@@ -1,0 +1,29 @@
+{
+  "family": "healplace-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "<EXECUTION_ROLE_ARN>",
+  "containerDefinitions": [
+    {
+      "name": "healplace-backend",
+      "image": "<<IMAGE1_NAME>>",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3000,
+          "protocol": "tcp"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/healplace-backend",
+          "awslogs-region": "<AWS_REGION>"
+        }
+      },
+      "environment": []
+    }
+  ]
+}
