@@ -21,7 +21,7 @@ phases:
       - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPOSITORY_NAME:$SOURCE_IMAGE_TAG
       - echo Writing image definitions for CodeDeploy...
       - printf '[{"name":"healplace-backend","imageUri":"%s"}]' $IMAGE_URI > imagedefinitions.json
-      - aws ecs update-service --cluster default --service healplace-v2-backend-68b7 --task-definition default-healplace-v2-backend-68b7
+      # - aws ecs update-service --cluster default --service healplace-v2-backend-68b7 --task-definition default-healplace-v2-backend-68b7
 
 artifacts:
   files:
