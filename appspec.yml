@@ -4,8 +4,8 @@ Resources:
   - TargetService:
       Type: AWS::ECS::Service
       Properties:
-        TaskDefinition: <<TASK_DEFINITION>>
+        TaskDefinition: arn:aws:ecs:us-east-2:644361744288:task-definition/default-healplace-v2-backend-68b7:2
         LoadBalancerInfo:
-          ContainerName: healplace-backend
+          ContainerName: 644361744288.dkr.ecr.us-east-2.amazonaws.com/healplace/healplace-v2-backend:latest
           ContainerPort: 3000
-        PlatformVersion: "1.4.0"
+        PlatformVersion: '1.4.0'
