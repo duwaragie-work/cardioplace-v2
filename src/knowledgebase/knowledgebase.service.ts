@@ -4,6 +4,7 @@ import { document_cleaner } from './utils/text-cleaner';
 import { text_splitter } from './utils/text-splitter';
 import { PrismaService } from '../prisma/prisma.service';
 import { MistralService } from '../mistral/mistral.service';
+import { retry } from '@mistralai/mistralai/lib/retries';
 
 @Injectable()
 export class KnowledgebaseService {
@@ -29,6 +30,54 @@ export class KnowledgebaseService {
     } catch (error) {
       throw new Error(`Error processing document: ${error.message}`);
     }
+  }
+
+  async getAllDocuments(){
+    return this.prisma.document.findMany({
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+  }
+
+  async accessSingleDocument(id:string) {
+    const existingDocument = await this.prisma.document.findUnique({ where: { id } });
+  
+    if (!existingDocument) {
+      return {status: false, message: "Document not found"};
+    }
+
+    return {status: true, data: existingDocument};
+  }
+
+  async updateDocumentTags(id: string, tags: string[]){
+
+    return this.prisma.document.update({
+      where: {
+        id: id,
+      },
+      data: {
+        sourceTags: tags,
+      },
+    });
+  }
+  
+  async updateDocumentStatus(id: string, status: boolean) {
+
+    await this.prisma.$executeRaw`
+      UPDATE "DocumentVector"
+      SET "sourceActiveStatus" = ${status}
+      WHERE "documentId" = ${id}
+    `;
+
+    return this.prisma.document.update({
+      where: {
+        id: id,
+      },
+      data: {
+        sourceActiveStatus: status,
+      },
+    });
   }
 
   async saveDocument(
@@ -74,8 +123,8 @@ export class KnowledgebaseService {
         const embeddingString = `[${embedding.join(',')}]`;
 
         await this.prisma.$executeRaw`
-            INSERT INTO "DocumentVector" ("id", "content", "embedding", "documentId")
-            VALUES (gen_random_uuid(), ${chunk}, ${embeddingString}::vector, ${document.id})
+            INSERT INTO "DocumentVector" ("id", "content", "embedding", "documentId", "sourceActiveStatus")
+            VALUES (gen_random_uuid(), ${chunk}, ${embeddingString}::vector, ${document.id}, true)
         `;
       }
 
