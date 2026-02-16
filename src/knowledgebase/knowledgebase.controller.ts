@@ -35,12 +35,23 @@ export class KnowledgebaseController {
         try {
             const content = await this.knowledgebaseService.processDocument(file.buffer, file.originalname);
             
+            let tags: string[] = [];
+            if (body.tags) {
+                try {
+                    tags = typeof body.tags === 'string' ? JSON.parse(body.tags) : body.tags;
+                } catch (e) {
+                    console.error('Error parsing tags:', e);
+                    tags = [];
+                }
+            }
+
             const savedDocument = await this.knowledgebaseService.saveDocument(file, content, {
                 originalName: file.originalname,
                 fileExtension: file.originalname.split('.').pop(),
                 fileSize: file.size,
                 sourceType: body.sourceType,
-                sourceResourceLink: body.sourceResourceLink,
+                sourceResourceLink: body.resouceLink, // Map resouceLink (sic) to sourceResourceLink
+                sourceTags: tags,
             });
             
             return {

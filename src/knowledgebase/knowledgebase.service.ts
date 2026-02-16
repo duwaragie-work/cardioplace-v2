@@ -43,6 +43,7 @@ export class KnowledgebaseService {
         fileSize,
         sourceType,
         sourceResourceLink,
+        sourceTags, // Destructure sourceTags
       } = metadata;
 
       // 1. Create Document Record
@@ -54,7 +55,7 @@ export class KnowledgebaseService {
           sourceSize: fileSize,
           sourceChunkCount: chunks.length,
           sourceResourceLink: sourceResourceLink || '',
-          sourceTags: [],
+          sourceTags: sourceTags || [], // Use passed tags or default to empty
           sourceActiveStatus: true,
         },
       });
