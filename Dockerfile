@@ -7,6 +7,8 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
 
+COPY prisma ./prisma
+
 # Copy source and build
 COPY . .
 RUN npm run build
@@ -25,7 +27,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 
 # Generate Prisma client in the runtime image (now that prod deps exist)
-RUN npx prisma generate
+RUN npm run db:generate
 
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
