@@ -7,8 +7,6 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
 
-COPY prisma ./prisma
-
 # Copy source and build
 COPY . .
 RUN npm run build
@@ -25,6 +23,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/prisma.config.ts ./
 
 # Generate Prisma client in the runtime image (now that prod deps exist)
 RUN npm run db:generate
