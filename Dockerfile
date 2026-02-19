@@ -12,7 +12,7 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-F# ============== Stage 2: Production ==============
+# ============== Stage 2: Production ==============
 FROM node:22-alpine AS production
 WORKDIR /app
 
