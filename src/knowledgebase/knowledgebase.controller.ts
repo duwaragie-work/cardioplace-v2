@@ -1,5 +1,6 @@
 import {
   Body,
+  Param,
   Controller,
   Get,
   HttpException,
@@ -24,7 +25,7 @@ export class KnowledgebaseController {
     }
   }
 
-  @Get('document/all')
+  @Get('document')
   async getAllDocuments() {
     const documents = await this.knowledgebaseService.getAllDocuments()
     return {
@@ -33,60 +34,78 @@ export class KnowledgebaseController {
     }
   }
 
-  @Patch('document/updateTags')
-  async updateDocument(@Body() body: any) {
-    if (!body.id || !body.tags) {
-      throw new HttpException('Missing required fields', HttpStatus.BAD_REQUEST)
-    }
+  @Patch('document/:id')
+  async updateDocument(
+    @Param('id') id: string,
+    @Body() body: any
+  ) {
 
-    try {
-      const document = await this.knowledgebaseService.accessSingleDocument(
-        body.id,
-      )
-      if (!document.status) {
-        throw new HttpException('Document is not found', HttpStatus.NOT_FOUND)
-      }
+    const hastTags = body.tags !== undefined
+    const hastStatus = body.status !== undefined
 
-      const updatedDocument =
-        await this.knowledgebaseService.updateDocumentTags(body.id, body.tags)
-      return {
-        message: 'Document updated successfully',
-        data: updatedDocument,
-      }
-    } catch (error) {
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR)
-    }
-  }
-
-  @Patch('document/updateStatus')
-  async updateDocumentStatus(@Body() body: any) {
-    if (!body.id || body.status === undefined || body.status === null) {
-      throw new HttpException('Missing required fields', HttpStatus.BAD_REQUEST)
-    }
-
-    try {
-      const document = await this.knowledgebaseService.accessSingleDocument(
-        body.id,
-      )
-
-      if (!document) {
-        throw new HttpException('Document is not found', HttpStatus.NOT_FOUND)
-      }
-      const updatedDocument =
-        await this.knowledgebaseService.updateDocumentStatus(
-          body.id,
-          body.status,
+    if(hastTags && hastStatus){
+      try{
+        const document = await this.knowledgebaseService.accessSingleDocument(
+          id,
         )
-      return {
-        message: 'Document status updated successfully',
-        data: updatedDocument,
+        if (!document.status) {
+          throw new HttpException('Document is not found', HttpStatus.NOT_FOUND)
+        }
+
+        const updatedDocumentTags = await this.knowledgebaseService.updateDocumentTags(id, body.tags)
+        const updatedDocumentStatus = await this.knowledgebaseService.updateDocumentStatus(id, body.status)
+        return {
+          message: 'Document tag and status updated successfully',
+          data: updatedDocumentStatus
+        }
+
+      } catch(e) {
+        throw new HttpException("Something went wrong", HttpStatus.INTERNAL_SERVER_ERROR)
       }
-    } catch (error) {
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR)
+    }
+    else if(hastTags){
+      try {
+        const document = await this.knowledgebaseService.accessSingleDocument(
+          id,
+        )
+        if (!document.status) {
+          throw new HttpException('Document is not found', HttpStatus.NOT_FOUND)
+        }
+  
+        const updatedDocument = await this.knowledgebaseService.updateDocumentTags(id, body.tags)
+        return {
+          message: 'Document tag updated successfully',
+          data: updatedDocument,
+        }
+      } catch (error) {
+        throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR)
+      }
+    }
+    else if(hastStatus){
+      try {
+        const document = await this.knowledgebaseService.accessSingleDocument(
+          id,
+        )
+    
+        if (!document) {
+          throw new HttpException('Document is not found', HttpStatus.NOT_FOUND)
+        }
+        const updatedDocument =
+          await this.knowledgebaseService.updateDocumentStatus(
+            id,
+            body.status,
+          )
+        return {
+          message: 'Document status updated successfully',
+          data: updatedDocument,
+        }
+      } catch (error) {
+        throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR)
+      }
     }
   }
 
-  @Post('document/upload')
+  @Post('document')
   @UseInterceptors(FileInterceptor('document'))
   async uploadDocument(
     @UploadedFile() file: Express.Multer.File,
