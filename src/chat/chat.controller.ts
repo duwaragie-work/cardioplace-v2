@@ -1,5 +1,5 @@
-import { Body, Controller, Post, Query, Sse } from '@nestjs/common'
-import { Observable } from 'rxjs'
+import { Body, Controller, Post, Res } from '@nestjs/common'
+import type { Response } from 'express'
 import { ChatService } from './chat.service.js'
 import { ChatRequestDto } from './dto/chat-request.dto.js'
 
@@ -9,23 +9,26 @@ export class ChatController {
 
   /**
    * POST /chat/streaming
-   * Returns a Server-Sent Events stream of response tokens.
-   * Replaces the getStreamingResponse Firebase Cloud Function.
+   * Accepts JSON body, streams back tokens as text/event-stream.
+   * Client calls this with fetch() and reads the stream.
    */
-  @Sse('streaming')
-  streamChat(@Query() body: ChatRequestDto): Observable<MessageEvent> {
-    return new Observable((observer) => {
-      ;(async () => {
-        try {
-          for await (const chunk of this.chatService.getStreamingResponse(body)) {
-            observer.next({ data: chunk } as MessageEvent)
-          }
-          observer.complete()
-        } catch (err) {
-          observer.error(err)
-        }
-      })()
-    })
+  @Post('streaming')
+  async streamChat(@Body() body: ChatRequestDto, @Res() res: Response) {
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.flushHeaders()
+
+    try {
+      for await (const chunk of this.chatService.getStreamingResponse(body)) {
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`)
+      }
+      res.write('data: [DONE]\n\n')
+      res.end()
+    } catch (err) {
+      res.write(`data: ${JSON.stringify({ error: 'An error occurred' })}\n\n`)
+      res.end()
+    }
   }
 
   /**
