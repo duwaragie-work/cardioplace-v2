@@ -1,6 +1,31 @@
+enum UserRole {
+  GUEST
+  REGISTERED_USER
+  VERIFIED_USER 
+  CONTENT_ADMIN
+  ARTICLE_ADMIN
+  ARTICLE_APPROVER
+  KB_UPLOADER 
+  KB_APPROVER 
+  CHAT_REVIEWER
+  SUPER_ADMIN
+}
+
 model User {
-    id      Int     @id @default(autoincrement())
-    email   String  @unique
-    name    String?
-    pwdhash String?
+  id                  String   @id @default(ulid())
+  email               String?  @unique
+  name                String?
+  age                 Int?
+  pwdhash             String?
+  isVerified          Boolean  @default(false)
+  role                UserRole @default(GUEST)
+  onboardingCompleted Boolean  @default(false)
+
+  accounts      Account[]
+  refreshTokens RefreshToken[]
+  otps          OtpCode[]
+  devices       Device[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

@@ -1,0 +1,16 @@
+model Device {
+  id         String   @id @default(ulid())
+  deviceId   String   @unique // UUID from browser localStorage / mobile SDK / watch SDK
+  platform   String? // OS: "web" | "ios" | "android" | "watchos" | "wearos"
+  deviceType String? // Category: "browser" | "phone" | "tablet" | "watch" | "wearable"
+  deviceName String? // e.g. "Apple Watch Ultra 2", "iPhone 15 Pro"
+  userAgent  String?
+  lastSeenAt DateTime @default(now())
+
+  userId String? // null for guests; set after login
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}

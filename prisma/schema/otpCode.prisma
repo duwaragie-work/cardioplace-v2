@@ -1,0 +1,13 @@
+model OtpCode {
+  id              String   @id @default(ulid())
+  email           String
+  codeHash        String // bcrypt hash of 6-digit OTP (empty string for sentinel rows)
+  expiresAt       DateTime
+  isConsumed      Boolean  @default(false) // true on successful verify sentinel row
+  isFailedAttempt Boolean  @default(false) // true on each wrong guess sentinel row
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+}
