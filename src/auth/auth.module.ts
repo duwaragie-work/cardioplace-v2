@@ -11,6 +11,7 @@ import { Public } from './decorators/public.decorator.js'
 import { AppleAuthGuard } from './guards/apple-auth.guard.js'
 import { GoogleAuthGuard } from './guards/google-auth.guard.js'
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js'
+import { RolesGuard } from './guards/roles.guard.js'
 import { AppleStrategy } from './strategies/apple.strategy.js'
 import { GoogleStrategy } from './strategies/google.strategy.js'
 import { JwtStrategy } from './strategies/jwt.strategy.js'
@@ -39,9 +40,14 @@ export { Public }
     JwtAuthGuard,
     GoogleAuthGuard,
     AppleAuthGuard,
+    RolesGuard,
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
     },
   ],
   controllers: [AuthController],

@@ -1,19 +1,37 @@
 import {
   Body,
-  Param,
   Controller,
   Get,
   HttpException,
   HttpStatus,
+  Param,
   Patch,
   Post,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common'
 import { FileInterceptor } from '@nestjs/platform-express'
+import { Roles } from '../auth/decorators/roles.decorator.js'
+import { UserRole } from '../generated/prisma/enums.js'
+import { UpdateDocumentDto } from './dto/update-document.dto.js'
+import { UploadDocumentDto } from './dto/upload-document.dto.js'
 import { KnowledgebaseService } from './knowledgebase.service.js'
 
+/**
+ * Knowledgebase management endpoints.
+ * Restricted to all admin roles.
+ */
 @Controller('v2/knowledgebase')
+@Roles(
+  UserRole.REGISTERED_USER,
+  UserRole.CONTENT_ADMIN,
+  UserRole.ARTICLE_ADMIN,
+  UserRole.ARTICLE_APPROVER,
+  UserRole.KB_UPLOADER,
+  UserRole.KB_APPROVER,
+  UserRole.CHAT_REVIEWER,
+  UserRole.SUPER_ADMIN,
+)
 export class KnowledgebaseController {
   constructor(private readonly knowledgebaseService: KnowledgebaseService) {}
 
@@ -35,44 +53,41 @@ export class KnowledgebaseController {
   }
 
   @Patch('document/:id')
-  async updateDocument(
-    @Param('id') id: string,
-    @Body() body: any
-  ) {
-
+  async updateDocument(@Param('id') id: string, @Body() body: UpdateDocumentDto) {
     const hastTags = body.tags !== undefined
     const hastStatus = body.status !== undefined
 
-    if(hastTags && hastStatus){
-      try{
-        const document = await this.knowledgebaseService.accessSingleDocument(
-          id,
-        )
+    if (hastTags && hastStatus) {
+      try {
+        const document =
+          await this.knowledgebaseService.accessSingleDocument(id)
         if (!document.status) {
           throw new HttpException('Document is not found', HttpStatus.NOT_FOUND)
         }
 
-        const updatedDocumentTags = await this.knowledgebaseService.updateDocumentTags(id, body.tags)
-        const updatedDocumentStatus = await this.knowledgebaseService.updateDocumentStatus(id, body.status)
+        await this.knowledgebaseService.updateDocumentTags(id, body.tags!)
+        const updatedDocumentStatus =
+          await this.knowledgebaseService.updateDocumentStatus(id, body.status!)
         return {
           message: 'Document tag and status updated successfully',
-          data: updatedDocumentStatus
+          data: updatedDocumentStatus,
         }
-
-      } catch(e) {
-        throw new HttpException("Something went wrong", HttpStatus.INTERNAL_SERVER_ERROR)
-      }
-    }
-    else if(hastTags){
-      try {
-        const document = await this.knowledgebaseService.accessSingleDocument(
-          id,
+      } catch (_e) {
+        throw new HttpException(
+          'Something went wrong',
+          HttpStatus.INTERNAL_SERVER_ERROR,
         )
+      }
+    } else if (hastTags) {
+      try {
+        const document =
+          await this.knowledgebaseService.accessSingleDocument(id)
         if (!document.status) {
           throw new HttpException('Document is not found', HttpStatus.NOT_FOUND)
         }
-  
-        const updatedDocument = await this.knowledgebaseService.updateDocumentTags(id, body.tags)
+
+        const updatedDocument =
+          await this.knowledgebaseService.updateDocumentTags(id, body.tags!)
         return {
           message: 'Document tag updated successfully',
           data: updatedDocument,
@@ -80,21 +95,16 @@ export class KnowledgebaseController {
       } catch (error) {
         throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR)
       }
-    }
-    else if(hastStatus){
+    } else if (hastStatus) {
       try {
-        const document = await this.knowledgebaseService.accessSingleDocument(
-          id,
-        )
-    
+        const document =
+          await this.knowledgebaseService.accessSingleDocument(id)
+
         if (!document) {
           throw new HttpException('Document is not found', HttpStatus.NOT_FOUND)
         }
         const updatedDocument =
-          await this.knowledgebaseService.updateDocumentStatus(
-            id,
-            body.status,
-          )
+          await this.knowledgebaseService.updateDocumentStatus(id, body.status!)
         return {
           message: 'Document status updated successfully',
           data: updatedDocument,
@@ -109,7 +119,7 @@ export class KnowledgebaseController {
   @UseInterceptors(FileInterceptor('document'))
   async uploadDocument(
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: any,
+    @Body() body: UploadDocumentDto,
   ) {
     if (!file) {
       throw new HttpException('No file uploaded', HttpStatus.BAD_REQUEST)

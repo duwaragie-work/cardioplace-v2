@@ -1,9 +1,15 @@
 import { Body, Controller, Post, Res } from '@nestjs/common'
 import type { Response } from 'express'
+import { Public } from '../auth/decorators/public.decorator.js'
 import { ChatService } from './chat.service.js'
 import { ChatRequestDto } from './dto/chat-request.dto.js'
 
+/**
+ * Chat endpoints are publicly accessible (no authentication required).
+ * This allows anonymous guest users to chat without logging in.
+ */
 @Controller('chat')
+@Public()
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
@@ -25,7 +31,7 @@ export class ChatController {
       }
       res.write('data: [DONE]\n\n')
       res.end()
-    } catch (err) {
+    } catch (_err) {
       res.write(`data: ${JSON.stringify({ error: 'An error occurred' })}\n\n`)
       res.end()
     }
