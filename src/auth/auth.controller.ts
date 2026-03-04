@@ -15,7 +15,7 @@ import { AuthService, TokenPair } from './auth.service.js'
 import { Public } from './decorators/public.decorator.js'
 import { AppleLoginDto } from './dto/apple-login.dto.js'
 import { GoogleMobileLoginDto } from './dto/google-mobile-login.dto.js'
-import { OnboardingDto } from './dto/onboarding.dto.js'
+import { ProfileDto } from './dto/profile.dto.js'
 import { RefreshDto } from './dto/refresh.dto.js'
 import { SendOtpDto } from './dto/send-otp.dto.js'
 import { VerifyOtpDto } from './dto/verify-otp.dto.js'
@@ -49,11 +49,13 @@ export class AuthController {
     deviceId?: string
     ipAddress?: string
     userAgent?: string
+    timezone?: string
   } {
     return {
       deviceId: req.headers['x-device-id'] as string | undefined,
       ipAddress: this.extractIpAddress(req),
       userAgent: req.headers['user-agent'],
+      timezone: req.headers['x-timezone'] as string | undefined,
     }
   }
 
@@ -102,8 +104,10 @@ export class AuthController {
     if (context.deviceId) {
       await this.authService.upsertOrTrackDevice({
         deviceId: context.deviceId,
-        userId: undefined,
+        userId: result.userId,
         platform: req.headers['x-device-platform'] as string | undefined,
+        deviceType: req.headers['x-device-type'] as string | undefined,
+        deviceName: req.headers['x-device-name'] as string | undefined,
         userAgent: context.userAgent,
       })
     }
@@ -116,15 +120,14 @@ export class AuthController {
   @Post('apple')
   async apple(@Body() dto: AppleLoginDto, @Req() req: Request) {
     const context = this.buildAuthContext(req)
-    const result = await this.authService.appleLogin(
-      dto.identityToken,
-      context,
-    )
+    const result = await this.authService.appleLogin(dto.identityToken, context)
     if (context.deviceId) {
       await this.authService.upsertOrTrackDevice({
         deviceId: context.deviceId,
-        userId: undefined,
+        userId: result.userId,
         platform: req.headers['x-device-platform'] as string | undefined,
+        deviceType: req.headers['x-device-type'] as string | undefined,
+        deviceName: req.headers['x-device-name'] as string | undefined,
         userAgent: context.userAgent,
       })
     }
@@ -180,30 +183,19 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const context = this.buildAuthContext(req)
-    const result = await this.authService.verifyOtp(
-      dto.email,
-      dto.otp,
-      context,
-    )
+    const result = await this.authService.verifyOtp(dto.email, dto.otp, context)
     this.setRefreshCookie(res, result.refreshToken)
-    if (dto.deviceId) {
+    if (context.deviceId) {
       await this.authService.upsertOrTrackDevice({
-        deviceId: dto.deviceId,
-        userId: result.user_type !== 'GUEST' ? undefined : undefined,
+        deviceId: context.deviceId,
+        userId: result.userId,
         platform: req.headers['x-device-platform'] as string | undefined,
+        deviceType: req.headers['x-device-type'] as string | undefined,
+        deviceName: req.headers['x-device-name'] as string | undefined,
         userAgent: context.userAgent,
       })
     }
     return result
-  }
-
-  // ─── Onboarding ───────────────────────────────────────────────────────────────
-
-  @UseGuards(JwtAuthGuard)
-  @Patch('onboarding')
-  completeOnboarding(@Req() req: Request, @Body() dto: OnboardingDto) {
-    const user = req.user as { id: string }
-    return this.authService.completeOnboarding(user.id, dto)
   }
 
   // ─── Refresh ─────────────────────────────────────────────────────────────────
@@ -221,10 +213,7 @@ export class AuthController {
     if (!rawToken) throw new UnauthorizedException('No refresh token provided')
 
     const context = this.buildAuthContext(req)
-    const result = await this.authService.rotateRefreshToken(
-      rawToken,
-      context,
-    )
+    const result = await this.authService.rotateRefreshToken(rawToken, context)
     this.setRefreshCookie(res, result.refreshToken)
     return {
       accessToken: result.accessToken,
@@ -252,12 +241,39 @@ export class AuthController {
     return { message: 'Logged out successfully' }
   }
 
-  // ─── Me (protected) ───────────────────────────────────────────────────────────
+  // ─── Me (JWT payload) ────────────────────────────────────────────────────────
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
   getMe(@Req() req: Request) {
     return req.user
+  }
+
+  // ─── Profile ─────────────────────────────────────────────────────────────────
+  //
+  // GET  /auth/profile  — fetch full profile
+  // POST /auth/profile  — submit initial onboarding (marks onboardingStatus COMPLETED)
+  // PATCH/PUT /auth/profile  — edit profile fields
+
+  @UseGuards(JwtAuthGuard)
+  @Get('profile')
+  getProfile(@Req() req: Request) {
+    const { id } = req.user as { id: string }
+    return this.authService.getProfile(id)
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('profile')
+  submitProfile(@Req() req: Request, @Body() dto: ProfileDto) {
+    const { id } = req.user as { id: string }
+    return this.authService.submitProfile(id, dto)
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('profile')
+  patchProfile(@Req() req: Request, @Body() dto: ProfileDto) {
+    const { id } = req.user as { id: string }
+    return this.authService.patchProfile(id, dto)
   }
 
   // ─── Cookie Helper ────────────────────────────────────────────────────────────

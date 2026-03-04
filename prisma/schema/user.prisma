@@ -11,15 +11,39 @@ enum UserRole {
   SUPER_ADMIN
 }
 
+enum MenopauseStage {
+  PERIMENOPAUSE
+  MENOPAUSE
+  POSTMENOPAUSE
+  UNKNOWN
+}
+
+enum OnboardingStatus {
+  NOT_COMPLETED
+  COMPLETED
+}
+
+enum AccountStatus {
+  ACTIVE
+  BLOCKED
+  SUSPENDED
+}
+
 model User {
-  id                  String   @id @default(ulid())
-  email               String?  @unique
-  name                String?
-  age                 Int?
-  pwdhash             String?
-  isVerified          Boolean  @default(false)
-  role                UserRole @default(GUEST)
-  onboardingCompleted Boolean  @default(false)
+  id      String  @id @default(ulid())
+  email   String? @unique
+  name    String?
+  pwdhash String?
+
+  // Profile fields set during / after onboarding
+  dateOfBirth    DateTime?
+  menopauseStage MenopauseStage @default(UNKNOWN)
+  timezone       String?        // IANA identifier, e.g. "Asia/Colombo"
+
+  isVerified       Boolean          @default(false)
+  role             UserRole         @default(GUEST)
+  onboardingStatus OnboardingStatus @default(NOT_COMPLETED)
+  accountStatus    AccountStatus    @default(ACTIVE)
 
   accounts      Account[]
   refreshTokens RefreshToken[]

@@ -1,16 +1,24 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
 import { createHash, randomBytes, randomInt } from 'crypto'
-import nodemailer from 'nodemailer'
+import * as nodemailer from 'nodemailer'
 import type { Profile } from 'passport-google-oauth20'
-import { UserRole } from '../generated/prisma/enums.js'
+import {
+  AccountStatus,
+  MenopauseStage,
+  OnboardingStatus,
+  UserRole,
+} from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { BcryptService } from './bcrypt.service.js'
+import type { ProfileDto } from './dto/profile.dto.js'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -20,16 +28,29 @@ export interface TokenPair {
 }
 
 export interface AuthResponse extends TokenPair {
+  userId: string
   onboarding_required: boolean
-  user_type: UserRole // e.g. "GUEST", "REGISTERED_USER"
-  login_method: 'otp' | 'google' | 'apple' 
+  user_type: UserRole
+  login_method: 'otp' | 'google' | 'apple'
+  name: string | null
 }
 
 interface MinimalUser {
   id: string
   email: string | null
+  name: string | null
   role: UserRole
-  onboardingCompleted: boolean
+  onboardingStatus: OnboardingStatus
+  accountStatus: AccountStatus
+}
+
+export interface ProfileResult {
+  message: string
+  name: string | null
+  dateOfBirth: Date | null
+  menopauseStage: MenopauseStage
+  timezone: string | null
+  onboardingStatus: OnboardingStatus
 }
 
 function sha256(input: string): string {
@@ -108,6 +129,12 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired refresh token')
     }
 
+    if (existing.user.accountStatus !== AccountStatus.ACTIVE) {
+      throw new ForbiddenException(
+        `Account is ${existing.user.accountStatus.toLowerCase()}`,
+      )
+    }
+
     await this.prisma.refreshToken.update({
       where: { id: existing.id },
       data: { revokedAt: new Date() },
@@ -144,7 +171,7 @@ export class AuthService {
       include: { user: true },
     })
     if (!existing) return
-    
+
     await this.prisma.refreshToken.update({
       where: { id: existing.id },
       data: { revokedAt: new Date() },
@@ -178,9 +205,24 @@ export class AuthService {
   ): AuthResponse {
     return {
       ...tokens,
-      onboarding_required: !user.onboardingCompleted,
+      userId: user.id,
+      onboarding_required: user.onboardingStatus !== OnboardingStatus.COMPLETED,
       user_type: user.role,
       login_method,
+      name: user.name,
+    }
+  }
+
+  // ─── Account Status Guard ───────────────────────────────────────────────────
+
+  private assertAccountActive(
+    user: Pick<MinimalUser, 'accountStatus'>,
+    context?: { event?: string; identifier?: string },
+  ): void {
+    if (user.accountStatus !== AccountStatus.ACTIVE) {
+      throw new ForbiddenException(
+        `Account is ${user.accountStatus.toLowerCase()}`,
+      )
     }
   }
 
@@ -208,7 +250,9 @@ export class AuthService {
           deviceId: params.deviceId ?? null,
           ipAddress: params.ipAddress ?? null,
           userAgent: params.userAgent ?? null,
-          metadata: params.metadata ? JSON.parse(JSON.stringify(params.metadata)) : null,
+          metadata: params.metadata
+            ? JSON.parse(JSON.stringify(params.metadata))
+            : null,
           success: params.success,
           errorCode: params.errorCode ?? null,
         },
@@ -216,6 +260,23 @@ export class AuthService {
     } catch (error) {
       // Never let logging failures break the auth flow
       console.error('Failed to log auth event:', error)
+    }
+  }
+
+  // ─── Timezone Auto-Update ───────────────────────────────────────────────────
+
+  private async silentlyUpdateTimezone(
+    userId: string,
+    timezone?: string,
+  ): Promise<void> {
+    if (!timezone || !timezone.includes('/')) return
+    try {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { timezone },
+      })
+    } catch (error) {
+      console.error('Failed to update timezone:', error)
     }
   }
 
@@ -227,6 +288,7 @@ export class AuthService {
       deviceId?: string
       ipAddress?: string
       userAgent?: string
+      timezone?: string
     },
   ): Promise<AuthResponse> {
     const providerId = profile.id
@@ -242,6 +304,8 @@ export class AuthService {
         emailVerified,
         profile.displayName,
       )
+      this.assertAccountActive(user)
+      await this.silentlyUpdateTimezone(user.id, context?.timezone)
       const tokens = await this.issueTokenPair(user, context?.userAgent)
 
       await this.logAuthEvent({
@@ -258,17 +322,19 @@ export class AuthService {
 
       return this.buildAuthResponse(tokens, user, 'google')
     } catch (err) {
-      await this.logAuthEvent({
-        event: 'social_login_failed',
-        identifier: rawEmail ?? undefined,
-        method: 'google',
-        deviceId: context?.deviceId,
-        ipAddress: context?.ipAddress,
-        userAgent: context?.userAgent,
-        metadata: { providerId },
-        success: false,
-        errorCode: 'google_login_error',
-      })
+      if (!(err instanceof ForbiddenException)) {
+        await this.logAuthEvent({
+          event: 'social_login_failed',
+          identifier: rawEmail ?? undefined,
+          method: 'google',
+          deviceId: context?.deviceId,
+          ipAddress: context?.ipAddress,
+          userAgent: context?.userAgent,
+          metadata: { providerId },
+          success: false,
+          errorCode: 'google_login_error',
+        })
+      }
       throw err
     }
   }
@@ -281,6 +347,7 @@ export class AuthService {
       deviceId?: string
       ipAddress?: string
       userAgent?: string
+      timezone?: string
     },
   ): Promise<AuthResponse> {
     const res = await fetch(
@@ -333,6 +400,8 @@ export class AuthService {
         emailVerified,
         claims.name,
       )
+      this.assertAccountActive(user)
+      await this.silentlyUpdateTimezone(user.id, context?.timezone)
       const tokens = await this.issueTokenPair(user, context?.userAgent)
 
       await this.logAuthEvent({
@@ -349,17 +418,19 @@ export class AuthService {
 
       return this.buildAuthResponse(tokens, user, 'google')
     } catch (err) {
-      await this.logAuthEvent({
-        event: 'social_login_failed',
-        identifier: claims.email,
-        method: 'google',
-        deviceId: context?.deviceId,
-        ipAddress: context?.ipAddress,
-        userAgent: context?.userAgent,
-        metadata: { providerId: claims.sub },
-        success: false,
-        errorCode: 'google_mobile_login_error',
-      })
+      if (!(err instanceof ForbiddenException)) {
+        await this.logAuthEvent({
+          event: 'social_login_failed',
+          identifier: claims.email,
+          method: 'google',
+          deviceId: context?.deviceId,
+          ipAddress: context?.ipAddress,
+          userAgent: context?.userAgent,
+          metadata: { providerId: claims.sub },
+          success: false,
+          errorCode: 'google_mobile_login_error',
+        })
+      }
       throw err
     }
   }
@@ -372,6 +443,7 @@ export class AuthService {
       deviceId?: string
       ipAddress?: string
       userAgent?: string
+      timezone?: string
     },
   ): Promise<AuthResponse> {
     const appleSignin = await import('apple-signin-auth')
@@ -403,6 +475,8 @@ export class AuthService {
         claims.email ?? null,
         false,
       )
+      this.assertAccountActive(user)
+      await this.silentlyUpdateTimezone(user.id, context?.timezone)
       const tokens = await this.issueTokenPair(user, context?.userAgent)
 
       await this.logAuthEvent({
@@ -419,17 +493,19 @@ export class AuthService {
 
       return this.buildAuthResponse(tokens, user, 'apple')
     } catch (err) {
-      await this.logAuthEvent({
-        event: 'social_login_failed',
-        identifier: claims.email,
-        method: 'apple',
-        deviceId: context?.deviceId,
-        ipAddress: context?.ipAddress,
-        userAgent: context?.userAgent,
-        metadata: { providerId: claims.sub },
-        success: false,
-        errorCode: 'apple_login_error',
-      })
+      if (!(err instanceof ForbiddenException)) {
+        await this.logAuthEvent({
+          event: 'social_login_failed',
+          identifier: claims.email,
+          method: 'apple',
+          deviceId: context?.deviceId,
+          ipAddress: context?.ipAddress,
+          userAgent: context?.userAgent,
+          metadata: { providerId: claims.sub },
+          success: false,
+          errorCode: 'apple_login_error',
+        })
+      }
       throw err
     }
   }
@@ -446,6 +522,7 @@ export class AuthService {
       deviceId?: string
       ipAddress?: string
       userAgent?: string
+      timezone?: string
     },
   ): Promise<AuthResponse> {
     const providerId = profile.id
@@ -462,6 +539,8 @@ export class AuthService {
         false,
         fullName,
       )
+      this.assertAccountActive(user)
+      await this.silentlyUpdateTimezone(user.id, context?.timezone)
       const tokens = await this.issueTokenPair(user, context?.userAgent)
 
       await this.logAuthEvent({
@@ -478,17 +557,19 @@ export class AuthService {
 
       return this.buildAuthResponse(tokens, user, 'apple')
     } catch (err) {
-      await this.logAuthEvent({
-        event: 'social_login_failed',
-        identifier: email ?? undefined,
-        method: 'apple',
-        deviceId: context?.deviceId,
-        ipAddress: context?.ipAddress,
-        userAgent: context?.userAgent,
-        metadata: { providerId },
-        success: false,
-        errorCode: 'apple_web_login_error',
-      })
+      if (!(err instanceof ForbiddenException)) {
+        await this.logAuthEvent({
+          event: 'social_login_failed',
+          identifier: email ?? undefined,
+          method: 'apple',
+          deviceId: context?.deviceId,
+          ipAddress: context?.ipAddress,
+          userAgent: context?.userAgent,
+          metadata: { providerId },
+          success: false,
+          errorCode: 'apple_web_login_error',
+        })
+      }
       throw err
     }
   }
@@ -550,6 +631,27 @@ export class AuthService {
 
     const normalizedEmail = email.trim().toLowerCase()
 
+    // Check account status for existing users before sending OTP
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: { accountStatus: true },
+    })
+    if (existingUser && existingUser.accountStatus !== AccountStatus.ACTIVE) {
+      await this.logAuthEvent({
+        event: 'otp_blocked',
+        identifier: normalizedEmail,
+        method: 'otp',
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        success: false,
+        errorCode: 'account_not_active',
+      })
+      throw new ForbiddenException(
+        `Account is ${existingUser.accountStatus.toLowerCase()}`,
+      )
+    }
+
     // Check for recent OTP request (rate limiting)
     const recentOtp = await this.prisma.otpCode.findFirst({
       where: {
@@ -597,6 +699,7 @@ export class AuthService {
       deviceId?: string
       ipAddress?: string
       userAgent?: string
+      timezone?: string
     },
   ): Promise<AuthResponse> {
     if (!email?.trim()) {
@@ -692,8 +795,29 @@ export class AuthService {
       })
     }
 
-    // Delete the OTP record (cache cleanup)
+    // Enforce account status before issuing tokens
+    if (user.accountStatus !== AccountStatus.ACTIVE) {
+      await this.prisma.otpCode.delete({ where: { id: otpRecord.id } })
+      await this.logAuthEvent({
+        event: 'otp_blocked',
+        identifier: normalizedEmail,
+        userId: user.id,
+        method: 'otp',
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        success: false,
+        errorCode: 'account_not_active',
+      })
+      throw new ForbiddenException(
+        `Account is ${user.accountStatus.toLowerCase()}`,
+      )
+    }
+
     await this.prisma.otpCode.delete({ where: { id: otpRecord.id } })
+
+    // Update timezone on every successful login (silently)
+    await this.silentlyUpdateTimezone(user.id, context?.timezone)
 
     // Log successful verification
     await this.logAuthEvent({
@@ -734,27 +858,99 @@ export class AuthService {
       update: {
         lastSeenAt: new Date(),
         userId: opts.userId ?? undefined,
+        platform: opts.platform ?? undefined,
+        deviceType: opts.deviceType ?? undefined,
+        deviceName: opts.deviceName ?? undefined,
         userAgent: opts.userAgent,
       },
     })
   }
 
-  // ─── Onboarding ─────────────────────────────────────────────────────────────
+  // ─── Profile — Submit (POST: initial onboarding or first-time save) ──────────
 
-  async completeOnboarding(
-    userId: string,
-    dto: { name: string; age?: number },
-  ): Promise<{ message: string }> {
-    await this.prisma.user.update({
+  async submitProfile(userId: string, dto: ProfileDto): Promise<ProfileResult> {
+    const patch = this.buildProfilePatch(dto)
+
+    const updated = await this.prisma.user.update({
       where: { id: userId },
-      data: {
-        name: dto.name,
-        age: dto.age ?? null,
-        onboardingCompleted: true,
-        role: UserRole.REGISTERED_USER,
+      data: { ...patch, onboardingStatus: OnboardingStatus.COMPLETED },
+      select: {
+        name: true,
+        dateOfBirth: true,
+        menopauseStage: true,
+        timezone: true,
+        onboardingStatus: true,
       },
     })
-    return { message: 'Onboarding completed' }
+
+    return { message: 'Profile saved', ...updated }
+  }
+
+  // ─── Profile — Patch (PATCH: edit existing profile) ──────────────────────────
+
+  async patchProfile(userId: string, dto: ProfileDto): Promise<ProfileResult> {
+    const patch = this.buildProfilePatch(dto)
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: patch,
+      select: {
+        name: true,
+        dateOfBirth: true,
+        menopauseStage: true,
+        timezone: true,
+        onboardingStatus: true,
+      },
+    })
+
+    return { message: 'Profile updated', ...updated }
+  }
+
+  private buildProfilePatch(dto: ProfileDto) {
+    const patch: {
+      name?: string
+      dateOfBirth?: Date | null
+      menopauseStage?: MenopauseStage
+      timezone?: string
+    } = {}
+
+    if (dto.name !== undefined) patch.name = dto.name
+    if (dto.dateOfBirth !== undefined) {
+      patch.dateOfBirth = dto.dateOfBirth ? new Date(dto.dateOfBirth) : null
+    }
+    if (dto.menopauseStage !== undefined) {
+      patch.menopauseStage = dto.menopauseStage as MenopauseStage
+    }
+    if (dto.timezone !== undefined) patch.timezone = dto.timezone
+
+    return patch
+  }
+
+  // ─── Profile — Get ────────────────────────────────────────────────────────────
+
+  async getProfile(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        isVerified: true,
+        onboardingStatus: true,
+        accountStatus: true,
+        dateOfBirth: true,
+        menopauseStage: true,
+        timezone: true,
+        createdAt: true,
+      },
+    })
+
+    if (!user) {
+      throw new NotFoundException('User not found')
+    }
+
+    return user
   }
 
   // ─── Email Helper ────────────────────────────────────────────────────────────

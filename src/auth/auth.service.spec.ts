@@ -1,14 +1,29 @@
 // @ts-nocheck
-
 import { jest } from '@jest/globals'
-import { BadRequestException, UnauthorizedException } from '@nestjs/common'
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
 import { Test, TestingModule } from '@nestjs/testing'
-import { UserRole } from '../generated/prisma/enums.js'
+import { validate } from 'class-validator'
+import {
+  AccountStatus,
+  MenopauseStage,
+  OnboardingStatus,
+  UserRole,
+} from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { AuthService } from './auth.service.js'
 import { BcryptService } from './bcrypt.service.js'
+import { ProfileDto } from './dto/profile.dto.js'
+
+// Type for spying on private methods in tests
+type AuthServiceWithPrivateMethods = AuthService & {
+  issueTokenPair: (...args: unknown[]) => Promise<unknown>
+}
 
 describe('AuthService', () => {
   let service: AuthService
@@ -22,8 +37,11 @@ describe('AuthService', () => {
     name: 'Test User',
     role: UserRole.REGISTERED_USER,
     isVerified: true,
-    onboardingCompleted: true,
-    age: null,
+    onboardingStatus: OnboardingStatus.COMPLETED,
+    accountStatus: AccountStatus.ACTIVE,
+    dateOfBirth: null,
+    menopauseStage: MenopauseStage.UNKNOWN,
+    timezone: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   }
@@ -144,7 +162,6 @@ describe('AuthService', () => {
 
       ;(prisma.authLog.create as jest.Mock).mockResolvedValue(mockAuthLog)
 
-      // Access private method via type assertion
       await (
         service as unknown as {
           logAuthEvent: (params: Record<string, unknown>) => Promise<void>
@@ -246,7 +263,6 @@ describe('AuthService', () => {
         new Error('Database connection failed'),
       )
 
-      // Should not throw even if DB write fails
       await expect(
         (
           service as unknown as {
@@ -311,7 +327,7 @@ describe('AuthService', () => {
         data: expect.objectContaining({
           event: 'otp_requested',
           identifier: 'test@example.com',
-          userId: null, // No userId before auth
+          userId: null,
         }),
       })
     })
@@ -342,7 +358,9 @@ describe('AuthService', () => {
     it('should verify OTP successfully, delete OtpCode, and log event', async () => {
       const otpCode = { ...mockOtpCode }
       ;(bcryptService.compare as jest.Mock).mockResolvedValue(true)
-      ;(bcryptService.hash as jest.Mock).mockResolvedValue('hashed_refresh_token')
+      ;(bcryptService.hash as jest.Mock).mockResolvedValue(
+        'hashed_refresh_token',
+      )
       ;(prisma.otpCode.findFirst as jest.Mock).mockResolvedValue(otpCode)
       ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser)
       ;(prisma.otpCode.delete as jest.Mock).mockResolvedValue(otpCode)
@@ -358,12 +376,10 @@ describe('AuthService', () => {
         mockContext,
       )
 
-      // Verify OTP was deleted (not marked consumed)
       expect(prisma.otpCode.delete).toHaveBeenCalledWith({
         where: { id: otpCode.id },
       })
 
-      // Verify success event was logged
       expect(prisma.authLog.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           event: 'otp_verified',
@@ -374,7 +390,6 @@ describe('AuthService', () => {
         }),
       })
 
-      // Verify response structure
       expect(result).toMatchObject({
         accessToken: expect.any(String),
         refreshToken: expect.any(String),
@@ -387,7 +402,9 @@ describe('AuthService', () => {
     it('should create new user if email not found', async () => {
       const otpCode = { ...mockOtpCode }
       ;(bcryptService.compare as jest.Mock).mockResolvedValue(true)
-      ;(bcryptService.hash as jest.Mock).mockResolvedValue('hashed_refresh_token')
+      ;(bcryptService.hash as jest.Mock).mockResolvedValue(
+        'hashed_refresh_token',
+      )
       ;(prisma.otpCode.findFirst as jest.Mock).mockResolvedValue(otpCode)
       ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(null)
       ;(prisma.user.create as jest.Mock).mockResolvedValue(mockUser)
@@ -400,7 +417,6 @@ describe('AuthService', () => {
 
       await service.verifyOtp('test@example.com', '123456', mockContext)
 
-      // Verify user was created
       expect(prisma.user.create).toHaveBeenCalledWith({
         data: {
           email: 'test@example.com',
@@ -414,7 +430,9 @@ describe('AuthService', () => {
       const unverifiedUser = { ...mockUser, isVerified: false }
       const otpCode = { ...mockOtpCode }
       ;(bcryptService.compare as jest.Mock).mockResolvedValue(true)
-      ;(bcryptService.hash as jest.Mock).mockResolvedValue('hashed_refresh_token')
+      ;(bcryptService.hash as jest.Mock).mockResolvedValue(
+        'hashed_refresh_token',
+      )
       ;(prisma.otpCode.findFirst as jest.Mock).mockResolvedValue(otpCode)
       ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(unverifiedUser)
       ;(prisma.user.update as jest.Mock).mockResolvedValue({
@@ -452,13 +470,11 @@ describe('AuthService', () => {
         service.verifyOtp('test@example.com', 'wrongcode', mockContext),
       ).rejects.toThrow(BadRequestException)
 
-      // Verify attempts incremented
       expect(prisma.otpCode.update).toHaveBeenCalledWith({
         where: { id: otpCode.id },
         data: { attempts: 1 },
       })
 
-      // Verify failure logged
       expect(prisma.authLog.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           event: 'otp_failed',
@@ -480,12 +496,10 @@ describe('AuthService', () => {
         service.verifyOtp('test@example.com', '123456', mockContext),
       ).rejects.toThrow('Too many incorrect attempts. Request a new OTP.')
 
-      // Verify OTP deleted (locked)
       expect(prisma.otpCode.delete).toHaveBeenCalledWith({
         where: { id: otpCode.id },
       })
 
-      // Verify locked event logged
       expect(prisma.authLog.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           event: 'otp_locked',
@@ -516,12 +530,43 @@ describe('AuthService', () => {
     })
 
     it('should handle expired OTP (expiresAt in past)', async () => {
-      ;(prisma.otpCode.findFirst as jest.Mock).mockResolvedValue(null) // Query filters expired
+      ;(prisma.otpCode.findFirst as jest.Mock).mockResolvedValue(null)
       ;(prisma.authLog.create as jest.Mock).mockResolvedValue({})
 
       await expect(
         service.verifyOtp('test@example.com', '123456', mockContext),
       ).rejects.toThrow(BadRequestException)
+    })
+
+    it('should throw ForbiddenException when user account is blocked', async () => {
+      const blockedUser = { ...mockUser, accountStatus: AccountStatus.BLOCKED }
+      const otpCode = { ...mockOtpCode }
+      ;(bcryptService.compare as jest.Mock).mockResolvedValue(true)
+      ;(prisma.otpCode.findFirst as jest.Mock).mockResolvedValue(otpCode)
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(blockedUser)
+      ;(prisma.otpCode.delete as jest.Mock).mockResolvedValue(otpCode)
+      ;(prisma.authLog.create as jest.Mock).mockResolvedValue({})
+
+      await expect(
+        service.verifyOtp('test@example.com', '123456', mockContext),
+      ).rejects.toThrow(ForbiddenException)
+    })
+
+    it('should throw ForbiddenException when user account is suspended', async () => {
+      const suspendedUser = {
+        ...mockUser,
+        accountStatus: AccountStatus.SUSPENDED,
+      }
+      const otpCode = { ...mockOtpCode }
+      ;(bcryptService.compare as jest.Mock).mockResolvedValue(true)
+      ;(prisma.otpCode.findFirst as jest.Mock).mockResolvedValue(otpCode)
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(suspendedUser)
+      ;(prisma.otpCode.delete as jest.Mock).mockResolvedValue(otpCode)
+      ;(prisma.authLog.create as jest.Mock).mockResolvedValue({})
+
+      await expect(
+        service.verifyOtp('test@example.com', '123456', mockContext),
+      ).rejects.toThrow(ForbiddenException)
     })
   })
 
@@ -539,7 +584,9 @@ describe('AuthService', () => {
     it('should normalize email to lowercase', async () => {
       const otpCode = { ...mockOtpCode, email: 'test@example.com' }
       ;(bcryptService.compare as jest.Mock).mockResolvedValue(true)
-      ;(bcryptService.hash as jest.Mock).mockResolvedValue('hashed_refresh_token')
+      ;(bcryptService.hash as jest.Mock).mockResolvedValue(
+        'hashed_refresh_token',
+      )
       ;(prisma.otpCode.findFirst as jest.Mock).mockResolvedValue(otpCode)
       ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser)
       ;(prisma.otpCode.delete as jest.Mock).mockResolvedValue(otpCode)
@@ -551,7 +598,6 @@ describe('AuthService', () => {
 
       await service.verifyOtp('TEST@EXAMPLE.COM', '123456', mockContext)
 
-      // Verify lookup used normalized email
       expect(prisma.otpCode.findFirst).toHaveBeenCalledWith({
         where: expect.objectContaining({
           email: 'test@example.com',
@@ -563,7 +609,9 @@ describe('AuthService', () => {
     it('should work without context (optional parameters)', async () => {
       const otpCode = { ...mockOtpCode }
       ;(bcryptService.compare as jest.Mock).mockResolvedValue(true)
-      ;(bcryptService.hash as jest.Mock).mockResolvedValue('hashed_refresh_token')
+      ;(bcryptService.hash as jest.Mock).mockResolvedValue(
+        'hashed_refresh_token',
+      )
       ;(prisma.otpCode.findFirst as jest.Mock).mockResolvedValue(otpCode)
       ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser)
       ;(prisma.otpCode.delete as jest.Mock).mockResolvedValue(otpCode)
@@ -575,7 +623,6 @@ describe('AuthService', () => {
 
       await service.verifyOtp('test@example.com', '123456')
 
-      // Verify log was called with null context fields (not provided)
       expect(prisma.authLog.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           deviceId: null,
@@ -583,6 +630,292 @@ describe('AuthService', () => {
           userAgent: null,
         }),
       })
+    })
+  })
+
+  // ─── ProfileDto validation ────────────────────────────────────────────────────
+
+  describe('ProfileDto validation', () => {
+    it('should pass with an empty DTO (all fields optional)', async () => {
+      const dto = Object.assign(new ProfileDto(), {})
+      const errors = await validate(dto)
+      expect(errors).toHaveLength(0)
+    })
+
+    it('should pass with a full valid DTO', async () => {
+      const dto = Object.assign(new ProfileDto(), {
+        name: 'Alice',
+        dateOfBirth: '1986-04-12',
+        menopauseStage: 'PERIMENOPAUSE',
+        timezone: 'America/New_York',
+      })
+      const errors = await validate(dto)
+      expect(errors).toHaveLength(0)
+    })
+
+    it('should reject a name longer than 100 characters', async () => {
+      const dto = Object.assign(new ProfileDto(), { name: 'A'.repeat(101) })
+      const errors = await validate(dto)
+      expect(errors.some((e) => e.property === 'name')).toBe(true)
+    })
+
+    it('should reject a dateOfBirth that is in the future', async () => {
+      const futureDate = new Date(Date.now() + 86_400_000)
+        .toISOString()
+        .slice(0, 10)
+      const dto = Object.assign(new ProfileDto(), {
+        dateOfBirth: futureDate,
+      })
+      const errors = await validate(dto)
+      expect(errors.some((e) => e.property === 'dateOfBirth')).toBe(true)
+    })
+
+    it('should reject an invalid dateOfBirth format', async () => {
+      const dto = Object.assign(new ProfileDto(), {
+        dateOfBirth: '12-04-1986',
+      })
+      const errors = await validate(dto)
+      expect(errors.some((e) => e.property === 'dateOfBirth')).toBe(true)
+    })
+
+    it('should reject an invalid menopauseStage value', async () => {
+      const dto = Object.assign(new ProfileDto(), {
+        menopauseStage: 'INVALID_STAGE',
+      })
+      const errors = await validate(dto)
+      expect(errors.some((e) => e.property === 'menopauseStage')).toBe(true)
+    })
+
+    it('should reject a timezone without a slash', async () => {
+      const dto = Object.assign(new ProfileDto(), { timezone: 'UTC' })
+      const errors = await validate(dto)
+      expect(errors.some((e) => e.property === 'timezone')).toBe(true)
+    })
+  })
+
+  // ─── submitProfile service method ─────────────────────────────────────────────
+
+  describe('submitProfile', () => {
+    it('should always set onboardingStatus = COMPLETED even with an empty DTO', async () => {
+      ;(prisma.user.update as jest.Mock).mockResolvedValue({
+        name: mockUser.name,
+        dateOfBirth: null,
+        menopauseStage: MenopauseStage.UNKNOWN,
+        timezone: null,
+        onboardingStatus: OnboardingStatus.COMPLETED,
+      })
+
+      const result = await service.submitProfile(mockUser.id, {})
+      expect(result).toMatchObject({
+        message: 'Profile saved',
+        name: mockUser.name,
+        onboardingStatus: OnboardingStatus.COMPLETED,
+      })
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: mockUser.id },
+          data: expect.objectContaining({
+            onboardingStatus: OnboardingStatus.COMPLETED,
+          }),
+          select: {
+            name: true,
+            dateOfBirth: true,
+            menopauseStage: true,
+            timezone: true,
+            onboardingStatus: true,
+          },
+        }),
+      )
+    })
+
+    it('should persist all provided profile fields', async () => {
+      ;(prisma.user.update as jest.Mock).mockResolvedValue({
+        name: 'Alice',
+        dateOfBirth: null,
+        menopauseStage: MenopauseStage.PERIMENOPAUSE,
+        timezone: 'Asia/Colombo',
+        onboardingStatus: OnboardingStatus.COMPLETED,
+      })
+
+      await service.submitProfile(mockUser.id, {
+        name: 'Alice',
+        menopauseStage: 'PERIMENOPAUSE',
+        timezone: 'Asia/Colombo',
+      })
+
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: mockUser.id },
+          data: expect.objectContaining({
+            name: 'Alice',
+            menopauseStage: 'PERIMENOPAUSE',
+            timezone: 'Asia/Colombo',
+            onboardingStatus: OnboardingStatus.COMPLETED,
+          }),
+        }),
+      )
+    })
+
+    it('should store dateOfBirth as a Date when provided', async () => {
+      ;(prisma.user.update as jest.Mock).mockResolvedValue({ ...mockUser })
+
+      await service.submitProfile(mockUser.id, {
+        dateOfBirth: '1986-04-12',
+      })
+
+      const call = (prisma.user.update as jest.Mock).mock.calls[0][0]
+      expect(call.data.dateOfBirth).toEqual(new Date('1986-04-12'))
+    })
+
+    it('should leave dateOfBirth out of the patch when not provided', async () => {
+      ;(prisma.user.update as jest.Mock).mockResolvedValue({ ...mockUser })
+
+      await service.submitProfile(mockUser.id, { name: 'Alice' })
+
+      const call = (prisma.user.update as jest.Mock).mock.calls[0][0]
+      expect(call.data).not.toHaveProperty('dateOfBirth')
+    })
+
+    it('should not include fields that were not provided in the DTO', async () => {
+      ;(prisma.user.update as jest.Mock).mockResolvedValue({ ...mockUser })
+
+      await service.submitProfile(mockUser.id, { name: 'Bob' })
+
+      const call = (prisma.user.update as jest.Mock).mock.calls[0][0]
+      expect(call.data).not.toHaveProperty('timezone')
+      expect(call.data).not.toHaveProperty('menopauseStage')
+    })
+  })
+
+  // ─── patchProfile service method ──────────────────────────────────────────────
+
+  describe('patchProfile', () => {
+    it('should NOT change onboardingStatus when patching profile', async () => {
+      ;(prisma.user.update as jest.Mock).mockResolvedValue({
+        name: 'Alice Updated',
+        dateOfBirth: null,
+        menopauseStage: MenopauseStage.UNKNOWN,
+        timezone: 'Asia/Colombo',
+        onboardingStatus: OnboardingStatus.COMPLETED,
+      })
+
+      await service.patchProfile(mockUser.id, { name: 'Alice Updated' })
+
+      const call = (prisma.user.update as jest.Mock).mock.calls[0][0]
+      expect(call.data).not.toHaveProperty('onboardingStatus')
+    })
+
+    it('should return message "Profile updated"', async () => {
+      ;(prisma.user.update as jest.Mock).mockResolvedValue({
+        name: 'Alice',
+        dateOfBirth: null,
+        menopauseStage: MenopauseStage.UNKNOWN,
+        timezone: null,
+        onboardingStatus: OnboardingStatus.COMPLETED,
+      })
+
+      const result = await service.patchProfile(mockUser.id, { name: 'Alice' })
+      expect(result.message).toBe('Profile updated')
+    })
+  })
+
+  // ─── getProfile ──────────────────────────────────────────────────────────────
+
+  describe('getProfile', () => {
+    it('should return selected user fields', async () => {
+      const profileData = {
+        id: mockUser.id,
+        email: mockUser.email,
+        name: mockUser.name,
+        role: mockUser.role,
+        isVerified: mockUser.isVerified,
+        onboardingStatus: OnboardingStatus.COMPLETED,
+        accountStatus: AccountStatus.ACTIVE,
+        dateOfBirth: null,
+        menopauseStage: MenopauseStage.UNKNOWN,
+        timezone: 'Asia/Colombo',
+        createdAt: mockUser.createdAt,
+      }
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(profileData)
+
+      const result = await service.getProfile(mockUser.id)
+      expect(result).toEqual(profileData)
+    })
+
+    it('should throw NotFoundException when user does not exist', async () => {
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(null)
+
+      await expect(service.getProfile('nonexistent-id')).rejects.toThrow(
+        NotFoundException,
+      )
+    })
+  })
+
+  // ─── Device Linking ──────────────────────────────────────────────────────────
+
+  describe('Device Linking', () => {
+    it('should include userId in AuthResponse for OTP verification', async () => {
+      const context = { deviceId: 'device-uuid-123', userAgent: 'test-agent' }
+
+      // Mock OTP verification
+      ;(prisma.otpCode.findFirst as jest.Mock).mockResolvedValue({
+        id: 'otp-id',
+        email: 'test@example.com',
+        codeHash: 'hashed_code',
+        expiresAt: new Date(Date.now() + 600000),
+        attempts: 0,
+      })
+      ;(bcryptService.compare as jest.Mock).mockResolvedValue(true)
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(null) // New user
+      ;(prisma.user.create as jest.Mock).mockResolvedValue(mockUser)
+      ;(prisma.otpCode.delete as jest.Mock).mockResolvedValue(undefined)
+
+      // Mock token issuance
+      const mockTokens = { accessToken: 'access', refreshToken: 'refresh' }
+      jest
+        .spyOn(service as unknown as AuthServiceWithPrivateMethods, 'issueTokenPair')
+        .mockResolvedValue(mockTokens)
+
+      const result = await service.verifyOtp(
+        'test@example.com',
+        '123456',
+        context,
+      )
+
+      // Verify AuthResponse includes userId
+      expect(result).toHaveProperty('userId', mockUser.id)
+      expect(result).toHaveProperty('onboarding_required', false)
+      expect(result).toHaveProperty('user_type', UserRole.REGISTERED_USER)
+      expect(result).toHaveProperty('login_method', 'otp')
+    })
+
+    it('should include userId in AuthResponse for Google mobile login', async () => {
+      const context = { deviceId: 'device-uuid-456', userAgent: 'mobile-agent' }
+
+      // Mock Google token verification
+      ;(global.fetch as jest.MockedFunction<typeof fetch>) = jest.fn().mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue({
+          sub: 'google-user-id',
+          email: 'google@example.com',
+          email_verified: 'true',
+          name: 'Google User',
+          aud: 'mock-google-client-id', // Use the mocked client ID
+        }),
+      })
+
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(null)
+      ;(prisma.user.create as jest.Mock).mockResolvedValue(mockUser)
+
+      const mockTokens = { accessToken: 'access', refreshToken: 'refresh' }
+      jest
+        .spyOn(service as unknown as AuthServiceWithPrivateMethods, 'issueTokenPair')
+        .mockResolvedValue(mockTokens)
+
+      const result = await service.googleMobileLogin('fake-token', context)
+
+      expect(result).toHaveProperty('userId', mockUser.id)
+      expect(result).toHaveProperty('login_method', 'google')
     })
   })
 })
