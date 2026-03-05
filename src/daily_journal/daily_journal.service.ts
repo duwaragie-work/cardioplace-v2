@@ -6,11 +6,22 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
-import { Prisma } from '../generated/prisma/client.js'
+import { Prisma, Mood } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from './constants/events.js'
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto.js'
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto.js'
+
+type JsonValue = Prisma.JsonValue
+
+const MOOD_MAP: Record<string, Mood> = {
+  calm: Mood.CALM,
+  anxious: Mood.ANXIOUS,
+  depressed: Mood.DEPRESSED,
+  irritable: Mood.IRRITABLE,
+  energized: Mood.ENERGIZED,
+  neutral: Mood.NEUTRAL,
+}
 
 @Injectable()
 export class DailyJournalService {
@@ -27,9 +38,16 @@ export class DailyJournalService {
         data: {
           userId,
           entryDate: new Date(dto.entryDate),
-          sleepHours: new Prisma.Decimal(dto.sleepHours),
-          sleepQuality: dto.sleepQuality,
-          awakenings: dto.awakenings,
+          sleepHours:
+            dto.sleepHours != null
+              ? new Prisma.Decimal(dto.sleepHours)
+              : null,
+          sleepQuality: dto.sleepQuality ?? null,
+          awakenings: dto.awakenings ?? null,
+          bedtime: dto.bedtime ?? null,
+          wakeTime: dto.wakeTime ?? null,
+          symptoms: (dto.symptoms as JsonValue) ?? Prisma.JsonNull,
+          mood: dto.mood ? MOOD_MAP[dto.mood] : null,
           notes: dto.notes ?? null,
         },
       })
@@ -38,7 +56,7 @@ export class DailyJournalService {
         userId,
         entryId: entry.id,
         entryDate: entry.entryDate,
-        sleepHours: Number(entry.sleepHours),
+        sleepHours: entry.sleepHours != null ? Number(entry.sleepHours) : null,
         sleepQuality: entry.sleepQuality,
         awakenings: entry.awakenings,
       })
@@ -75,28 +93,35 @@ export class DailyJournalService {
     }
 
     try {
+      const data: Prisma.JournalEntryUpdateInput = {}
+
+      if (dto.entryDate !== undefined) data.entryDate = new Date(dto.entryDate)
+      if (dto.sleepHours !== undefined)
+        data.sleepHours =
+          dto.sleepHours != null ? new Prisma.Decimal(dto.sleepHours) : null
+      if (dto.sleepQuality !== undefined)
+        data.sleepQuality = dto.sleepQuality
+      if (dto.awakenings !== undefined)
+        data.awakenings = dto.awakenings
+      if (dto.bedtime !== undefined) data.bedtime = dto.bedtime
+      if (dto.wakeTime !== undefined) data.wakeTime = dto.wakeTime
+      if (dto.symptoms !== undefined)
+        data.symptoms = (dto.symptoms as JsonValue) ?? Prisma.JsonNull
+      if (dto.mood !== undefined)
+        data.mood = dto.mood ? MOOD_MAP[dto.mood] : null
+      if (dto.notes !== undefined) data.notes = dto.notes
+
       const updated = await this.prisma.journalEntry.update({
         where: { id: entryId },
-        data: {
-          ...(dto.entryDate && { entryDate: new Date(dto.entryDate) }),
-          ...(dto.sleepHours !== undefined && {
-            sleepHours: new Prisma.Decimal(dto.sleepHours),
-          }),
-          ...(dto.sleepQuality !== undefined && {
-            sleepQuality: dto.sleepQuality,
-          }),
-          ...(dto.awakenings !== undefined && {
-            awakenings: dto.awakenings,
-          }),
-          ...(dto.notes !== undefined && { notes: dto.notes }),
-        },
+        data,
       })
 
       this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
         userId,
         entryId: updated.id,
         entryDate: updated.entryDate,
-        sleepHours: Number(updated.sleepHours),
+        sleepHours:
+          updated.sleepHours != null ? Number(updated.sleepHours) : null,
         sleepQuality: updated.sleepQuality,
         awakenings: updated.awakenings,
       })
@@ -137,11 +162,7 @@ export class DailyJournalService {
     }
   }
 
-  async getHistory(
-    userId: string,
-    page: number,
-    limit: number,
-  ) {
+  async getHistory(userId: string, page: number, limit: number) {
     const skip = (page - 1) * limit
 
     const [entries, total] = await Promise.all([
@@ -184,9 +205,14 @@ export class DailyJournalService {
       data: entries.map((entry) => ({
         id: entry.id,
         entryDate: entry.entryDate,
-        sleepHours: Number(entry.sleepHours),
+        sleepHours:
+          entry.sleepHours != null ? Number(entry.sleepHours) : null,
         sleepQuality: entry.sleepQuality,
         awakenings: entry.awakenings,
+        bedtime: entry.bedtime,
+        wakeTime: entry.wakeTime,
+        symptoms: entry.symptoms,
+        mood: entry.mood,
         notes: entry.notes,
         baseline: entry.snapshot
           ? {
@@ -271,7 +297,9 @@ export class DailyJournalService {
         journalEntry: alert.journalEntry
           ? {
               ...alert.journalEntry,
-              sleepHours: Number(alert.journalEntry.sleepHours),
+              sleepHours: alert.journalEntry.sleepHours != null
+                ? Number(alert.journalEntry.sleepHours)
+                : null,
             }
           : null,
       })),
@@ -359,9 +387,13 @@ export class DailyJournalService {
     id: string
     userId: string
     entryDate: Date
-    sleepHours: Prisma.Decimal | number
-    sleepQuality: number
-    awakenings: number
+    sleepHours: Prisma.Decimal | number | null
+    sleepQuality: number | null
+    awakenings: number | null
+    bedtime: string | null
+    wakeTime: string | null
+    symptoms: JsonValue
+    mood: Mood | null
     notes: string | null
     snapshotId: string | null
     createdAt: Date
@@ -371,9 +403,13 @@ export class DailyJournalService {
       id: entry.id,
       userId: entry.userId,
       entryDate: entry.entryDate,
-      sleepHours: Number(entry.sleepHours),
+      sleepHours: entry.sleepHours != null ? Number(entry.sleepHours) : null,
       sleepQuality: entry.sleepQuality,
       awakenings: entry.awakenings,
+      bedtime: entry.bedtime,
+      wakeTime: entry.wakeTime,
+      symptoms: entry.symptoms,
+      mood: entry.mood ? entry.mood.toLowerCase() : null,
       notes: entry.notes,
       snapshotId: entry.snapshotId,
       createdAt: entry.createdAt,

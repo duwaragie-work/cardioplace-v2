@@ -2,18 +2,18 @@ export interface JournalEntryCreatedEvent {
   userId: string
   entryId: string
   entryDate: Date
-  sleepHours: number
-  sleepQuality: number
-  awakenings: number
+  sleepHours: number | null
+  sleepQuality: number | null
+  awakenings: number | null
 }
 
 export interface JournalEntryUpdatedEvent {
   userId: string
   entryId: string
   entryDate: Date
-  sleepHours: number
-  sleepQuality: number
-  awakenings: number
+  sleepHours: number | null
+  sleepQuality: number | null
+  awakenings: number | null
 }
 
 export interface BaselineComputedEvent {

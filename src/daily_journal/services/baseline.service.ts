@@ -31,6 +31,17 @@ export class BaselineService {
   private async computeBaseline(
     payload: JournalEntryCreatedEvent | JournalEntryUpdatedEvent,
   ) {
+    if (
+      payload.sleepHours == null ||
+      payload.sleepQuality == null ||
+      payload.awakenings == null
+    ) {
+      this.logger.log(
+        `Skipping baseline for entry ${payload.entryId} — incomplete sleep metrics`,
+      )
+      return
+    }
+
     try {
       const fourteenDaysAgo = new Date(payload.entryDate)
       fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14)
@@ -39,6 +50,9 @@ export class BaselineService {
         where: {
           userId: payload.userId,
           entryDate: { gte: fourteenDaysAgo },
+          sleepHours: { not: null },
+          sleepQuality: { not: null },
+          awakenings: { not: null },
         },
         orderBy: { entryDate: 'desc' },
       })
@@ -54,9 +68,9 @@ export class BaselineService {
         avgSleepHours =
           entries.reduce((sum, e) => sum + Number(e.sleepHours), 0) / count
         avgSleepQuality =
-          entries.reduce((sum, e) => sum + e.sleepQuality, 0) / count
+          entries.reduce((sum, e) => sum + Number(e.sleepQuality), 0) / count
         avgAwakenings =
-          entries.reduce((sum, e) => sum + e.awakenings, 0) / count
+          entries.reduce((sum, e) => sum + Number(e.awakenings), 0) / count
       } else {
         this.logger.log(
           `Baseline threshold not met for user ${payload.userId}: ${entries.length}/10 entries — storing zeros`,

@@ -1,7 +1,9 @@
 import {
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -9,10 +11,9 @@ import {
   MaxLength,
   Min,
   registerDecorator,
+  ValidateIf,
   ValidationOptions,
 } from 'class-validator'
-
-// ─── Custom validator: date must not be in the future ─────────────────────────
 
 function IsDateNotInFuture(validationOptions?: ValidationOptions) {
   return (object: object, propertyName: string) => {
@@ -30,8 +31,6 @@ function IsDateNotInFuture(validationOptions?: ValidationOptions) {
           if (typeof value !== 'string') return false
           const d = new Date(value)
           if (isNaN(d.getTime())) return false
-
-          // Compare date-only (ignore time) in UTC
           const today = new Date()
           today.setHours(23, 59, 59, 999)
           return d <= today
@@ -41,14 +40,16 @@ function IsDateNotInFuture(validationOptions?: ValidationOptions) {
   }
 }
 
-// ─── DTO ──────────────────────────────────────────────────────────────────────
+const VALID_MOODS = [
+  'calm',
+  'anxious',
+  'depressed',
+  'irritable',
+  'energized',
+  'neutral',
+] as const
 
 export class CreateJournalEntryDto {
-  /**
-   * Date of the journal entry in YYYY-MM-DD format.
-   * Must not be a future date.
-   * Each user can only have one entry per date.
-   */
   @IsNotEmpty({ message: 'entryDate is required' })
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
@@ -57,42 +58,54 @@ export class CreateJournalEntryDto {
   @IsDateNotInFuture()
   entryDate!: string
 
-  /**
-   * Total hours of sleep (0–24). Decimals allowed (e.g. 7.5).
-   * Maps to Decimal(4,2) in the database.
-   */
-  @IsNotEmpty({ message: 'sleepHours is required' })
+  @IsOptional()
   @IsNumber(
     { maxDecimalPlaces: 2 },
     { message: 'sleepHours must be a number with at most 2 decimal places' },
   )
   @Min(0, { message: 'sleepHours must be at least 0' })
   @Max(24, { message: 'sleepHours must be at most 24' })
-  sleepHours!: number
+  sleepHours?: number
 
-  /**
-   * Subjective sleep quality rating on a 1–10 scale.
-   */
-  @IsNotEmpty({ message: 'sleepQuality is required' })
+  @IsOptional()
   @IsInt({ message: 'sleepQuality must be an integer' })
   @Min(1, { message: 'sleepQuality must be at least 1' })
   @Max(10, { message: 'sleepQuality must be at most 10' })
-  sleepQuality!: number
+  sleepQuality?: number
 
-  /**
-   * Number of times the user woke up during the night.
-   */
-  @IsNotEmpty({ message: 'awakenings is required' })
+  @IsOptional()
   @IsInt({ message: 'awakenings must be an integer' })
   @Min(0, { message: 'awakenings must be at least 0' })
-  awakenings!: number
+  awakenings?: number
 
-  /**
-   * Optional free-text notes about the day/sleep.
-   * Maximum 2000 characters.
-   */
+  @IsOptional()
+  @IsString({ message: 'bedtime must be a string' })
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
+    message: 'bedtime must be in HH:MM format (24-hour)',
+  })
+  bedtime?: string
+
+  @IsOptional()
+  @IsString({ message: 'wakeTime must be a string' })
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
+    message: 'wakeTime must be in HH:MM format (24-hour)',
+  })
+  wakeTime?: string
+
+  @IsOptional()
+  @IsObject({ message: 'symptoms must be a JSON object' })
+  symptoms?: Record<string, unknown>
+
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsString({ message: 'mood must be a string' })
+  @IsIn(VALID_MOODS, {
+    message: `mood must be one of: ${VALID_MOODS.join(', ')}`,
+  })
+  mood?: (typeof VALID_MOODS)[number] | null
+
   @IsOptional()
   @IsString({ message: 'notes must be a string' })
-  @MaxLength(2000, { message: 'notes must be at most 2000 characters' })
+  @MaxLength(500, { message: 'notes must be at most 500 characters' })
   notes?: string
 }

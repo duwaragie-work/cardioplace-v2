@@ -28,26 +28,43 @@ enum EscalationLevel {
     LEVEL_3
 }
 
+enum Mood {
+    CALM
+    ANXIOUS
+    DEPRESSED
+    IRRITABLE
+    ENERGIZED
+    NEUTRAL
+}
+
 model JournalEntry {
     id     String @id @default(uuid())
     userId String
     user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-    entryDate    DateTime @db.Date
-    sleepHours   Decimal  @db.Decimal(4, 2)
-    sleepQuality Int // 1–10 scale
-    awakenings   Int
-    notes        String?
+    entryDate DateTime @db.Date
+
+    // Sleep metrics (all optional — user may not fill every field)
+    sleepHours   Decimal? @db.Decimal(4, 2)
+    sleepQuality Int?
+    awakenings   Int?
+    bedtime      String?
+    wakeTime     String?
+
+    // Symptoms stored as flexible JSON
+    symptoms Json?
+
+    // Mood & Notes
+    mood  Mood?
+    notes String? @db.VarChar(500)
 
     // FK to the baseline snapshot that was active when this entry was evaluated
-    // Nullable because baseline does not exist until >= 10 entries in 14-day window
     snapshotId String?
     snapshot   BaselineSnapshot? @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
 
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 
-    // Relations
     deviationAlerts DeviationAlert[]
 
     @@unique([userId, entryDate])
