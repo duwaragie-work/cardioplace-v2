@@ -1,0 +1,54 @@
+enum DeviationType {
+    SLEEP_HOURS
+    SLEEP_QUALITY
+    AWAKENINGS
+}
+
+enum DeviationSeverity {
+    LOW
+    MEDIUM
+    HIGH
+}
+
+enum AlertStatus {
+    OPEN
+    ACKNOWLEDGED
+    RESOLVED
+}
+
+enum NotificationChannel {
+    PUSH
+    EMAIL
+    SMS
+}
+
+enum EscalationLevel {
+    LEVEL_1
+    LEVEL_2
+}
+
+model JournalEntry {
+    id     String @id @default(uuid())
+    userId String
+    user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    entryDate    DateTime @db.Date
+    sleepHours   Decimal  @db.Decimal(4, 2)
+    sleepQuality Int // 1–10 scale
+    awakenings   Int
+    notes        String?
+
+    // FK to the baseline snapshot that was active when this entry was evaluated
+    // Nullable because baseline does not exist until >= 10 entries in 14-day window
+    snapshotId String?
+    snapshot   BaselineSnapshot? @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // Relations
+    deviationAlerts DeviationAlert[]
+
+    @@unique([userId, entryDate])
+    @@index([userId, entryDate(sort: Desc)])
+}

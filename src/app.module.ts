@@ -11,6 +11,7 @@ import { PrismaService } from './prisma/prisma.service.js'
 import { UsersModule } from './users/users.module.js'
 import { UsersService } from './users/users.service.js'
 import { ChatModule } from './chat/chat.module.js'
+import { DailyJournalModule } from './daily_journal/daily_journal.module.js'
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { ChatModule } from './chat/chat.module.js'
     MistralModule,
     UsersModule,
     ChatModule,
+    DailyJournalModule,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],

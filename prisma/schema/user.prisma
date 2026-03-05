@@ -1,12 +1,12 @@
 enum UserRole {
   GUEST
   REGISTERED_USER
-  VERIFIED_USER 
+  VERIFIED_USER
   CONTENT_ADMIN
   ARTICLE_ADMIN
   ARTICLE_APPROVER
-  KB_UPLOADER 
-  KB_APPROVER 
+  KB_UPLOADER
+  KB_APPROVER
   CHAT_REVIEWER
   SUPER_ADMIN
 }
@@ -38,18 +38,23 @@ model User {
   // Profile fields set during / after onboarding
   dateOfBirth    DateTime?
   menopauseStage MenopauseStage @default(UNKNOWN)
-  timezone       String?        // IANA identifier, e.g. "Asia/Colombo"
+  timezone       String? // IANA identifier, e.g. "Asia/Colombo"
 
   isVerified       Boolean          @default(false)
   role             UserRole         @default(GUEST)
   onboardingStatus OnboardingStatus @default(NOT_COMPLETED)
   accountStatus    AccountStatus    @default(ACTIVE)
 
-  accounts      Account[]
-  refreshTokens RefreshToken[]
-  devices       Device[]
-  authLogs      AuthLog[] 
+  accounts          Account[]
+  refreshTokens     RefreshToken[]
+  devices           Device[]
+  authLogs          AuthLog[]
+  baselineSnapshots BaselineSnapshot[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  journalEntries   JournalEntry[]
+  deviationAlerts  DeviationAlert[]
+  escalationEvents EscalationEvent[]
+  notifications    Notification[]
 }
