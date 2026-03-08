@@ -49,6 +49,7 @@ model User {
   refreshTokens RefreshToken[]
   devices       Device[]
   authLogs      AuthLog[] 
+  sessions      Session[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

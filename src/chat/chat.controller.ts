@@ -1,5 +1,6 @@
-import { Body, Controller, Post, Res } from '@nestjs/common'
-import type { Response } from 'express'
+import { Body, Controller, Post, Res, Req } from '@nestjs/common'
+import type { Request, Response } from 'express'
+import { randomUUID } from 'crypto'
 import { Public } from '../auth/decorators/public.decorator.js'
 import { ChatService } from './chat.service.js'
 import { ChatRequestDto } from './dto/chat-request.dto.js'
@@ -11,7 +12,7 @@ import { ChatRequestDto } from './dto/chat-request.dto.js'
 @Controller('chat')
 @Public()
 export class ChatController {
-  constructor(private readonly chatService: ChatService) {}
+  constructor(private readonly chatService: ChatService) { }
 
   /**
    * POST /chat/streaming
@@ -19,11 +20,24 @@ export class ChatController {
    * Client calls this with fetch() and reads the stream.
    */
   @Post('streaming')
-  async streamChat(@Body() body: ChatRequestDto, @Res() res: Response) {
+  async streamChat(@Body() body: ChatRequestDto, @Req() req: any, @Res() res: Response) {
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache')
     res.setHeader('Connection', 'keep-alive')
     res.flushHeaders()
+
+    console.log("=============================")
+    console.log(req.user)
+    console.log("=============================")
+
+    if (!body.sessionId) {
+      body.sessionId = randomUUID()
+      const userId = req.user?.id || null
+      await this.chatService.createSession(body.sessionId, userId)
+      this.chatService.generateSessionTitle(body.sessionId, body.prompt).catch(console.error)
+    }
+
+    res.write(`data: ${JSON.stringify({ sessionId: body.sessionId })}\n\n`)
 
     try {
       for await (const chunk of this.chatService.getStreamingResponse(body)) {
@@ -43,8 +57,14 @@ export class ChatController {
    * Replaces the getStructuredResponse Firebase Cloud Function.
    */
   @Post('structured')
-  async structuredChat(@Body() body: ChatRequestDto) {
+  async structuredChat(@Body() body: ChatRequestDto, @Req() req: any) {
+    if (!body.sessionId) {
+      body.sessionId = randomUUID()
+      const userId = req.user?.id || null
+      await this.chatService.createSession(body.sessionId, userId)
+      this.chatService.generateSessionTitle(body.sessionId, body.prompt).catch(console.error)
+    }
     const response = await this.chatService.getStructuredResponse(body)
-    return { data: response.text }
+    return { sessionId: body.sessionId, data: response.text }
   }
 }

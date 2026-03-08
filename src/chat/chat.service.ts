@@ -8,6 +8,7 @@ import { ChatRequestDto } from './dto/chat-request.dto.js'
 import { SystemPromptService } from './services/system-prompt.service.js'
 import { RagService } from './services/rag.service.js'
 import { ConversationHistoryService } from './services/conversation-history.service.js'
+import { PrismaService } from '../prisma/prisma.service.js'
 
 interface ChainInput {
   input: string
@@ -24,6 +25,7 @@ export class ChatService {
     private readonly ragService: RagService,
     private readonly conversationHistoryService: ConversationHistoryService,
     private readonly configService: ConfigService,
+    private readonly prisma: PrismaService,
   ) {
     this.chatModel =
       this.configService.get<string>('MISTRAL_CHAT_MODEL') || 'ministral-3b-2512'
@@ -84,7 +86,8 @@ export class ChatService {
    * Mirrors LangchainService.getStreamingResponse() from functions/.
    */
   async *getStreamingResponse(request: ChatRequestDto): AsyncIterable<string> {
-    const { sessionId, prompt, date: _date, ...config } = request
+    const { prompt, date: _date, ...config } = request
+    const sessionId = request.sessionId as string
 
     try {
       const systemPrompt = this.systemPromptService.buildSystemPrompt(config)
@@ -131,7 +134,8 @@ export class ChatService {
    * Mirrors LangchainService.getStructuredResponse() from functions/.
    */
   async getStructuredResponse(request: ChatRequestDto): Promise<{ text: string }> {
-    const { sessionId, prompt, date: _date, ...config } = request
+    const { prompt, date: _date, ...config } = request
+    const sessionId = request.sessionId as string
 
     try {
       const systemPrompt = this.systemPromptService.buildSystemPrompt(config)
@@ -168,6 +172,48 @@ export class ChatService {
     } catch (error) {
       console.error('Structured response error:', error)
       return { text: 'An error occurred while getting recommendations' }
+    }
+  }
+
+  async createSession(sessionId: string, userId?: string): Promise<void> {
+    try {
+      await this.prisma.session.create({
+        data: {
+          id: sessionId,
+          title: 'New Chat',
+          userId: userId || null,
+        },
+      })
+      console.log(`Created new session: ${sessionId}`)
+    } catch (error) {
+      console.error('Error creating session:', error)
+    }
+  }
+
+  async generateSessionTitle(sessionId: string, prompt: string): Promise<void> {
+    try {
+      const apiKey = this.configService.get<string>('MISTRAL_API_KEY')
+
+      const llm = new ChatMistralAI({
+        apiKey,
+        model: this.chatModel,
+        maxTokens: 50,
+      })
+
+      const response = await llm.invoke([
+        ['system', 'You are a helpful assistant. Summarize the user prompt into a short 3-5 word chat title. Return ONLY the title, without quotes.'],
+        ['human', prompt],
+      ])
+
+      const title = (response.content as string).trim().replace(/^["']|["']$/g, '')
+
+      await this.prisma.session.update({
+        where: { id: sessionId },
+        data: { title },
+      })
+      console.log(`Generated session title for ${sessionId}: ${title}`)
+    } catch (error) {
+      console.error('Error generating session title:', error)
     }
   }
 }
