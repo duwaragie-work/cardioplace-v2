@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -15,6 +16,7 @@ import { AuthService, TokenPair } from './auth.service.js'
 import { Public } from './decorators/public.decorator.js'
 import { AppleLoginDto } from './dto/apple-login.dto.js'
 import { GoogleMobileLoginDto } from './dto/google-mobile-login.dto.js'
+import { GuestLoginDto } from './dto/guest-login.dto.js'
 import { ProfileDto } from './dto/profile.dto.js'
 import { RefreshDto } from './dto/refresh.dto.js'
 import { SendOtpDto } from './dto/send-otp.dto.js'
@@ -23,7 +25,7 @@ import { AppleAuthGuard } from './guards/apple-auth.guard.js'
 import { GoogleAuthGuard } from './guards/google-auth.guard.js'
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js'
 
-@Controller('auth')
+@Controller('v2/auth')
 export class AuthController {
   constructor(
     private authService: AuthService,
@@ -166,6 +168,31 @@ export class AuthController {
     return res.redirect(`${webAppUrl}/auth/callback?${params.toString()}`)
   }
 
+  // ─── Guest (device-linked) ─────────────────────────────────────────────────────
+
+  @Public()
+  @Post('guest')
+  async guest(
+    @Body() dto: GuestLoginDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const context = this.buildAuthContext(req)
+    const deviceId =
+      (context.deviceId ?? dto?.deviceId)?.trim() || null
+    if (!deviceId) {
+      throw new BadRequestException(
+        'Device ID is required. Send via header x-device-id or body deviceId.',
+      )
+    }
+    const result = await this.authService.guestLogin({
+      ...context,
+      deviceId,
+    })
+    this.setRefreshCookie(res, result.refreshToken)
+    return result
+  }
+
   // ─── Email OTP ────────────────────────────────────────────────────────────────
 
   @Public()
@@ -251,9 +278,9 @@ export class AuthController {
 
   // ─── Profile ─────────────────────────────────────────────────────────────────
   //
-  // GET  /auth/profile  — fetch full profile
-  // POST /auth/profile  — submit initial onboarding (marks onboardingStatus COMPLETED)
-  // PATCH/PUT /auth/profile  — edit profile fields
+  // GET  /v2/auth/profile  — fetch full profile
+  // POST /v2/auth/profile  — submit initial onboarding (marks onboardingStatus COMPLETED)
+  // PATCH/PUT /v2/auth/profile  — edit profile fields
 
   @UseGuards(JwtAuthGuard)
   @Get('profile')

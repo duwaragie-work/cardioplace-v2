@@ -32,7 +32,7 @@ export interface AuthResponse extends TokenPair {
   onboarding_required: boolean
   user_type: UserRole
   roles: UserRole[]
-  login_method: 'otp' | 'google' | 'apple'
+  login_method: 'otp' | 'google' | 'apple' | 'guest'
   name: string | null
 }
 
@@ -202,7 +202,7 @@ export class AuthService {
   private buildAuthResponse(
     tokens: TokenPair,
     user: MinimalUser,
-    login_method: 'otp' | 'google' | 'apple',
+    login_method: 'otp' | 'google' | 'apple' | 'guest',
   ): AuthResponse {
     const primaryRole = user.roles[0] ?? UserRole.GUEST
     return {
@@ -235,7 +235,7 @@ export class AuthService {
     event: string
     identifier?: string
     userId?: string
-    method?: 'otp' | 'google' | 'apple'
+    method?: 'otp' | 'google' | 'apple' | 'guest'
     deviceId?: string
     ipAddress?: string
     userAgent?: string
@@ -836,6 +836,85 @@ export class AuthService {
 
     const tokens = await this.issueTokenPair(user, context?.userAgent)
     return this.buildAuthResponse(tokens, user, 'otp')
+  }
+
+  // ─── Guest (device-linked) ──────────────────────────────────────────────────
+
+  /**
+   * Continue as guest: find or create a User keyed by device ID, issue tokens.
+   * Same response shape as other logins so the frontend can store tokens and go to homepage.
+   */
+  async guestLogin(context: {
+    deviceId: string
+    userAgent?: string
+    platform?: string
+    deviceType?: string
+    deviceName?: string
+    ipAddress?: string
+  }): Promise<AuthResponse> {
+    const { deviceId } = context
+    if (!deviceId?.trim()) {
+      throw new BadRequestException('Device ID is required (header x-device-id or body deviceId)')
+    }
+
+    const existingDevice = await this.prisma.device.findUnique({
+      where: { deviceId },
+      include: { user: true },
+    })
+
+    let user: MinimalUser
+
+    if (existingDevice?.user) {
+      user = existingDevice.user
+      this.assertAccountActive(user)
+      await this.logAuthEvent({
+        event: 'guest_login_success',
+        userId: user.id,
+        method: 'guest',
+        deviceId,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        success: true,
+      })
+    } else {
+      if (existingDevice) {
+        const newUser = await this.prisma.user.create({
+          data: { roles: [UserRole.GUEST] },
+        })
+        await this.prisma.device.update({
+          where: { deviceId },
+          data: { userId: newUser.id, lastSeenAt: new Date() },
+        })
+        user = newUser
+      } else {
+        const newUser = await this.prisma.user.create({
+          data: { roles: [UserRole.GUEST] },
+        })
+        await this.prisma.device.create({
+          data: {
+            deviceId,
+            userId: newUser.id,
+            platform: context.platform,
+            deviceType: context.deviceType,
+            deviceName: context.deviceName,
+            userAgent: context.userAgent,
+          },
+        })
+        user = newUser
+      }
+      await this.logAuthEvent({
+        event: 'guest_login_success',
+        userId: user.id,
+        method: 'guest',
+        deviceId,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        success: true,
+      })
+    }
+
+    const tokens = await this.issueTokenPair(user, context.userAgent)
+    return this.buildAuthResponse(tokens, user, 'guest')
   }
 
   // ─── Device Tracking ────────────────────────────────────────────────────────

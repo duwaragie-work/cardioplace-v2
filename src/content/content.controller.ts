@@ -35,7 +35,7 @@ type PublicRequest = {
   headers: Record<string, string | string[] | undefined>
 }
 
-@Controller('content')
+@Controller('v2/content')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ContentController {
   constructor(
@@ -51,6 +51,22 @@ export class ContentController {
     return this.contentService.listPublished(query)
   }
 
+  // ─── Admin: list all + full view (routes before :id so /all is not captured as id) ─
+
+  /** GET /v2/content/all — admin view with all statuses */
+  @Get('all')
+  @Roles(...ADMIN_ROLES)
+  listAdmin(@Query() query: ListContentQueryDto) {
+    return this.contentService.listAdmin(query)
+  }
+
+  /** GET /v2/content/all/:id — full admin view of a single item */
+  @Get('all/:id')
+  @Roles(...ADMIN_ROLES)
+  findOneAdmin(@Param('id') id: string) {
+    return this.contentService.findOneAdmin(id)
+  }
+
   /** GET /v2/content/:id — single published item + appends ContentView row */
   @Get(':id')
   findOnePublished(@Param('id') id: string, @Request() req: PublicRequest) {
@@ -61,22 +77,6 @@ export class ContentController {
       userId,
       Array.isArray(deviceId) ? deviceId[0] : deviceId,
     )
-  }
-
-  // ─── Admin: manage content ──────────────────────────────────────────────────
-
-  /** GET /v2/content/admin/all — admin view with all statuses */
-  @Get('admin/all')
-  @Roles(...ADMIN_ROLES)
-  listAdmin(@Query() query: ListContentQueryDto) {
-    return this.contentService.listAdmin(query)
-  }
-
-  /** GET /v2/content/admin/:id — full admin view of a single item */
-  @Get('admin/:id')
-  @Roles(...ADMIN_ROLES)
-  findOneAdmin(@Param('id') id: string) {
-    return this.contentService.findOneAdmin(id)
   }
 
   /** POST /v2/content — create a new DRAFT */

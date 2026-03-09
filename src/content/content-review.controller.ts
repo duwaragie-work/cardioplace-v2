@@ -6,7 +6,7 @@ import { UserRole } from '../generated/prisma/enums.js'
 import { ContentReviewService } from './content-review.service.js'
 import { SubmitReviewDto } from './dto/submit-review.dto.js'
 
-@Controller('content')
+@Controller('v2/content')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.CONTENT_APPROVER, UserRole.SUPER_ADMIN)
 export class ContentReviewController {
