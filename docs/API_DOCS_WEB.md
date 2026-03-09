@@ -2,7 +2,9 @@
 
 **Base URL:** `https://your-api-domain.com` (replace with your actual API domain)
 
-**Last Updated:** February 27, 2026
+**Auth path prefix:** All auth endpoints use `/api/v2/auth`. Full URL = `{Base URL}/api/v2/auth/...`
+
+**Last Updated:** March 2026
 
 ---
 
@@ -10,14 +12,15 @@
 - [Authentication Flow](#authentication-flow)
 - [Headers](#headers)
 - [Endpoints](#endpoints)
-  - [Google Sign In (OAuth)](#1-google-sign-in-web-oauth)
-  - [Apple Sign In (OAuth)](#2-apple-sign-in-web-oauth)
-  - [Email OTP - Send](#3-send-otp-email)
-  - [Email OTP - Verify](#4-verify-otp)
-  - [Complete Onboarding](#5-complete-onboarding)
-  - [Refresh Token](#6-refresh-token)
-  - [Logout](#7-logout)
-  - [Get Current User](#8-get-current-user-me)
+  - [Guest Login](#1-guest-login)
+  - [Google Sign In (OAuth)](#2-google-sign-in-web-oauth)
+  - [Apple Sign In (OAuth)](#3-apple-sign-in-web-oauth)
+  - [Email OTP - Send](#4-send-otp-email)
+  - [Email OTP - Verify](#5-verify-otp)
+  - [Profile / Onboarding](#6-profile--onboarding)
+  - [Refresh Token](#7-refresh-token)
+  - [Logout](#8-logout)
+  - [Get Current User](#9-get-current-user-me)
   - [Content Library](#content-library)
     - [Public Endpoints](#public-content-endpoints)
     - [Admin Endpoints](#admin-content-endpoints)
@@ -31,13 +34,14 @@
 ## Authentication Flow
 
 ### Overview for Web
-1. User signs in via **Google OAuth**, **Apple OAuth**, or **Email OTP**
+1. User signs in via **Guest**, **Google OAuth**, **Apple OAuth**, or **Email OTP**
 2. For OAuth flows, user is redirected to provider, then back to your callback URL
 3. Backend sets `refreshToken` as **httpOnly cookie** (secure)
-4. Backend returns `accessToken` in URL parameters (OAuth) or response body (OTP)
+4. Backend returns `accessToken` in URL parameters (OAuth) or response body (OTP / Guest)
 5. Store `accessToken` in memory or sessionStorage
 6. Include credentials in requests (cookies sent automatically)
 7. If `onboarding_required: true`, redirect to onboarding page
+8. **Guest:** Call `POST /api/v2/auth/guest` with `X-Device-Id`; store tokens and go to main app (no redirect)
 
 ### Key Differences from Mobile
 - **Refresh token** is stored in httpOnly cookie (not in response body)
@@ -73,11 +77,65 @@ Authorization: Bearer <accessToken>
 
 ## Endpoints
 
-### 1. Google Sign In (Web OAuth)
+### 1. Guest Login
+
+**Endpoint:** `POST /api/v2/auth/guest`
+
+**Headers:**
+```
+Content-Type: application/json
+X-Device-Id: <device-id>    (required — or send in body as deviceId)
+```
+
+**Request Body (optional):**
+```json
+{
+  "deviceId": "string (optional if X-Device-Id header is set)"
+}
+```
+
+**Description:**
+Continue as guest without signing up. Backend finds or creates a user keyed by device ID and returns the same auth response. Set refresh cookie; store access token and redirect to main app.
+
+**Success Response (200):**
+```json
+{
+  "accessToken": "...",
+  "refreshToken": "...",
+  "userId": "01J...",
+  "onboarding_required": false,
+  "user_type": "GUEST",
+  "roles": ["GUEST"],
+  "login_method": "guest",
+  "name": null
+}
+```
+
+**Example:**
+```javascript
+const response = await fetch('https://your-api-domain.com/api/v2/auth/guest', {
+  method: 'POST',
+  credentials: 'include',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Device-Id': getOrCreateDeviceId(), // e.g. from localStorage
+  },
+  body: JSON.stringify({}),
+});
+const data = await response.json();
+if (response.ok) {
+  sessionStorage.setItem('accessToken', data.accessToken);
+  window.location.href = '/home';
+}
+```
+
+---
+
+### 2. Google Sign In (Web OAuth)
 
 **Step 1: Initiate OAuth**
 
-**Endpoint:** `GET /auth/google`
+**Endpoint:** `GET /api/v2/auth/google`
 
 **Description:**
 Redirect user to this endpoint to start Google OAuth flow.
@@ -85,26 +143,23 @@ Redirect user to this endpoint to start Google OAuth flow.
 **Example:**
 ```javascript
 // Redirect user to:
-window.location.href = 'https://your-api-domain.com/auth/google';
+window.location.href = 'https://your-api-domain.com/api/v2/auth/google';
 ```
 
 **Step 2: Handle Callback**
 
-**Endpoint:** `GET /auth/google/callback` (handled by backend)
-
-**Description:**
-Backend handles Google's callback and redirects to your web app with parameters.
+**Endpoint:** `GET /api/v2/auth/google/callback` (handled by backend)
 
 **Redirect URL:**
 ```
-https://your-web-app.com/auth/callback?access=<accessToken>&onboarding_required=<boolean>&user_type=<USER|GUEST>&login_method=GOOGLE
+https://your-web-app.com/auth/callback?access=<accessToken>&onboarding_required=<boolean>&user_type=<UserRole>&login_method=google
 ```
 
 **URL Parameters:**
 - `access`: The access token (JWT)
 - `onboarding_required`: Boolean string ("true" or "false")
-- `user_type`: "USER" or "GUEST"
-- `login_method`: "GOOGLE"
+- `user_type`: Primary role (e.g. "REGISTERED_USER", "GUEST")
+- `login_method`: "google"
 
 **Example Frontend Handler:**
 ```javascript
@@ -131,35 +186,25 @@ if (onboardingRequired) {
 
 ---
 
-### 2. Apple Sign In (Web OAuth)
+### 3. Apple Sign In (Web OAuth)
 
 **Step 1: Initiate OAuth**
 
-**Endpoint:** `GET /auth/apple/web`
-
-**Description:**
-Redirect user to this endpoint to start Apple OAuth flow.
+**Endpoint:** `GET /api/v2/auth/apple/web`
 
 **Example:**
 ```javascript
-// Redirect user to:
-window.location.href = 'https://your-api-domain.com/auth/apple/web';
+window.location.href = 'https://your-api-domain.com/api/v2/auth/apple/web';
 ```
 
 **Step 2: Handle Callback**
 
-**Endpoint:** `GET /auth/apple/callback` (handled by backend)
-
-**Description:**
-Backend handles Apple's callback and redirects to your web app with parameters.
+**Endpoint:** `GET /api/v2/auth/apple/callback`
 
 **Redirect URL:**
 ```
-https://your-web-app.com/auth/callback?access=<accessToken>&onboarding_required=<boolean>&user_type=<USER|GUEST>&login_method=APPLE
+https://your-web-app.com/auth/callback?access=<accessToken>&onboarding_required=<boolean>&user_type=<UserRole>&login_method=apple
 ```
-
-**URL Parameters:**
-Same as Google OAuth (see above)
 
 **Example Frontend Handler:**
 ```javascript
@@ -179,9 +224,9 @@ if (onboardingRequired) {
 
 ---
 
-### 3. Send OTP (Email)
+### 4. Send OTP (Email)
 
-**Endpoint:** `POST /auth/otp/send`
+**Endpoint:** `POST /api/v2/auth/otp/send`
 
 **Headers:**
 ```
@@ -209,7 +254,7 @@ Request an OTP code to be sent to the user's email address.
 **Example:**
 ```javascript
 async function sendOTP(email) {
-  const response = await fetch('https://your-api-domain.com/auth/otp/send', {
+  const response = await fetch('https://your-api-domain.com/api/v2/auth/otp/send', {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -224,9 +269,9 @@ async function sendOTP(email) {
 
 ---
 
-### 4. Verify OTP
+### 5. Verify OTP
 
-**Endpoint:** `POST /auth/otp/verify`
+**Endpoint:** `POST /api/v2/auth/otp/verify`
 
 **Headers:**
 ```
@@ -248,11 +293,14 @@ Verify the OTP code and authenticate the user. Backend sets refresh token cookie
 **Success Response (200):**
 ```json
 {
-  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "accessToken": "...",
+  "refreshToken": "...",
+  "userId": "01J...",
   "onboarding_required": true,
-  "user_type": "GUEST",
-  "login_method": "EMAIL_OTP"
+  "user_type": "REGISTERED_USER",
+  "roles": ["REGISTERED_USER"],
+  "login_method": "otp",
+  "name": null
 }
 ```
 
@@ -261,7 +309,7 @@ Verify the OTP code and authenticate the user. Backend sets refresh token cookie
 **Example:**
 ```javascript
 async function verifyOTP(email, otp) {
-  const response = await fetch('https://your-api-domain.com/auth/otp/verify', {
+  const response = await fetch('https://your-api-domain.com/api/v2/auth/otp/verify', {
     method: 'POST',
     credentials: 'include', // Important for cookies
     headers: {
@@ -291,9 +339,12 @@ async function verifyOTP(email, otp) {
 
 ---
 
-### 5. Complete Onboarding
+### 6. Profile / Onboarding
 
-**Endpoint:** `PATCH /auth/onboarding`
+**Endpoints:**
+- `GET /api/v2/auth/profile` — Fetch current user profile
+- `POST /api/v2/auth/profile` — Submit initial onboarding (sets `onboardingStatus: COMPLETED`)
+- `PATCH /api/v2/auth/profile` — Update profile later
 
 **Protected:** ✅ Yes (requires Authorization header)
 
@@ -303,52 +354,50 @@ Content-Type: application/json
 Authorization: Bearer <accessToken>
 ```
 
-**Request Body:**
+**Request Body (POST for initial onboarding):**
 ```json
 {
-  "name": "string (required)",
-  "age": "number (optional, 0-120)"
+  "name": "string (optional)",
+  "dateOfBirth": "string ISO date (optional)",
+  "menopauseStage": "PERIMENOPAUSE | MENOPAUSE | POSTMENOPAUSE | UNKNOWN (optional)",
+  "timezone": "string IANA e.g. Asia/Colombo (optional)"
 }
 ```
-
-**Description:**
-Complete user onboarding by providing name and optional age.
 
 **Success Response (200):**
 ```json
 {
-  "id": "01JGM7XK8N9P2R3T4V5W6X7Y8Z",
+  "message": "Profile saved",
   "name": "John Doe",
-  "age": 30,
-  "email": "user@example.com",
-  "user_type": "USER"
+  "dateOfBirth": "1990-01-15T00:00:00.000Z",
+  "menopauseStage": "UNKNOWN",
+  "timezone": "Asia/Colombo",
+  "onboardingStatus": "COMPLETED"
 }
 ```
 
 **Example:**
 ```javascript
-async function completeOnboarding(name, age) {
+async function completeOnboarding(name, timezone) {
   const accessToken = sessionStorage.getItem('accessToken');
-  
-  const response = await fetch('https://your-api-domain.com/auth/onboarding', {
-    method: 'PATCH',
+  const response = await fetch('https://your-api-domain.com/api/v2/auth/profile', {
+    method: 'POST',
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${accessToken}`,
     },
-    body: JSON.stringify({ name, age }),
+    body: JSON.stringify({ name, timezone }),
   });
-  
   return response.json();
 }
 ```
 
 ---
 
-### 6. Refresh Token
+### 7. Refresh Token
 
-**Endpoint:** `POST /auth/refresh`
+**Endpoint:** `POST /api/v2/auth/refresh`
 
 **Headers:**
 ```
@@ -376,7 +425,7 @@ Get a new access token. The refresh token is read from the httpOnly cookie autom
 **Example:**
 ```javascript
 async function refreshToken() {
-  const response = await fetch('https://your-api-domain.com/auth/refresh', {
+  const response = await fetch('https://your-api-domain.com/api/v2/auth/refresh', {
     method: 'POST',
     credentials: 'include', // Sends refresh token cookie
     headers: {
@@ -404,13 +453,13 @@ async function fetchWithAuth(url, options = {}) {
   
   const response = await fetch(url, {
     ...options,
-    credentials: 'include',
-    headers: {
-      ...options.headers,
-      'Authorization': `Bearer ${accessToken}`,
-    },
-  });
-  
+  credentials: 'include',
+  headers: {
+    ...options.headers,
+    'Authorization': `Bearer ${accessToken}`,
+  },
+});
+
   // If token expired, refresh and retry
   if (response.status === 401) {
     const refreshResponse = await refreshToken();
@@ -432,11 +481,13 @@ async function fetchWithAuth(url, options = {}) {
 }
 ```
 
+**Note:** Use `/api/v2/auth/*` for all auth endpoints (e.g. `${API_BASE_URL}/api/v2/auth/me`).
+
 ---
 
-### 7. Logout
+### 8. Logout
 
-**Endpoint:** `POST /auth/logout`
+**Endpoint:** `POST /api/v2/auth/logout`
 
 **Protected:** ✅ Yes (requires Authorization header)
 
@@ -466,7 +517,7 @@ Revoke the refresh token and clear the cookie. Backend clears the refresh token 
 async function logout() {
   const accessToken = sessionStorage.getItem('accessToken');
   
-  const response = await fetch('https://your-api-domain.com/auth/logout', {
+  const response = await fetch('https://your-api-domain.com/api/v2/auth/logout', {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -488,9 +539,9 @@ async function logout() {
 
 ---
 
-### 8. Get Current User (Me)
+### 9. Get Current User (Me)
 
-**Endpoint:** `GET /auth/me`
+**Endpoint:** `GET /api/v2/auth/me`
 
 **Protected:** ✅ Yes (requires Authorization header)
 
@@ -504,19 +555,18 @@ Authorization: Bearer <accessToken>
 {
   "id": "01JGM7XK8N9P2R3T4V5W6X7Y8Z",
   "email": "user@example.com",
-  "name": "John Doe",
-  "age": 30,
-  "user_type": "USER",
-  "createdAt": "2026-02-27T10:30:00.000Z"
+  "roles": ["REGISTERED_USER"]
 }
 ```
+
+**Note:** Full profile (name, dateOfBirth, menopauseStage, timezone) from `GET /api/v2/auth/profile`.
 
 **Example:**
 ```javascript
 async function getCurrentUser() {
   const accessToken = sessionStorage.getItem('accessToken');
   
-  const response = await fetch('https://your-api-domain.com/auth/me', {
+  const response = await fetch('https://your-api-domain.com/api/v2/auth/me', {
     credentials: 'include',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -672,7 +722,7 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     try {
-      await fetch(`${API_BASE_URL}/auth/logout`, {
+      await fetch(`${API_BASE_URL}/api/v2/auth/logout`, {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -691,7 +741,7 @@ export function AuthProvider({ children }) {
 
   const refreshToken = async (): Promise<boolean> => {
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      const response = await fetch(`${API_BASE_URL}/api/v2/auth/refresh`, {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -745,7 +795,7 @@ export function AuthProvider({ children }) {
   const getCurrentUser = async () => {
     if (!accessToken) return;
 
-    const response = await fetchWithAuth(`${API_BASE_URL}/auth/me`);
+    const response = await fetchWithAuth(`${API_BASE_URL}/api/v2/auth/me`);
     
     if (response.ok) {
       const userData = await response.json();
@@ -792,7 +842,7 @@ export function LoginPage() {
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    const response = await fetch(`${API_BASE_URL}/auth/otp/send`, {
+    const response = await fetch(`${API_BASE_URL}/api/v2/auth/otp/send`, {
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -809,7 +859,7 @@ export function LoginPage() {
   const handleVerifyOTP = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    const response = await fetch(`${API_BASE_URL}/auth/otp/verify`, {
+    const response = await fetch(`${API_BASE_URL}/api/v2/auth/otp/verify`, {
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -831,11 +881,11 @@ export function LoginPage() {
   };
 
   const handleGoogleLogin = () => {
-    window.location.href = `${API_BASE_URL}/auth/google`;
+    window.location.href = `${API_BASE_URL}/api/v2/auth/google`;
   };
 
   const handleAppleLogin = () => {
-    window.location.href = `${API_BASE_URL}/auth/apple/web`;
+    window.location.href = `${API_BASE_URL}/api/v2/auth/apple/web`;
   };
 
   return (
@@ -931,7 +981,7 @@ If testing OAuth locally, you need to:
 ### Public Content Endpoints
 
 #### 1. List Public Content
-**Endpoint:** `GET /v2/content`
+**Endpoint:** `GET /api/v2/content`
 **Protected:** ✅ Yes
 **Query Parameters:**
 - `contentType`: `ARTICLE | TIP | FAQ` (optional)
@@ -944,7 +994,7 @@ If testing OAuth locally, you need to:
 ---
 
 #### 2. Get Single Content
-**Endpoint:** `GET /v2/content/:id`
+**Endpoint:** `GET /api/v2/content/:id`
 **Protected:** ✅ Yes
 **Description:** Returns full content body. Increments view count.
 
@@ -953,39 +1003,39 @@ If testing OAuth locally, you need to:
 ### Admin Content Endpoints (CONTENT_ADMIN, SUPER_ADMIN)
 
 #### 3. Create Draft
-**Endpoint:** `POST /v2/content`
+**Endpoint:** `POST /api/v2/content`
 **Request Body:** `CreateContentDto` (title, contentType, body, summary, tags?, references?)
 **Status:** `DRAFT`
 
 ---
 
 #### 4. Save/Update Draft
-**Endpoint:** `PATCH /v2/content/:id`
+**Endpoint:** `PATCH /api/v2/content/:id`
 **Description:** Edits content in `DRAFT`. Creates a new version snapshot.
 
 ---
 
 #### 5. Submit for Review
-**Endpoint:** `POST /v2/content/:id/submit`
+**Endpoint:** `POST /api/v2/content/:id/submit`
 **Description:** Transitions to `IN_REVIEW`. Locks editing.
 
 ---
 
 #### 6. Admin Actions (Unpublish / Reopen)
-- `POST /v2/content/:id/unpublish`
-- `POST /v2/content/:id/reopen` (DRAFT ← UNPUBLISHED)
+- `POST /api/v2/content/:id/unpublish`
+- `POST /api/v2/content/:id/reopen` (DRAFT ← UNPUBLISHED)
 
 ---
 
 #### 7. Version History & Audit Log
-- `GET /v2/content/:id/versions`
-- `GET /v2/content/:id/versions/:versionNo`
-- `GET /v2/content/:id/audit` (Full event log)
+- `GET /api/v2/content/:id/versions`
+- `GET /api/v2/content/:id/versions/:versionNo`
+- `GET /api/v2/content/:id/audit` (Full event log)
 
 ---
 
 #### 8. Super Admin Override
-**Endpoint:** `POST /v2/content/:id/publish/:versionNo`
+**Endpoint:** `POST /api/v2/content/:id/publish/:versionNo`
 **Description:** Bypasses review gate.
 
 ---
@@ -993,7 +1043,7 @@ If testing OAuth locally, you need to:
 ### Reviewer Endpoints (CONTENT_APPROVER, SUPER_ADMIN)
 
 #### 9. Submit Review
-**Endpoint:** `POST /v2/content/:id/review`
+**Endpoint:** `POST /api/v2/content/:id/review`
 **Body:** `{ reviewType: EDITORIAL|CLINICAL, outcome: APPROVED|REJECTED, notes?: string }`
 **Logic:** Rejection resets to `DRAFT`. Dual approval auto-publishes.
 
@@ -1002,7 +1052,7 @@ If testing OAuth locally, you need to:
 ### Content User Actions
 
 #### 10. Rate Content
-**Endpoint:** `POST /v2/content/:id/rate`
+**Endpoint:** `POST /api/v2/content/:id/rate`
 **Body:** `{ ratingValue: 1-5 }`
 **Description:** Upserts rating and updates average.
 

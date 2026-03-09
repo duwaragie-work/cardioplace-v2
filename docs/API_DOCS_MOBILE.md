@@ -2,7 +2,9 @@
 
 **Base URL:** `https://your-api-domain.com` (replace with your actual API domain)
 
-**Last Updated:** February 27, 2026
+**Auth path prefix:** All auth endpoints use `/api/v2/auth`. Full URL = `{Base URL}/api/v2/auth/...`
+
+**Last Updated:** March 2026
 
 ---
 
@@ -10,14 +12,15 @@
 - [Authentication Flow](#authentication-flow)
 - [Headers](#headers)
 - [Endpoints](#endpoints)
-  - [Google Sign In](#1-google-sign-in-mobile)
-  - [Apple Sign In](#2-apple-sign-in-mobile)
-  - [Email OTP - Send](#3-send-otp-email)
-  - [Email OTP - Verify](#4-verify-otp)
-  - [Complete Onboarding](#5-complete-onboarding)
-  - [Refresh Token](#6-refresh-token)
-  - [Logout](#7-logout)
-  - [Get Current User](#8-get-current-user-me)
+  - [Guest Login](#1-guest-login)
+  - [Google Sign In](#2-google-sign-in-mobile)
+  - [Apple Sign In](#3-apple-sign-in-mobile)
+  - [Email OTP - Send](#4-send-otp-email)
+  - [Email OTP - Verify](#5-verify-otp)
+  - [Complete Onboarding](#6-complete-onboarding)
+  - [Refresh Token](#7-refresh-token)
+  - [Logout](#8-logout)
+  - [Get Current User](#9-get-current-user-me)
   - [Content Library](#content-library)
 - [Response Types](#response-types)
 - [Error Handling](#error-handling)
@@ -27,12 +30,13 @@
 ## Authentication Flow
 
 ### Overview
-1. User signs in via **Google**, **Apple**, or **Email OTP**
-2. Backend returns `accessToken` and `refreshToken`
+1. User signs in via **Guest**, **Google**, **Apple**, or **Email OTP**
+2. Backend returns `accessToken`, `refreshToken`, `userId`, `roles`, and `user_type`
 3. Store both tokens securely on the device
 4. Include `accessToken` in `Authorization` header for protected endpoints
 5. Use `refreshToken` to get new tokens when `accessToken` expires
 6. If `onboarding_required: true`, prompt user to complete onboarding
+7. **Guest:** Send device ID to get tokens without email/sign-in; same response shape as other logins
 
 ---
 
@@ -59,9 +63,56 @@ Authorization: Bearer <accessToken>
 
 ## Endpoints
 
-### 1. Google Sign In (Mobile)
+### 1. Guest Login
 
-**Endpoint:** `POST /auth/google/mobile`
+**Endpoint:** `POST /api/v2/auth/guest`
+
+**Headers:**
+```
+Content-Type: application/json
+X-Device-Id: <device-id>    (required — or send in body as deviceId)
+```
+
+**Request Body (optional):**
+```json
+{
+  "deviceId": "string (optional if X-Device-Id header is set)"
+}
+```
+
+**Description:**
+Continue as guest without signing up. Backend finds or creates a user keyed by device ID and returns the same auth response as other logins. Use this when the user taps "Continue as Guest"; then store tokens and go to the main app.
+
+**Success Response (200):**
+```json
+{
+  "accessToken": "...",
+  "refreshToken": "...",
+  "userId": "01J...",
+  "onboarding_required": false,
+  "user_type": "GUEST",
+  "roles": ["GUEST"],
+  "login_method": "guest",
+  "name": null
+}
+```
+
+**Error (400):** Missing device ID — send `X-Device-Id` header or `deviceId` in body.
+
+**Example:**
+```javascript
+POST /api/v2/auth/guest
+Content-Type: application/json
+X-Device-Id: ABC123-DEVICE-UUID
+
+{}
+```
+
+---
+
+### 2. Google Sign In (Mobile)
+
+**Endpoint:** `POST /api/v2/auth/google/mobile`
 
 **Headers:**
 ```
@@ -84,17 +135,20 @@ Pass the ID token obtained from Google Sign-In SDK.
 ```json
 {
   "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refreshToken": "...",
+  "userId": "01J...",
   "onboarding_required": false,
-  "user_type": "USER",
-  "login_method": "GOOGLE"
+  "user_type": "REGISTERED_USER",
+  "roles": ["REGISTERED_USER"],
+  "login_method": "google",
+  "name": "John Doe"
 }
 ```
 
 **Example:**
 ```javascript
 // Request
-POST /auth/google/mobile
+POST /api/v2/auth/google/mobile
 Content-Type: application/json
 X-Device-Id: ABC123-DEVICE-UUID
 X-Device-Platform: ios
@@ -106,9 +160,9 @@ X-Device-Platform: ios
 
 ---
 
-### 2. Apple Sign In (Mobile)
+### 3. Apple Sign In (Mobile)
 
-**Endpoint:** `POST /auth/apple`
+**Endpoint:** `POST /api/v2/auth/apple`
 
 **Headers:**
 ```
@@ -130,18 +184,21 @@ Pass the identity token obtained from Apple Sign In.
 **Success Response (200):**
 ```json
 {
-  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "accessToken": "...",
+  "refreshToken": "...",
+  "userId": "01J...",
   "onboarding_required": true,
-  "user_type": "GUEST",
-  "login_method": "APPLE"
+  "user_type": "REGISTERED_USER",
+  "roles": ["REGISTERED_USER"],
+  "login_method": "apple",
+  "name": "Jane Doe"
 }
 ```
 
 **Example:**
 ```javascript
 // Request
-POST /auth/apple
+POST /api/v2/auth/apple
 Content-Type: application/json
 X-Device-Id: ABC123-DEVICE-UUID
 X-Device-Platform: ios
@@ -153,9 +210,9 @@ X-Device-Platform: ios
 
 ---
 
-### 3. Send OTP (Email)
+### 4. Send OTP (Email)
 
-**Endpoint:** `POST /auth/otp/send`
+**Endpoint:** `POST /api/v2/auth/otp/send`
 
 **Headers:**
 ```
@@ -194,9 +251,9 @@ Content-Type: application/json
 
 ---
 
-### 4. Verify OTP
+### 5. Verify OTP
 
-**Endpoint:** `POST /auth/otp/verify`
+**Endpoint:** `POST /api/v2/auth/otp/verify`
 
 **Headers:**
 ```
@@ -220,18 +277,21 @@ Verify the OTP code and authenticate the user.
 **Success Response (200):**
 ```json
 {
-  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "accessToken": "...",
+  "refreshToken": "...",
+  "userId": "01J...",
   "onboarding_required": true,
-  "user_type": "GUEST",
-  "login_method": "EMAIL_OTP"
+  "user_type": "REGISTERED_USER",
+  "roles": ["REGISTERED_USER"],
+  "login_method": "otp",
+  "name": null
 }
 ```
 
 **Example:**
 ```javascript
 // Request
-POST /auth/otp/verify
+POST /api/v2/auth/otp/verify
 Content-Type: application/json
 X-Device-Id: ABC123-DEVICE-UUID
 X-Device-Platform: android
@@ -245,9 +305,9 @@ X-Device-Platform: android
 
 ---
 
-### 5. Complete Onboarding
+### 6. Complete Onboarding
 
-**Endpoint:** `PATCH /auth/onboarding`
+**Endpoint:** `POST /api/v2/auth/profile` (submit) or `PATCH /api/v2/auth/profile` (update)
 
 **Protected:** ✅ Yes (requires Authorization header)
 
@@ -257,46 +317,49 @@ Content-Type: application/json
 Authorization: Bearer <accessToken>
 ```
 
-**Request Body:**
+**Request Body (POST for initial onboarding):**
 ```json
 {
-  "name": "string (required)",
-  "age": "number (optional, 0-120)"
+  "name": "string (optional)",
+  "dateOfBirth": "string ISO date (optional)",
+  "menopauseStage": "PERIMENOPAUSE | MENOPAUSE | POSTMENOPAUSE | UNKNOWN (optional)",
+  "timezone": "string IANA e.g. Asia/Colombo (optional)"
 }
 ```
 
 **Description:**
-Complete user onboarding by providing name and optional age.
+Complete or update user profile. Use POST for initial onboarding (sets `onboardingStatus: COMPLETED`). Use PATCH to update later.
 
 **Success Response (200):**
 ```json
 {
-  "id": "01JGM7XK8N9P2R3T4V5W6X7Y8Z",
+  "message": "Profile saved",
   "name": "John Doe",
-  "age": 30,
-  "email": "user@example.com",
-  "user_type": "USER"
+  "dateOfBirth": "1990-01-15T00:00:00.000Z",
+  "menopauseStage": "UNKNOWN",
+  "timezone": "Asia/Colombo",
+  "onboardingStatus": "COMPLETED"
 }
 ```
 
 **Example:**
 ```javascript
 // Request
-PATCH /auth/onboarding
+POST /api/v2/auth/profile
 Content-Type: application/json
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 {
   "name": "John Doe",
-  "age": 30
+  "timezone": "Asia/Colombo"
 }
 ```
 
 ---
 
-### 6. Refresh Token
+### 7. Refresh Token
 
-**Endpoint:** `POST /auth/refresh`
+**Endpoint:** `POST /api/v2/auth/refresh`
 
 **Headers:**
 ```
@@ -324,7 +387,7 @@ Get a new access token and refresh token pair. Mobile apps must send the refresh
 **Example:**
 ```javascript
 // Request
-POST /auth/refresh
+POST /api/v2/auth/refresh
 Content-Type: application/json
 
 {
@@ -337,9 +400,9 @@ Store the new tokens securely and replace the old ones.
 
 ---
 
-### 7. Logout
+### 8. Logout
 
-**Endpoint:** `POST /auth/logout`
+**Endpoint:** `POST /api/v2/auth/logout`
 
 **Protected:** ✅ Yes (requires Authorization header)
 
@@ -369,7 +432,7 @@ Revoke the refresh token and log out the user.
 **Example:**
 ```javascript
 // Request
-POST /auth/logout
+POST /api/v2/auth/logout
 Content-Type: application/json
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
@@ -383,9 +446,9 @@ Clear stored tokens from the device after successful logout.
 
 ---
 
-### 8. Get Current User (Me)
+### 9. Get Current User (Me)
 
-**Endpoint:** `GET /auth/me`
+**Endpoint:** `GET /api/v2/auth/me`
 
 **Protected:** ✅ Yes (requires Authorization header)
 
@@ -399,17 +462,16 @@ Authorization: Bearer <accessToken>
 {
   "id": "01JGM7XK8N9P2R3T4V5W6X7Y8Z",
   "email": "user@example.com",
-  "name": "John Doe",
-  "age": 30,
-  "user_type": "USER",
-  "createdAt": "2026-02-27T10:30:00.000Z"
+  "roles": ["REGISTERED_USER"]
 }
 ```
+
+**Note:** Profile details (name, dateOfBirth, menopauseStage, timezone, etc.) come from `GET /api/v2/auth/profile`.
 
 **Example:**
 ```javascript
 // Request
-GET /auth/me
+GET /api/v2/auth/me
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
@@ -417,26 +479,41 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 ## Response Types
 
-### Login/Auth Response
+### Login / Auth Response
 ```typescript
 {
   accessToken: string
   refreshToken: string
+  userId: string
   onboarding_required: boolean
-  user_type: "GUEST" | "USER"
-  login_method: "GOOGLE" | "APPLE" | "EMAIL_OTP"
+  user_type: UserRole        // primary role (e.g. roles[0])
+  roles: UserRole[]         // full list: GUEST | REGISTERED_USER | VERIFIED_USER | CONTENT_ADMIN | ...
+  login_method: 'otp' | 'google' | 'apple' | 'guest'
+  name: string | null
 }
 ```
 
-### User Object
+### User Object (GET /me)
 ```typescript
 {
   id: string
-  email: string
-  name?: string
-  age?: number
-  user_type: "GUEST" | "USER"
-  createdAt: string (ISO 8601)
+  email: string | null
+  roles: string[]   // UserRole enum values
+}
+```
+
+### Profile Object (GET /profile)
+```typescript
+{
+  id: string
+  email: string | null
+  name: string | null
+  dateOfBirth: Date | null
+  menopauseStage: string
+  timezone: string | null
+  onboardingStatus: string
+  accountStatus: string
+  createdAt: string
 }
 ```
 
@@ -539,9 +616,26 @@ async function getTokens() {
   return { accessToken, refreshToken };
 }
 
+// Guest login (device ID required)
+async function guestLogin(deviceId: string) {
+  const response = await fetch(`${API_BASE_URL}/api/v2/auth/guest`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Device-Id': deviceId,
+    },
+    body: JSON.stringify({}),
+  });
+  const data = await response.json();
+  if (response.ok) {
+    await storeTokens(data.accessToken, data.refreshToken);
+  }
+  return data;
+}
+
 // Google Sign In
 async function googleSignIn(idToken: string, deviceId: string) {
-  const response = await fetch(`${API_BASE_URL}/auth/google/mobile`, {
+  const response = await fetch(`${API_BASE_URL}/api/v2/auth/google/mobile`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -570,7 +664,7 @@ async function googleSignIn(idToken: string, deviceId: string) {
 async function refreshAccessToken() {
   const { refreshToken } = await getTokens();
   
-  const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+  const response = await fetch(`${API_BASE_URL}/api/v2/auth/refresh`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -591,7 +685,7 @@ async function refreshAccessToken() {
 async function getCurrentUser() {
   const { accessToken } = await getTokens();
   
-  const response = await fetch(`${API_BASE_URL}/auth/me`, {
+  const response = await fetch(`${API_BASE_URL}/api/v2/auth/me`, {
     headers: {
       'Authorization': `Bearer ${accessToken}`,
     },
@@ -611,7 +705,7 @@ async function getCurrentUser() {
 async function logout() {
   const { accessToken, refreshToken } = await getTokens();
   
-  await fetch(`${API_BASE_URL}/auth/logout`, {
+  await fetch(`${API_BASE_URL}/api/v2/auth/logout`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -644,7 +738,7 @@ Contact your backend team for test credentials and test environment URL.
 ## Content Library
 
 ### 1. List Public Articles/Tips
-**Endpoint:** `GET /v2/content`
+**Endpoint:** `GET /api/v2/content`
 **Protected:** ✅ Yes
 **Query Parameters:**
 - `contentType`: `ARTICLE | TIP | FAQ`
@@ -657,14 +751,14 @@ Contact your backend team for test credentials and test environment URL.
 ---
 
 ### 2. Get Article Detail
-**Endpoint:** `GET /v2/content/:id`
+**Endpoint:** `GET /api/v2/content/:id`
 **Protected:** ✅ Yes
 **Description:** Fetch full markdown body. Increments view count safely.
 
 ---
 
 ### 3. Rate Content
-**Endpoint:** `POST /v2/content/:id/rate`
+**Endpoint:** `POST /api/v2/content/:id/rate`
 **Protected:** ✅ Yes
 **Body:** `{ ratingValue: number (1-5) }`
 **Description:** Submit or update user rating.
