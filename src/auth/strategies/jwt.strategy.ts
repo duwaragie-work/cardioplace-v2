@@ -7,7 +7,7 @@ import { UserRole } from '../../generated/prisma/enums.js'
 export interface JwtPayload {
   sub: string
   email: string | null
-  role: UserRole
+  roles: UserRole[]
   iat?: number
   exp?: number
 }
@@ -23,6 +23,6 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   validate(payload: JwtPayload) {
-    return { id: payload.sub, email: payload.email, role: payload.role }
+    return { id: payload.sub, email: payload.email, roles: payload.roles }
   }
 }

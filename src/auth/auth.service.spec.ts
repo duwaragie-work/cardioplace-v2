@@ -35,7 +35,7 @@ describe('AuthService', () => {
     id: '01JCEXAMPLE123456789',
     email: 'test@example.com',
     name: 'Test User',
-    role: UserRole.REGISTERED_USER,
+    roles: [UserRole.REGISTERED_USER],
     isVerified: true,
     onboardingStatus: OnboardingStatus.COMPLETED,
     accountStatus: AccountStatus.ACTIVE,
@@ -93,6 +93,9 @@ describe('AuthService', () => {
               create: jest.fn(),
             },
             device: {
+              findUnique: jest.fn(),
+              create: jest.fn(),
+              update: jest.fn(),
               upsert: jest.fn(),
             },
           },
@@ -421,7 +424,7 @@ describe('AuthService', () => {
         data: {
           email: 'test@example.com',
           isVerified: true,
-          role: UserRole.REGISTERED_USER,
+          roles: [UserRole.REGISTERED_USER],
         },
       })
     })
@@ -827,7 +830,7 @@ describe('AuthService', () => {
         id: mockUser.id,
         email: mockUser.email,
         name: mockUser.name,
-        role: mockUser.role,
+        roles: mockUser.roles,
         isVerified: mockUser.isVerified,
         onboardingStatus: OnboardingStatus.COMPLETED,
         accountStatus: AccountStatus.ACTIVE,
@@ -848,6 +851,129 @@ describe('AuthService', () => {
       await expect(service.getProfile('nonexistent-id')).rejects.toThrow(
         NotFoundException,
       )
+    })
+  })
+
+  // ─── Guest Login ─────────────────────────────────────────────────────────────
+
+  describe('guestLogin', () => {
+    const guestUser = {
+      id: '01JCGUEST123456789',
+      email: null,
+      name: null,
+      roles: [UserRole.GUEST],
+      isVerified: false,
+      onboardingStatus: OnboardingStatus.NOT_COMPLETED,
+      accountStatus: AccountStatus.ACTIVE,
+      dateOfBirth: null,
+      menopauseStage: MenopauseStage.UNKNOWN,
+      timezone: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+
+    it('should throw BadRequestException when deviceId is missing', async () => {
+      await expect(
+        service.guestLogin({ deviceId: '' }),
+      ).rejects.toThrow('Device ID is required')
+      await expect(
+        service.guestLogin({ deviceId: '   ' }),
+      ).rejects.toThrow('Device ID is required')
+    })
+
+    it('should create new User and Device when device not found, return tokens', async () => {
+      ;(prisma.device.findUnique as jest.Mock).mockResolvedValue(null)
+      ;(prisma.user.create as jest.Mock).mockResolvedValue(guestUser)
+      ;(prisma.device.create as jest.Mock).mockResolvedValue({
+        deviceId: 'device-guest-1',
+        userId: guestUser.id,
+      })
+      ;(prisma.authLog.create as jest.Mock).mockResolvedValue({})
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({})
+
+      const result = await service.guestLogin({
+        deviceId: 'device-guest-1',
+        userAgent: 'Mozilla/5.0',
+      })
+
+      expect(prisma.device.findUnique).toHaveBeenCalledWith({
+        where: { deviceId: 'device-guest-1' },
+        include: { user: true },
+      })
+      expect(prisma.user.create).toHaveBeenCalledWith({
+        data: { roles: [UserRole.GUEST] },
+      })
+      expect(prisma.device.create).toHaveBeenCalledWith({
+        data: {
+          deviceId: 'device-guest-1',
+          userId: guestUser.id,
+          platform: undefined,
+          deviceType: undefined,
+          deviceName: undefined,
+          userAgent: 'Mozilla/5.0',
+        },
+      })
+      expect(result).toMatchObject({
+        userId: guestUser.id,
+        user_type: UserRole.GUEST,
+        roles: [UserRole.GUEST],
+        login_method: 'guest',
+        onboarding_required: true,
+      })
+      expect(result).toHaveProperty('accessToken')
+      expect(result).toHaveProperty('refreshToken')
+    })
+
+    it('should return tokens for existing device with user', async () => {
+      ;(prisma.device.findUnique as jest.Mock).mockResolvedValue({
+        deviceId: 'device-existing',
+        userId: guestUser.id,
+        user: guestUser,
+      })
+      ;(prisma.authLog.create as jest.Mock).mockResolvedValue({})
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({})
+
+      const result = await service.guestLogin({
+        deviceId: 'device-existing',
+      })
+
+      expect(prisma.user.create).not.toHaveBeenCalled()
+      expect(prisma.device.create).not.toHaveBeenCalled()
+      expect(result).toMatchObject({
+        userId: guestUser.id,
+        user_type: UserRole.GUEST,
+        roles: [UserRole.GUEST],
+        login_method: 'guest',
+      })
+    })
+
+    it('should create User and update Device when device exists without user', async () => {
+      ;(prisma.device.findUnique as jest.Mock).mockResolvedValue({
+        deviceId: 'device-orphan',
+        userId: null,
+        user: null,
+      })
+      ;(prisma.user.create as jest.Mock).mockResolvedValue(guestUser)
+      ;(prisma.device.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authLog.create as jest.Mock).mockResolvedValue({})
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({})
+
+      const result = await service.guestLogin({
+        deviceId: 'device-orphan',
+      })
+
+      expect(prisma.user.create).toHaveBeenCalledWith({
+        data: { roles: [UserRole.GUEST] },
+      })
+      expect(prisma.device.update).toHaveBeenCalledWith({
+        where: { deviceId: 'device-orphan' },
+        data: { userId: guestUser.id, lastSeenAt: expect.any(Date) },
+      })
+      expect(prisma.device.create).not.toHaveBeenCalled()
+      expect(result).toMatchObject({
+        userId: guestUser.id,
+        login_method: 'guest',
+      })
     })
   })
 

@@ -1,12 +1,11 @@
 enum UserRole {
   GUEST
   REGISTERED_USER
-  VERIFIED_USER 
-  CONTENT_ADMIN
-  ARTICLE_ADMIN
-  ARTICLE_APPROVER
-  KB_UPLOADER 
-  KB_APPROVER 
+  VERIFIED_USER
+  CONTENT_ADMIN     
+  CONTENT_APPROVER  // Reviews content (editorial + clinical approval)
+  KB_UPLOADER
+  KB_APPROVER
   CHAT_REVIEWER
   SUPER_ADMIN
 }
@@ -41,14 +40,19 @@ model User {
   timezone       String?        // IANA identifier, e.g. "Asia/Colombo"
 
   isVerified       Boolean          @default(false)
-  role             UserRole         @default(GUEST)
+  roles            UserRole[]       @default([GUEST])
   onboardingStatus OnboardingStatus @default(NOT_COMPLETED)
   accountStatus    AccountStatus    @default(ACTIVE)
 
   accounts      Account[]
   refreshTokens RefreshToken[]
   devices       Device[]
-  authLogs      AuthLog[] 
+  authLogs      AuthLog[]
+
+  // Content Library relations
+  contentSubmitted Content[]       @relation("ContentSubmittedBy")
+  contentReviews   ContentReview[] @relation("ContentReviewedBy")
+  contentRatings   ContentRating[] @relation("ContentRatings")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

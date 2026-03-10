@@ -31,7 +31,8 @@ export interface AuthResponse extends TokenPair {
   userId: string
   onboarding_required: boolean
   user_type: UserRole
-  login_method: 'otp' | 'google' | 'apple'
+  roles: UserRole[]
+  login_method: 'otp' | 'google' | 'apple' | 'guest'
   name: string | null
 }
 
@@ -39,7 +40,7 @@ interface MinimalUser {
   id: string
   email: string | null
   name: string | null
-  role: UserRole
+  roles: UserRole[]
   onboardingStatus: OnboardingStatus
   accountStatus: AccountStatus
 }
@@ -84,7 +85,7 @@ export class AuthService {
     const expiresIn = this.config.get<string>('JWT_ACCESS_EXPIRES_IN', '15m')
     // @ts-expect-error - NestJS JWT accepts string for expiresIn despite type definition
     return await this.jwtService.signAsync(
-      { sub: user.id, email: user.email, role: user.role },
+      { sub: user.id, email: user.email, roles: user.roles },
       { expiresIn },
     )
   }
@@ -201,13 +202,15 @@ export class AuthService {
   private buildAuthResponse(
     tokens: TokenPair,
     user: MinimalUser,
-    login_method: 'otp' | 'google' | 'apple',
+    login_method: 'otp' | 'google' | 'apple' | 'guest',
   ): AuthResponse {
+    const primaryRole = user.roles[0] ?? UserRole.GUEST
     return {
       ...tokens,
       userId: user.id,
       onboarding_required: user.onboardingStatus !== OnboardingStatus.COMPLETED,
-      user_type: user.role,
+      user_type: primaryRole,
+      roles: user.roles,
       login_method,
       name: user.name,
     }
@@ -232,7 +235,7 @@ export class AuthService {
     event: string
     identifier?: string
     userId?: string
-    method?: 'otp' | 'google' | 'apple'
+    method?: 'otp' | 'google' | 'apple' | 'guest'
     deviceId?: string
     ipAddress?: string
     userAgent?: string
@@ -606,7 +609,7 @@ export class AuthService {
         email: email ?? null,
         name: name ?? null,
         isVerified: emailVerified,
-        role: UserRole.REGISTERED_USER,
+        roles: [UserRole.REGISTERED_USER],
         accounts: {
           create: { provider, providerId, email },
         },
@@ -785,7 +788,7 @@ export class AuthService {
         data: {
           email: normalizedEmail,
           isVerified: true,
-          role: UserRole.REGISTERED_USER,
+          roles: [UserRole.REGISTERED_USER],
         },
       })
     } else if (!user.isVerified) {
@@ -833,6 +836,85 @@ export class AuthService {
 
     const tokens = await this.issueTokenPair(user, context?.userAgent)
     return this.buildAuthResponse(tokens, user, 'otp')
+  }
+
+  // ─── Guest (device-linked) ──────────────────────────────────────────────────
+
+  /**
+   * Continue as guest: find or create a User keyed by device ID, issue tokens.
+   * Same response shape as other logins so the frontend can store tokens and go to homepage.
+   */
+  async guestLogin(context: {
+    deviceId: string
+    userAgent?: string
+    platform?: string
+    deviceType?: string
+    deviceName?: string
+    ipAddress?: string
+  }): Promise<AuthResponse> {
+    const { deviceId } = context
+    if (!deviceId?.trim()) {
+      throw new BadRequestException('Device ID is required (header x-device-id or body deviceId)')
+    }
+
+    const existingDevice = await this.prisma.device.findUnique({
+      where: { deviceId },
+      include: { user: true },
+    })
+
+    let user: MinimalUser
+
+    if (existingDevice?.user) {
+      user = existingDevice.user
+      this.assertAccountActive(user)
+      await this.logAuthEvent({
+        event: 'guest_login_success',
+        userId: user.id,
+        method: 'guest',
+        deviceId,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        success: true,
+      })
+    } else {
+      if (existingDevice) {
+        const newUser = await this.prisma.user.create({
+          data: { roles: [UserRole.GUEST] },
+        })
+        await this.prisma.device.update({
+          where: { deviceId },
+          data: { userId: newUser.id, lastSeenAt: new Date() },
+        })
+        user = newUser
+      } else {
+        const newUser = await this.prisma.user.create({
+          data: { roles: [UserRole.GUEST] },
+        })
+        await this.prisma.device.create({
+          data: {
+            deviceId,
+            userId: newUser.id,
+            platform: context.platform,
+            deviceType: context.deviceType,
+            deviceName: context.deviceName,
+            userAgent: context.userAgent,
+          },
+        })
+        user = newUser
+      }
+      await this.logAuthEvent({
+        event: 'guest_login_success',
+        userId: user.id,
+        method: 'guest',
+        deviceId,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        success: true,
+      })
+    }
+
+    const tokens = await this.issueTokenPair(user, context.userAgent)
+    return this.buildAuthResponse(tokens, user, 'guest')
   }
 
   // ─── Device Tracking ────────────────────────────────────────────────────────
@@ -935,7 +1017,7 @@ export class AuthService {
         id: true,
         email: true,
         name: true,
-        role: true,
+        roles: true,
         isVerified: true,
         onboardingStatus: true,
         accountStatus: true,
