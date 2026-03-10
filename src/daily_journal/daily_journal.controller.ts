@@ -17,6 +17,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js'
 import { DailyJournalService } from './daily_journal.service.js'
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto.js'
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto.js'
+import { UpdateNotificationStatusDto } from './dto/update-notification-status.dto.js'
+import { BulkUpdateNotificationStatusDto } from './dto/bulk-update-notification-status.dto.js'
 
 @Controller('daily-journal')
 @UseGuards(JwtAuthGuard)
@@ -66,9 +68,49 @@ export class DailyJournalController {
   }
 
   @Get('notifications')
-  getNotifications(@Req() req: Request) {
+  getNotifications(
+    @Req() req: Request,
+    @Query('status') status?: 'all' | 'unread' | 'read',
+  ) {
     const { id: userId } = req.user as { id: string }
-    return this.dailyJournalService.getNotifications(userId)
+    const normalizedStatus: 'all' | 'unread' | 'read' =
+      status === 'unread' || status === 'read' || status === 'all'
+        ? status
+        : 'all'
+    return this.dailyJournalService.getNotifications(userId, normalizedStatus)
+  }
+
+  @Patch('notifications/bulk-status')
+  bulkUpdateNotificationStatus(
+    @Req() req: Request,
+    @Body() dto: BulkUpdateNotificationStatusDto,
+  ) {
+    const { id: userId } = req.user as { id: string }
+    return this.dailyJournalService.bulkUpdateNotificationStatus(
+      userId,
+      dto.ids,
+      dto.watched,
+    )
+  }
+
+  @Get('notifications/:id')
+  getNotification(@Req() req: Request, @Param('id') id: string) {
+    const { id: userId } = req.user as { id: string }
+    return this.dailyJournalService.getNotificationById(userId, id)
+  }
+
+  @Patch('notifications/:id/status')
+  updateNotificationStatus(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: UpdateNotificationStatusDto,
+  ) {
+    const { id: userId } = req.user as { id: string }
+    return this.dailyJournalService.updateNotificationStatus(
+      userId,
+      id,
+      dto.watched,
+    )
   }
 
   @Get('baseline/latest')

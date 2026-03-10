@@ -346,16 +346,109 @@ export class DailyJournalService {
     }
   }
 
-  async getNotifications(userId: string) {
+  async getNotifications(
+    userId: string,
+    status: 'all' | 'unread' | 'read' = 'all',
+  ) {
+    const where: Prisma.NotificationWhereInput = { userId }
+
+    if (status === 'unread') {
+      where.readAt = null
+    } else if (status === 'read') {
+      where.readAt = { not: null }
+    }
+
     const notifications = await this.prisma.notification.findMany({
-      where: { userId },
+      where,
       orderBy: { sentAt: 'desc' },
     })
 
     return {
       statusCode: 200,
       message: 'Notifications retrieved successfully',
-      data: notifications,
+      data: notifications.map((notification) => ({
+        ...notification,
+        watched: notification.readAt != null,
+      })),
+    }
+  }
+
+  async getNotificationById(userId: string, id: string) {
+    const notification = await this.prisma.notification.findFirst({
+      where: { id, userId },
+    })
+
+    if (!notification) {
+      throw new NotFoundException('Notification not found')
+    }
+
+    return {
+      statusCode: 200,
+      message: 'Notification retrieved successfully',
+      data: {
+        ...notification,
+        watched: notification.readAt != null,
+      },
+    }
+  }
+
+  async updateNotificationStatus(
+    userId: string,
+    id: string,
+    watched: boolean,
+  ) {
+    const existing = await this.prisma.notification.findFirst({
+      where: { id, userId },
+    })
+
+    if (!existing) {
+      throw new NotFoundException('Notification not found')
+    }
+
+    const readAt = watched ? existing.readAt ?? new Date() : null
+
+    const updated = await this.prisma.notification.update({
+      where: { id },
+      data: { readAt },
+    })
+
+    return {
+      statusCode: 200,
+      message: 'Notification status updated',
+      data: {
+        ...updated,
+        watched: updated.readAt != null,
+      },
+    }
+  }
+
+  async bulkUpdateNotificationStatus(
+    userId: string,
+    ids: string[],
+    watched: boolean,
+  ) {
+    if (!ids.length) {
+      return {
+        statusCode: 200,
+        message: 'Notifications status updated',
+        data: { count: 0 },
+      }
+    }
+
+    const readAt = watched ? new Date() : null
+
+    const result = await this.prisma.notification.updateMany({
+      where: {
+        id: { in: ids },
+        userId,
+      },
+      data: { readAt },
+    })
+
+    return {
+      statusCode: 200,
+      message: 'Notifications status updated',
+      data: { count: result.count },
     }
   }
 
