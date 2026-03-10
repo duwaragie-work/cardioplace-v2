@@ -28,6 +28,9 @@ model Content {
   summary     String      // Short synopsis shown in cards/lists
   author      String?     // Display-only field (e.g. "Healplace Medical Team", guest name, null)
 
+  /// Short, human-friendly identifier like "ART-ABC123"
+  humanId String @unique
+
   submittedById String
   submittedBy   User   @relation("ContentSubmittedBy", fields: [submittedById], references: [id])
 
@@ -39,6 +42,10 @@ model Content {
   // Populated once the content has been published at least once.
   // Points to the ContentVersion.versionNo that is currently live.
   publishedVersionNo Int?
+
+  // When a review round is in progress (initial or revision),
+  // pins which ContentVersion.versionNo is under review.
+  reviewVersionNo Int?
 
   // Non-null only when status = PUBLISHED and a background revision is in progress.
   // Tracks where that revision is in the review cycle.

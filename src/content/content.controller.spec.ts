@@ -14,11 +14,13 @@ import { UpdateContentDto } from './dto/update-content.dto.js'
 const mockContentService = {
   listPublished: jest.fn(),
   findOnePublished: jest.fn(),
+  findOnePublishedByHumanId: jest.fn(),
   listAdmin: jest.fn(),
   findOneAdmin: jest.fn(),
+  findOneAdminByHumanId: jest.fn(),
   create: jest.fn(),
-  update: jest.fn(),
-  submitForReview: jest.fn(),
+  editContent: jest.fn(),
+  submitContent: jest.fn(),
   unpublish: jest.fn(),
   reopenForEditing: jest.fn(),
   softDelete: jest.fn(),
@@ -71,25 +73,40 @@ describe('ContentController', () => {
   })
 
   describe('findOnePublished', () => {
-    it('delegates to contentService.findOnePublished with userId and deviceId', () => {
+    it('delegates to contentService.findOnePublished with userId and deviceId when id looks like ULID', () => {
       const req = {
         user: { id: 'u-1' },
         headers: { 'x-device-id': 'device-abc' },
       }
       mockContentService.findOnePublished.mockReturnValue({ id: 'c-1' })
 
-      controller.findOnePublished('c-1', req)
+      controller.findOnePublished('c1', req)
 
-      expect(mockContentService.findOnePublished).toHaveBeenCalledWith('c-1', 'u-1', 'device-abc')
+      expect(mockContentService.findOnePublished).toHaveBeenCalledWith('c1', 'u-1', 'device-abc')
     })
 
-    it('passes undefined userId for unauthenticated requests', () => {
+    it('passes undefined userId for unauthenticated requests when id looks like ULID', () => {
       const req = { user: undefined, headers: {} }
       mockContentService.findOnePublished.mockReturnValue({ id: 'c-1' })
 
-      controller.findOnePublished('c-1', req)
+      controller.findOnePublished('c1', req)
 
-      expect(mockContentService.findOnePublished).toHaveBeenCalledWith('c-1', undefined, undefined)
+      expect(mockContentService.findOnePublished).toHaveBeenCalledWith('c1', undefined, undefined)
+    })
+    it('delegates to contentService.findOnePublishedByHumanId when id looks like humanId', () => {
+      const req = {
+        user: { id: 'u-1' },
+        headers: { 'x-device-id': 'device-abc' },
+      }
+      mockContentService.findOnePublishedByHumanId.mockReturnValue({ id: 'c-1' })
+
+      controller.findOnePublished('ART-ABC123', req)
+
+      expect(mockContentService.findOnePublishedByHumanId).toHaveBeenCalledWith(
+        'ART-ABC123',
+        'u-1',
+        'device-abc',
+      )
     })
   })
 
@@ -107,12 +124,19 @@ describe('ContentController', () => {
   })
 
   describe('findOneAdmin', () => {
-    it('delegates to contentService.findOneAdmin', () => {
+    it('delegates to contentService.findOneAdmin when id looks like ULID', () => {
       mockContentService.findOneAdmin.mockReturnValue({ id: 'c-1' })
 
-      controller.findOneAdmin('c-1')
+      controller.findOneAdmin('c1')
 
-      expect(mockContentService.findOneAdmin).toHaveBeenCalledWith('c-1')
+      expect(mockContentService.findOneAdmin).toHaveBeenCalledWith('c1')
+    })
+    it('delegates to contentService.findOneAdminByHumanId when id looks like humanId', () => {
+      mockContentService.findOneAdminByHumanId.mockReturnValue({ id: 'c-1' })
+
+      controller.findOneAdmin('ART-ABC123')
+
+      expect(mockContentService.findOneAdminByHumanId).toHaveBeenCalledWith('ART-ABC123')
     })
   })
 
@@ -133,23 +157,23 @@ describe('ContentController', () => {
   })
 
   describe('update', () => {
-    it('delegates to contentService.update with actorId', () => {
+    it('delegates to contentService.editContent with actorId', () => {
       const dto: UpdateContentDto = { title: 'Updated' }
-      mockContentService.update.mockReturnValue({ id: 'c-1' })
+      mockContentService.editContent.mockReturnValue({ id: 'c-1' })
 
       controller.update('c-1', dto, authReq)
 
-      expect(mockContentService.update).toHaveBeenCalledWith('c-1', dto, 'user-1')
+      expect(mockContentService.editContent).toHaveBeenCalledWith('c-1', dto, 'user-1')
     })
   })
 
   describe('submit', () => {
-    it('delegates to contentService.submitForReview', () => {
-      mockContentService.submitForReview.mockReturnValue({ status: ContentStatus.IN_REVIEW })
+    it('delegates to contentService.submitContent with undefined versionNo by default', () => {
+      mockContentService.submitContent.mockReturnValue({ status: ContentStatus.IN_REVIEW })
 
-      controller.submit('c-1', authReq)
+      controller.submit('c-1', {}, authReq)
 
-      expect(mockContentService.submitForReview).toHaveBeenCalledWith('c-1', 'user-1')
+      expect(mockContentService.submitContent).toHaveBeenCalledWith('c-1', 'user-1', undefined)
     })
   })
 

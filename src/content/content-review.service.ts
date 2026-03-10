@@ -52,8 +52,9 @@ export class ContentReviewService {
     }
 
     // ── Get the version being reviewed ────────────────────────────────────────
-    // The "current version" for review purposes is always the latest version
-    const currentVersionNo = content.versions[0]?.versionNo ?? 1
+    // Prefer the pinned reviewVersionNo when present; otherwise fall back to latest.
+    const currentVersionNo =
+      content.reviewVersionNo ?? content.versions[0]?.versionNo ?? 1
 
     // ── Prevent duplicate review of same type in this round ──────────────────
     const existingReview = content.reviews.find(

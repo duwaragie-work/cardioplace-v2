@@ -7,6 +7,7 @@ import { Prisma } from '../generated/prisma/client.js'
 import {
   ContentRevisionStatus,
   ContentStatus,
+  ContentType,
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { CreateContentDto } from './dto/create-content.dto.js'
@@ -40,6 +41,8 @@ export class ContentService {
   // ─── Create ──────────────────────────────────────────────────────────────────
 
   async create(dto: CreateContentDto, submittedById: string) {
+    const humanId = await this.generateHumanId(dto.contentType)
+
     const content = await this.prisma.content.create({
       data: {
         title: dto.title,
@@ -49,9 +52,10 @@ export class ContentService {
         author: dto.author ?? null,
         tags: dto.tags ?? [],
         mediaUrl: dto.mediaUrl ?? null,
-        submittedById,
+        humanId,
+        submittedBy: { connect: { id: submittedById } },
         status: ContentStatus.DRAFT,
-      },
+      } as Prisma.ContentCreateInput,
     })
 
     // The first version is always created immediately on content creation (Bug 2 fix)
@@ -111,10 +115,39 @@ export class ContentService {
     })
     if (!content) throw new NotFoundException('Content not found')
 
-    // Append view record (fire-and-forget)
-    this.prisma.contentView
-      .create({ data: { contentId: id, userId, deviceId } })
-      .catch(() => null)
+    // Append view record when we have userId (logged-in) or deviceId (guest); fire-and-forget
+    if (userId ?? deviceId) {
+      this.prisma.contentView
+        .create({ data: { contentId: id, userId: userId ?? undefined, deviceId: deviceId ?? undefined } })
+        .catch(() => null)
+    }
+
+    return content
+  }
+
+  async findOnePublishedByHumanId(
+    humanId: string,
+    userId?: string,
+    deviceId?: string,
+  ) {
+    const content = await this.prisma.content.findFirst({
+      where: { humanId, status: ContentStatus.PUBLISHED, needsReview: false, deletedAt: null },
+      include: { submittedBy: { select: { id: true, name: true } } },
+    })
+    if (!content) throw new NotFoundException('Content not found')
+
+    // Append view record when we have userId (logged-in) or deviceId (guest); fire-and-forget
+    if (userId ?? deviceId) {
+      this.prisma.contentView
+        .create({
+          data: {
+            contentId: content.id,
+            userId: userId ?? undefined,
+            deviceId: deviceId ?? undefined,
+          },
+        })
+        .catch(() => null)
+    }
 
     return content
   }
@@ -147,6 +180,18 @@ export class ContentService {
   async findOneAdmin(id: string) {
     const content = await this.prisma.content.findFirst({
       where: { id, deletedAt: null },
+      include: {
+        submittedBy: { select: { id: true, name: true, email: true } },
+        reviews: { include: { reviewedBy: { select: { id: true, name: true } } } },
+      },
+    })
+    if (!content) throw new NotFoundException('Content not found')
+    return content
+  }
+
+  async findOneAdminByHumanId(humanId: string) {
+    const content = await this.prisma.content.findFirst({
+      where: { humanId, deletedAt: null },
       include: {
         submittedBy: { select: { id: true, name: true, email: true } },
         reviews: { include: { reviewedBy: { select: { id: true, name: true } } } },
@@ -238,6 +283,113 @@ export class ContentService {
     })
 
     return updated
+  }
+
+  // ─── Unified edit / submit façade (controller-facing) ─────────────────────────
+  /**
+   * Edit content regardless of whether it's an initial draft (pre‑first‑publish)
+   * or a background revision of already‑published content.
+   *
+   * Controller should call this for PATCH /v2/content/:id.
+   */
+  async editContent(id: string, dto: UpdateContentDto, actorId: string) {
+    const content = await this.prisma.content.findUnique({ where: { id } })
+    if (!content) throw new NotFoundException('Content not found')
+
+    // Initial lifecycle: unpublished draft before first publish
+    if (content.status === ContentStatus.DRAFT && content.publishedVersionNo === null) {
+      return this.update(id, dto, actorId)
+    }
+
+    // Background revision on a live published article
+    if (content.status === ContentStatus.PUBLISHED) {
+      // If no revision is in progress yet, start one
+      if (content.revisionStatus === null) {
+        await this.startRevision(id, actorId)
+      }
+
+      // Now persist changes into the revision draft snapshot
+      return this.updateRevision(id, dto, actorId)
+    }
+
+    throw new BadRequestException(
+      'Content cannot be edited in its current state. Use appropriate admin actions.',
+    )
+  }
+
+  /**
+   * Submit either an initial draft or an in‑progress background revision
+   * into the review workflow.
+   *
+   * - If versionNo is provided, that specific version is pinned for review.
+   * - If omitted, the latest available version is used.
+   *
+   * Controller should call this for POST /v2/content/:id/submit.
+   */
+  async submitContent(id: string, actorId: string, versionNo?: number) {
+    const content = await this.prisma.content.findUnique({ where: { id } })
+    if (!content) throw new NotFoundException('Content not found')
+
+    const isInitialDraft =
+      content.status === ContentStatus.DRAFT && content.publishedVersionNo === null
+    const isRevisionDraft =
+      content.status === ContentStatus.PUBLISHED &&
+      content.revisionStatus === ContentRevisionStatus.DRAFT
+
+    if (!isInitialDraft && !isRevisionDraft) {
+      throw new BadRequestException(
+        'Content cannot be submitted for review in its current state.',
+      )
+    }
+
+    // Resolve which version number is being submitted for review
+    let targetVersionNo: number
+
+    if (versionNo !== undefined && versionNo !== null) {
+      const explicitVersion = await this.prisma.contentVersion.findUnique({
+        where: { contentId_versionNo: { contentId: id, versionNo } },
+      })
+      if (!explicitVersion) {
+        throw new BadRequestException(`Version ${versionNo} not found for this content`)
+      }
+      targetVersionNo = versionNo
+    } else {
+      const latestVersion = await this.prisma.contentVersion.findFirst({
+        where: { contentId: id },
+        orderBy: { versionNo: 'desc' },
+      })
+      if (!latestVersion) {
+        throw new BadRequestException(
+          'Cannot submit for review: no versions exist for this content',
+        )
+      }
+      targetVersionNo = latestVersion.versionNo
+    }
+
+    // Delegate to existing lifecycle-specific submitters to enforce guards,
+    // then pin reviewVersionNo to the chosen version.
+    if (isInitialDraft) {
+      const updated = await this.submitForReview(id, actorId)
+      await this.prisma.content.update({
+        where: { id },
+        data: { reviewVersionNo: targetVersionNo } as Prisma.ContentUpdateInput,
+      })
+      return { ...updated, reviewVersionNo: targetVersionNo }
+    }
+
+    if (isRevisionDraft) {
+      const updated = await this.submitRevisionForReview(id, actorId)
+      await this.prisma.content.update({
+        where: { id },
+        data: { reviewVersionNo: targetVersionNo } as Prisma.ContentUpdateInput,
+      })
+      return { ...updated, reviewVersionNo: targetVersionNo }
+    }
+
+    // Fallback — should be unreachable due to earlier guards
+    throw new BadRequestException(
+      'Content cannot be submitted for review in its current state.',
+    )
   }
 
   // ─── Unpublish ───────────────────────────────────────────────────────────────
@@ -615,12 +767,24 @@ export class ContentService {
     const content = await this.prisma.content.findUnique({ where: { id } })
     if (!content) throw new NotFoundException('Content not found')
 
-    // Find the current draft version (the last edited snapshot)
-    const draftVersion = await this.prisma.contentVersion.findFirst({
-      where: { contentId: id, isDraft: true },
-      orderBy: { versionNo: 'desc' },
+    // Determine which version should be promoted.
+    // Prefer the pinned reviewVersionNo when set, otherwise fall back to the latest draft.
+    let targetVersionNo =
+      (content as { reviewVersionNo?: number | null }).reviewVersionNo ?? null
+
+    if (targetVersionNo == null) {
+      const draftVersion = await this.prisma.contentVersion.findFirst({
+        where: { contentId: id, isDraft: true },
+        orderBy: { versionNo: 'desc' },
+      })
+      if (!draftVersion) throw new NotFoundException('No draft version found to publish')
+      targetVersionNo = draftVersion.versionNo
+    }
+
+    const draftVersion = await this.prisma.contentVersion.findUnique({
+      where: { contentId_versionNo: { contentId: id, versionNo: targetVersionNo } },
     })
-    if (!draftVersion) throw new NotFoundException('No draft version found to publish')
+    if (!draftVersion) throw new NotFoundException(`Version ${targetVersionNo} not found`)
 
     // Unmark any previously-published version
     await this.prisma.contentVersion.updateMany({
@@ -647,10 +811,11 @@ export class ContentService {
         ...(snap.mediaUrl !== undefined && { mediaUrl: snap.mediaUrl as string | null }),
         status: ContentStatus.PUBLISHED,
         publishedVersionNo: draftVersion.versionNo,
+        reviewVersionNo: null,
         publishedAt: new Date(),
         lastReviewed: new Date(),
         needsReview: false,
-      },
+      } as Prisma.ContentUpdateInput,
     })
 
     await this.appendAuditLog(id, 'published', actorId, {
@@ -670,7 +835,10 @@ export class ContentService {
     // The existing isDraft version remains; admin can continue editing it
     const updated = await this.prisma.content.update({
       where: { id },
-      data: { status: ContentStatus.DRAFT },
+      data: {
+        status: ContentStatus.DRAFT,
+        reviewVersionNo: null,
+      } as Prisma.ContentUpdateInput,
     })
 
     await this.appendAuditLog(id, 'rejected', actorId, {
@@ -706,11 +874,24 @@ export class ContentService {
     const content = await this.prisma.content.findUnique({ where: { id } })
     if (!content) throw new NotFoundException('Content not found')
 
-    const revisionDraft = await this.prisma.contentVersion.findFirst({
-      where: { contentId: id, isDraft: true },
-      orderBy: { versionNo: 'desc' },
+    // Determine which revision version should be promoted.
+    // Prefer the pinned reviewVersionNo when set, otherwise fall back to latest draft.
+    let targetVersionNo =
+      (content as { reviewVersionNo?: number | null }).reviewVersionNo ?? null
+
+    if (targetVersionNo == null) {
+      const revisionDraft = await this.prisma.contentVersion.findFirst({
+        where: { contentId: id, isDraft: true },
+        orderBy: { versionNo: 'desc' },
+      })
+      if (!revisionDraft) throw new NotFoundException('No revision draft version found')
+      targetVersionNo = revisionDraft.versionNo
+    }
+
+    const revisionDraft = await this.prisma.contentVersion.findUnique({
+      where: { contentId_versionNo: { contentId: id, versionNo: targetVersionNo } },
     })
-    if (!revisionDraft) throw new NotFoundException('No revision draft version found')
+    if (!revisionDraft) throw new NotFoundException(`Version ${targetVersionNo} not found`)
 
     // Retire old published version
     await this.prisma.contentVersion.updateMany({
@@ -738,10 +919,11 @@ export class ContentService {
         status: ContentStatus.PUBLISHED,
         publishedVersionNo: revisionDraft.versionNo,
         revisionStatus: null,
+        reviewVersionNo: null,
         publishedAt: new Date(),
         lastReviewed: new Date(),
         needsReview: false,
-      },
+      } as Prisma.ContentUpdateInput,
     })
 
     await this.appendAuditLog(id, 'revision_published', actorId, {
@@ -771,7 +953,10 @@ export class ContentService {
   async revertRevisionToDraft(id: string, actorId: string, fromRevisionStatus: ContentRevisionStatus) {
     const updated = await this.prisma.content.update({
       where: { id },
-      data: { revisionStatus: ContentRevisionStatus.DRAFT },
+      data: {
+        revisionStatus: ContentRevisionStatus.DRAFT,
+        reviewVersionNo: null,
+      } as Prisma.ContentUpdateInput,
     })
 
     await this.appendAuditLog(id, 'revision_rejected', actorId, {
@@ -783,7 +968,6 @@ export class ContentService {
   }
 
   // ─── Shared utilities ─────────────────────────────────────────────────────────
-
   async assertExists(id: string) {
     const content = await this.prisma.content.findFirst({
       where: { id, deletedAt: null },
@@ -801,6 +985,32 @@ export class ContentService {
     await this.prisma.contentAuditLog.create({
       data: { contentId, event, actorId, metadata },
     })
+  }
+
+  private async generateHumanId(contentType: ContentType): Promise<string> {
+    const prefixMap: Record<ContentType, string> = {
+      [ContentType.ARTICLE]: 'ART',
+      [ContentType.TIP]: 'TIP',
+      [ContentType.FAQ]: 'FAQ',
+    }
+
+    const prefix = prefixMap[contentType] ?? 'CNT'
+
+    // Very low collision probability; loop just in case.
+    // 36^6 ≈ 2.1B possible codes.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const code = Math.random().toString(36).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)
+      if (code.length < 6) continue
+      const candidate = `${prefix}-${code}`
+
+      const existing = await this.prisma.content.findFirst({
+        where: { humanId: candidate } as Prisma.ContentWhereInput,
+        select: { id: true },
+      })
+
+      if (!existing) return candidate
+    }
   }
 
   private async nextVersionNo(contentId: string): Promise<number> {

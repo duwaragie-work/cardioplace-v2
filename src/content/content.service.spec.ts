@@ -122,7 +122,11 @@ describe('ContentService', () => {
 
       expect(result).toEqual(DRAFT_CONTENT)
       expect(mockPrisma.content.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ status: ContentStatus.DRAFT, submittedById: actorId }),
+        data: expect.objectContaining({
+          status: ContentStatus.DRAFT,
+          humanId: expect.any(String),
+          submittedBy: { connect: { id: actorId } },
+        }),
       })
     })
 
@@ -325,6 +329,7 @@ describe('ContentService', () => {
       const content = { ...DRAFT_CONTENT, status: ContentStatus.PARTIALLY_APPROVED }
       jest.mocked(mockPrisma.content.findUnique).mockResolvedValue(content)
       jest.mocked(mockPrisma.contentVersion.findFirst).mockResolvedValue(DRAFT_VERSION)
+      jest.mocked(mockPrisma.contentVersion.findUnique).mockResolvedValue(DRAFT_VERSION)
       jest.mocked(mockPrisma.content.update).mockResolvedValue({ ...content, status: ContentStatus.PUBLISHED })
 
       const result = await service.publishAfterDualApproval(id, actorId)
@@ -339,6 +344,7 @@ describe('ContentService', () => {
     it('does NOT create a new ContentVersion (Bug 1 fix)', async () => {
       jest.mocked(mockPrisma.content.findUnique).mockResolvedValue(DRAFT_CONTENT)
       jest.mocked(mockPrisma.contentVersion.findFirst).mockResolvedValue(DRAFT_VERSION)
+      jest.mocked(mockPrisma.contentVersion.findUnique).mockResolvedValue(DRAFT_VERSION)
       jest.mocked(mockPrisma.content.update).mockResolvedValue({ ...DRAFT_CONTENT, status: ContentStatus.PUBLISHED })
 
       await service.publishAfterDualApproval(id, actorId)
@@ -562,6 +568,7 @@ describe('ContentService', () => {
       const revisedDraft = { ...DRAFT_VERSION, versionNo: 4, isDraft: true }
       jest.mocked(mockPrisma.content.findUnique).mockResolvedValue(PUBLISHED_CONTENT)
       jest.mocked(mockPrisma.contentVersion.findFirst).mockResolvedValue(revisedDraft)
+      jest.mocked(mockPrisma.contentVersion.findUnique).mockResolvedValue(revisedDraft)
       jest.mocked(mockPrisma.content.update).mockResolvedValue({
         ...PUBLISHED_CONTENT,
         publishedVersionNo: 4,
@@ -585,6 +592,7 @@ describe('ContentService', () => {
     it('does NOT create a new version', async () => {
       jest.mocked(mockPrisma.content.findUnique).mockResolvedValue(PUBLISHED_CONTENT)
       jest.mocked(mockPrisma.contentVersion.findFirst).mockResolvedValue(DRAFT_VERSION)
+      jest.mocked(mockPrisma.contentVersion.findUnique).mockResolvedValue(DRAFT_VERSION)
       jest.mocked(mockPrisma.content.update).mockResolvedValue(PUBLISHED_CONTENT)
 
       await service.publishRevisionAfterDualApproval(id, actorId)

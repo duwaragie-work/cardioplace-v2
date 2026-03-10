@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common'
 import { Roles } from '../auth/decorators/roles.decorator.js'
+import { Public } from '../auth/decorators/public.decorator.js'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js'
 import { RolesGuard } from '../auth/guards/roles.guard.js'
 import { UserRole } from '../generated/prisma/enums.js'
@@ -45,7 +46,8 @@ export class ContentController {
 
   // ─── Public: list published content ────────────────────────────────────────
 
-  /** GET /v2/content — paginated list of PUBLISHED content */
+  /** GET /v2/content — paginated list of PUBLISHED content (no auth required) */
+  @Public()
   @Get()
   listPublished(@Query() query: ListContentQueryDto) {
     return this.contentService.listPublished(query)
@@ -60,23 +62,29 @@ export class ContentController {
     return this.contentService.listAdmin(query)
   }
 
-  /** GET /v2/content/all/:id — full admin view of a single item */
+  /** GET /v2/content/all/:id — full admin view of a single item (by ULID or humanId) */
   @Get('all/:id')
   @Roles(...ADMIN_ROLES)
   findOneAdmin(@Param('id') id: string) {
+    if (id.includes('-')) {
+      return this.contentService.findOneAdminByHumanId(id)
+    }
     return this.contentService.findOneAdmin(id)
   }
 
-  /** GET /v2/content/:id — single published item + appends ContentView row */
+  /** GET /v2/content/:id — single published item (by ULID or humanId) + appends ContentView row (no auth required; optional x-device-id for guest view tracking) */
+  @Public()
   @Get(':id')
   findOnePublished(@Param('id') id: string, @Request() req: PublicRequest) {
     const userId: string | undefined = req.user?.id
     const deviceId = req.headers['x-device-id']
-    return this.contentService.findOnePublished(
-      id,
-      userId,
-      Array.isArray(deviceId) ? deviceId[0] : deviceId,
-    )
+    const normalizedDeviceId = Array.isArray(deviceId) ? deviceId[0] : deviceId
+
+    if (id.includes('-')) {
+      return this.contentService.findOnePublishedByHumanId(id, userId, normalizedDeviceId)
+    }
+
+    return this.contentService.findOnePublished(id, userId, normalizedDeviceId)
   }
 
   /** POST /v2/content — create a new DRAFT */
@@ -94,14 +102,18 @@ export class ContentController {
     @Body() dto: UpdateContentDto,
     @Request() req: AuthRequest,
   ) {
-    return this.contentService.update(id, dto, req.user.id)
+    return this.contentService.editContent(id, dto, req.user.id)
   }
 
-  /** POST /v2/content/:id/submit — submit DRAFT for review */
+  /** POST /v2/content/:id/submit — submit a version for review (initial or revision) */
   @Post(':id/submit')
   @Roles(...ADMIN_ROLES)
-  submit(@Param('id') id: string, @Request() req: AuthRequest) {
-    return this.contentService.submitForReview(id, req.user.id)
+  submit(
+    @Param('id') id: string,
+    @Body() body: { versionNo?: number },
+    @Request() req: AuthRequest,
+  ) {
+    return this.contentService.submitContent(id, req.user.id, body.versionNo)
   }
 
   /** POST /v2/content/:id/unpublish — take published content offline */
@@ -142,45 +154,6 @@ export class ContentController {
     @Request() req: AuthRequest,
   ) {
     return this.contentService.superAdminPublish(id, versionNo, overrideReason, req.user.id)
-  }
-
-  // ─── Background Revision (Option B) ────────────────────────────────────────
-
-  /**
-   * POST /content/:id/revise
-   * Start a background revision of a PUBLISHED article.
-   * The live version stays public while the new revision is drafted.
-   */
-  @Post(':id/revise')
-  @Roles(...ADMIN_ROLES)
-  startRevision(@Param('id') id: string, @Request() req: AuthRequest) {
-    return this.contentService.startRevision(id, req.user.id)
-  }
-
-  /**
-   * PATCH /content/:id/revision
-   * Edit the in-flight background revision draft.
-   * Does NOT affect the live published content — only the pending version snapshot.
-   */
-  @Patch(':id/revision')
-  @Roles(...ADMIN_ROLES)
-  updateRevision(
-    @Param('id') id: string,
-    @Body() dto: UpdateContentDto,
-    @Request() req: AuthRequest,
-  ) {
-    return this.contentService.updateRevision(id, dto, req.user.id)
-  }
-
-  /**
-   * POST /content/:id/revision/submit
-   * Submit the background revision for the dual-approval review cycle.
-   * The live version remains public throughout the review.
-   */
-  @Post(':id/revision/submit')
-  @Roles(...ADMIN_ROLES)
-  submitRevision(@Param('id') id: string, @Request() req: AuthRequest) {
-    return this.contentService.submitRevisionForReview(id, req.user.id)
   }
 
   // ─── Admin: version history + audit log ────────────────────────────────────
