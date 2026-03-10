@@ -17,17 +17,18 @@ export class EscalationService {
   @OnEvent(JOURNAL_EVENTS.ANOMALY_TRACKED, { async: true })
   async handleAnomalyTracked(payload: AnomalyTrackedEvent) {
     try {
-      // Escalation only triggers at 3+ consecutive days of deviation.
-      // Days 1–2 are just tracked alerts — no escalation, no notification.
-      if (payload.consecutiveDays < 3) {
+      // Escalation only triggers when the same deviation type
+      // occurred on the past two days and today (3+ occurrences
+      // in the last 3 days). Fewer than 3 are just tracked alerts.
+      if (payload.occurrencesInLast3Days < 3) {
         this.logger.log(
-          `Alert ${payload.alertId}: ${payload.consecutiveDays} consecutive day(s) — below escalation threshold (need 3+)`,
+          `Alert ${payload.alertId}: ${payload.occurrencesInLast3Days} occurrence(s) in last 3 days — below escalation threshold (need 3)`,
         )
         return
       }
 
       const typeLabel = payload.type.toLowerCase().replace('_', ' ')
-      const reason = `${payload.consecutiveDays} consecutive day(s) of ${typeLabel} deviation (${payload.severity})`
+      const reason = `${payload.occurrencesInLast3Days} occurrence(s) of ${typeLabel} deviation in the last 3 days (${payload.severity})`
 
       const escalation = await this.prisma.escalationEvent.create({
         data: {

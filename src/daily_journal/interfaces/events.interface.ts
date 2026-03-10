@@ -46,7 +46,6 @@ export interface DeviationDetectedEvent {
   alertId: string
   type: string
   severity: string
-  consecutiveDays: number
 }
 
 export interface AnomalyTrackedEvent {
@@ -54,7 +53,7 @@ export interface AnomalyTrackedEvent {
   alertId: string
   type: string
   severity: string
-  consecutiveDays: number
+  occurrencesInLast3Days: number
   escalated: boolean
 }
 

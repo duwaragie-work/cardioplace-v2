@@ -14,9 +14,7 @@ model DeviationAlert {
     baselineValue Decimal? @db.Decimal(6, 2)
     actualValue   Decimal? @db.Decimal(6, 2)
 
-    // Streak tracking — how many consecutive days this deviation has occurred
-    consecutiveDays Int     @default(1)
-    escalated       Boolean @default(false)
+    escalated Boolean @default(false)
 
     status         AlertStatus @default(OPEN)
     createdAt      DateTime    @default(now())

@@ -108,7 +108,7 @@ export class DeviationService {
   }
 
   /**
-   * Shared logic: upsert alerts, track consecutive anomalies, emit events.
+   * Shared logic: upsert alerts, track anomalies, emit events.
    */
   private async processDeviations(
     deviations: DetectedDeviation[],
@@ -147,16 +147,15 @@ export class DeviationService {
         },
       })
 
-      const consecutiveDays = await this.trackConsecutiveAnomaly(
+      const occurrencesInLast3Days = await this.countOccurrencesInLast3Days(
         userId,
         entryDate,
         deviation.type,
-        alert.id,
       )
 
       this.logger.log(
         `Deviation detected: ${deviation.type} (${deviation.severity}) for user ${userId}, ` +
-          `consecutive days: ${consecutiveDays}`,
+          `occurrences in last 3 days: ${occurrencesInLast3Days}`,
       )
 
       this.eventEmitter.emit(JOURNAL_EVENTS.ANOMALY_TRACKED, {
@@ -164,7 +163,7 @@ export class DeviationService {
         alertId: alert.id,
         type: deviation.type,
         severity: deviation.severity,
-        consecutiveDays,
+        occurrencesInLast3Days,
         escalated: alert.escalated,
       })
     }
@@ -259,39 +258,35 @@ export class DeviationService {
     return deviations
   }
 
-  private async trackConsecutiveAnomaly(
+  private async countOccurrencesInLast3Days(
     userId: string,
     entryDate: Date,
     type: DeviationType,
-    alertId: string,
   ): Promise<number> {
-    const yesterday = new Date(entryDate)
-    yesterday.setDate(yesterday.getDate() - 1)
+    let count = 1 // today already has an alert
 
-    const yesterdayEntry = await this.prisma.journalEntry.findUnique({
-      where: {
-        userId_entryDate: { userId, entryDate: yesterday },
-      },
-      include: {
-        deviationAlerts: {
-          where: { type },
-        },
-      },
-    })
+    for (let offset = 1; offset <= 2; offset++) {
+      const previousDate = new Date(entryDate)
+      previousDate.setDate(previousDate.getDate() - offset)
 
-    let consecutiveDays = 1
+      const previousEntry =
+        await this.prisma.journalEntry.findUnique({
+          where: {
+            userId_entryDate: { userId, entryDate: previousDate },
+          },
+          include: {
+            deviationAlerts: {
+              where: { type },
+            },
+          },
+        })
 
-    if (yesterdayEntry?.deviationAlerts?.length) {
-      consecutiveDays =
-        yesterdayEntry.deviationAlerts[0].consecutiveDays + 1
+      if (previousEntry?.deviationAlerts?.length) {
+        count += 1
+      }
     }
 
-    await this.prisma.deviationAlert.update({
-      where: { id: alertId },
-      data: { consecutiveDays },
-    })
-
-    return consecutiveDays
+    return count
   }
 
   private async resolveOpenAlerts(userId: string) {
