@@ -737,31 +737,90 @@ Contact your backend team for test credentials and test environment URL.
 
 ## Content Library
 
-### 1. List Public Articles/Tips
-**Endpoint:** `GET /api/v2/content`
+### 1. List Public Content
+
+**Endpoint:** `GET /api/v2/content`  
 **Protected:** ✅ Yes
+
 **Query Parameters:**
-- `contentType`: `ARTICLE | TIP | FAQ`
-- `tags`: `string[]` (optional)
+- `contentType`: `ARTICLE | TIP | FAQ` (optional)
+- `tags`: `string[]` (optional) — e.g. `?tags=hot-flashes&tags=sleep`
 - `page`: `number` (default: 1)
 - `limit`: `number` (default: 10)
 
-**Response:** Paginated list of content. Items needing review are hidden.
+**Description:**  
+Returns paginated list of published content. Items needing review or soft-deleted are hidden.
+
+**Success Response (200) – Example:**
+```json
+{
+  "items": [
+    {
+      "id": "string",
+      "title": "string",
+      "contentType": "ARTICLE",
+      "summary": "string",
+      "tags": ["string"],
+      "publishedAt": "2025-01-01T00:00:00.000Z"
+    }
+  ],
+  "page": 1,
+  "limit": 10,
+  "total": 42
+}
+```
 
 ---
 
-### 2. Get Article Detail
-**Endpoint:** `GET /api/v2/content/:id`
+### 2. Get Content Detail
+
+**Endpoint:** `GET /api/v2/content/:id`  
 **Protected:** ✅ Yes
-**Description:** Fetch full markdown body. Increments view count safely.
+
+**Description:**  
+Fetch full content body and metadata. Increments view count safely.
+
+**Success Response (200) – Example:**
+```json
+{
+  "id": "string",
+  "title": "string",
+  "contentType": "ARTICLE",
+  "summary": "string",
+  "body": "string",
+  "tags": ["string"],
+  "publishedAt": "2025-01-01T00:00:00.000Z",
+  "viewCount": 123,
+  "averageRating": 4.5
+}
+```
 
 ---
 
 ### 3. Rate Content
-**Endpoint:** `POST /api/v2/content/:id/rate`
+
+**Endpoint:** `POST /api/v2/content/:id/rate`  
 **Protected:** ✅ Yes
-**Body:** `{ ratingValue: number (1-5) }`
-**Description:** Submit or update user rating.
+
+**Request Body:**
+```json
+{
+  "ratingValue": 1
+}
+```
+(`ratingValue` must be between 1 and 5.)
+
+**Description:**  
+Submit or update the current user’s rating for the content. Also updates the average rating.
+
+**Success Response (200) – Example:**
+```json
+{
+  "id": "string",
+  "averageRating": 4.3,
+  "userRating": 1
+}
+```
 
 ---
 

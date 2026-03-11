@@ -79,7 +79,8 @@ Authorization: Bearer <accessToken>
 
 ### 1. Guest Login
 
-**Endpoint:** `POST /api/v2/auth/guest`
+**Endpoint:** `POST /api/v2/auth/guest`  
+**Protected:** ❌ No
 
 **Headers:**
 ```
@@ -94,15 +95,15 @@ X-Device-Id: <device-id>    (required — or send in body as deviceId)
 }
 ```
 
-**Description:**
-Continue as guest without signing up. Backend finds or creates a user keyed by device ID and returns the same auth response. Set refresh cookie; store access token and redirect to main app.
+**Description:**  
+Continue as guest without signing up. Backend finds or creates a user keyed by device ID and returns the standard auth response. Backend also sets the refresh token as an httpOnly cookie.
 
 **Success Response (200):**
 ```json
 {
-  "accessToken": "...",
-  "refreshToken": "...",
-  "userId": "01J...",
+  "accessToken": "string",
+  "refreshToken": "string",
+  "userId": "string",
   "onboarding_required": false,
   "user_type": "GUEST",
   "roles": ["GUEST"],
@@ -118,7 +119,7 @@ const response = await fetch('https://your-api-domain.com/api/v2/auth/guest', {
   credentials: 'include',
   headers: {
     'Content-Type': 'application/json',
-    'X-Device-Id': getOrCreateDeviceId(), // e.g. from localStorage
+    'X-Device-Id': getOrCreateDeviceId(),
   },
   body: JSON.stringify({}),
 });
@@ -342,11 +343,11 @@ async function verifyOTP(email, otp) {
 ### 6. Profile / Onboarding
 
 **Endpoints:**
-- `GET /api/v2/auth/profile` — Fetch current user profile
-- `POST /api/v2/auth/profile` — Submit initial onboarding (sets `onboardingStatus: COMPLETED`)
+- `GET /api/v2/auth/profile` — Fetch current user profile  
+- `POST /api/v2/auth/profile` — Submit initial onboarding (sets `onboardingStatus: COMPLETED`)  
 - `PATCH /api/v2/auth/profile` — Update profile later
 
-**Protected:** ✅ Yes (requires Authorization header)
+**Protected:** ✅ Yes
 
 **Headers:**
 ```
@@ -354,7 +355,7 @@ Content-Type: application/json
 Authorization: Bearer <accessToken>
 ```
 
-**Request Body (POST for initial onboarding):**
+**Request Body (POST for initial onboarding / PATCH for update):**
 ```json
 {
   "name": "string (optional)",
@@ -981,80 +982,257 @@ If testing OAuth locally, you need to:
 ### Public Content Endpoints
 
 #### 1. List Public Content
-**Endpoint:** `GET /api/v2/content`
+
+**Endpoint:** `GET /api/v2/content`  
 **Protected:** ✅ Yes
+
 **Query Parameters:**
 - `contentType`: `ARTICLE | TIP | FAQ` (optional)
-- `tags`: `string[]` (optional)
+- `tags`: `string[]` (optional) — e.g. `?tags=hot-flashes&tags=sleep`
 - `page`: `number` (default: 1)
 - `limit`: `number` (default: 10)
 
-**Description:** Returns paginated list of published content. Automatically filters out items needing review or soft-deleted.
+**Description:**  
+Returns a paginated list of published content. Automatically filters out items needing review or soft-deleted.
+
+**Success Response (200) – Example:**
+```json
+{
+  "items": [
+    {
+      "id": "string",
+      "title": "string",
+      "contentType": "ARTICLE",
+      "summary": "string",
+      "tags": ["string"],
+      "publishedAt": "2025-01-01T00:00:00.000Z"
+    }
+  ],
+  "page": 1,
+  "limit": 10,
+  "total": 42
+}
+```
 
 ---
 
 #### 2. Get Single Content
-**Endpoint:** `GET /api/v2/content/:id`
+
+**Endpoint:** `GET /api/v2/content/:id`  
 **Protected:** ✅ Yes
-**Description:** Returns full content body. Increments view count.
+
+**Description:**  
+Returns full content body and metadata. Increments view count.
+
+**Success Response (200) – Example:**
+```json
+{
+  "id": "string",
+  "title": "string",
+  "contentType": "ARTICLE",
+  "summary": "string",
+  "body": "string",
+  "tags": ["string"],
+  "publishedAt": "2025-01-01T00:00:00.000Z",
+  "viewCount": 123,
+  "averageRating": 4.5
+}
+```
 
 ---
 
 ### Admin Content Endpoints (CONTENT_ADMIN, SUPER_ADMIN)
 
 #### 3. Create Draft
-**Endpoint:** `POST /api/v2/content`
-**Request Body:** `CreateContentDto` (title, contentType, body, summary, tags?, references?)
-**Status:** `DRAFT`
+
+**Endpoint:** `POST /api/v2/content`  
+**Protected:** ✅ Yes
+
+**Request Body (CreateContentDto):**
+```json
+{
+  "title": "string",
+  "contentType": "ARTICLE | TIP | FAQ",
+  "body": "string",
+  "summary": "string",
+  "tags": ["string"],
+  "references": ["string"]
+}
+```
+
+**Success Response (201) – Example:**
+```json
+{
+  "id": "string",
+  "status": "DRAFT"
+}
+```
 
 ---
 
 #### 4. Save/Update Draft
-**Endpoint:** `PATCH /api/v2/content/:id`
-**Description:** Edits content in `DRAFT`. Creates a new version snapshot.
+
+**Endpoint:** `PATCH /api/v2/content/:id`  
+**Protected:** ✅ Yes
+
+**Description:**  
+Edits content while in `DRAFT` state and creates a new version snapshot.
+
+**Request Body (partial, same shape as create):**
+```json
+{
+  "title": "string (optional)",
+  "contentType": "ARTICLE | TIP | FAQ (optional)",
+  "body": "string (optional)",
+  "summary": "string (optional)",
+  "tags": ["string"],
+  "references": ["string"]
+}
+```
 
 ---
 
 #### 5. Submit for Review
-**Endpoint:** `POST /api/v2/content/:id/submit`
-**Description:** Transitions to `IN_REVIEW`. Locks editing.
+
+**Endpoint:** `POST /api/v2/content/:id/submit`  
+**Protected:** ✅ Yes
+
+**Description:**  
+Transitions content to `IN_REVIEW` and locks editing.
+
+**Request Body:**
+```json
+{}
+```
+
+**Success Response (200) – Example:**
+```json
+{
+  "id": "string",
+  "status": "IN_REVIEW"
+}
+```
 
 ---
 
 #### 6. Admin Actions (Unpublish / Reopen)
+
+**Endpoints:**
 - `POST /api/v2/content/:id/unpublish`
 - `POST /api/v2/content/:id/reopen` (DRAFT ← UNPUBLISHED)
+
+**Request Body (both):**
+```json
+{}
+```
+
+**Description:**  
+Unpublish removes content from public list; reopen moves `UNPUBLISHED` back to `DRAFT`.
 
 ---
 
 #### 7. Version History & Audit Log
+
+**Endpoints:**
 - `GET /api/v2/content/:id/versions`
 - `GET /api/v2/content/:id/versions/:versionNo`
-- `GET /api/v2/content/:id/audit` (Full event log)
+- `GET /api/v2/content/:id/audit`
+
+**Success Response – Examples:**
+
+`GET /:id/versions`:
+```json
+[
+  {
+    "versionNo": 1,
+    "editor": "user-id",
+    "createdAt": "2025-01-01T00:00:00.000Z"
+  }
+]
+```
+
+`GET /:id/versions/:versionNo`:
+```json
+{
+  "versionNo": 2,
+  "title": "string",
+  "body": "string",
+  "summary": "string",
+  "tags": ["string"],
+  "createdAt": "2025-01-02T00:00:00.000Z"
+}
+```
 
 ---
 
 #### 8. Super Admin Override
-**Endpoint:** `POST /api/v2/content/:id/publish/:versionNo`
-**Description:** Bypasses review gate.
+
+**Endpoint:** `POST /api/v2/content/:id/publish/:versionNo`  
+**Roles:** `SUPER_ADMIN`
+
+**Request Body:**
+```json
+{}
+```
+
+**Description:**  
+Bypasses review gate and force-publishes a specific version.
+
+**Success Response (200) – Example:**
+```json
+{
+  "id": "string",
+  "status": "PUBLISHED",
+  "publishedVersion": 3
+}
+```
 
 ---
 
 ### Reviewer Endpoints (CONTENT_APPROVER, SUPER_ADMIN)
 
 #### 9. Submit Review
-**Endpoint:** `POST /api/v2/content/:id/review`
-**Body:** `{ reviewType: EDITORIAL|CLINICAL, outcome: APPROVED|REJECTED, notes?: string }`
-**Logic:** Rejection resets to `DRAFT`. Dual approval auto-publishes.
+
+**Endpoint:** `POST /api/v2/content/:id/review`  
+**Protected:** ✅ Yes
+
+**Request Body:**
+```json
+{
+  "reviewType": "EDITORIAL" | "CLINICAL",
+  "outcome": "APPROVED" | "REJECTED",
+  "notes": "string (optional)"
+}
+```
+
+**Description:**  
+Rejection resets item to `DRAFT`. Dual approval (editorial + clinical) auto-publishes.
 
 ---
 
 ### Content User Actions
 
 #### 10. Rate Content
-**Endpoint:** `POST /api/v2/content/:id/rate`
-**Body:** `{ ratingValue: 1-5 }`
-**Description:** Upserts rating and updates average.
+
+**Endpoint:** `POST /api/v2/content/:id/rate`  
+**Protected:** ✅ Yes
+
+**Request Body:**
+```json
+{
+  "ratingValue": 1
+}
+```
+(`ratingValue` must be between 1 and 5.)
+
+**Success Response (200) – Example:**
+```json
+{
+  "id": "string",
+  "averageRating": 4.3,
+  "userRating": 1
+}
+```
 
 ---
 
