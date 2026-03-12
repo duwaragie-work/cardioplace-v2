@@ -26,10 +26,6 @@ export class ChatController {
     res.setHeader('Connection', 'keep-alive')
     res.flushHeaders()
 
-    console.log("=============================")
-    console.log(req.user)
-    console.log("=============================")
-
     if (!body.sessionId) {
       body.sessionId = randomUUID()
       const userId = req.user?.id || null
@@ -40,7 +36,8 @@ export class ChatController {
     res.write(`data: ${JSON.stringify({ sessionId: body.sessionId })}\n\n`)
 
     try {
-      for await (const chunk of this.chatService.getStreamingResponse(body)) {
+      const userId = req.user?.id || null
+      for await (const chunk of this.chatService.getStreamingResponse(body, userId)) {
         res.write(`data: ${JSON.stringify(chunk)}\n\n`)
       }
       res.write('data: [DONE]\n\n')
@@ -64,8 +61,14 @@ export class ChatController {
       await this.chatService.createSession(body.sessionId, userId)
       this.chatService.generateSessionTitle(body.sessionId, body.prompt).catch(console.error)
     }
-    const response = await this.chatService.getStructuredResponse(body)
-    return { sessionId: body.sessionId, data: response.text }
+    const userId = req.user?.id || null
+    const response = await this.chatService.getStructuredResponse(body, userId)
+    return {
+      sessionId: body.sessionId,
+      data: response.text,
+      isEmergency: response.isEmergency,
+      emergencySituation: response.emergencySituation,
+    }
   }
 
   /**

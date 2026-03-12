@@ -8,6 +8,7 @@ import { ChatRequestDto } from './dto/chat-request.dto.js'
 import { SystemPromptService } from './services/system-prompt.service.js'
 import { RagService } from './services/rag.service.js'
 import { ConversationHistoryService } from './services/conversation-history.service.js'
+import { EmergencyDetectionService, EmergencyDetectionResult } from './services/emergency-detection.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 
 interface ChainInput {
@@ -26,6 +27,7 @@ export class ChatService {
     private readonly conversationHistoryService: ConversationHistoryService,
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly emergencyDetectionService: EmergencyDetectionService,
   ) {
     this.chatModel =
       this.configService.get<string>('MISTRAL_CHAT_MODEL') || 'ministral-3b-2512'
@@ -82,14 +84,160 @@ export class ChatService {
   }
 
   /**
+   * Build a dedicated chain for emergency situations.
+   * This focuses on supportive, non-diagnostic guidance and encourages real-world help.
+   */
+  private buildEmergencyChain() {
+    const apiKey = this.configService.get<string>('MISTRAL_API_KEY')
+
+    const llm = new ChatMistralAI({
+      apiKey,
+      model: this.chatModel,
+      maxTokens: 2048,
+      streaming: true,
+    })
+
+    const chatPrompt = ChatPromptTemplate.fromMessages([
+      [
+        'system',
+        `You are a compassionate assistant responding to a potential emergency situation.
+
+You are NOT a doctor, therapist, or emergency service, and you must say this clearly.
+
+You receive:
+- The original user message describing their situation.
+- A short classifier label describing the potential emergency.
+
+Your goals:
+- Acknowledge the user's feelings and the seriousness of the situation.
+- Make it VERY CLEAR that you cannot provide medical or crisis care.
+- Strongly encourage them to seek immediate in-person help from local emergency services,
+  medical professionals, or trusted people around them.
+- Encourage them to contact appropriate crisis hotlines or local emergency numbers
+  if they are in immediate danger.
+
+Do NOT:
+- Provide a medical diagnosis.
+- Give instructions that could increase harm.
+- Minimize or dismiss the seriousness of the situation.
+
+Keep your message short, clear, and supportive.`,
+      ],
+      [
+        'human',
+        `Here is the user's original message:\n\n{user_prompt}\n\nClassifier description of the emergency:\n{emergency_situation}\n\nNow respond directly to the user, following all the safety instructions.`,
+      ],
+    ])
+
+    const chain = RunnableSequence.from([
+      {
+        user_prompt: RunnableLambda.from((input: { user_prompt: string; emergency_situation: string | null }) => input.user_prompt),
+        emergency_situation: RunnableLambda.from((input: { user_prompt: string; emergency_situation: string | null }) =>
+          input.emergency_situation ?? 'No additional description provided.',
+        ),
+      },
+      chatPrompt,
+      llm,
+    ])
+
+    return chain
+  }
+
+  /**
+   * Run emergency detection and optionally record an emergency event.
+   */
+  private async preCheckEmergency(
+    sessionId: string | null,
+    prompt: string,
+    userId: string | null,
+  ): Promise<EmergencyDetectionResult> {
+    const result = await this.emergencyDetectionService.detectEmergency(prompt)
+
+    if (result.isEmergency) {
+      try {
+        await this.prisma.emergencyEvent.create({
+          data: {
+            userId,
+            sessionId,
+            prompt,
+            isEmergency: true,
+            emergency_situation: result.emergencySituation,
+          },
+        })
+        console.log(`Recorded emergency event for session ${sessionId}: ${result.emergencySituation}`)
+      } catch (error) {
+        console.error('Error recording emergency event:', error)
+      }
+    }
+
+    return result
+  }
+
+  /**
+   * Generate a streaming emergency response tailored to the situation.
+   */
+  private async *getEmergencyStreamingResponse(
+    prompt: string,
+    emergencySituation: string | null,
+    sessionId: string,
+  ): AsyncIterable<string> {
+    const chain = this.buildEmergencyChain()
+    const stream = await chain.stream({
+      user_prompt: prompt,
+      emergency_situation: emergencySituation,
+    })
+
+    let fullResponse = ''
+
+    for await (const chunk of stream) {
+      const text: string =
+        chunk && typeof chunk === 'object' && 'content' in chunk
+          ? (chunk.content as string)
+          : typeof chunk === 'string'
+            ? chunk
+            : ''
+
+      if (text) {
+        fullResponse += text
+        yield text
+      }
+    }
+
+    // Optionally record the emergency response in the conversation history
+    await this.conversationHistoryService.saveConversation(sessionId, prompt, fullResponse, {
+      // Mark this as an emergency response; extend config shape as needed.
+      emergency: true,
+    } as any)
+  }
+
+  /**
    * Stream response token-by-token (SSE).
    * Mirrors LangchainService.getStreamingResponse() from functions/.
    */
-  async *getStreamingResponse(request: ChatRequestDto): AsyncIterable<string> {
+  async *getStreamingResponse(
+    request: ChatRequestDto,
+    userId: string | null,
+  ): AsyncIterable<string | { type: 'emergency'; emergencySituation: string | null }> {
     const { prompt, date: _date, ...config } = request
     const sessionId = request.sessionId as string
 
     try {
+      const emergency = await this.preCheckEmergency(sessionId, prompt, userId)
+      if (emergency.isEmergency) {
+        // First, notify the client that this is an emergency situation.
+        yield { type: 'emergency', emergencySituation: emergency.emergencySituation }
+
+        // Then, stream a tailored emergency response.
+        for await (const chunk of this.getEmergencyStreamingResponse(
+          prompt,
+          emergency.emergencySituation,
+          sessionId,
+        )) {
+          yield chunk
+        }
+        return
+      }
+
       const systemPrompt = this.systemPromptService.buildSystemPrompt(config)
       const chatHistory = await this.conversationHistoryService.getConversationHistory(
         sessionId,
@@ -133,11 +281,23 @@ export class ChatService {
    * Return a complete JSON response.
    * Mirrors LangchainService.getStructuredResponse() from functions/.
    */
-  async getStructuredResponse(request: ChatRequestDto): Promise<{ text: string }> {
+  async getStructuredResponse(
+    request: ChatRequestDto,
+    userId: string | null,
+  ): Promise<{ text: string; isEmergency: boolean; emergencySituation: string | null }> {
     const { prompt, date: _date, ...config } = request
     const sessionId = request.sessionId as string
 
     try {
+      const emergency = await this.preCheckEmergency(sessionId, prompt, userId)
+      if (emergency.isEmergency) {
+        return {
+          text: emergency.emergencySituation || '',
+          isEmergency: true,
+          emergencySituation: emergency.emergencySituation,
+        }
+      }
+
       const systemPrompt = this.systemPromptService.buildSystemPrompt(config)
       const chatHistory = await this.conversationHistoryService.getConversationHistory(
         sessionId,
@@ -168,10 +328,14 @@ export class ChatService {
       await this.conversationHistoryService.saveConversation(sessionId, prompt, responseText, config)
       console.log(`Structured response complete for session ${sessionId}`)
 
-      return { text: responseText }
+      return { text: responseText, isEmergency: false, emergencySituation: null }
     } catch (error) {
       console.error('Structured response error:', error)
-      return { text: 'An error occurred while getting recommendations' }
+      return {
+        text: 'An error occurred while getting recommendations',
+        isEmergency: false,
+        emergencySituation: null,
+      }
     }
   }
 
