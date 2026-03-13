@@ -1032,7 +1032,21 @@ export class AuthService {
       throw new NotFoundException('User not found')
     }
 
-    return user
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      roles: user.roles,
+      emailVerified: user.isVerified,
+      accountStatus: user.accountStatus.toLowerCase(),
+      createdAt: user.createdAt.toISOString(),
+      dateOfBirth: user.dateOfBirth
+        ? user.dateOfBirth.toISOString().slice(0, 10)
+        : null,
+      menopauseStage: user.menopauseStage,
+      timezone: user.timezone,
+      onboardingStatus: user.onboardingStatus,
+    }
   }
 
   // ─── Email Helper ────────────────────────────────────────────────────────────

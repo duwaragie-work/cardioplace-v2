@@ -377,6 +377,23 @@ Authorization: Bearer <accessToken>
 }
 ```
 
+**Success Response (200) – GET /api/v2/auth/profile (Phase 1 payload):**
+
+```json
+{
+  "email": "user@example.com",
+  "name": "Jane Doe",
+  "roles": ["REGISTERED_USER"],
+  "emailVerified": true,
+  "accountStatus": "active",
+  "createdAt": "2025-01-01T12:34:56.000Z",
+  "dateOfBirth": "1990-01-15",
+  "menopauseStage": "PERIMENOPAUSE",
+  "timezone": "Asia/Colombo",
+  "onboardingStatus": "COMPLETED"
+}
+```
+
 **Example:**
 ```javascript
 async function completeOnboarding(name, timezone) {
