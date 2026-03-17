@@ -70,10 +70,10 @@ describe('Auth OTP Flow (e2e)', () => {
     })
   })
 
-  describe('POST /auth/otp/send', () => {
+  describe('POST /v2/auth/otp/send', () => {
     it('should send OTP and create OtpCode record', async () => {
       const response = await request(app.getHttpServer())
-        .post('/auth/otp/send')
+        .post('/v2/auth/otp/send')
         .send({ email: testEmail })
         .expect(200)
 
@@ -106,7 +106,7 @@ describe('Auth OTP Flow (e2e)', () => {
     it('should replace existing OTP when sending new one', async () => {
       // Send first OTP
       await request(app.getHttpServer())
-        .post('/auth/otp/send')
+        .post('/v2/auth/otp/send')
         .send({ email: testEmail })
         .expect(200)
 
@@ -119,7 +119,7 @@ describe('Auth OTP Flow (e2e)', () => {
 
       // Send second OTP
       await request(app.getHttpServer())
-        .post('/auth/otp/send')
+        .post('/v2/auth/otp/send')
         .send({ email: testEmail })
         .expect(200)
 
@@ -147,24 +147,24 @@ describe('Auth OTP Flow (e2e)', () => {
 
     it('should reject invalid phone number format', async () => {
       await request(app.getHttpServer())
-        .post('/auth/otp/send')
+        .post('/v2/auth/otp/send')
         .send({ email: 'invalid' })
         .expect(400)
     })
   })
 
-  describe('POST /auth/otp/verify - Error Cases', () => {
+  describe('POST /v2/auth/otp/verify - Error Cases', () => {
     beforeEach(async () => {
       // Send OTP first to create an OtpCode record
       await request(app.getHttpServer())
-        .post('/auth/otp/send')
+        .post('/v2/auth/otp/send')
         .send({ email: testEmail })
         .expect(200)
     })
 
     it('should reject invalid OTP code and increment attempts', async () => {
       const response = await request(app.getHttpServer())
-        .post('/auth/otp/verify')
+        .post('/v2/auth/otp/verify')
         .send({
           email: testEmail,
           otp: '000000', // Wrong code
@@ -198,7 +198,7 @@ describe('Auth OTP Flow (e2e)', () => {
       // Make 5 failed attempts
       for (let i = 0; i < 5; i++) {
         await request(app.getHttpServer())
-          .post('/auth/otp/verify')
+          .post('/v2/auth/otp/verify')
           .send({
             email: testEmail,
             otp: '000000',
@@ -248,7 +248,7 @@ describe('Auth OTP Flow (e2e)', () => {
       }
 
       const response = await request(app.getHttpServer())
-        .post('/auth/otp/verify')
+        .post('/v2/auth/otp/verify')
         .send({
           email: testEmail,
           otp: '123456',
@@ -272,7 +272,7 @@ describe('Auth OTP Flow (e2e)', () => {
 
     it('should reject when OTP does not exist', async () => {
       const response = await request(app.getHttpServer())
-        .post('/auth/otp/verify')
+        .post('/v2/auth/otp/verify')
         .send({
           email: 'nonexistent@example.com',
           otp: '123456',
@@ -285,7 +285,7 @@ describe('Auth OTP Flow (e2e)', () => {
 
     it('should reject missing required fields', async () => {
       await request(app.getHttpServer())
-        .post('/auth/otp/verify')
+        .post('/v2/auth/otp/verify')
         .send({
           // Missing email
           otp: '123456',
@@ -294,7 +294,7 @@ describe('Auth OTP Flow (e2e)', () => {
         .expect(400)
 
       await request(app.getHttpServer())
-        .post('/auth/otp/verify')
+        .post('/v2/auth/otp/verify')
         .send({
           email: testEmail,
           // Missing otp
@@ -308,13 +308,13 @@ describe('Auth OTP Flow (e2e)', () => {
     it('should prevent sending OTP twice within 60 seconds', async () => {
       // Send first OTP
       await request(app.getHttpServer())
-        .post('/auth/otp/send')
+        .post('/v2/auth/otp/send')
         .send({ email: testEmail })
         .expect(200)
 
       // Try to send again immediately
       const response = await request(app.getHttpServer())
-        .post('/auth/otp/send')
+        .post('/v2/auth/otp/send')
         .send({ email: testEmail })
         .expect(400)
 

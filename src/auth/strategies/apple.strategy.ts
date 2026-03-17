@@ -19,7 +19,7 @@ export class AppleStrategy extends PassportStrategy(Strategy, 'apple') {
       privateKeyString: config.get<string>('APPLE_PRIVATE_KEY', ''),
       callbackURL: config.get<string>(
         'APPLE_CALLBACK_URL',
-        'http://localhost:3000/api/auth/apple/callback',
+        'http://localhost:3000/api/v2/auth/apple/callback',
       ),
       scope: ['email', 'name'],
       passReqToCallback: false,

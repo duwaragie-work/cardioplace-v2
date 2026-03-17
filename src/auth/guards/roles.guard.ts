@@ -11,7 +11,7 @@ import { ROLES_KEY } from '../decorators/roles.decorator.js'
 interface JwtUser {
   id: string
   email: string | null
-  role: UserRole
+  roles: UserRole[]
 }
 
 @Injectable()
@@ -29,7 +29,7 @@ export class RolesGuard implements CanActivate {
 
     const user = context.switchToHttp().getRequest<{ user: JwtUser }>().user
 
-    if (!requiredRoles.includes(user.role)) {
+    if (!requiredRoles.some((r) => user.roles.includes(r))) {
       throw new ForbiddenException(
         `Access denied. Required roles: ${requiredRoles.join(', ')}`,
       )
