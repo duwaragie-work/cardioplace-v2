@@ -51,6 +51,9 @@ model User {
   devices           Device[]
   authLogs          AuthLog[]
   baselineSnapshots BaselineSnapshot[]
+  userDevices   UserDevice[]
+
+  // Content Library relations
   contentSubmitted Content[]       @relation("ContentSubmittedBy")
   contentReviews   ContentReview[] @relation("ContentReviewedBy")
   contentRatings   ContentRating[] @relation("ContentRatings")

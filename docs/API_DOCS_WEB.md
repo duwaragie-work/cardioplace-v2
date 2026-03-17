@@ -105,7 +105,6 @@ Continue as guest without signing up. Backend finds or creates a user keyed by d
   "refreshToken": "string",
   "userId": "string",
   "onboarding_required": false,
-  "user_type": "GUEST",
   "roles": ["GUEST"],
   "login_method": "guest",
   "name": null
@@ -153,13 +152,12 @@ window.location.href = 'https://your-api-domain.com/api/v2/auth/google';
 
 **Redirect URL:**
 ```
-https://your-web-app.com/auth/callback?access=<accessToken>&onboarding_required=<boolean>&user_type=<UserRole>&login_method=google
+https://your-web-app.com/auth/callback?access=<accessToken>&onboarding_required=<boolean>&login_method=google
 ```
 
 **URL Parameters:**
 - `access`: The access token (JWT)
 - `onboarding_required`: Boolean string ("true" or "false")
-- `user_type`: Primary role (e.g. "REGISTERED_USER", "GUEST")
 - `login_method`: "google"
 
 **Example Frontend Handler:**
@@ -168,7 +166,6 @@ https://your-web-app.com/auth/callback?access=<accessToken>&onboarding_required=
 const urlParams = new URLSearchParams(window.location.search);
 const accessToken = urlParams.get('access');
 const onboardingRequired = urlParams.get('onboarding_required') === 'true';
-const userType = urlParams.get('user_type');
 const loginMethod = urlParams.get('login_method');
 
 // Store access token (sessionStorage or memory)
@@ -204,7 +201,7 @@ window.location.href = 'https://your-api-domain.com/api/v2/auth/apple/web';
 
 **Redirect URL:**
 ```
-https://your-web-app.com/auth/callback?access=<accessToken>&onboarding_required=<boolean>&user_type=<UserRole>&login_method=apple
+https://your-web-app.com/auth/callback?access=<accessToken>&onboarding_required=<boolean>&login_method=apple
 ```
 
 **Example Frontend Handler:**
@@ -298,7 +295,6 @@ Verify the OTP code and authenticate the user. Backend sets refresh token cookie
   "refreshToken": "...",
   "userId": "01J...",
   "onboarding_required": true,
-  "user_type": "REGISTERED_USER",
   "roles": ["REGISTERED_USER"],
   "login_method": "otp",
   "name": null
