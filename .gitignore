@@ -3,6 +3,11 @@
 /node_modules
 /build
 
+#doucments and html test
+docs/
+html_test/
+
+
 # Logs
 logs
 *.log

@@ -1,0 +1,81 @@
+enum DeviationType {
+    SLEEP_HOURS
+    SLEEP_QUALITY
+    AWAKENINGS
+}
+
+enum DeviationSeverity {
+    LOW
+    MEDIUM
+    HIGH
+}
+
+enum AlertStatus {
+    OPEN
+    ACKNOWLEDGED
+    RESOLVED
+}
+
+enum NotificationChannel {
+    PUSH
+    EMAIL
+    SMS
+}
+
+enum EscalationLevel {
+    LEVEL_1
+    LEVEL_2
+    LEVEL_3
+}
+
+enum Mood {
+    CALM
+    ANXIOUS
+    DEPRESSED
+    IRRITABLE
+    ENERGIZED
+    NEUTRAL
+}
+
+enum EntrySource {
+    MANUAL
+    HEALTHKIT
+}
+
+model JournalEntry {
+    id     String @id @default(uuid())
+    userId String
+    user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    entryDate DateTime @db.Date
+
+    // Sleep metrics (all optional — user may not fill every field)
+    sleepHours   Decimal? @db.Decimal(4, 2)
+    sleepQuality Int?
+    awakenings   Int?
+    bedtime      String?
+    wakeTime     String?
+
+    // Symptoms stored as flexible JSON
+    symptoms Json?
+
+    // Mood & Notes
+    mood  Mood?
+    notes String? @db.VarChar(500)
+
+    // Data source
+    source         EntrySource @default(MANUAL)
+    sourceMetadata Json?
+
+    // FK to the baseline snapshot that was active when this entry was evaluated
+    snapshotId String?
+    snapshot   BaselineSnapshot? @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    deviationAlerts DeviationAlert[]
+
+    @@unique([userId, entryDate])
+    @@index([userId, entryDate(sort: Desc)])
+}
