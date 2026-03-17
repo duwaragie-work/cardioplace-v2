@@ -46,7 +46,7 @@ model User {
 
   accounts      Account[]
   refreshTokens RefreshToken[]
-  devices       Device[]
+  userDevices   UserDevice[]
   authLogs      AuthLog[]
 
   // Content Library relations

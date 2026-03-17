@@ -841,8 +841,17 @@ export class AuthService {
   // ─── Guest (device-linked) ──────────────────────────────────────────────────
 
   /**
-   * Continue as guest: find or create a User keyed by device ID, issue tokens.
-   * Same response shape as other logins so the frontend can store tokens and go to homepage.
+   * Continue as guest: find or create a GUEST user keyed by device ID.
+   *
+   * Decision tree:
+   *  1. Upsert the Device record (hardware fingerprint).
+   *  2. Look for a UserDevice row where the linked user has role GUEST.
+   *     → Found  : resume the same guest session.
+   *     → Missing: the device is new, or only has registered/verified users
+   *                linked to it — create a fresh GUEST user + UserDevice row.
+   *
+   * This prevents a guest login from ever returning a registered user's account
+   * while still preserving guest session continuity for returning devices.
    */
   async guestLogin(context: {
     deviceId: string
@@ -857,15 +866,39 @@ export class AuthService {
       throw new BadRequestException('Device ID is required (header x-device-id or body deviceId)')
     }
 
-    const existingDevice = await this.prisma.device.findUnique({
+    // 1. Upsert the Device record (hardware fingerprint only — no userId)
+    const device = await this.prisma.device.upsert({
       where: { deviceId },
-      include: { user: true },
+      create: {
+        deviceId,
+        platform: context.platform,
+        deviceType: context.deviceType,
+        deviceName: context.deviceName,
+        userAgent: context.userAgent,
+      },
+      update: {
+        lastSeenAt: new Date(),
+        platform: context.platform ?? undefined,
+        deviceType: context.deviceType ?? undefined,
+        deviceName: context.deviceName ?? undefined,
+        userAgent: context.userAgent ?? undefined,
+      },
     })
 
     let user: MinimalUser
 
-    if (existingDevice?.user) {
-      user = existingDevice.user
+    // 2. Look for an existing GUEST-role user already linked to this device
+    const existingLink = await this.prisma.userDevice.findFirst({
+      where: {
+        deviceId: device.id,
+        user: { roles: { has: UserRole.GUEST } },
+      },
+      include: { user: true },
+    })
+
+    if (existingLink) {
+      // Resume same guest session
+      user = existingLink.user
       this.assertAccountActive(user)
       await this.logAuthEvent({
         event: 'guest_login_success',
@@ -877,31 +910,13 @@ export class AuthService {
         success: true,
       })
     } else {
-      if (existingDevice) {
-        const newUser = await this.prisma.user.create({
-          data: { roles: [UserRole.GUEST] },
-        })
-        await this.prisma.device.update({
-          where: { deviceId },
-          data: { userId: newUser.id, lastSeenAt: new Date() },
-        })
-        user = newUser
-      } else {
-        const newUser = await this.prisma.user.create({
-          data: { roles: [UserRole.GUEST] },
-        })
-        await this.prisma.device.create({
-          data: {
-            deviceId,
-            userId: newUser.id,
-            platform: context.platform,
-            deviceType: context.deviceType,
-            deviceName: context.deviceName,
-            userAgent: context.userAgent,
-          },
-        })
-        user = newUser
-      }
+      // No GUEST user found for this device — create a fresh one
+      user = await this.prisma.user.create({
+        data: { roles: [UserRole.GUEST] },
+      })
+      await this.prisma.userDevice.create({
+        data: { userId: user.id, deviceId: device.id },
+      })
       await this.logAuthEvent({
         event: 'guest_login_success',
         userId: user.id,
@@ -919,6 +934,13 @@ export class AuthService {
 
   // ─── Device Tracking ────────────────────────────────────────────────────────
 
+  /**
+   * Upsert the Device hardware record, then create/ensure a UserDevice link
+   * between that device and the given user.
+   *
+   * Called after every successful non-guest login so the device history is
+   * always tracked in the join table regardless of which user logged in.
+   */
   async upsertOrTrackDevice(opts: {
     deviceId: string
     userId?: string
@@ -927,11 +949,11 @@ export class AuthService {
     deviceName?: string
     userAgent?: string
   }): Promise<void> {
-    await this.prisma.device.upsert({
+    // 1. Upsert the Device (hardware fingerprint — no userId field anymore)
+    const device = await this.prisma.device.upsert({
       where: { deviceId: opts.deviceId },
       create: {
         deviceId: opts.deviceId,
-        userId: opts.userId ?? null,
         platform: opts.platform,
         deviceType: opts.deviceType,
         deviceName: opts.deviceName,
@@ -939,13 +961,23 @@ export class AuthService {
       },
       update: {
         lastSeenAt: new Date(),
-        userId: opts.userId ?? undefined,
         platform: opts.platform ?? undefined,
         deviceType: opts.deviceType ?? undefined,
         deviceName: opts.deviceName ?? undefined,
-        userAgent: opts.userAgent,
+        userAgent: opts.userAgent ?? undefined,
       },
     })
+
+    // 2. If a userId is provided, ensure a UserDevice link exists
+    if (opts.userId) {
+      await this.prisma.userDevice.upsert({
+        where: {
+          userId_deviceId: { userId: opts.userId, deviceId: device.id },
+        },
+        create: { userId: opts.userId, deviceId: device.id },
+        update: {}, // link already exists — nothing to update
+      })
+    }
   }
 
   // ─── Profile — Submit (POST: initial onboarding or first-time save) ──────────
