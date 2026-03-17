@@ -7,10 +7,7 @@ model Device {
   userAgent  String?
   lastSeenAt DateTime @default(now())
 
-  userId String? // null for guests; set after login
-  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userDevices UserDevice[]
 
   createdAt DateTime @default(now())
-
-  @@index([userId])
 }

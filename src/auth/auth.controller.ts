@@ -87,7 +87,6 @@ export class AuthController {
     const params = new URLSearchParams({
       access: result.accessToken,
       onboarding_required: String(result.onboarding_required),
-      user_type: result.user_type,
       login_method: result.login_method,
     })
     return res.redirect(`${webAppUrl}/auth/callback?${params.toString()}`)
@@ -99,6 +98,11 @@ export class AuthController {
   @Post('google/mobile')
   async googleMobile(@Body() dto: GoogleMobileLoginDto, @Req() req: Request) {
     const context = this.buildAuthContext(req)
+    if (!context.deviceId?.trim()) {
+      throw new BadRequestException(
+        'Device ID is required. Send via header x-device-id.',
+      )
+    }
     const result = await this.authService.googleMobileLogin(
       dto.idToken,
       context,
@@ -122,6 +126,11 @@ export class AuthController {
   @Post('apple')
   async apple(@Body() dto: AppleLoginDto, @Req() req: Request) {
     const context = this.buildAuthContext(req)
+    if (!context.deviceId?.trim()) {
+      throw new BadRequestException(
+        'Device ID is required. Send via header x-device-id.',
+      )
+    }
     const result = await this.authService.appleLogin(dto.identityToken, context)
     if (context.deviceId) {
       await this.authService.upsertOrTrackDevice({
@@ -162,7 +171,6 @@ export class AuthController {
     const params = new URLSearchParams({
       access: result.accessToken,
       onboarding_required: String(result.onboarding_required),
-      user_type: result.user_type,
       login_method: result.login_method,
     })
     return res.redirect(`${webAppUrl}/auth/callback?${params.toString()}`)
@@ -209,8 +217,20 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const context = this.buildAuthContext(req)
-    const result = await this.authService.verifyOtp(dto.email, dto.otp, context)
+    const baseContext = this.buildAuthContext(req)
+    const deviceId =
+      (baseContext.deviceId ?? dto?.deviceId)?.trim() || null
+    if (!deviceId) {
+      throw new BadRequestException(
+        'Device ID is required. Send via header x-device-id or body deviceId.',
+      )
+    }
+    const context = { ...baseContext, deviceId }
+    const result = await this.authService.verifyOtp(
+      dto.email,
+      dto.otp,
+      context,
+    )
     this.setRefreshCookie(res, result.refreshToken)
     if (context.deviceId) {
       await this.authService.upsertOrTrackDevice({

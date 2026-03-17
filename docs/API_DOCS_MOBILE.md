@@ -31,7 +31,7 @@
 
 ### Overview
 1. User signs in via **Guest**, **Google**, **Apple**, or **Email OTP**
-2. Backend returns `accessToken`, `refreshToken`, `userId`, `roles`, and `user_type`
+2. Backend returns `accessToken`, `refreshToken`, `userId`, `roles`
 3. Store both tokens securely on the device
 4. Include `accessToken` in `Authorization` header for protected endpoints
 5. Use `refreshToken` to get new tokens when `accessToken` expires
@@ -90,7 +90,6 @@ Continue as guest without signing up. Backend finds or creates a user keyed by d
   "refreshToken": "...",
   "userId": "01J...",
   "onboarding_required": false,
-  "user_type": "GUEST",
   "roles": ["GUEST"],
   "login_method": "guest",
   "name": null
@@ -117,7 +116,7 @@ X-Device-Id: ABC123-DEVICE-UUID
 **Headers:**
 ```
 Content-Type: application/json
-X-Device-Id: <device-id>          (optional)
+X-Device-Id: <device-id>          (required)
 X-Device-Platform: ios | android   (optional)
 ```
 
@@ -138,7 +137,6 @@ Pass the ID token obtained from Google Sign-In SDK.
   "refreshToken": "...",
   "userId": "01J...",
   "onboarding_required": false,
-  "user_type": "REGISTERED_USER",
   "roles": ["REGISTERED_USER"],
   "login_method": "google",
   "name": "John Doe"
@@ -167,7 +165,7 @@ X-Device-Platform: ios
 **Headers:**
 ```
 Content-Type: application/json
-X-Device-Id: <device-id>          (optional)
+X-Device-Id: <device-id>          (required)
 X-Device-Platform: ios | android   (optional)
 ```
 
@@ -188,7 +186,6 @@ Pass the identity token obtained from Apple Sign In.
   "refreshToken": "...",
   "userId": "01J...",
   "onboarding_required": true,
-  "user_type": "REGISTERED_USER",
   "roles": ["REGISTERED_USER"],
   "login_method": "apple",
   "name": "Jane Doe"
@@ -258,7 +255,7 @@ Content-Type: application/json
 **Headers:**
 ```
 Content-Type: application/json
-X-Device-Id: <device-id>          (optional)
+X-Device-Id: <device-id>          (required — or send in body as deviceId)
 X-Device-Platform: ios | android   (optional)
 ```
 
@@ -281,7 +278,6 @@ Verify the OTP code and authenticate the user.
   "refreshToken": "...",
   "userId": "01J...",
   "onboarding_required": true,
-  "user_type": "REGISTERED_USER",
   "roles": ["REGISTERED_USER"],
   "login_method": "otp",
   "name": null
@@ -486,7 +482,6 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
   refreshToken: string
   userId: string
   onboarding_required: boolean
-  user_type: UserRole        // primary role (e.g. roles[0])
   roles: UserRole[]         // full list: GUEST | REGISTERED_USER | VERIFIED_USER | CONTENT_ADMIN | ...
   login_method: 'otp' | 'google' | 'apple' | 'guest'
   name: string | null

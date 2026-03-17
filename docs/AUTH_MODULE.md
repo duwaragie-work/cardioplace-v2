@@ -266,7 +266,6 @@ model Device {
 - **Schema:** `User.roles` is an array (`UserRole[]`), default `[GUEST]`. A user can have multiple roles (e.g. `[REGISTERED_USER, CONTENT_ADMIN]`).
 - **JWT:** The access token payload includes `roles: UserRole[]` (not a single `role`). `req.user.roles` is used for authorization.
 - **Authorization:** `RolesGuard` allows access if the user has **any** of the required roles: `requiredRoles.some(r => user.roles.includes(r))`. Use `@Roles(UserRole.CONTENT_ADMIN, UserRole.SUPER_ADMIN)` to allow either role.
-- **Backward compatibility:** The auth API still returns `user_type` (primary role, e.g. first in `roles`) for redirects and existing clients; the full list is in `roles`.
 
 ## 6. Auth Flows
 
@@ -300,7 +299,7 @@ sequenceDiagram
     Server->>Server: issueAccessToken (JWT 15m)
     Server->>Server: issueRefreshToken (opaque 30d)
     Server->>DB: Log: otp_verified
-    Server-->>Client: 200 { accessToken, refreshToken, onboarding_required, user_type, roles, login_method, name }
+    Server-->>Client: 200 { accessToken, refreshToken, onboarding_required, roles, login_method, name }
     Note right of Server: Set-Cookie: refresh_token=... (Web)
 ```
 
@@ -341,7 +340,7 @@ sequenceDiagram
     Server->>DB: upsertSocialUser (by providerId)
     Server->>Server: issueAccessToken + issueRefreshToken
     Server->>DB: upsertOrTrackDevice (x-device-id)
-    Server-->>Mobile: 200 { accessToken, refreshToken, onboarding_required, user_type, roles, ... }
+    Server-->>Mobile: 200 { accessToken, refreshToken, onboarding_required, roles, ... }
 ```
 
 ### 6.6 Guest Login (Device-Linked)
@@ -367,12 +366,12 @@ sequenceDiagram
     end
     Server->>Server: issueAccessToken + issueRefreshToken
     Server->>DB: Log: guest_login_success
-    Server-->>Client: 200 { accessToken, refreshToken, userId, user_type: GUEST, roles: [GUEST], login_method: guest, ... }
+    Server-->>Client: 200 { accessToken, refreshToken, userId, roles: [GUEST], login_method: guest, ... }
 ```
 
 **Request:** `POST /api/v2/auth/guest` with header `x-device-id` (or body `{ deviceId }`). Device ID is required.
 
-**Response:** Same shape as other logins (`accessToken`, `refreshToken`, `userId`, `user_type`, `roles`, `login_method: 'guest'`, `name: null`). Frontend stores tokens and redirects to the main app; no email/OTP step.
+**Response:** Same shape as other logins (`accessToken`, `refreshToken`, `userId`, `roles`, `login_method: 'guest'`, `name: null`). Frontend stores tokens and redirects to the main app; no email/OTP step.
 
 **Scenarios:**
 
@@ -460,7 +459,6 @@ Endpoints returning an `AuthResponse` (login and guest) provide:
   refreshToken: string
   userId: string
   onboarding_required: boolean
-  user_type: UserRole        // primary role (e.g. roles[0]) for backward compatibility
   roles: UserRole[]          // full list of roles
   login_method: 'otp' | 'google' | 'apple' | 'guest'
   name: string | null
