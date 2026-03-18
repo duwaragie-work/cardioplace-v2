@@ -30,8 +30,8 @@ export interface TokenPair {
 export interface AuthResponse extends TokenPair {
   userId: string
   onboarding_required: boolean
-  user_type: UserRole
-  login_method: 'otp' | 'google' | 'apple'
+  roles: UserRole[]
+  login_method: 'otp' | 'google' | 'apple' | 'guest'
   name: string | null
 }
 
@@ -39,7 +39,7 @@ interface MinimalUser {
   id: string
   email: string | null
   name: string | null
-  role: UserRole
+  roles: UserRole[]
   onboardingStatus: OnboardingStatus
   accountStatus: AccountStatus
 }
@@ -84,7 +84,7 @@ export class AuthService {
     const expiresIn = this.config.get<string>('JWT_ACCESS_EXPIRES_IN', '15m')
     // @ts-expect-error - NestJS JWT accepts string for expiresIn despite type definition
     return await this.jwtService.signAsync(
-      { sub: user.id, email: user.email, role: user.role },
+      { sub: user.id, email: user.email, roles: user.roles },
       { expiresIn },
     )
   }
@@ -201,13 +201,13 @@ export class AuthService {
   private buildAuthResponse(
     tokens: TokenPair,
     user: MinimalUser,
-    login_method: 'otp' | 'google' | 'apple',
+    login_method: 'otp' | 'google' | 'apple' | 'guest',
   ): AuthResponse {
     return {
       ...tokens,
       userId: user.id,
       onboarding_required: user.onboardingStatus !== OnboardingStatus.COMPLETED,
-      user_type: user.role,
+      roles: user.roles,
       login_method,
       name: user.name,
     }
@@ -232,7 +232,7 @@ export class AuthService {
     event: string
     identifier?: string
     userId?: string
-    method?: 'otp' | 'google' | 'apple'
+    method?: 'otp' | 'google' | 'apple' | 'guest'
     deviceId?: string
     ipAddress?: string
     userAgent?: string
@@ -606,7 +606,7 @@ export class AuthService {
         email: email ?? null,
         name: name ?? null,
         isVerified: emailVerified,
-        role: UserRole.REGISTERED_USER,
+        roles: [UserRole.REGISTERED_USER],
         accounts: {
           create: { provider, providerId, email },
         },
@@ -785,7 +785,7 @@ export class AuthService {
         data: {
           email: normalizedEmail,
           isVerified: true,
-          role: UserRole.REGISTERED_USER,
+          roles: [UserRole.REGISTERED_USER],
         },
       })
     } else if (!user.isVerified) {
@@ -835,8 +835,109 @@ export class AuthService {
     return this.buildAuthResponse(tokens, user, 'otp')
   }
 
+  // ─── Guest (device-linked) ──────────────────────────────────────────────────
+
+  /**
+   * Continue as guest: find or create a GUEST user keyed by device ID.
+   *
+   * Decision tree:
+   *  1. Upsert the Device record (hardware fingerprint).
+   *  2. Look for a UserDevice row where the linked user has role GUEST.
+   *     → Found  : resume the same guest session.
+   *     → Missing: the device is new, or only has registered/verified users
+   *                linked to it — create a fresh GUEST user + UserDevice row.
+   *
+   * This prevents a guest login from ever returning a registered user's account
+   * while still preserving guest session continuity for returning devices.
+   */
+  async guestLogin(context: {
+    deviceId: string
+    userAgent?: string
+    platform?: string
+    deviceType?: string
+    deviceName?: string
+    ipAddress?: string
+  }): Promise<AuthResponse> {
+    const { deviceId } = context
+    if (!deviceId?.trim()) {
+      throw new BadRequestException('Device ID is required (header x-device-id or body deviceId)')
+    }
+
+    // 1. Upsert the Device record (hardware fingerprint only — no userId)
+    const device = await this.prisma.device.upsert({
+      where: { deviceId },
+      create: {
+        deviceId,
+        platform: context.platform,
+        deviceType: context.deviceType,
+        deviceName: context.deviceName,
+        userAgent: context.userAgent,
+      },
+      update: {
+        lastSeenAt: new Date(),
+        platform: context.platform ?? undefined,
+        deviceType: context.deviceType ?? undefined,
+        deviceName: context.deviceName ?? undefined,
+        userAgent: context.userAgent ?? undefined,
+      },
+    })
+
+    let user: MinimalUser
+
+    // 2. Look for an existing GUEST-role user already linked to this device
+    const existingLink = await this.prisma.userDevice.findFirst({
+      where: {
+        deviceId: device.id,
+        user: { roles: { has: UserRole.GUEST } },
+      },
+      include: { user: true },
+    })
+
+    if (existingLink) {
+      // Resume same guest session
+      user = existingLink.user
+      this.assertAccountActive(user)
+      await this.logAuthEvent({
+        event: 'guest_login_success',
+        userId: user.id,
+        method: 'guest',
+        deviceId,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        success: true,
+      })
+    } else {
+      // No GUEST user found for this device — create a fresh one
+      user = await this.prisma.user.create({
+        data: { roles: [UserRole.GUEST] },
+      })
+      await this.prisma.userDevice.create({
+        data: { userId: user.id, deviceId: device.id },
+      })
+      await this.logAuthEvent({
+        event: 'guest_login_success',
+        userId: user.id,
+        method: 'guest',
+        deviceId,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        success: true,
+      })
+    }
+
+    const tokens = await this.issueTokenPair(user, context.userAgent)
+    return this.buildAuthResponse(tokens, user, 'guest')
+  }
+
   // ─── Device Tracking ────────────────────────────────────────────────────────
 
+  /**
+   * Upsert the Device hardware record, then create/ensure a UserDevice link
+   * between that device and the given user.
+   *
+   * Called after every successful non-guest login so the device history is
+   * always tracked in the join table regardless of which user logged in.
+   */
   async upsertOrTrackDevice(opts: {
     deviceId: string
     userId?: string
@@ -845,11 +946,11 @@ export class AuthService {
     deviceName?: string
     userAgent?: string
   }): Promise<void> {
-    await this.prisma.device.upsert({
+    // 1. Upsert the Device (hardware fingerprint — no userId field anymore)
+    const device = await this.prisma.device.upsert({
       where: { deviceId: opts.deviceId },
       create: {
         deviceId: opts.deviceId,
-        userId: opts.userId ?? null,
         platform: opts.platform,
         deviceType: opts.deviceType,
         deviceName: opts.deviceName,
@@ -857,13 +958,23 @@ export class AuthService {
       },
       update: {
         lastSeenAt: new Date(),
-        userId: opts.userId ?? undefined,
         platform: opts.platform ?? undefined,
         deviceType: opts.deviceType ?? undefined,
         deviceName: opts.deviceName ?? undefined,
-        userAgent: opts.userAgent,
+        userAgent: opts.userAgent ?? undefined,
       },
     })
+
+    // 2. If a userId is provided, ensure a UserDevice link exists
+    if (opts.userId) {
+      await this.prisma.userDevice.upsert({
+        where: {
+          userId_deviceId: { userId: opts.userId, deviceId: device.id },
+        },
+        create: { userId: opts.userId, deviceId: device.id },
+        update: {}, // link already exists — nothing to update
+      })
+    }
   }
 
   // ─── Profile — Submit (POST: initial onboarding or first-time save) ──────────
@@ -935,7 +1046,7 @@ export class AuthService {
         id: true,
         email: true,
         name: true,
-        role: true,
+        roles: true,
         isVerified: true,
         onboardingStatus: true,
         accountStatus: true,
@@ -950,7 +1061,21 @@ export class AuthService {
       throw new NotFoundException('User not found')
     }
 
-    return user
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      roles: user.roles,
+      emailVerified: user.isVerified,
+      accountStatus: user.accountStatus.toLowerCase(),
+      createdAt: user.createdAt.toISOString(),
+      dateOfBirth: user.dateOfBirth
+        ? user.dateOfBirth.toISOString().slice(0, 10)
+        : null,
+      menopauseStage: user.menopauseStage,
+      timezone: user.timezone,
+      onboardingStatus: user.onboardingStatus,
+    }
   }
 
   // ─── Email Helper ────────────────────────────────────────────────────────────

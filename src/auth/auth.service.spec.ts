@@ -35,7 +35,7 @@ describe('AuthService', () => {
     id: '01JCEXAMPLE123456789',
     email: 'test@example.com',
     name: 'Test User',
-    role: UserRole.REGISTERED_USER,
+    roles: [UserRole.REGISTERED_USER],
     isVerified: true,
     onboardingStatus: OnboardingStatus.COMPLETED,
     accountStatus: AccountStatus.ACTIVE,
@@ -93,6 +93,14 @@ describe('AuthService', () => {
               create: jest.fn(),
             },
             device: {
+              findUnique: jest.fn(),
+              create: jest.fn(),
+              update: jest.fn(),
+              upsert: jest.fn(),
+            },
+            userDevice: {
+              findFirst: jest.fn(),
+              create: jest.fn(),
               upsert: jest.fn(),
             },
           },
@@ -394,7 +402,6 @@ describe('AuthService', () => {
         accessToken: expect.any(String),
         refreshToken: expect.any(String),
         onboarding_required: false,
-        user_type: UserRole.REGISTERED_USER,
         login_method: 'otp',
       })
     })
@@ -421,7 +428,7 @@ describe('AuthService', () => {
         data: {
           email: 'test@example.com',
           isVerified: true,
-          role: UserRole.REGISTERED_USER,
+          roles: [UserRole.REGISTERED_USER],
         },
       })
     })
@@ -823,24 +830,40 @@ describe('AuthService', () => {
 
   describe('getProfile', () => {
     it('should return selected user fields', async () => {
-      const profileData = {
+      // Raw DB shape — what Prisma returns
+      const dbRow = {
         id: mockUser.id,
         email: mockUser.email,
         name: mockUser.name,
-        role: mockUser.role,
-        isVerified: mockUser.isVerified,
+        roles: mockUser.roles,
+        isVerified: mockUser.isVerified,         // service renames to emailVerified
         onboardingStatus: OnboardingStatus.COMPLETED,
-        accountStatus: AccountStatus.ACTIVE,
+        accountStatus: AccountStatus.ACTIVE,     // service lowercases to 'active'
         dateOfBirth: null,
         menopauseStage: MenopauseStage.UNKNOWN,
         timezone: 'Asia/Colombo',
-        createdAt: mockUser.createdAt,
+        createdAt: mockUser.createdAt,           // service converts to ISO string
       }
-      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(profileData)
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(dbRow)
 
       const result = await service.getProfile(mockUser.id)
-      expect(result).toEqual(profileData)
+
+      // Match the transformed response shape (not the raw DB row)
+      expect(result).toEqual({
+        id: mockUser.id,
+        email: mockUser.email,
+        name: mockUser.name,
+        roles: mockUser.roles,
+        emailVerified: mockUser.isVerified,
+        accountStatus: 'active',
+        dateOfBirth: null,
+        menopauseStage: MenopauseStage.UNKNOWN,
+        timezone: 'Asia/Colombo',
+        onboardingStatus: OnboardingStatus.COMPLETED,
+        createdAt: mockUser.createdAt.toISOString(),
+      })
     })
+
 
     it('should throw NotFoundException when user does not exist', async () => {
       ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(null)
@@ -851,13 +874,164 @@ describe('AuthService', () => {
     })
   })
 
-  // ─── Device Linking ──────────────────────────────────────────────────────────
+
+  // ─── Guest Login ────────────────────────────────────────────────────────
+
+  describe('guestLogin', () => {
+    // Shared mock data
+    const mockDevice = {
+      id: '01DEVICE123456789000',
+      deviceId: 'device-guest-1',
+      platform: null,
+      deviceType: null,
+      deviceName: null,
+      userAgent: null,
+      lastSeenAt: new Date(),
+      createdAt: new Date(),
+    }
+
+    const guestUser = {
+      id: '01JCGUEST123456789',
+      email: null,
+      name: null,
+      roles: [UserRole.GUEST],
+      isVerified: false,
+      onboardingStatus: OnboardingStatus.NOT_COMPLETED,
+      accountStatus: AccountStatus.ACTIVE,
+      dateOfBirth: null,
+      menopauseStage: MenopauseStage.UNKNOWN,
+      timezone: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+
+    beforeEach(() => {
+      // Device.upsert always returns the mock device
+      ;(prisma.device.upsert as jest.Mock).mockResolvedValue(mockDevice)
+      ;(prisma.authLog.create as jest.Mock).mockResolvedValue({})
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({})
+    })
+
+    it('should throw BadRequestException when deviceId is missing', async () => {
+      await expect(
+        service.guestLogin({ deviceId: '' }),
+      ).rejects.toThrow('Device ID is required')
+      await expect(
+        service.guestLogin({ deviceId: '   ' }),
+      ).rejects.toThrow('Device ID is required')
+    })
+
+    it('Case: new device — creates new GUEST user and UserDevice link', async () => {
+      // No existing GUEST link for this device
+      ;(prisma.userDevice.findFirst as jest.Mock).mockResolvedValue(null)
+      ;(prisma.user.create as jest.Mock).mockResolvedValue(guestUser)
+      ;(prisma.userDevice.create as jest.Mock).mockResolvedValue({})
+
+      const result = await service.guestLogin({
+        deviceId: 'device-guest-1',
+        userAgent: 'Mozilla/5.0',
+      })
+
+      // Device upserted
+      expect(prisma.device.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { deviceId: 'device-guest-1' } }),
+      )
+      // Looked for existing GUEST link
+      expect(prisma.userDevice.findFirst).toHaveBeenCalledWith({
+        where: { deviceId: mockDevice.id, user: { roles: { has: UserRole.GUEST } } },
+        include: { user: true },
+      })
+      // Created new GUEST user
+      expect(prisma.user.create).toHaveBeenCalledWith({
+        data: { roles: [UserRole.GUEST] },
+      })
+      // Created UserDevice join row
+      expect(prisma.userDevice.create).toHaveBeenCalledWith({
+        data: { userId: guestUser.id, deviceId: mockDevice.id },
+      })
+      expect(result).toMatchObject({
+        userId: guestUser.id,
+        roles: [UserRole.GUEST],
+        login_method: 'guest',
+        onboarding_required: true,
+      })
+      expect(result).toHaveProperty('accessToken')
+      expect(result).toHaveProperty('refreshToken')
+    })
+
+    it('Case: returning guest — resumes same session (same GUEST user returned)', async () => {
+      // Existing GUEST user already linked to this device
+      ;(prisma.userDevice.findFirst as jest.Mock).mockResolvedValue({
+        id: '01LINK000000000001',
+        userId: guestUser.id,
+        deviceId: mockDevice.id,
+        user: guestUser,
+      })
+
+      const result = await service.guestLogin({ deviceId: 'device-guest-1' })
+
+      // Should NOT create a new user
+      expect(prisma.user.create).not.toHaveBeenCalled()
+      expect(prisma.userDevice.create).not.toHaveBeenCalled()
+
+      expect(result).toMatchObject({
+        userId: guestUser.id,
+        login_method: 'guest',
+      })
+    })
+
+    it('Case: device has only registered user — creates NEW GUEST user', async () => {
+      // No GUEST-role UserDevice found (device only linked to registered user)
+      ;(prisma.userDevice.findFirst as jest.Mock).mockResolvedValue(null)
+      const newGuestUser = { ...guestUser, id: '01JCGUEST_NEW_000001' }
+      ;(prisma.user.create as jest.Mock).mockResolvedValue(newGuestUser)
+      ;(prisma.userDevice.create as jest.Mock).mockResolvedValue({})
+
+      const result = await service.guestLogin({ deviceId: 'device-guest-1' })
+
+      expect(prisma.user.create).toHaveBeenCalledWith({
+        data: { roles: [UserRole.GUEST] },
+      })
+      expect(prisma.userDevice.create).toHaveBeenCalledWith({
+        data: { userId: newGuestUser.id, deviceId: mockDevice.id },
+      })
+      // Must NOT return the registered user
+      expect(result.userId).toBe(newGuestUser.id)
+      expect(result.login_method).toBe('guest')
+    })
+
+    it('should throw ForbiddenException when existing guest account is blocked', async () => {
+      const blockedGuest = { ...guestUser, accountStatus: AccountStatus.BLOCKED }
+      ;(prisma.userDevice.findFirst as jest.Mock).mockResolvedValue({
+        id: '01LINK000000000002',
+        userId: blockedGuest.id,
+        deviceId: mockDevice.id,
+        user: blockedGuest,
+      })
+
+      await expect(
+        service.guestLogin({ deviceId: 'device-guest-1' }),
+      ).rejects.toThrow(ForbiddenException)
+    })
+  })
+
+  // ─── Device Linking (upsertOrTrackDevice) ──────────────────────────────────────
 
   describe('Device Linking', () => {
+    const mockDevice = {
+      id: '01DEVICE123456789000',
+      deviceId: 'device-uuid-123',
+      platform: null,
+      deviceType: null,
+      deviceName: null,
+      userAgent: 'test-agent',
+      lastSeenAt: new Date(),
+      createdAt: new Date(),
+    }
+
     it('should include userId in AuthResponse for OTP verification', async () => {
       const context = { deviceId: 'device-uuid-123', userAgent: 'test-agent' }
 
-      // Mock OTP verification
       ;(prisma.otpCode.findFirst as jest.Mock).mockResolvedValue({
         id: 'otp-id',
         email: 'test@example.com',
@@ -866,33 +1040,25 @@ describe('AuthService', () => {
         attempts: 0,
       })
       ;(bcryptService.compare as jest.Mock).mockResolvedValue(true)
-      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(null) // New user
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(null)
       ;(prisma.user.create as jest.Mock).mockResolvedValue(mockUser)
       ;(prisma.otpCode.delete as jest.Mock).mockResolvedValue(undefined)
 
-      // Mock token issuance
       const mockTokens = { accessToken: 'access', refreshToken: 'refresh' }
       jest
         .spyOn(service as unknown as AuthServiceWithPrivateMethods, 'issueTokenPair')
         .mockResolvedValue(mockTokens)
 
-      const result = await service.verifyOtp(
-        'test@example.com',
-        '123456',
-        context,
-      )
+      const result = await service.verifyOtp('test@example.com', '123456', context)
 
-      // Verify AuthResponse includes userId
       expect(result).toHaveProperty('userId', mockUser.id)
       expect(result).toHaveProperty('onboarding_required', false)
-      expect(result).toHaveProperty('user_type', UserRole.REGISTERED_USER)
       expect(result).toHaveProperty('login_method', 'otp')
     })
 
     it('should include userId in AuthResponse for Google mobile login', async () => {
       const context = { deviceId: 'device-uuid-456', userAgent: 'mobile-agent' }
 
-      // Mock Google token verification
       ;(global.fetch as jest.MockedFunction<typeof fetch>) = jest.fn().mockResolvedValue({
         ok: true,
         json: jest.fn().mockResolvedValue({
@@ -900,10 +1066,11 @@ describe('AuthService', () => {
           email: 'google@example.com',
           email_verified: 'true',
           name: 'Google User',
-          aud: 'mock-google-client-id', // Use the mocked client ID
+          aud: 'mock-google-client-id',
         }),
       })
 
+      ;(prisma.account.findUnique as jest.Mock).mockResolvedValue(null)
       ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(null)
       ;(prisma.user.create as jest.Mock).mockResolvedValue(mockUser)
 
@@ -916,6 +1083,38 @@ describe('AuthService', () => {
 
       expect(result).toHaveProperty('userId', mockUser.id)
       expect(result).toHaveProperty('login_method', 'google')
+    })
+
+    it('upsertOrTrackDevice: new device + user — creates Device and UserDevice link', async () => {
+      ;(prisma.device.upsert as jest.Mock).mockResolvedValue(mockDevice)
+      ;(prisma.userDevice.upsert as jest.Mock).mockResolvedValue({})
+
+      await service.upsertOrTrackDevice({
+        deviceId: 'device-uuid-123',
+        userId: mockUser.id,
+        userAgent: 'test-agent',
+      })
+
+      expect(prisma.device.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { deviceId: 'device-uuid-123' },
+          create: expect.objectContaining({ deviceId: 'device-uuid-123' }),
+        }),
+      )
+      expect(prisma.userDevice.upsert).toHaveBeenCalledWith({
+        where: { userId_deviceId: { userId: mockUser.id, deviceId: mockDevice.id } },
+        create: { userId: mockUser.id, deviceId: mockDevice.id },
+        update: {},
+      })
+    })
+
+    it('upsertOrTrackDevice: no userId provided — only upserts Device, no UserDevice link', async () => {
+      ;(prisma.device.upsert as jest.Mock).mockResolvedValue(mockDevice)
+
+      await service.upsertOrTrackDevice({ deviceId: 'device-uuid-123' })
+
+      expect(prisma.device.upsert).toHaveBeenCalled()
+      expect(prisma.userDevice.upsert).not.toHaveBeenCalled()
     })
   })
 })

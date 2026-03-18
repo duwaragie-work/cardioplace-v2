@@ -1,0 +1,30 @@
+model DeviationAlert {
+    id             String @id @default(uuid())
+    userId         String
+    journalEntryId String
+
+    user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+    journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+
+    type      DeviationType
+    severity  DeviationSeverity
+    magnitude Decimal           @db.Decimal(6, 2)
+
+    // Snapshot values at the time of detection for audit trail
+    baselineValue Decimal? @db.Decimal(6, 2)
+    actualValue   Decimal? @db.Decimal(6, 2)
+
+    escalated Boolean @default(false)
+
+    status         AlertStatus @default(OPEN)
+    createdAt      DateTime    @default(now())
+    acknowledgedAt DateTime?
+
+    // Relations
+    escalationEvents EscalationEvent[]
+    notifications    Notification[]
+
+    @@unique([journalEntryId, type])
+    @@index([userId, createdAt(sort: Desc)])
+    @@index([userId, status, createdAt(sort: Desc)])
+}

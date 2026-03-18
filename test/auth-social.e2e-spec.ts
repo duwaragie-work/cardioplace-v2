@@ -11,8 +11,8 @@ import { PrismaService } from '../src/prisma/prisma.service.js'
  * Integration Test - Social Login Flow
  *
  * This test suite verifies the complete social authentication flows:
- * 1. Google OAuth mobile login (POST /auth/google/mobile)
- * 2. Apple Sign In (POST /auth/apple)
+ * 1. Google OAuth mobile login (POST /v2/auth/google/mobile)
+ * 2. Apple Sign In (POST /v2/auth/apple)
  * 3. Validates AuthLog entries are created for each provider
  * 4. Tests both new user and existing user scenarios
  * 5. Validates proper error handling for invalid tokens
@@ -121,10 +121,10 @@ describe('Auth Social Login Flow (e2e)', () => {
     })
   })
 
-  describe('POST /auth/google/mobile - New User', () => {
+  describe('POST /v2/auth/google/mobile - New User', () => {
     it('should authenticate with Google and create new user', async () => {
       const response = await request(app.getHttpServer())
-        .post('/auth/google/mobile')
+        .post('/v2/auth/google/mobile')
         .send({
           token: 'valid_google_token',
           deviceId: 'google-device-001',
@@ -179,7 +179,7 @@ describe('Auth Social Login Flow (e2e)', () => {
 
     it('should reject invalid Google token', async () => {
       const response = await request(app.getHttpServer())
-        .post('/auth/google/mobile')
+        .post('/v2/auth/google/mobile')
         .send({
           token: 'invalid_token',
           deviceId: 'google-device-002',
@@ -213,7 +213,7 @@ describe('Auth Social Login Flow (e2e)', () => {
 
     it('should handle missing required fields', async () => {
       await request(app.getHttpServer())
-        .post('/auth/google/mobile')
+        .post('/v2/auth/google/mobile')
         .send({
           // Missing token
           deviceId: 'google-device-003',
@@ -221,7 +221,7 @@ describe('Auth Social Login Flow (e2e)', () => {
         .expect(400)
 
       await request(app.getHttpServer())
-        .post('/auth/google/mobile')
+        .post('/v2/auth/google/mobile')
         .send({
           token: 'valid_google_token',
           // Missing deviceId
@@ -230,7 +230,7 @@ describe('Auth Social Login Flow (e2e)', () => {
     })
   })
 
-  describe('POST /auth/google/mobile - Existing User', () => {
+  describe('POST /v2/auth/google/mobile - Existing User', () => {
     let existingAccount: { id: string; userId: string; email: string | null }
 
     beforeEach(async () => {
@@ -253,7 +253,7 @@ describe('Auth Social Login Flow (e2e)', () => {
 
     it('should authenticate existing Google user', async () => {
       const response = await request(app.getHttpServer())
-        .post('/auth/google/mobile')
+        .post('/v2/auth/google/mobile')
         .send({
           token: 'valid_google_token',
           deviceId: 'google-device-004',
@@ -288,10 +288,10 @@ describe('Auth Social Login Flow (e2e)', () => {
     })
   })
 
-  describe('POST /auth/apple - New User', () => {
+  describe('POST /v2/auth/apple - New User', () => {
     it('should authenticate with Apple and create new user', async () => {
       const response = await request(app.getHttpServer())
-        .post('/auth/apple')
+        .post('/v2/auth/apple')
         .send({
           identityToken: 'valid_apple_token',
           deviceId: 'apple-device-001',
@@ -346,7 +346,7 @@ describe('Auth Social Login Flow (e2e)', () => {
 
     it('should reject invalid Apple token', async () => {
       const response = await request(app.getHttpServer())
-        .post('/auth/apple')
+        .post('/v2/auth/apple')
         .send({
           identityToken: 'invalid_token',
           deviceId: 'apple-device-002',
@@ -379,7 +379,7 @@ describe('Auth Social Login Flow (e2e)', () => {
     })
   })
 
-  describe('POST /auth/apple - Existing User', () => {
+  describe('POST /v2/auth/apple - Existing User', () => {
     let existingAccount: { id: string; userId: string; email: string | null }
 
     beforeEach(async () => {
@@ -402,7 +402,7 @@ describe('Auth Social Login Flow (e2e)', () => {
 
     it('should authenticate existing Apple user', async () => {
       const response = await request(app.getHttpServer())
-        .post('/auth/apple')
+        .post('/v2/auth/apple')
         .send({
           identityToken: 'valid_apple_token',
           deviceId: 'apple-device-003',
@@ -442,7 +442,7 @@ describe('Auth Social Login Flow (e2e)', () => {
     it('should allow same user to login from multiple devices', async () => {
       // First login from device 1
       await request(app.getHttpServer())
-        .post('/auth/google/mobile')
+        .post('/v2/auth/google/mobile')
         .send({
           token: 'valid_google_token',
           deviceId: 'device-001',
@@ -451,7 +451,7 @@ describe('Auth Social Login Flow (e2e)', () => {
 
       // Second login from device 2
       const response = await request(app.getHttpServer())
-        .post('/auth/google/mobile')
+        .post('/v2/auth/google/mobile')
         .send({
           token: 'valid_google_token',
           deviceId: 'device-002',
@@ -508,7 +508,7 @@ describe('Auth Social Login Flow (e2e)', () => {
 
       // First login with Google
       const googleResponse = await request(app.getHttpServer())
-        .post('/auth/google/mobile')
+        .post('/v2/auth/google/mobile')
         .send({
           token: 'valid_google_token',
           deviceId: 'device-google',
@@ -532,7 +532,7 @@ describe('Auth Social Login Flow (e2e)', () => {
 
       // Then login with Apple using same email
       const appleResponse = await request(app.getHttpServer())
-        .post('/auth/apple')
+        .post('/v2/auth/apple')
         .send({
           identityToken: 'valid_apple_token',
           deviceId: 'device-apple',

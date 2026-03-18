@@ -25,8 +25,7 @@ import { KnowledgebaseService } from './knowledgebase.service.js'
 @Roles(
   UserRole.REGISTERED_USER,
   UserRole.CONTENT_ADMIN,
-  UserRole.ARTICLE_ADMIN,
-  UserRole.ARTICLE_APPROVER,
+  UserRole.CONTENT_APPROVER,
   UserRole.KB_UPLOADER,
   UserRole.KB_APPROVER,
   UserRole.CHAT_REVIEWER,

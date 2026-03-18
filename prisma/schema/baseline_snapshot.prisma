@@ -1,0 +1,21 @@
+model BaselineSnapshot {
+    id     String @id @default(uuid())
+    userId String
+    user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    // The date this baseline was computed for
+    computedForDate DateTime @db.Date
+
+    // Rolling averages computed from past 14-day window (min 10 entries required)
+    baselineSleepHours   Decimal? @db.Decimal(5, 2)
+    baselineSleepQuality Decimal? @db.Decimal(4, 2)
+    baselineAwakenings   Decimal? @db.Decimal(4, 2)
+
+    createdAt DateTime @default(now())
+
+    // Relations
+    journalEntries JournalEntry[]
+
+    @@unique([userId, computedForDate])
+    @@index([userId, computedForDate(sort: Desc)])
+}
