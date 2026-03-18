@@ -46,20 +46,13 @@ model User {
   onboardingStatus OnboardingStatus @default(NOT_COMPLETED)
   accountStatus    AccountStatus    @default(ACTIVE)
 
-<<<<<<< HEAD
   accounts      Account[]
   refreshTokens RefreshToken[]
   devices       Device[]
   authLogs      AuthLog[] 
   sessions      Session[]
-=======
-  accounts          Account[]
-  refreshTokens     RefreshToken[]
-  devices           Device[]
-  authLogs          AuthLog[]
   baselineSnapshots BaselineSnapshot[]
   userDevices   UserDevice[]
->>>>>>> origin/main
 
   // Content Library relations
   contentSubmitted Content[]       @relation("ContentSubmittedBy")
