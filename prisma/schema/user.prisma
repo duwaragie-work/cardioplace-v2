@@ -48,7 +48,6 @@ model User {
 
   accounts      Account[]
   refreshTokens RefreshToken[]
-  devices       Device[]
   authLogs      AuthLog[] 
   sessions      Session[]
   baselineSnapshots BaselineSnapshot[]
