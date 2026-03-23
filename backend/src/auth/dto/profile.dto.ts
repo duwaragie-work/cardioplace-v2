@@ -8,14 +8,10 @@ import {
   ValidationOptions,
 } from 'class-validator'
 
-// ─── MenopauseStage values (mirrors the Prisma enum) ─────────────────────────
+// ─── Cardio enum values (mirrors Prisma enums) ──────────────────────────────
 
-export const MENOPAUSE_STAGE_VALUES = [
-  'PERIMENOPAUSE',
-  'MENOPAUSE',
-  'POSTMENOPAUSE',
-  'UNKNOWN',
-] as const
+export const RISK_TIER_VALUES = ['STANDARD', 'ELEVATED', 'HIGH'] as const
+export const COMMUNICATION_PREFERENCE_VALUES = ['TEXT_FIRST', 'AUDIO_FIRST'] as const
 
 // ─── Custom validator: ISO date string that lies in the past ──────────────────
 
@@ -62,10 +58,25 @@ export class ProfileDto {
   @IsDateInPast()
   dateOfBirth?: string | null
 
-  /** Menopause stage. Defaults to UNKNOWN in the DB if not submitted. */
+  /** Primary cardiovascular condition (e.g. "hypertension"). */
   @IsOptional()
-  @IsIn(MENOPAUSE_STAGE_VALUES)
-  menopauseStage?: (typeof MENOPAUSE_STAGE_VALUES)[number]
+  @IsString()
+  primaryCondition?: string
+
+  /** Preferred language code (e.g. "en", "es"). */
+  @IsOptional()
+  @IsString()
+  preferredLanguage?: string
+
+  /** Risk tier for escalation thresholds. */
+  @IsOptional()
+  @IsIn(RISK_TIER_VALUES)
+  riskTier?: (typeof RISK_TIER_VALUES)[number]
+
+  /** Communication preference: text-first or audio-first. */
+  @IsOptional()
+  @IsIn(COMMUNICATION_PREFERENCE_VALUES)
+  communicationPreference?: (typeof COMMUNICATION_PREFERENCE_VALUES)[number]
 
   /**
    * IANA timezone identifier (e.g. "Asia/Colombo", "America/New_York").

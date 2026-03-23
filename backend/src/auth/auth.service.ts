@@ -12,7 +12,6 @@ import * as nodemailer from 'nodemailer'
 import type { Profile } from 'passport-google-oauth20'
 import {
   AccountStatus,
-  MenopauseStage,
   OnboardingStatus,
   UserRole,
 } from '../generated/prisma/enums.js'
@@ -48,7 +47,10 @@ export interface ProfileResult {
   message: string
   name: string | null
   dateOfBirth: Date | null
-  menopauseStage: MenopauseStage
+  communicationPreference?: string | null
+  preferredLanguage?: string | null
+  riskTier?: string | null
+  primaryCondition?: string | null
   timezone: string | null
   onboardingStatus: OnboardingStatus
 }
@@ -988,7 +990,10 @@ export class AuthService {
       select: {
         name: true,
         dateOfBirth: true,
-        menopauseStage: true,
+        communicationPreference: true,
+        preferredLanguage: true,
+        riskTier: true,
+        primaryCondition: true,
         timezone: true,
         onboardingStatus: true,
       },
@@ -1008,7 +1013,10 @@ export class AuthService {
       select: {
         name: true,
         dateOfBirth: true,
-        menopauseStage: true,
+        communicationPreference: true,
+        preferredLanguage: true,
+        riskTier: true,
+        primaryCondition: true,
         timezone: true,
         onboardingStatus: true,
       },
@@ -1018,21 +1026,17 @@ export class AuthService {
   }
 
   private buildProfilePatch(dto: ProfileDto) {
-    const patch: {
-      name?: string
-      dateOfBirth?: Date | null
-      menopauseStage?: MenopauseStage
-      timezone?: string
-    } = {}
+    const patch: Record<string, unknown> = {}
 
     if (dto.name !== undefined) patch.name = dto.name
     if (dto.dateOfBirth !== undefined) {
       patch.dateOfBirth = dto.dateOfBirth ? new Date(dto.dateOfBirth) : null
     }
-    if (dto.menopauseStage !== undefined) {
-      patch.menopauseStage = dto.menopauseStage as MenopauseStage
-    }
     if (dto.timezone !== undefined) patch.timezone = dto.timezone
+    if (dto.primaryCondition !== undefined) patch.primaryCondition = dto.primaryCondition
+    if (dto.preferredLanguage !== undefined) patch.preferredLanguage = dto.preferredLanguage
+    if (dto.riskTier !== undefined) patch.riskTier = dto.riskTier
+    if (dto.communicationPreference !== undefined) patch.communicationPreference = dto.communicationPreference
 
     return patch
   }
@@ -1051,7 +1055,10 @@ export class AuthService {
         onboardingStatus: true,
         accountStatus: true,
         dateOfBirth: true,
-        menopauseStage: true,
+        communicationPreference: true,
+        preferredLanguage: true,
+        riskTier: true,
+        primaryCondition: true,
         timezone: true,
         createdAt: true,
       },
@@ -1072,7 +1079,10 @@ export class AuthService {
       dateOfBirth: user.dateOfBirth
         ? user.dateOfBirth.toISOString().slice(0, 10)
         : null,
-      menopauseStage: user.menopauseStage,
+      communicationPreference: user.communicationPreference,
+      preferredLanguage: user.preferredLanguage,
+      riskTier: user.riskTier,
+      primaryCondition: user.primaryCondition,
       timezone: user.timezone,
       onboardingStatus: user.onboardingStatus,
     }

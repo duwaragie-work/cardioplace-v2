@@ -11,8 +11,9 @@ import { Test, TestingModule } from '@nestjs/testing'
 import { validate } from 'class-validator'
 import {
   AccountStatus,
-  MenopauseStage,
+  CommunicationPreference,
   OnboardingStatus,
+  RiskTier,
   UserRole,
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
@@ -40,7 +41,10 @@ describe('AuthService', () => {
     onboardingStatus: OnboardingStatus.COMPLETED,
     accountStatus: AccountStatus.ACTIVE,
     dateOfBirth: null,
-    menopauseStage: MenopauseStage.UNKNOWN,
+    communicationPreference: null,
+    preferredLanguage: 'en',
+    riskTier: RiskTier.STANDARD,
+    primaryCondition: null,
     timezone: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -653,7 +657,7 @@ describe('AuthService', () => {
       const dto = Object.assign(new ProfileDto(), {
         name: 'Alice',
         dateOfBirth: '1986-04-12',
-        menopauseStage: 'PERIMENOPAUSE',
+        riskTier: 'ELEVATED',
         timezone: 'America/New_York',
       })
       const errors = await validate(dto)
@@ -685,12 +689,12 @@ describe('AuthService', () => {
       expect(errors.some((e) => e.property === 'dateOfBirth')).toBe(true)
     })
 
-    it('should reject an invalid menopauseStage value', async () => {
+    it('should reject an invalid riskTier value', async () => {
       const dto = Object.assign(new ProfileDto(), {
-        menopauseStage: 'INVALID_STAGE',
+        riskTier: 'INVALID_TIER',
       })
       const errors = await validate(dto)
-      expect(errors.some((e) => e.property === 'menopauseStage')).toBe(true)
+      expect(errors.some((e) => e.property === 'riskTier')).toBe(true)
     })
 
     it('should reject a timezone without a slash', async () => {
@@ -707,7 +711,10 @@ describe('AuthService', () => {
       ;(prisma.user.update as jest.Mock).mockResolvedValue({
         name: mockUser.name,
         dateOfBirth: null,
-        menopauseStage: MenopauseStage.UNKNOWN,
+        communicationPreference: null,
+        preferredLanguage: 'en',
+        riskTier: RiskTier.STANDARD,
+        primaryCondition: null,
         timezone: null,
         onboardingStatus: OnboardingStatus.COMPLETED,
       })
@@ -727,7 +734,10 @@ describe('AuthService', () => {
           select: {
             name: true,
             dateOfBirth: true,
-            menopauseStage: true,
+            communicationPreference: true,
+            preferredLanguage: true,
+            riskTier: true,
+            primaryCondition: true,
             timezone: true,
             onboardingStatus: true,
           },
@@ -739,14 +749,18 @@ describe('AuthService', () => {
       ;(prisma.user.update as jest.Mock).mockResolvedValue({
         name: 'Alice',
         dateOfBirth: null,
-        menopauseStage: MenopauseStage.PERIMENOPAUSE,
+        communicationPreference: null,
+        preferredLanguage: 'en',
+        riskTier: RiskTier.ELEVATED,
+        primaryCondition: 'hypertension',
         timezone: 'Asia/Colombo',
         onboardingStatus: OnboardingStatus.COMPLETED,
       })
 
       await service.submitProfile(mockUser.id, {
         name: 'Alice',
-        menopauseStage: 'PERIMENOPAUSE',
+        riskTier: 'ELEVATED',
+        primaryCondition: 'hypertension',
         timezone: 'Asia/Colombo',
       })
 
@@ -755,7 +769,8 @@ describe('AuthService', () => {
           where: { id: mockUser.id },
           data: expect.objectContaining({
             name: 'Alice',
-            menopauseStage: 'PERIMENOPAUSE',
+            riskTier: 'ELEVATED',
+            primaryCondition: 'hypertension',
             timezone: 'Asia/Colombo',
             onboardingStatus: OnboardingStatus.COMPLETED,
           }),
@@ -790,7 +805,7 @@ describe('AuthService', () => {
 
       const call = (prisma.user.update as jest.Mock).mock.calls[0][0]
       expect(call.data).not.toHaveProperty('timezone')
-      expect(call.data).not.toHaveProperty('menopauseStage')
+      expect(call.data).not.toHaveProperty('riskTier')
     })
   })
 
@@ -801,7 +816,10 @@ describe('AuthService', () => {
       ;(prisma.user.update as jest.Mock).mockResolvedValue({
         name: 'Alice Updated',
         dateOfBirth: null,
-        menopauseStage: MenopauseStage.UNKNOWN,
+        communicationPreference: null,
+        preferredLanguage: 'en',
+        riskTier: RiskTier.STANDARD,
+        primaryCondition: null,
         timezone: 'Asia/Colombo',
         onboardingStatus: OnboardingStatus.COMPLETED,
       })
@@ -816,7 +834,10 @@ describe('AuthService', () => {
       ;(prisma.user.update as jest.Mock).mockResolvedValue({
         name: 'Alice',
         dateOfBirth: null,
-        menopauseStage: MenopauseStage.UNKNOWN,
+        communicationPreference: null,
+        preferredLanguage: 'en',
+        riskTier: RiskTier.STANDARD,
+        primaryCondition: null,
         timezone: null,
         onboardingStatus: OnboardingStatus.COMPLETED,
       })
@@ -840,7 +861,10 @@ describe('AuthService', () => {
         onboardingStatus: OnboardingStatus.COMPLETED,
         accountStatus: AccountStatus.ACTIVE,     // service lowercases to 'active'
         dateOfBirth: null,
-        menopauseStage: MenopauseStage.UNKNOWN,
+        communicationPreference: null,
+        preferredLanguage: 'en',
+        riskTier: RiskTier.STANDARD,
+        primaryCondition: null,
         timezone: 'Asia/Colombo',
         createdAt: mockUser.createdAt,           // service converts to ISO string
       }
@@ -857,7 +881,10 @@ describe('AuthService', () => {
         emailVerified: mockUser.isVerified,
         accountStatus: 'active',
         dateOfBirth: null,
-        menopauseStage: MenopauseStage.UNKNOWN,
+        communicationPreference: null,
+        preferredLanguage: 'en',
+        riskTier: RiskTier.STANDARD,
+        primaryCondition: null,
         timezone: 'Asia/Colombo',
         onboardingStatus: OnboardingStatus.COMPLETED,
         createdAt: mockUser.createdAt.toISOString(),
@@ -899,7 +926,10 @@ describe('AuthService', () => {
       onboardingStatus: OnboardingStatus.NOT_COMPLETED,
       accountStatus: AccountStatus.ACTIVE,
       dateOfBirth: null,
-      menopauseStage: MenopauseStage.UNKNOWN,
+      communicationPreference: null,
+      preferredLanguage: 'en',
+      riskTier: RiskTier.STANDARD,
+      primaryCondition: null,
       timezone: null,
       createdAt: new Date(),
       updatedAt: new Date(),
