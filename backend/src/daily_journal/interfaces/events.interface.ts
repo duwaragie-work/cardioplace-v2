@@ -2,18 +2,18 @@ export interface JournalEntryCreatedEvent {
   userId: string
   entryId: string
   entryDate: Date
-  sleepHours: number | null
-  sleepQuality: number | null
-  awakenings: number | null
+  systolicBP: number | null
+  diastolicBP: number | null
+  weight: number | null
 }
 
 export interface JournalEntryUpdatedEvent {
   userId: string
   entryId: string
   entryDate: Date
-  sleepHours: number | null
-  sleepQuality: number | null
-  awakenings: number | null
+  systolicBP: number | null
+  diastolicBP: number | null
+  weight: number | null
 }
 
 export interface BaselineComputedEvent {
@@ -21,21 +21,19 @@ export interface BaselineComputedEvent {
   entryId: string
   entryDate: Date
   snapshotId: string
-  baselineSleepHours: number
-  baselineSleepQuality: number
-  baselineAwakenings: number
-  sleepHours: number
-  sleepQuality: number
-  awakenings: number
+  baselineSystolic: number
+  baselineDiastolic: number
+  baselineWeight: number | null
+  systolicBP: number
+  diastolicBP: number
 }
 
 export interface BaselineUnavailableEvent {
   userId: string
   entryId: string
   entryDate: Date
-  sleepHours: number
-  sleepQuality: number
-  awakenings: number
+  systolicBP: number
+  diastolicBP: number
   reason: string
 }
 

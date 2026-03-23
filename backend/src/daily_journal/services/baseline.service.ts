@@ -31,49 +31,48 @@ export class BaselineService {
   private async computeBaseline(
     payload: JournalEntryCreatedEvent | JournalEntryUpdatedEvent,
   ) {
-    if (
-      payload.sleepHours == null ||
-      payload.sleepQuality == null ||
-      payload.awakenings == null
-    ) {
+    if (payload.systolicBP == null || payload.diastolicBP == null) {
       this.logger.log(
-        `Skipping baseline for entry ${payload.entryId} — incomplete sleep metrics`,
+        `Skipping baseline for entry ${payload.entryId} — incomplete BP metrics`,
       )
       return
     }
 
     try {
-      const fourteenDaysAgo = new Date(payload.entryDate)
-      fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14)
+      const sevenDaysAgo = new Date(payload.entryDate)
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
 
       const entries = await this.prisma.journalEntry.findMany({
         where: {
           userId: payload.userId,
-          entryDate: { gte: fourteenDaysAgo },
-          sleepHours: { not: null },
-          sleepQuality: { not: null },
-          awakenings: { not: null },
+          entryDate: { gte: sevenDaysAgo },
+          systolicBP: { not: null },
+          diastolicBP: { not: null },
         },
         orderBy: { entryDate: 'desc' },
       })
 
-      const baselineMet = entries.length >= 10
+      const sampleSize = entries.length
+      const baselineMet = sampleSize >= 3
 
-      let avgSleepHours = 0
-      let avgSleepQuality = 0
-      let avgAwakenings = 0
+      let avgSystolic = 0
+      let avgDiastolic = 0
+      let avgWeight: number | null = null
 
       if (baselineMet) {
-        const count = entries.length
-        avgSleepHours =
-          entries.reduce((sum, e) => sum + Number(e.sleepHours), 0) / count
-        avgSleepQuality =
-          entries.reduce((sum, e) => sum + Number(e.sleepQuality), 0) / count
-        avgAwakenings =
-          entries.reduce((sum, e) => sum + Number(e.awakenings), 0) / count
+        avgSystolic =
+          entries.reduce((sum, e) => sum + Number(e.systolicBP), 0) / sampleSize
+        avgDiastolic =
+          entries.reduce((sum, e) => sum + Number(e.diastolicBP), 0) / sampleSize
+        const weightEntries = entries.filter((e) => e.weight != null)
+        if (weightEntries.length > 0) {
+          avgWeight =
+            weightEntries.reduce((sum, e) => sum + Number(e.weight), 0) /
+            weightEntries.length
+        }
       } else {
         this.logger.log(
-          `Baseline threshold not met for user ${payload.userId}: ${entries.length}/10 entries — storing zeros`,
+          `Baseline threshold not met for user ${payload.userId}: ${sampleSize}/3 entries — storing zeros`,
         )
       }
 
@@ -85,20 +84,20 @@ export class BaselineService {
           },
         },
         update: {
-          baselineSleepHours: new Prisma.Decimal(avgSleepHours.toFixed(2)),
-          baselineSleepQuality: new Prisma.Decimal(
-            avgSleepQuality.toFixed(2),
-          ),
-          baselineAwakenings: new Prisma.Decimal(avgAwakenings.toFixed(2)),
+          baselineSystolic: new Prisma.Decimal(avgSystolic.toFixed(2)),
+          baselineDiastolic: new Prisma.Decimal(avgDiastolic.toFixed(2)),
+          baselineWeight:
+            avgWeight != null ? new Prisma.Decimal(avgWeight.toFixed(2)) : null,
+          sampleSize,
         },
         create: {
           userId: payload.userId,
           computedForDate: payload.entryDate,
-          baselineSleepHours: new Prisma.Decimal(avgSleepHours.toFixed(2)),
-          baselineSleepQuality: new Prisma.Decimal(
-            avgSleepQuality.toFixed(2),
-          ),
-          baselineAwakenings: new Prisma.Decimal(avgAwakenings.toFixed(2)),
+          baselineSystolic: new Prisma.Decimal(avgSystolic.toFixed(2)),
+          baselineDiastolic: new Prisma.Decimal(avgDiastolic.toFixed(2)),
+          baselineWeight:
+            avgWeight != null ? new Prisma.Decimal(avgWeight.toFixed(2)) : null,
+          sampleSize,
         },
       })
 
@@ -110,7 +109,7 @@ export class BaselineService {
       if (baselineMet) {
         this.logger.log(
           `Baseline computed for user ${payload.userId} on ${payload.entryDate}: ` +
-            `hours=${avgSleepHours.toFixed(2)}, quality=${avgSleepQuality.toFixed(2)}, awakenings=${avgAwakenings.toFixed(2)}`,
+            `systolic=${avgSystolic.toFixed(2)}, diastolic=${avgDiastolic.toFixed(2)}, weight=${avgWeight?.toFixed(2) ?? 'n/a'}`,
         )
 
         this.eventEmitter.emit(JOURNAL_EVENTS.BASELINE_COMPUTED, {
@@ -118,22 +117,20 @@ export class BaselineService {
           entryId: payload.entryId,
           entryDate: payload.entryDate,
           snapshotId: snapshot.id,
-          baselineSleepHours: avgSleepHours,
-          baselineSleepQuality: avgSleepQuality,
-          baselineAwakenings: avgAwakenings,
-          sleepHours: payload.sleepHours,
-          sleepQuality: payload.sleepQuality,
-          awakenings: payload.awakenings,
+          baselineSystolic: avgSystolic,
+          baselineDiastolic: avgDiastolic,
+          baselineWeight: avgWeight,
+          systolicBP: payload.systolicBP,
+          diastolicBP: payload.diastolicBP,
         })
       } else {
         this.eventEmitter.emit(JOURNAL_EVENTS.BASELINE_UNAVAILABLE, {
           userId: payload.userId,
           entryId: payload.entryId,
           entryDate: payload.entryDate,
-          sleepHours: payload.sleepHours,
-          sleepQuality: payload.sleepQuality,
-          awakenings: payload.awakenings,
-          reason: `Only ${entries.length} entries in last 14 days (need 10) — baseline set to zero`,
+          systolicBP: payload.systolicBP,
+          diastolicBP: payload.diastolicBP,
+          reason: `Only ${sampleSize} entries in last 7 days (need 3) — baseline set to zero`,
         })
       }
     } catch (error) {
