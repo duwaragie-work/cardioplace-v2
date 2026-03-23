@@ -238,7 +238,54 @@ Keep your message short, clear, and supportive.`,
         return
       }
 
-      const systemPrompt = this.systemPromptService.buildSystemPrompt(config)
+      let systemPrompt = this.systemPromptService.buildSystemPrompt()
+
+      if (userId) {
+        const [recentEntries, baseline, activeAlerts, user] = await Promise.all([
+          this.prisma.journalEntry.findMany({
+            where: { userId },
+            orderBy: { entryDate: 'desc' },
+            take: 7,
+            select: {
+              entryDate: true, systolicBP: true, diastolicBP: true,
+              weight: true, medicationTaken: true,
+            },
+          }),
+          this.prisma.baselineSnapshot.findFirst({
+            where: { userId },
+            orderBy: { createdAt: 'desc' },
+            select: { baselineSystolic: true, baselineDiastolic: true },
+          }),
+          this.prisma.deviationAlert.findMany({
+            where: { userId, acknowledgedAt: null },
+            select: { type: true, severity: true },
+          }),
+          this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { communicationPreference: true, preferredLanguage: true },
+          }),
+        ])
+
+        const patientContext = this.systemPromptService.buildPatientContext({
+          recentEntries: recentEntries.map((e) => ({
+            ...e,
+            systolicBP: e.systolicBP != null ? Number(e.systolicBP) : null,
+            diastolicBP: e.diastolicBP != null ? Number(e.diastolicBP) : null,
+            weight: e.weight != null ? Number(e.weight) : null,
+          })),
+          baseline: baseline
+            ? {
+                baselineSystolic: baseline.baselineSystolic != null ? Number(baseline.baselineSystolic) : null,
+                baselineDiastolic: baseline.baselineDiastolic != null ? Number(baseline.baselineDiastolic) : null,
+              }
+            : null,
+          activeAlerts,
+          communicationPreference: user?.communicationPreference ?? null,
+          preferredLanguage: user?.preferredLanguage ?? null,
+        })
+        systemPrompt = systemPrompt + '\n\n' + patientContext
+      }
+
       const chatHistory = await this.conversationHistoryService.getConversationHistory(
         sessionId,
         prompt,
@@ -298,7 +345,54 @@ Keep your message short, clear, and supportive.`,
         }
       }
 
-      const systemPrompt = this.systemPromptService.buildSystemPrompt(config)
+      let systemPrompt = this.systemPromptService.buildSystemPrompt()
+
+      if (userId) {
+        const [recentEntries, baseline, activeAlerts, user] = await Promise.all([
+          this.prisma.journalEntry.findMany({
+            where: { userId },
+            orderBy: { entryDate: 'desc' },
+            take: 7,
+            select: {
+              entryDate: true, systolicBP: true, diastolicBP: true,
+              weight: true, medicationTaken: true,
+            },
+          }),
+          this.prisma.baselineSnapshot.findFirst({
+            where: { userId },
+            orderBy: { createdAt: 'desc' },
+            select: { baselineSystolic: true, baselineDiastolic: true },
+          }),
+          this.prisma.deviationAlert.findMany({
+            where: { userId, acknowledgedAt: null },
+            select: { type: true, severity: true },
+          }),
+          this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { communicationPreference: true, preferredLanguage: true },
+          }),
+        ])
+
+        const patientContext = this.systemPromptService.buildPatientContext({
+          recentEntries: recentEntries.map((e) => ({
+            ...e,
+            systolicBP: e.systolicBP != null ? Number(e.systolicBP) : null,
+            diastolicBP: e.diastolicBP != null ? Number(e.diastolicBP) : null,
+            weight: e.weight != null ? Number(e.weight) : null,
+          })),
+          baseline: baseline
+            ? {
+                baselineSystolic: baseline.baselineSystolic != null ? Number(baseline.baselineSystolic) : null,
+                baselineDiastolic: baseline.baselineDiastolic != null ? Number(baseline.baselineDiastolic) : null,
+              }
+            : null,
+          activeAlerts,
+          communicationPreference: user?.communicationPreference ?? null,
+          preferredLanguage: user?.preferredLanguage ?? null,
+        })
+        systemPrompt = systemPrompt + '\n\n' + patientContext
+      }
+
       const chatHistory = await this.conversationHistoryService.getConversationHistory(
         sessionId,
         prompt,
