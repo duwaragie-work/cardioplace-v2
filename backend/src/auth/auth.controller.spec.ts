@@ -6,7 +6,7 @@ import type { Request, Response } from 'express'
 import { AuthController } from './auth.controller.js'
 import { AuthService } from './auth.service.js'
 
-describe('AuthController - device ID enforcement', () => {
+describe('AuthController - OTP device ID enforcement', () => {
   let controller: AuthController
   let authService: jest.Mocked<AuthService>
 
@@ -17,8 +17,6 @@ describe('AuthController - device ID enforcement', () => {
         {
           provide: AuthService,
           useValue: {
-            googleMobileLogin: jest.fn(),
-            appleLogin: jest.fn(),
             verifyOtp: jest.fn(),
             upsertOrTrackDevice: jest.fn(),
           },
@@ -34,74 +32,6 @@ describe('AuthController - device ID enforcement', () => {
 
     controller = module.get<AuthController>(AuthController)
     authService = module.get(AuthService) as jest.Mocked<AuthService>
-  })
-
-  describe('googleMobile', () => {
-    it('should throw BadRequestException when deviceId header is missing or blank', async () => {
-      const req = {
-        headers: {
-          // no x-device-id
-          'user-agent': 'jest-test',
-        },
-      } as unknown as Request
-
-      await expect(
-        controller.googleMobile({ idToken: 'token' }, req),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Device ID is required. Send via header x-device-id.',
-        ),
-      )
-
-      const reqBlank = {
-        headers: {
-          'x-device-id': '   ',
-          'user-agent': 'jest-test',
-        },
-      } as unknown as Request
-
-      await expect(
-        controller.googleMobile({ idToken: 'token' }, reqBlank),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Device ID is required. Send via header x-device-id.',
-        ),
-      )
-    })
-  })
-
-  describe('apple', () => {
-    it('should throw BadRequestException when deviceId header is missing or blank', async () => {
-      const req = {
-        headers: {
-          // no x-device-id
-          'user-agent': 'jest-test',
-        },
-      } as unknown as Request
-
-      await expect(
-        controller.apple({ identityToken: 'token' }, req),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Device ID is required. Send via header x-device-id.',
-        ),
-      )
-
-      const reqBlank = {
-        headers: {
-          'x-device-id': '   ',
-          'user-agent': 'jest-test',
-        },
-      } as unknown as Request
-
-      await expect(
-        controller.apple({ identityToken: 'token' }, reqBlank),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Device ID is required. Send via header x-device-id.',
-        ),
-      )
-    })
   })
 
   describe('verifyOtp', () => {

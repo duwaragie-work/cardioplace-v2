@@ -12,17 +12,12 @@ import {
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { Request, Response } from 'express'
-import { AuthService, TokenPair } from './auth.service.js'
+import { AuthService } from './auth.service.js'
 import { Public } from './decorators/public.decorator.js'
-import { AppleLoginDto } from './dto/apple-login.dto.js'
-import { GoogleMobileLoginDto } from './dto/google-mobile-login.dto.js'
-import { GuestLoginDto } from './dto/guest-login.dto.js'
 import { ProfileDto } from './dto/profile.dto.js'
 import { RefreshDto } from './dto/refresh.dto.js'
 import { SendOtpDto } from './dto/send-otp.dto.js'
 import { VerifyOtpDto } from './dto/verify-otp.dto.js'
-import { AppleAuthGuard } from './guards/apple-auth.guard.js'
-import { GoogleAuthGuard } from './guards/google-auth.guard.js'
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js'
 
 @Controller('v2/auth')
@@ -61,145 +56,12 @@ export class AuthController {
     }
   }
 
-  // ─── Google Web ──────────────────────────────────────────────────────────────
-
-  @Public()
-  @UseGuards(GoogleAuthGuard)
-  @Get('google')
-  async googleAuth() {
-    // Guard triggers OAuth redirect to Google
-  }
-
-  @Public()
-  @UseGuards(GoogleAuthGuard)
-  @Get('google/callback')
-  async googleCallback(@Req() req: Request, @Res() res: Response) {
-    const context = this.buildAuthContext(req)
-    const result = await this.authService.googleLogin(
-      req.user as Parameters<AuthService['googleLogin']>[0],
-      context,
-    )
-    this.setRefreshCookie(res, result.refreshToken)
-    const webAppUrl = this.config.get<string>(
-      'WEB_APP_URL',
-      'http://localhost:3001',
-    )
-    const params = new URLSearchParams({
-      access: result.accessToken,
-      onboarding_required: String(result.onboarding_required),
-      login_method: result.login_method,
-    })
-    return res.redirect(`${webAppUrl}/auth/callback?${params.toString()}`)
-  }
-
-  // ─── Google Mobile ───────────────────────────────────────────────────────────
-
-  @Public()
-  @Post('google/mobile')
-  async googleMobile(@Body() dto: GoogleMobileLoginDto, @Req() req: Request) {
-    const context = this.buildAuthContext(req)
-    if (!context.deviceId?.trim()) {
-      throw new BadRequestException(
-        'Device ID is required. Send via header x-device-id.',
-      )
-    }
-    const result = await this.authService.googleMobileLogin(
-      dto.idToken,
-      context,
-    )
-    if (context.deviceId) {
-      await this.authService.upsertOrTrackDevice({
-        deviceId: context.deviceId,
-        userId: result.userId,
-        platform: req.headers['x-device-platform'] as string | undefined,
-        deviceType: req.headers['x-device-type'] as string | undefined,
-        deviceName: req.headers['x-device-name'] as string | undefined,
-        userAgent: context.userAgent,
-      })
-    }
-    return result
-  }
-
-  // ─── Apple Mobile ─────────────────────────────────────────────────────────────
-
-  @Public()
-  @Post('apple')
-  async apple(@Body() dto: AppleLoginDto, @Req() req: Request) {
-    const context = this.buildAuthContext(req)
-    if (!context.deviceId?.trim()) {
-      throw new BadRequestException(
-        'Device ID is required. Send via header x-device-id.',
-      )
-    }
-    const result = await this.authService.appleLogin(dto.identityToken, context)
-    if (context.deviceId) {
-      await this.authService.upsertOrTrackDevice({
-        deviceId: context.deviceId,
-        userId: result.userId,
-        platform: req.headers['x-device-platform'] as string | undefined,
-        deviceType: req.headers['x-device-type'] as string | undefined,
-        deviceName: req.headers['x-device-name'] as string | undefined,
-        userAgent: context.userAgent,
-      })
-    }
-    return result
-  }
-
-  // ─── Apple Web ───────────────────────────────────────────────────────────────
-
-  @Public()
-  @UseGuards(AppleAuthGuard)
-  @Get('apple/web')
-  async appleAuth() {
-    // Guard triggers OAuth redirect to Apple
-  }
-
-  @Public()
-  @UseGuards(AppleAuthGuard)
-  @Get('apple/callback')
-  async appleCallback(@Req() req: Request, @Res() res: Response) {
-    const context = this.buildAuthContext(req)
-    const result = await this.authService.appleWebLogin(
-      req.user as Parameters<AuthService['appleWebLogin']>[0],
-      context,
-    )
-    this.setRefreshCookie(res, result.refreshToken)
-    const webAppUrl = this.config.get<string>(
-      'WEB_APP_URL',
-      'http://localhost:3001',
-    )
-    const params = new URLSearchParams({
-      access: result.accessToken,
-      onboarding_required: String(result.onboarding_required),
-      login_method: result.login_method,
-    })
-    return res.redirect(`${webAppUrl}/auth/callback?${params.toString()}`)
-  }
-
-  // ─── Guest (device-linked) ─────────────────────────────────────────────────────
-
-  @Public()
-  @Post('guest')
-  async guest(
-    @Body() dto: GuestLoginDto,
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const context = this.buildAuthContext(req)
-    const deviceId =
-      (context.deviceId ?? dto?.deviceId)?.trim() || null
-    if (!deviceId) {
-      throw new BadRequestException(
-        'Device ID is required. Send via header x-device-id or body deviceId.',
-      )
-    }
-    const result = await this.authService.guestLogin({
-      ...context,
-      deviceId,
-    })
-    this.setRefreshCookie(res, result.refreshToken)
-    return result
-  }
+  /* ═══ DISABLED – OTP-only auth ═══════════════════════════════════════════════
+   * Google Web, Google Mobile, Apple Mobile, Apple Web, and Guest login routes
+   * have been disabled. Only OTP-based authentication is supported.
+   * To re-enable, uncomment the routes below and restore the corresponding
+   * imports, strategies, and guards in auth.module.ts.
+   * ══════════════════════════════════════════════════════════════════════════════ */
 
   // ─── Email OTP ────────────────────────────────────────────────────────────────
 

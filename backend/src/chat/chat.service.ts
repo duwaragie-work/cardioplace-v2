@@ -216,7 +216,7 @@ Keep your message short, clear, and supportive.`,
    */
   async *getStreamingResponse(
     request: ChatRequestDto,
-    userId: string | null,
+    userId: string,
   ): AsyncIterable<string | { type: 'emergency'; emergencySituation: string | null }> {
     const { prompt, date: _date, ...config } = request
     const sessionId = request.sessionId as string
@@ -330,7 +330,7 @@ Keep your message short, clear, and supportive.`,
    */
   async getStructuredResponse(
     request: ChatRequestDto,
-    userId: string | null,
+    userId: string,
   ): Promise<{ text: string; isEmergency: boolean; emergencySituation: string | null }> {
     const { prompt, date: _date, ...config } = request
     const sessionId = request.sessionId as string
