@@ -22,7 +22,9 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/lib/auth-context';
 import AlertPanel, { type Alert } from './AlertPanel';
 import ScheduleModal, { type ScheduleDetails } from './ScheduleModal';
 
@@ -74,11 +76,46 @@ const alerts: Alert[] = [
 ];
 
 export default function ProviderDashboard() {
+  const { user } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
   const [scheduleAlert, setScheduleAlert] = useState<Alert | null>(null);
   const [alertsList] = useState<Alert[]>(alerts);
+
+  if (!user?.roles?.includes('SUPER_ADMIN')) {
+    return (
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '100vh',
+        gap: '1.5rem',
+        fontFamily: 'var(--font-sans, system-ui, sans-serif)',
+      }}>
+        <h1 style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--brand-red, #dc2626)' }}>
+          403 — Access Denied
+        </h1>
+        <p style={{ fontSize: '1.125rem', color: 'var(--brand-text-secondary, #6b7280)' }}>
+          Super Admin only
+        </p>
+        <Link
+          href="/dashboard"
+          style={{
+            padding: '0.75rem 1.5rem',
+            borderRadius: '0.5rem',
+            backgroundColor: 'var(--brand-primary, #2563eb)',
+            color: '#fff',
+            textDecoration: 'none',
+            fontWeight: 600,
+          }}
+        >
+          Go to Dashboard
+        </Link>
+      </div>
+    );
+  }
 
   const activeAlerts = alertsList.filter((a) => !reviewedIds.has(a.id));
 

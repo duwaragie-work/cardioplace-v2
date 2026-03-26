@@ -14,6 +14,7 @@ import { UsersModule } from './users/users.module.js'
 import { UsersService } from './users/users.service.js'
 import { ChatModule } from './chat/chat.module.js'
 import { ContentModule } from './content/content.module.js'
+import { ProviderModule } from './provider/provider.module.js'
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -46,6 +47,7 @@ import { ContentModule } from './content/content.module.js'
     ChatModule,
     DailyJournalModule,
     ContentModule,
+    ProviderModule,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],
