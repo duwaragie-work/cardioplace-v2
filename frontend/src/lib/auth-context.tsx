@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
+import { REFRESH_TOKEN_KEY } from '@/lib/services/token';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 const TOKEN_KEY = 'healplace_token';
@@ -166,12 +167,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(TOKEN_KEY, newToken);
       setAuthCookie(newToken);
     }
+
+    const newRefreshToken = response.refreshToken || null;
+    if (newRefreshToken) {
+      localStorage.setItem(REFRESH_TOKEN_KEY, newRefreshToken);
+    }
   };
 
   const logout = () => {
     setToken(null);
     setUser(null);
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
     clearAuthCookie();
     router.push('/');
   };
