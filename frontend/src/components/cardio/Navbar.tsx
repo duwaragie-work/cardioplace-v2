@@ -12,7 +12,6 @@ const BASE_LINKS = [
   { label: 'Home', href: '/dashboard' },
   { label: 'Check-In', href: '/check-in' },
   { label: 'Chat', href: '/chat' },
-  { label: 'Profile', href: '/profile' },
 ];
 
 export default function Navbar() {

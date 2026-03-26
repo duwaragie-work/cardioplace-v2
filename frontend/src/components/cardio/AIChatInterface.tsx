@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send,
   Mic,
   Paperclip,
-  Heart,
   Plus,
   Volume2,
   ArrowRight,
@@ -99,11 +99,11 @@ function TypingIndicator() {
       <div
         className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
         style={{
-          background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
+          background: 'linear-gradient(135deg, #7b00e017, #9233ea43)',
           boxShadow: '0 2px 8px rgba(123,0,224,0.3)',
         }}
       >
-        <Heart className="w-3.5 h-3.5 text-white" />
+        <Image src="/logo.svg" alt="Healplace" width={30} height={30} />
       </div>
       <div
         className="flex items-center gap-1.5 px-4 py-3.5"
@@ -172,9 +172,9 @@ function MessageBubble({ msg }: { msg: Message }) {
       >
         <div
           className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
-          style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}
+          style={{ background: 'linear-gradient(135deg, #7b00e017, #9233ea43)',}}
         >
-          <Heart className="w-3.5 h-3.5 text-white" />
+          <Image src="/logo.svg" alt="Healplace" width={30} height={30} />
         </div>
         <div
           className="max-w-[75%] sm:max-w-[65%] px-4 py-3.5"
@@ -217,11 +217,11 @@ function MessageBubble({ msg }: { msg: Message }) {
       <div
         className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
         style={{
-          background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
-          boxShadow: '0 2px 8px rgba(123,0,224,0.2)',
+          background: 'linear-gradient(135deg, #7b00e017, #9233ea43)',
+                    boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)',
         }}
       >
-        <Heart className="w-3.5 h-3.5 text-white" />
+        <Image src="/logo.svg" alt="Healplace" width={30} height={30} />
       </div>
       <div
         className="max-w-[75%] sm:max-w-[65%] px-4 py-3.5"
@@ -668,11 +668,11 @@ export default function AIChatInterface() {
             <div
               className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
               style={{
-                background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
-                boxShadow: '0 2px 10px rgba(123,0,224,0.3)',
+                background: 'linear-gradient(135deg, #7b00e017, #9233ea43)',
+                    boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)',
               }}
             >
-              <Heart className="w-4 h-4 text-white" />
+              <Image src="/logo.svg" alt="Healplace" width={30} height={30}/>
             </div>
             <div>
               <p
@@ -723,11 +723,11 @@ export default function AIChatInterface() {
                 <div
                   className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
                   style={{
-                    background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
-                    boxShadow: '0 8px 28px rgba(123,0,224,0.28)',
+                    background: 'linear-gradient(135deg, #7b00e017, #9233ea43)',
+                    boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)',
                   }}
                 >
-                  <Heart className="w-8 h-8 text-white" />
+                  <Image src="/logo.svg" alt="Healplace" width={50} height={50} />
                 </div>
                 <p
                   className="text-[16px] font-bold mb-1.5"
