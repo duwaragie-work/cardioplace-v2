@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
-import { Prisma, EntrySource } from '../generated/prisma/client.js'
+import { Prisma, EntrySource, EscalationLevel } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from './constants/events.js'
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto.js'
@@ -146,10 +146,26 @@ export class DailyJournalService {
     }
   }
 
-  async findAll(userId: string) {
+  async findAll(
+    userId: string,
+    startDate?: string,
+    endDate?: string,
+    limit?: number,
+  ) {
+    const where: Prisma.JournalEntryWhereInput = { userId }
+
+    if (startDate || endDate) {
+      where.entryDate = {}
+      if (startDate) where.entryDate.gte = new Date(startDate)
+      if (endDate) where.entryDate.lte = new Date(endDate)
+    }
+
+    const take = Math.min(limit ?? 50, 200)
+
     const entries = await this.prisma.journalEntry.findMany({
-      where: { userId },
+      where,
       orderBy: { entryDate: 'desc' },
+      take,
     })
 
     return {
@@ -474,6 +490,161 @@ export class DailyJournalService {
           : null,
         createdAt: snapshot.createdAt,
       },
+    }
+  }
+
+  async delete(userId: string, id: string) {
+    const entry = await this.prisma.journalEntry.findFirst({
+      where: { id, userId },
+    })
+
+    if (!entry) {
+      throw new NotFoundException('Journal entry not found')
+    }
+
+    await this.prisma.journalEntry.delete({ where: { id } })
+
+    return {
+      statusCode: 200,
+      message: 'Journal entry deleted successfully',
+    }
+  }
+
+  async getStats(userId: string) {
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const thirtyDaysAgo = new Date(today)
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+
+    const [totalEntries, recentEntries, allEntries] = await Promise.all([
+      this.prisma.journalEntry.count({ where: { userId } }),
+      this.prisma.journalEntry.findMany({
+        where: { userId, entryDate: { gte: thirtyDaysAgo } },
+        select: { systolicBP: true, diastolicBP: true },
+      }),
+      this.prisma.journalEntry.findMany({
+        where: { userId },
+        orderBy: { entryDate: 'desc' },
+        select: { entryDate: true, medicationTaken: true },
+      }),
+    ])
+
+    // Current streak: consecutive days ending today
+    let currentStreak = 0
+    if (allEntries.length > 0) {
+      const checkDate = new Date(today)
+      const entryDates = new Set(
+        allEntries.map((e) => e.entryDate.toISOString().slice(0, 10)),
+      )
+      while (entryDates.has(checkDate.toISOString().slice(0, 10))) {
+        currentStreak++
+        checkDate.setDate(checkDate.getDate() - 1)
+      }
+    }
+
+    // Medication adherence rate
+    const medEntries = allEntries.filter((e) => e.medicationTaken !== null)
+    const medTaken = medEntries.filter((e) => e.medicationTaken === true).length
+    const medicationAdherenceRate =
+      medEntries.length > 0 ? Math.round((medTaken / medEntries.length) * 100) : 0
+
+    // Average BP from last 30 days
+    const systolicValues = recentEntries
+      .filter((e) => e.systolicBP !== null)
+      .map((e) => Number(e.systolicBP))
+    const diastolicValues = recentEntries
+      .filter((e) => e.diastolicBP !== null)
+      .map((e) => Number(e.diastolicBP))
+
+    const averageSystolic =
+      systolicValues.length > 0
+        ? Math.round(systolicValues.reduce((a, b) => a + b, 0) / systolicValues.length)
+        : null
+    const averageDiastolic =
+      diastolicValues.length > 0
+        ? Math.round(diastolicValues.reduce((a, b) => a + b, 0) / diastolicValues.length)
+        : null
+
+    const lastEntryDate =
+      allEntries.length > 0
+        ? allEntries[0].entryDate.toISOString().slice(0, 10)
+        : null
+
+    return {
+      statusCode: 200,
+      message: 'Journal stats retrieved successfully',
+      data: {
+        totalEntries,
+        currentStreak,
+        medicationAdherenceRate,
+        averageSystolic,
+        averageDiastolic,
+        lastEntryDate,
+      },
+    }
+  }
+
+  async getEscalations(userId: string) {
+    const escalations = await this.prisma.escalationEvent.findMany({
+      where: { userId },
+      orderBy: { triggeredAt: 'desc' },
+      include: {
+        alert: {
+          select: {
+            id: true,
+            type: true,
+            severity: true,
+            actualValue: true,
+            journalEntry: {
+              select: {
+                entryDate: true,
+                systolicBP: true,
+                diastolicBP: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
+    return {
+      statusCode: 200,
+      message: 'Escalation events retrieved successfully',
+      data: escalations.map((e) => {
+        const systolicBP = e.alert.journalEntry?.systolicBP ?? 0
+        const diastolicBP = e.alert.journalEntry?.diastolicBP ?? 0
+
+        const patientMessage =
+          e.escalationLevel === EscalationLevel.LEVEL_2
+            ? 'URGENT: Your blood pressure reading indicates a medical emergency. Call 911 immediately or go to your nearest emergency room.'
+            : 'Your recent blood pressure reading has been flagged. Your care team has been notified and will follow up with you within 24 hours.'
+
+        const careTeamMessage =
+          e.escalationLevel === EscalationLevel.LEVEL_2
+            ? `IMMEDIATE ACTION REQUIRED: Patient ${e.userId} has critical BP readings (${systolicBP}/${diastolicBP} mmHg). Emergency escalation triggered.`
+            : `FOLLOW-UP WITHIN 24H: Patient ${e.userId} has elevated BP readings (${systolicBP}/${diastolicBP} mmHg). Review recommended.`
+
+        return {
+          id: e.id,
+          level: e.escalationLevel,
+          patientMessage,
+          careTeamMessage,
+          createdAt: e.triggeredAt,
+          alert: {
+            id: e.alert.id,
+            type: e.alert.type,
+            severity: e.alert.severity,
+            actualValue: e.alert.actualValue ? Number(e.alert.actualValue) : null,
+            journalEntry: e.alert.journalEntry
+              ? {
+                  entryDate: e.alert.journalEntry.entryDate,
+                  systolicBP: e.alert.journalEntry.systolicBP,
+                  diastolicBP: e.alert.journalEntry.diastolicBP,
+                }
+              : null,
+          },
+        }
+      }),
     }
   }
 

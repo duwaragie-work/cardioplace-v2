@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -44,9 +45,15 @@ export class DailyJournalController {
   }
 
   @Get()
-  findAll(@Req() req: Request) {
+  findAll(
+    @Req() req: Request,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('limit') limit?: string,
+  ) {
     const { id: userId } = req.user as { id: string }
-    return this.dailyJournalService.findAll(userId)
+    const l = limit ? Math.min(Math.max(1, parseInt(limit, 10) || 50), 200) : undefined
+    return this.dailyJournalService.findAll(userId, startDate, endDate, l)
   }
 
   @Get('history')
@@ -113,6 +120,18 @@ export class DailyJournalController {
     )
   }
 
+  @Get('stats')
+  getStats(@Req() req: Request) {
+    const { id: userId } = req.user as { id: string }
+    return this.dailyJournalService.getStats(userId)
+  }
+
+  @Get('escalations')
+  getEscalations(@Req() req: Request) {
+    const { id: userId } = req.user as { id: string }
+    return this.dailyJournalService.getEscalations(userId)
+  }
+
   @Get('baseline/latest')
   getLatestBaseline(@Req() req: Request) {
     const { id: userId } = req.user as { id: string }
@@ -123,6 +142,12 @@ export class DailyJournalController {
   findOne(@Req() req: Request, @Param('id') id: string) {
     const { id: userId } = req.user as { id: string }
     return this.dailyJournalService.findOne(userId, id)
+  }
+
+  @Delete(':id')
+  delete(@Req() req: Request, @Param('id') id: string) {
+    const { id: userId } = req.user as { id: string }
+    return this.dailyJournalService.delete(userId, id)
   }
 
   @Patch('alerts/:id/acknowledge')
