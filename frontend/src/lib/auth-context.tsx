@@ -109,12 +109,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return res.json();
       })
       .then(
-        (data: { id: string; email?: string | null; roles?: string[] }) => {
+        (data: { id: string; email?: string | null; name?: string | null; roles?: string[] }) => {
           setToken(stored);
           setAuthCookie(stored);
           setUser({
             id: data.id,
             email: data.email,
+            name: data.name,
             roles: data.roles,
           });
         },

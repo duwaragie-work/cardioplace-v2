@@ -80,7 +80,7 @@ function transformAlert(raw: any): Alert {
 }
 
 export default function ProviderDashboard() {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
   const [scheduleAlert, setScheduleAlert] = useState<Alert | null>(null);
@@ -92,7 +92,12 @@ export default function ProviderDashboard() {
     bpControlledPercent: 0,
   });
 
+
+
   useEffect(() => {
+    if (isLoading || !user) return; // 🔴 WAIT until user is ready
+
+    console.log(user);
     Promise.all([getProviderStats(), getProviderAlerts()]).then(
       ([statsData, alertsData]) => {
         setStats({
@@ -111,7 +116,7 @@ export default function ProviderDashboard() {
     ).catch(() => {
       // keep defaults on error
     });
-  }, []);
+  }, [user,isLoading]);
 
   if (!user?.roles?.includes('SUPER_ADMIN')) {
     return (

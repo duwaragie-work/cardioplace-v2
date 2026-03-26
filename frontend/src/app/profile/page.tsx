@@ -12,22 +12,20 @@ import {
   Save,
   Star,
   X,
+  Shield,
+  Heart,
 } from "lucide-react";
-import { AdminLayout } from "@/components/admin-layout";
 import SpinnerIndicator from "@/components/ui/SpinnerIndicator";
 import { useAuth } from "@/lib/auth-context";
 import { fetchWithAuth } from "@/lib/services/token";
 
 type PrimaryCondition = "hypertension" | "heart_disease" | "diabetes_cardiac" | "high_cholesterol" | "other" | "";
-
 type AccountStatus = "active" | "blocked" | "suspended";
 
 type User = {
   id: string;
   email: string;
   createdAt: string;
-
-  // Demographics & profile
   name: string;
   dateOfBirth: string;
   primaryCondition: PrimaryCondition;
@@ -36,8 +34,6 @@ type User = {
   riskTier: string;
   timezone: string;
   diagnosisDate: string | null;
-
-  // Metadata & audit
   accountStatus: AccountStatus;
   emailVerified: boolean;
   roles: string[];
@@ -86,10 +82,7 @@ function formatPrimaryCondition(condition: string): string {
 }
 
 function toTitleCase(input: string) {
-  return input
-    .replaceAll("_", " ")
-    .toLowerCase()
-    .replace(/\b\w/g, (m) => m.toUpperCase());
+  return input.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
 function formatRoleLabel(role: string) {
@@ -102,28 +95,24 @@ function formatCommunicationPreference(pref: string | null | undefined): string 
   return "Not set";
 }
 
-function accountStatusDotClass(status: AccountStatus) {
-  if (status === "active") return "bg-[#16a34a]";
-  if (status === "suspended") return "bg-[#f59e0b]";
-  if (status === "blocked") return "bg-[#dc2626]";
-  return "bg-[#3b82f6]";
-}
-
 function RiskTierBadge({ tier }: { tier: string | null | undefined }) {
   if (tier === "HIGH")
     return (
-      <span className="px-3 py-1 bg-[#dc2626] text-white text-xs font-bold rounded-full">
+      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold"
+        style={{ backgroundColor: 'rgba(220,38,38,0.15)', color: '#dc2626' }}>
         High Risk
       </span>
     );
   if (tier === "ELEVATED")
     return (
-      <span className="px-3 py-1 bg-[#f59e0b] text-white text-xs font-bold rounded-full">
+      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold"
+        style={{ backgroundColor: 'rgba(245,158,11,0.15)', color: '#d97706' }}>
         Elevated
       </span>
     );
   return (
-    <span className="px-3 py-1 bg-[#16a34a] text-white text-xs font-bold rounded-full">
+    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold"
+      style={{ backgroundColor: 'rgba(22,163,74,0.12)', color: '#16a34a' }}>
       Standard
     </span>
   );
@@ -133,7 +122,6 @@ const initialUserData: User = {
   id: "",
   email: "",
   createdAt: "",
-
   name: "",
   dateOfBirth: "",
   primaryCondition: "",
@@ -142,11 +130,34 @@ const initialUserData: User = {
   riskTier: "STANDARD",
   timezone: "",
   diagnosisDate: null,
-
   accountStatus: "active",
   emailVerified: false,
   roles: [],
 };
+
+// ── Field wrappers ────────────────────────────────────────────────────────────
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <label className="text-xs font-semibold uppercase tracking-wider block mb-1.5"
+      style={{ color: 'var(--brand-text-muted)' }}>
+      {children}
+    </label>
+  );
+}
+
+function FieldValue({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-sm font-medium" style={{ color: 'var(--brand-text-primary)' }}>
+      {children}
+    </p>
+  );
+}
+
+const inputCls =
+  "w-full px-3 py-2 rounded-xl text-sm font-medium border transition-colors focus:outline-none" +
+  " bg-white border-[#E9D5FF] focus:border-[#7B00E0]";
+
+const selectCls = inputCls + " cursor-pointer";
 
 export default function Profile() {
   const router = useRouter();
@@ -155,36 +166,23 @@ export default function Profile() {
   const [isEditing, setIsEditing] = useState(false);
   const [userData, setUserData] = useState<User>(initialUserData);
   const [serverSnapshot, setServerSnapshot] = useState<User>(initialUserData);
-
   const [timezones, setTimezones] = useState<string[]>([]);
-
   const [isProfileLoading, setIsProfileLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const updatePrimaryCondition = (condition: PrimaryCondition) => {
-    setUserData((prev) => ({
-      ...prev,
-      primaryCondition: condition,
-    }));
-  };
+  const updatePrimaryCondition = (condition: PrimaryCondition) =>
+    setUserData((prev) => ({ ...prev, primaryCondition: condition }));
 
   const formatDate = (dateString?: string | null) => {
     if (!dateString) return "N/A";
-    return new Date(dateString).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
+    return new Date(dateString).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
   };
 
   const formatShortMonthYear = (dateString?: string) => {
     if (!dateString) return "N/A";
-    return new Date(dateString).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-    });
+    return new Date(dateString).toLocaleDateString("en-US", { year: "numeric", month: "short" });
   };
 
   const toDateInputValue = (raw?: string | null) => {
@@ -196,45 +194,29 @@ export default function Profile() {
 
   useEffect(() => {
     if (isAuthLoading) return;
-    if (!user) {
-      router.replace("/register");
-    }
+    if (!user) router.replace("/register");
   }, [isAuthLoading, user, router]);
 
   useEffect(() => {
-    // Prefer browser-provided IANA list; only runs client-side.
     try {
-      const supported = typeof Intl !== "undefined" && (Intl as any).supportedValuesOf
-        ? (Intl as any).supportedValuesOf("timeZone")
-        : [];
+      const supported =
+        typeof Intl !== "undefined" && (Intl as any).supportedValuesOf
+          ? (Intl as any).supportedValuesOf("timeZone")
+          : [];
       if (Array.isArray(supported) && supported.length > 0) {
         setTimezones(supported);
         return;
       }
-    } catch {
-      // ignore
-    }
-
-    // Fallback list (only used if Intl.supportedValuesOf is unavailable).
+    } catch { /* ignore */ }
     setTimezones([
-      "America/New_York",
-      "America/Chicago",
-      "America/Denver",
-      "America/Los_Angeles",
-      "Europe/London",
-      "Europe/Paris",
-      "Asia/Colombo",
-      "Asia/Tokyo",
-      "Australia/Sydney",
+      "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+      "Europe/London", "Europe/Paris", "Asia/Colombo", "Asia/Tokyo", "Australia/Sydney",
     ]);
   }, []);
 
   useEffect(() => {
     if (!user) return;
-    if (!API_BASE_URL) {
-      setLoadError("Missing API configuration.");
-      return;
-    }
+    if (!API_BASE_URL) { setLoadError("Missing API configuration."); return; }
 
     const controller = new AbortController();
     setIsProfileLoading(true);
@@ -247,18 +229,12 @@ export default function Profile() {
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
         });
-
         if (!res.ok) {
-          if (res.status === 401) {
-            router.replace("/welcome");
-            return;
-          }
+          if (res.status === 401) { router.replace("/welcome"); return; }
           setLoadError("We couldn't load your profile. Please try again.");
           return;
         }
-
         const data: ProfileGetResponse = await res.json();
-
         setUserData((prev) => {
           const next: User = {
             ...prev,
@@ -266,10 +242,7 @@ export default function Profile() {
             email: data.email ?? "",
             name: data.name ?? "",
             roles: Array.isArray(data.roles) ? data.roles : [],
-            emailVerified:
-              typeof data.emailVerified === "boolean"
-                ? data.emailVerified
-                : false,
+            emailVerified: typeof data.emailVerified === "boolean" ? data.emailVerified : false,
             accountStatus: data.accountStatus ?? "active",
             createdAt: data.createdAt ?? "",
             dateOfBirth: data.dateOfBirth ?? "",
@@ -280,14 +253,12 @@ export default function Profile() {
             timezone: data.timezone ?? "",
             diagnosisDate: data.diagnosisDate ?? null,
           };
-
           setServerSnapshot(next);
           return next;
         });
       } catch (e) {
-        if ((e as Error).name !== "AbortError") {
+        if ((e as Error).name !== "AbortError")
           setLoadError("We couldn't load your profile. Please try again.");
-        }
       } finally {
         setIsProfileLoading(false);
       }
@@ -304,20 +275,13 @@ export default function Profile() {
   };
 
   const handleSaveProfile = async () => {
-    if (!API_BASE_URL) {
-      setSaveError("Missing API configuration. Please try again later.");
-      return;
-    }
-
+    if (!API_BASE_URL) { setSaveError("Missing API configuration."); return; }
     setIsSaving(true);
     setSaveError(null);
 
-    const timezoneLooksValid =
-      userData.timezone && userData.timezone.includes("/");
-
-    // If timezone is missing/invalid, avoid sending it to prevent a 400.
+    const timezoneLooksValid = userData.timezone && userData.timezone.includes("/");
     if (!timezoneLooksValid && userData.timezone) {
-      setSaveError('timezone must be a valid IANA identifier (e.g. "America/New_York")');
+      setSaveError('Timezone must be a valid IANA identifier (e.g. "America/New_York")');
       setIsSaving(false);
       return;
     }
@@ -341,8 +305,7 @@ export default function Profile() {
       if (!res.ok) {
         try {
           const err = await res.json();
-          const msg =
-            Array.isArray(err?.message) ? err.message[0] : err?.message;
+          const msg = Array.isArray(err?.message) ? err.message[0] : err?.message;
           setSaveError(msg || "We couldn't save your profile. Please try again.");
         } catch {
           setSaveError("We couldn't save your profile. Please try again.");
@@ -351,24 +314,22 @@ export default function Profile() {
       }
 
       const data: ProfilePatchResponse = await res.json();
-
       const next: User = {
         ...userData,
         name: data.name ?? userData.name,
         dateOfBirth: data.dateOfBirth ?? userData.dateOfBirth,
         primaryCondition: (data.primaryCondition as PrimaryCondition) ?? userData.primaryCondition,
-        communicationPreference: data.communicationPreference !== undefined ? data.communicationPreference : userData.communicationPreference,
+        communicationPreference:
+          data.communicationPreference !== undefined
+            ? data.communicationPreference
+            : userData.communicationPreference,
         preferredLanguage: data.preferredLanguage ?? userData.preferredLanguage,
         timezone: data.timezone ?? userData.timezone,
       };
-
       setServerSnapshot(next);
       setUserData(next);
       setIsEditing(false);
-
-      if (data.onboardingStatus === "COMPLETED") {
-        markOnboardingComplete();
-      }
+      if (data.onboardingStatus === "COMPLETED") markOnboardingComplete();
     } catch {
       setSaveError("We couldn't save your profile. Please try again.");
     } finally {
@@ -376,17 +337,19 @@ export default function Profile() {
     }
   };
 
+  // ── Loading / error states ────────────────────────────────────────────────
   if (isAuthLoading || isProfileLoading) return <SpinnerIndicator />;
 
   if (loadError) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-6 py-10">
-        <div className="w-full max-w-md text-center">
-          <p className="text-red-600 font-bold">{loadError}</p>
+      <div className="min-h-screen flex items-center justify-center px-6"
+        style={{ backgroundColor: 'var(--brand-background)' }}>
+        <div className="text-center">
+          <p className="font-semibold mb-4" style={{ color: 'var(--brand-alert-red)' }}>{loadError}</p>
           <button
-            type="button"
             onClick={() => router.refresh()}
-            className="mt-6 w-full h-12 bg-white rounded-lg border border-[#e5e7eb] font-semibold text-[#374151] hover:bg-gray-50 transition-colors"
+            className="px-6 py-2.5 rounded-xl text-sm font-semibold border transition-colors"
+            style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
           >
             Try Again
           </button>
@@ -395,493 +358,424 @@ export default function Profile() {
     );
   }
 
+  const initials = userData.name?.split(" ").map((n) => n[0]).join("").toUpperCase() || "U";
+
   return (
-    <AdminLayout>
-      <div className="flex-1 overflow-auto bg-[#fafafa]">
-        {/* Header */}
-        <div className="bg-white border-b border-[#e2e8f0]">
-          <div className="px-6 lg:px-8 py-6">
-            <div className="flex items-end justify-between">
-              <h1 className="text-h5 font-bold text-[#0a0a0a] leading-9">
-                Your Health Profile
-              </h1>
+    <div className="min-h-screen" style={{ backgroundColor: 'var(--brand-background)' }}>
+      <div className="max-w-4xl mx-auto px-4 md:px-8 py-6 md:py-8">
+
+        {/* ── Hero Card ── */}
+        <div
+          className="rounded-[20px] overflow-hidden mb-6 p-6 md:p-8"
+          style={{ background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)' }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5">
+            {/* Avatar + info */}
+            <div className="flex items-center gap-4">
+              <div
+                className="w-16 h-16 md:w-20 md:h-20 rounded-2xl flex items-center justify-center text-white text-2xl md:text-3xl font-bold flex-shrink-0"
+                style={{ backgroundColor: 'rgba(255, 255, 255, 0.53)', boxShadow: '0 4px 20px rgba(0,0,0,0.15)' }}
+              >
+                {initials}
+              </div>
+              <div>
+                <h1 className="text-xl md:text-2xl font-bold text-white leading-tight">
+                  {userData.name || "No name set"}
+                </h1>
+                <p className="text-sm mt-0.5" style={{ color: 'rgba(255,255,255,0.7)' }}>
+                  {userData.roles.length ? userData.roles.map(formatRoleLabel).join(" / ") : "Patient"}
+                </p>
+                <div className="flex flex-wrap items-center gap-2 mt-2">
+                  <span className="flex items-center gap-1 text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>
+                    <Calendar className="w-3 h-3" />
+                    Joined {formatShortMonthYear(userData.createdAt)}
+                  </span>
+                  <span
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                    style={{ backgroundColor: 'rgba(255,255,255,0.18)', color: 'white' }}
+                  >
+                    <CheckCircle2 className="w-3 h-3" />
+                    {userData.emailVerified ? "Verified" : "Unverified"}
+                  </span>
+                  <RiskTierBadge tier={userData.riskTier} />
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-wrap items-center justify-center gap-2 self-start sm:self-center">
+              {!isEditing ? (
+                <button
+                  onClick={() => setIsEditing(true)}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer w-[150px]"
+                  style={{ backgroundColor: 'rgba(255, 255, 255, 0.53)', color: 'white' }}
+                >
+                  <Pencil className="w-3.5 h-3.5" /> Edit Profile
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={handleCancelEdit}
+                    disabled={isSaving}
+                    className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer w-[150px]"
+                    style={{ backgroundColor: 'rgba(255, 255, 255, 0.53)', color: 'white' }}
+                  >
+                    <X className="w-3.5 h-3.5" /> Cancel
+                  </button>
+                  <button
+                    onClick={() => void handleSaveProfile()}
+                    disabled={isSaving}
+                    className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer w-[150px]"
+                    style={{ backgroundColor: 'white', color: '#7B00E0' }}
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    {isSaving ? "Saving…" : "Save Changes"}
+                  </button>
+                </>
+              )}
               <button
                 onClick={logout}
-                className="flex items-center gap-2 px-4.25 py-4.25 bg-[#fef2f2] border border-[#fee2e2] rounded-lg text-[#dc2626] font-semibold hover:bg-[#fee2e2] transition-colors"
+                className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer w-[150px]"
+                style={{ backgroundColor: 'rgba(255, 0, 0, 0.83)', color: 'white' }}
               >
-                <LogOut className="w-4.5 h-4.5" />
-                Log Out
+                <LogOut className="w-3.5 h-3.5" /> Log Out
               </button>
             </div>
           </div>
         </div>
 
-        {/* Main Content */}
-        <div className="px-6 lg:px-8 py-6 max-w-300">
-          <div className="space-y-6">
-            {/* Profile Hero Section */}
-            <div className="bg-white border border-[#e2e8f0] rounded-xl shadow-sm p-8">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-6">
-                  {/* Avatar */}
-                  <div className="relative">
-                    <div className="w-24 h-24 rounded-2xl bg-[#6c00d1] flex items-center justify-center text-white text-[30px] font-bold shadow-lg">
-                      {userData.name
-                        ?.split(" ")
-                        .map((n) => n[0])
-                        .join("") || "U"}
-                    </div>
-                    <div className="absolute inset-0 rounded-2xl shadow-[0px_10px_15px_-3px_rgba(0,0,0,0.1),0px_4px_6px_-4px_rgba(0,0,0,0.1)] pointer-events-none" />
-                  </div>
+        {/* ── Content Grid ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
-                  {/* Info */}
-                  <div className="space-y-1">
-                    <h2 className="text-2xl font-bold text-[#0f172a]">
-                      {userData.name || "No name set"}
-                    </h2>
-                    <p className="text-base font-medium text-[#7B00E0]">
-                      {userData.roles.length
-                        ? userData.roles.map(formatRoleLabel).join(" / ")
-                        : "Patient"}
-                    </p>
-                    <div className="flex items-center gap-4 pt-2">
-                      <div className="flex items-center gap-1">
-                        <Calendar
-                          className="w-3 h-3 text-[#94a3b8] opacity-100! inline-block! visible!"
-                          color="#94a3b8"
-                          strokeWidth={2.5}
-                          style={{
-                            visibility: "visible",
-                            display: "inline-block",
-                            opacity: 1,
-                          }}
-                        />
-                        <span className="text-sm text-[#94a3b8]">
-                          Joined {formatShortMonthYear(userData.createdAt)}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <CheckCircle2
-                          className="w-2.5 h-2.5 text-[#94a3b8] opacity-100! inline-block! visible!"
-                          color="#94a3b8"
-                          strokeWidth={2.5}
-                          style={{
-                            visibility: "visible",
-                            display: "inline-block",
-                            opacity: 1,
-                          }}
-                        />
-                        <span className="text-sm text-[#94a3b8]">
-                          {userData.emailVerified ? "Verified" : "Unverified"}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <span
-                          className={`inline-flex w-3 h-3 rounded-full ${accountStatusDotClass(
-                            userData.accountStatus,
-                          )}`}
-                        />
-                        <span className="text-sm font-medium text-[#0f172a] capitalize">
-                          {toTitleCase(userData.accountStatus)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+          {/* Left — Personal Info */}
+          <div className="lg:col-span-2 space-y-5">
+
+            {/* Personal Information */}
+            <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+              <div className="flex items-center gap-2 mb-5">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+                  style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
+                  <Info className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
+                </div>
+                <h3 className="text-sm font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                  Personal Information
+                </h3>
+              </div>
+
+              {saveError && isEditing && (
+                <div className="mb-4 px-4 py-3 rounded-xl text-sm font-semibold"
+                  style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)' }}>
+                  {saveError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                {/* Full Name */}
+                <div>
+                  <FieldLabel>Full Name</FieldLabel>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      value={userData.name}
+                      onChange={(e) => setUserData((prev) => ({ ...prev, name: e.target.value }))}
+                      className={inputCls}
+                      style={{ color: 'var(--brand-text-primary)' }}
+                    />
+                  ) : (
+                    <FieldValue>{userData.name || "N/A"}</FieldValue>
+                  )}
                 </div>
 
-                {/* Edit / Save actions */}
-                {!isEditing ? (
-                  <button
-                    onClick={() => setIsEditing(true)}
-                    className="flex items-center gap-2 px-6 py-2.5 bg-[#f1f5f9] rounded-lg text-[#334155] font-bold hover:bg-[#e2e8f0] transition-colors"
-                  >
-                    <Pencil
-                      className="w-4 h-4 text-[#334155]"
-                      color="#334155"
-                      strokeWidth={3}
+                {/* Email */}
+                <div>
+                  <FieldLabel>Email Address</FieldLabel>
+                  <FieldValue>{userData.email || "N/A"}</FieldValue>
+                </div>
+
+                {/* Date of Birth */}
+                <div>
+                  <FieldLabel>Date of Birth</FieldLabel>
+                  {isEditing ? (
+                    <input
+                      type="date"
+                      value={toDateInputValue(userData.dateOfBirth)}
+                      onChange={(e) => setUserData((prev) => ({ ...prev, dateOfBirth: e.target.value }))}
+                      className={inputCls}
+                      style={{ color: 'var(--brand-text-primary)' }}
                     />
-                    Edit Profile
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={handleCancelEdit}
-                      disabled={isSaving}
-                      className="flex items-center gap-2 px-6 py-2.5 bg-white border border-[#e2e8f0] rounded-lg text-[#334155] font-bold hover:bg-[#f8fafc] transition-colors disabled:opacity-60"
+                  ) : (
+                    <FieldValue>{formatDate(userData.dateOfBirth)}</FieldValue>
+                  )}
+                </div>
+
+                {/* Timezone */}
+                <div>
+                  <FieldLabel>Timezone</FieldLabel>
+                  {isEditing ? (
+                    <select
+                      value={userData.timezone || ""}
+                      onChange={(e) => setUserData((prev) => ({ ...prev, timezone: e.target.value }))}
+                      className={selectCls}
+                      style={{ color: 'var(--brand-text-primary)' }}
                     >
-                      <X
-                        className="w-4 h-4 text-[#334155] opacity-100!"
-                        color="#334155"
-                        strokeWidth={3}
-                        style={{ visibility: "visible", display: "inline-block", opacity: 1 }}
-                      />
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleSaveProfile()}
-                      disabled={isSaving}
-                      className="flex items-center gap-2 px-6 py-2.5 bg-[#7B00E0] rounded-lg text-white font-bold hover:bg-[#6600BC] transition-colors disabled:opacity-60"
+                      {timezones.map((tz) => (
+                        <option key={tz} value={tz}>{tz}</option>
+                      ))}
+                      {userData.timezone && !timezones.includes(userData.timezone) && (
+                        <option value={userData.timezone}>{userData.timezone}</option>
+                      )}
+                    </select>
+                  ) : (
+                    <FieldValue>{userData.timezone || "N/A"}</FieldValue>
+                  )}
+                </div>
+
+                {/* Communication Preference */}
+                <div>
+                  <FieldLabel>Communication Preference</FieldLabel>
+                  {isEditing ? (
+                    <select
+                      value={userData.communicationPreference ?? ""}
+                      onChange={(e) =>
+                        setUserData((prev) => ({ ...prev, communicationPreference: e.target.value || null }))
+                      }
+                      className={selectCls}
+                      style={{ color: 'var(--brand-text-primary)' }}
                     >
-                      <Save
-                        className="w-4 h-4 text-white opacity-100!"
-                        color="#ffffff"
-                        strokeWidth={3}
-                        style={{ visibility: "visible", display: "inline-block", opacity: 1 }}
-                      />
-                      {isSaving ? "Saving..." : "Save Changes"}
-                    </button>
-                  </div>
-                )}
+                      <option value="">Not set</option>
+                      <option value="TEXT_FIRST">Text / Chat</option>
+                      <option value="AUDIO_FIRST">Audio / Voice</option>
+                    </select>
+                  ) : (
+                    <FieldValue>{formatCommunicationPreference(userData.communicationPreference)}</FieldValue>
+                  )}
+                </div>
+
+                {/* Preferred Language */}
+                <div>
+                  <FieldLabel>Preferred Language</FieldLabel>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      value={userData.preferredLanguage}
+                      onChange={(e) => setUserData((prev) => ({ ...prev, preferredLanguage: e.target.value }))}
+                      className={inputCls}
+                      style={{ color: 'var(--brand-text-primary)' }}
+                    />
+                  ) : (
+                    <FieldValue>{userData.preferredLanguage || "English"}</FieldValue>
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* Content Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Left Column */}
-              <div className="lg:col-span-2 space-y-6">
-                {/* Personal Information */}
-                <div className="bg-white border border-[#e2e8f0] rounded-xl shadow-sm overflow-hidden">
-                  <div className="bg-[rgba(108,0,209,0.05)] border-b border-[rgba(108,0,209,0.1)] px-6 py-4">
-                    <h3 className="text-base font-bold text-[#0f172a]">Personal Information</h3>
-                  </div>
+            {/* Health Information */}
+            <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+              <div className="flex items-center gap-2 mb-5">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+                  style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
+                  <Heart className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
+                </div>
+                <h3 className="text-sm font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                  Health Information
+                </h3>
+              </div>
 
-                  {saveError && isEditing && <div className="px-6 pt-4"><p className="text-sm font-bold text-red-600">{saveError}</p></div>}
-
-                  <div className="p-6 grid grid-cols-2 gap-x-8 gap-y-6">
-                    <div>
-                      <label className="text-sm font-medium text-[#64748b] block mb-1">
-                        Full name
-                      </label>
-                      {isEditing ? (
-                        <input
-                          type="text"
-                          value={userData.name}
-                          onChange={(e) =>
-                            setUserData((prev) => ({
-                              ...prev,
-                              name: e.target.value,
-                            }))
-                          }
-                          className="w-full px-3 py-2 border border-[#e2e8f0] rounded-lg focus:outline-none focus:border-[#6c00d1] text-base font-medium text-[#0f172a]"
-                        />
-                      ) : (
-                        <p className="text-base font-medium text-[#0f172a]">
-                          {userData.name || "N/A"}
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-medium text-[#64748b] block mb-1">
-                        Email Address
-                      </label>
-                      <p className="text-base font-medium text-[#0f172a]">
-                        {userData.email || "N/A"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-medium text-[#64748b] block mb-1">
-                        Date of Birth
-                      </label>
-                      {isEditing ? (
-                        <input
-                          type="date"
-                          value={toDateInputValue(userData.dateOfBirth)}
-                          onChange={(e) =>
-                            setUserData((prev) => ({
-                              ...prev,
-                              dateOfBirth: e.target.value,
-                            }))
-                          }
-                          className="w-full px-3 py-2 border border-[#e2e8f0] rounded-lg focus:outline-none focus:border-[#6c00d1] text-base font-medium text-[#0f172a]"
-                        />
-                      ) : (
-                        <p className="text-base font-medium text-[#0f172a]">
-                          {formatDate(userData.dateOfBirth)}
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-bold text-[rgba(108,0,209,0.6)] uppercase tracking-wider block mb-1">
-                        Timezone
-                      </label>
-                      {isEditing ? (
-                        <select
-                          value={userData.timezone || ""}
-                          onChange={(e) =>
-                            setUserData((prev) => ({
-                              ...prev,
-                              timezone: e.target.value,
-                            }))
-                          }
-                          className="w-full px-3 py-2 border border-[#e2e8f0] rounded-lg focus:outline-none focus:border-[#6c00d1] text-base font-medium text-[#0f172a] bg-white"
-                        >
-                          {timezones.map((tz) => (
-                            <option key={tz} value={tz}>
-                              {tz}
-                            </option>
-                          ))}
-                          {userData.timezone &&
-                            !timezones.includes(userData.timezone) && (
-                              <option value={userData.timezone}>
-                                {userData.timezone}
-                              </option>
-                            )}
-                        </select>
-                      ) : (
-                        <p className="text-base font-medium text-[#0f172a]">
-                          {userData.timezone || "N/A"}
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-bold text-[rgba(108,0,209,0.6)] uppercase tracking-wider block mb-2">
-                        Primary Condition
-                      </label>
-                      {isEditing ? (
-                        <select
-                          value={userData.primaryCondition}
-                          onChange={(e) =>
-                            updatePrimaryCondition(
-                              e.target.value as PrimaryCondition,
-                            )
-                          }
-                          className="w-full px-3 py-2 border border-[#e2e8f0] rounded-lg focus:outline-none focus:border-[#6c00d1] text-base font-medium text-[#0f172a] bg-white"
-                        >
-                          <option value="">Select your condition</option>
-                          <option value="hypertension">Hypertension (High Blood Pressure)</option>
-                          <option value="heart_disease">Heart Disease</option>
-                          <option value="diabetes_cardiac">Diabetes with Cardiac Risk</option>
-                          <option value="high_cholesterol">High Cholesterol</option>
-                          <option value="other">Other cardiovascular concern</option>
-                        </select>
-                      ) : (
-                        <p className="text-base font-medium text-[#0f172a]">
-                          {formatPrimaryCondition(userData.primaryCondition)}
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-bold text-[rgba(108,0,209,0.6)] uppercase tracking-wider block mb-1">
-                        Diagnosis Date
-                      </label>
-                      <p className="text-base font-medium text-[#0f172a]">
-                        {userData.diagnosisDate ? formatDate(userData.diagnosisDate) : "Not provided"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-bold text-[rgba(108,0,209,0.6)] uppercase tracking-wider block mb-1">
-                        Communication Preference
-                      </label>
-                      {isEditing ? (
-                        <select
-                          value={userData.communicationPreference ?? ""}
-                          onChange={(e) =>
-                            setUserData((prev) => ({
-                              ...prev,
-                              communicationPreference: e.target.value || null,
-                            }))
-                          }
-                          className="w-full px-3 py-2 border border-[#e2e8f0] rounded-lg focus:outline-none focus:border-[#6c00d1] text-base font-medium text-[#0f172a] bg-white"
-                        >
-                          <option value="">Not set</option>
-                          <option value="TEXT_FIRST">Text / Chat</option>
-                          <option value="AUDIO_FIRST">Audio / Voice</option>
-                        </select>
-                      ) : (
-                        <p className="text-base font-medium text-[#0f172a]">
-                          {formatCommunicationPreference(userData.communicationPreference)}
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-bold text-[rgba(108,0,209,0.6)] uppercase tracking-wider block mb-1">
-                        Preferred Language
-                      </label>
-                      {isEditing ? (
-                        <input
-                          type="text"
-                          value={userData.preferredLanguage}
-                          onChange={(e) =>
-                            setUserData((prev) => ({
-                              ...prev,
-                              preferredLanguage: e.target.value,
-                            }))
-                          }
-                          className="w-full px-3 py-2 border border-[#e2e8f0] rounded-lg focus:outline-none focus:border-[#6c00d1] text-base font-medium text-[#0f172a]"
-                        />
-                      ) : (
-                        <p className="text-base font-medium text-[#0f172a]">
-                          {userData.preferredLanguage || "English"}
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-bold text-[rgba(108,0,209,0.6)] uppercase tracking-wider block mb-1">
-                        Risk Tier
-                      </label>
-                      <RiskTierBadge tier={userData.riskTier} />
-                    </div>
-                  </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                {/* Primary Condition */}
+                <div className="sm:col-span-2">
+                  <FieldLabel>Primary Condition</FieldLabel>
+                  {isEditing ? (
+                    <select
+                      value={userData.primaryCondition}
+                      onChange={(e) => updatePrimaryCondition(e.target.value as PrimaryCondition)}
+                      className={selectCls}
+                      style={{ color: 'var(--brand-text-primary)' }}
+                    >
+                      <option value="">Select your condition</option>
+                      <option value="hypertension">Hypertension (High Blood Pressure)</option>
+                      <option value="heart_disease">Heart Disease</option>
+                      <option value="diabetes_cardiac">Diabetes with Cardiac Risk</option>
+                      <option value="high_cholesterol">High Cholesterol</option>
+                      <option value="other">Other cardiovascular concern</option>
+                    </select>
+                  ) : (
+                    <FieldValue>{formatPrimaryCondition(userData.primaryCondition)}</FieldValue>
+                  )}
                 </div>
 
-                {/* Roles & Permissions */}
-                <div className="bg-white border border-[#e2e8f0] rounded-xl shadow-sm overflow-hidden">
-                  <div className="bg-[rgba(108,0,209,0.05)] border-b border-[rgba(108,0,209,0.1)] px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <Star className="w-4.5 h-4.5 text-[#6C00D1]" />
-                      <h3 className="text-base font-bold text-[#0f172a]">
-                        Roles & Permissions
-                      </h3>
-                    </div>
+                {/* Diagnosis Date */}
+                <div>
+                  <FieldLabel>Diagnosis Date</FieldLabel>
+                  <FieldValue>
+                    {userData.diagnosisDate ? formatDate(userData.diagnosisDate) : "Not provided"}
+                  </FieldValue>
+                </div>
+
+                {/* Risk Tier */}
+                <div>
+                  <FieldLabel>Risk Tier</FieldLabel>
+                  <RiskTierBadge tier={userData.riskTier} />
+                </div>
+              </div>
+            </div>
+
+            {/* Roles */}
+            {userData.roles.length > 0 && (
+              <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+                <div className="flex items-center gap-2 mb-5">
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+                    style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
+                    <Star className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
                   </div>
-                  <div className="p-6 space-y-4">
-                    {userData.roles?.map((role, index) => (
-                      <div
-                        key={`${role}-${index}`}
-                        className="flex items-center justify-between p-4 bg-[rgba(108,0,209,0.05)] border border-[rgba(108,0,209,0.1)] rounded-lg"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-[#7B00E0] flex items-center justify-center">
-                            <Star className="w-5 h-5 text-white" />
-                          </div>
-                          <div>
-                            <p className="text-sm font-bold text-[#0f172a] capitalize">
-                              {role.replace("_", " ")}
-                            </p>
-                            <p className="text-xs text-[#64748b]">
-                              Full access to{" "}
-                              {role.includes("admin") ? "admin" : role.includes("provider") ? "provider" : "user"}{" "}
-                              features
-                            </p>
-                          </div>
+                  <h3 className="text-sm font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                    Roles & Permissions
+                  </h3>
+                </div>
+                <div className="space-y-3">
+                  {userData.roles.map((role, i) => (
+                    <div
+                      key={`${role}-${i}`}
+                      className="flex items-center justify-between p-3 rounded-xl"
+                      style={{ backgroundColor: 'var(--brand-primary-purple-light)', border: '1px solid #E9D5FF' }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-8 h-8 rounded-lg flex items-center justify-center"
+                          style={{ backgroundColor: 'var(--brand-primary-purple)' }}
+                        >
+                          <Star className="w-4 h-4 text-white" />
                         </div>
-                        <span className="px-3 py-1 bg-[#16a34a] text-white text-xs font-bold rounded-full">
-                          Active
-                        </span>
+                        <div>
+                          <p className="text-sm font-semibold capitalize" style={{ color: 'var(--brand-text-primary)' }}>
+                            {role.replace("_", " ")}
+                          </p>
+                          <p className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>
+                            Full access to {role.includes("admin") ? "admin" : role.includes("provider") ? "provider" : "user"} features
+                          </p>
+                        </div>
                       </div>
-                    ))}
-                    {(!userData.roles || userData.roles.length === 0) && (
-                      <p className="text-sm text-[#64748b]">No roles assigned</p>
-                    )}
-                  </div>
+                      <span
+                        className="px-2.5 py-1 rounded-full text-[10px] font-bold"
+                        style={{ backgroundColor: 'rgba(22,163,74,0.12)', color: '#16a34a' }}
+                      >
+                        Active
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
+            )}
+          </div>
 
-              {/* Right Column */}
-              <div className="space-y-6">
-                {/* Metadata */}
-                <div className="bg-white border border-[#e2e8f0] rounded-xl shadow-sm overflow-hidden">
-                  <div className="bg-[rgba(108,0,209,0.05)] border-b border-[rgba(108,0,209,0.1)] px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <Info className="w-5 h-5 text-[#6C00D1]" />
-                      <h3 className="text-base font-bold text-[#0f172a]">
-                        Metadata
-                      </h3>
-                    </div>
-                  </div>
-                  <div className="p-6 space-y-4">
-                    <div>
-                      <label className="text-[10px] font-bold text-[rgba(108,0,209,0.6)] uppercase tracking-wider block mb-1">
-                        User ID
-                      </label>
-                      <p className="text-xs font-mono text-[#0f172a]">
-                        {userData.id || "N/A"}
-                      </p>
-                    </div>
+          {/* Right Column */}
+          <div className="space-y-5">
 
-                    <div>
-                      <label className="text-[10px] font-bold text-[rgba(108,0,209,0.6)] uppercase tracking-wider block mb-1">
-                        Account Created
-                      </label>
-                      <p className="text-sm text-[#0f172a]">
-                        {formatDate(userData.createdAt)}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-bold text-[rgba(108,0,209,0.6)] uppercase tracking-wider block mb-1">
-                        Email Status
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2
-                          className="w-3.5 h-3.5 text-[#16a34a] opacity-100! inline-block! visible!"
-                          color={userData.emailVerified ? "#16a34a" : "#94a3b8"}
-                          strokeWidth={3}
-                          style={{
-                            visibility: "visible",
-                            display: "inline-block",
-                            opacity: 1,
-                          }}
-                        />
-                        <span className={`text-sm font-bold ${userData.emailVerified ? "text-[#16a34a]" : "text-[#94a3b8]"}`}>
-                          {userData.emailVerified ? "Verified" : "Unverified"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+            {/* Account Metadata */}
+            <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+              <div className="flex items-center gap-2 mb-5">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+                  style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
+                  <Info className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
                 </div>
-
-                {/* Account Status */}
-                <div className="bg-white border border-[#e2e8f0] rounded-xl shadow-sm overflow-hidden">
-                  <div className="bg-[rgba(108,0,209,0.05)] border-b border-[rgba(108,0,209,0.1)] px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <Activity className="w-4.5 h-4.5 text-[#6C00D1]" />
-                      <h3 className="text-base font-bold text-[#0f172a]">
-                        Account Status
-                      </h3>
-                    </div>
-                  </div>
-                  <div className="p-6 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-[#0f172a]">
-                        Status
-                      </span>
-                      <span className={`px-3 py-1 text-white text-xs font-bold rounded-full capitalize ${
-                        userData.accountStatus === "active" ? "bg-[#16a34a]" :
-                        userData.accountStatus === "suspended" ? "bg-[#f59e0b]" :
-                        "bg-[#dc2626]"
-                      }`}>
-                        {toTitleCase(userData.accountStatus)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-[#0f172a]">
-                        Two-Factor Auth
-                      </span>
-                      <span className="px-3 py-1 bg-[#7B00E0] text-white text-xs font-bold rounded-full">
-                        Enabled
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-[#0f172a]">
-                        Session Timeout
-                      </span>
-                      <span className="text-sm font-bold text-[#0f172a]">
-                        30 minutes
-                      </span>
-                    </div>
-                    <div className="pt-4 border-t border-[rgba(108,0,209,0.05)]">
-                      <button className="w-full py-2.5 text-sm font-bold text-[#dc2626] hover:bg-[rgba(220,38,38,0.05)] rounded-lg transition-colors">
-                        Deactivate Account
-                      </button>
-                    </div>
-                  </div>
+                <h3 className="text-sm font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                  Account Info
+                </h3>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <FieldLabel>User ID</FieldLabel>
+                  <p className="text-xs font-mono break-all" style={{ color: 'var(--brand-text-secondary)' }}>
+                    {userData.id || "N/A"}
+                  </p>
+                </div>
+                <div>
+                  <FieldLabel>Account Created</FieldLabel>
+                  <FieldValue>{formatDate(userData.createdAt)}</FieldValue>
+                </div>
+                <div>
+                  <FieldLabel>Email Status</FieldLabel>
+                  <span
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
+                    style={
+                      userData.emailVerified
+                        ? { backgroundColor: 'rgba(22,163,74,0.12)', color: '#16a34a' }
+                        : { backgroundColor: 'var(--brand-background)', color: 'var(--brand-text-muted)' }
+                    }
+                  >
+                    <CheckCircle2 className="w-3 h-3" />
+                    {userData.emailVerified ? "Verified" : "Unverified"}
+                  </span>
                 </div>
               </div>
+            </div>
+
+            {/* Account Status */}
+            <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+              <div className="flex items-center gap-2 mb-5">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+                  style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
+                  <Activity className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
+                </div>
+                <h3 className="text-sm font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                  Account Status
+                </h3>
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm" style={{ color: 'var(--brand-text-secondary)' }}>Status</span>
+                  <span
+                    className="px-2.5 py-1 rounded-full text-[10px] font-bold capitalize"
+                    style={
+                      userData.accountStatus === "active"
+                        ? { backgroundColor: 'rgba(22,163,74,0.12)', color: '#16a34a' }
+                        : userData.accountStatus === "suspended"
+                          ? { backgroundColor: 'rgba(245,158,11,0.12)', color: '#d97706' }
+                          : { backgroundColor: 'rgba(220,38,38,0.12)', color: '#dc2626' }
+                    }
+                  >
+                    {toTitleCase(userData.accountStatus)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm" style={{ color: 'var(--brand-text-secondary)' }}>Two-Factor Auth</span>
+                  <span
+                    className="px-2.5 py-1 rounded-full text-[10px] font-bold"
+                    style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
+                  >
+                    Enabled
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm" style={{ color: 'var(--brand-text-secondary)' }}>Session Timeout</span>
+                  <span className="text-sm font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                    30 min
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Security */}
+            <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+                  style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
+                  <Shield className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
+                </div>
+                <h3 className="text-sm font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                  Security
+                </h3>
+              </div>
+              <button
+                className="w-full py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                style={{ color: 'var(--brand-alert-red)', backgroundColor: 'rgba(220,38,38,0.06)' }}
+              >
+                Deactivate Account
+              </button>
             </div>
           </div>
         </div>
       </div>
-    </AdminLayout>
+    </div>
   );
 }

@@ -69,7 +69,7 @@ interface DeviationAlert {
 
 export default function Dashboard() {
   const router = useRouter();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
 
   const [bpChartData, setBpChartData] = useState<{ day: string; systolic: number; diastolic: number }[]>([]);
   const [latestEntry, setLatestEntry] = useState<JournalEntry | null>(null);
@@ -79,7 +79,7 @@ export default function Dashboard() {
   const [totalEntries, setTotalEntries] = useState(0);
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (isLoading || !isAuthenticated) return;
     Promise.all([
       getJournalEntries({ limit: 7 }).catch(() => []),
       getLatestBaseline().catch(() => null),
@@ -115,7 +115,7 @@ export default function Dashboard() {
       setBaseline(baselineData ?? null);
       setAlerts(Array.isArray(alertsData) ? alertsData : []);
     });
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isLoading]);
 
   // ─── Derived values ─────────────────────────────────────────────────────
   const userName = user?.name?.split(' ')[0] ?? 'there';
@@ -159,7 +159,7 @@ export default function Dashboard() {
 
   return (
     <div
-      className="min-h-screen"
+      className="min-h-screen flex justify-center items-center"
       style={{ backgroundColor: 'var(--brand-background)' }}
     >
       {/* Main Content */}
