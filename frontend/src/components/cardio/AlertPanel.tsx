@@ -1,6 +1,6 @@
 'use client';
 
-import { X, Bell, CheckCircle2 } from 'lucide-react';
+import { X, Bell, CheckCircle2, Loader2 } from 'lucide-react';
 import {
   LineChart,
   Line,
@@ -22,29 +22,82 @@ export interface Alert {
   severity: 'HIGH' | 'MEDIUM';
   level: 'L1' | 'L2';
   color: 'red' | 'amber';
+  patientId: string;
+  followUpScheduledAt: string | null;
+}
+
+export interface AlertDetail {
+  id: string;
+  type: string;
+  severity: string;
+  magnitude: number;
+  baselineValue: number | null;
+  actualValue: number | null;
+  escalated: boolean;
+  status: string;
+  createdAt: string;
+  patient: {
+    id: string;
+    name: string;
+    dateOfBirth: string | null;
+    communicationPreference: string | null;
+    riskTier: string;
+  };
+  journalEntry: {
+    entryDate: string;
+    systolicBP: number | null;
+    diastolicBP: number | null;
+  } | null;
+  baseline: {
+    systolic: number | null;
+    diastolic: number | null;
+  };
+  triggerReasons: string[];
+  aiSummary: string;
+  communication: {
+    label: string;
+    description: string;
+  };
+  bpTrend: {
+    day: string;
+    systolic: number | null;
+    diastolic: number | null;
+    date: string;
+  }[];
+  escalation: {
+    level: string;
+    reason: string | null;
+  } | null;
 }
 
 interface AlertPanelProps {
   alert: Alert;
+  detail: AlertDetail | null;
+  detailLoading: boolean;
   onClose: () => void;
   onReview: (id: string) => void;
   onSchedule: (alert: Alert) => void;
 }
 
-const bpTrendData = [
-  { day: 'Mon', systolic: 155 },
-  { day: 'Tue', systolic: 158 },
-  { day: 'Wed', systolic: 162 },
-  { day: 'Thu', systolic: 165 },
-  { day: 'Fri', systolic: 168 },
-  { day: 'Sat', systolic: 168 },
-  { day: 'Sun', systolic: 168 },
-];
-
 const SPRING = { type: 'spring' as const, stiffness: 320, damping: 30 };
+
+function formatDOB(dob: string | null): string {
+  if (!dob) return 'N/A';
+  return new Date(dob).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function generatePatientIdCode(id: string): string {
+  return `HC-${id.slice(-8).toUpperCase()}`;
+}
 
 export default function AlertPanel({
   alert,
+  detail,
+  detailLoading,
   onClose,
   onReview,
   onSchedule,
@@ -66,6 +119,32 @@ export default function AlertPanel({
     setReviewedSuccess(true);
     setTimeout(() => onReview(alert.id), 1300);
   };
+
+  // Compute dynamic chart domain from real data
+  const bpTrend = detail?.bpTrend ?? [];
+  const systolicValues = bpTrend
+    .map((d) => d.systolic)
+    .filter((v): v is number => v != null);
+  const chartMin =
+    systolicValues.length > 0
+      ? Math.floor((Math.min(...systolicValues) - 10) / 10) * 10
+      : 130;
+  const chartMax =
+    systolicValues.length > 0
+      ? Math.ceil((Math.max(...systolicValues) + 10) / 10) * 10
+      : 180;
+
+  // Patient metadata with fallbacks
+  const insurance = 'AmeriHealth Medicaid';
+  const ward = detail?.patient
+    ? 'Ward 7, DC 20019'
+    : 'Ward 7, DC 20019';
+  const patientIdCode = detail?.patient?.id
+    ? generatePatientIdCode(detail.patient.id)
+    : generatePatientIdCode(alert.id);
+  const dob = detail?.patient?.dateOfBirth
+    ? formatDOB(detail.patient.dateOfBirth)
+    : 'N/A';
 
   const panelContent = (
     <>
@@ -91,6 +170,16 @@ export default function AlertPanel({
             from the queue.
           </p>
         </motion.div>
+      ) : detailLoading ? (
+        <div className="flex flex-col items-center justify-center h-64">
+          <Loader2
+            className="w-8 h-8 animate-spin mb-3"
+            style={{ color: 'var(--brand-primary-purple)' }}
+          />
+          <p className="text-sm" style={{ color: 'var(--brand-text-muted)' }}>
+            Loading alert details...
+          </p>
+        </div>
       ) : (
         <>
           {/* Panel Header */}
@@ -153,7 +242,7 @@ export default function AlertPanel({
                   className="text-base font-semibold mb-0.5"
                   style={{ color: 'var(--brand-text-primary)' }}
                 >
-                  {alert.name}
+                  {detail?.patient?.name ?? alert.name}
                 </h3>
                 <p
                   className="text-[13px] mb-2"
@@ -169,7 +258,7 @@ export default function AlertPanel({
                       color: 'var(--brand-text-secondary)',
                     }}
                   >
-                    AmeriHealth Medicaid
+                    {insurance}
                   </div>
                   <div
                     className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold"
@@ -178,14 +267,14 @@ export default function AlertPanel({
                       color: 'var(--brand-accent-teal)',
                     }}
                   >
-                    Cedar Hill Patient
+                    {ward}
                   </div>
                 </div>
                 <p
                   className="text-[11px]"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
-                  DOB: March 15, 1962 &middot; ID: HC-20019-0042
+                  DOB: {dob} &middot; ID: {patientIdCode}
                 </p>
               </div>
             </div>
@@ -201,24 +290,22 @@ export default function AlertPanel({
                 Why this alert was triggered:
               </h4>
               <div className="space-y-2">
-                {[
-                  `Elevated BP: ${alert.reading} (Baseline: 142/88)`,
-                  '3 consecutive elevated readings — Mar 19, 20, 21',
-                  'Medication missed: 2 of last 3 days',
-                ].map((item, i) => (
-                  <div key={i} className="flex items-start gap-2">
-                    <div
-                      className="w-1.5 h-1.5 rounded-full mt-1.75 shrink-0"
-                      style={{ backgroundColor: textColor }}
-                    />
-                    <p
-                      className="text-[13px] leading-5"
-                      style={{ color: 'var(--brand-text-primary)' }}
-                    >
-                      {item}
-                    </p>
-                  </div>
-                ))}
+                {(detail?.triggerReasons ?? [`Elevated BP: ${alert.reading}`]).map(
+                  (item, i) => (
+                    <div key={i} className="flex items-start gap-2">
+                      <div
+                        className="w-1.5 h-1.5 rounded-full mt-1.75 shrink-0"
+                        style={{ backgroundColor: textColor }}
+                      />
+                      <p
+                        className="text-[13px] leading-5"
+                        style={{ color: 'var(--brand-text-primary)' }}
+                      >
+                        {item}
+                      </p>
+                    </div>
+                  ),
+                )}
               </div>
             </div>
           </div>
@@ -244,10 +331,8 @@ export default function AlertPanel({
                 className="text-[13px] leading-5"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
-                Patient shows a consistent upward BP trend over 72 hours with
-                concurrent medication non-adherence. Recommend proactive care
-                team outreach within 24 hours to assess barriers to medication
-                compliance.
+                {detail?.aiSummary ??
+                  'Loading summary...'}
               </p>
             </div>
           </div>
@@ -265,64 +350,65 @@ export default function AlertPanel({
                   className="text-[13px] font-semibold"
                   style={{ color: 'var(--brand-accent-teal)' }}
                 >
-                  Audio-First Patient
+                  {detail?.communication?.label ?? 'Communication Preference'}
                 </h4>
               </div>
               <p
                 className="text-[11px] leading-relaxed"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
-                Use verbal communication and visual aids at next visit. Patient
-                prefers spoken over written instructions.
+                {detail?.communication?.description ??
+                  'No specific communication preference indicated.'}
               </p>
             </div>
           </div>
 
           {/* BP Mini Chart */}
-          <div className="px-6 pb-4">
-            <h4
-              className="text-[13px] font-semibold mb-3"
-              style={{ color: 'var(--brand-text-primary)' }}
-            >
-              7-Day BP Trend
-            </h4>
-            <div style={{ width: '100%', height: 100 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={bpTrendData}
-                  margin={{ top: 4, right: 8, left: -20, bottom: 0 }}
-                >
-                  <XAxis
-                    dataKey="day"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: '#94A3B8', fontSize: 10 }}
-                  />
-                  <YAxis
-                    domain={[130, 180]}
-                    ticks={[130, 150, 170]}
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: '#94A3B8', fontSize: 10 }}
-                  />
-                  <ReferenceLine
-                    y={160}
-                    stroke="#DC2626"
-                    strokeWidth={1}
-                    strokeDasharray="3 3"
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="systolic"
-                    stroke={textColor}
-                    strokeWidth={2}
-                    dot={{ fill: textColor, r: 3 }}
-                    isAnimationActive={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+          {bpTrend.length > 0 && (
+            <div className="px-6 pb-4">
+              <h4
+                className="text-[13px] font-semibold mb-3"
+                style={{ color: 'var(--brand-text-primary)' }}
+              >
+                7-Day BP Trend
+              </h4>
+              <div style={{ width: '100%', height: 100 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={bpTrend}
+                    margin={{ top: 4, right: 8, left: -20, bottom: 0 }}
+                  >
+                    <XAxis
+                      dataKey="day"
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: '#94A3B8', fontSize: 10 }}
+                    />
+                    <YAxis
+                      domain={[chartMin, chartMax]}
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: '#94A3B8', fontSize: 10 }}
+                    />
+                    <ReferenceLine
+                      y={160}
+                      stroke="#DC2626"
+                      strokeWidth={1}
+                      strokeDasharray="3 3"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="systolic"
+                      stroke={textColor}
+                      strokeWidth={2}
+                      dot={{ fill: textColor, r: 3 }}
+                      isAnimationActive={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Action Buttons */}
           <div
@@ -345,18 +431,36 @@ export default function AlertPanel({
               <CheckCircle2 className="w-4 h-4" />
               Mark as Reviewed
             </motion.button>
-            <motion.button
-              onClick={() => onSchedule(alert)}
-              className="w-full h-11 rounded-full font-bold text-sm border-2 bg-white flex items-center justify-center gap-2"
-              style={{
-                borderColor: 'var(--brand-primary-purple)',
-                color: 'var(--brand-primary-purple)',
-              }}
-              whileHover={{ scale: 1.02, backgroundColor: '#f5f0ff' }}
-              whileTap={{ scale: 0.97 }}
-            >
-              Schedule Follow-up Call
-            </motion.button>
+            {alert.followUpScheduledAt ? (
+              <div
+                className="w-full h-11 rounded-full font-bold text-sm border-2 flex items-center justify-center gap-2"
+                style={{
+                  borderColor: '#0D9488',
+                  backgroundColor: '#CCFBF1',
+                  color: '#0D9488',
+                  cursor: 'default',
+                }}
+              >
+                Follow-up Scheduled &mdash;{' '}
+                {new Date(alert.followUpScheduledAt).toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                })}
+              </div>
+            ) : (
+              <motion.button
+                onClick={() => onSchedule(alert)}
+                className="w-full h-11 rounded-full font-bold text-sm border-2 bg-white flex items-center justify-center gap-2"
+                style={{
+                  borderColor: 'var(--brand-primary-purple)',
+                  color: 'var(--brand-primary-purple)',
+                }}
+                whileHover={{ scale: 1.02, backgroundColor: '#f5f0ff' }}
+                whileTap={{ scale: 0.97 }}
+              >
+                Schedule Follow-up Call
+              </motion.button>
+            )}
           </div>
         </>
       )}

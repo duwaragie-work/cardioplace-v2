@@ -8,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
 import { createHash, randomBytes, randomInt } from 'crypto'
-import * as nodemailer from 'nodemailer'
+import { EmailService } from '../email/email.service.js'
 import type { Profile } from 'passport-google-oauth20'
 import {
   AccountStatus,
@@ -78,6 +78,7 @@ export class AuthService {
     private jwtService: JwtService,
     private config: ConfigService,
     private bcryptService: BcryptService,
+    private emailService: EmailService,
   ) {}
 
   // ─── Token Issuance ─────────────────────────────────────────────────────────
@@ -1098,23 +1099,10 @@ export class AuthService {
   // ─── Email Helper ────────────────────────────────────────────────────────────
 
   private async sendOtpEmail(email: string, otp: string): Promise<void> {
-    const transporter = nodemailer.createTransport({
-      host: this.config.get<string>('SMTP_HOST'),
-      port: Number(this.config.get<string>('SMTP_PORT', '587')),
-      auth: {
-        user: this.config.get<string>('SMTP_USER'),
-        pass: this.config.get<string>('SMTP_PASS'),
-      },
-    })
-
-    await transporter.sendMail({
-      from: this.config.get<string>(
-        'SMTP_FROM',
-        'Healplace <no-reply@healplace.com>',
-      ),
-      to: email,
-      subject: 'Your Healplace verification code',
-      html: `
+    await this.emailService.sendEmail(
+      email,
+      'Your Healplace verification code',
+      `
         <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
           <h2 style="color: #1a1a2e;">Your verification code</h2>
           <p style="font-size: 36px; font-weight: bold; letter-spacing: 10px;
@@ -1128,6 +1116,6 @@ export class AuthService {
           </p>
         </div>
       `,
-    })
+    )
   }
 }

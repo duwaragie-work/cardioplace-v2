@@ -3,6 +3,9 @@
     "allow": [
       "Bash(npx tsc:*)",
       "mcp__claude_ai_Figma__get_design_context"
+    ],
+    "additionalDirectories": [
+      "c:\\git\\work\\healplace-cardio\\backend\\src"
     ]
   }
 }
