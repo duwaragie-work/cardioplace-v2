@@ -7,6 +7,7 @@ import {
   Area,
   XAxis,
   YAxis,
+  Label,
   ResponsiveContainer,
 } from 'recharts';
 import { Flame, Clock, ArrowRight } from 'lucide-react';
@@ -129,8 +130,8 @@ export default function Dashboard() {
   const bpStatusStyle = bpStatusLabel === 'Within Target'
     ? { backgroundColor: 'var(--brand-success-green-light)', color: 'var(--brand-success-green)' }
     : bpStatusLabel === 'Elevated'
-    ? { backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }
-    : { backgroundColor: '#F1F5F9', color: 'var(--brand-text-muted)' };
+      ? { backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }
+      : { backgroundColor: '#F1F5F9', color: 'var(--brand-text-muted)' };
 
   const baselineStr = baseline?.baselineSystolic && baseline?.baselineDiastolic
     ? `${Math.round(Number(baseline.baselineSystolic))}/${Math.round(Number(baseline.baselineDiastolic))}` : '--/--';
@@ -142,7 +143,7 @@ export default function Dashboard() {
     : [100, 180];
 
   return (
-    <div className="relative overflow-hidden" style={{ height: 'calc(100vh - 4rem)', backgroundColor: '#FAFBFF' }}>
+    <div className="relative overflow-auto" style={{ height: 'calc(100vh - 4rem)', backgroundColor: '#FAFBFF' }}>
 
       {/* ── Decorative background blobs ── */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -161,11 +162,11 @@ export default function Dashboard() {
       <main className="relative h-full flex flex-col px-4 md:px-8 py-4 md:py-5 max-w-7xl mx-auto">
 
         {/* ROW 1 — Greeting + Stat cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4 mb-3 md:mb-4">
+        <div className="grid grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4 mb-3 md:mb-4">
 
           {/* Greeting Card */}
           <div
-            className="md:col-span-3 lg:col-span-2 p-5 rounded-[20px] relative overflow-hidden"
+            className="col-span-3 lg:col-span-2 p-5 rounded-[20px] relative overflow-hidden"
             style={{ background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)' }}
           >
             {/* decorative circle inside card */}
@@ -241,7 +242,7 @@ export default function Dashboard() {
         </div>
 
         {/* ROW 2 — BP Chart · Check-In CTA · Alerts */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4 flex-1 min-h-0">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 flex-1 h-[300px]">
 
           {/* BP Trend */}
           <div className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
@@ -254,7 +255,7 @@ export default function Dashboard() {
               </a>
             </div>
 
-            <div className="flex-1 min-h-0" style={{ minHeight: 120 }}>
+            <div className="flex-1" style={{ minHeight: 220 }}>
               {loading ? (
                 <div className="h-full flex flex-col justify-end gap-1 pb-2">
                   {/* Fake chart bars */}
@@ -264,7 +265,7 @@ export default function Dashboard() {
                     ))}
                   </div>
                   <div className="flex gap-1 px-2 mt-1">
-                    {['M','T','W','T','F','S','S'].map((_d, i) => (
+                    {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((_d, i) => (
                       <div key={i} className="flex-1 flex justify-center">
                         <Bone w={12} h={8} r={4} />
                       </div>
@@ -280,8 +281,12 @@ export default function Dashboard() {
                         <stop offset="95%" stopColor="#7B00E0" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} />
-                    <YAxis domain={bpDomain} axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} width={30} />
+                    <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }}>
+                      <Label value="Day" position="insideBottom" offset={-2} style={{ fill: '#94A3B8', fontSize: 10 }} />
+                    </XAxis>
+                    <YAxis domain={bpDomain} axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} width={38}>
+                      <Label value="mmHg" angle={-90} position="insideLeft" offset={4} style={{ fill: '#94A3B8', fontSize: 10 }} />
+                    </YAxis>
                     <Area type="monotone" dataKey="systolic" stroke="#7B00E0" strokeWidth={2} fill="url(#colorSystolic)" />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -299,114 +304,124 @@ export default function Dashboard() {
             </p>
           </div>
 
-          {/* Check-In CTA */}
-          <div
-            className="p-4 md:p-5 rounded-2xl flex flex-col justify-between"
-            style={{ backgroundColor: 'var(--brand-primary-purple-light)', border: '1px solid #E9D5FF' }}
-          >
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <Clock className="w-5 h-5" style={{ color: 'var(--brand-primary-purple)' }} />
-                <h3 className="text-sm font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                  Today&apos;s Check-In
-                </h3>
-              </div>
-              <p className="text-[11px] mb-3" style={{ color: 'var(--brand-text-muted)' }}>Takes about 3 minutes</p>
+          {/* Check-In CTA + Alerts */}
+          <div className="grid grid-rows-[0.5fr_1.5fr] gap-3 md:gap-4">
 
-              {loading ? (
-                <Bone w={88} h={20} r={99} />
-              ) : todayHasEntry ? (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold"
-                  style={{ backgroundColor: 'var(--brand-success-green-light)', color: 'var(--brand-success-green)' }}>
-                  ✓ Completed today
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold"
-                  style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }}>
-                  Due today
-                </span>
-              )}
-            </div>
-
-            <div>
-              <button
-                onClick={() => router.push('/check-in')}
-                className="w-full h-9 flex items-center justify-center gap-1.5 rounded-full text-white font-bold text-xs transition-all hover:scale-[1.02] active:scale-[0.98]"
-                style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
-              >
-                {loading ? (
-                  <Bone w={120} h={12} color="rgba(255,255,255,0.4)" />
-                ) : (
-                  <>{todayHasEntry ? 'Log Another Reading' : 'Start Check-In'} <ArrowRight className="w-3 h-3" /></>
-                )}
-              </button>
-              <p className="text-[10px] mt-1.5 text-center" style={{ color: 'var(--brand-text-muted)' }}>
-                {loading ? (
-                  <span className="flex justify-center"><Bone w={90} h={8} r={5} /></span>
-                ) : (
-                  `Last: ${getLastCheckInText(latestEntry as Record<string, unknown> | null)}`
-                )}
-              </p>
-            </div>
-          </div>
-
-          {/* Recent Alerts */}
-          <div className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
-            <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
-              Recent Alerts
-            </h3>
-
-            {loading ? (
-              <div className="space-y-2">
-                {[1, 2].map((i) => (
-                  <div key={i} className="p-3 rounded-xl" style={{ backgroundColor: '#F8F4FF', borderLeft: '3px solid #EDE9F6' }}>
-                    <Bone w="75%" h={11} />
-                    <div className="mt-1.5"><Bone w="45%" h={9} r={5} /></div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <>
-                {openAlerts.length === 0 && streak === 0 && (
-                  <p className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>
-                    No active alerts — keep up the great work!
-                  </p>
-                )}
-
-                <div className="space-y-2">
-                  {openAlerts.slice(0, 2).map((alert) => (
-                    <div key={alert.id} className="p-3 rounded-xl"
-                      style={{
-                        backgroundColor: alert.severity === 'HIGH' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
-                        borderLeft: `3px solid ${alert.severity === 'HIGH' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)'}`,
-                      }}>
-                      <div className="flex items-start justify-between">
-                        <p className="text-[11px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                          {formatAlertType(alert.type)}
-                        </p>
-                        <span className="text-[10px] font-semibold"
-                          style={{ color: alert.severity === 'HIGH' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}>
-                          Open
-                        </span>
-                      </div>
-                      <p className="text-[10px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
-                        {formatAlertDate(alert.journalEntry?.entryDate ?? alert.createdAt ?? '')} · Care team notified
-                      </p>
-                    </div>
-                  ))}
-
-                  {streak > 0 && (
-                    <div className="p-3 rounded-xl"
-                      style={{ backgroundColor: 'var(--brand-success-green-light)', borderLeft: '3px solid var(--brand-success-green)' }}>
-                      <p className="text-[11px] font-semibold mb-0.5" style={{ color: 'var(--brand-text-primary)' }}>
-                        {streak} day medication streak 🔥
-                      </p>
-                      <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>Keep it up!</p>
-                    </div>
+            <div
+              className="p-4 md:p-5 rounded-2xl flex flex-col justify-between bg-[#7B00E0]">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Clock className="w-6 h-6" color='white' />
+                  <h3 className="text-lg font-semibold text-white" >
+                    Today&apos;s Check-In
+                  </h3>
+                  {loading ? (
+                    <Bone w={88} h={20} r={99} />
+                  ) : todayHasEntry ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold"
+                      style={{ backgroundColor: 'var(--brand-success-green-light)', color: 'var(--brand-success-green)' }}>
+                      ✓ Completed today
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold"
+                      style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }}>
+                      Due today
+                    </span>
                   )}
                 </div>
-              </>
-            )}
+                <p className="text-[11px] mb-3 text-white">Takes about 3 minutes</p>
+              </div>
+
+              <div>
+                <button
+                  onClick={() => router.push('/check-in')}
+                  className="w-full h-10 bg-white flex items-center justify-center gap-1.5 rounded-full text-[#7B00E0] font-bold text-[13px] transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                >
+                  {loading ? (
+                    <Bone w={120} h={12} color="#7B00E0" />
+                  ) : (
+                    <>{todayHasEntry ? 'Log Another Reading' : 'Start Check-In'} <ArrowRight className="w-4 h-4" /></>
+                  )}
+                </button>
+                <p className="text-[10px] mt-3 text-center text-white">
+                  {loading ? (
+                    <span className="flex justify-center"><Bone w={90} h={8} r={5} /></span>
+                  ) : (
+                    `Last: ${getLastCheckInText(latestEntry as Record<string, unknown> | null)}`
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {/* Recent Alerts */}
+            <div className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
+              <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
+                Recent Alerts
+              </h3>
+
+              {loading ? (
+                <div className="space-y-2">
+                  {[1, 2].map((i) => (
+                    <div key={i} className="p-3 rounded-xl" style={{ backgroundColor: '#F8F4FF', borderLeft: '3px solid #EDE9F6' }}>
+                      <Bone w="75%" h={11} />
+                      <div className="mt-1.5"><Bone w="45%" h={9} r={5} /></div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  {openAlerts.length === 0 && streak === 0 && (
+                    <p className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>
+                      No active alerts — keep up the great work!
+                    </p>
+                  )}
+
+                  <div className="space-y-2">
+                    {/* Show max 2 alert items; if streak is shown, only 1 alert */}
+                    {openAlerts.slice(0, streak > 0 ? 1 : 2).map((alert) => (
+                      <div key={alert.id} className="p-3 rounded-xl"
+                        style={{
+                          backgroundColor: alert.severity === 'HIGH' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
+                          borderLeft: `3px solid ${alert.severity === 'HIGH' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)'}`,
+                        }}>
+                        <div className="flex items-start justify-between">
+                          <p className="text-[11px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                            {formatAlertType(alert.type)}
+                          </p>
+                          <span className="text-[10px] font-semibold"
+                            style={{ color: alert.severity === 'HIGH' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}>
+                            Open
+                          </span>
+                        </div>
+                        <p className="text-[10px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+                          {formatAlertDate(alert.journalEntry?.entryDate ?? alert.createdAt ?? '')} · Care team notified
+                        </p>
+                      </div>
+                    ))}
+
+                    {streak > 0 && (
+                      <div className="p-3 rounded-xl"
+                        style={{ backgroundColor: 'var(--brand-success-green-light)', borderLeft: '3px solid var(--brand-success-green)' }}>
+                        <p className="text-[11px] font-semibold mb-0.5" style={{ color: 'var(--brand-text-primary)' }}>
+                          {streak} day medication streak 🔥
+                        </p>
+                        <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>Keep it up!</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {openAlerts.length > 2 || (openAlerts.length > 1 && streak > 0) ? (
+                    <button
+                      onClick={() => router.push('/notifications')}
+                      className="mt-2 w-full flex items-center justify-center gap-1 py-1.5 rounded-full text-[11px] font-semibold transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                      style={{ color: 'var(--brand-primary-purple)', backgroundColor: 'var(--brand-primary-purple-light)' }}
+                    >
+                      View all alerts <ArrowRight className="w-3 h-3" />
+                    </button>
+                  ) : null}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </main>
