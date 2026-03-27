@@ -1,11 +1,18 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { EmailService } from '../email/email.service.js'
+import { scheduleCallEmailHtml } from '../email/email-templates.js'
 
 const SEVERITY_ORDER: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 }
 
 @Injectable()
 export class ProviderService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(ProviderService.name)
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emailService: EmailService,
+  ) {}
 
   // ─── GET /provider/stats ──────────────────────────────────────────────────────
 
@@ -761,24 +768,56 @@ export class ProviderService {
     // Verify patient exists
     const patient = await this.prisma.user.findUnique({
       where: { id: body.patientUserId },
-      select: { id: true },
+      select: { id: true, email: true, name: true },
     })
     if (!patient) throw new NotFoundException('Patient not found')
+
+    const notifTitle = 'Follow-up Call Scheduled'
+    const notifBody = `Your care team has scheduled a ${body.callType} call on ${body.callDate} at ${body.callTime}.${body.notes ? ` Note: ${body.notes}` : ''}`
 
     const notification = await this.prisma.notification.create({
       data: {
         userId: body.patientUserId,
         alertId: body.alertId ?? null,
         channel: 'PUSH',
-        title: 'Follow-up Call Scheduled',
-        body: `Your care team has scheduled a ${body.callType} call on ${body.callDate} at ${body.callTime}.${body.notes ? ` Note: ${body.notes}` : ''}`,
+        title: notifTitle,
+        body: notifBody,
         tips: [],
       },
     })
 
+    // ─── Email notification ──────────────────────────────────────────
+    if (patient.email) {
+      await this.prisma.notification.create({
+        data: {
+          userId: body.patientUserId,
+          alertId: body.alertId ?? null,
+          channel: 'EMAIL',
+          title: notifTitle,
+          body: notifBody,
+          tips: [],
+        },
+      })
+
+      await this.emailService.sendEmail(
+        patient.email,
+        'Follow-up Call Scheduled — Healplace Cardio',
+        scheduleCallEmailHtml(
+          patient.name ?? 'Patient',
+          body.callType,
+          body.callDate,
+          body.callTime,
+        ),
+      )
+    } else {
+      this.logger.warn(
+        `No email for patient ${body.patientUserId} — skipping email notification`,
+      )
+    }
+
     return {
       statusCode: 201,
-      message: 'Call scheduled. Patient notified in-app.',
+      message: 'Call scheduled. Patient notified.',
       data: { notificationId: notification.id },
     }
   }

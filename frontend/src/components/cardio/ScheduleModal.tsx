@@ -94,7 +94,7 @@ export default function ScheduleModal({
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 z-60 flex items-center justify-center px-4"
+        className="fixed inset-0 z-100 flex items-center justify-center px-4"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
@@ -149,7 +149,7 @@ export default function ScheduleModal({
                   className="text-sm"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
-                  Call scheduled. Patient notified in-app.
+                  Call scheduled. Patient notified.
                   <br />
                   {callType === 'phone' ? 'Phone call' : 'Video call'} with{' '}
                   {alert.name}

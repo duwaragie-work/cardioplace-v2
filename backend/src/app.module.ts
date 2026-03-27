@@ -15,6 +15,7 @@ import { UsersService } from './users/users.service.js'
 import { ChatModule } from './chat/chat.module.js'
 import { ContentModule } from './content/content.module.js'
 import { ProviderModule } from './provider/provider.module.js'
+import { EmailModule } from './email/email.module.js'
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -40,6 +41,7 @@ import { ProviderModule } from './provider/provider.module.js'
     ]),
 
     PrismaModule,
+    EmailModule,
     AuthModule,
     KnowledgebaseModule,
     MistralModule,

@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Calendar,
-  Activity,
   CheckCircle2,
   Info,
   LogOut,
@@ -631,20 +630,6 @@ export default function Profile() {
               <CardHeader icon={<Info className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />}
                 title="Account Info" />
               <div className="space-y-4">
-                {/* User ID */}
-                <div>
-                  <FieldLabel>User ID</FieldLabel>
-                  {loading ? (
-                    <div className="space-y-1.5">
-                      <Bone w="100%" h={11} r={4} />
-                      <Bone w="55%" h={11} r={4} />
-                    </div>
-                  ) : (
-                    <p className="text-xs font-mono break-all" style={{ color: 'var(--brand-text-secondary)' }}>
-                      {userData.id || "N/A"}
-                    </p>
-                  )}
-                </div>
                 {/* Account Created */}
                 <Field label="Account Created" value={<FieldValue>{formatDate(userData.createdAt)}</FieldValue>}
                   loading={loading} valueW="72%" />
@@ -665,12 +650,12 @@ export default function Profile() {
             </div>
 
             {/* Account Status */}
-            <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+            {/* <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
               <CardHeader icon={<Activity className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />}
                 title="Account Status" />
-              <div className="space-y-3">
+              <div className="space-y-3"> */}
                 {/* Status row */}
-                <div className="flex items-center justify-between">
+                {/* <div className="flex items-center justify-between">
                   <span className="text-sm" style={{ color: 'var(--brand-text-secondary)' }}>Status</span>
                   {loading ? <Bone w={60} h={22} r={99} /> : (
                     <span className="px-2.5 py-1 rounded-full text-[10px] font-bold capitalize"
@@ -682,9 +667,9 @@ export default function Profile() {
                       {toTitleCase(userData.accountStatus)}
                     </span>
                   )}
-                </div>
+                </div> */}
                 {/* 2FA row */}
-                <div className="flex items-center justify-between">
+                {/* <div className="flex items-center justify-between">
                   <span className="text-sm" style={{ color: 'var(--brand-text-secondary)' }}>Two-Factor Auth</span>
                   {loading ? <Bone w={64} h={22} r={99} /> : (
                     <span className="px-2.5 py-1 rounded-full text-[10px] font-bold"
@@ -692,16 +677,16 @@ export default function Profile() {
                       Enabled
                     </span>
                   )}
-                </div>
+                </div> */}
                 {/* Session timeout row */}
-                <div className="flex items-center justify-between">
+                {/* <div className="flex items-center justify-between">
                   <span className="text-sm" style={{ color: 'var(--brand-text-secondary)' }}>Session Timeout</span>
                   {loading ? <Bone w={40} h={14} /> : (
                     <span className="text-sm font-semibold" style={{ color: 'var(--brand-text-primary)' }}>30 min</span>
                   )}
-                </div>
-              </div>
-            </div>
+                </div> */}
+              {/* </div>
+            </div>       */}
 
             {/* Security */}
             <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>

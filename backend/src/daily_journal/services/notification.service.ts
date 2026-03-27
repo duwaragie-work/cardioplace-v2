@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { OnEvent } from '@nestjs/event-emitter'
 import { PrismaService } from '../../prisma/prisma.service.js'
+import { EmailService } from '../../email/email.service.js'
+import { escalationEmailHtml } from '../../email/email-templates.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import type { EscalationCreatedEvent } from '../interfaces/events.interface.js'
 import { CARDIO_TIPS } from '../utils/tips.js'
@@ -9,7 +11,10 @@ import { CARDIO_TIPS } from '../utils/tips.js'
 export class JournalNotificationService {
   private readonly logger = new Logger(JournalNotificationService.name)
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emailService: EmailService,
+  ) {}
 
   @OnEvent(JOURNAL_EVENTS.ESCALATION_CREATED, { async: true })
   async handleEscalation(payload: EscalationCreatedEvent) {
@@ -37,6 +42,45 @@ export class JournalNotificationService {
       this.logger.log(
         `Notification ${notification.id} sent to user ${payload.userId} [${payload.escalationLevel}]`,
       )
+
+      // ─── Email notification ──────────────────────────────────────────
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.userId },
+        select: { email: true, name: true },
+      })
+
+      if (user?.email) {
+        await this.prisma.notification.create({
+          data: {
+            userId: payload.userId,
+            alertId: payload.alertId,
+            escalationEventId: payload.escalationEventId,
+            channel: 'EMAIL',
+            title,
+            body,
+            tips,
+          },
+        })
+
+        const isLevel2 = payload.escalationLevel === 'LEVEL_2'
+        await this.emailService.sendEmail(
+          user.email,
+          isLevel2
+            ? 'URGENT: Blood Pressure Emergency Alert'
+            : 'Blood Pressure Notice — Action Required',
+          escalationEmailHtml(
+            user.name ?? 'Patient',
+            payload.escalationLevel,
+            title,
+            body,
+            tips,
+          ),
+        )
+      } else {
+        this.logger.warn(
+          `No email for user ${payload.userId} — skipping email notification`,
+        )
+      }
     } catch (error) {
       this.logger.error(
         `Notification failed for escalation ${payload.escalationEventId}`,

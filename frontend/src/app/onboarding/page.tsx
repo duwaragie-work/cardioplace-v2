@@ -27,7 +27,7 @@ export default function OnboardingPage() {
   const { user, isLoading, logout, markOnboardingComplete } = useAuth();
   const [name, setName] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
-  const [primaryCondition, setPrimaryCondition] = useState("");
+  const [communicationPreference, setCommunicationPreference] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -75,7 +75,7 @@ export default function OnboardingPage() {
     return true;
   }
 
-  const isFormPartiallyFilled = name.trim() !== "" || dateOfBirth !== "" || primaryCondition !== "";
+  const isFormPartiallyFilled = name.trim() !== "" || dateOfBirth !== "" || communicationPreference !== "";
 
   if (isLoading || !user || isRedirecting) {
     return <SpinnerIndicator />;
@@ -126,7 +126,7 @@ export default function OnboardingPage() {
     await submitProfile({
       name: name.trim() || null,
       dateOfBirth: dateOfBirth || null,
-      primaryCondition: primaryCondition || null,
+      communicationPreference: communicationPreference || null,
     });
   }
 
@@ -200,22 +200,19 @@ export default function OnboardingPage() {
                 />
               </div>
 
-              {/* Primary health concern */}
+              {/* Communication Preference */}
               <div className="w-full max-w-105">
                 <label className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
-                  Primary health concern
+                  Communication Preference
                 </label>
                 <select
-                  value={primaryCondition}
-                  onChange={(e) => setPrimaryCondition(e.target.value)}
+                  value={communicationPreference}
+                  onChange={(e) => setCommunicationPreference(e.target.value)}
                   className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%228%22%20viewBox%3D%220%200%2012%208%22%3E%3cpath%20fill%3D%22%23171717%22%20d%3D%22M6%208L0%200h12z%22%2F%3E%3c%2Fsvg%3E')] bg-size-[12px] bg-position-[center_right_1rem] bg-no-repeat"
                 >
-                  <option value="">Select your condition</option>
-                  <option value="hypertension">Hypertension (High Blood Pressure)</option>
-                  <option value="heart_disease">Heart Disease</option>
-                  <option value="diabetes_cardiac">Diabetes with Cardiac Risk</option>
-                  <option value="high_cholesterol">High Cholesterol</option>
-                  <option value="other">Other cardiovascular concern</option>
+                  <option value="">Select your preference</option>
+                  <option value="TEXT_FIRST">Text First</option>
+                  <option value="AUDIO_FIRST">Audio First</option>
                 </select>
               </div>
 
