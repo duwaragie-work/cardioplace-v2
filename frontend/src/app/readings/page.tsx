@@ -542,10 +542,12 @@ function EditModal({
 // ─── Delete Confirmation ───────────────────────────────────────────────────────
 function DeleteConfirm({
   deleting,
+  error,
   onConfirm,
   onCancel,
 }: {
   deleting: boolean;
+  error: string;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -577,6 +579,11 @@ function DeleteConfirm({
         <p className="text-[13px] mb-6 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
           This cannot be undone. Your care team&apos;s records will be updated.
         </p>
+        {error && (
+          <p className="text-[13px] mb-4 text-center" style={{ color: 'var(--brand-alert-red)' }}>
+            {error}
+          </p>
+        )}
         <div className="flex gap-3">
           <button
             onClick={onCancel}
@@ -667,10 +674,10 @@ export default function ReadingsPage() {
       if (editForm.systolic) payload.systolicBP = parseInt(editForm.systolic, 10);
       if (editForm.diastolic) payload.diastolicBP = parseInt(editForm.diastolic, 10);
       if (editForm.weight) payload.weight = parseFloat(editForm.weight);
-      if (editForm.medication) payload.medicationTaken = editForm.medication === 'yes';
-      const cleanSymptoms = editForm.symptoms.filter((s) => s !== 'None of these');
-      if (cleanSymptoms.length > 0) payload.symptoms = cleanSymptoms;
-      if (editForm.notes.trim()) payload.notes = editForm.notes.trim();
+      if (editForm.medication === 'yes') payload.medicationTaken = true;
+      else if (editForm.medication === 'no') payload.medicationTaken = false;
+      payload.symptoms = editForm.symptoms.filter((s) => s !== 'None of these');
+      payload.notes = editForm.notes.trim();
 
       await updateJournalEntry(editEntry.id, payload);
       closeEdit();
@@ -682,15 +689,18 @@ export default function ReadingsPage() {
     }
   }
 
+  const [deleteError, setDeleteError] = useState('');
+
   async function confirmDelete() {
     if (!deleteId) return;
     setDeleting(true);
+    setDeleteError('');
     try {
       await deleteJournalEntry(deleteId);
       setDeleteId(null);
       load();
-    } catch {
-      // keep dialog open on error
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete. Please try again.');
     } finally {
       setDeleting(false);
     }
@@ -804,8 +814,9 @@ export default function ReadingsPage() {
         {deleteId && (
           <DeleteConfirm
             deleting={deleting}
+            error={deleteError}
             onConfirm={confirmDelete}
-            onCancel={() => setDeleteId(null)}
+            onCancel={() => { setDeleteId(null); setDeleteError(''); }}
           />
         )}
       </AnimatePresence>
