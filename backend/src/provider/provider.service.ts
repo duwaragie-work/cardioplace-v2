@@ -453,35 +453,333 @@ export class ProviderService {
         (SEVERITY_ORDER[b.severity] ?? 3),
     )
 
+    // Fetch follow-up call notifications linked to these alerts
+    const alertIds = alerts.map((a) => a.id)
+    const followUpNotifications = alertIds.length
+      ? await this.prisma.notification.findMany({
+          where: {
+            alertId: { in: alertIds },
+            title: 'Follow-up Call Scheduled',
+          },
+          select: {
+            alertId: true,
+            sentAt: true,
+            body: true,
+          },
+        })
+      : []
+
+    const followUpMap = new Map(
+      followUpNotifications.map((n) => [n.alertId, n]),
+    )
+
     return {
       statusCode: 200,
-      data: alerts.map((a) => ({
-        id: a.id,
-        type: a.type,
-        severity: a.severity,
-        magnitude: Number(a.magnitude),
-        baselineValue: a.baselineValue ? Number(a.baselineValue) : null,
-        actualValue: a.actualValue ? Number(a.actualValue) : null,
-        escalated: a.escalated,
-        status: a.status,
-        createdAt: a.createdAt,
-        acknowledgedAt: a.acknowledgedAt,
-        patient: a.user
+      data: alerts.map((a) => {
+        const followUp = followUpMap.get(a.id)
+        return {
+          id: a.id,
+          type: a.type,
+          severity: a.severity,
+          magnitude: Number(a.magnitude),
+          baselineValue: a.baselineValue ? Number(a.baselineValue) : null,
+          actualValue: a.actualValue ? Number(a.actualValue) : null,
+          escalated: a.escalated,
+          status: a.status,
+          createdAt: a.createdAt,
+          acknowledgedAt: a.acknowledgedAt,
+          followUpScheduledAt: followUp?.sentAt ?? null,
+          followUpBody: followUp?.body ?? null,
+          patient: a.user
+            ? {
+                id: a.user.id,
+                name: a.user.name,
+                riskTier: a.user.riskTier,
+                communicationPreference: a.user.communicationPreference,
+              }
+            : null,
+          journalEntry: a.journalEntry
+            ? {
+                entryDate: a.journalEntry.entryDate,
+                systolicBP: a.journalEntry.systolicBP,
+                diastolicBP: a.journalEntry.diastolicBP,
+              }
+            : null,
+        }
+      }),
+    }
+  }
+
+  // ─── GET /provider/alerts/:alertId/detail ─────────────────────────────────────
+
+  async getAlertDetail(alertId: string) {
+    const alert = await this.prisma.deviationAlert.findUnique({
+      where: { id: alertId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            dateOfBirth: true,
+            communicationPreference: true,
+            riskTier: true,
+          },
+        },
+        journalEntry: {
+          select: {
+            entryDate: true,
+            systolicBP: true,
+            diastolicBP: true,
+            weight: true,
+            medicationTaken: true,
+          },
+        },
+        escalationEvents: {
+          orderBy: { triggeredAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            escalationLevel: true,
+            reason: true,
+            triggeredAt: true,
+          },
+        },
+      },
+    })
+
+    if (!alert) throw new NotFoundException('Alert not found')
+
+    const userId = alert.userId
+
+    // Latest baseline snapshot
+    const latestBaseline = await this.prisma.baselineSnapshot.findFirst({
+      where: { userId, baselineSystolic: { gt: 0 } },
+      orderBy: { computedForDate: 'desc' },
+      select: {
+        baselineSystolic: true,
+        baselineDiastolic: true,
+      },
+    })
+
+    // Last 7 journal entries for BP trend chart
+    const recentEntries = await this.prisma.journalEntry.findMany({
+      where: { userId, systolicBP: { not: null } },
+      orderBy: { entryDate: 'desc' },
+      take: 7,
+      select: {
+        entryDate: true,
+        systolicBP: true,
+        diastolicBP: true,
+      },
+    })
+
+    // Recent alerts of the same type in last 3 days (for consecutive reading dates)
+    const threeDaysAgo = new Date()
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3)
+    const consecutiveAlerts = await this.prisma.deviationAlert.findMany({
+      where: {
+        userId,
+        type: alert.type,
+        createdAt: { gte: threeDaysAgo },
+      },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        journalEntry: {
+          select: { entryDate: true },
+        },
+      },
+    })
+
+    // Medication adherence in last 3 days
+    const medEntries = await this.prisma.journalEntry.findMany({
+      where: {
+        userId,
+        entryDate: { gte: threeDaysAgo },
+        medicationTaken: { not: null },
+      },
+      orderBy: { entryDate: 'desc' },
+      take: 3,
+      select: {
+        entryDate: true,
+        medicationTaken: true,
+      },
+    })
+
+    const baselineSystolic = latestBaseline?.baselineSystolic
+      ? Number(latestBaseline.baselineSystolic)
+      : null
+    const baselineDiastolic = latestBaseline?.baselineDiastolic
+      ? Number(latestBaseline.baselineDiastolic)
+      : null
+
+    // Build trigger reasons dynamically
+    const triggerReasons: string[] = []
+
+    const baselineStr =
+      baselineSystolic != null && baselineDiastolic != null
+        ? `${Math.round(baselineSystolic)}/${Math.round(baselineDiastolic)}`
+        : 'N/A'
+    const readingStr =
+      alert.journalEntry?.systolicBP != null &&
+      alert.journalEntry?.diastolicBP != null
+        ? `${alert.journalEntry.systolicBP}/${alert.journalEntry.diastolicBP}`
+        : '—'
+    triggerReasons.push(
+      `Elevated BP: ${readingStr} (Baseline: ${baselineStr})`,
+    )
+
+    if (consecutiveAlerts.length >= 2) {
+      const dates = consecutiveAlerts
+        .map((a) => {
+          const d = a.journalEntry?.entryDate ?? a.createdAt
+          return new Date(d).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+          })
+        })
+        .join(', ')
+      triggerReasons.push(
+        `${consecutiveAlerts.length} consecutive elevated readings — ${dates}`,
+      )
+    }
+
+    const missedCount = medEntries.filter((e) => e.medicationTaken === false).length
+    if (missedCount > 0) {
+      triggerReasons.push(
+        `Medication missed: ${missedCount} of last ${medEntries.length} days`,
+      )
+    }
+
+    // Generate AI summary from real data
+    const entryCount = recentEntries.length
+    const bpValues = recentEntries
+      .filter((e) => e.systolicBP != null)
+      .map((e) => e.systolicBP as number)
+    let trendDirection = 'stable'
+    if (bpValues.length >= 3) {
+      const first = bpValues[bpValues.length - 1]
+      const last = bpValues[0]
+      if (last - first > 5) trendDirection = 'an upward'
+      else if (first - last > 5) trendDirection = 'a downward'
+    }
+
+    const medAdherence =
+      missedCount > 0
+        ? `concurrent medication non-adherence (${missedCount} missed doses)`
+        : 'consistent medication adherence'
+
+    const action =
+      alert.severity === 'HIGH'
+        ? 'Recommend immediate clinical review and patient contact'
+        : 'Recommend proactive care team outreach within 24 hours'
+
+    const aiSummary = `Patient shows ${trendDirection} BP trend over the last ${entryCount} readings with ${medAdherence}. ${action} to assess current cardiovascular status.`
+
+    // Build communication preference info
+    const commPref = alert.user?.communicationPreference
+    let commLabel = 'Standard Communication'
+    let commDescription =
+      'No specific communication preference indicated.'
+    if (commPref === 'AUDIO_FIRST') {
+      commLabel = 'Audio-First Patient'
+      commDescription =
+        'Use verbal communication and visual aids at next visit. Patient prefers spoken over written instructions.'
+    } else if (commPref === 'TEXT_FIRST') {
+      commLabel = 'Text-First Patient'
+      commDescription =
+        'Patient prefers written communication. Use text messages and written care plans.'
+    }
+
+    // Format BP trend for chart (reverse to chronological order)
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const bpTrend = [...recentEntries].reverse().map((e) => ({
+      day: dayNames[new Date(e.entryDate).getDay()],
+      systolic: e.systolicBP,
+      diastolic: e.diastolicBP,
+      date: e.entryDate,
+    }))
+
+    return {
+      statusCode: 200,
+      data: {
+        id: alert.id,
+        type: alert.type,
+        severity: alert.severity,
+        magnitude: Number(alert.magnitude),
+        baselineValue: alert.baselineValue
+          ? Number(alert.baselineValue)
+          : null,
+        actualValue: alert.actualValue ? Number(alert.actualValue) : null,
+        escalated: alert.escalated,
+        status: alert.status,
+        createdAt: alert.createdAt,
+        patient: {
+          id: alert.user?.id ?? '',
+          name: alert.user?.name ?? 'Unknown',
+          dateOfBirth: alert.user?.dateOfBirth ?? null,
+          communicationPreference: commPref ?? null,
+          riskTier: alert.user?.riskTier ?? 'STANDARD',
+        },
+        journalEntry: alert.journalEntry
           ? {
-              id: a.user.id,
-              name: a.user.name,
-              riskTier: a.user.riskTier,
-              communicationPreference: a.user.communicationPreference,
+              entryDate: alert.journalEntry.entryDate,
+              systolicBP: alert.journalEntry.systolicBP,
+              diastolicBP: alert.journalEntry.diastolicBP,
             }
           : null,
-        journalEntry: a.journalEntry
+        baseline: {
+          systolic: baselineSystolic,
+          diastolic: baselineDiastolic,
+        },
+        triggerReasons,
+        aiSummary,
+        communication: {
+          label: commLabel,
+          description: commDescription,
+        },
+        bpTrend,
+        escalation: alert.escalationEvents[0]
           ? {
-              entryDate: a.journalEntry.entryDate,
-              systolicBP: a.journalEntry.systolicBP,
-              diastolicBP: a.journalEntry.diastolicBP,
+              level: alert.escalationEvents[0].escalationLevel,
+              reason: alert.escalationEvents[0].reason,
             }
           : null,
-      })),
+      },
+    }
+  }
+
+  // ─── POST /provider/schedule-call ───────────────────────────────────────────────
+
+  async scheduleCall(body: {
+    patientUserId: string
+    alertId?: string
+    callDate: string
+    callTime: string
+    callType: string
+    notes?: string
+  }) {
+    // Verify patient exists
+    const patient = await this.prisma.user.findUnique({
+      where: { id: body.patientUserId },
+      select: { id: true },
+    })
+    if (!patient) throw new NotFoundException('Patient not found')
+
+    const notification = await this.prisma.notification.create({
+      data: {
+        userId: body.patientUserId,
+        alertId: body.alertId ?? null,
+        channel: 'PUSH',
+        title: 'Follow-up Call Scheduled',
+        body: `Your care team has scheduled a ${body.callType} call on ${body.callDate} at ${body.callTime}.${body.notes ? ` Note: ${body.notes}` : ''}`,
+        tips: [],
+      },
+    })
+
+    return {
+      statusCode: 201,
+      message: 'Call scheduled. Patient notified in-app.',
+      data: { notificationId: notification.id },
     }
   }
 

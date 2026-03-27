@@ -14,12 +14,15 @@ interface Alert {
   severity: 'HIGH' | 'MEDIUM';
   level: 'L1' | 'L2';
   color: 'red' | 'amber';
+  patientId: string;
+  followUpScheduledAt: string | null;
 }
 
 interface ScheduleModalProps {
   alert: Alert;
   onClose: () => void;
   onConfirm: (details: ScheduleDetails) => void;
+  error?: string | null;
 }
 
 export interface ScheduleDetails {
@@ -37,14 +40,14 @@ const getNextDays = () => {
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ];
-  const today = new Date(2026, 2, 25);
+  const today = new Date();
   for (let i = 0; i < 7; i++) {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
     days.push({
       label: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : dayNames[d.getDay()],
       sublabel: `${monthNames[d.getMonth()]} ${d.getDate()}`,
-      value: `${monthNames[d.getMonth()]} ${d.getDate()}, 2026`,
+      value: `${monthNames[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`,
     });
   }
   return days;
@@ -60,6 +63,7 @@ export default function ScheduleModal({
   alert,
   onClose,
   onConfirm,
+  error,
 }: ScheduleModalProps) {
   const days = getNextDays();
   const [selectedDate, setSelectedDate] = useState(days[1].value);
@@ -67,24 +71,30 @@ export default function ScheduleModal({
   const [callType, setCallType] = useState<'phone' | 'video'>('phone');
   const [notes, setNotes] = useState('');
   const [confirmed, setConfirmed] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
+    setSubmitting(true);
     setConfirmed(true);
-    setTimeout(() => {
-      onConfirm({
-        patientName: alert.name,
-        date: selectedDate,
-        time: selectedTime,
-        callType,
-        notes,
-      });
-    }, 1400);
+    onConfirm({
+      patientName: alert.name,
+      date: selectedDate,
+      time: selectedTime,
+      callType,
+      notes,
+    });
   };
+
+  // If there's an error, reset the confirmed state so user can retry
+  if (error && confirmed) {
+    setConfirmed(false);
+    setSubmitting(false);
+  }
 
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 z-[60] flex items-center justify-center px-4"
+        className="fixed inset-0 z-60 flex items-center justify-center px-4"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
@@ -99,7 +109,7 @@ export default function ScheduleModal({
         />
 
         <motion.div
-          className="relative bg-white rounded-2xl w-full max-w-[480px] max-h-[90vh] overflow-y-auto z-10"
+          className="relative bg-white rounded-2xl w-full max-w-120 max-h-[90vh] overflow-y-auto z-10"
           style={{ boxShadow: '0 24px 60px rgba(0,0,0,0.18)' }}
           initial={{ opacity: 0, scale: 0.93, y: 24 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -107,7 +117,7 @@ export default function ScheduleModal({
           transition={{ type: 'spring', stiffness: 380, damping: 32 }}
           onClick={(e) => e.stopPropagation()}
         >
-          {confirmed ? (
+          {confirmed && !error ? (
             <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
               <motion.div
                 initial={{ scale: 0 }}
@@ -139,6 +149,8 @@ export default function ScheduleModal({
                   className="text-sm"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
+                  Call scheduled. Patient notified in-app.
+                  <br />
                   {callType === 'phone' ? 'Phone call' : 'Video call'} with{' '}
                   {alert.name}
                   <br />
@@ -191,6 +203,19 @@ export default function ScheduleModal({
               </div>
 
               <div className="px-6 py-5 space-y-6">
+                {/* Error message */}
+                {error && (
+                  <div
+                    className="rounded-xl p-3 text-sm font-medium"
+                    style={{
+                      backgroundColor: 'var(--brand-alert-red-light)',
+                      color: 'var(--brand-alert-red)',
+                    }}
+                  >
+                    {error}
+                  </div>
+                )}
+
                 {/* Call Type */}
                 <div>
                   <p
@@ -245,7 +270,7 @@ export default function ScheduleModal({
                       <button
                         key={day.value}
                         onClick={() => setSelectedDate(day.value)}
-                        className="shrink-0 flex flex-col items-center px-3 py-2.5 rounded-xl border-2 transition-all min-w-[64px]"
+                        className="shrink-0 flex flex-col items-center px-3 py-2.5 rounded-xl border-2 transition-all min-w-16"
                         style={{
                           borderColor:
                             selectedDate === day.value
@@ -366,13 +391,14 @@ export default function ScheduleModal({
                 </button>
                 <button
                   onClick={handleConfirm}
-                  className="flex-[2] h-11 rounded-full text-white text-sm font-bold transition hover:scale-[1.02] active:scale-[0.98]"
+                  disabled={submitting}
+                  className="flex-2 h-11 rounded-full text-white text-sm font-bold transition hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60"
                   style={{
                     backgroundColor: 'var(--brand-primary-purple)',
                     boxShadow: 'var(--brand-shadow-button)',
                   }}
                 >
-                  Confirm Schedule
+                  {submitting ? 'Scheduling...' : 'Confirm Schedule'}
                 </button>
               </div>
             </>

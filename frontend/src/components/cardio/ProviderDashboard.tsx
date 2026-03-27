@@ -10,27 +10,20 @@ import {
   ReferenceLine,
 } from 'recharts';
 import { Users, Activity, Bell, Heart } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/auth-context';
-import AlertPanel, { type Alert } from './AlertPanel';
+import AlertPanel, { type Alert, type AlertDetail } from './AlertPanel';
 import ScheduleModal, { type ScheduleDetails } from './ScheduleModal';
 import {
   getProviderStats,
   getProviderAlerts,
+  getAlertDetail,
   acknowledgeProviderAlert,
+  scheduleCall,
 } from '@/lib/services/provider.service';
 
-const bpTrendData = [
-  { day: 'Mon', systolic: 155, id: 1 },
-  { day: 'Tue', systolic: 158, id: 2 },
-  { day: 'Wed', systolic: 162, id: 3 },
-  { day: 'Thu', systolic: 165, id: 4 },
-  { day: 'Fri', systolic: 168, id: 5 },
-  { day: 'Sat', systolic: 175, id: 6 },
-  { day: 'Sun', systolic: 185, id: 7 },
-];
 
 interface ProviderStats {
   totalPatients: number;
@@ -57,7 +50,9 @@ function transformAlert(raw: any): Alert {
 
   let reading: string = raw.reading ?? '';
   if (!reading) {
-    if (raw.systolicBP && raw.diastolicBP) {
+    if (raw.journalEntry?.systolicBP && raw.journalEntry?.diastolicBP) {
+      reading = `${raw.journalEntry.systolicBP}/${raw.journalEntry.diastolicBP} mmHg`;
+    } else if (raw.systolicBP && raw.diastolicBP) {
       reading = `${raw.systolicBP}/${raw.diastolicBP} mmHg`;
     } else if ((raw.type ?? raw.deviationType ?? '').includes('MEDICATION')) {
       reading = 'Missed medication';
@@ -70,20 +65,28 @@ function transformAlert(raw: any): Alert {
     id: String(raw.id),
     initials,
     name,
-    location: raw.location ?? raw.ward ?? '—',
+    location: raw.patient?.communicationPreference ?? raw.communicationPreference ?? '—',
     reading,
     type: raw.type ?? raw.deviationType ?? '',
     severity,
     level,
     color,
+    patientId: raw.patient?.id ?? raw.userId ?? '',
+    followUpScheduledAt: raw.followUpScheduledAt ?? null,
   };
 }
 
 export default function ProviderDashboard() {
   const { user, isLoading } = useAuth();
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
+  const [selectedAlertDetail, setSelectedAlertDetail] = useState<AlertDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [trendAlert, setTrendAlert] = useState<Alert | null>(null);
+  const [trendDetail, setTrendDetail] = useState<AlertDetail | null>(null);
+  const [trendLoading, setTrendLoading] = useState(false);
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
   const [scheduleAlert, setScheduleAlert] = useState<Alert | null>(null);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [alertsList, setAlertsList] = useState<Alert[]>([]);
   const [stats, setStats] = useState<ProviderStats>({
     totalPatients: 0,
@@ -92,21 +95,18 @@ export default function ProviderDashboard() {
     bpControlledPercent: 0,
   });
 
-
-
   useEffect(() => {
-    if (isLoading || !user) return; // 🔴 WAIT until user is ready
+    if (isLoading || !user) return;
 
-    console.log(user);
     Promise.all([getProviderStats(), getProviderAlerts()]).then(
       ([statsData, alertsData]) => {
         setStats({
-          totalPatients: statsData.totalPatients ?? statsData.patients ?? 0,
+          totalPatients: statsData.totalActivePatients ?? statsData.totalPatients ?? 0,
           monthlyInteractions:
-            statsData.monthlyInteractions ?? statsData.interactions ?? 0,
-          activeAlerts: statsData.activeAlerts ?? statsData.alerts ?? 0,
+            statsData.monthlyInteractions ?? 0,
+          activeAlerts: statsData.activeAlertsCount ?? statsData.activeAlerts ?? 0,
           bpControlledPercent:
-            statsData.bpControlledPercent ?? statsData.bpControlled ?? 0,
+            statsData.bpControlledPercent ?? 0,
         });
         const rawAlerts: Alert[] = Array.isArray(alertsData)
           ? alertsData.map(transformAlert)
@@ -116,7 +116,53 @@ export default function ProviderDashboard() {
     ).catch(() => {
       // keep defaults on error
     });
-  }, [user,isLoading]);
+  }, [user, isLoading]);
+
+  const handleSelectAlert = useCallback(async (alert: Alert) => {
+    setSelectedAlert(alert);
+    setSelectedAlertDetail(null);
+    setDetailLoading(true);
+    try {
+      const detail = await getAlertDetail(alert.id);
+      setSelectedAlertDetail(detail);
+    } catch {
+      // Panel will show with fallback data
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
+  const handleRowHover = useCallback(async (alert: Alert) => {
+    if (trendAlert?.id === alert.id) return;
+    setTrendAlert(alert);
+    setTrendDetail(null);
+    setTrendLoading(true);
+    try {
+      const detail = await getAlertDetail(alert.id);
+      setTrendDetail(detail);
+    } catch {
+      // keep empty
+    } finally {
+      setTrendLoading(false);
+    }
+  }, [trendAlert?.id]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
+        <div className="flex flex-col items-center gap-3">
+          <div
+            className="w-10 h-10 border-4 rounded-full animate-spin"
+            style={{
+              borderColor: 'var(--brand-border, #e5e7eb)',
+              borderTopColor: 'var(--brand-primary-purple, #7c3aed)',
+            }}
+          />
+          <p className="text-sm" style={{ color: 'var(--brand-text-muted)' }}>Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!user?.roles?.includes('SUPER_ADMIN')) {
     return (
@@ -162,16 +208,50 @@ export default function ProviderDashboard() {
     }
     setReviewedIds((prev) => new Set([...prev, id]));
     setSelectedAlert(null);
+    setSelectedAlertDetail(null);
   };
 
   const handleSchedule = (alert: Alert) => {
     setScheduleAlert(alert);
+    setScheduleError(null);
   };
 
-  const handleScheduleConfirm = (_details: ScheduleDetails) => {
-    setTimeout(() => {
-      setScheduleAlert(null);
-    }, 1600);
+  const handleScheduleConfirm = async (details: ScheduleDetails) => {
+    const alert = scheduleAlert;
+    if (!alert) return;
+
+    try {
+      await scheduleCall({
+        patientUserId: alert.patientId,
+        alertId: alert.id,
+        callDate: details.date,
+        callTime: details.time,
+        callType: details.callType,
+        notes: details.notes || undefined,
+      });
+      setScheduleError(null);
+      // Mark this alert as having a follow-up scheduled (local state)
+      const now = new Date().toISOString();
+      setAlertsList((prev) =>
+        prev.map((a) =>
+          a.id === alert.id ? { ...a, followUpScheduledAt: now } : a,
+        ),
+      );
+      // Also update selectedAlert if it's the same one
+      if (selectedAlert?.id === alert.id) {
+        setSelectedAlert((prev) =>
+          prev ? { ...prev, followUpScheduledAt: now } : prev,
+        );
+      }
+      // ScheduleModal shows its own success animation, then we close
+      setTimeout(() => {
+        setScheduleAlert(null);
+      }, 1600);
+    } catch (err) {
+      setScheduleError(
+        err instanceof Error ? err.message : 'Failed to schedule call',
+      );
+    }
   };
 
   return (
@@ -288,8 +368,10 @@ export default function ProviderDashboard() {
                   {activeAlerts.map((alert) => (
                     <tr
                       key={alert.id}
-                      className="hover:bg-red-50 transition-colors relative"
+                      className="hover:bg-red-50 transition-colors relative cursor-pointer"
                       style={{ borderLeft: `3px solid ${alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)'}` }}
+                      onMouseEnter={() => handleRowHover(alert)}
+                      onClick={() => handleRowHover(alert)}
                     >
                       <td className="px-4 py-4 border-b" style={{ borderColor: '#F1F5F9' }}>
                         <div className="flex items-center gap-3">
@@ -328,18 +410,28 @@ export default function ProviderDashboard() {
                         </div>
                       </td>
                       <td className="px-4 py-4 border-b" style={{ borderColor: '#F1F5F9' }}>
-                        <div
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold"
-                          style={{
-                            backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
-                            color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
-                          }}
-                        >
+                        <div className="flex items-center gap-2">
                           <div
-                            className="w-1.5 h-1.5 rounded-full animate-pulse"
-                            style={{ backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}
-                          />
-                          {alert.level}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold"
+                            style={{
+                              backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
+                              color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
+                            }}
+                          >
+                            <div
+                              className="w-1.5 h-1.5 rounded-full animate-pulse"
+                              style={{ backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}
+                            />
+                            {alert.level}
+                          </div>
+                          {alert.followUpScheduledAt && (
+                            <span
+                              className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold whitespace-nowrap"
+                              style={{ backgroundColor: '#CCFBF1', color: '#0D9488' }}
+                            >
+                              Call scheduled
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-4 border-b" style={{ borderColor: '#F1F5F9' }}>
@@ -349,7 +441,7 @@ export default function ProviderDashboard() {
                             borderColor: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
                             color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
                           }}
-                          onClick={() => setSelectedAlert(alert)}
+                          onClick={() => handleSelectAlert(alert)}
                         >
                           Review &rarr;
                         </button>
@@ -365,11 +457,12 @@ export default function ProviderDashboard() {
               {activeAlerts.map((alert) => (
                 <div
                   key={alert.id}
-                  className="p-4 rounded-xl"
+                  className="p-4 rounded-xl cursor-pointer"
                   style={{
                     backgroundColor: 'var(--brand-background)',
                     borderLeft: `3px solid ${alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)'}`,
                   }}
+                  onClick={() => handleRowHover(alert)}
                 >
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
@@ -419,7 +512,7 @@ export default function ProviderDashboard() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <div
                       className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-semibold"
                       style={{
@@ -429,13 +522,21 @@ export default function ProviderDashboard() {
                     >
                       {alert.severity}
                     </div>
+                    {alert.followUpScheduledAt && (
+                      <span
+                        className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold"
+                        style={{ backgroundColor: '#CCFBF1', color: '#0D9488' }}
+                      >
+                        Call scheduled
+                      </span>
+                    )}
                     <button
                       className="ml-auto h-8 px-4 rounded-lg text-xs font-semibold border"
                       style={{
                         borderColor: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
                         color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
                       }}
-                      onClick={() => setSelectedAlert(alert)}
+                      onClick={() => handleSelectAlert(alert)}
                     >
                       Review &rarr;
                     </button>
@@ -449,69 +550,95 @@ export default function ProviderDashboard() {
           <div className="lg:col-span-2 bg-white p-6 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-base font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                BP Trend &middot; Marcus Johnson
+                BP Trend &middot; {trendDetail?.patient?.name ?? trendAlert?.name ?? 'Select a patient'}
               </h2>
               <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>Last 7 Days</span>
             </div>
 
-            <div className="h-50 relative">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={bpTrendData}>
-                  <defs>
-                    <linearGradient id="colorBP" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#DC2626" stopOpacity={0.06} />
-                      <stop offset="95%" stopColor="#DC2626" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis
-                    dataKey="day"
-                    axisLine={true}
-                    tickLine={false}
-                    tick={{ fill: '#94A3B8', fontSize: 12 }}
-                  />
-                  <YAxis
-                    domain={[130, 190]}
-                    ticks={[130, 140, 150, 160, 170, 180, 190]}
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: '#94A3B8', fontSize: 12 }}
-                  />
-                  <Tooltip
-                    content={({ active, payload }) => {
-                      if (active && payload && payload.length) {
-                        const item = payload[0].payload as { id?: number };
-                        return (
-                          <div
-                            className="bg-white px-3 py-2 rounded-lg text-xs font-semibold"
-                            style={{ boxShadow: '0 4px 6px rgba(0,0,0,0.1)', color: 'var(--brand-text-primary)' }}
-                          >
-                            {payload[0].value}/115 mmHg &middot; Mar {15 + (item.id || 0)}
-                          </div>
-                        );
-                      }
-                      return null;
-                    }}
-                  />
-                  <ReferenceLine y={160} stroke="#DC2626" strokeWidth={1} strokeDasharray="4 4" />
-                  <Area
-                    type="monotone"
-                    dataKey="systolic"
-                    stroke="#DC2626"
-                    strokeWidth={2.5}
-                    fill="url(#colorBP)"
-                    dot={{ fill: '#DC2626', r: 4 }}
-                    activeDot={{ r: 6 }}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+            {trendDetail?.bpTrend && trendDetail.bpTrend.length > 0 ? (() => {
+              const trendData = trendDetail.bpTrend;
+              const systolicVals = trendData
+                .map((d) => d.systolic)
+                .filter((v): v is number => v != null);
+              const yMin = systolicVals.length > 0
+                ? Math.floor((Math.min(...systolicVals) - 10) / 10) * 10
+                : 130;
+              const yMax = systolicVals.length > 0
+                ? Math.ceil((Math.max(...systolicVals) + 10) / 10) * 10
+                : 190;
+              const yTicks: number[] = [];
+              for (let t = yMin; t <= yMax; t += 10) yTicks.push(t);
 
-              <div
-                className="absolute right-2 text-[11px] font-semibold"
-                style={{ top: '40%', transform: 'translateY(-50%)', color: 'var(--brand-alert-red)' }}
-              >
-                Alert threshold
+              return (
+                <div className="h-50 relative">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={trendData}>
+                      <defs>
+                        <linearGradient id="colorBP" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#DC2626" stopOpacity={0.06} />
+                          <stop offset="95%" stopColor="#DC2626" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis
+                        dataKey="day"
+                        axisLine={true}
+                        tickLine={false}
+                        tick={{ fill: '#94A3B8', fontSize: 12 }}
+                      />
+                      <YAxis
+                        domain={[yMin, yMax]}
+                        ticks={yTicks}
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: '#94A3B8', fontSize: 12 }}
+                      />
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (active && payload && payload.length) {
+                            const item = payload[0].payload as { diastolic?: number; date?: string };
+                            const dateStr = item.date
+                              ? new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                              : '';
+                            return (
+                              <div
+                                className="bg-white px-3 py-2 rounded-lg text-xs font-semibold"
+                                style={{ boxShadow: '0 4px 6px rgba(0,0,0,0.1)', color: 'var(--brand-text-primary)' }}
+                              >
+                                {payload[0].value}/{item.diastolic ?? '—'} mmHg{dateStr ? ` · ${dateStr}` : ''}
+                              </div>
+                            );
+                          }
+                          return null;
+                        }}
+                      />
+                      <ReferenceLine y={160} stroke="#DC2626" strokeWidth={1} strokeDasharray="4 4" />
+                      <Area
+                        type="monotone"
+                        dataKey="systolic"
+                        stroke="#DC2626"
+                        strokeWidth={2.5}
+                        fill="url(#colorBP)"
+                        dot={{ fill: '#DC2626', r: 4 }}
+                        activeDot={{ r: 6 }}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+
+                  <div
+                    className="absolute right-2 text-[11px] font-semibold"
+                    style={{ top: '40%', transform: 'translateY(-50%)', color: 'var(--brand-alert-red)' }}
+                  >
+                    Alert threshold
+                  </div>
+                </div>
+              );
+            })() : (
+              <div className="h-50 flex items-center justify-center">
+                <p className="text-sm" style={{ color: 'var(--brand-text-muted)' }}>
+                  {trendLoading ? 'Loading trend data...' : 'Hover over a patient row to see BP trend'}
+                </p>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </main>
@@ -521,7 +648,12 @@ export default function ProviderDashboard() {
         {selectedAlert && (
           <AlertPanel
             alert={selectedAlert}
-            onClose={() => setSelectedAlert(null)}
+            detail={selectedAlertDetail}
+            detailLoading={detailLoading}
+            onClose={() => {
+              setSelectedAlert(null);
+              setSelectedAlertDetail(null);
+            }}
             onReview={handleReview}
             onSchedule={handleSchedule}
           />
@@ -533,8 +665,12 @@ export default function ProviderDashboard() {
         {scheduleAlert && (
           <ScheduleModal
             alert={scheduleAlert}
-            onClose={() => setScheduleAlert(null)}
+            onClose={() => {
+              setScheduleAlert(null);
+              setScheduleError(null);
+            }}
             onConfirm={handleScheduleConfirm}
+            error={scheduleError}
           />
         )}
       </AnimatePresence>

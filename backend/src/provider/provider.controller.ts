@@ -1,8 +1,10 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
   Patch,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common'
@@ -71,8 +73,28 @@ export class ProviderController {
     })
   }
 
+  @Get('alerts/:alertId/detail')
+  getAlertDetail(@Param('alertId') alertId: string) {
+    return this.providerService.getAlertDetail(alertId)
+  }
+
   @Patch('alerts/:alertId/acknowledge')
   acknowledgeAlert(@Param('alertId') alertId: string) {
     return this.providerService.acknowledgeAlert(alertId)
+  }
+
+  @Post('schedule-call')
+  scheduleCall(
+    @Body()
+    body: {
+      patientUserId: string
+      alertId?: string
+      callDate: string
+      callTime: string
+      callType: string
+      notes?: string
+    },
+  ) {
+    return this.providerService.scheduleCall(body)
   }
 }

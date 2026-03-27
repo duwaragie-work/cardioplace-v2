@@ -73,6 +73,37 @@ export async function getProviderAlerts(filters?: {
   return json.data ?? json
 }
 
+export async function getAlertDetail(alertId: string) {
+  const res = await fetchWithAuth(`${API}/api/provider/alerts/${alertId}/detail`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json()
+  return json.data ?? json
+}
+
+export async function scheduleCall(body: {
+  patientUserId: string
+  alertId?: string
+  callDate: string
+  callTime: string
+  callType: string
+  notes?: string
+}) {
+  const res = await fetchWithAuth(`${API}/api/provider/schedule-call`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json()
+  return json
+}
+
 export async function acknowledgeProviderAlert(alertId: string) {
   const res = await fetchWithAuth(`${API}/api/provider/alerts/${alertId}/acknowledge`, {
     method: 'PATCH',
