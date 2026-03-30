@@ -1,12 +1,14 @@
 import { ValidationPipe } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
 import cookieParser from 'cookie-parser'
+import { IoAdapter } from '@nestjs/platform-socket.io'
 import { AppModule } from './app.module.js'
 
 async function bootstrap() {
   
   const app = await NestFactory.create(AppModule)
 
+  app.useWebSocketAdapter(new IoAdapter(app))
   app.use(cookieParser())
 
   app.useGlobalPipes(
