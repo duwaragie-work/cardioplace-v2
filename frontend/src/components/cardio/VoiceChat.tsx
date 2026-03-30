@@ -301,7 +301,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
 
   const handleStart = async () => {
     if (!token) return;
-    await start({ mode, token });
+    await start({ token });
   };
 
   const handleSendText = () => {

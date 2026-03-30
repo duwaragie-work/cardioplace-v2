@@ -14,7 +14,7 @@ import { Server, Socket } from 'socket.io'
 import { VoiceService } from './voice.service.js'
 
 interface StartSessionPayload {
-  mode: 'checkin' | 'chat'
+  sessionId?: string
 }
 
 @WebSocketGateway({
@@ -54,7 +54,6 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const payload = this.jwtService.verify<{ sub: string }>(token, {
         secret: this.config.getOrThrow('JWT_ACCESS_SECRET'),
       })
-      // Attach userId and raw token to socket data for later use
       client.data = { userId: payload.sub, token }
       this.logger.log(`Voice WS connected [socket=${client.id}, user=${payload.sub}]`)
     } catch {
@@ -81,34 +80,41 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return
     }
 
-    const mode = payload?.mode ?? 'chat'
     const authToken = data?.token ?? ''
+    const chatSessionId = payload?.sessionId
 
-    this.logger.log(`Starting voice session [socket=${client.id}, mode=${mode}]`)
+    this.logger.log(`Starting voice session [socket=${client.id}, chatSession=${chatSessionId ?? 'new'}]`)
 
-    await this.voiceService.createSession(client.id, userId, mode, {
-      onReady: () => {
-        client.emit('session_ready', {})
+    await this.voiceService.createSession(
+      client.id,
+      userId,
+      {
+        onReady: () => {
+          const sessionId = this.voiceService.getSessionId(client.id)
+          client.emit('session_ready', { sessionId })
+        },
+        onAudio: (audioBase64: string) => {
+          client.emit('audio_response', { audio: audioBase64 })
+        },
+        onTranscript: (text: string, isFinal: boolean, speaker: 'user' | 'agent') => {
+          client.emit('transcript', { text, isFinal, speaker })
+        },
+        onAction: (type: string, detail: string) => {
+          client.emit('action', { type, detail })
+        },
+        onCheckinSaved: (summary) => {
+          client.emit('checkin_saved', summary)
+        },
+        onError: (message: string) => {
+          client.emit('session_error', { message })
+        },
+        onClose: () => {
+          client.emit('session_closed', {})
+        },
       },
-      onAudio: (audioBase64: string) => {
-        client.emit('audio_response', { audio: audioBase64 })
-      },
-      onTranscript: (text: string, isFinal: boolean, speaker: 'user' | 'agent') => {
-        client.emit('transcript', { text, isFinal, speaker })
-      },
-      onAction: (type: string, detail: string) => {
-        client.emit('action', { type, detail })
-      },
-      onCheckinSaved: (summary) => {
-        client.emit('checkin_saved', summary)
-      },
-      onError: (message: string) => {
-        client.emit('session_error', { message })
-      },
-      onClose: () => {
-        client.emit('session_closed', {})
-      },
-    }, authToken)
+      authToken,
+      chatSessionId,
+    )
   }
 
   @SubscribeMessage('audio_chunk')

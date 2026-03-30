@@ -67,4 +67,5 @@ model User {
   deviationAlerts  DeviationAlert[]
   escalationEvents EscalationEvent[]
   notifications    Notification[]
+  scheduledCalls   ScheduledCall[]
 }

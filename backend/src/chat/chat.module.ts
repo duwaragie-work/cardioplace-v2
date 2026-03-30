@@ -18,6 +18,6 @@ import { MistralModule } from '../mistral/mistral.module.js'
     ConversationHistoryService,
     EmergencyDetectionService,
   ],
-  exports: [ChatService],
+  exports: [ChatService, ConversationHistoryService],
 })
 export class ChatModule {}

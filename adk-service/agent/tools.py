@@ -45,9 +45,10 @@ def make_tools(
         weight: float = 0.0,
         symptoms: list[str] | None = None,
         notes: str = "",
+        entry_date: str = "",
     ) -> dict:
         """
-        Submit the patient's daily health check-in after all values have been
+        Submit the patient's health check-in after all values have been
         confirmed with the patient. Call this only once the patient has said yes
         to saving.
 
@@ -58,6 +59,8 @@ def make_tools(
             weight:           Weight in lbs (0 means not provided).
             symptoms:         List of symptoms the patient reported.
             notes:            Any extra notes the patient mentioned.
+            entry_date:       Date of the reading in YYYY-MM-DD format. Defaults
+                              to today if not provided or blank.
 
         Returns:
             dict with 'saved' (bool) and 'message' (str).
@@ -74,9 +77,17 @@ def make_tools(
             )
         )
 
-        today = datetime.now().strftime("%Y-%m-%d")
+        # Resolve entry date — fall back to today if blank or invalid
+        resolved_date = datetime.now().strftime("%Y-%m-%d")
+        if entry_date and entry_date.strip():
+            try:
+                datetime.strptime(entry_date.strip(), "%Y-%m-%d")
+                resolved_date = entry_date.strip()
+            except ValueError:
+                logger.warning("Invalid entry_date '%s', defaulting to today", entry_date)
+
         payload: dict[str, Any] = {
-            "entryDate": today,
+            "entryDate": resolved_date,
             "systolicBP": systolic_bp,
             "diastolicBP": diastolic_bp,
             "medicationTaken": medication_taken,

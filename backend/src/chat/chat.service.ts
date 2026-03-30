@@ -286,6 +286,16 @@ Keep your message short, clear, and supportive.`,
         systemPrompt = systemPrompt + '\n\n' + patientContext
       }
 
+      // Inject session history summary (covers both text and voice turns)
+      const sessionSummary = await this.conversationHistoryService.generateContextSummary(sessionId)
+      if (sessionSummary) {
+        systemPrompt =
+          systemPrompt +
+          '\n\n--- CONVERSATION HISTORY SUMMARY ---\n' +
+          sessionSummary +
+          '\n--- END SUMMARY ---'
+      }
+
       const chatHistory = await this.conversationHistoryService.getConversationHistory(
         sessionId,
         prompt,
@@ -391,6 +401,16 @@ Keep your message short, clear, and supportive.`,
           preferredLanguage: user?.preferredLanguage ?? null,
         })
         systemPrompt = systemPrompt + '\n\n' + patientContext
+      }
+
+      // Inject session history summary (covers both text and voice turns)
+      const sessionSummary = await this.conversationHistoryService.generateContextSummary(sessionId)
+      if (sessionSummary) {
+        systemPrompt =
+          systemPrompt +
+          '\n\n--- CONVERSATION HISTORY SUMMARY ---\n' +
+          sessionSummary +
+          '\n--- END SUMMARY ---'
       }
 
       const chatHistory = await this.conversationHistoryService.getConversationHistory(

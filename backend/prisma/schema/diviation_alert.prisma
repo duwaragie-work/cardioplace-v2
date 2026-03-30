@@ -23,6 +23,7 @@ model DeviationAlert {
     // Relations
     escalationEvents EscalationEvent[]
     notifications    Notification[]
+    scheduledCalls   ScheduledCall[]
 
     @@unique([journalEntryId, type])
     @@index([userId, createdAt(sort: Desc)])

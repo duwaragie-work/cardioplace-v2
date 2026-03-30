@@ -4,6 +4,7 @@ model Conversation {
     userMessage  String
     aiResponse   String
     embedding    Unsupported("vector(1024)")?
+    source       String?                      @default("text")
     medicalLens  String?
     tone         String?
     detailLevel  String?

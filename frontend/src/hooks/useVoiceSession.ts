@@ -32,8 +32,8 @@ export interface CheckinSummary {
 }
 
 export interface StartOptions {
-  mode: 'checkin' | 'chat';
   token: string;
+  sessionId?: string;
 }
 
 // ── Audio helpers ─────────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ function base64ToFloat32(base64: string, sampleRate: number): AudioBuffer | null
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
-export function useVoiceSession() {
+export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) {
   const [sessionState, setSessionState] = useState<SessionState>('idle');
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
   const [pendingCheckin, setPendingCheckin] = useState<CheckinSummary | null>(null);
@@ -96,6 +96,7 @@ export function useVoiceSession() {
   const audioQueueRef = useRef<AudioBuffer[]>([]);
   const isPlayingRef = useRef(false);
   const transcriptIdRef = useRef(0);
+  const onSessionCreatedRef = useRef(onSessionCreated);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -235,7 +236,7 @@ export function useVoiceSession() {
   // ── Public API ──────────────────────────────────────────────────────────────
 
   const start = useCallback(
-    async ({ mode, token }: StartOptions) => {
+    async ({ token, sessionId }: StartOptions) => {
       setSessionState('connecting');
       setTranscript([]);
       setPendingCheckin(null);
@@ -251,7 +252,11 @@ export function useVoiceSession() {
       });
       socketRef.current = socket;
 
-      socket.on('session_ready', async () => {
+      socket.on('session_ready', async (data?: { sessionId?: string }) => {
+        // Notify consumer of resolved sessionId (may be a newly created one)
+        if (data?.sessionId) {
+          onSessionCreatedRef.current?.(data.sessionId);
+        }
         try {
           await startMic();
         } catch {
@@ -298,7 +303,7 @@ export function useVoiceSession() {
       });
 
       socket.on('connect', () => {
-        socket.emit('start_session', { mode });
+        socket.emit('start_session', { sessionId: sessionId ?? null });
       });
     },
     [startMic, stopMic, playAudio, appendTranscript],
