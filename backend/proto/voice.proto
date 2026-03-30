@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+package voice;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Service definition
+// ─────────────────────────────────────────────────────────────────────────────
+
+service VoiceAgent {
+  // Bidirectional streaming: browser audio in, agent audio/events out
+  rpc StreamSession(stream ClientMessage) returns (stream ServerMessage);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Client → Server messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+message ClientMessage {
+  oneof payload {
+    SessionInit init  = 1;
+    AudioChunk  audio = 2;
+    TextInput   text  = 3;
+    EndSession  end   = 4;
+  }
+}
+
+message SessionInit {
+  string user_id         = 1;  // Patient user ID
+  string language        = 2;  // BCP-47: "en-US", "es-ES", "fr-FR", etc.
+  string mode            = 3;  // "checkin" | "chat"
+  string patient_context = 4;  // JSON: recent BP readings, baseline, alerts
+  string auth_token      = 5;  // JWT — used by tools to call NestJS REST API
+}
+
+message AudioChunk {
+  bytes  data      = 1;  // Raw PCM audio bytes
+  string mime_type = 2;  // "audio/pcm;rate=16000"
+}
+
+message TextInput {
+  string text = 1;
+}
+
+message EndSession {}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Server → Client messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+message ServerMessage {
+  oneof payload {
+    SessionReady  ready      = 1;
+    AudioChunk    audio      = 2;
+    Transcript    transcript = 3;
+    ActionNotice  action     = 4;
+    CheckinSaved  checkin    = 5;
+    SessionError  error      = 6;
+    SessionClosed closed     = 7;
+  }
+}
+
+message SessionReady {}
+
+message SessionClosed {}
+
+message Transcript {
+  string text     = 1;
+  bool   is_final = 2;
+  string speaker  = 3;  // "user" | "agent"
+}
+
+message ActionNotice {
+  string type   = 1;  // e.g. "submitting_checkin"
+  string detail = 2;
+}
+
+message CheckinSaved {
+  int32           systolic_bp      = 1;
+  int32           diastolic_bp     = 2;
+  float           weight           = 3;
+  bool            medication_taken = 4;
+  repeated string symptoms         = 5;
+  bool            saved            = 6;
+}
+
+message SessionError {
+  string message = 1;
+}

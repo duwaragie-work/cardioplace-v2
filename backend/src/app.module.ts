@@ -16,6 +16,7 @@ import { ChatModule } from './chat/chat.module.js'
 import { ContentModule } from './content/content.module.js'
 import { ProviderModule } from './provider/provider.module.js'
 import { EmailModule } from './email/email.module.js'
+import { VoiceModule } from './voice/voice.module.js'
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -50,6 +51,7 @@ import { EmailModule } from './email/email.module.js'
     DailyJournalModule,
     ContentModule,
     ProviderModule,
+    VoiceModule,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],

@@ -1,32 +1,24 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import * as nodemailer from 'nodemailer'
+import { Resend } from 'resend'
 
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name)
-  private readonly transporter: nodemailer.Transporter
+  private readonly resend: Resend
   private readonly from: string
 
   constructor(private readonly config: ConfigService) {
-    this.transporter = nodemailer.createTransport({
-      host: this.config.get<string>('SMTP_HOST'),
-      port: Number(this.config.get<string>('SMTP_PORT', '587')),
-      auth: {
-        user: this.config.get<string>('SMTP_USER'),
-        pass: this.config.get<string>('SMTP_PASS'),
-      },
-    })
-
+    this.resend = new Resend(this.config.get<string>('RESEND_API_KEY'))
     this.from = this.config.get<string>(
-      'SMTP_FROM',
-      'Healplace <no-reply@healplace.com>',
+      'EMAIL_FROM',
+      'Healplace <onboarding@resend.dev>',
     )
   }
 
   async sendEmail(to: string, subject: string, html: string): Promise<void> {
     try {
-      await this.transporter.sendMail({ from: this.from, to, subject, html })
+      await this.resend.emails.send({ from: this.from, to, subject, html })
       this.logger.log(`Email sent to ${to} — subject: ${subject}`)
     } catch (error) {
       this.logger.error(

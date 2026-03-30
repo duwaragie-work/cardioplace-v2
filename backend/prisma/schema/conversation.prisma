@@ -1,15 +1,16 @@
 model Conversation {
-  id           String                 @id @default(uuid())
-  sessionId    String
-  userMessage  String
-  aiResponse   String
-  embedding    Unsupported("vector")?
-  medicalLens  String?
-  tone         String?
-  detailLevel  String?
-  careApproach String?
-  spirituality Boolean?
-  timestamp    DateTime               @default(now())
+    id           String                       @id @default(uuid())
+    sessionId    String
+    userMessage  String
+    aiResponse   String
+    embedding    Unsupported("vector(1024)")?
+    source       String?                      @default("text")
+    medicalLens  String?
+    tone         String?
+    detailLevel  String?
+    careApproach String?
+    spirituality Boolean?
+    timestamp    DateTime                     @default(now())
 
   @@index([sessionId])
 }
