@@ -1,12 +1,10 @@
 model RefreshToken {
   id        String    @id @default(ulid())
-  tokenHash String 
+  tokenHash String
   expiresAt DateTime
-  revokedAt DateTime? // null = active; set on logout/rotation
-  userAgent String? // browser/device from request headers
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
+  revokedAt DateTime?
+  userAgent String?
+  userId    String
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

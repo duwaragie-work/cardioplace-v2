@@ -1,3 +1,20 @@
+model ContentReview {
+  id           String        @id @default(ulid())
+  contentId    String
+  versionNo    Int
+  reviewType   ReviewType
+  outcome      ReviewOutcome
+  notes        String?
+  reviewedById String
+  reviewedAt   DateTime      @default(now())
+  content      Content       @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  reviewedBy   User          @relation("ContentReviewedBy", fields: [reviewedById], references: [id])
+
+  @@index([contentId])
+  @@index([versionNo])
+  @@index([reviewedById])
+}
+
 enum ReviewType {
   EDITORIAL
   CLINICAL
@@ -7,24 +24,4 @@ enum ReviewOutcome {
   APPROVED
   APPROVED_WITH_MINOR_REVISIONS
   REJECTED
-}
-
-model ContentReview {
-  id        String @id @default(ulid())
-  contentId String
-  content   Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
-
-  versionNo Int // Which content version this review applies to
-
-  reviewType ReviewType
-  outcome    ReviewOutcome
-  notes      String? // Required when outcome = REJECTED
-
-  reviewedById String
-  reviewedBy   User   @relation("ContentReviewedBy", fields: [reviewedById], references: [id])
-  reviewedAt   DateTime @default(now())
-
-  @@index([contentId])
-  @@index([versionNo])
-  @@index([reviewedById])
 }

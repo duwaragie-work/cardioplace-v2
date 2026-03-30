@@ -1,16 +1,10 @@
-// Append-only view log — never update rows.
-// Do NOT increment a viewsCount column on the Content row — that is expensive at scale.
-// Aggregate view counts via COUNT(*) query or a future batch job.
-
 model ContentView {
-  id        String  @id @default(ulid())
+  id        String   @id @default(ulid())
   contentId String
-  content   Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
-
-  userId   String?  // null for guest/unauthed views
-  deviceId String?  // from x-device-id header
-
-  viewedAt DateTime @default(now())
+  userId    String?
+  deviceId  String?
+  viewedAt  DateTime @default(now())
+  content   Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
 
   @@index([contentId])
   @@index([userId])

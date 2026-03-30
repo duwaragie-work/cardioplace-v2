@@ -1,22 +1,11 @@
-// Append-only editorial event log — do NOT update or delete rows.
-// View tracking is separate (ContentView table).
-// actorId is null for scheduler-triggered events.
-
 model ContentAuditLog {
-  id        String  @id @default(ulid())
+  id        String   @id @default(ulid())
   contentId String
-  content   Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
-
-  // Event types: create | save_draft | edit | submit_review | editorial_approved |
-  //              clinical_approved | partially_approved | rejected | published |
-  //              unpublished | flag_stale | super_admin_override
-  event   String
-  actorId String? // null when triggered by the scheduler
-
-  // Extra context: { fromStatus, toStatus, versionNo, outcome?, notes?, overrideReason? }
-  metadata Json?
-
+  event     String
+  actorId   String?
+  metadata  Json?
   createdAt DateTime @default(now())
+  content   Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
 
   @@index([contentId])
   @@index([event])

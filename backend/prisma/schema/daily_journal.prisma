@@ -1,74 +1,65 @@
+model JournalEntry {
+  id               String            @id @default(uuid())
+  userId           String
+  entryDate        DateTime          @db.Date
+  systolicBP       Int?
+  diastolicBP      Int?
+  weight           Decimal?
+  medicationTaken  Boolean?
+  missedDoses      Int?              @default(0)
+  symptoms         String[]
+  teachBackAnswer  String?
+  teachBackCorrect Boolean?
+  notes            String?
+  source           EntrySource       @default(MANUAL)
+  sourceMetadata   Json?
+  snapshotId       String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  deviationAlerts  DeviationAlert[]
+  snapshot         BaselineSnapshot? @relation(fields: [snapshotId], references: [id])
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, entryDate])
+  @@index([userId, entryDate(sort: Desc)])
+}
+
 enum DeviationType {
-    SYSTOLIC_BP
-    DIASTOLIC_BP
-    WEIGHT
-    MEDICATION_ADHERENCE
+  SYSTOLIC_BP
+  DIASTOLIC_BP
+  WEIGHT
+  MEDICATION_ADHERENCE
 }
 
 enum DeviationSeverity {
-    LOW
-    MEDIUM
-    HIGH
+  LOW
+  MEDIUM
+  HIGH
 }
 
 enum AlertStatus {
-    OPEN
-    ACKNOWLEDGED
-    RESOLVED
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
 }
 
 enum NotificationChannel {
-    PUSH
-    EMAIL
-    SMS
+  PUSH
+  EMAIL
+  SMS
 }
 
 enum EscalationLevel {
-    LEVEL_1
-    LEVEL_2
+  LEVEL_1
+  LEVEL_2
 }
 
 enum CommunicationPreference {
-    TEXT_FIRST
-    AUDIO_FIRST
+  TEXT_FIRST
+  AUDIO_FIRST
 }
 
 enum EntrySource {
-    MANUAL
-    HEALTHKIT
-}
-
-model JournalEntry {
-    id     String @id @default(uuid())
-    userId String
-    user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-    entryDate DateTime @db.Date
-
-    // Cardiovascular metrics (all optional — user may not fill every field)
-    systolicBP       Int?
-    diastolicBP      Int?
-    weight           Decimal?
-    medicationTaken  Boolean?
-    missedDoses      Int?      @default(0)
-    symptoms         String[]
-    teachBackAnswer  String?
-    teachBackCorrect Boolean?
-    notes            String?
-
-    // Data source
-    source         EntrySource @default(MANUAL)
-    sourceMetadata Json?
-
-    // FK to the baseline snapshot that was active when this entry was evaluated
-    snapshotId String?
-    snapshot   BaselineSnapshot? @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
-
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-
-    deviationAlerts DeviationAlert[]
-
-    @@unique([userId, entryDate])
-    @@index([userId, entryDate(sort: Desc)])
+  MANUAL
+  HEALTHKIT
 }

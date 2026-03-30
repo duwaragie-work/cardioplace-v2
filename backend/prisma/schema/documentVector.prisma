@@ -1,9 +1,8 @@
 model DocumentVector {
-  id         String @id @default(uuid())
-  content    String 
-  embedding  Unsupported("vector(1024)")? 
-  documentId String
-  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  sourceActiveStatus Boolean @default(true)
-
+  id                 String                 @id @default(uuid())
+  content            String
+  embedding          Unsupported("vector")?
+  documentId         String
+  sourceActiveStatus Boolean                @default(true)
+  document           Document               @relation(fields: [documentId], references: [id], onDelete: Cascade)
 }

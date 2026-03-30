@@ -1,16 +1,11 @@
-// OtpCode: Active OTP sessions cache (temporary, deleted on success/failure)
-// Lifecycle: Created on request → Updated on failed attempts → Deleted on success/max attempts/expiry
-// Historical data is preserved in AuthLog table
-
 model OtpCode {
   id        String   @id @default(ulid())
-  email     String   
+  email     String
   codeHash  String
-  expiresAt DateTime 
+  expiresAt DateTime
   attempts  Int      @default(0)
-  
   createdAt DateTime @default(now())
-  
-  @@index([email])     
-  @@index([expiresAt]) 
+
+  @@index([email])
+  @@index([expiresAt])
 }

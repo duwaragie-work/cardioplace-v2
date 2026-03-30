@@ -1,25 +1,14 @@
-// ContentVersion stores a snapshot of content fields at every meaningful edit point.
-// A new version is created ONLY when content fields (title, body, summary, author,
-// contentType, tags, mediaUrl) actually change — not on status transitions.
-//
-// At most ONE version per content can have isDraft=true (the currently-active working draft).
-// At most ONE version per content can have isPublished=true (the currently-live version).
-// These can be the same version (e.g. right after first publish before any revision starts).
-
 model ContentVersion {
-  id        String  @id @default(ulid())
-  contentId String
-  content   Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
-
-  versionNo    Int     // 1, 2, 3 … increments per contentId
-  snapshotJson Json    // Full content-field snapshot at this point in time
-  changeReason String? // e.g. "initial draft" | "revision after rejection" | "background revision"
-
-  isDraft     Boolean @default(false) // true = currently the active working draft (max 1 per contentId)
-  isPublished Boolean @default(false) // true = this is the currently live version (max 1 per contentId)
-
-  createdById String   // userId who triggered this version
-  createdAt   DateTime @default(now())
+  id           String   @id @default(ulid())
+  contentId    String
+  versionNo    Int
+  snapshotJson Json
+  changeReason String?
+  isDraft      Boolean  @default(false)
+  isPublished  Boolean  @default(false)
+  createdById  String
+  createdAt    DateTime @default(now())
+  content      Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
 
   @@unique([contentId, versionNo])
   @@index([contentId])

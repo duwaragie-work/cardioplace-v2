@@ -1,16 +1,10 @@
-// UserDevice: Join table for the many-to-many User <-> Device relationship
-// One user can have multiple devices; one device can be used by multiple users
-
 model UserDevice {
-  id       String @id @default(ulid())
-
+  id       String   @id @default(ulid())
   userId   String
-  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   deviceId String
-  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-
   linkedAt DateTime @default(now())
+  device   Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, deviceId])
   @@index([userId])

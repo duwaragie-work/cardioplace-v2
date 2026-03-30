@@ -1,32 +1,20 @@
-// AuthLog: Comprehensive audit trail for all authentication events
-// This is an append-only table for HIPAA compliance and security monitoring
-// Events include: OTP attempts, social logins, token refresh, logout, etc.
-
 model AuthLog {
   id         String   @id @default(ulid())
-
-  event      String   // Event type: otp_requested, otp_verified, otp_failed, otp_locked, otp_expired, social_login_success, social_login_failed, login_success, refresh_success, refresh_failed, logout, token_revoked
-
-  identifier String?  
-  userId     String?  
-  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  
-  // Authentication context
-  method     String?  // Authentication method: "otp" | "google" | "apple" | null
-  deviceId   String?  // From x-device-id header (client-generated UUID)
-  ipAddress  String?  // IP address from req.ip or x-forwarded-for
-  userAgent  String?  
-  
-  metadata   Json?   
-  
-  // Outcome
-  success    Boolean  @default(false) // true = successful auth event, false = failed/error
-  errorCode  String?  // Error code if failed: max_attempts, invalid_token, expired, etc.
-  
+  event      String
+  identifier String?
+  userId     String?
+  method     String?
+  deviceId   String?
+  ipAddress  String?
+  userAgent  String?
+  metadata   Json?
+  success    Boolean  @default(false)
+  errorCode  String?
   createdAt  DateTime @default(now())
-  
-  @@index([userId])      
-  @@index([identifier])  
-  @@index([event])       
-  @@index([createdAt])   
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([identifier])
+  @@index([event])
+  @@index([createdAt])
 }

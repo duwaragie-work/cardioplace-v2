@@ -1,23 +1,15 @@
 model EscalationEvent {
-    id      String @id @default(uuid())
-    alertId String
-    userId  String
+  id                 String          @id @default(uuid())
+  alertId            String
+  userId             String
+  escalationLevel    EscalationLevel
+  reason             String?
+  triggeredAt        DateTime        @default(now())
+  notificationSentAt DateTime?
+  alert              DeviationAlert  @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notifications      Notification[]
 
-    alert DeviationAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
-    user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-    // Level of escalation reached (1 = first warning, 3 = critical)
-    escalationLevel EscalationLevel
-
-    // Why this escalation was triggered (e.g. "3 consecutive days of low sleep quality")
-    reason String?
-
-    triggeredAt        DateTime  @default(now())
-    notificationSentAt DateTime?
-
-    // Relations
-    notifications Notification[]
-
-    @@index([alertId, triggeredAt(sort: Desc)])
-    @@index([userId, triggeredAt(sort: Desc)])
+  @@index([alertId, triggeredAt(sort: Desc)])
+  @@index([userId, triggeredAt(sort: Desc)])
 }
