@@ -12,7 +12,7 @@
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
-    "build": "rm -f tsconfig.build.tsbuildinfo && tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json",
     "prebuild": "prisma generate",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
@@ -27,6 +27,9 @@
     "test:e2e": "NODE_OPTIONS='--experimental-vm-modules' jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@google/genai": "^1.47.0",
+    "@grpc/grpc-js": "^1.14.3",
+    "@grpc/proto-loader": "^0.8.0",
     "@langchain/core": "^1.1.22",
     "@langchain/mistralai": "^1.0.4",
     "@langchain/textsplitters": "^1.0.1",
@@ -39,8 +42,10 @@
     "@nestjs/mapped-types": "*",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.1.12",
+    "@nestjs/platform-socket.io": "^11.1.17",
     "@nestjs/schedule": "^6.1.1",
     "@nestjs/throttler": "^6.5.0",
+    "@nestjs/websockets": "^11.1.17",
     "@prisma/adapter-pg": "^7.3.0",
     "@prisma/client": "^7.3.0",
     "apple-signin-auth": "^2.0.0",
@@ -60,7 +65,8 @@
     "pdf-parse": "^2.4.5",
     "pg": "^8.18.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.3",
@@ -96,5 +102,10 @@
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0"
+  },
+  "overrides": {
+    "ajv": "^8.17.2",
+    "path-to-regexp": "^8.4.0",
+    "picomatch": "^4.0.4"
   }
 }

@@ -1,0 +1,15 @@
+[project]
+name = "adk-service"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "google-adk>=1.0.0",
+    "google-genai>=1.0.0",
+    "grpcio>=1.63.0",
+    "grpcio-tools>=1.63.0",
+    "protobuf>=5.0.0",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+]

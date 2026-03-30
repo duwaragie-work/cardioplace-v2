@@ -19,6 +19,7 @@ import {
   getChatSessions,
   getSessionHistory,
 } from '@/lib/services/chat.service';
+import VoiceChat from './VoiceChat';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type MessageType = 'ai' | 'patient' | 'teachback';
@@ -404,6 +405,7 @@ function SidebarContent({
 export default function AIChatInterface() {
   const { user } = useAuth();
 
+  const [voiceMode, setVoiceMode] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -570,6 +572,35 @@ export default function AIChatInterface() {
     setActiveSessionId(id);
     setShowSessions(false);
   };
+
+  if (voiceMode) {
+    return (
+      <div
+        className="flex"
+        style={{ height: 'calc(100vh - 4rem)', backgroundColor: 'var(--brand-background)' }}
+      >
+        {/* Desktop sidebar stays visible in voice mode */}
+        <div
+          className="hidden lg:flex flex-col w-72 shrink-0 h-full"
+          style={{ backgroundColor: 'white', borderRight: '1px solid var(--brand-border)' }}
+        >
+          <SidebarContent
+            sessions={sessions}
+            activeId={activeSessionId}
+            onSelect={handleSelectSession}
+            onNewConversation={handleNewConversation}
+            userInitials={userInitials}
+            userName={userName}
+            riskTier={riskTier}
+            isLoading={isLoadingSessions}
+          />
+        </div>
+        <div className="flex-1 min-w-0 h-full">
+          <VoiceChat onBack={() => setVoiceMode(false)} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -839,6 +870,7 @@ export default function AIChatInterface() {
             </span>
           </div>
           <button
+            onClick={() => setVoiceMode(true)}
             className="shrink-0 flex items-center gap-1 text-[12px] font-semibold ml-3 transition hover:opacity-70"
             style={{ color: 'var(--brand-primary-purple)' }}
           >
@@ -875,7 +907,11 @@ export default function AIChatInterface() {
               disabled={isSending}
             />
 
-            <button className="shrink-0 p-1 transition hover:opacity-70">
+            <button
+              onClick={() => setVoiceMode(true)}
+              className="shrink-0 p-1 transition hover:opacity-70"
+              aria-label="Switch to voice mode"
+            >
               <Mic className="w-4 h-4" style={{ color: 'var(--brand-primary-purple)' }} />
             </button>
 

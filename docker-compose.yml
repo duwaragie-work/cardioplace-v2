@@ -1,0 +1,53 @@
+version: '3.9'
+
+services:
+  # ── Python ADK / gRPC voice service ─────────────────────────────────────────
+  adk-service:
+    build:
+      context: ./adk-service
+      dockerfile: Dockerfile
+    env_file: ./adk-service/.env
+    environment:
+      GRPC_HOST: 0.0.0.0
+      GRPC_PORT: 50051
+      NESTJS_INTERNAL_URL: http://backend:8080/api
+    ports:
+      - '50051:50051'
+    networks:
+      - healplace
+
+  # ── NestJS backend ───────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: ./backend/.env
+    environment:
+      PORT: 8080
+      ADK_SERVICE_HOST: adk-service
+      ADK_SERVICE_PORT: 50051
+    ports:
+      - '8080:8080'
+    depends_on:
+      - adk-service
+    networks:
+      - healplace
+
+  # ── Next.js frontend ─────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    env_file: ./frontend/.env.local
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080/api
+    ports:
+      - '3000:3000'
+    depends_on:
+      - backend
+    networks:
+      - healplace
+
+networks:
+  healplace:
+    driver: bridge
