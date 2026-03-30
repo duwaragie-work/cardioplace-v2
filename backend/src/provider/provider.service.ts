@@ -896,7 +896,7 @@ export class ProviderService {
         user: {
           select: { id: true, name: true, email: true, riskTier: true },
         },
-        alert: {
+        deviationAlert: {
           select: {
             id: true,
             type: true,
@@ -925,14 +925,14 @@ export class ProviderService {
         patient: c.user
           ? { id: c.user.id, name: c.user.name, email: c.user.email, riskTier: c.user.riskTier }
           : null,
-        alert: c.alert
+        alert: c.deviationAlert
           ? {
-              id: c.alert.id,
-              type: c.alert.type,
-              severity: c.alert.severity,
-              alertStatus: c.alert.status,
-              createdAt: c.alert.createdAt,
-              journalEntry: c.alert.journalEntry,
+              id: c.deviationAlert.id,
+              type: c.deviationAlert.type,
+              severity: c.deviationAlert.severity,
+              alertStatus: c.deviationAlert.status,
+              createdAt: c.deviationAlert.createdAt,
+              journalEntry: c.deviationAlert.journalEntry,
             }
           : null,
       })),
