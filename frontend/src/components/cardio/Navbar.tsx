@@ -41,7 +41,10 @@ export default function Navbar() {
   const links = [
     ...BASE_LINKS,
     ...(user?.roles?.includes('SUPER_ADMIN')
-      ? [{ label: 'Provider', href: '/provider/dashboard' }]
+      ? [
+          { label: 'Provider', href: '/provider/dashboard' },
+          { label: 'Patients', href: '/provider/patients' },
+        ]
       : []),
   ];
 

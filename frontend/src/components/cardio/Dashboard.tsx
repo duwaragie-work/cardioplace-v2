@@ -194,9 +194,9 @@ export default function Dashboard() {
 
           {/* BP Stat Card */}
           <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--brand-text-muted)' }}>
+            <span className="block text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--brand-text-muted)' }}>
               {loading ? <Bone w={60} h={9} r={5} /> : (todayHasEntry ? "Today's BP" : 'Latest BP')}
-            </p>
+            </span>
             {loading ? (
               <Bone w={88} h={28} />
             ) : (
@@ -222,9 +222,9 @@ export default function Dashboard() {
                 {streak} <span className="text-sm font-medium">day</span>
               </div>
             )}
-            <p className="text-[10px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
+            <span className="block text-[10px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
               {loading ? <Bone w={80} h={9} r={5} /> : 'Medication streak'}
-            </p>
+            </span>
           </div>
 
           {/* Total Check-ins Card */}
@@ -237,9 +237,9 @@ export default function Dashboard() {
             ) : (
               <div className="text-2xl font-bold" style={{ color: 'var(--brand-accent-teal)' }}>{totalEntries}</div>
             )}
-            <p className="text-[10px] mt-1" style={{ color: 'var(--brand-text-secondary)' }}>
+            <span className="block text-[10px] mt-1" style={{ color: 'var(--brand-text-secondary)' }}>
               {loading ? <Bone w={56} h={9} r={5} /> : 'Total logged'}
-            </p>
+            </span>
           </div>
         </div>
 
@@ -308,9 +308,9 @@ export default function Dashboard() {
               )}
             </div>
 
-            <p className="text-[10px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
+            <span className="block text-[10px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
               {loading ? <Bone w="60%" h={9} r={5} /> : `Baseline: ${baselineStr} mmHg`}
-            </p>
+            </span>
           </div>
 
           {/* Check-In CTA + Alerts */}
@@ -352,13 +352,13 @@ export default function Dashboard() {
                     <>{todayHasEntry ? 'Log Another Reading' : 'Start Check-In'} <ArrowRight className="w-4 h-4" /></>
                   )}
                 </button>
-                <p className="text-[10px] mt-3 text-center text-white">
+                <span className="block text-[10px] mt-3 text-center text-white">
                   {loading ? (
                     <span className="flex justify-center"><Bone w={90} h={8} r={5} /></span>
                   ) : (
                     `Last: ${getLastCheckInText(latestEntry as Record<string, unknown> | null)}`
                   )}
-                </p>
+                </span>
               </div>
             </div>
 
