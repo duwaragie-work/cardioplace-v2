@@ -258,8 +258,9 @@ export class VoiceService implements OnModuleDestroy {
   }
 
   /**
-   * Summarise the accumulated voice transcript via Mistral and save the
-   * summary (not raw lines) to the Conversation table.
+   * Summarise the accumulated voice transcript via Mistral into patient-side
+   * and AI-side summaries, then delegate to ConversationHistoryService which
+   * generates an embedding and saves to the Conversation table.
    */
   private async saveVoiceTranscript(socketId: string): Promise<void> {
     const session = this.sessions.get(socketId)
@@ -274,32 +275,39 @@ export class VoiceService implements OnModuleDestroy {
         .map((e) => `${e.speaker === 'user' ? 'Patient' : 'AI'}: ${e.text}`)
         .join('\n')
 
-      // Ask Mistral to summarise in 3-5 sentences
+      // Ask Mistral to produce two-part summary (patient side + AI side)
       const result = await this.mistral.getChatCompletion([
         {
           role: 'system',
           content:
-            'You are a medical scribe. Summarise the following voice conversation between a cardiovascular patient and an AI health assistant in 3–5 concise sentences. ' +
-            'Capture: topics discussed, any BP or weight values mentioned, medication status, symptoms reported, and any advice or next steps given. ' +
-            'Write in past tense, third-person ("The patient…"). Return only the summary, no headings.',
+            'You are a medical scribe. From the following voice conversation, produce two separate summaries:\n\n' +
+            'PATIENT: Summarise what the patient said, reported, or asked in 2–3 sentences. Include any BP values, weight, medication status, and symptoms they mentioned.\n\n' +
+            'AI: Summarise what the AI assistant advised, asked, or confirmed in 2–3 sentences. Include any actions taken (like saving a check-in).\n\n' +
+            'Return exactly in this format:\nPATIENT: <summary>\nAI: <summary>\n\nNo other text.',
         },
         { role: 'user', content: raw },
       ])
 
-      const summary =
-        (result.choices?.[0]?.message?.content as string | undefined)?.trim() ||
-        raw.slice(0, 500)
+      const output =
+        (result.choices?.[0]?.message?.content as string | undefined)?.trim() || ''
 
-      await (this.prisma as any).$executeRawUnsafe(
-        `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "aiResponse", source, timestamp)
-         VALUES (gen_random_uuid(), $1, '[Voice session]', $2, 'voice', NOW())`,
+      // Parse the two-part response
+      const patientMatch = output.match(/PATIENT:\s*([\s\S]*?)(?=\nAI:|$)/i)
+      const aiMatch = output.match(/AI:\s*([\s\S]*)/i)
+
+      const patientSummary = patientMatch?.[1]?.trim() ||
+        buffer.filter((e) => e.speaker === 'user').map((e) => e.text).join(' ').slice(0, 300) ||
+        '[Voice session — patient audio]'
+      const aiSummary = aiMatch?.[1]?.trim() ||
+        buffer.filter((e) => e.speaker === 'agent').map((e) => e.text).join(' ').slice(0, 300) ||
+        '[Voice session — AI audio]'
+
+      // Delegate to ConversationHistoryService (generates embedding + saves)
+      await this.conversationHistory.saveVoiceConversation(
         session.sessionId,
-        summary,
+        patientSummary,
+        aiSummary,
       )
-
-      // Immediately invalidate the summary cache so the next text message
-      // picks up this voice session without waiting for the 5-minute TTL.
-      this.conversationHistory.invalidateSummaryCache(session.sessionId)
 
       this.logger.log(`Saved voice session summary [session=${session.sessionId}]`)
     } catch (err) {
@@ -309,7 +317,17 @@ export class VoiceService implements OnModuleDestroy {
 
   private async buildPatientContext(userId: string, sessionId?: string): Promise<string> {
     try {
-      const [entries, baseline, alerts, recentConversations] = await Promise.all([
+      const [user, entries, baseline, alerts, sessionData] = await Promise.all([
+        this.prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            name: true,
+            primaryCondition: true,
+            riskTier: true,
+            dateOfBirth: true,
+            preferredLanguage: true,
+          },
+        }),
         this.prisma.journalEntry.findMany({
           where: { userId },
           orderBy: { entryDate: 'desc' },
@@ -324,16 +342,28 @@ export class VoiceService implements OnModuleDestroy {
           take: 5,
         }),
         sessionId
-          ? (this.prisma as any).$queryRawUnsafe(
-              `SELECT "userMessage", "aiResponse", source, timestamp
-               FROM "Conversation"
-               WHERE "sessionId" = $1
-               ORDER BY timestamp DESC
-               LIMIT 6`,
-              sessionId,
-            ) as Promise<Array<{ userMessage: string; aiResponse: string; source: string; timestamp: Date }>>
-          : Promise.resolve([]),
+          ? this.prisma.session.findUnique({
+              where: { id: sessionId },
+              select: { summary: true },
+            })
+          : Promise.resolve(null),
       ])
+
+      // Patient profile
+      const profileLines: string[] = []
+      if (user?.name) profileLines.push(`Patient name: ${user.name}`)
+      if (user?.primaryCondition) profileLines.push(`Primary condition: ${user.primaryCondition}`)
+      if (user?.riskTier) profileLines.push(`Risk tier: ${user.riskTier}`)
+      if (user?.dateOfBirth) {
+        const age = Math.floor(
+          (Date.now() - new Date(user.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000),
+        )
+        profileLines.push(`Age: ${age}`)
+      }
+      if (user?.preferredLanguage) profileLines.push(`Preferred language: ${user.preferredLanguage}`)
+      const profileSummary = profileLines.length > 0
+        ? profileLines.join('. ') + '.'
+        : 'Patient profile not available.'
 
       const readingsSummary =
         entries.length > 0
@@ -354,25 +384,11 @@ export class VoiceService implements OnModuleDestroy {
           ? `Active alerts: ${alerts.map((a) => `${a.type} (${a.severity})`).join(', ')}`
           : 'No active alerts'
 
-      let historySummary = ''
-      if (recentConversations.length > 0) {
-        const sorted = [...recentConversations].sort(
-          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-        )
-        const lines = sorted
-          .slice(-4)
-          .map((c) => {
-            const label = c.source === 'voice' ? 'Voice session summary' : 'Chat'
-            // Voice rows have aiResponse = the full summary; text rows have a Q&A pair
-            return c.source === 'voice'
-              ? `[${label}]: ${c.aiResponse.slice(0, 300)}`
-              : `[${label}] Patient: ${c.userMessage.slice(0, 100)} → AI: ${c.aiResponse.slice(0, 100)}`
-          })
-          .join('\n')
-        historySummary = `\n\nRECENT SESSION HISTORY:\n${lines}`
-      }
+      const historySummary = sessionData?.summary
+        ? `\n\nSESSION HISTORY SUMMARY:\n${sessionData.summary}`
+        : ''
 
-      return `${readingsSummary}. ${baselineSummary}. ${alertSummary}.${historySummary}`
+      return `${profileSummary}\n\n${readingsSummary}. ${baselineSummary}. ${alertSummary}.${historySummary}`
     } catch {
       return 'Patient context unavailable.'
     }

@@ -44,7 +44,8 @@ export async function getSessionHistory(
   Array<{
     id: string
     userMessage: string
-    aiResponse: string
+    aiSummary: string
+    source: string
     timestamp: string
   }>
 > {

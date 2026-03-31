@@ -203,11 +203,8 @@ Keep your message short, clear, and supportive.`,
       }
     }
 
-    // Optionally record the emergency response in the conversation history
-    await this.conversationHistoryService.saveConversation(sessionId, prompt, fullResponse, {
-      // Mark this as an emergency response; extend config shape as needed.
-      emergency: true,
-    } as any)
+    // Record the emergency response in the conversation history
+    await this.conversationHistoryService.saveConversation(sessionId, prompt, fullResponse)
   }
 
   /**
@@ -218,7 +215,7 @@ Keep your message short, clear, and supportive.`,
     request: ChatRequestDto,
     userId: string,
   ): AsyncIterable<string | { type: 'emergency'; emergencySituation: string | null }> {
-    const { prompt, date: _date, ...config } = request
+    const { prompt } = request
     const sessionId = request.sessionId as string
 
     try {
@@ -286,8 +283,8 @@ Keep your message short, clear, and supportive.`,
         systemPrompt = systemPrompt + '\n\n' + patientContext
       }
 
-      // Inject session history summary (covers both text and voice turns)
-      const sessionSummary = await this.conversationHistoryService.generateContextSummary(sessionId)
+      // Inject rolling session summary (covers both text and voice turns)
+      const sessionSummary = await this.conversationHistoryService.getSessionSummary(sessionId)
       if (sessionSummary) {
         systemPrompt =
           systemPrompt +
@@ -326,7 +323,7 @@ Keep your message short, clear, and supportive.`,
         }
       }
 
-      await this.conversationHistoryService.saveConversation(sessionId, prompt, fullResponse, config)
+      await this.conversationHistoryService.saveConversation(sessionId, prompt, fullResponse)
       console.log(`Streaming complete for session ${sessionId}`)
     } catch (error) {
       console.error('Streaming error:', error)
@@ -342,7 +339,7 @@ Keep your message short, clear, and supportive.`,
     request: ChatRequestDto,
     userId: string,
   ): Promise<{ text: string; isEmergency: boolean; emergencySituation: string | null }> {
-    const { prompt, date: _date, ...config } = request
+    const { prompt } = request
     const sessionId = request.sessionId as string
 
     try {
@@ -403,8 +400,8 @@ Keep your message short, clear, and supportive.`,
         systemPrompt = systemPrompt + '\n\n' + patientContext
       }
 
-      // Inject session history summary (covers both text and voice turns)
-      const sessionSummary = await this.conversationHistoryService.generateContextSummary(sessionId)
+      // Inject rolling session summary (covers both text and voice turns)
+      const sessionSummary = await this.conversationHistoryService.getSessionSummary(sessionId)
       if (sessionSummary) {
         systemPrompt =
           systemPrompt +
@@ -439,7 +436,7 @@ Keep your message short, clear, and supportive.`,
         responseText = 'An error occurred while generating response'
       }
 
-      await this.conversationHistoryService.saveConversation(sessionId, prompt, responseText, config)
+      await this.conversationHistoryService.saveConversation(sessionId, prompt, responseText)
       console.log(`Structured response complete for session ${sessionId}`)
 
       return { text: responseText, isEmergency: false, emergencySituation: null }
@@ -486,7 +483,8 @@ Keep your message short, clear, and supportive.`,
       select: {
         id: true,
         userMessage: true,
-        aiResponse: true,
+        aiSummary: true,
+        source: true,
         timestamp: true,
       },
     })

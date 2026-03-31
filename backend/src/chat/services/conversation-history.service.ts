@@ -1,31 +1,19 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { MistralService } from '../../mistral/mistral.service.js'
-import { SystemPromptConfig } from '../dto/system-prompt-config.dto.js'
 
 @Injectable()
 export class ConversationHistoryService {
-  /** In-memory cache: sessionId → { summary, expiresAt (5 min TTL) } */
-  private readonly summaryCache = new Map<string, { summary: string; expiresAt: number }>()
-
-  /** Call this whenever new conversation data is written for a session (e.g. voice session end). */
-  invalidateSummaryCache(sessionId: string): void {
-    this.summaryCache.delete(sessionId)
-  }
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly mistralService: MistralService,
   ) {}
 
+  // ── Retrieval ───────────────────────────────────────────────────────────────
+
   /**
-   * Retrieve the most relevant past messages for a session.
-   *
-   * - Text turns (with embeddings): ranked by vector similarity to the current query.
-   * - Voice turns (no embedding): fetched chronologically and merged in.
-   *
-   * Both sets are merged and returned in chronological order so the LLM sees
-   * the full conversation history regardless of whether turns came from text or voice.
+   * Retrieve the most relevant past messages for a session using vector
+   * similarity. Works for both text and voice rows since all have embeddings.
    */
   async getConversationHistory(
     sessionId: string,
@@ -34,61 +22,35 @@ export class ConversationHistoryService {
     try {
       if (!query?.trim()) return []
 
-      type RawRow = { userMessage: string; aiResponse: string; timestamp: Date }
-
-      // ── 1. Vector-similarity fetch for text turns ────────────────────────
       const embeddingResponse = await this.mistralService.getEmbeddings(query)
       const queryEmbedding = embeddingResponse.data[0]?.embedding
+      if (!queryEmbedding) return []
 
-      let textResults: RawRow[] = []
-      if (queryEmbedding) {
-        const embeddingString = `[${queryEmbedding.join(',')}]`
-        textResults = await (this.prisma as any).$queryRawUnsafe(
-          `SELECT "userMessage", "aiResponse", timestamp
-           FROM "Conversation"
-           WHERE "sessionId" = $1 AND embedding IS NOT NULL
-           ORDER BY embedding <-> $2::vector
-           LIMIT 8`,
-          sessionId,
-          embeddingString,
-        )
-      }
+      const embeddingString = `[${queryEmbedding.join(',')}]`
 
-      // ── 2. Chronological fetch for voice turns (no embedding) ────────────
-      const voiceResults: RawRow[] = await (this.prisma as any).$queryRawUnsafe(
-        `SELECT "userMessage", "aiResponse", timestamp
+      type RawRow = { userMessage: string; aiSummary: string; timestamp: Date }
+
+      const results: RawRow[] = await (this.prisma as any).$queryRawUnsafe(
+        `SELECT "userMessage", "aiSummary", timestamp
          FROM "Conversation"
-         WHERE "sessionId" = $1 AND embedding IS NULL
-         ORDER BY timestamp DESC
-         LIMIT 4`,
+         WHERE "sessionId" = $1 AND embedding IS NOT NULL
+         ORDER BY embedding <-> $2::vector
+         LIMIT 10`,
         sessionId,
+        embeddingString,
       )
 
-      // ── 3. Merge, deduplicate by timestamp+message, sort chronologically ──
-      const seen = new Set<string>()
-      const merged: RawRow[] = []
-      for (const row of [...textResults, ...voiceResults]) {
-        const key = `${new Date(row.timestamp).getTime()}:${row.userMessage.slice(0, 40)}`
-        if (!seen.has(key)) {
-          seen.add(key)
-          merged.push(row)
-        }
-      }
-
-      const sorted = merged.sort(
+      const sorted = [...results].sort(
         (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
       )
 
       const history: [string, string][] = []
       for (const row of sorted) {
         history.push(['human', row.userMessage])
-        history.push(['ai', row.aiResponse])
+        history.push(['ai', row.aiSummary])
       }
 
-      console.log(
-        `Retrieved ${history.length / 2} conversation turns for session ${sessionId} ` +
-        `(${textResults.length} text, ${voiceResults.length} voice)`,
-      )
+      console.log(`Retrieved ${history.length / 2} conversation turns for session ${sessionId}`)
       return history
     } catch (error) {
       console.error('Error retrieving conversation history:', error)
@@ -97,123 +59,192 @@ export class ConversationHistoryService {
   }
 
   /**
-   * Embed and persist a user/AI conversation turn.
+   * Read the rolling session summary. One DB read, no LLM call.
+   */
+  async getSessionSummary(sessionId: string): Promise<string> {
+    if (!sessionId) return ''
+    try {
+      const session = await this.prisma.session.findUnique({
+        where: { id: sessionId },
+        select: { summary: true },
+      })
+      return session?.summary ?? ''
+    } catch {
+      return ''
+    }
+  }
+
+  // ── Saving ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Save a text chat turn: summarise the AI response, embed, persist,
+   * and incrementally update the session rolling summary.
    */
   async saveConversation(
     sessionId: string,
     userMessage: string,
-    aiResponse: string,
-    config: SystemPromptConfig,
+    rawAiResponse: string,
   ): Promise<void> {
     try {
-      const memoryContent = `Human: ${userMessage}\nAI: ${aiResponse}`
-      if (!memoryContent.trim()) return
+      if (!userMessage?.trim() && !rawAiResponse?.trim()) return
 
-      const embeddingResponse = await this.mistralService.getEmbeddings(memoryContent)
+      const aiSummary = await this.summariseText(rawAiResponse, 'ai')
+
+      // Generate embedding
+      const content = `Patient: ${userMessage}\nAI: ${aiSummary}`
+      const embeddingResponse = await this.mistralService.getEmbeddings(content)
       const embedding = embeddingResponse.data[0]?.embedding
 
       if (embedding) {
         const embeddingString = `[${embedding.join(',')}]`
         await (this.prisma as any).$executeRawUnsafe(
-          `INSERT INTO "Conversation" (
-            id, "sessionId", "userMessage", "aiResponse", embedding,
-            "medicalLens", tone, "detailLevel", "careApproach", spirituality
-          ) VALUES (
-            gen_random_uuid(), $1, $2, $3, $4::vector, $5, $6, $7, $8, $9
-          )`,
+          `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "aiSummary", source, embedding)
+           VALUES (gen_random_uuid(), $1, $2, $3, 'text', $4::vector)`,
           sessionId,
           userMessage,
-          aiResponse,
+          aiSummary,
           embeddingString,
-          config.medicalLens,
-          config.tone,
-          config.detailLevel,
-          config.careApproach,
-          config.spirituality,
         )
       } else {
         await (this.prisma as any).$executeRawUnsafe(
-          `INSERT INTO "Conversation" (
-            id, "sessionId", "userMessage", "aiResponse",
-            "medicalLens", tone, "detailLevel", "careApproach", spirituality
-          ) VALUES (
-            gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8
-          )`,
+          `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "aiSummary", source)
+           VALUES (gen_random_uuid(), $1, $2, $3, 'text')`,
           sessionId,
           userMessage,
-          aiResponse,
-          config.medicalLens,
-          config.tone,
-          config.detailLevel,
-          config.careApproach,
-          config.spirituality,
+          aiSummary,
         )
       }
 
-      console.log(`Saved conversation for session ${sessionId}`)
+      // Incrementally update the session rolling summary
+      await this.updateRollingSummary(sessionId, userMessage, aiSummary, 'text')
+
+      console.log(`Saved text conversation for session ${sessionId}`)
     } catch (error) {
       console.error('Error saving conversation:', error)
     }
   }
 
   /**
-   * Generate (and cache for 5 min) a concise summary of all conversations
-   * in a session — both text and voice turns — for injection into system prompts.
-   * Returns an empty string if there is no history yet.
+   * Save a voice session turn (already summarised patient + AI parts),
+   * generate embedding, and update the session rolling summary.
    */
-  async generateContextSummary(sessionId: string): Promise<string> {
-    if (!sessionId) return ''
-
-    // Return cached summary if still fresh
-    const cached = this.summaryCache.get(sessionId)
-    if (cached && Date.now() < cached.expiresAt) return cached.summary
-
+  async saveVoiceConversation(
+    sessionId: string,
+    patientSummary: string,
+    aiSummary: string,
+  ): Promise<void> {
     try {
-      type Row = { userMessage: string; aiResponse: string; source: string; timestamp: Date }
+      const content = `Patient: ${patientSummary}\nAI: ${aiSummary}`
+      const embeddingResponse = await this.mistralService.getEmbeddings(content)
+      const embedding = embeddingResponse.data[0]?.embedding
 
-      const rows: Row[] = await (this.prisma as any).$queryRawUnsafe(
-        `SELECT "userMessage", "aiResponse", source, timestamp
-         FROM "Conversation"
-         WHERE "sessionId" = $1
-         ORDER BY timestamp ASC
-         LIMIT 20`,
-        sessionId,
-      )
-
-      if (rows.length === 0) return ''
-
-      // Build readable history text
-      const historyText = rows
-        .map((r) =>
-          r.source === 'voice'
-            ? `[Voice session]: ${r.aiResponse}`
-            : `Patient: ${r.userMessage}\nAI: ${r.aiResponse}`,
+      if (embedding) {
+        const embeddingString = `[${embedding.join(',')}]`
+        await (this.prisma as any).$executeRawUnsafe(
+          `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "aiSummary", source, embedding)
+           VALUES (gen_random_uuid(), $1, $2, $3, 'voice', $4::vector)`,
+          sessionId,
+          patientSummary,
+          aiSummary,
+          embeddingString,
         )
-        .join('\n\n')
+      } else {
+        await (this.prisma as any).$executeRawUnsafe(
+          `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "aiSummary", source)
+           VALUES (gen_random_uuid(), $1, $2, $3, 'voice')`,
+          sessionId,
+          patientSummary,
+          aiSummary,
+        )
+      }
 
-      // Ask Mistral to summarise
+      // Incrementally update the session rolling summary
+      await this.updateRollingSummary(sessionId, patientSummary, aiSummary, 'voice')
+
+      console.log(`Saved voice conversation for session ${sessionId}`)
+    } catch (error) {
+      console.error('Error saving voice conversation:', error)
+    }
+  }
+
+  // ── Rolling summary ─────────────────────────────────────────────────────────
+
+  /**
+   * Incrementally update Session.summary by feeding Mistral the current
+   * summary + the new exchange. One LLM call per exchange, fixed input size.
+   */
+  private async updateRollingSummary(
+    sessionId: string,
+    userMessage: string,
+    aiSummary: string,
+    source: 'text' | 'voice',
+  ): Promise<void> {
+    try {
+      const session = await this.prisma.session.findUnique({
+        where: { id: sessionId },
+        select: { summary: true, messageCount: true },
+      })
+      if (!session) return
+
+      const currentSummary = session.summary ?? ''
+      const newCount = (session.messageCount ?? 0) + 1
+      const label = source === 'voice' ? 'Voice call' : 'Text chat'
+
+      const newExchange = `[${label}] Patient: ${userMessage}\nAI: ${aiSummary}`
+
       const result = await this.mistralService.getChatCompletion([
         {
           role: 'system',
           content:
-            'You are a medical scribe. Summarise the following conversation history between a cardiovascular patient and an AI health assistant. ' +
-            'Write 3–6 bullet points covering: topics discussed, BP/weight values recorded, medication adherence, symptoms mentioned, and any advice given. ' +
-            'Be concise. Use plain language. Return only the bullet points, no headings or preamble.',
+            'You are a medical scribe maintaining a running summary of a cardiovascular patient\'s chat session. ' +
+            'You receive the current summary and one new exchange. Produce an updated summary that incorporates the new information. ' +
+            'Keep it to 4–8 bullet points. Preserve specific numbers (BP values, weight, dates). ' +
+            'Drop older details if the summary gets too long. Return only the bullet points, no headings.',
         },
-        { role: 'user', content: historyText },
+        {
+          role: 'user',
+          content: currentSummary
+            ? `CURRENT SUMMARY:\n${currentSummary}\n\nNEW EXCHANGE:\n${newExchange}`
+            : `FIRST EXCHANGE:\n${newExchange}`,
+        },
       ])
 
-      const summary =
-        (result.choices?.[0]?.message?.content as string | undefined)?.trim() ?? ''
+      const updatedSummary =
+        (result.choices?.[0]?.message?.content as string | undefined)?.trim() ?? currentSummary
 
-      // Cache for 5 minutes
-      this.summaryCache.set(sessionId, { summary, expiresAt: Date.now() + 5 * 60 * 1000 })
-
-      console.log(`Generated context summary for session ${sessionId}`)
-      return summary
+      await this.prisma.session.update({
+        where: { id: sessionId },
+        data: { summary: updatedSummary, messageCount: newCount },
+      })
     } catch (error) {
-      console.error('Error generating context summary:', error)
-      return ''
+      console.error('Error updating rolling summary:', error)
+    }
+  }
+
+  // ── Private helpers ─────────────────────────────────────────────────────────
+
+  /**
+   * Condense a long text (AI response) into 2-3 sentences.
+   * Returns the original if it's already short enough (<300 chars).
+   */
+  private async summariseText(text: string, role: 'ai' | 'patient'): Promise<string> {
+    if (!text || text.length < 300) return text
+
+    try {
+      const roleLabel = role === 'ai' ? "an AI health assistant's response" : "a patient's message"
+      const result = await this.mistralService.getChatCompletion([
+        {
+          role: 'system',
+          content:
+            `Summarise ${roleLabel} in 2–3 concise sentences. Preserve any specific numbers ` +
+            '(BP values, weight, dates). Return only the summary, no headings.',
+        },
+        { role: 'user', content: text },
+      ])
+
+      return (result.choices?.[0]?.message?.content as string | undefined)?.trim() || text
+    } catch {
+      return text
     }
   }
 }

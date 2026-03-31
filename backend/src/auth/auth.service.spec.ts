@@ -126,11 +126,8 @@ describe('AuthService', () => {
                 JWT_REFRESH_EXPIRES_IN: '30d',
                 GOOGLE_CLIENT_ID: 'mock-google-client-id',
                 APPLE_CLIENT_ID: 'mock-apple-client-id',
-                SMTP_HOST: 'smtp.example.com',
-                SMTP_PORT: '587',
-                SMTP_USER: 'test@example.com',
-                SMTP_PASS: 'password',
-                SMTP_FROM: 'Healplace <no-reply@healplace.com>',
+                RESEND_API_KEY: 'test-resend-key',
+                EMAIL_FROM: 'Healplace <onboarding@resend.dev>',
               }
               return config[key] ?? defaultValue
             }),

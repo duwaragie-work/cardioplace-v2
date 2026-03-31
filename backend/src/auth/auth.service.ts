@@ -677,7 +677,7 @@ export class AuthService {
       data: { email: normalizedEmail, codeHash, expiresAt },
     })
 
-    await this.sendOtpEmail(normalizedEmail, otp)
+    this.sendOtpEmail(normalizedEmail, otp)  // fire-and-forget — don't block response
 
     // Log the OTP request event
     await this.logAuthEvent({

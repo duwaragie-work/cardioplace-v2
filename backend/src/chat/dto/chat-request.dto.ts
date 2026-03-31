@@ -1,7 +1,6 @@
 import { IsNotEmpty, IsString, IsOptional } from 'class-validator'
-import { SystemPromptConfig } from './system-prompt-config.dto.js'
 
-export class ChatRequestDto implements SystemPromptConfig {
+export class ChatRequestDto {
   @IsOptional()
   @IsString()
   sessionId?: string
@@ -13,9 +12,4 @@ export class ChatRequestDto implements SystemPromptConfig {
   @IsOptional()
   @IsString()
   date: string
-  medicalLens: string
-  tone: string
-  detailLevel: string
-  careApproach: string
-  spirituality: boolean
 }

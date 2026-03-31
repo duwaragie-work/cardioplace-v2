@@ -1,10 +1,12 @@
 model Session {
-    id        String         @id @default(uuid())
-    title     String?
-    userId    String?
-    user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
-    createdAt DateTime       @default(now())
-    updatedAt DateTime       @updatedAt
+    id           String         @id @default(uuid())
+    title        String?
+    userId       String?
+    summary      String?
+    messageCount Int            @default(0)
+    user         User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+    createdAt    DateTime       @default(now())
+    updatedAt    DateTime       @updatedAt
 
     @@index([id])
     @@index([userId])
