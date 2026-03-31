@@ -17,6 +17,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { getScheduledCalls, updateCallStatus, deleteScheduledCall } from '@/lib/services/provider.service';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -162,11 +163,18 @@ function CallDetailModal({
   onStatusChange: (id: string, status: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }) {
+  const { t } = useLanguage();
   const [acting, setActing] = useState(false);
   const meta = STATUS_META[call.status] ?? STATUS_META.upcoming;
   const StatusIcon = meta.icon;
   const initials = getInitials(call.patient?.name ?? null);
   const risk = RISK_STYLES[call.patient?.riskTier ?? 'STANDARD'] ?? RISK_STYLES.STANDARD;
+  const statusLabel: Record<string, string> = {
+    upcoming: t('provider.upcoming'),
+    completed: t('provider.completed'),
+    missed: t('provider.missed'),
+    cancelled: t('provider.cancelled'),
+  };
 
   const handleAction = async (action: 'completed' | 'missed' | 'cancelled' | 'delete') => {
     setActing(true);
@@ -216,7 +224,7 @@ function CallDetailModal({
                 <Phone className="w-4.5 h-4.5" />
               </div>
               <div>
-                <h3 className="text-white font-bold text-[15px]">Call Details</h3>
+                <h3 className="text-white font-bold text-[15px]">{t('provider.callDetails')}</h3>
                 <p className="text-white/70 text-[11px]">{call.callType} call</p>
               </div>
             </div>
@@ -234,7 +242,7 @@ function CallDetailModal({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <StatusIcon className="w-4 h-4" style={{ color: meta.color }} />
-                <span className="text-[13px] font-bold" style={{ color: meta.color }}>{meta.label}</span>
+                <span className="text-[13px] font-bold" style={{ color: meta.color }}>{statusLabel[call.status] ?? meta.label}</span>
               </div>
               <span
                 className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase"
@@ -249,7 +257,7 @@ function CallDetailModal({
               <div className="p-3 rounded-xl" style={{ backgroundColor: '#FAFBFF' }}>
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <Calendar className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
-                  <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Date</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>{t('provider.date')}</p>
                 </div>
                 <p className="text-[14px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
                   {formatDate(call.callDate)}
@@ -258,7 +266,7 @@ function CallDetailModal({
               <div className="p-3 rounded-xl" style={{ backgroundColor: '#FAFBFF' }}>
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <Clock className="w-3.5 h-3.5" style={{ color: 'var(--brand-accent-teal)' }} />
-                  <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Time</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>{t('provider.time')}</p>
                 </div>
                 <p className="text-[14px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
                   {formatTime(call.callTime)}
@@ -270,7 +278,7 @@ function CallDetailModal({
             {call.patient && (
               <div>
                 <h4 className="text-[12px] font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--brand-text-muted)' }}>
-                  Patient
+                  {t('provider.patient')}
                 </h4>
                 <div className="flex items-center gap-3 p-3 rounded-xl" style={{ backgroundColor: '#FAFBFF' }}>
                   <div
@@ -301,7 +309,7 @@ function CallDetailModal({
             {call.alert && (
               <div>
                 <h4 className="text-[12px] font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--brand-text-muted)' }}>
-                  Alert Context
+                  {t('provider.alertContext')}
                 </h4>
                 <div
                   className="p-3 rounded-xl"
@@ -327,7 +335,7 @@ function CallDetailModal({
                     </p>
                   )}
                   <p className="text-[10px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
-                    Alert: {call.alert.alertStatus} &middot; {formatDate(call.alert.createdAt)}
+                    {t('provider.alert')}: {call.alert.alertStatus} &middot; {formatDate(call.alert.createdAt)}
                   </p>
                 </div>
               </div>
@@ -348,7 +356,7 @@ function CallDetailModal({
             {/* Actions */}
             <div>
               <h4 className="text-[12px] font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--brand-text-muted)' }}>
-                Actions
+                {t('provider.actions')}
               </h4>
               <div className="space-y-2">
                 {call.status === 'upcoming' && (
@@ -360,7 +368,7 @@ function CallDetailModal({
                       style={{ backgroundColor: 'var(--brand-success-green-light)', color: 'var(--brand-success-green)', border: '1px solid var(--brand-success-green)' }}
                     >
                       <CheckCircle2 className="w-4 h-4" />
-                      Mark as Completed
+                      {t('provider.markCompleted')}
                     </button>
                     <button
                       disabled={acting}
@@ -369,7 +377,7 @@ function CallDetailModal({
                       style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)', border: '1px solid var(--brand-alert-red)' }}
                     >
                       <XCircle className="w-4 h-4" />
-                      Mark as Missed
+                      {t('provider.markMissed')}
                     </button>
                     <button
                       disabled={acting}
@@ -378,7 +386,7 @@ function CallDetailModal({
                       style={{ backgroundColor: '#F1F5F9', color: 'var(--brand-text-muted)', border: '1px solid var(--brand-border)' }}
                     >
                       <X className="w-4 h-4" />
-                      Cancel Call
+                      {t('provider.cancelCall')}
                     </button>
                   </>
                 )}
@@ -399,7 +407,7 @@ function CallDetailModal({
                   className="w-full h-9 rounded-xl text-[12px] font-semibold flex items-center justify-center gap-1.5 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
                   style={{ color: 'var(--brand-alert-red)' }}
                 >
-                  Delete Call
+                  {t('provider.deleteCall')}
                 </button>
               </div>
             </div>
@@ -413,6 +421,7 @@ function CallDetailModal({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function ScheduledCallsPage() {
   const { user, isAuthenticated, isLoading } = useAuth();
+  const { t } = useLanguage();
 
   const [calls, setCalls] = useState<ScheduledCall[]>([]);
   const [loading, setLoading] = useState(true);
@@ -494,6 +503,12 @@ export default function ScheduledCallsPage() {
     const meta = STATUS_META[call.status] ?? STATUS_META.upcoming;
     const StatusIcon = meta.icon;
     const initials = getInitials(call.patient?.name ?? null);
+    const statusLabelMap: Record<string, string> = {
+      upcoming: t('provider.upcoming'),
+      completed: t('provider.completed'),
+      missed: t('provider.missed'),
+      cancelled: t('provider.cancelled'),
+    };
 
     return (
       <motion.button
@@ -527,7 +542,7 @@ export default function ScheduledCallsPage() {
               style={{ backgroundColor: meta.bg, color: meta.color }}
             >
               <StatusIcon className="w-3 h-3" />
-              {meta.label}
+              {statusLabelMap[call.status] ?? meta.label}
             </span>
           </div>
         </div>
@@ -619,7 +634,7 @@ export default function ScheduledCallsPage() {
             </div>
             <div>
               <h1 className="text-xl font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                Scheduled Calls
+                {t('provider.scheduledCalls')}
               </h1>
               <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
                 {loading ? '...' : `${calls.length} total calls`}
@@ -638,7 +653,7 @@ export default function ScheduledCallsPage() {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search patients..."
+                placeholder={t('provider.searchCalls')}
                 className="flex-1 text-[12px] outline-none bg-transparent"
                 style={{ color: 'var(--brand-text-primary)' }}
               />
@@ -661,11 +676,11 @@ export default function ScheduledCallsPage() {
                   color: 'var(--brand-text-secondary)',
                 }}
               >
-                <option value="ALL">All ({counts.ALL})</option>
-                <option value="upcoming">Upcoming ({counts.upcoming})</option>
-                <option value="completed">Completed ({counts.completed})</option>
-                <option value="missed">Missed ({counts.missed})</option>
-                <option value="cancelled">Cancelled ({counts.cancelled})</option>
+                <option value="ALL">{t('provider.allStatuses')} ({counts.ALL})</option>
+                <option value="upcoming">{t('provider.upcoming')} ({counts.upcoming})</option>
+                <option value="completed">{t('provider.completed')} ({counts.completed})</option>
+                <option value="missed">{t('provider.missed')} ({counts.missed})</option>
+                <option value="cancelled">{t('provider.cancelled')} ({counts.cancelled})</option>
               </select>
               <ChevronDown
                 className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none"
@@ -697,7 +712,7 @@ export default function ScheduledCallsPage() {
                   <div className="flex items-center gap-2 mb-2">
                     <Icon className="w-4 h-4" style={{ color: s.color }} />
                     <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>
-                      {s.label}
+                      {{ Upcoming: t('provider.upcoming'), Completed: t('provider.completed'), Missed: t('provider.missed'), Cancelled: t('provider.cancelled') }[s.label] ?? s.label}
                     </span>
                   </div>
                   <p className="text-2xl font-bold" style={{ color: s.color }}>
@@ -725,7 +740,7 @@ export default function ScheduledCallsPage() {
               <Phone className="w-7 h-7" style={{ color: 'var(--brand-primary-purple)' }} />
             </div>
             <p className="text-sm font-semibold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-              {search || statusFilter !== 'ALL' ? 'No calls match your filters' : 'No scheduled calls yet'}
+              {t('provider.noCalls')}
             </p>
             <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
               Schedule follow-up calls from the Provider Dashboard alert queue
@@ -733,10 +748,10 @@ export default function ScheduledCallsPage() {
           </div>
         ) : statusFilter === 'ALL' ? (
           <>
-            <Section title="Upcoming" items={upcoming} icon={Clock} color="var(--brand-primary-purple)" />
-            <Section title="Missed" items={missed} icon={XCircle} color="var(--brand-alert-red)" />
-            <Section title="Completed" items={completed} icon={CheckCircle2} color="var(--brand-success-green)" />
-            <Section title="Cancelled" items={cancelled} icon={XCircle} color="var(--brand-text-muted)" />
+            <Section title={t('provider.upcoming')} items={upcoming} icon={Clock} color="var(--brand-primary-purple)" />
+            <Section title={t('provider.missed')} items={missed} icon={XCircle} color="var(--brand-alert-red)" />
+            <Section title={t('provider.completed')} items={completed} icon={CheckCircle2} color="var(--brand-success-green)" />
+            <Section title={t('provider.cancelled')} items={cancelled} icon={XCircle} color="var(--brand-text-muted)" />
           </>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">

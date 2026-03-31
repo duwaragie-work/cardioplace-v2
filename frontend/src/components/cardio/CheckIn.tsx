@@ -16,6 +16,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { createJournalEntry, getJournalEntries, getLatestBaseline } from '@/lib/services/journal.service';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FormData {
@@ -67,6 +68,11 @@ function getBpStatus(sys: number, dia: number): { label: string; color: 'amber' 
 
 // ─── Step Progress Bar (desktop) ─────────────────────────────────────────────
 function StepBar({ current }: { current: number }) {
+  const { t } = useLanguage();
+  const stepLabels = [
+    t('checkin.stepDate'), t('checkin.stepBP'), t('checkin.stepWeight'),
+    t('checkin.stepMedication'), t('checkin.stepSymptoms'),
+  ];
   return (
     <div className="flex items-center w-full mb-8">
       {STEPS.map((step, i) => {
@@ -109,7 +115,7 @@ function StepBar({ current }: { current: number }) {
                     : 'var(--brand-text-muted)',
                 }}
               >
-                {step.label}
+                {stepLabels[i]}
               </span>
             </div>
             {i < STEPS.length - 1 && (
@@ -176,20 +182,21 @@ function ContextPanel({
       ? `${Math.round(Number(baseline.baselineSystolic))} / ${Math.round(Number(baseline.baselineDiastolic))}`
       : '-- / --';
 
+  const { t } = useLanguage();
   const displayReadings = recentReadings.slice(0, 3);
 
   return (
     <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-[15px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-          Your Recent Readings
+          {t('checkin.recentReadings')}
         </h3>
         <Link
           href="/readings"
           className="flex items-center gap-0.5 text-[12px] font-semibold transition hover:opacity-75"
           style={{ color: 'var(--brand-primary-purple)' }}
         >
-          View All
+          {t('checkin.viewAll')}
           <ChevronRight className="w-3.5 h-3.5" />
         </Link>
       </div>
@@ -203,10 +210,10 @@ function ContextPanel({
             borderBottom: '1px solid var(--brand-border)',
           }}
         >
-          <span>Date</span>
-          <span className="text-center">Systolic</span>
-          <span className="text-center">Diastolic</span>
-          <span className="text-right">Status</span>
+          <span>{t('checkin.date')}</span>
+          <span className="text-center">{t('checkin.systolic')}</span>
+          <span className="text-center">{t('checkin.diastolic')}</span>
+          <span className="text-right">{t('checkin.status')}</span>
         </div>
         {readingsLoading ? (
           <>
@@ -216,7 +223,7 @@ function ContextPanel({
           </>
         ) : displayReadings.length === 0 ? (
           <p className="text-[12px] py-3" style={{ color: 'var(--brand-text-muted)' }}>
-            No readings yet — this is your first check-in!
+            {t('checkin.noReadingsYet')}
           </p>
         ) : (
           displayReadings.map((r, i) => (
@@ -281,7 +288,7 @@ function ContextPanel({
       {/* Baseline card */}
       <div className="rounded-xl p-4" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
         <p className="text-[13px] font-semibold mb-1" style={{ color: 'var(--brand-primary-purple)' }}>
-          Your Baseline
+          {t('checkin.baselineBP')}
         </p>
         <p className="text-[26px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
           {baselineStr}{' '}
@@ -290,7 +297,7 @@ function ContextPanel({
           </span>
         </p>
         <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
-          7-day rolling average &middot; Updated today
+          {t('checkin.rollingAvg')}
         </p>
       </div>
 
@@ -301,10 +308,10 @@ function ContextPanel({
       >
         <div>
           <p className="text-[12px] font-semibold mb-0.5" style={{ color: 'var(--brand-accent-teal)' }}>
-            Best time to measure
+            {t('checkin.bestTime')}
           </p>
           <p className="text-[11px] leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
-            Take readings in the morning before medications, seated and rested for 5 minutes.
+            {t('checkin.bestTimeDesc')}
           </p>
         </div>
       </div>
@@ -320,22 +327,23 @@ function Step1Date({
   form: FormData;
   onChange: (k: keyof FormData, v: string) => void;
 }) {
+  const { t } = useLanguage();
   return (
     <div className="space-y-6">
       <div>
         <p className="text-[13px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>
-          Step 1 of 5
+          {t('checkin.stepOf').replace('{x}', '1')}
         </p>
         <h2 className="text-[22px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-          Confirm Today&apos;s Date
+          {t('checkin.confirmDate')}
         </h2>
         <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>
-          Make sure you&apos;re logging for the right day
+          {t('checkin.confirmDateHint')}
         </p>
       </div>
       <div>
         <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          Date
+          {t('checkin.date')}
         </label>
         <input
           type="date"
@@ -357,7 +365,7 @@ function Step1Date({
       >
         <CalendarDays className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />
         <p className="text-[13px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
-          Recording daily readings helps your care team at Cedar Hill track your cardiovascular health trends accurately.
+          {t('checkin.dateReason')}
         </p>
       </div>
     </div>
@@ -372,6 +380,7 @@ function Step2BP({
   form: FormData;
   onChange: (k: keyof FormData, v: string) => void;
 }) {
+  const { t } = useLanguage();
   const sys = parseInt(form.systolic || '0');
   const dia = parseInt(form.diastolic || '0');
   const isElevated = sys >= 140 || dia >= 90;
@@ -380,18 +389,18 @@ function Step2BP({
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-[13px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>Step 2 of 5</p>
+        <p className="text-[13px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.stepOf').replace('{x}', '2')}</p>
         <h2 className="text-[22px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-          Blood Pressure Reading
+          {t('checkin.bpTitle')}
         </h2>
         <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>
-          Take a seated reading and enter your numbers
+          {t('checkin.bpSeatHint')}
         </p>
       </div>
 
       <div className="flex items-end gap-3">
         <div className="flex-1">
-          <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>Systolic</label>
+          <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('checkin.systolic')}</label>
           <input
             type="number"
             inputMode="numeric"
@@ -419,13 +428,13 @@ function Step2BP({
                 : 'var(--brand-border)';
             }}
           />
-          <p className="text-[11px] text-center mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>Top number</p>
+          <p className="text-[11px] text-center mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.topNumber')}</p>
         </div>
 
         <div className="pb-7 text-[36px] font-light" style={{ color: 'var(--brand-text-muted)' }}>/</div>
 
         <div className="flex-1">
-          <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>Diastolic</label>
+          <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('checkin.diastolic')}</label>
           <input
             type="number"
             inputMode="numeric"
@@ -446,7 +455,7 @@ function Step2BP({
             onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
             onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
           />
-          <p className="text-[11px] text-center mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>Bottom number</p>
+          <p className="text-[11px] text-center mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.bottomNumber')}</p>
         </div>
       </div>
 
@@ -488,10 +497,10 @@ function Step2BP({
               }}
             >
               {isCritical
-                ? 'Critical range — your care team will be notified immediately'
+                ? t('checkin.criticalRange')
                 : isElevated
-                ? 'Elevated — above your target range'
-                : 'Within normal range for you'}
+                ? t('checkin.elevatedRange')
+                : t('checkin.normalRange')}
             </p>
           </motion.div>
         )}
@@ -502,12 +511,12 @@ function Step2BP({
       {/* Medication toggle */}
       <div>
         <p className="text-[15px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
-          Did you take your medication today?
+          {t('checkin.medicationQuestion')}
         </p>
         <div className="grid grid-cols-2 gap-3">
           {[
-            { value: 'yes', label: 'Yes, I took it', activeColor: 'var(--brand-success-green)' },
-            { value: 'no', label: 'No, I missed it', activeColor: 'var(--brand-alert-red)' },
+            { value: 'yes', label: t('checkin.medicationTaken'), activeColor: 'var(--brand-success-green)' },
+            { value: 'no', label: t('checkin.medicationMissed'), activeColor: 'var(--brand-alert-red)' },
           ].map((opt) => {
             const isActive = form.medication === opt.value;
             return (
@@ -543,20 +552,21 @@ function Step3Weight({
   form: FormData;
   onChange: (k: keyof FormData, v: string) => void;
 }) {
+  const { t } = useLanguage();
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-[13px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>Step 3 of 5</p>
+        <p className="text-[13px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.stepOf').replace('{x}', '3')}</p>
         <h2 className="text-[22px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-          Weight Check-In
+          {t('checkin.weightTitle')}
         </h2>
         <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>
-          Weigh yourself first thing in the morning, after using the bathroom
+          {t('checkin.weightMorning')}
         </p>
       </div>
 
       <div>
-        <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>Unit</label>
+        <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('checkin.unit')}</label>
         <div
           className="inline-flex rounded-full p-1 gap-1"
           style={{ backgroundColor: 'var(--brand-background)', border: '1px solid var(--brand-border)' }}
@@ -579,7 +589,7 @@ function Step3Weight({
 
       <div>
         <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          Weight ({form.weightUnit})
+          {t('checkin.stepWeight')} ({form.weightUnit})
         </label>
         <div className="relative">
           <input
@@ -613,10 +623,10 @@ function Step3Weight({
         <Scale className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-accent-teal)' }} />
         <div>
           <p className="text-[13px] font-semibold mb-0.5" style={{ color: 'var(--brand-accent-teal)' }}>
-            Why weight matters
+            {t('checkin.whyWeight')}
           </p>
           <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
-            Sudden weight gain (3+ lbs in 24 hours) can signal fluid retention, a key sign your care team tracks for heart health.
+            {t('checkin.weightInfo')}
           </p>
         </div>
       </div>
@@ -632,6 +642,7 @@ function Step4Medication({
   form: FormData;
   onChange: (k: keyof FormData, v: string) => void;
 }) {
+  const { t } = useLanguage();
   const meds = [
     { name: 'Lisinopril', dose: '10mg', time: 'Morning' },
     { name: 'Amlodipine', dose: '5mg', time: 'Morning' },
@@ -641,12 +652,12 @@ function Step4Medication({
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-[13px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>Step 4 of 5</p>
+        <p className="text-[13px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.stepOf').replace('{x}', '4')}</p>
         <h2 className="text-[22px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-          Medication Adherence
+          {t('checkin.medAdherence')}
         </h2>
         <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>
-          Did you take all of your prescribed medications today?
+          {t('checkin.medAllQuestion')}
         </p>
       </div>
 
@@ -686,12 +697,12 @@ function Step4Medication({
 
       <div>
         <p className="text-[15px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
-          Overall — did you take all medications?
+          {t('checkin.medicationQuestion')}
         </p>
         <div className="grid grid-cols-2 gap-3">
           {[
-            { value: 'yes', label: 'Yes, all taken', activeColor: 'var(--brand-success-green)' },
-            { value: 'no', label: 'Missed one or more', activeColor: 'var(--brand-alert-red)' },
+            { value: 'yes', label: t('checkin.medicationTaken'), activeColor: 'var(--brand-success-green)' },
+            { value: 'no', label: t('checkin.medicationMissed'), activeColor: 'var(--brand-alert-red)' },
           ].map((opt) => {
             const isActive = form.medication === opt.value;
             return (
@@ -726,6 +737,7 @@ function Step5Symptoms({
   form: FormData;
   onChange: (k: keyof FormData, v: string) => void;
 }) {
+  const { t } = useLanguage();
   const allSymptoms = [
     'Chest Pain', 'Severe Headache', 'Shortness of Breath',
     'Dizziness', 'Blurred Vision', 'Swollen Ankles',
@@ -743,12 +755,12 @@ function Step5Symptoms({
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-[13px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>Step 5 of 5</p>
+        <p className="text-[13px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.stepOf').replace('{x}', '5')}</p>
         <h2 className="text-[22px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-          Symptoms Today
+          {t('checkin.symptomsToday')}
         </h2>
         <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>
-          Select all that apply — your care team reviews these daily
+          {t('checkin.selectAllApply')}
         </p>
       </div>
 
@@ -777,13 +789,13 @@ function Step5Symptoms({
 
       <div>
         <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          Additional notes <span style={{ color: 'var(--brand-text-muted)', fontWeight: 400 }}>(optional)</span>
+          {t('checkin.additionalNotes')}
         </label>
         <textarea
           rows={3}
           value={form.notes}
           onChange={(e) => onChange('notes', e.target.value)}
-          placeholder="Anything else you'd like your care team to know..."
+          placeholder={t('checkin.anythingElse')}
           className="w-full rounded-xl px-4 py-3 text-[13px] resize-none outline-none transition"
           style={{
             border: '2px solid var(--brand-border)',
@@ -800,6 +812,7 @@ function Step5Symptoms({
 
 // ─── Success screen ───────────────────────────────────────────────────────────
 function SuccessScreen({ onDone }: { onDone: () => void }) {
+  const { t } = useLanguage();
   const today = new Date();
   const dateLabel = today.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   return (
@@ -821,13 +834,13 @@ function SuccessScreen({ onDone }: { onDone: () => void }) {
       </motion.div>
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
         <h2 className="text-[28px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          Check-In Complete!
+          {t('checkin.success')}
         </h2>
         <p className="text-[15px] mb-2" style={{ color: 'var(--brand-text-muted)' }}>
-          Your readings have been submitted to your care team.
+          {t('checkin.successMsg')}
         </p>
         <p className="text-[13px] mb-8" style={{ color: 'var(--brand-text-muted)' }}>
-          Reviewed by Cedar Hill Medical &middot; {dateLabel}
+          {t('checkin.reviewedByCedar')} &middot; {dateLabel}
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
           <motion.button
@@ -837,7 +850,7 @@ function SuccessScreen({ onDone }: { onDone: () => void }) {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.97 }}
           >
-            Back to Dashboard
+            {t('checkin.goToDashboard')}
           </motion.button>
         </div>
       </motion.div>
@@ -847,6 +860,7 @@ function SuccessScreen({ onDone }: { onDone: () => void }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function CheckIn() {
+  const { t } = useLanguage();
   const router = useRouter();
   const today = new Date();
   const yyyy = today.getFullYear();
@@ -966,11 +980,11 @@ export default function CheckIn() {
   ];
 
   const nextLabels = [
-    'Next: Blood Pressure',
-    'Next: Weight',
-    'Next: Medication',
-    'Next: Symptoms',
-    isSubmitting ? 'Submitting...' : 'Submit Check-In',
+    `${t('common.next')}: ${t('checkin.stepBP')}`,
+    `${t('common.next')}: ${t('checkin.stepWeight')}`,
+    `${t('common.next')}: ${t('checkin.stepMedication')}`,
+    `${t('common.next')}: ${t('checkin.stepSymptoms')}`,
+    isSubmitting ? t('checkin.submitting') : t('checkin.submitCheckin'),
   ];
 
   if (submitted) {
@@ -994,14 +1008,14 @@ export default function CheckIn() {
                 <div className="bg-white rounded-2xl p-4" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-[13px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                      Your Recent Readings
+                      {t('checkin.recentReadings')}
                     </h3>
                     <Link
                       href="/readings"
                       className="flex items-center gap-0.5 text-[11px] font-semibold transition hover:opacity-75"
                       style={{ color: 'var(--brand-primary-purple)' }}
                     >
-                      View All
+                      {t('checkin.viewAll')}
                       <ChevronRight className="w-3 h-3" />
                     </Link>
                   </div>
@@ -1014,10 +1028,10 @@ export default function CheckIn() {
                         borderBottom: '1px solid var(--brand-border)',
                       }}
                     >
-                      <span>Date</span>
-                      <span className="text-center">Sys</span>
-                      <span className="text-center">Dia</span>
-                      <span className="text-right">Status</span>
+                      <span>{t('checkin.date')}</span>
+                      <span className="text-center">{t('checkin.systolic')}</span>
+                      <span className="text-center">{t('checkin.diastolic')}</span>
+                      <span className="text-right">{t('checkin.status')}</span>
                     </div>
                     {readingsLoading ? (
                       <>
@@ -1026,7 +1040,7 @@ export default function CheckIn() {
                         <ReadingSkeletonRow last />
                       </>
                     ) : recentReadings.length === 0 ? (
-                      <p className="text-[12px] py-2" style={{ color: 'var(--brand-text-muted)' }}>No readings yet</p>
+                      <p className="text-[12px] py-2" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.noReadingsYet')}</p>
                     ) : (
                       recentReadings.slice(0, 3).map((r, i) => (
                         <div
@@ -1067,10 +1081,10 @@ export default function CheckIn() {
                 >
                   <div>
                     <p className="text-[12px] font-semibold mb-0.5" style={{ color: 'var(--brand-primary-purple)' }}>
-                      Your Baseline
+                      {t('checkin.baselineBP')}
                     </p>
                     <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
-                      7-day avg &middot; Updated today
+                      {t('checkin.rollingAvg')}
                     </p>
                   </div>
                   <p className="text-[26px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
@@ -1133,7 +1147,7 @@ export default function CheckIn() {
                   whileTap={{ scale: 0.97 }}
                 >
                   <ArrowLeft className="w-4 h-4" />
-                  {step === 0 ? 'Cancel' : 'Back'}
+                  {step === 0 ? t('common.cancel') : t('common.back')}
                 </motion.button>
 
                 <motion.button
@@ -1156,7 +1170,7 @@ export default function CheckIn() {
             </div>
 
             <p className="text-center text-[11px] mt-3" style={{ color: 'var(--brand-text-muted)' }}>
-              Responses reviewed by your care team at Cedar Hill
+              {t('checkin.reviewedBy')}
             </p>
           </div>
 
@@ -1178,7 +1192,7 @@ export default function CheckIn() {
           style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
         >
           <ArrowLeft className="w-4 h-4" />
-          {step === 0 ? 'Exit' : 'Back'}
+          {step === 0 ? t('common.close') : t('common.back')}
         </button>
         <motion.button
           onClick={goNext}
@@ -1187,7 +1201,7 @@ export default function CheckIn() {
           style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
           whileTap={{ scale: 0.97 }}
         >
-          {step === 4 ? (isSubmitting ? 'Submitting...' : 'Submit') : 'Next'}
+          {step === 4 ? (isSubmitting ? t('checkin.submitting') : t('common.submit')) : t('common.next')}
         </motion.button>
       </div>
     </div>

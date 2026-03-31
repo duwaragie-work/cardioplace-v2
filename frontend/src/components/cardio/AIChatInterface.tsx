@@ -15,6 +15,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
 import {
   sendMessage as sendChatMessage,
   getChatSessions,
@@ -127,6 +128,7 @@ function TypingIndicator() {
 
 // ─── Message bubble ───────────────────────────────────────────────────────────
 function MessageBubble({ msg }: { msg: Message }) {
+  const { t } = useLanguage();
   const isVoice = msg.source === 'voice';
 
   if (msg.type === 'patient') {
@@ -171,7 +173,7 @@ function MessageBubble({ msg }: { msg: Message }) {
           style={{ backgroundColor: 'var(--brand-accent-teal-light)', borderRadius: '4px 18px 18px 18px', borderLeft: '3px solid var(--brand-accent-teal)' }}
         >
           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold mb-2" style={{ backgroundColor: 'var(--brand-accent-teal)', color: 'white' }}>
-            Comprehension Check
+            {t('chat.checkinMode')}
           </span>
           <p className="text-[14px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>{msg.text}</p>
           <p className="text-[10px] mt-1.5 text-right" style={{ color: 'var(--brand-text-muted)' }}>{msg.time}</p>
@@ -207,6 +209,7 @@ function MessageBubble({ msg }: { msg: Message }) {
 
 // ─── Checkin result card ───────────────────────────────────────────────────────
 function CheckinCard({ summary, onDismiss }: { summary: CheckinSummary; onDismiss: () => void }) {
+  const { t } = useLanguage();
   return (
     <motion.div
       initial={{ opacity: 0, y: 16, scale: 0.97 }}
@@ -219,7 +222,7 @@ function CheckinCard({ summary, onDismiss }: { summary: CheckinSummary; onDismis
           ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-success-green)' }} />
           : <AlertCircle className="w-5 h-5 text-red-500" />}
         <p className="font-bold text-[15px]" style={{ color: 'var(--brand-text-primary)' }}>
-          {summary.saved ? 'Check-in saved!' : 'Could not save check-in'}
+          {summary.saved ? t('chat.checkinSaved') : t('chat.couldNotSave')}
         </p>
       </div>
       <div className="grid grid-cols-2 gap-3 mb-4">
@@ -257,7 +260,7 @@ function CheckinCard({ summary, onDismiss }: { summary: CheckinSummary; onDismis
         className="w-full py-2.5 rounded-xl text-[14px] font-semibold transition hover:opacity-90 active:scale-[0.98]"
         style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)', color: 'white', boxShadow: '0 4px 14px rgba(123,0,224,0.28)' }}
       >
-        Done
+        {t('chat.dismiss')}
       </button>
     </motion.div>
   );
@@ -276,6 +279,7 @@ function SidebarContent({
   riskTier: string;
   isLoading: boolean;
 }) {
+  const { t } = useLanguage();
   const riskColor =
     riskTier === 'HIGH'
       ? { bg: 'var(--brand-alert-red-light)', text: 'var(--brand-alert-red)' }
@@ -286,14 +290,14 @@ function SidebarContent({
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="px-4 pt-5 pb-3 shrink-0">
-        <h2 className="text-[15px] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>Conversations</h2>
+        <h2 className="text-[15px] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.conversations')}</h2>
         <button
           onClick={onNewConversation}
           className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[13px] font-semibold transition-all hover:opacity-90 active:scale-[0.98]"
           style={{ background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)', color: 'white', boxShadow: '0 4px 14px rgba(123,0,224,0.28)' }}
         >
           <Plus className="w-4 h-4" />
-          New Conversation
+          {t('chat.newConversation')}
         </button>
       </div>
 
@@ -305,7 +309,7 @@ function SidebarContent({
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-[13px] font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>{userName}</p>
-              <p className="text-[11px] font-medium" style={{ color: 'var(--brand-accent-teal)' }}>Patient</p>
+              <p className="text-[11px] font-medium" style={{ color: 'var(--brand-accent-teal)' }}>{t('chat.patient')}</p>
             </div>
             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0" style={{ backgroundColor: riskColor.bg, color: riskColor.text }}>
               {riskTier}
@@ -315,11 +319,11 @@ function SidebarContent({
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 pb-4 min-h-0">
-        <p className="text-[10px] font-bold uppercase tracking-wider px-2 mb-2" style={{ color: 'var(--brand-text-muted)' }}>Recent</p>
+        <p className="text-[10px] font-bold uppercase tracking-wider px-2 mb-2" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.recent')}</p>
         {isLoading ? (
           <SessionSkeleton />
         ) : sessions.length === 0 ? (
-          <p className="text-[12px] px-2 py-2" style={{ color: 'var(--brand-text-muted)' }}>No conversations yet — start one above!</p>
+          <p className="text-[12px] px-2 py-2" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.noConversations')}</p>
         ) : (
           <div className="space-y-0.5">
             {sessions.map((s) => {
@@ -351,13 +355,14 @@ function VoiceCallBar({
   state: 'connecting' | 'ready' | 'listening' | 'agent_speaking' | 'processing' | 'checkin_confirm';
   onStop: () => void;
 }) {
+  const { t } = useLanguage();
   const stateLabel: Record<string, string> = {
-    connecting: 'Connecting…',
-    ready: 'Connected',
-    listening: 'Listening…',
-    agent_speaking: 'AI is speaking…',
-    processing: 'Processing…',
-    checkin_confirm: 'Check-in complete',
+    connecting: t('chat.processing'),
+    ready: t('chat.processing'),
+    listening: t('chat.listening'),
+    agent_speaking: t('chat.agentSpeaking'),
+    processing: t('chat.processing'),
+    checkin_confirm: t('chat.checkinSaved'),
   };
   const isListening = state === 'listening';
   const isSpeaking = state === 'agent_speaking';
@@ -380,7 +385,7 @@ function VoiceCallBar({
       <div className="flex items-center gap-2 flex-1 min-w-0">
         <Mic className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />
         <span className="text-[12px] font-semibold" style={{ color: 'var(--brand-primary-purple)' }}>
-          Voice call active
+          {t('chat.voiceMode')}
         </span>
         <span className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
           · {stateLabel[state] ?? state}
@@ -389,7 +394,7 @@ function VoiceCallBar({
       <div className="flex items-center gap-2 shrink-0">
         <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px]" style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#b91c1c' }}>
           <PhoneCall className="w-3 h-3" />
-          <span>911 if emergency</span>
+          <span>{t('chat.emergencyCall')}</span>
         </div>
         <button
           onClick={onStop}
@@ -397,7 +402,7 @@ function VoiceCallBar({
           style={{ backgroundColor: '#ef4444', color: 'white' }}
         >
           <MicOff className="w-3 h-3" />
-          End
+          {t('chat.endVoice')}
         </button>
       </div>
     </motion.div>
@@ -451,6 +456,7 @@ function LiveTranscriptBubbles({ lines }: { lines: TranscriptLine[] }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function AIChatInterface() {
   const { user, token } = useAuth();
+  const { t } = useLanguage();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -604,7 +610,7 @@ export default function AIChatInterface() {
       setIsTyping(false);
       setMessages((prev) => [
         ...prev,
-        { id: Date.now() + 1, type: 'ai', source: 'text', text: 'Sorry, I had trouble connecting. Please try again.', time: nowTimeStr() },
+        { id: Date.now() + 1, type: 'ai', source: 'text', text: t('chat.errorConnect'), time: nowTimeStr() },
       ]);
     } finally {
       setIsSending(false);
@@ -702,16 +708,16 @@ export default function AIChatInterface() {
               <Image src="/logo.svg" alt="Healplace" width={30} height={30} />
             </div>
             <div>
-              <p className="text-[14px] font-semibold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>Healplace Cardio AI</p>
+              <p className="text-[14px] font-semibold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.title')}</p>
               <div className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
-                <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>Online · Monitored by care team</span>
+                <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.onlineMonitored')}</span>
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'var(--brand-accent-teal-light)', color: 'var(--brand-accent-teal)' }}>
-              Context loaded
+              {t('chat.contextLoaded')}
             </span>
             <button className="lg:hidden w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-85 active:scale-95" style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }} onClick={handleNewConversation}>
               <Plus className="w-4 h-4 text-white" />
@@ -756,12 +762,12 @@ export default function AIChatInterface() {
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'linear-gradient(135deg, #7b00e017, #9233ea43)', boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
                   <Image src="/logo.svg" alt="Healplace" width={50} height={50} />
                 </div>
-                <p className="text-[16px] font-bold mb-1.5" style={{ color: 'var(--brand-text-primary)' }}>How can I help you today?</p>
+                <p className="text-[16px] font-bold mb-1.5" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.howCanIHelp')}</p>
                 <p className="text-[13px] leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
-                  Ask me about your blood pressure, medications, or tap the mic to speak.
+                  {t('chat.askMe')}
                 </p>
                 <div className="flex flex-wrap gap-2 justify-center mt-5">
-                  {['My BP readings', 'Medication tips', 'Record check-in', 'How am I doing?'].map((chip) => (
+                  {[t('chat.chipBP'), t('chat.chipMeds'), t('chat.chipCheckin'), t('chat.chipHowAmI')].map((chip) => (
                     <button
                       key={chip}
                       onClick={() => setInputValue(chip)}
@@ -819,7 +825,7 @@ export default function AIChatInterface() {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={isVoiceActive ? 'Voice active — type to also send text…' : 'Type a message…'}
+              placeholder={isVoiceActive ? t('chat.voiceMode') : t('chat.placeholder')}
               className="flex-1 bg-transparent text-[14px] outline-none min-w-0 py-2"
               style={{ color: 'var(--brand-text-primary)' }}
               disabled={isSending}
@@ -839,7 +845,7 @@ export default function AIChatInterface() {
               }}
               whileHover={{ scale: 1.08 }}
               whileTap={{ scale: 0.92 }}
-              title={isVoiceActive ? 'End voice call' : 'Start voice call'}
+              title={isVoiceActive ? t('chat.endVoice') : t('chat.startVoice')}
             >
               {isVoiceActive
                 ? <MicOff className="w-3.5 h-3.5 text-white" />
@@ -865,7 +871,7 @@ export default function AIChatInterface() {
           </div>
 
           <p className="text-center text-[10px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
-            Healplace Cardio AI &middot; Text or voice &middot; Monitored by care team
+            {t('chat.footer')}
           </p>
         </div>
       </div>

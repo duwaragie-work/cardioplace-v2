@@ -6,6 +6,7 @@ import { useAuth, type OtpVerifyResponse } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import Logo from "@/components/Logo";
 import { getOrCreateDeviceId } from "@/lib/device";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const OTP_LENGTH = 6;
 
@@ -24,6 +25,23 @@ function isEmailValid(email: string) {
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { t } = useLanguage();
+
+  // Map known backend English messages to translated versions
+  const backendMsgMap: Record<string, string> = {
+    'OTP sent successfully': t('register.otpSentSuccess'),
+    'Please wait 60 seconds before requesting a new OTP': t('register.pleaseWait'),
+    'Invalid OTP': t('register.invalidOtp'),
+    'Verification failed': t('register.verificationFailed'),
+  };
+  function translateBackendMsg(msg: string | undefined): string {
+    if (!msg) return '';
+    for (const [en, translated] of Object.entries(backendMsgMap)) {
+      if (msg.includes(en)) return translated;
+    }
+    return msg;
+  }
+
   const { user, isLoading, login } = useAuth();
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
@@ -101,10 +119,10 @@ export default function RegisterPage() {
       const data = await sendOtpRequest(email.trim());
       setOtpSent(true);
       setOtp("");
-      setStatusMessage(data.message || "OTP sent to your email.");
+      setStatusMessage(translateBackendMsg(data.message) || t('register.otpSent'));
       startResendCooldown();
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Failed to request OTP.");
+      setErrorMessage(translateBackendMsg(err instanceof Error ? err.message : '') || t('register.failedOtp'));
     } finally {
       setIsRequestingOtp(false);
     }
@@ -117,10 +135,10 @@ export default function RegisterPage() {
     setIsResendingOtp(true);
     try {
       const data = await sendOtpRequest(email.trim());
-      setStatusMessage(data.message || "OTP resent to your email.");
+      setStatusMessage(translateBackendMsg(data.message) || t('register.otpResent'));
       startResendCooldown();
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Failed to resend OTP.");
+      setErrorMessage(translateBackendMsg(err instanceof Error ? err.message : '') || t('register.failedResend'));
     } finally {
       setIsResendingOtp(false);
     }
@@ -146,7 +164,7 @@ export default function RegisterPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setErrorMessage(data.message || "Verification failed.");
+        setErrorMessage(translateBackendMsg(data.message) || t('register.verificationFailed'));
         throw new Error(data.message || "Verification failed.");
       }
       login(data as OtpVerifyResponse);
@@ -156,7 +174,7 @@ export default function RegisterPage() {
         router.push("/dashboard");
       }
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Invalid OTP. Please try again.");
+      setErrorMessage(translateBackendMsg(err instanceof Error ? err.message : '') || t('register.invalidOtp'));
     } finally {
       setIsVerifyingOtp(false);
     }
@@ -172,13 +190,13 @@ export default function RegisterPage() {
             <div className="mb-8 flex items-center gap-3">
               <Logo />
               <h2 className="font-bold leading-[1.2] text-[#170c1d] text-[26px] lg:text-[33px] tracking-[-0.4px]">
-                Sign in to Healplace Cardio
+                {t('register.signIn')}
               </h2>
             </div>
 
             <div className="mb-10 w-full">
               <p className="font-normal leading-[28.5px] text-[#4b5563] text-label lg:text-[18px]">
-                Enter your email address to receive a secure one-time login code
+                {t('register.enterEmail')}
               </p>
             </div>
 
@@ -189,13 +207,13 @@ export default function RegisterPage() {
               <div className="w-full max-w-105">
                 <>
                   <label className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
-                    Email Address
+                    {t('register.emailAddress')}
                   </label>
                   <input
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="user@example.com"
+                    placeholder={t('register.emailPlaceholder')}
                     autoComplete="email"
                     className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
                   />
@@ -205,14 +223,14 @@ export default function RegisterPage() {
                     disabled={!emailIsValid || isRequestingOtp}
                     className="w-full cursor-pointer h-12 lg:h-14 rounded-lg flex items-center justify-center border border-[#6B00D1] mt-3 mb-7"
                   >
-                    <span className="font-semibold text-[#6B00D1] text-base lg:text-medium">{isRequestingOtp ? "Sending OTP..." : "Send OTP"}</span>
+                    <span className="font-semibold text-[#6B00D1] text-base lg:text-medium">{isRequestingOtp ? t('register.sendingOtp') : t('register.sendOtp')}</span>
                   </button>
                 </>
                 {otpSent &&
                   <>
                     <div className="flex items-center justify-between mb-2">
                       <label className="font-semibold text-[#171717] text-xs lg:text-sm">
-                        Enter OTP
+                        {t('register.enterOtp')}
                       </label>
                       <button
                         type="button"
@@ -221,10 +239,10 @@ export default function RegisterPage() {
                         className="font-medium text-[#7B00E0] text-xs lg:text-sm hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {isResendingOtp
-                          ? "Resending..."
+                          ? t('register.resending')
                           : resendCooldown > 0
-                            ? `Resend in ${resendCooldown}s`
-                            : "Resend code"}
+                            ? t('register.resendIn').replace('{s}', String(resendCooldown))
+                            : t('register.resendCode')}
                       </button>
                     </div>
                     <input
@@ -240,7 +258,7 @@ export default function RegisterPage() {
 
                     {!(statusMessage || errorMessage) ? (
                       <p className="mt-2 text-[#737373] text-xs lg:text-sm">
-                        Enter the 6-digit code sent to your inbox.
+                        {t('register.enterCode')}
                       </p>
                     ) : (
                       <div className="w-full max-w-105">
@@ -269,26 +287,26 @@ export default function RegisterPage() {
                   disabled={!canVerifyOtp || isVerifyingOtp}
                   className="w-full h-12 lg:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm lg:text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
-                  {isVerifyingOtp ? "Verifying..." : "Continue"}
+                  {isVerifyingOtp ? t('register.verifying') : t('register.continue')}
                 </button>
               </div>
 
               {/* Terms */}
               <div className=" w-full max-w-105">
                 <p className="text-[#737373] text-[11px] lg:text-xs leading-relaxed text-center">
-                  By creating an account, you agree to our{" "}
+                  {t('register.terms')}{" "}
                   <a
                     href="#"
                     className="font-medium text-[#7B00E0] hover:underline"
                   >
-                    Terms of Service
+                    {t('register.termsOfService')}
                   </a>{" "}
-                  and{" "} <br />
+                  {t('register.and')}{" "} <br />
                   <a
                     href="#"
                     className="font-medium text-[#7B00E0] hover:underline"
                   >
-                    Privacy Policy
+                    {t('register.privacyPolicy')}
                   </a>
                   .
                 </p>
@@ -305,11 +323,11 @@ export default function RegisterPage() {
                     <CheckCircle2 className="w-6 h-6 lg:w-8 lg:h-8 text-white" strokeWidth={2} />
                   </div>
                   <h3 className="font-bold text-[#170c1d] text-base md:text-lg lg:text-2xl">
-                    Secure Access
+                    {t('register.secureAccess')}
                   </h3>
                 </div>
                 <p className="text-[#4b3b55] text-xs md:text-sm lg:text-base leading-relaxed">
-                  We use a one-time code sent to your email to keep your health data secure. No passwords to remember.
+                  {t('register.secureDesc')}
                 </p>
                 <div className="space-y-3 pt-2">
                   <div className="flex items-start gap-3">
@@ -317,7 +335,7 @@ export default function RegisterPage() {
                       <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
                     </div>
                     <p className="text-[#4b3b55] text-xs md:text-sm">
-                      No password required
+                      {t('register.noPassword')}
                     </p>
                   </div>
                   <div className="flex items-start gap-3">
@@ -325,7 +343,7 @@ export default function RegisterPage() {
                       <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
                     </div>
                     <p className="text-[#4b3b55] text-xs md:text-sm">
-                      Code expires in 10 minutes
+                      {t('register.codeExpires')}
                     </p>
                   </div>
                   <div className="flex items-start gap-3">
@@ -333,7 +351,7 @@ export default function RegisterPage() {
                       <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
                     </div>
                     <p className="text-[#4b3b55] text-xs md:text-sm">
-                      Your data is encrypted and HIPAA-aligned
+                      {t('register.dataEncrypted')}
                     </p>
                   </div>
                 </div>

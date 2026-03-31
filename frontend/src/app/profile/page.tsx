@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { fetchWithAuth } from "@/lib/services/token";
+import { useLanguage } from '@/contexts/LanguageContext';
 
 type PrimaryCondition = "hypertension" | "heart_disease" | "diabetes_cardiac" | "high_cholesterol" | "other" | "";
 type AccountStatus = "active" | "blocked" | "suspended";
@@ -94,24 +95,25 @@ function formatCommunicationPreference(pref: string | null | undefined): string 
 }
 
 function RiskTierBadge({ tier }: { tier: string | null | undefined }) {
+  const { t } = useLanguage();
   if (tier === "HIGH")
     return (
       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold"
         style={{ backgroundColor: 'rgba(220,38,38,0.15)', color: '#dc2626' }}>
-        High Risk
+        {t('profile.highRisk')}
       </span>
     );
   if (tier === "ELEVATED")
     return (
       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold"
         style={{ backgroundColor: 'rgba(245,158,11,0.15)', color: '#d97706' }}>
-        Elevated
+        {t('profile.elevated')}
       </span>
     );
   return (
     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold"
       style={{ backgroundColor: 'rgba(22,163,74,0.12)', color: '#16a34a' }}>
-      Standard
+      {t('profile.standard')}
     </span>
   );
 }
@@ -183,6 +185,7 @@ function Field({
 
 export default function Profile() {
   const router = useRouter();
+  const { t } = useLanguage();
   const { user, isLoading: isAuthLoading, logout, markOnboardingComplete } = useAuth();
 
   const [isEditing, setIsEditing] = useState(false);
@@ -348,7 +351,7 @@ export default function Profile() {
           <button onClick={() => router.refresh()}
             className="px-6 py-2.5 rounded-xl text-sm font-semibold border transition-colors"
             style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}>
-            Try Again
+            {t('profile.tryAgain')}
           </button>
         </div>
       </div>
@@ -382,13 +385,13 @@ export default function Profile() {
                 {/* Name */}
                 {loading ? <Bone w={160} h={22} dark /> : (
                   <h1 className="text-xl md:text-2xl font-bold text-white leading-tight">
-                    {userData.name || "No name set"}
+                    {userData.name || t('profile.noNameSet')}
                   </h1>
                 )}
                 {/* Role */}
                 {loading ? <Bone w={96} h={14} dark /> : (
                   <p className="text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>
-                    {userData.roles.length ? userData.roles.map(formatRoleLabel).join(" / ") : "Patient"}
+                    {userData.roles.length ? userData.roles.map(formatRoleLabel).join(" / ") : t('profile.patient')}
                   </p>
                 )}
                 {/* Meta badges */}
@@ -402,12 +405,12 @@ export default function Profile() {
                   ) : (
                     <>
                       <span className="flex items-center gap-1 text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>
-                        <Calendar className="w-3 h-3" /> Joined {formatShortMonthYear(userData.createdAt)}
+                        <Calendar className="w-3 h-3" /> {t('profile.joined')} {formatShortMonthYear(userData.createdAt)}
                       </span>
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
                         style={{ backgroundColor: 'rgba(255,255,255,0.18)', color: 'white' }}>
                         <CheckCircle2 className="w-3 h-3" />
-                        {userData.emailVerified ? "Verified" : "Unverified"}
+                        {userData.emailVerified ? t('profile.verified') : t('profile.unverified')}
                       </span>
                       <RiskTierBadge tier={userData.riskTier} />
                     </>
@@ -422,26 +425,26 @@ export default function Profile() {
                 <button onClick={() => setIsEditing(true)} disabled={loading}
                   className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer w-[150px] disabled:opacity-50"
                   style={{ backgroundColor: 'rgba(255,255,255,0.53)', color: 'white' }}>
-                  <Pencil className="w-3.5 h-3.5" /> Edit Profile
+                  <Pencil className="w-3.5 h-3.5" /> {t('profile.editProfile')}
                 </button>
               ) : (
                 <>
                   <button onClick={handleCancelEdit} disabled={isSaving}
                     className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer w-[150px] disabled:opacity-50"
                     style={{ backgroundColor: 'rgba(255,255,255,0.53)', color: 'white' }}>
-                    <X className="w-3.5 h-3.5" /> Cancel
+                    <X className="w-3.5 h-3.5" /> {t('common.cancel')}
                   </button>
                   <button onClick={() => void handleSaveProfile()} disabled={isSaving}
                     className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer w-[150px] disabled:opacity-50"
                     style={{ backgroundColor: 'white', color: '#7B00E0' }}>
-                    <Save className="w-3.5 h-3.5" /> {isSaving ? "Saving…" : "Save Changes"}
+                    <Save className="w-3.5 h-3.5" /> {isSaving ? t('common.saving') : t('profile.saveChanges')}
                   </button>
                 </>
               )}
               <button onClick={logout}
                 className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer w-[150px]"
                 style={{ backgroundColor: 'rgba(255,0,0,0.83)', color: 'white' }}>
-                <LogOut className="w-3.5 h-3.5" /> Log Out
+                <LogOut className="w-3.5 h-3.5" /> {t('profile.logout')}
               </button>
             </div>
           </div>
@@ -456,7 +459,7 @@ export default function Profile() {
             {/* Personal Information */}
             <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
               <CardHeader icon={<Info className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />}
-                title="Personal Information" />
+                title={t('profile.personalInfo')} />
 
               {saveError && isEditing && (
                 <div className="mb-4 px-4 py-3 rounded-xl text-sm font-semibold"
@@ -468,7 +471,7 @@ export default function Profile() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 {/* Full Name */}
                 <div>
-                  <FieldLabel>Full Name</FieldLabel>
+                  <FieldLabel>{t('profile.name')}</FieldLabel>
                   {loading ? <Bone w="68%" h={14} /> : isEditing ? (
                     <input type="text" value={userData.name}
                       onChange={(e) => setUserData((p) => ({ ...p, name: e.target.value }))}
@@ -478,13 +481,13 @@ export default function Profile() {
 
                 {/* Email */}
                 <div>
-                  <FieldLabel>Email Address</FieldLabel>
+                  <FieldLabel>{t('profile.email')}</FieldLabel>
                   {loading ? <Bone w="82%" h={14} /> : <FieldValue>{userData.email || "N/A"}</FieldValue>}
                 </div>
 
                 {/* Date of Birth */}
                 <div>
-                  <FieldLabel>Date of Birth</FieldLabel>
+                  <FieldLabel>{t('profile.dob')}</FieldLabel>
                   {loading ? <Bone w="58%" h={14} /> : isEditing ? (
                     <input type="date" value={toDateInputValue(userData.dateOfBirth)}
                       onChange={(e) => setUserData((p) => ({ ...p, dateOfBirth: e.target.value }))}
@@ -494,7 +497,7 @@ export default function Profile() {
 
                 {/* Timezone */}
                 <div>
-                  <FieldLabel>Timezone</FieldLabel>
+                  <FieldLabel>{t('profile.timezone')}</FieldLabel>
                   {loading ? <Bone w="78%" h={14} /> : isEditing ? (
                     <select value={userData.timezone || ""}
                       onChange={(e) => setUserData((p) => ({ ...p, timezone: e.target.value }))}
@@ -509,21 +512,21 @@ export default function Profile() {
 
                 {/* Communication Preference */}
                 <div>
-                  <FieldLabel>Communication Preference</FieldLabel>
+                  <FieldLabel>{t('profile.communication')}</FieldLabel>
                   {loading ? <Bone w="52%" h={14} /> : isEditing ? (
                     <select value={userData.communicationPreference ?? ""}
                       onChange={(e) => setUserData((p) => ({ ...p, communicationPreference: e.target.value || null }))}
                       className={selectCls} style={{ color: 'var(--brand-text-primary)' }}>
-                      <option value="">Not set</option>
-                      <option value="TEXT_FIRST">Text / Chat</option>
-                      <option value="AUDIO_FIRST">Audio / Voice</option>
+                      <option value="">{t('profile.notSet')}</option>
+                      <option value="TEXT_FIRST">{t('profile.textChat')}</option>
+                      <option value="AUDIO_FIRST">{t('profile.audioVoice')}</option>
                     </select>
-                  ) : <FieldValue>{formatCommunicationPreference(userData.communicationPreference)}</FieldValue>}
+                  ) : <FieldValue>{userData.communicationPreference === "TEXT_FIRST" ? t('profile.textChat') : userData.communicationPreference === "AUDIO_FIRST" ? t('profile.audioVoice') : t('profile.notSet')}</FieldValue>}
                 </div>
 
                 {/* Preferred Language */}
                 <div>
-                  <FieldLabel>Preferred Language</FieldLabel>
+                  <FieldLabel>{t('profile.language')}</FieldLabel>
                   {loading ? <Bone w="44%" h={14} /> : isEditing ? (
                     <input type="text" value={userData.preferredLanguage}
                       onChange={(e) => setUserData((p) => ({ ...p, preferredLanguage: e.target.value }))}
@@ -536,17 +539,17 @@ export default function Profile() {
             {/* Health Information */}
             <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
               <CardHeader icon={<Heart className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />}
-                title="Health Information" />
+                title={t('profile.healthInfo')} />
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 {/* Primary Condition */}
                 <div className="sm:col-span-2">
-                  <FieldLabel>Primary Condition</FieldLabel>
+                  <FieldLabel>{t('profile.primaryCondition')}</FieldLabel>
                   {loading ? <Bone w="56%" h={14} /> : isEditing ? (
                     <select value={userData.primaryCondition}
                       onChange={(e) => updatePrimaryCondition(e.target.value as PrimaryCondition)}
                       className={selectCls} style={{ color: 'var(--brand-text-primary)' }}>
-                      <option value="">Select your condition</option>
+                      <option value="">{t('profile.selectCondition')}</option>
                       <option value="hypertension">Hypertension (High Blood Pressure)</option>
                       <option value="heart_disease">Heart Disease</option>
                       <option value="diabetes_cardiac">Diabetes with Cardiac Risk</option>
@@ -558,15 +561,15 @@ export default function Profile() {
 
                 {/* Diagnosis Date */}
                 <div>
-                  <FieldLabel>Diagnosis Date</FieldLabel>
+                  <FieldLabel>{t('profile.diagnosisDate')}</FieldLabel>
                   {loading ? <Bone w="60%" h={14} /> : (
-                    <FieldValue>{userData.diagnosisDate ? formatDate(userData.diagnosisDate) : "Not provided"}</FieldValue>
+                    <FieldValue>{userData.diagnosisDate ? formatDate(userData.diagnosisDate) : t('profile.notProvided')}</FieldValue>
                   )}
                 </div>
 
                 {/* Risk Tier */}
                 <div>
-                  <FieldLabel>Risk Tier</FieldLabel>
+                  <FieldLabel>{t('profile.riskTier')}</FieldLabel>
                   {loading ? <Bone w={72} h={22} r={99} /> : <RiskTierBadge tier={userData.riskTier} />}
                 </div>
               </div>
@@ -575,7 +578,7 @@ export default function Profile() {
             {/* Roles & Permissions */}
             <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
               <CardHeader icon={<Star className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />}
-                title="Roles & Permissions" />
+                title={t('profile.rolesPermissions')} />
 
               {loading ? (
                 /* Skeleton role card */
@@ -611,13 +614,13 @@ export default function Profile() {
                       </div>
                       <span className="px-2.5 py-1 rounded-full text-[10px] font-bold"
                         style={{ backgroundColor: 'rgba(22,163,74,0.12)', color: '#16a34a' }}>
-                        Active
+                        {t('profile.active')}
                       </span>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-sm" style={{ color: 'var(--brand-text-muted)' }}>No roles assigned</p>
+                <p className="text-sm" style={{ color: 'var(--brand-text-muted)' }}>{t('profile.noRoles')}</p>
               )}
             </div>
           </div>
@@ -628,21 +631,21 @@ export default function Profile() {
             {/* Account Info */}
             <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
               <CardHeader icon={<Info className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />}
-                title="Account Info" />
+                title={t('profile.accountInfo')} />
               <div className="space-y-4">
                 {/* Account Created */}
-                <Field label="Account Created" value={<FieldValue>{formatDate(userData.createdAt)}</FieldValue>}
+                <Field label={t('profile.accountCreated')} value={<FieldValue>{formatDate(userData.createdAt)}</FieldValue>}
                   loading={loading} valueW="72%" />
                 {/* Email Status */}
                 <div>
-                  <FieldLabel>Email Status</FieldLabel>
+                  <FieldLabel>{t('profile.emailStatus')}</FieldLabel>
                   {loading ? <Bone w={80} h={22} r={99} /> : (
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
                       style={userData.emailVerified
                         ? { backgroundColor: 'rgba(22,163,74,0.12)', color: '#16a34a' }
                         : { backgroundColor: 'var(--brand-background)', color: 'var(--brand-text-muted)' }}>
                       <CheckCircle2 className="w-3 h-3" />
-                      {userData.emailVerified ? "Verified" : "Unverified"}
+                      {userData.emailVerified ? t('profile.verified') : t('profile.unverified')}
                     </span>
                   )}
                 </div>
@@ -691,11 +694,11 @@ export default function Profile() {
             {/* Security */}
             <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
               <CardHeader icon={<Shield className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />}
-                title="Security" />
+                title={t('profile.security')} />
               {loading ? <Bone w="100%" h={40} r={12} /> : (
                 <button className="w-full py-2.5 rounded-xl text-sm font-semibold transition-colors"
                   style={{ color: 'var(--brand-alert-red)', backgroundColor: 'rgba(220,38,38,0.06)' }}>
-                  Deactivate Account
+                  {t('profile.deactivateAccount')}
                 </button>
               )}
             </div>

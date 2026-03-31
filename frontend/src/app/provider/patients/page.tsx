@@ -40,6 +40,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { getPatients, getPatientSummary } from '@/lib/services/provider.service';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -211,6 +212,7 @@ function PatientModal({
   loading: boolean;
   onClose: () => void;
 }) {
+  const { t } = useLanguage();
   const initials = patient.name
     ? patient.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
     : 'P';
@@ -274,7 +276,7 @@ function PatientModal({
                   <div className="flex items-center gap-1.5 mb-1.5">
                     <Heart className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
                     <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>
-                      Latest BP
+                      {t('provider.latestBP')}
                     </p>
                   </div>
                   <p className="text-[20px] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>
@@ -289,7 +291,7 @@ function PatientModal({
                   <div className="flex items-center gap-1.5 mb-1.5">
                     <Shield className="w-3.5 h-3.5" style={{ color: 'var(--brand-accent-teal)' }} />
                     <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>
-                      Risk Tier
+                      {t('provider.riskTier')}
                     </p>
                   </div>
                   <RiskBadge tier={patient.riskTier} />
@@ -299,7 +301,7 @@ function PatientModal({
                   <div className="flex items-center gap-1.5 mb-1.5">
                     <Activity className="w-3.5 h-3.5" style={{ color: 'var(--brand-accent-teal)' }} />
                     <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>
-                      Baseline
+                      {t('provider.baseline')}
                     </p>
                   </div>
                   <p className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
@@ -316,7 +318,7 @@ function PatientModal({
                   <div className="flex items-center gap-1.5 mb-1.5">
                     <AlertTriangle className="w-3.5 h-3.5" style={{ color: 'var(--brand-warning-amber)' }} />
                     <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>
-                      Active Alerts
+                      {t('provider.activeAlerts')}
                     </p>
                   </div>
                   <p className="text-[20px] font-bold" style={{ color: patient.activeAlertsCount > 0 ? 'var(--brand-alert-red)' : 'var(--brand-text-primary)' }}>
@@ -328,14 +330,14 @@ function PatientModal({
               {/* Patient Info */}
               <div>
                 <h4 className="text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-                  Patient Info
+                  {t('provider.patientDetails')}
                 </h4>
                 <div className="space-y-2">
                   {[
-                    { icon: Mail, label: 'Email', value: patient.email ?? '--' },
-                    { icon: Phone, label: 'Preference', value: (patient.communicationPreference ?? 'TEXT_FIRST').replace('_', ' ') },
-                    { icon: Calendar, label: 'Last Check-in', value: patient.lastEntryDate ? timeAgo(patient.lastEntryDate) : 'Never' },
-                    { icon: Heart, label: 'Condition', value: patient.primaryCondition ?? '--' },
+                    { icon: Mail, label: t('provider.email'), value: patient.email ?? '--' },
+                    { icon: Phone, label: t('provider.preference'), value: (patient.communicationPreference ?? 'TEXT_FIRST').replace('_', ' ') },
+                    { icon: Calendar, label: t('provider.lastCheckin'), value: patient.lastEntryDate ? timeAgo(patient.lastEntryDate) : 'Never' },
+                    { icon: Heart, label: t('provider.condition'), value: patient.primaryCondition ?? '--' },
                   ].map(({ icon: Icon, label, value }) => (
                     <div key={label} className="flex items-center gap-2.5 py-1.5">
                       <Icon className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-text-muted)' }} />
@@ -350,7 +352,7 @@ function PatientModal({
               {summary && summary.recentEntries.length > 0 && (
                 <div>
                   <h4 className="text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-                    Recent Readings
+                    {t('provider.recentReadings')}
                   </h4>
                   <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--brand-border)' }}>
                     <table className="w-full text-[11px]">
@@ -398,7 +400,7 @@ function PatientModal({
               {summary && summary.activeAlerts.length > 0 && (
                 <div>
                   <h4 className="text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-                    Active Alerts
+                    {t('provider.alerts')}
                   </h4>
                   <div className="space-y-2">
                     {summary.activeAlerts.map((alert) => (
@@ -434,7 +436,7 @@ function PatientModal({
               {summary && summary.activeEscalations.length > 0 && (
                 <div>
                   <h4 className="text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-                    Escalations
+                    {t('provider.escalations')}
                   </h4>
                   <div className="space-y-2">
                     {summary.activeEscalations.map((esc) => (
@@ -466,6 +468,7 @@ function PatientModal({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function PatientsPage() {
   const { user, isAuthenticated, isLoading } = useAuth();
+  const { t } = useLanguage();
 
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
@@ -557,7 +560,7 @@ export default function PatientsPage() {
             </div>
             <div>
               <h1 className="text-xl font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                Patients
+                {t('provider.patientList')}
               </h1>
               <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
                 {loading ? '...' : `${patients.length} registered patients`}
@@ -576,7 +579,7 @@ export default function PatientsPage() {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search patients..."
+                placeholder={t('provider.searchPatients')}
                 className="flex-1 text-[12px] outline-none bg-transparent"
                 style={{ color: 'var(--brand-text-primary)' }}
               />
@@ -599,10 +602,10 @@ export default function PatientsPage() {
                   color: 'var(--brand-text-secondary)',
                 }}
               >
-                <option value="ALL">All Risk</option>
-                <option value="HIGH">High</option>
-                <option value="ELEVATED">Elevated</option>
-                <option value="STANDARD">Standard</option>
+                <option value="ALL">{t('provider.allTiers')}</option>
+                <option value="HIGH">{t('provider.high')}</option>
+                <option value="ELEVATED">{t('provider.elevated')}</option>
+                <option value="STANDARD">{t('provider.standard')}</option>
               </select>
               <ChevronDown
                 className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none"
@@ -626,11 +629,11 @@ export default function PatientsPage() {
               borderBottom: '1px solid var(--brand-border)',
             }}
           >
-            <span>Patient</span>
-            <span>Latest BP</span>
-            <span>Risk Tier</span>
-            <span>Alerts</span>
-            <span>Last Check-in</span>
+            <span>{t('provider.patientList')}</span>
+            <span>{t('provider.lastBP')}</span>
+            <span>{t('provider.allTiers')}</span>
+            <span>{t('provider.alerts')}</span>
+            <span>{t('provider.lastCheckin')}</span>
             <span></span>
           </div>
 
@@ -642,7 +645,7 @@ export default function PatientsPage() {
             <div className="py-16 text-center">
               <Users className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--brand-border)' }} />
               <p className="text-sm font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
-                {search || riskFilter !== 'ALL' ? 'No patients match your filters' : 'No patients yet'}
+                {t('provider.noPatients')}
               </p>
             </div>
           ) : (

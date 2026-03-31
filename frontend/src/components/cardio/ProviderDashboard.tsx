@@ -14,6 +14,8 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
+import type { TranslationKey } from '@/i18n/en';
 import AlertPanel, { type Alert, type AlertDetail } from './AlertPanel';
 import ScheduleModal, { type ScheduleDetails } from './ScheduleModal';
 import {
@@ -33,7 +35,7 @@ interface ProviderStats {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function transformAlert(raw: any): Alert {
+function transformAlert(raw: any, t: (key: TranslationKey) => string): Alert {
   const name: string = raw.patientName ?? raw.user?.name ?? raw.patient?.name ?? 'Unknown';
   const parts = name.trim().split(/\s+/);
   const initials =
@@ -55,7 +57,7 @@ function transformAlert(raw: any): Alert {
     } else if (raw.systolicBP && raw.diastolicBP) {
       reading = `${raw.systolicBP}/${raw.diastolicBP} mmHg`;
     } else if ((raw.type ?? raw.deviationType ?? '').includes('MEDICATION')) {
-      reading = 'Missed medication';
+      reading = t('alert.medication');
     } else {
       reading = '—';
     }
@@ -78,6 +80,7 @@ function transformAlert(raw: any): Alert {
 
 export default function ProviderDashboard() {
   const { user, isLoading } = useAuth();
+  const { t } = useLanguage();
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   const [selectedAlertDetail, setSelectedAlertDetail] = useState<AlertDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -110,7 +113,7 @@ export default function ProviderDashboard() {
             statsData.bpControlledPercent ?? 0,
         });
         const rawAlerts: Alert[] = Array.isArray(alertsData)
-          ? alertsData.map(transformAlert)
+          ? alertsData.map((a: unknown) => transformAlert(a, t))
           : [];
         setAlertsList(rawAlerts);
       },
@@ -159,7 +162,7 @@ export default function ProviderDashboard() {
               borderTopColor: 'var(--brand-primary-purple, #7c3aed)',
             }}
           />
-          <p className="text-sm" style={{ color: 'var(--brand-text-muted)' }}>Loading dashboard...</p>
+          <p className="text-sm" style={{ color: 'var(--brand-text-muted)' }}>{t('provider.loadingDashboard')}</p>
         </div>
       </div>
     );
@@ -177,10 +180,10 @@ export default function ProviderDashboard() {
         fontFamily: 'var(--font-sans, system-ui, sans-serif)',
       }}>
         <h1 style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--brand-red, #dc2626)' }}>
-          403 — Access Denied
+          {t('provider.accessDenied')}
         </h1>
         <p style={{ fontSize: '1.125rem', color: 'var(--brand-text-secondary, #6b7280)' }}>
-          Super Admin only
+          {t('provider.superAdminOnly')}
         </p>
         <Link
           href="/dashboard"
@@ -193,7 +196,7 @@ export default function ProviderDashboard() {
             fontWeight: 600,
           }}
         >
-          Go to Dashboard
+          {t('provider.goToDashboard')}
         </Link>
       </div>
     );
@@ -250,7 +253,7 @@ export default function ProviderDashboard() {
       }, 1600);
     } catch (err) {
       setScheduleError(
-        err instanceof Error ? err.message : 'Failed to schedule call',
+        err instanceof Error ? err.message : t('provider.failedSchedule'),
       );
     }
   };
@@ -265,17 +268,17 @@ export default function ProviderDashboard() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
           <div>
             <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-              Patient Safety Dashboard
+              {t('provider.dashboard')}
             </h1>
             <p className="text-sm" style={{ color: 'var(--brand-text-muted)' }}>
-              DC Wards 7 &amp; 8 &middot; March 2026
+              {t('provider.dcWards')} &middot; March 2026
             </p>
           </div>
           <button
             className="h-10 px-6 rounded-full text-white font-bold text-sm transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap"
             style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
           >
-            + Add Patient
+            + {t('provider.addPatient')}
           </button>
         </div>
 
@@ -296,53 +299,53 @@ export default function ProviderDashboard() {
             <>
               <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
                 <div className="flex items-start justify-between mb-2">
-                  <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>Active Patients</span>
+                  <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>{t('provider.totalPatients')}</span>
                   <Users className="w-5 h-5" style={{ color: 'var(--brand-primary-purple)' }} />
                 </div>
                 <div className="text-4xl font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{stats.totalPatients}</div>
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xs font-semibold" style={{ color: 'var(--brand-success-green)' }}>
-                    &uarr; +3 this week
+                    &uarr; +3 {t('provider.thisWeek')}
                   </span>
                 </div>
                 <div
                   className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-semibold"
                   style={{ backgroundColor: 'var(--brand-accent-teal-light)', color: 'var(--brand-accent-teal)' }}
                 >
-                  CPT 99454 eligible
+                  {t('provider.cptEligible')}
                 </div>
               </div>
 
               <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
                 <div className="flex items-start justify-between mb-2">
-                  <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>Monthly Interactions</span>
+                  <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>{t('provider.monthlyInteractions')}</span>
                   <Activity className="w-5 h-5" style={{ color: 'var(--brand-accent-teal)' }} />
                 </div>
                 <div className="text-4xl font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{stats.monthlyInteractions.toLocaleString()}</div>
                 <span className="text-xs font-semibold" style={{ color: 'var(--brand-success-green)' }}>
-                  &uarr; 18% vs last month
+                  &uarr; 18% {t('provider.vsLastMonth')}
                 </span>
               </div>
 
               <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
                 <div className="flex items-start justify-between mb-2">
-                  <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>Active Alerts</span>
+                  <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>{t('provider.activeAlerts')}</span>
                   <Bell className="w-5 h-5" style={{ color: 'var(--brand-alert-red)' }} />
                 </div>
                 <div className="text-4xl font-bold mb-2" style={{ color: 'var(--brand-alert-red)' }}>{activeAlerts.length}</div>
                 <span className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>
-                  {activeAlerts.filter((a) => a.level === 'L1').length}x Level 1 &middot;{' '}
-                  {activeAlerts.filter((a) => a.level === 'L2').length}x Level 2
+                  {activeAlerts.filter((a) => a.level === 'L1').length}x {t('provider.level1')} &middot;{' '}
+                  {activeAlerts.filter((a) => a.level === 'L2').length}x {t('provider.level2')}
                 </span>
               </div>
 
               <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
                 <div className="flex items-start justify-between mb-2">
-                  <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>BP Controlled</span>
+                  <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>{t('provider.bpControlRate')}</span>
                   <Heart className="w-5 h-5" style={{ color: 'var(--brand-success-green)' }} />
                 </div>
                 <div className="text-4xl font-bold mb-2" style={{ color: 'var(--brand-success-green)' }}>{stats.bpControlledPercent}%</div>
-                <span className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>Target: &gt;70%</span>
+                <span className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>{t('provider.target')}: &gt;70%</span>
               </div>
             </>
           )}
@@ -408,13 +411,13 @@ export default function ProviderDashboard() {
           <div className="lg:col-span-3 bg-white p-6 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
               <h2 className="text-base font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                Patient Alert Queue
+                {t('provider.alertQueue')}
               </h2>
               <div
                 className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold w-fit"
                 style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }}
               >
-                Requires Action
+                {t('provider.requiresAction')}
               </div>
             </div>
 
@@ -426,12 +429,12 @@ export default function ProviderDashboard() {
                     className="text-[13px] font-semibold text-left"
                     style={{ backgroundColor: 'var(--brand-background)', color: 'var(--brand-text-muted)' }}
                   >
-                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>Patient</th>
-                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>Last Reading</th>
-                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>Type</th>
-                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>Severity</th>
-                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>Level</th>
-                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>Action</th>
+                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>{t('provider.patient')}</th>
+                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>{t('provider.lastReading')}</th>
+                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>{t('provider.type')}</th>
+                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>{t('provider.severity')}</th>
+                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>{t('provider.level')}</th>
+                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>{t('provider.action')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -499,7 +502,7 @@ export default function ProviderDashboard() {
                               className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold whitespace-nowrap"
                               style={{ backgroundColor: '#CCFBF1', color: '#0D9488' }}
                             >
-                              Call scheduled
+                              {t('provider.callScheduled')}
                             </span>
                           )}
                         </div>
@@ -513,7 +516,7 @@ export default function ProviderDashboard() {
                           }}
                           onClick={() => handleSelectAlert(alert)}
                         >
-                          Review &rarr;
+                          {t('provider.review')} &rarr;
                         </button>
                       </td>
                     </tr>
@@ -565,7 +568,7 @@ export default function ProviderDashboard() {
                   <div className="grid grid-cols-2 gap-3 mb-3">
                     <div>
                       <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>
-                        Last Reading
+                        {t('provider.lastReading')}
                       </div>
                       <div
                         className="text-sm font-bold"
@@ -576,7 +579,7 @@ export default function ProviderDashboard() {
                     </div>
                     <div>
                       <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>
-                        Type
+                        {t('provider.type')}
                       </div>
                       <div className="text-xs" style={{ color: 'var(--brand-text-secondary)' }}>{alert.type}</div>
                     </div>
@@ -608,7 +611,7 @@ export default function ProviderDashboard() {
                       }}
                       onClick={() => handleSelectAlert(alert)}
                     >
-                      Review &rarr;
+                      {t('provider.review')} &rarr;
                     </button>
                   </div>
                 </div>
@@ -620,9 +623,9 @@ export default function ProviderDashboard() {
           <div className="lg:col-span-2 bg-white p-6 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-base font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                BP Trend &middot; {trendDetail?.patient?.name ?? trendAlert?.name ?? 'Select a patient'}
+                {t('provider.bpTrend')} &middot; {trendDetail?.patient?.name ?? trendAlert?.name ?? t('provider.selectPatient')}
               </h2>
-              <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>Last 7 Days</span>
+              <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>{t('provider.last7Days')}</span>
             </div>
 
             {trendDetail?.bpTrend && trendDetail.bpTrend.length > 0 ? (() => {
@@ -698,14 +701,14 @@ export default function ProviderDashboard() {
                     className="absolute right-2 text-[11px] font-semibold"
                     style={{ top: '40%', transform: 'translateY(-50%)', color: 'var(--brand-alert-red)' }}
                   >
-                    Alert threshold
+                    {t('provider.alertThreshold')}
                   </div>
                 </div>
               );
             })() : (
               <div className="h-50 flex items-center justify-center">
                 <p className="text-sm" style={{ color: 'var(--brand-text-muted)' }}>
-                  {trendLoading ? 'Loading trend data...' : 'Hover over a patient row to see BP trend'}
+                  {trendLoading ? t('provider.loadingTrend') : t('provider.hoverToSee')}
                 </p>
               </div>
             )}

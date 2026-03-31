@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 import { Flame, Clock, ArrowRight } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { getJournalEntries, getLatestBaseline, getAlerts } from '@/lib/services/journal.service';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -42,12 +43,6 @@ function getLastCheckInText(latestEntry: Record<string, unknown> | null): string
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function getGreeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  return 'Good evening';
-}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface JournalEntry {
@@ -81,6 +76,7 @@ function Bone({ w, h = 14, r = 8, color = '#EDE9F6' }: { w: number | string; h?:
 export default function Dashboard() {
   const router = useRouter();
   const { user, isAuthenticated, isLoading } = useAuth();
+  const { t } = useLanguage();
 
   const [bpChartData, setBpChartData] = useState<{ day: string; systolic: number; diastolic: number }[]>([]);
   const [latestEntry, setLatestEntry] = useState<JournalEntry | null>(null);
@@ -122,16 +118,23 @@ export default function Dashboard() {
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayHasEntry = latestEntry?.entryDate?.slice(0, 10) === todayStr;
 
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (h < 12) return t('dashboard.goodMorning');
+    if (h < 17) return t('dashboard.goodAfternoon');
+    return t('dashboard.goodEvening');
+  })();
+
   const latestBP = latestEntry?.systolicBP && latestEntry?.diastolicBP
     ? `${latestEntry.systolicBP}/${latestEntry.diastolicBP}` : '--/--';
 
   const bpStatusLabel = latestEntry?.systolicBP != null
-    ? (latestEntry.systolicBP >= 140 || (latestEntry.diastolicBP ?? 0) >= 90 ? 'Elevated' : 'Within Target')
-    : 'No Data';
+    ? (latestEntry.systolicBP >= 140 || (latestEntry.diastolicBP ?? 0) >= 90 ? t('dashboard.elevated') : t('dashboard.withinTarget'))
+    : t('dashboard.noData');
 
-  const bpStatusStyle = bpStatusLabel === 'Within Target'
+  const bpStatusStyle = bpStatusLabel === t('dashboard.withinTarget')
     ? { backgroundColor: 'var(--brand-success-green-light)', color: 'var(--brand-success-green)' }
-    : bpStatusLabel === 'Elevated'
+    : bpStatusLabel === t('dashboard.elevated')
       ? { backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }
       : { backgroundColor: '#F1F5F9', color: 'var(--brand-text-muted)' };
 
@@ -175,27 +178,27 @@ export default function Dashboard() {
             <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 bg-white" />
             <div className="absolute -bottom-8 -right-4 w-20 h-20 rounded-full opacity-10 bg-white" />
 
-            <p className="text-white/70 text-xs font-medium mb-1">{getGreeting()}</p>
+            <p className="text-white/70 text-xs font-medium mb-1">{greeting}</p>
             {loading ? (
               <Bone w={160} h={26} color="rgba(255,255,255,0.3)" />
             ) : (
               <h2 className="text-white text-xl md:text-2xl font-bold leading-tight mb-1">
-                {userName ? userName : 'Welcome back'}
+                {userName ? userName : t('dashboard.welcomeBack')}
               </h2>
             )}
             <p className="text-white/70 text-xs mt-1 mb-3">
-              Your care team is monitoring your progress
+              {t('dashboard.careTeamMonitoring')}
             </p>
             <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/20 rounded-full text-xs font-semibold text-white">
               <span className="w-1.5 h-1.5 rounded-full bg-green-300 inline-block" />
-              Cedar Hill Connected
+              {t('dashboard.cedarHillConnected')}
             </div>
           </div>
 
           {/* BP Stat Card */}
           <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
             <span className="block text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--brand-text-muted)' }}>
-              {loading ? <Bone w={60} h={9} r={5} /> : (todayHasEntry ? "Today's BP" : 'Latest BP')}
+              {loading ? <Bone w={60} h={9} r={5} /> : (todayHasEntry ? t('dashboard.todaysBp') : t('dashboard.latestBp'))}
             </span>
             {loading ? (
               <Bone w={88} h={28} />
@@ -219,18 +222,18 @@ export default function Dashboard() {
               <Bone w={64} h={28} />
             ) : (
               <div className="text-2xl font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                {streak} <span className="text-sm font-medium">day</span>
+                {streak} <span className="text-sm font-medium">{t('dashboard.day')}</span>
               </div>
             )}
             <span className="block text-[10px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
-              {loading ? <Bone w={80} h={9} r={5} /> : 'Medication streak'}
+              {loading ? <Bone w={80} h={9} r={5} /> : t('dashboard.medicationStreak')}
             </span>
           </div>
 
           {/* Total Check-ins Card */}
           <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--brand-text-muted)' }}>
-              Check-ins
+              {t('dashboard.checkIns')}
             </p>
             {loading ? (
               <Bone w={52} h={28} />
@@ -238,7 +241,7 @@ export default function Dashboard() {
               <div className="text-2xl font-bold" style={{ color: 'var(--brand-accent-teal)' }}>{totalEntries}</div>
             )}
             <span className="block text-[10px] mt-1" style={{ color: 'var(--brand-text-secondary)' }}>
-              {loading ? <Bone w={56} h={9} r={5} /> : 'Total logged'}
+              {loading ? <Bone w={56} h={9} r={5} /> : t('dashboard.totalLogged')}
             </span>
           </div>
         </div>
@@ -250,10 +253,10 @@ export default function Dashboard() {
           <div className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                BP This Week
+                {t('dashboard.bpThisWeek')}
               </h3>
               <a href="#" className="text-[11px]" style={{ color: 'var(--brand-accent-teal)' }}>
-                Full history →
+                {t('dashboard.fullHistory')}
               </a>
             </div>
 
@@ -302,14 +305,14 @@ export default function Dashboard() {
               ) : (
                 <div className="h-full flex items-center justify-center">
                   <p className="text-xs text-center" style={{ color: 'var(--brand-text-muted)' }}>
-                    No readings yet — complete a check-in
+                    {t('dashboard.noReadingsYet')}
                   </p>
                 </div>
               )}
             </div>
 
             <span className="block text-[10px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
-              {loading ? <Bone w="60%" h={9} r={5} /> : `Baseline: ${baselineStr} mmHg`}
+              {loading ? <Bone w="60%" h={9} r={5} /> : `${t('dashboard.baseline')}: ${baselineStr} mmHg`}
             </span>
           </div>
 
@@ -322,23 +325,23 @@ export default function Dashboard() {
                 <div className="flex items-center gap-2 mb-2">
                   <Clock className="w-6 h-6" color='white' />
                   <h3 className="text-lg font-semibold text-white" >
-                    Today&apos;s Check-In
+                    {t('dashboard.todayCheckin')}
                   </h3>
                   {loading ? (
                     <Bone w={88} h={20} r={99} />
                   ) : todayHasEntry ? (
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold"
                       style={{ backgroundColor: 'var(--brand-success-green-light)', color: 'var(--brand-success-green)' }}>
-                      ✓ Completed today
+                      {'✓ ' + t('dashboard.completedToday')}
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold"
                       style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }}>
-                      Due today
+                      {t('dashboard.dueToday')}
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] mb-3 text-white">Takes about 3 minutes</p>
+                <p className="text-[11px] mb-3 text-white">{t('dashboard.takesAbout')}</p>
               </div>
 
               <div>
@@ -349,14 +352,14 @@ export default function Dashboard() {
                   {loading ? (
                     <Bone w={120} h={12} color="#7B00E0" />
                   ) : (
-                    <>{todayHasEntry ? 'Log Another Reading' : 'Start Check-In'} <ArrowRight className="w-4 h-4" /></>
+                    <>{todayHasEntry ? t('dashboard.logAnother') : t('dashboard.startCheckin')} <ArrowRight className="w-4 h-4" /></>
                   )}
                 </button>
                 <span className="block text-[10px] mt-3 text-center text-white">
                   {loading ? (
                     <span className="flex justify-center"><Bone w={90} h={8} r={5} /></span>
                   ) : (
-                    `Last: ${getLastCheckInText(latestEntry as Record<string, unknown> | null)}`
+                    `${t('dashboard.last')}: ${getLastCheckInText(latestEntry as Record<string, unknown> | null)}`
                   )}
                 </span>
               </div>
@@ -365,7 +368,7 @@ export default function Dashboard() {
             {/* Recent Alerts */}
             <div className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
               <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
-                Recent Alerts
+                {t('dashboard.recentAlerts')}
               </h3>
 
               {loading ? (
@@ -381,7 +384,7 @@ export default function Dashboard() {
                 <>
                   {openAlerts.length === 0 && streak === 0 && (
                     <p className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>
-                      No active alerts — keep up the great work!
+                      {t('dashboard.noAlertsGreat')}
                     </p>
                   )}
 
@@ -399,11 +402,11 @@ export default function Dashboard() {
                           </p>
                           <span className="text-[10px] font-semibold"
                             style={{ color: alert.severity === 'HIGH' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}>
-                            Open
+                            {t('dashboard.open')}
                           </span>
                         </div>
                         <p className="text-[10px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
-                          {formatAlertDate(alert.journalEntry?.entryDate ?? alert.createdAt ?? '')} · Care team notified
+                          {formatAlertDate(alert.journalEntry?.entryDate ?? alert.createdAt ?? '')} {'· ' + t('dashboard.careTeamNotified')}
                         </p>
                       </div>
                     ))}
@@ -412,9 +415,9 @@ export default function Dashboard() {
                       <div className="p-3 rounded-xl"
                         style={{ backgroundColor: 'var(--brand-success-green-light)', borderLeft: '3px solid var(--brand-success-green)' }}>
                         <p className="text-[11px] font-semibold mb-0.5" style={{ color: 'var(--brand-text-primary)' }}>
-                          {streak} day medication streak 🔥
+                          {streak} {t('dashboard.day')} {t('dashboard.medicationStreak')} 🔥
                         </p>
-                        <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>Keep it up!</p>
+                        <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>{t('dashboard.keepItUp')}</p>
                       </div>
                     )}
                   </div>
