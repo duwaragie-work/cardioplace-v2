@@ -17,7 +17,7 @@ model JournalEntry {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   deviationAlerts  DeviationAlert[]
-  snapshot         BaselineSnapshot? @relation(fields: [snapshotId], references: [id])
+  snapshot         BaselineSnapshot? @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
   user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, entryDate])
