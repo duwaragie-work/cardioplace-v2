@@ -8,7 +8,7 @@
 # Or run everything with Docker:
 #   make docker-up
 
-.PHONY: adk backend frontend docker-up docker-down install dev
+.PHONY: adk backend frontend docker-up docker-down install dev stop restart
 
 # ── Run all services (opens 3 terminals) ─────────────────────────────────────
 
@@ -16,6 +16,22 @@ dev:
 	powershell -Command "Start-Process cmd '/k cd /d C:/git/work/healplace-cardio/backend & npm run start:dev'"
 	powershell -Command "Start-Process cmd '/k cd /d C:/git/work/healplace-cardio/frontend & npm run dev'"
 	powershell -Command "Start-Process cmd '/k cd /d C:/git/work/healplace-cardio/adk-service & .venv\Scripts\activate.bat & python main.py'"
+
+# ── Stop all services ────────────────────────────────────────────────────────
+
+stop:
+	-taskkill /F /IM node.exe >nul 2>&1
+	-taskkill /F /IM python.exe >nul 2>&1
+	-powershell -Command "Get-Process cmd -ErrorAction SilentlyContinue | Where-Object {$$_.MainWindowTitle -match 'healplace-cardio'} | Stop-Process -Force -ErrorAction SilentlyContinue"
+	@echo All services stopped
+
+# ── Restart (stop + clean .next + dev) ───────────────────────────────────────
+
+restart:
+	$(MAKE) stop
+	powershell -Command "if (Test-Path frontend/.next) { Remove-Item -Recurse -Force frontend/.next }"
+	@echo "▶ Cleaned frontend/.next"
+	$(MAKE) dev
 
 # ── Individual service commands ───────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import { useAuth, type OtpVerifyResponse } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
@@ -181,6 +181,7 @@ export default function RegisterPage() {
   }
 
   return (
+    <Suspense>
     <div className="min-h-screen bg-white flex items-center justify-center px-6 lg:px-12 py-10">
       <div className="w-full max-w-300 mx-auto">
         <div className="flex flex-col md:flex-row gap-12 lg:gap-20">
@@ -361,6 +362,7 @@ export default function RegisterPage() {
         </div>
       </div>
     </div>
+    </Suspense>
   );
 }
 
