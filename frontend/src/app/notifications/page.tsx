@@ -22,6 +22,7 @@ import {
   getNotifications,
   markNotificationRead,
 } from '@/lib/services/journal.service';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type AlertType = 'SYSTOLIC_BP' | 'DIASTOLIC_BP' | 'WEIGHT' | 'MEDICATION_ADHERENCE';
@@ -178,11 +179,25 @@ function AlertCard({
   onAcknowledge: (id: string) => void;
   acknowledging: string | null;
 }) {
+  const { t } = useLanguage();
   const meta = TYPE_META[alert.type] ?? { label: alert.type, icon: AlertTriangle };
   const sevMeta = SEVERITY_META[alert.severity] ?? SEVERITY_META.LOW;
   const Icon = meta.icon;
   const isOpen = alert.status === 'OPEN';
   const isAcking = acknowledging === alert.id;
+
+  const alertTypeLabels: Record<AlertType, string> = {
+    SYSTOLIC_BP: t('alert.systolicBP'),
+    DIASTOLIC_BP: t('alert.diastolicBP'),
+    WEIGHT: t('alert.weight'),
+    MEDICATION_ADHERENCE: t('alert.medication'),
+  };
+
+  const sevLabels: Record<string, string> = {
+    HIGH: t('alert.urgent'),
+    MEDIUM: t('alert.moderate'),
+    LOW: t('alert.low'),
+  };
 
   return (
     <motion.div
@@ -220,18 +235,18 @@ function AlertCard({
                 className="text-[14px] font-bold"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
-                {meta.label}
+                {alertTypeLabels[alert.type] ?? alert.type}
               </span>
               <span
                 className="px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0"
                 style={{ backgroundColor: sevMeta.bg, color: sevMeta.text }}
               >
-                {sevMeta.label}
+                {sevLabels[alert.severity] ?? alert.severity}
               </span>
               {alert.escalated && (
                 <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-600 text-white shrink-0 flex items-center gap-1">
                   <Zap className="w-3 h-3" />
-                  Escalated
+                  {t('notifications.escalated')}
                 </span>
               )}
             </div>
@@ -239,11 +254,11 @@ function AlertCard({
             {/* Values */}
             {alert.actualValue != null && alert.baselineValue != null && (
               <p className="text-[12px] mb-2" style={{ color: 'var(--brand-text-muted)' }}>
-                Recorded{' '}
+                {t('alert.recorded')}{' '}
                 <span className="font-semibold" style={{ color: sevMeta.text }}>
                   {Number(alert.actualValue).toFixed(0)}
                 </span>{' '}
-                vs your baseline of{' '}
+                {t('alert.vsBaseline')}{' '}
                 <span className="font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
                   {Number(alert.baselineValue).toFixed(0)}
                 </span>
@@ -278,11 +293,11 @@ function AlertCard({
             whileTap={{ scale: 0.98 }}
           >
             {isAcking ? (
-              <>Acknowledging…</>
+              <>{t('notifications.acknowledging')}</>
             ) : (
               <>
                 <CheckCircle2 className="w-4 h-4" />
-                Acknowledge — I&apos;ve seen this
+                {t('notifications.acknowledge')}
               </>
             )}
           </motion.button>
@@ -300,6 +315,7 @@ function NotifCard({
   notif: Notif;
   onRead: (id: string) => void;
 }) {
+  const { t } = useLanguage();
   const [expanded, setExpanded] = useState(false);
   const hasTips = notif.tips && notif.tips.length > 0;
 
@@ -384,7 +400,7 @@ function NotifCard({
                 className="inline-block mt-1.5 text-[11px] font-semibold"
                 style={{ color: 'var(--brand-primary-purple)' }}
               >
-                Tap to mark as read
+                {t('notifications.tapToRead')}
               </span>
             )}
           </div>
@@ -405,12 +421,12 @@ function NotifCard({
               {expanded ? (
                 <>
                   <ChevronUp className="w-3.5 h-3.5" />
-                  Hide tips
+                  {t('notifications.hideTips')}
                 </>
               ) : (
                 <>
                   <ChevronDown className="w-3.5 h-3.5" />
-                  {notif.tips.length} care tip{notif.tips.length > 1 ? 's' : ''}
+                  {notif.tips.length} {notif.tips.length > 1 ? t('notifications.careTips') : t('notifications.careTip')}
                 </>
               )}
             </button>
@@ -451,10 +467,11 @@ function NotifCard({
 type Tab = 'all' | 'unread' | 'read';
 
 function TabBar({ active, onChange, unreadCount }: { active: Tab; onChange: (t: Tab) => void; unreadCount: number }) {
+  const { t } = useLanguage();
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'all', label: 'All' },
-    { id: 'unread', label: 'Unread' },
-    { id: 'read', label: 'Read' },
+    { id: 'all', label: t('notifications.allTab') },
+    { id: 'unread', label: t('notifications.unreadTab') },
+    { id: 'read', label: t('notifications.readTab') },
   ];
   return (
     <div
@@ -528,6 +545,7 @@ function EmptyState({ message }: { message: string }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function NotificationsPage() {
+  const { t } = useLanguage();
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [notifs, setNotifs] = useState<Notif[]>([]);
   const [loading, setLoading] = useState(true);
@@ -624,15 +642,15 @@ export default function NotificationsPage() {
                 className="text-[18px] font-bold leading-tight"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
-                Notifications
+                {t('notifications.title')}
               </h1>
               {!loading && (
                 <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
                   {openAlerts.length > 0
-                    ? `${openAlerts.length} action${openAlerts.length > 1 ? 's' : ''} needed · ${unreadCount} unread`
+                    ? `${openAlerts.length} ${openAlerts.length > 1 ? t('notifications.actionsNeededPlural') : t('notifications.actionsNeeded')} · ${unreadCount} ${t('notifications.unread')}`
                     : unreadCount > 0
-                      ? `${unreadCount} unread`
-                      : 'All caught up'}
+                      ? `${unreadCount} ${t('notifications.unread')}`
+                      : t('notifications.allCaughtUp')}
                 </p>
               )}
             </div>
@@ -649,7 +667,7 @@ export default function NotificationsPage() {
               }}
             >
               <CheckCheck className="w-3.5 h-3.5" />
-              {markingAll ? 'Marking…' : 'Mark all read'}
+              {markingAll ? t('notifications.marking') : t('notifications.markAllRead')}
             </button>
           )}
         </div>
@@ -687,7 +705,7 @@ export default function NotificationsPage() {
             {/* ── Action Required ── */}
             {openAlerts.length > 0 && (
               <div>
-                <SectionLabel count={openAlerts.length}>Action Required</SectionLabel>
+                <SectionLabel count={openAlerts.length}>{t('notifications.actionNeeded')}</SectionLabel>
                 <div className="space-y-3">
                   <AnimatePresence mode="popLayout">
                     {openAlerts.map((alert) => (
@@ -707,7 +725,7 @@ export default function NotificationsPage() {
             <div>
               <div className="flex items-center justify-between mb-3">
                 <SectionLabel count={unreadCount > 0 ? unreadCount : undefined}>
-                  Messages
+                  {t('notifications.messages')}
                 </SectionLabel>
               </div>
 
@@ -719,10 +737,10 @@ export default function NotificationsPage() {
                     <EmptyState
                       message={
                         tab === 'unread'
-                          ? 'No unread messages'
+                          ? t('notifications.noUnread')
                           : tab === 'read'
-                            ? 'No read messages yet'
-                            : 'No messages yet'
+                            ? t('notifications.noRead')
+                            : t('notifications.noMessages')
                       }
                     />
                   ) : (
@@ -747,6 +765,7 @@ export default function NotificationsPage() {
 
 // ─── Past Alerts (collapsible section) ───────────────────────────────────────
 function PastAlerts({ alerts }: { alerts: Alert[] }) {
+  const { t } = useLanguage();
   const [open, setOpen] = useState(true);
 
   return (
@@ -757,7 +776,7 @@ function PastAlerts({ alerts }: { alerts: Alert[] }) {
         style={{ color: 'var(--brand-text-muted)' }}
       >
         {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-        Past Alerts ({alerts.length})
+        {t('notifications.pastAlerts')} ({alerts.length})
       </button>
 
       <AnimatePresence>

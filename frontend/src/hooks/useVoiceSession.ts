@@ -2,7 +2,6 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { io, Socket } from 'socket.io-client';
-
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type SessionState =

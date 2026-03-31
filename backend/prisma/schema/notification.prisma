@@ -1,24 +1,18 @@
 model Notification {
-    id                String  @id @default(uuid())
-    userId            String
-    alertId           String?
-    escalationEventId String?
+  id                String              @id @default(uuid())
+  userId            String
+  alertId           String?
+  escalationEventId String?
+  channel           NotificationChannel
+  title             String
+  body              String
+  tips              String[]
+  sentAt            DateTime            @default(now())
+  readAt            DateTime?
+  alert             DeviationAlert?     @relation(fields: [alertId], references: [id], onDelete: SetNull)
+  escalationEvent   EscalationEvent?    @relation(fields: [escalationEventId], references: [id], onDelete: SetNull)
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-    user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-    alert           DeviationAlert?  @relation(fields: [alertId], references: [id], onDelete: SetNull)
-    escalationEvent EscalationEvent? @relation(fields: [escalationEventId], references: [id], onDelete: SetNull)
-
-    channel NotificationChannel
-
-    title String
-    body  String
-
-    // Sleep improvement tips sent alongside the warning
-    tips String[] // e.g. ["Avoid caffeine after 2pm", "Keep a consistent sleep schedule"]
-
-    sentAt DateTime  @default(now())
-    readAt DateTime?
-
-    @@index([userId, sentAt(sort: Desc)])
-    @@index([userId, readAt])
+  @@index([userId, sentAt(sort: Desc)])
+  @@index([userId, readAt])
 }

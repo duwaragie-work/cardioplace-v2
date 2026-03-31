@@ -12,6 +12,7 @@ import Image from "next/image";
 import Logo from "@/components/Logo";
 import { CheckCircle2 } from "lucide-react";
 import SpinnerIndicator from "@/components/ui/SpinnerIndicator";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 function getBrowserTimezone(): string | undefined {
   if (typeof Intl === "undefined" || typeof Intl.DateTimeFormat === "undefined") return undefined;
@@ -24,6 +25,7 @@ function getBrowserTimezone(): string | undefined {
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const { t } = useLanguage();
   const { user, isLoading, logout, markOnboardingComplete } = useAuth();
   const [name, setName] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
@@ -120,7 +122,7 @@ export default function OnboardingPage() {
   async function handleContinue() {
     if (!isFormPartiallyFilled || isSubmitting) return;
     if (dateOfBirth && !isDateOfBirthValid(dateOfBirth)) {
-      setError("Please enter a valid date of birth.");
+      setError(t('onboarding.invalidDob'));
       return;
     }
     await submitProfile({
@@ -164,10 +166,10 @@ export default function OnboardingPage() {
             {/* Heading */}
             <div className="mb-10">
               <h1 className="font-semibold text-[#171717] text-3xl lg:text-4xl tracking-[-0.04em] mb-3">
-                Tell Us About Your Health
+                {t('onboarding.title')}
               </h1>
               <p className="text-[#4b5563] text-sm lg:text-base leading-relaxed max-w-105">
-                Help us personalise your cardiovascular monitoring experience.
+                {t('onboarding.subtitle')}
               </p>
             </div>
 
@@ -176,13 +178,13 @@ export default function OnboardingPage() {
               {/* Name */}
               <div className="w-full max-w-105">
                 <label className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
-                  What should we call you?
+                  {t('onboarding.nameQuestion')}
                 </label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Enter your name"
+                  placeholder={t('onboarding.namePlaceholder')}
                   className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
                 />
               </div>
@@ -190,7 +192,7 @@ export default function OnboardingPage() {
               {/* Date of Birth */}
               <div className="w-full max-w-105">
                 <label className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
-                  Date of Birth
+                  {t('onboarding.dob')}
                 </label>
                 <input
                   type="date"
@@ -203,16 +205,16 @@ export default function OnboardingPage() {
               {/* Communication Preference */}
               <div className="w-full max-w-105">
                 <label className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
-                  Communication Preference
+                  {t('onboarding.commPref')}
                 </label>
                 <select
                   value={communicationPreference}
                   onChange={(e) => setCommunicationPreference(e.target.value)}
                   className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%228%22%20viewBox%3D%220%200%2012%208%22%3E%3cpath%20fill%3D%22%23171717%22%20d%3D%22M6%208L0%200h12z%22%2F%3E%3c%2Fsvg%3E')] bg-size-[12px] bg-position-[center_right_1rem] bg-no-repeat"
                 >
-                  <option value="">Select your preference</option>
-                  <option value="TEXT_FIRST">Text First</option>
-                  <option value="AUDIO_FIRST">Audio First</option>
+                  <option value="">{t('onboarding.selectPref')}</option>
+                  <option value="TEXT_FIRST">{t('onboarding.textFirst')}</option>
+                  <option value="AUDIO_FIRST">{t('onboarding.audioFirst')}</option>
                 </select>
               </div>
 
@@ -233,14 +235,14 @@ export default function OnboardingPage() {
                   disabled={!isFormPartiallyFilled || isSubmitting}
                   className="w-full h-12 lg:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm lg:text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
-                  {isSubmitting ? "Saving..." : "Continue"}
+                  {isSubmitting ? t('common.saving') : t('onboarding.continue')}
                 </button>
                 <button
                   type="button"
                   onClick={handleSkip}
                   className="w-full text-sm text-[#737373] mt-4 cursor-pointer"
                 >
-                  Skip for now
+                  {t('onboarding.skip')}
                 </button>
               </div>
               {/* (Privacy note and sign out text removed per design) */}
@@ -262,30 +264,30 @@ export default function OnboardingPage() {
                     </svg>
                   </div>
                   <h3 className="font-bold text-[#170c1d] text-base md:text-lg lg:text-2xl">
-                    Personalised Cardio Care
+                    {t('onboarding.cardTitle')}
                   </h3>
                 </div>
                 <p className="text-[#4b3b55] text-xs md:text-sm lg:text-base leading-relaxed">
-                  We use your profile to monitor your cardiovascular health, track blood pressure patterns, and keep your care team informed.
+                  {t('onboarding.cardDesc')}
                 </p>
                 <div className="space-y-3 pt-2">
                   <div className="flex items-start gap-3">
                     <div className="bg-white rounded-full p-1 mt-1">
                       <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
                     </div>
-                    <p className="text-[#4b3b55] text-xs md:text-sm">Daily BP monitoring and trend analysis</p>
+                    <p className="text-[#4b3b55] text-xs md:text-sm">{t('onboarding.benefit1')}</p>
                   </div>
                   <div className="flex items-start gap-3">
                     <div className="bg-white rounded-full p-1 mt-1">
                       <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
                     </div>
-                    <p className="text-[#4b3b55] text-xs md:text-sm">Medication adherence tracking</p>
+                    <p className="text-[#4b3b55] text-xs md:text-sm">{t('onboarding.benefit2')}</p>
                   </div>
                   <div className="flex items-start gap-3">
                     <div className="bg-white rounded-full p-1 mt-1">
                       <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
                     </div>
-                    <p className="text-[#4b3b55] text-xs md:text-sm">Care team alerts when readings are elevated</p>
+                    <p className="text-[#4b3b55] text-xs md:text-sm">{t('onboarding.benefit3')}</p>
                   </div>
                 </div>
               </div>

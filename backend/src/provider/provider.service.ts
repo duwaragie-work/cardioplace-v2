@@ -460,25 +460,30 @@ export class ProviderService {
         (SEVERITY_ORDER[b.severity] ?? 3),
     )
 
-    // Fetch follow-up call notifications linked to these alerts
+    // Fetch scheduled calls linked to these alerts
     const alertIds = alerts.map((a) => a.id)
-    const followUpNotifications = alertIds.length
-      ? await this.prisma.notification.findMany({
-          where: {
-            alertId: { in: alertIds },
-            title: 'Follow-up Call Scheduled',
-          },
+    const scheduledCalls = alertIds.length
+      ? await this.prisma.scheduledCall.findMany({
+          where: { alertId: { in: alertIds } },
+          orderBy: { createdAt: 'desc' },
           select: {
             alertId: true,
-            sentAt: true,
-            body: true,
+            callDate: true,
+            callTime: true,
+            callType: true,
+            status: true,
+            createdAt: true,
           },
         })
       : []
 
-    const followUpMap = new Map(
-      followUpNotifications.map((n) => [n.alertId, n]),
-    )
+    // Keep the latest scheduled call per alert
+    const followUpMap = new Map<string, (typeof scheduledCalls)[0]>()
+    for (const sc of scheduledCalls) {
+      if (sc.alertId && !followUpMap.has(sc.alertId)) {
+        followUpMap.set(sc.alertId, sc)
+      }
+    }
 
     return {
       statusCode: 200,
@@ -495,8 +500,11 @@ export class ProviderService {
           status: a.status,
           createdAt: a.createdAt,
           acknowledgedAt: a.acknowledgedAt,
-          followUpScheduledAt: followUp?.sentAt ?? null,
-          followUpBody: followUp?.body ?? null,
+          followUpScheduledAt: followUp?.createdAt ?? null,
+          followUpCallDate: followUp?.callDate ?? null,
+          followUpCallTime: followUp?.callTime ?? null,
+          followUpCallType: followUp?.callType ?? null,
+          followUpStatus: followUp?.status ?? null,
           patient: a.user
             ? {
                 id: a.user.id,
@@ -772,10 +780,24 @@ export class ProviderService {
     })
     if (!patient) throw new NotFoundException('Patient not found')
 
+    // ─── Create ScheduledCall record ─────────────────────────────────
+    const scheduledCall = await this.prisma.scheduledCall.create({
+      data: {
+        userId: body.patientUserId,
+        alertId: body.alertId ?? null,
+        callDate: body.callDate,
+        callTime: body.callTime,
+        callType: body.callType,
+        notes: body.notes ?? null,
+        status: 'UPCOMING',
+      },
+    })
+
+    // ─── Notifications (patient-facing) ──────────────────────────────
     const notifTitle = 'Follow-up Call Scheduled'
     const notifBody = `Your care team has scheduled a ${body.callType} call on ${body.callDate} at ${body.callTime}.${body.notes ? ` Note: ${body.notes}` : ''}`
 
-    const notification = await this.prisma.notification.create({
+    await this.prisma.notification.create({
       data: {
         userId: body.patientUserId,
         alertId: body.alertId ?? null,
@@ -818,7 +840,7 @@ export class ProviderService {
     return {
       statusCode: 201,
       message: 'Call scheduled. Patient notified.',
-      data: { notificationId: notification.id },
+      data: { scheduledCallId: scheduledCall.id },
     }
   }
 
@@ -857,5 +879,93 @@ export class ProviderService {
         acknowledgedAt: updated.acknowledgedAt,
       },
     }
+  }
+
+  // ─── GET /provider/scheduled-calls ──────────────────────────────────────────
+
+  async getScheduledCalls(filters: { status?: string }) {
+    const where: Record<string, unknown> = {}
+    if (filters.status) {
+      where.status = filters.status.toUpperCase()
+    }
+
+    const calls = await this.prisma.scheduledCall.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: {
+          select: { id: true, name: true, email: true, riskTier: true },
+        },
+        deviationAlert: {
+          select: {
+            id: true,
+            type: true,
+            severity: true,
+            status: true,
+            createdAt: true,
+            journalEntry: {
+              select: { systolicBP: true, diastolicBP: true, entryDate: true },
+            },
+          },
+        },
+      },
+    })
+
+    return {
+      statusCode: 200,
+      data: calls.map((c) => ({
+        id: c.id,
+        callDate: c.callDate,
+        callTime: c.callTime,
+        callType: c.callType,
+        notes: c.notes,
+        status: c.status.toLowerCase(),
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+        patient: c.user
+          ? { id: c.user.id, name: c.user.name, email: c.user.email, riskTier: c.user.riskTier }
+          : null,
+        alert: c.deviationAlert
+          ? {
+              id: c.deviationAlert.id,
+              type: c.deviationAlert.type,
+              severity: c.deviationAlert.severity,
+              alertStatus: c.deviationAlert.status,
+              createdAt: c.deviationAlert.createdAt,
+              journalEntry: c.deviationAlert.journalEntry,
+            }
+          : null,
+      })),
+    }
+  }
+
+  // ─── PATCH /provider/scheduled-calls/:id/status ─────────────────────────────
+
+  async updateCallStatus(id: string, status: string) {
+    const validStatuses = ['UPCOMING', 'COMPLETED', 'MISSED', 'CANCELLED']
+    const upper = status.toUpperCase()
+    if (!validStatuses.includes(upper)) {
+      throw new NotFoundException(`Invalid status: ${status}`)
+    }
+
+    const call = await this.prisma.scheduledCall.findUnique({ where: { id } })
+    if (!call) throw new NotFoundException('Scheduled call not found')
+
+    const updated = await this.prisma.scheduledCall.update({
+      where: { id },
+      data: { status: upper as 'UPCOMING' | 'COMPLETED' | 'MISSED' | 'CANCELLED' },
+    })
+
+    return { statusCode: 200, data: { id: updated.id, status: updated.status } }
+  }
+
+  // ─── DELETE /provider/scheduled-calls/:id ───────────────────────────────────
+
+  async deleteScheduledCall(id: string) {
+    const call = await this.prisma.scheduledCall.findUnique({ where: { id } })
+    if (!call) throw new NotFoundException('Scheduled call not found')
+
+    await this.prisma.scheduledCall.delete({ where: { id } })
+    return { statusCode: 200, message: 'Scheduled call deleted' }
   }
 }

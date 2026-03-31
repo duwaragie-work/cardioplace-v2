@@ -1,78 +1,33 @@
-enum ContentType {
-  ARTICLE
-  TIP
-  FAQ
-}
-
-enum ContentStatus {
-  DRAFT              // Author is working on it; not submitted; not publicly visible
-  IN_REVIEW          // Submitted for approval; locked from editing
-  PARTIALLY_APPROVED // One of the two required approvals done; waiting for the other
-  PUBLISHED          // Both editorial + clinical approved; visible to users
-  UNPUBLISHED        // Manually taken down by admin
-}
-
-// Tracks the review progress of an in-flight background revision.
-// Only populated on a PUBLISHED content that has an ongoing revision cycle.
-enum ContentRevisionStatus {
-  DRAFT
-  IN_REVIEW
-  PARTIALLY_APPROVED
-}
-
 model Content {
-  id          String      @id @default(ulid())
-  title       String
-  contentType ContentType
-  body        String      // Markdown body text
-  summary     String      // Short synopsis shown in cards/lists
-  author      String?     // Display-only field (e.g. "Healplace Medical Team", guest name, null)
-
+  id                 String                 @id @default(ulid())
+  title              String
+  contentType        ContentType
+  body               String
+  summary            String
+  author             String?
   /// Short, human-friendly identifier like "ART-ABC123"
-  humanId String @unique
-
-  submittedById String
-  submittedBy   User   @relation("ContentSubmittedBy", fields: [submittedById], references: [id])
-
-  tags String[]
-
-  // ── Lifecycle ─────────────────────────────────────────────────────────────
-  status ContentStatus @default(DRAFT)
-
-  // Populated once the content has been published at least once.
-  // Points to the ContentVersion.versionNo that is currently live.
+  humanId            String                 @unique
+  submittedById      String
+  tags               String[]
+  status             ContentStatus          @default(DRAFT)
   publishedVersionNo Int?
-
-  // When a review round is in progress (initial or revision),
-  // pins which ContentVersion.versionNo is under review.
-  reviewVersionNo Int?
-
-  // Non-null only when status = PUBLISHED and a background revision is in progress.
-  // Tracks where that revision is in the review cycle.
-  revisionStatus ContentRevisionStatus?
-
-  needsReview Boolean @default(false) // true = scheduler-flagged stale; excluded from chatbot KB
-
-  // ── Rating aggregate cache ────────────────────────────────────────────────
-  ratingAvg    Float? @default(0)
-  ratingsCount Int    @default(0)
-
-  // S3 / media placeholder — will hold cover image or attached PDF URL when S3 is integrated
-  mediaUrl String?
-
-  lastReviewed DateTime?
-  publishedAt  DateTime?
-
-  // Relations
-  reviews   ContentReview[]
-  versions  ContentVersion[]
-  auditLogs ContentAuditLog[]
-  views     ContentView[]
-  ratings   ContentRating[]
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime? // null = active; set by SUPER_ADMIN soft-delete — row is NOT destroyed
+  reviewVersionNo    Int?
+  revisionStatus     ContentRevisionStatus?
+  needsReview        Boolean                @default(false)
+  ratingAvg          Float?                 @default(0)
+  ratingsCount       Int                    @default(0)
+  mediaUrl           String?
+  lastReviewed       DateTime?
+  publishedAt        DateTime?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  deletedAt          DateTime?
+  submittedBy        User                   @relation("ContentSubmittedBy", fields: [submittedById], references: [id])
+  auditLogs          ContentAuditLog[]
+  ratings            ContentRating[]
+  reviews            ContentReview[]
+  versions           ContentVersion[]
+  views              ContentView[]
 
   @@index([contentType])
   @@index([status])
@@ -80,4 +35,24 @@ model Content {
   @@index([lastReviewed])
   @@index([submittedById])
   @@index([deletedAt])
+}
+
+enum ContentType {
+  ARTICLE
+  TIP
+  FAQ
+}
+
+enum ContentStatus {
+  DRAFT
+  IN_REVIEW
+  PARTIALLY_APPROVED
+  PUBLISHED
+  UNPUBLISHED
+}
+
+enum ContentRevisionStatus {
+  DRAFT
+  IN_REVIEW
+  PARTIALLY_APPROVED
 }

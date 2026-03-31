@@ -1,18 +1,13 @@
-// One rating per registered user per content item (no anonymous ratings).
-// ratingValue: integer 1–5.
-// ratingAvg and ratingsCount on Content are aggregate caches — update after each upsert.
-
 model ContentRating {
-  id          String  @id @default(ulid())
+  id          String   @id @default(ulid())
   contentId   String
-  content     Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
-  userId      String  // Must be a registered (authenticated) user
-  user        User    @relation("ContentRatings", fields: [userId], references: [id])
-  ratingValue Int     // 1–5
+  userId      String
+  ratingValue Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  content     Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  user        User     @relation("ContentRatings", fields: [userId], references: [id])
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([contentId, userId]) // one rating per user per content item
+  @@unique([contentId, userId])
   @@index([contentId])
 }

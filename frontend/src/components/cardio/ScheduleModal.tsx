@@ -3,6 +3,8 @@
 import { X, Phone, Video, Clock, Calendar, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState } from 'react';
+import { useLanguage } from '@/contexts/LanguageContext';
+import type { TranslationKey } from '@/i18n/en';
 
 interface Alert {
   id: string;
@@ -33,7 +35,7 @@ export interface ScheduleDetails {
   notes: string;
 }
 
-const getNextDays = () => {
+const getNextDays = (t: (key: TranslationKey) => string) => {
   const days: { label: string; sublabel: string; value: string }[] = [];
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const monthNames = [
@@ -45,7 +47,7 @@ const getNextDays = () => {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
     days.push({
-      label: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : dayNames[d.getDay()],
+      label: i === 0 ? t('schedule.today') : i === 1 ? t('schedule.tomorrow') : dayNames[d.getDay()],
       sublabel: `${monthNames[d.getMonth()]} ${d.getDate()}`,
       value: `${monthNames[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`,
     });
@@ -65,7 +67,8 @@ export default function ScheduleModal({
   onConfirm,
   error,
 }: ScheduleModalProps) {
-  const days = getNextDays();
+  const { t } = useLanguage();
+  const days = getNextDays(t);
   const [selectedDate, setSelectedDate] = useState(days[1].value);
   const [selectedTime, setSelectedTime] = useState('10:00 AM');
   const [callType, setCallType] = useState<'phone' | 'video'>('phone');
@@ -143,15 +146,15 @@ export default function ScheduleModal({
                   className="text-xl font-bold mb-2"
                   style={{ color: 'var(--brand-text-primary)' }}
                 >
-                  Follow-up Scheduled!
+                  {t('schedule.success')}
                 </h3>
                 <p
                   className="text-sm"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
-                  Call scheduled. Patient notified.
+                  {t('schedule.successMsg')}
                   <br />
-                  {callType === 'phone' ? 'Phone call' : 'Video call'} with{' '}
+                  {callType === 'phone' ? t('schedule.phoneCall') : t('schedule.videoCall')} with{' '}
                   {alert.name}
                   <br />
                   {selectedDate} at {selectedTime}
@@ -175,14 +178,14 @@ export default function ScheduleModal({
                       className="text-base font-semibold"
                       style={{ color: 'var(--brand-text-primary)' }}
                     >
-                      Schedule Follow-up Call
+                      {t('schedule.title')}
                     </h2>
                   </div>
                   <p
                     className="text-[13px]"
                     style={{ color: 'var(--brand-text-muted)' }}
                   >
-                    Patient:{' '}
+                    {t('schedule.patient')}:{' '}
                     <span
                       className="font-semibold"
                       style={{ color: 'var(--brand-text-primary)' }}
@@ -222,15 +225,13 @@ export default function ScheduleModal({
                     className="text-[13px] font-semibold mb-3"
                     style={{ color: 'var(--brand-text-primary)' }}
                   >
-                    Call Type
+                    {t('schedule.callType')}
                   </p>
                   <div className="grid grid-cols-2 gap-3">
-                    {(
-                      [
-                        { value: 'phone' as const, label: 'Phone Call', icon: Phone },
-                        { value: 'video' as const, label: 'Video Call', icon: Video },
-                      ] as const
-                    ).map(({ value, label, icon: Icon }) => (
+                    {([
+                        { value: 'phone' as const, label: t('schedule.phoneCall'), icon: Phone },
+                        { value: 'video' as const, label: t('schedule.videoCall'), icon: Video },
+                      ]).map(({ value, label, icon: Icon }) => (
                       <button
                         key={value}
                         onClick={() => setCallType(value)}
@@ -263,7 +264,7 @@ export default function ScheduleModal({
                     className="text-[13px] font-semibold mb-3"
                     style={{ color: 'var(--brand-text-primary)' }}
                   >
-                    Select Date
+                    {t('schedule.selectDate')}
                   </p>
                   <div className="flex gap-2 overflow-x-auto pb-1">
                     {days.map((day) => (
@@ -308,7 +309,7 @@ export default function ScheduleModal({
                       className="text-[13px] font-semibold"
                       style={{ color: 'var(--brand-text-primary)' }}
                     >
-                      Select Time
+                      {t('schedule.selectTime')}
                     </p>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
@@ -344,19 +345,13 @@ export default function ScheduleModal({
                     className="text-[13px] font-semibold mb-2"
                     style={{ color: 'var(--brand-text-primary)' }}
                   >
-                    Notes{' '}
-                    <span
-                      className="font-normal"
-                      style={{ color: 'var(--brand-text-muted)' }}
-                    >
-                      (optional)
-                    </span>
+                    {t('schedule.notes')}
                   </p>
                   <textarea
                     rows={3}
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    placeholder="E.g. Discuss medication adherence, BP readings..."
+                    placeholder={t('schedule.notesPlaceholder')}
                     className="w-full rounded-xl px-4 py-3 text-[13px] resize-none outline-none transition"
                     style={{
                       border: '2px solid var(--brand-border)',
@@ -387,7 +382,7 @@ export default function ScheduleModal({
                     color: 'var(--brand-text-secondary)',
                   }}
                 >
-                  Cancel
+                  {t('schedule.cancel')}
                 </button>
                 <button
                   onClick={handleConfirm}
@@ -398,7 +393,7 @@ export default function ScheduleModal({
                     boxShadow: 'var(--brand-shadow-button)',
                   }}
                 >
-                  {submitting ? 'Scheduling...' : 'Confirm Schedule'}
+                  {submitting ? t('schedule.scheduling') : t('schedule.confirm')}
                 </button>
               </div>
             </>

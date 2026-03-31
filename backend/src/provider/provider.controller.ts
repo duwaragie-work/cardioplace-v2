@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -83,6 +84,11 @@ export class ProviderController {
     return this.providerService.acknowledgeAlert(alertId)
   }
 
+  @Get('scheduled-calls')
+  getScheduledCalls(@Query('status') status?: string) {
+    return this.providerService.getScheduledCalls({ status })
+  }
+
   @Post('schedule-call')
   scheduleCall(
     @Body()
@@ -96,5 +102,18 @@ export class ProviderController {
     },
   ) {
     return this.providerService.scheduleCall(body)
+  }
+
+  @Patch('scheduled-calls/:id/status')
+  updateCallStatus(
+    @Param('id') id: string,
+    @Body('status') status: string,
+  ) {
+    return this.providerService.updateCallStatus(id, status)
+  }
+
+  @Delete('scheduled-calls/:id')
+  deleteScheduledCall(@Param('id') id: string) {
+    return this.providerService.deleteScheduledCall(id)
   }
 }

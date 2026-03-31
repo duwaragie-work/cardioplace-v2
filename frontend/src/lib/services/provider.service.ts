@@ -104,6 +104,45 @@ export async function scheduleCall(body: {
   return json
 }
 
+export async function getScheduledCalls(filters?: { status?: string }) {
+  const qs = new URLSearchParams()
+  if (filters?.status) qs.append('status', filters.status)
+  const query = qs.toString()
+  const res = await fetchWithAuth(`${API}/api/provider/scheduled-calls${query ? `?${query}` : ''}`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json()
+  return json.data ?? json
+}
+
+export async function updateCallStatus(callId: string, status: string) {
+  const res = await fetchWithAuth(`${API}/api/provider/scheduled-calls/${callId}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json()
+  return json.data ?? json
+}
+
+export async function deleteScheduledCall(callId: string) {
+  const res = await fetchWithAuth(`${API}/api/provider/scheduled-calls/${callId}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json()
+  return json
+}
+
 export async function acknowledgeProviderAlert(alertId: string) {
   const res = await fetchWithAuth(`${API}/api/provider/alerts/${alertId}/acknowledge`, {
     method: 'PATCH',

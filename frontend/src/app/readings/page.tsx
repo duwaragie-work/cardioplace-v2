@@ -17,6 +17,7 @@ import {
   updateJournalEntry,
   deleteJournalEntry,
 } from '@/lib/services/journal.service';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Entry = {
@@ -119,6 +120,7 @@ function EntryCard({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useLanguage();
   const hasBP = entry.systolicBP && entry.diastolicBP;
   const bpStatus = hasBP ? getBpStatus(entry.systolicBP!, entry.diastolicBP!) : null;
 
@@ -172,13 +174,13 @@ function EntryCard({
                     color: statusColors[bpStatus.color].text,
                   }}
                 >
-                  {bpStatus.label}
+                  {bpStatus.label === 'Crisis' ? t('readings.crisis') : bpStatus.label === 'Elevated' ? t('dashboard.elevated') : t('checkin.normal')}
                 </span>
               )}
             </div>
           ) : (
             <p className="text-[13px] mb-2" style={{ color: 'var(--brand-text-muted)' }}>
-              No BP recorded
+              {t('readings.noBpRecorded')}
             </p>
           )}
 
@@ -207,7 +209,7 @@ function EntryCard({
                     : 'var(--brand-warning-amber)',
                 }}
               >
-                Meds: {entry.medicationTaken ? 'Taken' : 'Missed'}
+                {t('readings.meds')}: {entry.medicationTaken ? t('readings.taken') : t('readings.missed')}
               </span>
             )}
             {entry.symptoms && entry.symptoms.length > 0 && (
@@ -227,7 +229,7 @@ function EntryCard({
                   color: 'var(--brand-accent-teal)',
                 }}
               >
-                Note
+                {t('readings.note')}
               </span>
             )}
           </div>
@@ -283,6 +285,7 @@ function EditModal({
   onSave: () => void;
   onClose: () => void;
 }) {
+  const { t } = useLanguage();
   function toggleSymptom(s: string) {
     const updated = form.symptoms.includes(s)
       ? form.symptoms.filter((x) => x !== s)
@@ -321,7 +324,7 @@ function EditModal({
           style={{ borderBottom: '1px solid var(--brand-border)' }}
         >
           <h2 className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-            Edit Reading
+            {t('readings.editReading')}
           </h2>
           <button
             onClick={onClose}
@@ -339,7 +342,7 @@ function EditModal({
               className="block text-[12px] font-semibold mb-1.5"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
-              Date
+              {t('checkin.date')}
             </label>
             <input
               type="date"
@@ -359,12 +362,12 @@ function EditModal({
               className="block text-[12px] font-semibold mb-1.5"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
-              Blood Pressure (mmHg)
+              {t('readings.bloodPressure')}
             </label>
             <div className="flex gap-3 items-center">
               <input
                 type="number"
-                placeholder="Systolic"
+                placeholder={t('checkin.systolic')}
                 value={form.systolic}
                 onChange={(e) => onChange('systolic', e.target.value)}
                 min={60}
@@ -380,7 +383,7 @@ function EditModal({
               </span>
               <input
                 type="number"
-                placeholder="Diastolic"
+                placeholder={t('checkin.diastolic')}
                 value={form.diastolic}
                 onChange={(e) => onChange('diastolic', e.target.value)}
                 min={40}
@@ -400,7 +403,7 @@ function EditModal({
               className="block text-[12px] font-semibold mb-1.5"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
-              Weight (lbs)
+              {t('readings.weightLbs')}
             </label>
             <input
               type="number"
@@ -423,7 +426,7 @@ function EditModal({
               className="block text-[12px] font-semibold mb-2"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
-              Medication Taken?
+              {t('readings.medicationTaken')}
             </label>
             <div className="flex gap-3">
               {(['yes', 'no', ''] as const).map((val) => (
@@ -446,7 +449,7 @@ function EditModal({
                         : 'var(--brand-text-muted)',
                   }}
                 >
-                  {val === '' ? 'N/A' : val === 'yes' ? 'Yes' : 'No'}
+                  {val === '' ? t('common.na') : val === 'yes' ? t('common.yes') : t('common.no')}
                 </button>
               ))}
             </div>
@@ -458,7 +461,7 @@ function EditModal({
               className="block text-[12px] font-semibold mb-2"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
-              Symptoms
+              {t('readings.symptoms')}
             </label>
             <div className="flex flex-wrap gap-2">
               {SYMPTOM_OPTIONS.map((s) => {
@@ -491,12 +494,12 @@ function EditModal({
               className="block text-[12px] font-semibold mb-1.5"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
-              Notes
+              {t('readings.notes')}
             </label>
             <textarea
               value={form.notes}
               onChange={(e) => onChange('notes', e.target.value)}
-              placeholder="Any additional notes..."
+              placeholder={t('readings.notesPlaceholder')}
               rows={3}
               className="w-full px-3 py-2.5 rounded-xl border text-[14px] outline-none resize-none leading-relaxed"
               style={{
@@ -522,7 +525,7 @@ function EditModal({
                 color: 'var(--brand-text-secondary)',
               }}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               onClick={onSave}
@@ -530,7 +533,7 @@ function EditModal({
               className="flex-1 h-11 rounded-full text-white text-sm font-bold disabled:opacity-60 transition"
               style={{ backgroundColor: 'var(--brand-primary-purple)' }}
             >
-              {saving ? 'Saving...' : 'Save Changes'}
+              {saving ? t('common.saving') : t('readings.saveChanges')}
             </button>
           </div>
         </div>
@@ -551,6 +554,7 @@ function DeleteConfirm({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useLanguage();
   return (
     <motion.div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -574,10 +578,10 @@ function DeleteConfirm({
           <Trash2 className="w-5 h-5 text-red-500" />
         </div>
         <h3 className="text-[16px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-          Delete this reading?
+          {t('readings.deleteReading')}
         </h3>
         <p className="text-[13px] mb-6 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
-          This cannot be undone. Your care team&apos;s records will be updated.
+          {t('readings.deleteWarning')}
         </p>
         {error && (
           <p className="text-[13px] mb-4 text-center" style={{ color: 'var(--brand-alert-red)' }}>
@@ -593,7 +597,7 @@ function DeleteConfirm({
               color: 'var(--brand-text-secondary)',
             }}
           >
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             onClick={onConfirm}
@@ -601,7 +605,7 @@ function DeleteConfirm({
             className="flex-1 h-11 rounded-full text-white text-sm font-bold disabled:opacity-60"
             style={{ backgroundColor: '#DC2626' }}
           >
-            {deleting ? 'Deleting...' : 'Delete'}
+            {deleting ? t('common.deleting') : t('common.delete')}
           </button>
         </div>
       </motion.div>
@@ -611,6 +615,7 @@ function DeleteConfirm({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function ReadingsPage() {
+  const { t } = useLanguage();
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [editEntry, setEditEntry] = useState<Entry | null>(null);
@@ -727,10 +732,10 @@ export default function ReadingsPage() {
                 className="text-[18px] font-bold leading-tight"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
-                My Readings
+                {t('readings.title')}
               </h1>
               <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
-                {loading ? 'Loading...' : `${entries.length} total entr${entries.length === 1 ? 'y' : 'ies'}`}
+                {loading ? 'Loading...' : `${entries.length} ${entries.length === 1 ? t('readings.totalEntry') : t('readings.totalEntries')}`}
               </p>
             </div>
           </div>
@@ -741,7 +746,7 @@ export default function ReadingsPage() {
             style={{ backgroundColor: 'var(--brand-primary-purple)' }}
           >
             <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">New Check-In</span>
+            <span className="hidden sm:inline">{t('readings.newCheckin')}</span>
           </Link>
         </div>
       </div>
@@ -765,10 +770,10 @@ export default function ReadingsPage() {
               className="text-[16px] font-bold mb-1.5"
               style={{ color: 'var(--brand-text-primary)' }}
             >
-              No readings yet
+              {t('readings.noReadings')}
             </p>
             <p className="text-[13px] mb-5" style={{ color: 'var(--brand-text-muted)' }}>
-              Submit your first check-in to start tracking your blood pressure.
+              {t('readings.noReadingsDesc')}
             </p>
             <Link
               href="/check-in"
@@ -776,7 +781,7 @@ export default function ReadingsPage() {
               style={{ backgroundColor: 'var(--brand-primary-purple)' }}
             >
               <Plus className="w-4 h-4" />
-              Start Check-In
+              {t('readings.startCheckin')}
             </Link>
           </div>
         ) : (

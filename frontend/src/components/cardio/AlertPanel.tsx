@@ -11,6 +11,7 @@ import {
 } from 'recharts';
 import { motion } from 'framer-motion';
 import { useState } from 'react';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 export interface Alert {
   id: string;
@@ -102,6 +103,7 @@ export default function AlertPanel({
   onReview,
   onSchedule,
 }: AlertPanelProps) {
+  const { t } = useLanguage();
   const [reviewedSuccess, setReviewedSuccess] = useState(false);
 
   const isLevel1 = alert.level === 'L1';
@@ -177,7 +179,7 @@ export default function AlertPanel({
             style={{ color: 'var(--brand-primary-purple)' }}
           />
           <p className="text-sm" style={{ color: 'var(--brand-text-muted)' }}>
-            Loading alert details...
+            {t('provider.loadingAlert')}
           </p>
         </div>
       ) : (
@@ -194,7 +196,7 @@ export default function AlertPanel({
                   className="text-base font-semibold"
                   style={{ color: 'var(--brand-text-primary)' }}
                 >
-                  Care Team Alert
+                  {t('provider.careTeamAlert')}
                 </h2>
               </div>
               <div className="flex items-center gap-3">
@@ -220,7 +222,7 @@ export default function AlertPanel({
               style={{ color: 'var(--brand-text-muted)' }}
             >
               {isLevel1
-                ? 'Follow up required within 24 hours'
+                ? t('provider.followUpRequired')
                 : 'Immediate action required'}
             </p>
           </div>
@@ -287,7 +289,7 @@ export default function AlertPanel({
                 className="text-[13px] font-semibold mb-3"
                 style={{ color: textColor }}
               >
-                Why this alert was triggered:
+                {t('provider.whyTriggered') + ':'}
               </h4>
               <div className="space-y-2">
                 {(detail?.triggerReasons ?? [`Elevated BP: ${alert.reading}`]).map(
@@ -325,7 +327,7 @@ export default function AlertPanel({
                   color: 'white',
                 }}
               >
-                AI Summary
+                {t('provider.aiSummary')}
               </div>
               <p
                 className="text-[13px] leading-5"
@@ -370,7 +372,7 @@ export default function AlertPanel({
                 className="text-[13px] font-semibold mb-3"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
-                7-Day BP Trend
+                {t('provider.sevenDayBpTrend')}
               </h4>
               <div style={{ width: '100%', height: 100 }}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -429,7 +431,7 @@ export default function AlertPanel({
               whileTap={{ scale: 0.97 }}
             >
               <CheckCircle2 className="w-4 h-4" />
-              Mark as Reviewed
+              {t('provider.markReviewed')}
             </motion.button>
             {alert.followUpScheduledAt ? (
               <div
@@ -458,7 +460,7 @@ export default function AlertPanel({
                 whileHover={{ scale: 1.02, backgroundColor: '#f5f0ff' }}
                 whileTap={{ scale: 0.97 }}
               >
-                Schedule Follow-up Call
+                {t('provider.scheduleFollowUp')}
               </motion.button>
             )}
           </div>

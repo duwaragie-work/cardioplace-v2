@@ -7,5 +7,5 @@ model Conversation {
     embedding   Unsupported("vector(1024)")?
     timestamp   DateTime                     @default(now())
 
-    @@index([sessionId])
+  @@index([sessionId])
 }

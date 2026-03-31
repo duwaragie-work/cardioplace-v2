@@ -1,24 +1,23 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { Bell, Menu, X } from 'lucide-react';
+import { Bell, Menu, X, Globe } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { getAlerts } from '@/lib/services/journal.service';
-
-const BASE_LINKS = [
-  { label: 'Home', href: '/dashboard' },
-  { label: 'Check-In', href: '/check-in' },
-  { label: 'Chat', href: '/chat' },
-];
+import { useLanguage } from '@/contexts/LanguageContext';
+import { ALL_LOCALES, isLocaleSupported, type LocaleCode } from '@/i18n';
 
 export default function Navbar() {
   const pathname = usePathname();
   const { user, isAuthenticated } = useAuth();
+  const { locale, setLocale, t } = useLanguage();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
+  const [langOpen, setLangOpen] = useState(false);
+  const langRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -30,6 +29,17 @@ export default function Navbar() {
       .catch(() => {});
   }, [isAuthenticated]);
 
+  // Close language dropdown on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (langRef.current && !langRef.current.contains(e.target as Node)) {
+        setLangOpen(false);
+      }
+    }
+    if (langOpen) document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [langOpen]);
+
   const userInitials =
     user?.name
       ?.split(' ')
@@ -38,12 +48,24 @@ export default function Navbar() {
       .toUpperCase()
       .slice(0, 2) ?? 'U';
 
+  const BASE_LINKS = [
+    { labelKey: 'nav.home' as const, href: '/dashboard' },
+    { labelKey: 'nav.checkin' as const, href: '/check-in' },
+    { labelKey: 'nav.chat' as const, href: '/chat' },
+  ];
+
   const links = [
     ...BASE_LINKS,
     ...(user?.roles?.includes('SUPER_ADMIN')
-      ? [{ label: 'Provider', href: '/provider/dashboard' }]
+      ? [
+          { labelKey: 'nav.provider' as const, href: '/provider/dashboard' },
+          { labelKey: 'nav.patients' as const, href: '/provider/patients' },
+          { labelKey: 'nav.calls' as const, href: '/provider/scheduled-calls' },
+        ]
       : []),
   ];
+
+  const currentLocale = ALL_LOCALES.find((l) => l.code === locale);
 
   return (
     <>
@@ -88,7 +110,7 @@ export default function Navbar() {
                     : 'var(--brand-text-secondary)',
                 }}
               >
-                {link.label}
+                {t(link.labelKey)}
                 {active && (
                   <div
                     className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full"
@@ -100,8 +122,76 @@ export default function Navbar() {
           })}
         </div>
 
-        {/* Right: Bell + Avatar + Hamburger */}
+        {/* Right: Lang + Bell + Avatar + Hamburger */}
         <div className="flex items-center gap-3">
+          {/* Language Dropdown */}
+          <div className="relative" ref={langRef}>
+            <button
+              onClick={() => setLangOpen((v) => !v)}
+              className="flex items-center gap-1 h-8 px-2 rounded-lg text-[12px] font-semibold transition hover:opacity-80"
+              style={{
+                backgroundColor: langOpen ? 'var(--brand-primary-purple-light)' : 'transparent',
+                color: langOpen ? 'var(--brand-primary-purple)' : 'var(--brand-text-muted)',
+              }}
+              aria-label="Change language"
+            >
+              <Globe className="w-4 h-4" />
+              <span className="hidden sm:inline uppercase">{locale}</span>
+            </button>
+
+            {langOpen && (
+              <div
+                className="absolute right-0 top-full mt-1 w-52 bg-white rounded-xl overflow-hidden z-50"
+                style={{
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+                  border: '1px solid var(--brand-border)',
+                }}
+              >
+                {ALL_LOCALES.map((l) => {
+                  const supported = isLocaleSupported(l.code);
+                  const active = locale === l.code;
+                  return (
+                    <button
+                      key={l.code}
+                      onClick={() => {
+                        setLocale(l.code);
+                        setLangOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-[13px] transition hover:bg-gray-50"
+                      style={{
+                        backgroundColor: active ? 'var(--brand-primary-purple-light)' : undefined,
+                        color: active
+                          ? 'var(--brand-primary-purple)'
+                          : 'var(--brand-text-primary)',
+                        fontWeight: active ? 700 : 500,
+                      }}
+                    >
+                      <span className="text-base">{l.flag}</span>
+                      <span className="flex-1">{l.nativeName}</span>
+                      {!supported && (
+                        <span
+                          className="px-1.5 py-0.5 rounded text-[10px] font-bold"
+                          style={{
+                            backgroundColor: 'var(--brand-warning-amber-light)',
+                            color: 'var(--brand-warning-amber)',
+                          }}
+                        >
+                          {t('common.comingSoon')}
+                        </span>
+                      )}
+                      {active && (
+                        <span
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: 'var(--brand-primary-purple)' }}
+                        />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           <Link href="/notifications" className="relative p-1" aria-label="Alerts">
             <Bell
               className="w-5 h-5"
@@ -168,7 +258,7 @@ export default function Navbar() {
                   }}
                   onClick={() => setMobileOpen(false)}
                 >
-                  {link.label}
+                  {t(link.labelKey)}
                 </Link>
               );
             })}

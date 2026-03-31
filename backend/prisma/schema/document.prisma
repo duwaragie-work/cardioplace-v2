@@ -1,5 +1,5 @@
 model Document {
-  id                 String             @id @default(uuid())
+  id                 String           @id @default(uuid())
   sourceName         String
   sourceType         String
   sourceFormat       String
@@ -7,8 +7,8 @@ model Document {
   sourceChunkCount   Int
   sourceResourceLink String
   sourceTags         String[]
-  sourceActiveStatus Boolean         @default(true)
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
+  sourceActiveStatus Boolean          @default(true)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
   chunks             DocumentVector[]
 }

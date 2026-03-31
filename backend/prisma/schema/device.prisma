@@ -1,13 +1,11 @@
 model Device {
-  id         String   @id @default(ulid())
-  deviceId   String   @unique // UUID from browser localStorage / mobile SDK / watch SDK
-  platform   String? // OS: "web" | "ios" | "android" | "watchos" | "wearos"
-  deviceType String? // Category: "browser" | "phone" | "tablet" | "watch" | "wearable"
-  deviceName String? // e.g. "Apple Watch Ultra 2", "iPhone 15 Pro"
-  userAgent  String?
-  lastSeenAt DateTime @default(now())
-
+  id          String       @id @default(ulid())
+  deviceId    String       @unique
+  platform    String?
+  deviceType  String?
+  deviceName  String?
+  userAgent   String?
+  lastSeenAt  DateTime     @default(now())
+  createdAt   DateTime     @default(now())
   userDevices UserDevice[]
-
-  createdAt DateTime @default(now())
 }

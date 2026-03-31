@@ -1,11 +1,45 @@
+model User {
+  id                      String                   @id @default(ulid())
+  email                   String?                  @unique
+  name                    String?
+  pwdhash                 String?
+  dateOfBirth             DateTime?
+  timezone                String?
+  communicationPreference CommunicationPreference?
+  preferredLanguage       String?                  @default("en")
+  riskTier                RiskTier?                @default(STANDARD)
+  diagnosisDate           DateTime?
+  primaryCondition        String?
+  isVerified              Boolean                  @default(false)
+  roles                   UserRole[]               @default([GUEST])
+  onboardingStatus        OnboardingStatus         @default(NOT_COMPLETED)
+  accountStatus           AccountStatus            @default(ACTIVE)
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  accounts                Account[]
+  authLogs                AuthLog[]
+  baselineSnapshots       BaselineSnapshot[]
+  contentSubmitted        Content[]                @relation("ContentSubmittedBy")
+  contentRatings          ContentRating[]          @relation("ContentRatings")
+  contentReviews          ContentReview[]          @relation("ContentReviewedBy")
+  deviationAlerts         DeviationAlert[]
+  escalationEvents        EscalationEvent[]
+  journalEntries          JournalEntry[]
+  notifications           Notification[]
+  refreshTokens           RefreshToken[]
+  scheduledCalls          ScheduledCall[]
+  sessions                Session[]
+  userDevices             UserDevice[]
+}
+
 enum UserRole {
   GUEST
   REGISTERED_USER
   VERIFIED_USER
   CONTENT_ADMIN
   ARTICLE_ADMIN
-  ARTICLE_APPROVER  
-  CONTENT_APPROVER  // Reviews content (editorial + clinical approval)
+  ARTICLE_APPROVER
+  CONTENT_APPROVER
   KB_UPLOADER
   KB_APPROVER
   CHAT_REVIEWER
@@ -27,45 +61,4 @@ enum AccountStatus {
   ACTIVE
   BLOCKED
   SUSPENDED
-}
-
-model User {
-  id      String  @id @default(ulid())
-  email   String? @unique
-  name    String?
-  pwdhash String?
-
-  // Profile fields set during / after onboarding
-  dateOfBirth             DateTime?
-  timezone                String?                  // IANA identifier, e.g. "Asia/Colombo"
-  communicationPreference CommunicationPreference?
-  preferredLanguage       String?                  @default("en")
-  riskTier                RiskTier?                @default(STANDARD)
-  diagnosisDate           DateTime?
-  primaryCondition        String?
-
-  isVerified       Boolean          @default(false)
-  roles            UserRole[]       @default([GUEST])
-  onboardingStatus OnboardingStatus @default(NOT_COMPLETED)
-  accountStatus    AccountStatus    @default(ACTIVE)
-
-  accounts      Account[]
-  refreshTokens RefreshToken[]
-  authLogs      AuthLog[] 
-  sessions      Session[]
-  baselineSnapshots BaselineSnapshot[]
-  userDevices   UserDevice[]
-
-  // Content Library relations
-  contentSubmitted Content[]       @relation("ContentSubmittedBy")
-  contentReviews   ContentReview[] @relation("ContentReviewedBy")
-  contentRatings   ContentRating[] @relation("ContentRatings")
-
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  journalEntries   JournalEntry[]
-  deviationAlerts  DeviationAlert[]
-  escalationEvents EscalationEvent[]
-  notifications    Notification[]
-  scheduledCalls   ScheduledCall[]
 }

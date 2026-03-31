@@ -1,13 +1,12 @@
 model EmergencyEvent {
-  id         String   @id @default(uuid())
-  userId     String?
-  sessionId  String?
-  prompt     String
-  isEmergency Boolean
-  emergency_situation    String?
-  createdAt  DateTime @default(now())
+  id                  String   @id @default(uuid())
+  userId              String?
+  sessionId           String?
+  prompt              String
+  isEmergency         Boolean
+  emergency_situation String?
+  createdAt           DateTime @default(now())
 
   @@index([userId])
   @@index([sessionId])
 }
-

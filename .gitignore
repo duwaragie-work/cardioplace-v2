@@ -13,6 +13,10 @@ frontend/dist/
 frontend/.env.local
 frontend/.env.production
 
+# Python
+__pycache__/
+*.pyc
+
 # OS
 .DS_Store
 
