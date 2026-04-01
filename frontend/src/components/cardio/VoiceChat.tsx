@@ -1,158 +1,237 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, MicOff, X, Send, CheckCircle, AlertCircle, PhoneCall } from 'lucide-react';
+import { Mic, MicOff, X, Send, CheckCircle, AlertCircle, PhoneCall, Pencil, Trash2, Heart } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import {
   useVoiceSession,
   type SessionState,
-  type TranscriptLine,
   type CheckinSummary,
 } from '@/hooks/useVoiceSession';
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── Sound Wave Bars ──────────────────────────────────────────────────────────
 
-function PulsingOrb({ state }: { state: SessionState }) {
+function SoundWave({ color, count = 5 }: { color: string; count?: number }) {
+  return (
+    <div className="flex items-center justify-center gap-[3px] h-8">
+      {Array.from({ length: count }).map((_, i) => (
+        <motion.div
+          key={i}
+          className="w-[3px] rounded-full"
+          style={{ backgroundColor: color }}
+          animate={{
+            height: [8, 24 + Math.random() * 12, 8],
+          }}
+          transition={{
+            duration: 0.6 + Math.random() * 0.4,
+            repeat: Infinity,
+            ease: 'easeInOut',
+            delay: i * 0.08,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ── Animated Orb ─────────────────────────────────────────────────────────────
+
+function VoiceOrb({ state }: { state: SessionState }) {
   const isListening = state === 'listening';
   const isSpeaking = state === 'agent_speaking';
   const isProcessing = state === 'processing';
+  const isActive = isListening || isSpeaking;
+
+  const orbColor = isListening
+    ? '#ef4444'
+    : isSpeaking
+    ? '#7B00E0'
+    : isProcessing
+    ? '#f59e0b'
+    : '#7B00E0';
+
+  const orbGradient = isListening
+    ? 'linear-gradient(135deg, #ef4444, #dc2626)'
+    : isSpeaking
+    ? 'linear-gradient(135deg, #7B00E0, #9333EA)'
+    : isProcessing
+    ? 'linear-gradient(135deg, #f59e0b, #d97706)'
+    : 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)';
 
   return (
-    <div className="relative flex items-center justify-center w-28 h-28 mx-auto">
-      {/* Outer pulse ring */}
-      {(isListening || isSpeaking) && (
-        <motion.div
-          className="absolute inset-0 rounded-full"
-          style={{
-            background: isListening
-              ? 'rgba(239,68,68,0.15)'
-              : 'rgba(123,0,224,0.15)',
-          }}
-          animate={{ scale: [1, 1.35, 1] }}
-          transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-        />
+    <div className="relative flex items-center justify-center" style={{ width: 180, height: 180 }}>
+      {/* Outer glow rings */}
+      {isActive && (
+        <>
+          <motion.div
+            className="absolute inset-0 rounded-full"
+            style={{ background: `${orbColor}08` }}
+            animate={{ scale: [1, 1.4, 1], opacity: [0.4, 0, 0.4] }}
+            transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          <motion.div
+            className="absolute rounded-full"
+            style={{ inset: 16, background: `${orbColor}10` }}
+            animate={{ scale: [1, 1.3, 1], opacity: [0.6, 0.1, 0.6] }}
+            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut', delay: 0.3 }}
+          />
+          <motion.div
+            className="absolute rounded-full"
+            style={{ inset: 32, background: `${orbColor}18` }}
+            animate={{ scale: [1, 1.2, 1], opacity: [0.8, 0.2, 0.8] }}
+            transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut', delay: 0.5 }}
+          />
+        </>
       )}
-      {/* Middle ring */}
-      {(isListening || isSpeaking) && (
+
+      {/* Processing ring */}
+      {isProcessing && (
         <motion.div
           className="absolute rounded-full"
           style={{
-            inset: '12px',
-            background: isListening
-              ? 'rgba(239,68,68,0.2)'
-              : 'rgba(123,0,224,0.2)',
+            inset: 20,
+            border: `3px solid transparent`,
+            borderTopColor: orbColor,
+            borderRightColor: `${orbColor}40`,
           }}
-          animate={{ scale: [1, 1.2, 1] }}
-          transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut', delay: 0.2 }}
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1.2, repeat: Infinity, ease: 'linear' }}
         />
       )}
-      {/* Core circle */}
-      <div
-        className="relative z-10 w-16 h-16 rounded-full flex items-center justify-center"
+
+      {/* Core orb */}
+      <motion.div
+        className="relative z-10 rounded-full flex items-center justify-center"
         style={{
-          background: isListening
-            ? 'linear-gradient(135deg, #ef4444, #dc2626)'
-            : isSpeaking
-            ? 'linear-gradient(135deg, #7B00E0, #9333EA)'
-            : isProcessing
-            ? 'linear-gradient(135deg, #f59e0b, #d97706)'
-            : 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
-          boxShadow: isListening
-            ? '0 4px 24px rgba(239,68,68,0.4)'
-            : isSpeaking
-            ? '0 4px 24px rgba(123,0,224,0.4)'
-            : '0 4px 20px rgba(123,0,224,0.25)',
+          width: 96,
+          height: 96,
+          background: orbGradient,
+          boxShadow: `0 8px 40px ${orbColor}50`,
         }}
+        animate={isActive ? { scale: [1, 1.06, 1] } : { scale: 1 }}
+        transition={isActive ? { duration: 1.4, repeat: Infinity, ease: 'easeInOut' } : {}}
       >
         {isProcessing ? (
           <motion.div
-            className="w-5 h-5 border-2 border-white rounded-full border-t-transparent"
+            className="w-8 h-8 border-3 border-white rounded-full border-t-transparent"
             animate={{ rotate: 360 }}
             transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
           />
+        ) : isSpeaking ? (
+          <SoundWave color="white" count={5} />
         ) : isListening ? (
-          <Mic className="w-7 h-7 text-white" />
+          <Mic className="w-10 h-10 text-white" />
         ) : (
-          <MicOff className="w-6 h-6 text-white opacity-80" />
+          <Mic className="w-9 h-9 text-white opacity-70" />
         )}
-      </div>
+      </motion.div>
     </div>
   );
 }
+
+// ── State Label ──────────────────────────────────────────────────────────────
 
 function StateLabel({ state }: { state: SessionState }) {
-  const labels: Record<SessionState, string> = {
-    idle: 'Ready to start',
-    connecting: 'Connecting…',
-    ready: 'Connected',
-    listening: 'Listening…',
-    agent_speaking: 'AI is speaking',
-    processing: 'Processing…',
-    checkin_confirm: 'Check-in complete',
-    error: 'Error',
+  const config: Record<SessionState, { text: string; color: string; sub?: string }> = {
+    idle: { text: 'Ready to talk', color: 'var(--brand-text-muted)', sub: 'Tap start to begin' },
+    connecting: { text: 'Connecting...', color: 'var(--brand-text-muted)' },
+    ready: { text: 'Connected', color: 'var(--brand-accent-teal)' },
+    listening: { text: 'Listening to you', color: '#ef4444', sub: 'Speak naturally' },
+    agent_speaking: { text: 'AI is speaking', color: 'var(--brand-primary-purple)', sub: 'Listening...' },
+    processing: { text: 'Thinking...', color: '#f59e0b' },
+    checkin_confirm: { text: 'Check-in saved', color: 'var(--brand-success-green)' },
+    error: { text: 'Something went wrong', color: '#ef4444' },
   };
-  const colors: Record<SessionState, string> = {
-    idle: 'var(--brand-text-muted)',
-    connecting: 'var(--brand-text-muted)',
-    ready: 'var(--brand-accent-teal)',
-    listening: '#ef4444',
-    agent_speaking: 'var(--brand-primary-purple)',
-    processing: '#f59e0b',
-    checkin_confirm: 'var(--brand-success-green)',
-    error: '#ef4444',
-  };
+  const c = config[state];
   return (
-    <p className="text-[13px] font-semibold text-center mt-3" style={{ color: colors[state] }}>
-      {labels[state]}
-    </p>
-  );
-}
-
-function TranscriptArea({ lines }: { lines: TranscriptLine[] }) {
-  const endRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [lines]);
-
-  if (lines.length === 0) return null;
-
-  return (
-    <div
-      className="w-full max-w-md mx-auto rounded-2xl overflow-y-auto space-y-2 p-4"
-      style={{
-        maxHeight: '200px',
-        backgroundColor: 'white',
-        border: '1px solid var(--brand-border)',
-        boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
-      }}
-    >
-      {lines.map((line) => (
-        <div
-          key={line.id}
-          className={`flex ${line.speaker === 'user' ? 'justify-end' : 'justify-start'}`}
-        >
-          <span
-            className="inline-block px-3 py-1.5 rounded-xl text-[13px] max-w-[85%]"
-            style={{
-              background:
-                line.speaker === 'user'
-                  ? 'linear-gradient(135deg, #7B00E0, #9333EA)'
-                  : 'var(--brand-primary-purple-light)',
-              color:
-                line.speaker === 'user' ? 'white' : 'var(--brand-text-primary)',
-              opacity: line.isFinal ? 1 : 0.65,
-            }}
-          >
-            {line.text}
-          </span>
-        </div>
-      ))}
-      <div ref={endRef} />
+    <div className="text-center">
+      <motion.p
+        key={state}
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="text-[15px] font-bold"
+        style={{ color: c.color }}
+      >
+        {c.text}
+      </motion.p>
+      {c.sub && (
+        <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
+          {c.sub}
+        </p>
+      )}
     </div>
   );
 }
+
+// ── CRUD Action Overlay ──────────────────────────────────────────────────────
+
+function ActionOverlay({ type }: { type: string }) {
+  const isDelete = type === 'deleting_checkin';
+  const isUpdate = type === 'updating_checkin';
+  const color = isDelete ? '#ef4444' : isUpdate ? '#7B00E0' : '#f59e0b';
+  const gradient = isDelete
+    ? 'linear-gradient(135deg, #ef4444, #dc2626)'
+    : isUpdate ? 'linear-gradient(135deg, #7B00E0, #9333EA)'
+    : 'linear-gradient(135deg, #f59e0b, #d97706)';
+  const label = isDelete ? 'Deleting reading' : isUpdate ? 'Updating reading' : 'Saving check-in';
+  const sub = isDelete ? 'Removing your entry...' : isUpdate ? 'Updating your entry...' : 'Recording your data...';
+  const Icon = isDelete ? Trash2 : isUpdate ? Pencil : Heart;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="absolute inset-0 z-20 flex items-center justify-center"
+      style={{ backgroundColor: 'rgba(250,251,255,0.94)', backdropFilter: 'blur(8px)' }}
+    >
+      <div className="text-center">
+        {/* Orbiting dots */}
+        <div className="relative flex items-center justify-center mx-auto" style={{ width: 120, height: 120 }}>
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <motion.div
+              key={i}
+              className="absolute w-2.5 h-2.5 rounded-full"
+              style={{ backgroundColor: color }}
+              animate={{
+                x: [Math.cos((i / 6) * Math.PI * 2) * 48, Math.cos(((i + 6) / 6) * Math.PI * 2) * 48],
+                y: [Math.sin((i / 6) * Math.PI * 2) * 48, Math.sin(((i + 6) / 6) * Math.PI * 2) * 48],
+                opacity: [0.2, 0.8, 0.2],
+                scale: [0.6, 1.1, 0.6],
+              }}
+              transition={{ duration: 2.5, repeat: Infinity, ease: 'linear', delay: i * 0.15 }}
+            />
+          ))}
+          <motion.div
+            className="relative z-10 w-16 h-16 rounded-full flex items-center justify-center"
+            style={{ background: gradient, boxShadow: `0 8px 32px ${color}40` }}
+            animate={{ scale: [1, 1.1, 1] }}
+            transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <motion.div
+              animate={isDelete ? { rotate: [0, -8, 8, 0] } : { rotate: 360 }}
+              transition={isDelete ? { duration: 0.5, repeat: Infinity } : { duration: 2, repeat: Infinity, ease: 'linear' }}
+            >
+              <Icon className="w-7 h-7 text-white" />
+            </motion.div>
+          </motion.div>
+        </div>
+
+        <p className="text-[16px] font-bold mt-4" style={{ color }}>{label}</p>
+        <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>{sub}</p>
+
+        {/* Progress bar */}
+        <div className="w-48 mx-auto mt-3 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: `${color}15` }}>
+          <motion.div className="h-full rounded-full" style={{ backgroundColor: color }} animate={{ x: ['-100%', '100%'] }} transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }} />
+        </div>
+        <p className="text-[10px] mt-3" style={{ color: 'var(--brand-text-muted)' }}>AI will resume automatically</p>
+      </div>
+    </motion.div>
+  );
+}
+
+// ── Check-in Success Card ────────────────────────────────────────────────────
 
 function CheckinCard({
   summary,
@@ -161,60 +240,78 @@ function CheckinCard({
   summary: CheckinSummary;
   onDismiss: () => void;
 }) {
+  // Auto-dismiss after 4 seconds
+  useEffect(() => {
+    const timer = setTimeout(onDismiss, 4000);
+    return () => clearTimeout(timer);
+  }, [onDismiss]);
+
   return (
     <motion.div
-      initial={{ opacity: 0, y: 16, scale: 0.97 }}
+      initial={{ opacity: 0, y: 20, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      className="w-full max-w-md mx-auto rounded-2xl p-5"
-      style={{
-        backgroundColor: 'white',
-        border: '1.5px solid var(--brand-border)',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.09)',
-      }}
+      exit={{ opacity: 0, y: -10, scale: 0.95 }}
+      className="w-full max-w-sm mx-auto"
     >
-      {/* Header */}
-      <div className="flex items-center gap-2 mb-4">
-        {summary.saved ? (
-          <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-success-green)' }} />
-        ) : (
-          <AlertCircle className="w-5 h-5 text-red-500" />
-        )}
-        <p className="font-bold text-[15px]" style={{ color: 'var(--brand-text-primary)' }}>
-          {summary.saved ? 'Check-in saved!' : 'Could not save check-in'}
-        </p>
+      {/* Success animation */}
+      <div className="text-center mb-5">
+        <motion.div
+          className="w-20 h-20 mx-auto rounded-full flex items-center justify-center"
+          style={{
+            background: summary.saved
+              ? 'linear-gradient(135deg, #16A34A, #22c55e)'
+              : 'linear-gradient(135deg, #ef4444, #dc2626)',
+            boxShadow: summary.saved
+              ? '0 8px 32px rgba(22,163,74,0.3)'
+              : '0 8px 32px rgba(239,68,68,0.3)',
+          }}
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          transition={{ type: 'spring', stiffness: 200, damping: 12, delay: 0.1 }}
+        >
+          {summary.saved ? (
+            <CheckCircle className="w-10 h-10 text-white" />
+          ) : (
+            <AlertCircle className="w-10 h-10 text-white" />
+          )}
+        </motion.div>
+        <motion.p
+          className="text-[17px] font-bold mt-3"
+          style={{ color: 'var(--brand-text-primary)' }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+        >
+          {summary.saved ? 'Check-in saved!' : 'Could not save'}
+        </motion.p>
       </div>
 
-      {/* Values */}
-      <div className="grid grid-cols-2 gap-3 mb-4">
+      {/* Values grid */}
+      <motion.div
+        className="grid grid-cols-2 gap-2.5"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.4 }}
+      >
         {summary.systolicBP != null && summary.diastolicBP != null && (
-          <div
-            className="rounded-xl p-3 text-center"
-            style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
-          >
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1"
-               style={{ color: 'var(--brand-text-muted)' }}>
+          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wide mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
               Blood Pressure
             </p>
             <p className="text-[18px] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>
               {summary.systolicBP}/{summary.diastolicBP}
             </p>
-            <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>mmHg</p>
           </div>
         )}
 
-        {summary.weight != null && (
-          <div
-            className="rounded-xl p-3 text-center"
-            style={{ backgroundColor: 'var(--brand-accent-teal-light)' }}
-          >
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1"
-               style={{ color: 'var(--brand-text-muted)' }}>
+        {summary.weight != null && summary.weight > 0 && (
+          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-accent-teal-light)' }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wide mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
               Weight
             </p>
             <p className="text-[18px] font-bold" style={{ color: 'var(--brand-accent-teal)' }}>
-              {summary.weight}
+              {summary.weight} <span className="text-[11px] font-medium">lbs</span>
             </p>
-            <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>lbs</p>
           </div>
         )}
 
@@ -226,55 +323,51 @@ function CheckinCard({
               : 'var(--brand-alert-red-light)',
           }}
         >
-          <p className="text-[11px] font-semibold uppercase tracking-wide mb-1"
-             style={{ color: 'var(--brand-text-muted)' }}>
+          <p className="text-[10px] font-semibold uppercase tracking-wide mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
             Medications
           </p>
           <p
             className="text-[14px] font-bold"
-            style={{
-              color: summary.medicationTaken
-                ? 'var(--brand-success-green)'
-                : 'var(--brand-alert-red)',
-            }}
+            style={{ color: summary.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red)' }}
           >
-            {summary.medicationTaken ? 'Taken ✓' : 'Missed'}
+            {summary.medicationTaken ? 'Taken' : 'Missed'}
           </p>
         </div>
 
         {summary.symptoms.length > 0 && (
-          <div
-            className="rounded-xl p-3 text-center"
-            style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}
-          >
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1"
-               style={{ color: 'var(--brand-text-muted)' }}>
+          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wide mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
               Symptoms
             </p>
-            <p className="text-[12px] font-medium" style={{ color: 'var(--brand-warning-amber)' }}>
+            <p className="text-[11px] font-semibold" style={{ color: 'var(--brand-warning-amber)' }}>
               {summary.symptoms.slice(0, 2).join(', ')}
               {summary.symptoms.length > 2 && ` +${summary.symptoms.length - 2}`}
             </p>
           </div>
         )}
-      </div>
+      </motion.div>
 
-      <button
-        onClick={onDismiss}
-        className="w-full py-2.5 rounded-xl text-[14px] font-semibold transition hover:opacity-90 active:scale-[0.98]"
-        style={{
-          background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
-          color: 'white',
-          boxShadow: '0 4px 14px rgba(123,0,224,0.28)',
-        }}
+      {/* Auto-dismiss progress */}
+      <motion.div
+        className="mt-4 h-1 rounded-full overflow-hidden"
+        style={{ backgroundColor: 'var(--brand-border)' }}
       >
-        Done
-      </button>
+        <motion.div
+          className="h-full rounded-full"
+          style={{ backgroundColor: summary.saved ? 'var(--brand-success-green)' : 'var(--brand-alert-red)' }}
+          initial={{ width: '100%' }}
+          animate={{ width: '0%' }}
+          transition={{ duration: 4, ease: 'linear' }}
+        />
+      </motion.div>
+      <p className="text-[10px] text-center mt-2" style={{ color: 'var(--brand-text-muted)' }}>
+        Returning to conversation...
+      </p>
     </motion.div>
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+// ── Main Component ───────────────────────────────────────────────────────────
 
 export default function VoiceChat({ onBack }: { onBack: () => void }) {
   const { token } = useAuth();
@@ -283,9 +376,9 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
 
   const {
     sessionState,
-    transcript,
     pendingCheckin,
     errorMessage,
+    actionType,
     start,
     sendText,
     end,
@@ -324,8 +417,8 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
 
   return (
     <div
-      className="flex flex-col h-full"
-      style={{ backgroundColor: 'var(--brand-background)' }}
+      className="flex flex-col h-full relative"
+      style={{ backgroundColor: '#FAFBFF' }}
     >
       {/* Header */}
       <div
@@ -345,8 +438,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
                 onClick={() => setMode(m)}
                 className="px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all"
                 style={{
-                  backgroundColor:
-                    mode === m ? 'var(--brand-primary-purple)' : 'transparent',
+                  backgroundColor: mode === m ? 'var(--brand-primary-purple)' : 'transparent',
                   color: mode === m ? 'white' : 'var(--brand-primary-purple)',
                 }}
               >
@@ -354,8 +446,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
               </button>
             ))}
           </div>
-
-</div>
+        </div>
 
         {/* Back to text button */}
         <button
@@ -374,8 +465,13 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
         </button>
       </div>
 
+      {/* CRUD Action Overlay */}
+      <AnimatePresence>
+        {actionType && <ActionOverlay type={actionType} />}
+      </AnimatePresence>
+
       {/* Body */}
-      <div className="flex-1 flex flex-col items-center justify-center gap-5 px-4 py-6 overflow-y-auto">
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 px-4 py-8">
         <AnimatePresence mode="wait">
           {sessionState === 'checkin_confirm' && pendingCheckin ? (
             <motion.div
@@ -393,41 +489,63 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="flex flex-col items-center gap-5 w-full"
+              className="flex flex-col items-center gap-4 w-full"
             >
               {/* Orb */}
-              <PulsingOrb state={sessionState} />
+              <VoiceOrb state={sessionState} />
+
+              {/* State label */}
               <StateLabel state={sessionState} />
+
+              {/* Sound wave visualization when active */}
+              <AnimatePresence>
+                {(sessionState === 'listening' || sessionState === 'agent_speaking') && (
+                  <motion.div
+                    initial={{ opacity: 0, scaleY: 0 }}
+                    animate={{ opacity: 1, scaleY: 1 }}
+                    exit={{ opacity: 0, scaleY: 0 }}
+                    className="flex items-center justify-center gap-4"
+                  >
+                    <SoundWave
+                      color={sessionState === 'listening' ? 'rgba(239,68,68,0.5)' : 'rgba(123,0,224,0.5)'}
+                      count={7}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Error message */}
               {sessionState === 'error' && errorMessage && (
-                <p
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
                   className="text-[13px] text-center max-w-xs px-4"
                   style={{ color: '#ef4444' }}
                 >
                   {errorMessage}
-                </p>
+                </motion.p>
               )}
 
               {/* Idle instructions */}
               {canStart && (
-                <p
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
                   className="text-[13px] text-center max-w-xs"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
                   {mode === 'checkin'
                     ? 'Tap start to record your blood pressure, weight, and medications by voice.'
-                    : 'Tap start to ask your cardiovascular health assistant anything by voice.'}
-                </p>
+                    : 'Tap start to talk with your cardiovascular health assistant.'}
+                </motion.p>
               )}
-
-              {/* Transcript */}
-              {transcript.length > 0 && <TranscriptArea lines={transcript} />}
 
               {/* Emergency notice */}
               {isActive && (
-                <div
-                  className="flex items-center gap-2 px-3 py-2 rounded-xl w-full max-w-md"
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl w-full max-w-sm"
                   style={{
                     backgroundColor: 'var(--brand-alert-red-light)',
                     border: '1px solid rgba(239,68,68,0.2)',
@@ -437,7 +555,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
                   <p className="text-[11px]" style={{ color: '#b91c1c' }}>
                     If you feel chest pain or severe shortness of breath, call 911 immediately.
                   </p>
-                </div>
+                </motion.div>
               )}
             </motion.div>
           )}
@@ -455,31 +573,31 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
             {canStart ? (
               <motion.button
                 onClick={() => void handleStart()}
-                className="flex items-center gap-2 px-8 py-3 rounded-2xl text-[14px] font-bold transition-all"
+                className="flex items-center gap-2.5 px-10 py-3.5 rounded-2xl text-[14px] font-bold transition-all"
                 style={{
                   background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
                   color: 'white',
-                  boxShadow: '0 4px 18px rgba(123,0,224,0.35)',
+                  boxShadow: '0 6px 24px rgba(123,0,224,0.35)',
                 }}
                 whileHover={{ scale: 1.04 }}
                 whileTap={{ scale: 0.96 }}
               >
-                <Mic className="w-4 h-4" />
+                <Mic className="w-5 h-5" />
                 Start voice {mode === 'checkin' ? 'check-in' : 'chat'}
               </motion.button>
             ) : (
               <motion.button
                 onClick={() => void handleEnd()}
-                className="flex items-center gap-2 px-8 py-3 rounded-2xl text-[14px] font-bold"
+                className="flex items-center gap-2.5 px-10 py-3.5 rounded-2xl text-[14px] font-bold"
                 style={{
                   background: 'linear-gradient(135deg, #ef4444, #dc2626)',
                   color: 'white',
-                  boxShadow: '0 4px 18px rgba(239,68,68,0.3)',
+                  boxShadow: '0 6px 24px rgba(239,68,68,0.3)',
                 }}
                 whileHover={{ scale: 1.04 }}
                 whileTap={{ scale: 0.96 }}
               >
-                <MicOff className="w-4 h-4" />
+                <MicOff className="w-5 h-5" />
                 End session
               </motion.button>
             )}
@@ -501,7 +619,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Or type a message…"
+              placeholder="Or type a message..."
               className="flex-1 bg-transparent text-[13px] outline-none py-1.5"
               style={{ color: 'var(--brand-text-primary)' }}
             />
@@ -520,10 +638,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
           </div>
         )}
 
-        <p
-          className="text-center text-[10px]"
-          style={{ color: 'var(--brand-text-muted)' }}
-        >
+        <p className="text-center text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>
           Powered by Gemini Live · Responses monitored by care team
         </p>
       </div>

@@ -25,6 +25,7 @@ import {
 } from '@/lib/services/chat.service';
 import {
   useVoiceSession,
+  type SessionState,
   type TranscriptLine,
   type CheckinSummary,
   type UpdateSummary,
@@ -46,6 +47,7 @@ interface Session {
   id: string;
   title: string;
   time: string;
+  isVoice?: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -405,8 +407,11 @@ function SidebarContent({
                   className={`w-full text-left px-3 py-2.5 rounded-xl transition-all cursor-pointer ${!isActive ? 'hover:bg-[#F3EEFB]' : ''}`}
                   style={{ backgroundColor: isActive ? 'var(--brand-primary-purple-light)' : undefined, borderLeft: isActive ? '2px solid var(--brand-primary-purple)' : '2px solid transparent' }}
                 >
-                  <p className="text-[13px] font-semibold truncate" style={{ color: isActive ? 'var(--brand-primary-purple)' : 'var(--brand-text-secondary)' }}>{s.title}</p>
-                  <p className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--brand-text-muted)' }}>{s.time}</p>
+                  <div className="flex items-center gap-1.5">
+                    {s.isVoice && <Mic className="w-3 h-3 shrink-0" style={{ color: isActive ? 'var(--brand-primary-purple)' : 'var(--brand-text-muted)' }} />}
+                    <p className="text-[13px] font-semibold truncate" style={{ color: isActive ? 'var(--brand-primary-purple)' : 'var(--brand-text-secondary)' }}>{s.title}</p>
+                  </div>
+                  <p className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--brand-text-muted)' }}>{s.isVoice ? `🎙 ${s.time}` : s.time}</p>
                 </button>
               );
             })}
@@ -581,6 +586,321 @@ function LiveTranscriptBubbles({ lines }: { lines: TranscriptLine[] }) {
   );
 }
 
+// ─── Voice Active Screen (replaces chat area during voice) ────────────────────
+
+function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, actionType }: {
+  state: SessionState;
+  pendingCheckin: CheckinSummary | null;
+  onDismissCheckin: () => void;
+  actionType: string | null;
+}) {
+  const isConnecting = state === 'connecting' || state === 'ready';
+  const isListening = state === 'listening';
+  const isSpeaking = state === 'agent_speaking';
+  const isProcessing = state === 'processing';
+  const isCheckin = state === 'checkin_confirm';
+  const isActive = isListening || isSpeaking;
+
+  const orbColor = isListening ? '#ef4444' : isSpeaking ? '#7B00E0' : isProcessing ? '#f59e0b' : '#7B00E0';
+  const orbGradient = isListening
+    ? 'linear-gradient(135deg, #ef4444, #dc2626)'
+    : isSpeaking ? 'linear-gradient(135deg, #7B00E0, #9333EA)'
+    : isProcessing ? 'linear-gradient(135deg, #f59e0b, #d97706)'
+    : 'linear-gradient(135deg, #7B00E0, #9333EA)';
+
+  // Auto-dismiss checkin after 3s — AI resumes talking, no user action needed
+  useEffect(() => {
+    if (!isCheckin || !pendingCheckin) return;
+    const timer = setTimeout(onDismissCheckin, 3000);
+    return () => clearTimeout(timer);
+  }, [isCheckin, pendingCheckin, onDismissCheckin]);
+
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center px-6 relative overflow-hidden" style={{ backgroundColor: '#FAFBFF' }}>
+
+      {/* Background ambient glow */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        <motion.div
+          className="absolute rounded-full"
+          style={{ width: 400, height: 400, left: '50%', top: '50%', x: '-50%', y: '-50%', background: `radial-gradient(circle, ${orbColor}06 0%, transparent 70%)` }}
+          animate={{ scale: [1, 1.2, 1] }}
+          transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+        />
+      </div>
+
+      <AnimatePresence mode="wait">
+
+        {/* ── CONNECTING / TURNING ON ── */}
+        {isConnecting && (
+          <motion.div
+            key="connecting"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, scale: 1.1 }}
+            className="relative z-10 flex flex-col items-center"
+          >
+            {/* Expanding rings animation */}
+            <div className="relative flex items-center justify-center" style={{ width: 160, height: 160 }}>
+              {[0, 1, 2].map((i) => (
+                <motion.div
+                  key={i}
+                  className="absolute rounded-full"
+                  style={{ inset: 20 + i * 8, border: '2px solid var(--brand-primary-purple)', opacity: 0 }}
+                  animate={{ scale: [0.5, 1.4], opacity: [0.6, 0] }}
+                  transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut', delay: i * 0.5 }}
+                />
+              ))}
+              {/* Core orb growing in */}
+              <motion.div
+                className="relative z-10 rounded-full flex items-center justify-center"
+                style={{ width: 80, height: 80, background: 'linear-gradient(135deg, #7B00E0, #9333EA)', boxShadow: '0 8px 40px rgba(123,0,224,0.35)' }}
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: 'spring', stiffness: 180, damping: 14 }}
+              >
+                <motion.div
+                  className="w-8 h-8 border-[3px] border-white rounded-full"
+                  style={{ borderTopColor: 'transparent' }}
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 0.9, repeat: Infinity, ease: 'linear' }}
+                />
+              </motion.div>
+            </div>
+
+            <motion.div
+              className="text-center mt-5"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+            >
+              <p className="text-[16px] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>
+                {state === 'connecting' ? 'Turning on...' : 'Starting mic...'}
+              </p>
+              <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
+                Setting up your voice assistant
+              </p>
+              <div className="flex items-center justify-center gap-1.5 mt-3">
+                {[0, 1, 2, 3].map((i) => (
+                  <motion.div
+                    key={i}
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{ backgroundColor: 'var(--brand-primary-purple)' }}
+                    animate={{ opacity: [0.15, 1, 0.15] }}
+                    transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2 }}
+                  />
+                ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* ── CHECKIN SAVED ── auto-dismisses, no user action needed */}
+        {isCheckin && pendingCheckin && (
+          <motion.div
+            key="checkin-result"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.05 }}
+            className="relative z-10 text-center w-full max-w-xs"
+          >
+            <motion.div
+              className="w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-4"
+              style={{
+                background: pendingCheckin.saved
+                  ? 'linear-gradient(135deg, #16A34A, #22c55e)'
+                  : 'linear-gradient(135deg, #ef4444, #dc2626)',
+                boxShadow: pendingCheckin.saved
+                  ? '0 8px 32px rgba(22,163,74,0.3)'
+                  : '0 8px 32px rgba(239,68,68,0.3)',
+              }}
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ type: 'spring', stiffness: 200, damping: 12 }}
+            >
+              {pendingCheckin.saved ? (
+                <CheckCircle className="w-10 h-10 text-white" />
+              ) : (
+                <AlertCircle className="w-10 h-10 text-white" />
+              )}
+            </motion.div>
+
+            <p className="text-[17px] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
+              {pendingCheckin.saved ? 'Check-in saved!' : 'Could not save'}
+            </p>
+
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {pendingCheckin.systolicBP != null && pendingCheckin.diastolicBP != null && (
+                <div className="rounded-xl p-2.5 text-center" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
+                  <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>BP</p>
+                  <p className="text-[16px] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{pendingCheckin.systolicBP}/{pendingCheckin.diastolicBP}</p>
+                </div>
+              )}
+              <div className="rounded-xl p-2.5 text-center" style={{ backgroundColor: pendingCheckin.medicationTaken ? 'var(--brand-success-green-light)' : 'var(--brand-alert-red-light)' }}>
+                <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Meds</p>
+                <p className="text-[13px] font-bold" style={{ color: pendingCheckin.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red)' }}>{pendingCheckin.medicationTaken ? 'Taken' : 'Missed'}</p>
+              </div>
+            </div>
+
+            {/* Auto-dismiss countdown */}
+            <motion.div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--brand-border)' }}>
+              <motion.div className="h-full rounded-full" style={{ backgroundColor: 'var(--brand-success-green)' }} initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: 3, ease: 'linear' }} />
+            </motion.div>
+            <p className="text-[10px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>AI will continue talking...</p>
+          </motion.div>
+        )}
+
+        {/* ── CRUD / PROCESSING ── different animation per action type */}
+        {isProcessing && (() => {
+          const isDelete = actionType === 'deleting_checkin';
+          const isUpdate = actionType === 'updating_checkin';
+          const crudColor = isDelete ? '#ef4444' : isUpdate ? '#7B00E0' : '#f59e0b';
+          const crudGradient = isDelete
+            ? 'linear-gradient(135deg, #ef4444, #dc2626)'
+            : isUpdate ? 'linear-gradient(135deg, #7B00E0, #9333EA)'
+            : 'linear-gradient(135deg, #f59e0b, #d97706)';
+          const crudLabel = isDelete ? 'Deleting reading' : isUpdate ? 'Updating reading' : 'Saving check-in';
+          const crudSub = isDelete ? 'Removing your entry...' : isUpdate ? 'Updating your entry...' : 'Recording your data...';
+          const CrudIcon = isDelete ? X : isUpdate ? AlertCircle : CheckCircle;
+
+          return (
+            <motion.div
+              key={`processing-${actionType}`}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.05 }}
+              className="relative z-10 flex flex-col items-center"
+            >
+              {/* Orbiting dots */}
+              <div className="relative flex items-center justify-center" style={{ width: 140, height: 140 }}>
+                {[0, 1, 2, 3, 4, 5].map((i) => (
+                  <motion.div
+                    key={i}
+                    className="absolute w-2.5 h-2.5 rounded-full"
+                    style={{ backgroundColor: crudColor }}
+                    animate={{
+                      x: [Math.cos((i / 6) * Math.PI * 2) * 55, Math.cos(((i + 6) / 6) * Math.PI * 2) * 55],
+                      y: [Math.sin((i / 6) * Math.PI * 2) * 55, Math.sin(((i + 6) / 6) * Math.PI * 2) * 55],
+                      opacity: [0.2, 0.8, 0.2],
+                      scale: [0.6, 1.1, 0.6],
+                    }}
+                    transition={{ duration: 2.5, repeat: Infinity, ease: 'linear', delay: i * 0.15 }}
+                  />
+                ))}
+                <motion.div
+                  className="relative z-10 w-16 h-16 rounded-full flex items-center justify-center"
+                  style={{ background: crudGradient, boxShadow: `0 8px 32px ${crudColor}40` }}
+                  animate={{ scale: [1, 1.1, 1] }}
+                  transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+                >
+                  <motion.div animate={{ rotate: isDelete ? [0, -10, 10, 0] : 360 }} transition={isDelete ? { duration: 0.5, repeat: Infinity } : { duration: 2, repeat: Infinity, ease: 'linear' }}>
+                    <CrudIcon className="w-7 h-7 text-white" />
+                  </motion.div>
+                </motion.div>
+              </div>
+
+              <div className="text-center mt-4">
+                <p className="text-[16px] font-bold" style={{ color: crudColor }}>{crudLabel}</p>
+                <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>{crudSub}</p>
+                <div className="w-48 mx-auto mt-3 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: `${crudColor}15` }}>
+                  <motion.div className="h-full rounded-full" style={{ backgroundColor: crudColor }} animate={{ x: ['-100%', '100%'] }} transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }} />
+                </div>
+                <p className="text-[10px] mt-3" style={{ color: 'var(--brand-text-muted)' }}>AI will resume automatically</p>
+              </div>
+            </motion.div>
+          );
+        })()}
+
+        {/* ── MAIN VOICE ORB (listening / speaking) ── */}
+        {!isConnecting && !isProcessing && !isCheckin && (
+          <motion.div
+            key="orb"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0 }}
+            className="relative z-10 flex flex-col items-center"
+          >
+            {/* Orb container — fixed size, no layout shift */}
+            <div className="relative flex items-center justify-center" style={{ width: 170, height: 170 }}>
+              {isActive && (
+                <>
+                  <motion.div className="absolute inset-0 rounded-full" style={{ background: `${orbColor}08` }} animate={{ scale: [1, 1.45, 1], opacity: [0.5, 0, 0.5] }} transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }} />
+                  <motion.div className="absolute rounded-full" style={{ inset: 18, background: `${orbColor}10` }} animate={{ scale: [1, 1.25, 1], opacity: [0.6, 0.1, 0.6] }} transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut', delay: 0.3 }} />
+                  <motion.div className="absolute rounded-full" style={{ inset: 34, background: `${orbColor}18` }} animate={{ scale: [1, 1.12, 1], opacity: [0.8, 0.2, 0.8] }} transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut', delay: 0.5 }} />
+                </>
+              )}
+              <motion.div
+                className="relative z-10 rounded-full flex items-center justify-center"
+                style={{ width: 90, height: 90, background: orbGradient, boxShadow: `0 8px 40px ${orbColor}45` }}
+                animate={isActive ? { scale: [1, 1.06, 1] } : { scale: 1 }}
+                transition={isActive ? { duration: 1.4, repeat: Infinity, ease: 'easeInOut' } : {}}
+              >
+                {isSpeaking ? (
+                  <div className="flex items-center justify-center gap-[3px]" style={{ height: 32 }}>
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <motion.div key={i} className="w-[3px] rounded-full bg-white" animate={{ height: [6, 22 + Math.random() * 10, 6] }} transition={{ duration: 0.5 + Math.random() * 0.3, repeat: Infinity, ease: 'easeInOut', delay: i * 0.07 }} />
+                    ))}
+                  </div>
+                ) : isListening ? (
+                  <Mic className="w-9 h-9 text-white" />
+                ) : (
+                  <Mic className="w-8 h-8 text-white opacity-70" />
+                )}
+              </motion.div>
+            </div>
+
+            {/* State text — fixed position below orb */}
+            <div className="text-center mt-2">
+              <motion.p key={state} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="text-[16px] font-bold" style={{ color: isListening ? '#ef4444' : 'var(--brand-primary-purple)' }}>
+                {isListening ? 'Listening' : isSpeaking ? 'AI Speaking' : 'Ready'}
+              </motion.p>
+              <p className="text-[12px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+                {isListening ? 'Speak naturally...' : isSpeaking ? 'Listening to response...' : ''}
+              </p>
+            </div>
+
+            {/* Wave bars — fixed height container, no content shift */}
+            <div className="flex items-center justify-center gap-[3px] mt-4" style={{ height: 36 }}>
+              {isActive && Array.from({ length: 11 }).map((_, i) => (
+                <motion.div
+                  key={i}
+                  className="w-[2.5px] rounded-full"
+                  style={{ backgroundColor: `${orbColor}50` }}
+                  animate={{ height: [4, 20 + Math.random() * 14, 4] }}
+                  transition={{ duration: 0.5 + Math.random() * 0.4, repeat: Infinity, ease: 'easeInOut', delay: i * 0.05 }}
+                />
+              ))}
+            </div>
+
+            {/* Emergency notice — always at bottom, fixed position */}
+            {isActive && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl max-w-sm mt-5"
+                style={{ backgroundColor: 'var(--brand-alert-red-light)', border: '1px solid rgba(239,68,68,0.15)' }}
+              >
+                <PhoneCall className="w-3.5 h-3.5 shrink-0" style={{ color: '#ef4444' }} />
+                <p className="text-[10px]" style={{ color: '#b91c1c' }}>Chest pain or severe shortness of breath? Call 911 immediately.</p>
+              </motion.div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ─── Session mapper helper ────────────────────────────────────────────────────
+function mapSessions(arr: Array<{ id: string; title: string; updatedAt: string; createdAt: string }>): Session[] {
+  return arr.map((s) => {
+    const t = (s.title ?? '').toLowerCase();
+    const isVoice = t.includes('voice') || t.startsWith('bp check-in');
+    // Keep the backend-generated title as-is (e.g. "BP Check-in 140/90", "Voice: how is my BP")
+    const title = s.title || 'Conversation';
+    return { id: s.id, title, time: formatSessionTime(s.updatedAt ?? s.createdAt), isVoice };
+  });
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function AIChatInterface() {
   const { user, token } = useAuth();
@@ -611,9 +931,7 @@ export default function AIChatInterface() {
     getChatSessions()
       .then((data) => {
         const arr = Array.isArray(data) ? data : [];
-        setSessions(arr.map((s: { id: string; title: string; updatedAt: string; createdAt: string }) => ({
-          id: s.id, title: s.title || 'Voice Session', time: formatSessionTime(s.updatedAt ?? s.createdAt),
-        })));
+        setSessions(mapSessions(arr));
       })
       .catch(() => {});
   }, []);
@@ -623,6 +941,7 @@ export default function AIChatInterface() {
     transcript,
     pendingCheckin: voicePendingCheckin,
     errorMessage: voiceError,
+    actionType: voiceActionType,
     start: startVoice,
     end: endVoice,
     dismissCheckin,
@@ -674,9 +993,7 @@ export default function AIChatInterface() {
       getChatSessions()
         .then((data) => {
           const arr = Array.isArray(data) ? data : [];
-          setSessions(arr.map((s: { id: string; title: string; updatedAt: string; createdAt: string }) => ({
-            id: s.id, title: s.title || 'Voice Session', time: formatSessionTime(s.updatedAt ?? s.createdAt),
-          })));
+          setSessions(mapSessions(arr));
         })
         .catch(() => {});
     }
@@ -694,9 +1011,7 @@ export default function AIChatInterface() {
     getChatSessions()
       .then((data) => {
         const arr = Array.isArray(data) ? data : [];
-        setSessions(arr.map((s: { id: string; title: string; updatedAt: string; createdAt: string }) => ({
-          id: s.id, title: s.title || 'Conversation', time: formatSessionTime(s.updatedAt ?? s.createdAt),
-        })));
+        setSessions(mapSessions(arr));
       })
       .catch(() => {})
       .finally(() => setIsLoadingSessions(false));
@@ -711,14 +1026,29 @@ export default function AIChatInterface() {
     }
     setIsLoadingHistory(true);
     setMessages([]);
+    const currentSession = sessions.find((s) => s.id === activeSessionId);
+    const isVoiceSession = currentSession?.isVoice ?? false;
+
     getSessionHistory(activeSessionId)
       .then((history) => {
         const arr = Array.isArray(history) ? history : [];
         const msgs: Message[] = [];
-        arr.forEach((item: { id: string; userMessage: string; aiSummary: string; source: string; timestamp: string }, idx: number) => {
-          msgs.push({ id: idx * 2, type: 'patient', source: 'text', text: item.userMessage, time: formatMsgTime(item.timestamp) });
-          msgs.push({ id: idx * 2 + 1, type: 'ai', source: 'text', text: item.aiSummary, time: formatMsgTime(item.timestamp) });
-        });
+
+        if (isVoiceSession) {
+          // Voice sessions: show only the AI summary as a single message
+          arr.forEach((item: { id: string; userMessage: string; aiSummary: string; source: string; timestamp: string }, idx: number) => {
+            if (item.aiSummary) {
+              msgs.push({ id: idx, type: 'ai', source: 'voice', text: item.aiSummary, time: formatMsgTime(item.timestamp) });
+            }
+          });
+        } else {
+          // Text sessions: show full back-and-forth
+          arr.forEach((item: { id: string; userMessage: string; aiSummary: string; source: string; timestamp: string }, idx: number) => {
+            msgs.push({ id: idx * 2, type: 'patient', source: (item.source as MessageSource) || 'text', text: item.userMessage, time: formatMsgTime(item.timestamp) });
+            msgs.push({ id: idx * 2 + 1, type: 'ai', source: (item.source as MessageSource) || 'text', text: item.aiSummary, time: formatMsgTime(item.timestamp) });
+          });
+        }
+
         setMessages(msgs);
       })
       .catch(() => setMessages([]))
@@ -745,9 +1075,7 @@ export default function AIChatInterface() {
         getChatSessions()
           .then((data) => {
             const arr = Array.isArray(data) ? data : [];
-            setSessions(arr.map((s: { id: string; title: string; updatedAt: string; createdAt: string }) => ({
-              id: s.id, title: s.title || 'Conversation', time: formatSessionTime(s.updatedAt ?? s.createdAt),
-            })));
+            setSessions(mapSessions(arr));
           })
           .catch(() => {});
       }
@@ -914,7 +1242,15 @@ export default function AIChatInterface() {
           )}
         </AnimatePresence>
 
-        {/* Messages area */}
+        {/* Messages area / Voice active screen */}
+        {voiceState !== 'idle' && voiceState !== 'error' ? (
+          <VoiceActiveScreen
+            state={voiceState}
+            pendingCheckin={pendingCheckin}
+            onDismissCheckin={handleDismissCheckin}
+            actionType={voiceActionType}
+          />
+        ) : (
         <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5 space-y-4 min-h-0" style={{ backgroundColor: 'var(--brand-background)' }}>
           {isLoadingHistory && (
             <div className="space-y-4 py-4">
@@ -953,12 +1289,12 @@ export default function AIChatInterface() {
             <MessageBubble key={msg.id} msg={msg} />
           ))}
 
-          {/* Live voice transcript — visible during and after voice session */}
+          {/* Live voice transcript — only shown when voice is NOT active (post-session) */}
           {transcript.length > 0 && (
             <LiveTranscriptBubbles lines={transcript} />
           )}
 
-          {/* Check-in result card */}
+          {/* Check-in result card (text mode) */}
           <AnimatePresence>
             {pendingCheckin && (
               <motion.div key="checkin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -985,6 +1321,7 @@ export default function AIChatInterface() {
           </AnimatePresence>
           <div ref={messagesEndRef} />
         </div>
+        )}
 
         {/* Input bar */}
         <div className="shrink-0 bg-white px-4 lg:px-6 pt-3 pb-4" style={{ borderTop: '1px solid var(--brand-border)' }}>
