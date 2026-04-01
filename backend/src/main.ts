@@ -27,7 +27,7 @@ async function bootstrap() {
   app.setGlobalPrefix('api', { exclude: ['/'] })
 
   const port = process.env.PORT ?? 3000
-  await app.listen(port)
+  await app.listen(port, '0.0.0.0')
   console.log(`✅ App listening on port ${port}`)
 }
 bootstrap().catch((err) => {
