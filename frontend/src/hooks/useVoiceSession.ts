@@ -96,6 +96,7 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
   const [pendingCheckin, setPendingCheckin] = useState<CheckinSummary | null>(null);
   const [pendingUpdate, setPendingUpdate] = useState<UpdateSummary | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [actionType, setActionType] = useState<string | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -283,16 +284,32 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
 
       socket.on('transcript', (data: { text: string; isFinal: boolean; speaker: 'user' | 'agent' }) => {
         appendTranscript(data.text, data.speaker, data.isFinal);
+        // Detect end-call voice commands from user
+        if (data.speaker === 'user' && data.isFinal) {
+          const lower = data.text.toLowerCase();
+          const endPhrases = ['end the call', 'end call', 'hang up', 'stop the call', 'cut the call', 'bye', 'goodbye', 'end session', 'stop session'];
+          if (endPhrases.some((p) => lower.includes(p))) {
+            setTimeout(() => {
+              socketRef.current?.emit('end_session');
+              void cleanup();
+              setSessionState('idle');
+              setPendingCheckin(null);
+              setActionType(null);
+            }, 1500); // Small delay so AI can say goodbye
+          }
+        }
       });
 
       socket.on('action', (data: { type: string; detail: string }) => {
-        if (data.type === 'submitting_checkin') {
+        setActionType(data.type);
+        if (['submitting_checkin', 'updating_checkin', 'deleting_checkin'].includes(data.type)) {
           setSessionState('processing');
         }
       });
 
       socket.on('checkin_saved', (summary: CheckinSummary) => {
         setPendingCheckin(summary);
+        setActionType(null);
         setSessionState('checkin_confirm');
         stopMic();
       });
@@ -359,6 +376,7 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
     pendingCheckin,
     pendingUpdate,
     errorMessage,
+    actionType,
     start,
     sendText,
     end,
