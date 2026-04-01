@@ -6,6 +6,7 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
+# cache-bust: 2026-04-01-v2
 RUN npm run build
 
 # ── Production image ──────────────────────────────────────────────────────────
