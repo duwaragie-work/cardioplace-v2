@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Res, Req, Get, Param, UseGuards } from '@nestjs/common'
+import { Body, Controller, Post, Res, Req, Get, Param, Delete, UseGuards } from '@nestjs/common'
 import type { Request, Response } from 'express'
 import { randomUUID } from 'crypto'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js'
@@ -88,5 +88,11 @@ export class ChatController {
   async getSessionHistory(@Param('sessionId') sessionId: string, @Req() req: Request) {
     const userId = (req.user as { id: string }).id
     return this.chatService.getSessionHistory(sessionId, userId)
+  }
+
+  @Delete('sessions/:sessionId')
+  async deleteSession(@Param('sessionId') sessionId: string, @Req() req: Request) {
+    const userId = (req.user as { id: string }).id
+    return this.chatService.deleteSession(sessionId, userId)
   }
 }

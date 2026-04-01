@@ -13,6 +13,7 @@ import {
   PhoneCall,
   CheckCircle,
   AlertCircle,
+  Trash2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '@/lib/auth-context';
@@ -21,6 +22,7 @@ import {
   sendMessage as sendChatMessage,
   getChatSessions,
   getSessionHistory,
+  deleteSession as deleteSessionApi,
   type ToolResult,
 } from '@/lib/services/chat.service';
 import {
@@ -338,14 +340,102 @@ function UpdateCard({ summary, onDismiss }: { summary: UpdateSummary; onDismiss:
   );
 }
 
+// ─── Sidebar scrollbar styles ─────────────────────────────────────────────────
+const sidebarScrollStyles = `
+.sidebar-scroll::-webkit-scrollbar { width: 5px; }
+.sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+.sidebar-scroll::-webkit-scrollbar-thumb { background: #E0D4F5; border-radius: 99px; }
+.sidebar-scroll::-webkit-scrollbar-thumb:hover { background: #C4B0E0; }
+.sidebar-scroll { scrollbar-width: thin; scrollbar-color: #E0D4F5 transparent; }
+`;
+
+// ─── Delete Confirm Modal ─────────────────────────────────────────────────────
+function DeleteConfirmModal({
+  sessionTitle,
+  onConfirm,
+  onCancel,
+  deleting,
+}: {
+  sessionTitle: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  deleting: boolean;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ backgroundColor: 'rgba(15, 23, 42, 0.5)', backdropFilter: 'blur(4px)' }}
+      onClick={onCancel}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 10 }}
+        transition={{ duration: 0.2 }}
+        className="bg-white rounded-2xl w-full max-w-xs overflow-hidden"
+        style={{ boxShadow: '0 24px 48px rgba(123,0,224,0.15)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-5 text-center">
+          <div
+            className="w-14 h-14 mx-auto mb-3 rounded-full flex items-center justify-center"
+            style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
+          >
+            <Trash2 className="w-6 h-6" style={{ color: 'var(--brand-alert-red)' }} />
+          </div>
+          <p className="text-[15px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
+            Delete conversation?
+          </p>
+          <p className="text-[12px] leading-relaxed mb-4" style={{ color: 'var(--brand-text-muted)' }}>
+            &ldquo;{sessionTitle.length > 30 ? sessionTitle.slice(0, 30) + '…' : sessionTitle}&rdquo; will be permanently deleted.
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={onCancel}
+              disabled={deleting}
+              className="flex-1 h-10 rounded-xl text-[13px] font-semibold transition hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--brand-background)', color: 'var(--brand-text-secondary)', border: '1px solid var(--brand-border)' }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onConfirm}
+              disabled={deleting}
+              className="flex-1 h-10 rounded-xl text-[13px] font-bold text-white transition hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5"
+              style={{ backgroundColor: 'var(--brand-alert-red)' }}
+            >
+              {deleting ? (
+                <motion.div
+                  className="w-4 h-4 border-2 border-white rounded-full border-t-transparent"
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 0.7, repeat: Infinity, ease: 'linear' }}
+                />
+              ) : (
+                <>
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 function SidebarContent({
-  sessions, activeId, onSelect, onNewConversation, userInitials, userName, riskTier, isLoading,
+  sessions, activeId, onSelect, onNewConversation, onDeleteSession, userInitials, userName, riskTier, isLoading,
 }: {
   sessions: Session[];
   activeId: string | null;
   onSelect: (id: string) => void;
   onNewConversation: () => void;
+  onDeleteSession: (id: string) => void;
   userInitials: string;
   userName: string;
   riskTier: string;
@@ -361,6 +451,7 @@ function SidebarContent({
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      <style>{sidebarScrollStyles}</style>
       <div className="px-4 pt-5 pb-3 shrink-0">
         <h2 className="text-[15px] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.conversations')}</h2>
         <button
@@ -390,7 +481,7 @@ function SidebarContent({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 pb-4 min-h-0">
+      <div className="flex-1 overflow-y-auto px-3 pb-4 min-h-0 sidebar-scroll">
         <p className="text-[10px] font-bold uppercase tracking-wider px-2 mb-2" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.recent')}</p>
         {isLoading ? (
           <SessionSkeleton />
@@ -401,18 +492,26 @@ function SidebarContent({
             {sessions.map((s) => {
               const isActive = s.id === activeId;
               return (
-                <button
+                <div
                   key={s.id}
-                  onClick={() => onSelect(s.id)}
-                  className={`w-full text-left px-3 py-2.5 rounded-xl transition-all cursor-pointer ${!isActive ? 'hover:bg-[#F3EEFB]' : ''}`}
+                  className={`group relative w-full text-left px-3 py-2.5 rounded-xl transition-all cursor-pointer ${!isActive ? 'hover:bg-[#F3EEFB]' : ''}`}
                   style={{ backgroundColor: isActive ? 'var(--brand-primary-purple-light)' : undefined, borderLeft: isActive ? '2px solid var(--brand-primary-purple)' : '2px solid transparent' }}
+                  onClick={() => onSelect(s.id)}
                 >
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 pr-6">
                     {s.isVoice && <Mic className="w-3 h-3 shrink-0" style={{ color: isActive ? 'var(--brand-primary-purple)' : 'var(--brand-text-muted)' }} />}
                     <p className="text-[13px] font-semibold truncate" style={{ color: isActive ? 'var(--brand-primary-purple)' : 'var(--brand-text-secondary)' }}>{s.title}</p>
                   </div>
                   <p className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--brand-text-muted)' }}>{s.isVoice ? `🎙 ${s.time}` : s.time}</p>
-                </button>
+                  {/* Delete button — visible on hover */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onDeleteSession(s.id); }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50"
+                    title="Delete"
+                  >
+                    <Trash2 className="w-3 h-3" style={{ color: 'var(--brand-alert-red)' }} />
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -917,6 +1016,8 @@ export default function AIChatInterface() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [pendingCheckin, setPendingCheckin] = useState<CheckinSummary | null>(null);
   const [pendingUpdateCard, setPendingUpdateCard] = useState<UpdateSummary | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const userInitials = getUserInitials(user?.name);
@@ -1137,6 +1238,29 @@ export default function AIChatInterface() {
     setShowSessions(false);
   };
 
+  const handleRequestDelete = (sessionId: string) => {
+    const session = sessions.find((s) => s.id === sessionId);
+    if (session) setDeleteTarget(session);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      await deleteSessionApi(deleteTarget.id);
+      setSessions((prev) => prev.filter((s) => s.id !== deleteTarget.id));
+      if (activeSessionId === deleteTarget.id) {
+        setActiveSessionId(null);
+        setMessages([]);
+      }
+    } catch {
+      // best-effort
+    } finally {
+      setIsDeleting(false);
+      setDeleteTarget(null);
+    }
+  };
+
   const handleSelectSession = (id: string) => {
     setActiveSessionId(id);
     setShowSessions(false);
@@ -1162,7 +1286,7 @@ export default function AIChatInterface() {
       <div className="hidden lg:flex flex-col w-72 shrink-0 h-full" style={{ backgroundColor: 'white', borderRight: '1px solid var(--brand-border)' }}>
         <SidebarContent
           sessions={sessions} activeId={activeSessionId} onSelect={handleSelectSession}
-          onNewConversation={handleNewConversation} userInitials={userInitials}
+          onNewConversation={handleNewConversation} onDeleteSession={handleRequestDelete} userInitials={userInitials}
           userName={userName} riskTier={riskTier} isLoading={isLoadingSessions}
         />
       </div>
@@ -1183,7 +1307,7 @@ export default function AIChatInterface() {
               </button>
               <SidebarContent
                 sessions={sessions} activeId={activeSessionId} onSelect={handleSelectSession}
-                onNewConversation={handleNewConversation} userInitials={userInitials}
+                onNewConversation={handleNewConversation} onDeleteSession={handleRequestDelete} userInitials={userInitials}
                 userName={userName} riskTier={riskTier} isLoading={isLoadingSessions}
               />
             </motion.div>
@@ -1391,6 +1515,18 @@ export default function AIChatInterface() {
           </p>
         </div>
       </div>
+
+      {/* Delete confirm modal */}
+      <AnimatePresence>
+        {deleteTarget && (
+          <DeleteConfirmModal
+            sessionTitle={deleteTarget.title}
+            onConfirm={handleConfirmDelete}
+            onCancel={() => setDeleteTarget(null)}
+            deleting={isDeleting}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
