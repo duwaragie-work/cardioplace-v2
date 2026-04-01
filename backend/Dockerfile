@@ -16,12 +16,11 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-# Prisma needs tsx to read prisma.config.ts for migrate deploy
+# tsx + dotenv needed by prisma.config.ts for migrate deploy
 RUN npm install --no-save tsx dotenv
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/proto ./proto
-COPY --from=builder /app/src/generated ./src/generated
 COPY prisma ./prisma
 COPY prisma.config.ts ./prisma.config.ts
 

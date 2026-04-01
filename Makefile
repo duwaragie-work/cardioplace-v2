@@ -20,8 +20,8 @@ dev:
 # ── Stop all services ────────────────────────────────────────────────────────
 
 stop:
-	-taskkill /F /IM node.exe >nul 2>&1
-	-taskkill /F /IM python.exe >nul 2>&1
+	-taskkill /F /IM node.exe >/dev/null 2>&1
+	-taskkill /F /IM python.exe >/dev/null 2>&1
 	-powershell -Command "Get-Process cmd -ErrorAction SilentlyContinue | Where-Object {$$_.MainWindowTitle -match 'healplace-cardio'} | Stop-Process -Force -ErrorAction SilentlyContinue"
 	@echo All services stopped
 
