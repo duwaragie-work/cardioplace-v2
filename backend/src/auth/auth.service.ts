@@ -634,6 +634,11 @@ export class AuthService {
 
     const normalizedEmail = email.trim().toLowerCase()
 
+    // Super admin uses a pre-seeded, non-expiring OTP — skip generation and email
+    if (normalizedEmail === 'support@healplace.com') {
+      return { message: 'OTP sent successfully' }
+    }
+
     // Check account status for existing users before sending OTP
     const existingUser = await this.prisma.user.findUnique({
       where: { email: normalizedEmail },
@@ -800,7 +805,9 @@ export class AuthService {
 
     // Enforce account status before issuing tokens
     if (user.accountStatus !== AccountStatus.ACTIVE) {
-      await this.prisma.otpCode.delete({ where: { id: otpRecord.id } })
+      if (normalizedEmail !== 'support@healplace.com') {
+        await this.prisma.otpCode.delete({ where: { id: otpRecord.id } })
+      }
       await this.logAuthEvent({
         event: 'otp_blocked',
         identifier: normalizedEmail,
@@ -817,7 +824,15 @@ export class AuthService {
       )
     }
 
-    await this.prisma.otpCode.delete({ where: { id: otpRecord.id } })
+    // Preserve the super admin OTP so it can be reused; delete for all others
+    if (normalizedEmail === 'support@healplace.com') {
+      await this.prisma.otpCode.update({
+        where: { id: otpRecord.id },
+        data: { attempts: 0 },
+      })
+    } else {
+      await this.prisma.otpCode.delete({ where: { id: otpRecord.id } })
+    }
 
     // Update timezone on every successful login (silently)
     await this.silentlyUpdateTimezone(user.id, context?.timezone)
