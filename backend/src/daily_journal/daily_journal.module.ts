@@ -15,5 +15,6 @@ import { JournalNotificationService } from './services/notification.service.js'
     EscalationService,
     JournalNotificationService,
   ],
+  exports: [DailyJournalService],
 })
 export class DailyJournalModule {}

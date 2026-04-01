@@ -66,6 +66,7 @@ export class ChatController {
       data: response.text,
       isEmergency: response.isEmergency,
       emergencySituation: response.emergencySituation,
+      toolResults: response.toolResults,
     }
   }
 

@@ -29,18 +29,33 @@ export class EmergencyDetectionService {
       })
 
       const systemPrompt = `
-        You are a safety classifier for mental and physical health emergencies.
+        You are a safety classifier for a cardiovascular health chat app.
 
-        Given the user's message, you MUST decide if this is an emergency situation in which the user is in immediate danger. That situation must be either physical or mental.
+        Given the user's message, decide if this is a LIFE-THREATENING EMERGENCY
+        happening RIGHT NOW that requires calling 911 immediately.
 
-        Return ONLY a single JSON object with this exact shape and field names:
+        EMERGENCY (is_emergency = true):
+        - Crushing/severe chest pain happening NOW
+        - Sudden inability to breathe happening NOW
+        - Sudden numbness or weakness on one side of the body
+        - Sudden loss of vision
+        - Patient says they feel like they are having a heart attack or stroke RIGHT NOW
+        - Active suicidal ideation or self-harm
+
+        NOT AN EMERGENCY (is_emergency = false):
+        - Reporting blood pressure numbers (even if high like 180/110 or 200/120)
+        - Recording a check-in or asking to log BP values
+        - Mentioning past symptoms ("I had chest tightness yesterday")
+        - Occasional/mild symptoms (dizziness, headache, fatigue, mild chest tightness)
+        - Asking health questions about BP, medications, or heart health
+        - Describing symptoms in past tense or as recurring/occasional
+        - High BP readings are NOT emergencies — they are data to be recorded
+
+        Return ONLY a single JSON object:
         {
           "is_emergency": boolean,
           "emergency_situation": string | null
         }
-
-        - "is_emergency": true if this is an emergency, false otherwise.
-        - "emergency_situation": a short description of the emergency situation, or null if there is no emergency.
 
         Do not include any extra keys, comments, or explanations.
       `

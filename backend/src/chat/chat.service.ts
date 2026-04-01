@@ -4,12 +4,15 @@ import { ChatMistralAI } from '@langchain/mistralai'
 import { ChatPromptTemplate } from '@langchain/core/prompts'
 import { RunnableSequence, RunnableLambda } from '@langchain/core/runnables'
 import { Document } from '@langchain/core/documents'
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages'
 import { ChatRequestDto } from './dto/chat-request.dto.js'
 import { SystemPromptService } from './services/system-prompt.service.js'
 import { RagService } from './services/rag.service.js'
 import { ConversationHistoryService } from './services/conversation-history.service.js'
 import { EmergencyDetectionService, EmergencyDetectionResult } from './services/emergency-detection.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { DailyJournalService } from '../daily_journal/daily_journal.service.js'
+import { createJournalTools } from './tools/journal-tools.js'
 
 interface ChainInput {
   input: string
@@ -28,6 +31,7 @@ export class ChatService {
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
     private readonly emergencyDetectionService: EmergencyDetectionService,
+    private readonly dailyJournalService: DailyJournalService,
   ) {
     this.chatModel =
       this.configService.get<string>('MISTRAL_CHAT_MODEL') || 'ministral-3b-2512'
@@ -303,30 +307,82 @@ Keep your message short, clear, and supportive.`,
 
       console.log('Chat history turns:', chatHistory.length / 2)
 
-      const chain = this.buildChain(chatHistory, true)
-      const stream = await chain.stream({
-        input: prompt,
-        system_prompt: systemPrompt,
-        chat_history: chatHistory,
-      } as ChainInput)
-
-      let fullResponse = ''
-
-      for await (const chunk of stream) {
-        const text: string =
-          chunk && typeof chunk === 'object' && 'content' in chunk
-            ? (chunk.content as string)
-            : typeof chunk === 'string'
-              ? chunk
-              : ''
-
-        if (text) {
-          fullResponse += text
-          yield text
-        }
+      // RAG context
+      const ragDocs = await this.ragService.retrieveDocuments(prompt, 10)
+      let ragContext = ''
+      ragDocs.forEach((doc: Document, idx: number) => {
+        ragContext += `Document ${idx + 1}:\n${doc.pageContent}\n\n`
+      })
+      if (ragContext) {
+        systemPrompt = systemPrompt + '\n\nContext:\n' + ragContext
       }
 
-      await this.conversationHistoryService.saveConversation(sessionId, prompt, fullResponse)
+      // Build tools and LLM with tool binding
+      const tools = createJournalTools(this.dailyJournalService, userId)
+      const apiKey = this.configService.get<string>('MISTRAL_API_KEY')
+      const llm = new ChatMistralAI({ apiKey, model: this.chatModel, streaming: true })
+      const llmWithTools = llm.bindTools(tools)
+
+      // Build message history
+      const messages: (SystemMessage | HumanMessage | AIMessage | ToolMessage)[] = [
+        new SystemMessage(systemPrompt),
+      ]
+      for (const [role, text] of chatHistory) {
+        if (role === 'human') messages.push(new HumanMessage(text))
+        else messages.push(new AIMessage(text))
+      }
+      messages.push(new HumanMessage(prompt))
+
+      // Tool calling loop — max 5 iterations to prevent infinite loops
+      let fullResponse = ''
+      for (let iteration = 0; iteration < 5; iteration++) {
+        const response = await llmWithTools.invoke(messages)
+        messages.push(response)
+
+        // Capture any text content the model returned (may come alongside tool calls)
+        const textContent = typeof response.content === 'string' ? response.content : ''
+
+        // Check for tool calls
+        const toolCalls = response.tool_calls ?? []
+        if (toolCalls.length === 0) {
+          // No tool calls — this is the final text response, stream it
+          if (textContent) {
+            fullResponse += textContent
+            const words = textContent.split(' ')
+            for (let i = 0; i < words.length; i++) {
+              yield (i > 0 ? ' ' : '') + words[i]
+            }
+          }
+          break
+        }
+
+        // If model returned text alongside tool calls, capture it
+        if (textContent) {
+          fullResponse += textContent
+          const words = textContent.split(' ')
+          for (let i = 0; i < words.length; i++) {
+            yield (i > 0 ? ' ' : '') + words[i]
+          }
+        }
+
+        // Execute tool calls and add results to messages
+        for (const toolCall of toolCalls) {
+          const tool = tools.find((t) => t.name === toolCall.name)
+          if (tool) {
+            console.log(`Executing tool: ${toolCall.name}`, toolCall.args)
+            const result = await tool.invoke(toolCall.args)
+            messages.push(new ToolMessage({
+              content: typeof result === 'string' ? result : JSON.stringify(result),
+              tool_call_id: toolCall.id ?? toolCall.name,
+            }))
+          }
+        }
+        // Loop continues — LLM will see tool results and generate next response
+      }
+
+      if (fullResponse) {
+        await this.conversationHistoryService.saveConversation(sessionId, prompt, fullResponse)
+      }
       console.log(`Streaming complete for session ${sessionId}`)
     } catch (error) {
       console.error('Streaming error:', error)
@@ -341,7 +397,12 @@ Keep your message short, clear, and supportive.`,
   async getStructuredResponse(
     request: ChatRequestDto,
     userId: string,
-  ): Promise<{ text: string; isEmergency: boolean; emergencySituation: string | null }> {
+  ): Promise<{
+    text: string
+    isEmergency: boolean
+    emergencySituation: string | null
+    toolResults?: Array<{ tool: string; result: any }>
+  }> {
     const { prompt } = request
     const sessionId = request.sessionId as string
 
@@ -423,29 +484,82 @@ Keep your message short, clear, and supportive.`,
 
       console.log('Chat history turns:', chatHistory.length / 2)
 
-      const chain = this.buildChain(chatHistory, false)
-      const result = await chain.invoke({
-        input: prompt,
-        system_prompt: systemPrompt,
-        chat_history: chatHistory,
-      } as ChainInput)
-
-      console.log('Result:', JSON.stringify(result))
-
-      // Extract text content from LLM response
-      let responseText = ''
-      if (result && typeof result === 'object' && 'content' in result) {
-        responseText = result.content as string
-      } else if (typeof result === 'string') {
-        responseText = result
-      } else {
-        responseText = 'An error occurred while generating response'
+      // RAG context
+      const ragDocs = await this.ragService.retrieveDocuments(prompt, 10)
+      let ragContext = ''
+      ragDocs.forEach((doc: Document, idx: number) => {
+        ragContext += `Document ${idx + 1}:\n${doc.pageContent}\n\n`
+      })
+      if (ragContext) {
+        systemPrompt = systemPrompt + '\n\nContext:\n' + ragContext
       }
 
-      await this.conversationHistoryService.saveConversation(sessionId, prompt, responseText)
+      // Build tools and LLM with tool binding
+      const tools = createJournalTools(this.dailyJournalService, userId)
+      const apiKey = this.configService.get<string>('MISTRAL_API_KEY')
+      const llm = new ChatMistralAI({ apiKey, model: this.chatModel })
+      const llmWithTools = llm.bindTools(tools)
+
+      // Build message history
+      const messages: (SystemMessage | HumanMessage | AIMessage | ToolMessage)[] = [
+        new SystemMessage(systemPrompt),
+      ]
+      for (const [role, text] of chatHistory) {
+        if (role === 'human') messages.push(new HumanMessage(text))
+        else messages.push(new AIMessage(text))
+      }
+      messages.push(new HumanMessage(prompt))
+
+      // Tool calling loop
+      let responseText = ''
+      const toolResults: Array<{ tool: string; result: any }> = []
+
+      for (let iteration = 0; iteration < 5; iteration++) {
+        const response = await llmWithTools.invoke(messages)
+        messages.push(response)
+
+        const textContent = typeof response.content === 'string' ? response.content : ''
+        const toolCalls = response.tool_calls ?? []
+
+        if (toolCalls.length === 0) {
+          if (textContent) responseText += textContent
+          break
+        }
+
+        // Capture text returned alongside tool calls
+        if (textContent) responseText += textContent
+
+        for (const toolCall of toolCalls) {
+          const tool = tools.find((t) => t.name === toolCall.name)
+          if (tool) {
+            console.log(`Executing tool: ${toolCall.name}`, toolCall.args)
+            const rawResult = await tool.invoke(toolCall.args)
+            const resultStr = typeof rawResult === 'string' ? rawResult : JSON.stringify(rawResult)
+            messages.push(new ToolMessage({
+              content: resultStr,
+              tool_call_id: toolCall.id ?? toolCall.name,
+            }))
+            // Track for frontend popup
+            try {
+              toolResults.push({ tool: toolCall.name, result: JSON.parse(resultStr) })
+            } catch {
+              toolResults.push({ tool: toolCall.name, result: { message: resultStr } })
+            }
+          }
+        }
+      }
+
+      if (responseText) {
+        await this.conversationHistoryService.saveConversation(sessionId, prompt, responseText)
+      }
       console.log(`Structured response complete for session ${sessionId}`)
 
-      return { text: responseText, isEmergency: false, emergencySituation: null }
+      return {
+        text: responseText,
+        isEmergency: false,
+        emergencySituation: null,
+        toolResults: toolResults.length > 0 ? toolResults : undefined,
+      }
     } catch (error) {
       console.error('Structured response error:', error)
       return {
@@ -522,7 +636,7 @@ Keep your message short, clear, and supportive.`,
       })
 
       const response = await llm.invoke([
-        ['system', 'You are a helpful assistant. Summarize the user prompt into a short 3-5 word chat title. Return ONLY the title, without quotes.'],
+        ['system', 'You are a helpful assistant. Summarize the user prompt into a short 3-5 word chat title in English. Even if the prompt is in another language, the title MUST be in English. Return ONLY the title, without quotes.'],
         ['human', prompt],
       ])
 

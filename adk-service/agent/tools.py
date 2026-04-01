@@ -61,8 +61,9 @@ def make_tools(
             diastolic_bp:     Diastolic blood pressure — the bottom number (40–150).
             medication_taken: Whether the patient took all their medications today.
             weight:           Weight in lbs (0 means not provided).
-            symptoms:         List of symptoms the patient reported.
-            notes:            Any extra notes the patient mentioned.
+            symptoms:         List of symptoms the patient reported. ALWAYS in English
+                              regardless of conversation language (e.g. "headache" not "dolor de cabeza").
+            notes:            Any extra notes. ALWAYS in English regardless of conversation language.
             entry_date:       Date of the reading in YYYY-MM-DD format. Defaults
                               to today if not provided or blank.
 
@@ -206,8 +207,8 @@ def make_tools(
             diastolic_bp:     New diastolic BP value (40–150), or None to keep unchanged.
             medication_taken: New medication status, or None to keep unchanged.
             weight:           New weight in lbs, or None to keep unchanged.
-            symptoms:         New symptom list, or None to keep unchanged.
-            notes:            New notes, or None to keep unchanged.
+            symptoms:         New symptom list, or None to keep unchanged. ALWAYS in English.
+            notes:            New notes, or None to keep unchanged. ALWAYS in English.
 
         Returns:
             dict with 'updated' (bool) and 'message' (str).

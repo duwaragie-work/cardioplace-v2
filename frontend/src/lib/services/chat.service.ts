@@ -2,6 +2,34 @@ import { fetchWithAuth } from './token'
 
 const API = process.env.NEXT_PUBLIC_API_URL
 
+export interface ToolResult {
+  tool: string
+  result: {
+    saved?: boolean
+    updated?: boolean
+    deleted?: boolean
+    message?: string
+    data?: {
+      id?: string
+      entryDate?: string
+      systolicBP?: number
+      diastolicBP?: number
+      weight?: number
+      medicationTaken?: boolean
+      symptoms?: string[]
+    }
+    readings?: Array<{
+      id: string
+      date: string
+      systolic: number
+      diastolic: number
+      weight?: number
+      medication_taken?: boolean
+      symptoms?: string[]
+    }>
+  }
+}
+
 export async function sendMessage(
   prompt: string,
   sessionId?: string,
@@ -10,6 +38,7 @@ export async function sendMessage(
   data: string
   isEmergency: boolean
   emergencySituation: string | null
+  toolResults?: ToolResult[]
 }> {
   const res = await fetchWithAuth(`${API}/api/chat/structured`, {
     method: 'POST',

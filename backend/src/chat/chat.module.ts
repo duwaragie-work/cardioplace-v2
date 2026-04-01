@@ -7,9 +7,10 @@ import { ConversationHistoryService } from './services/conversation-history.serv
 import { EmergencyDetectionService } from './services/emergency-detection.service.js'
 import { PrismaModule } from '../prisma/prisma.module.js'
 import { MistralModule } from '../mistral/mistral.module.js'
+import { DailyJournalModule } from '../daily_journal/daily_journal.module.js'
 
 @Module({
-  imports: [PrismaModule, MistralModule],
+  imports: [PrismaModule, MistralModule, DailyJournalModule],
   controllers: [ChatController],
   providers: [
     ChatService,

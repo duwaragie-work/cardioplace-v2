@@ -14,12 +14,14 @@ import {
   CheckCircle,
   AlertCircle,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import {
   sendMessage as sendChatMessage,
   getChatSessions,
   getSessionHistory,
+  type ToolResult,
 } from '@/lib/services/chat.service';
 import {
   useVoiceSession,
@@ -176,7 +178,9 @@ function MessageBubble({ msg }: { msg: Message }) {
           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold mb-2" style={{ backgroundColor: 'var(--brand-accent-teal)', color: 'white' }}>
             {t('chat.checkinMode')}
           </span>
-          <p className="text-[14px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>{msg.text}</p>
+          <div className="prose prose-sm max-w-none text-[14px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+            <ReactMarkdown>{msg.text}</ReactMarkdown>
+          </div>
           <p className="text-[10px] mt-1.5 text-right" style={{ color: 'var(--brand-text-muted)' }}>{msg.time}</p>
         </div>
       </motion.div>
@@ -198,7 +202,9 @@ function MessageBubble({ msg }: { msg: Message }) {
         className="max-w-[75%] sm:max-w-[65%] px-4 py-3.5"
         style={{ backgroundColor: 'white', borderRadius: '4px 18px 18px 18px', boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }}
       >
-        <p className="text-[14px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>{msg.text}</p>
+        <div className="prose prose-sm max-w-none text-[14px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+          <ReactMarkdown>{msg.text}</ReactMarkdown>
+        </div>
         <div className="flex items-center justify-end gap-1.5 mt-1.5">
           {isVoice && <Mic className="w-2.5 h-2.5" style={{ color: 'var(--brand-text-muted)' }} />}
           <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>{msg.time}</p>
@@ -750,6 +756,35 @@ export default function AIChatInterface() {
         ...prev,
         { id: Date.now() + 1, type: response.isEmergency ? 'teachback' : 'ai', source: 'text', text: response.data, time: nowTimeStr() },
       ]);
+
+      // Show popup cards for tool results (checkin saved, updated, etc.)
+      if (response.toolResults) {
+        for (const tr of response.toolResults) {
+          if (tr.tool === 'submit_checkin' && tr.result.saved) {
+            const d = tr.result.data;
+            setPendingCheckin({
+              systolicBP: d?.systolicBP,
+              diastolicBP: d?.diastolicBP,
+              weight: d?.weight,
+              medicationTaken: d?.medicationTaken,
+              symptoms: d?.symptoms ?? [],
+              saved: true,
+            });
+          } else if (tr.tool === 'update_checkin' && tr.result.updated) {
+            const d = tr.result.data;
+            setPendingUpdateCard({
+              entryId: d?.id ?? '',
+              entryDate: d?.entryDate,
+              systolicBP: d?.systolicBP,
+              diastolicBP: d?.diastolicBP,
+              weight: d?.weight,
+              medicationTaken: d?.medicationTaken,
+              symptoms: d?.symptoms ?? [],
+              updated: true,
+            });
+          }
+        }
+      }
     } catch {
       setIsTyping(false);
       setMessages((prev) => [
