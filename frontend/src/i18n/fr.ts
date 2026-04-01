@@ -47,6 +47,7 @@ const fr: Record<TranslationKey, string> = {
   'dashboard.checkIns': 'Contrôles',
   'dashboard.totalLogged': 'Total enregistrés',
   'dashboard.bpThisWeek': 'TA cette semaine',
+  'dashboard.bpTrend': 'Tendance TA - 90 jours',
   'dashboard.fullHistory': 'Historique complet →',
   'dashboard.noBpData': 'Aucune donnée de TA enregistrée.',
   'dashboard.firstCheckin': 'Complétez votre premier contrôle pour voir votre tendance.',

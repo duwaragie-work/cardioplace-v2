@@ -47,6 +47,7 @@ const es: Record<TranslationKey, string> = {
   'dashboard.checkIns': 'Controles',
   'dashboard.totalLogged': 'Total registrados',
   'dashboard.bpThisWeek': 'PA esta semana',
+  'dashboard.bpTrend': 'Tendencia de PA - 90 días',
   'dashboard.fullHistory': 'Historial completo →',
   'dashboard.noBpData': 'Aún no hay datos de PA registrados.',
   'dashboard.firstCheckin': 'Completa tu primer control para ver tu tendencia.',

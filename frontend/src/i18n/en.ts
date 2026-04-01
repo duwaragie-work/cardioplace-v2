@@ -45,6 +45,7 @@ const en = {
   'dashboard.checkIns': 'Check-ins',
   'dashboard.totalLogged': 'Total logged',
   'dashboard.bpThisWeek': 'BP This Week',
+  'dashboard.bpTrend': '90-Day BP Trend',
   'dashboard.fullHistory': 'Full history →',
   'dashboard.noBpData': 'No BP data recorded yet.',
   'dashboard.firstCheckin': 'Complete your first check-in to see your trend.',

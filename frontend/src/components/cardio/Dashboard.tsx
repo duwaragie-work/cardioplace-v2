@@ -18,8 +18,8 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { getJournalEntries, getLatestBaseline, getAlerts } from '@/lib/services/journal.service';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-function getDayLabel(dateStr: string): string {
-  try { return new Date(dateStr).toLocaleDateString('en-US', { weekday: 'short' }); }
+function getDateLabel(dateStr: string): string {
+  try { return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
   catch { return ''; }
 }
 
@@ -90,13 +90,13 @@ export default function Dashboard() {
     if (isLoading || !isAuthenticated) return;
     setDataLoading(true);
     Promise.all([
-      getJournalEntries({ limit: 7 }).catch(() => []),
+      getJournalEntries({ limit: 90 }).catch(() => []),
       getLatestBaseline().catch(() => null),
       getAlerts().catch(() => []),
     ]).then(([entries, baselineData, alertsData]) => {
       const arr: JournalEntry[] = Array.isArray(entries) ? entries : [];
       const sortedAsc = [...arr].sort((a, b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime());
-      setBpChartData(sortedAsc.map((e) => ({ day: getDayLabel(e.entryDate), systolic: e.systolicBP ?? 0, diastolic: e.diastolicBP ?? 0 })));
+      setBpChartData(sortedAsc.map((e) => ({ day: getDateLabel(e.entryDate), systolic: e.systolicBP ?? 0, diastolic: e.diastolicBP ?? 0 })));
       const sortedDesc = [...arr].sort((a, b) => new Date(b.entryDate).getTime() - new Date(a.entryDate).getTime());
       setLatestEntry(sortedDesc[0] ?? null);
       setTotalEntries(arr.length);
@@ -253,7 +253,7 @@ export default function Dashboard() {
           <div className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                {t('dashboard.bpThisWeek')}
+                {t('dashboard.bpTrend')}
               </h3>
               <a href="#" className="text-[11px]" style={{ color: 'var(--brand-accent-teal)' }}>
                 {t('dashboard.fullHistory')}
@@ -287,8 +287,8 @@ export default function Dashboard() {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F1EEFF" vertical={false} />
-                    <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }}>
-                      <Label value="Day" position="insideBottom" offset={-2} style={{ fill: '#1d1d1d', fontSize: 10, fontWeight: 600 }} />
+                    <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} interval={Math.max(0, Math.floor(bpChartData.length / 8) - 1)}>
+                      <Label value="" position="insideBottom" offset={-2} style={{ fill: '#1d1d1d', fontSize: 10, fontWeight: 600 }} />
                     </XAxis>
                     <YAxis domain={bpDomain} axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} width={38}>
                       <Label value="mmHg" angle={-90} position="insideLeft" offset={4} style={{ fill: '#1d1d1d', fontSize: 10 ,fontWeight: 600}} />
@@ -299,7 +299,7 @@ export default function Dashboard() {
                       itemStyle={{ color: '#7B00E0', fontWeight: 600 }}
                       cursor={{ stroke: '#7B00E0', strokeWidth: 1, strokeDasharray: '4 4' }}
                     />
-                    <Area type="natural" dataKey="systolic" stroke="#7B00E0" strokeWidth={2.5} fill="url(#colorSystolic)" dot={{ r: 3.5, fill: '#fff', stroke: '#7B00E0', strokeWidth: 2 }} activeDot={{ r: 5, fill: '#7B00E0', stroke: '#fff', strokeWidth: 2 }} />
+                    <Area type="natural" dataKey="systolic" stroke="#7B00E0" strokeWidth={2} fill="url(#colorSystolic)" dot={bpChartData.length > 14 ? false : { r: 3.5, fill: '#fff', stroke: '#7B00E0', strokeWidth: 2 }} activeDot={{ r: 4, fill: '#7B00E0', stroke: '#fff', strokeWidth: 2 }} />
                   </AreaChart>
                 </ResponsiveContainer>
               ) : (

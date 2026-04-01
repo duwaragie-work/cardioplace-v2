@@ -47,6 +47,7 @@ const de: Record<TranslationKey, string> = {
   'dashboard.checkIns': 'Kontrollen',
   'dashboard.totalLogged': 'Gesamt erfasst',
   'dashboard.bpThisWeek': 'BD diese Woche',
+  'dashboard.bpTrend': '90-Tage BD-Trend',
   'dashboard.fullHistory': 'Vollständiger Verlauf →',
   'dashboard.noBpData': 'Noch keine BD-Daten erfasst.',
   'dashboard.firstCheckin': 'Schließen Sie Ihre erste Kontrolle ab, um Ihren Trend zu sehen.',

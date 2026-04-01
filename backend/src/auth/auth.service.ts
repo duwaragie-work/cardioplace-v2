@@ -634,8 +634,11 @@ export class AuthService {
 
     const normalizedEmail = email.trim().toLowerCase()
 
-    // Super admin uses a pre-seeded, non-expiring OTP — skip generation and email
-    if (normalizedEmail === 'support@healplace.com') {
+    // Demo accounts use pre-seeded, non-expiring OTPs — skip generation and email
+    const preSeeded = await this.prisma.otpCode.findFirst({
+      where: { email: normalizedEmail, expiresAt: { gt: new Date('2098-01-01') } },
+    })
+    if (preSeeded) {
       return { message: 'OTP sent successfully' }
     }
 
@@ -805,7 +808,8 @@ export class AuthService {
 
     // Enforce account status before issuing tokens
     if (user.accountStatus !== AccountStatus.ACTIVE) {
-      if (normalizedEmail !== 'support@healplace.com') {
+      const isPreSeededBlocked = otpRecord.expiresAt > new Date('2098-01-01')
+      if (!isPreSeededBlocked) {
         await this.prisma.otpCode.delete({ where: { id: otpRecord.id } })
       }
       await this.logAuthEvent({
@@ -824,8 +828,9 @@ export class AuthService {
       )
     }
 
-    // Preserve the super admin OTP so it can be reused; delete for all others
-    if (normalizedEmail === 'support@healplace.com') {
+    // Preserve pre-seeded demo OTPs so they can be reused; delete for all others
+    const isPreSeeded = otpRecord.expiresAt > new Date('2098-01-01')
+    if (isPreSeeded) {
       await this.prisma.otpCode.update({
         where: { id: otpRecord.id },
         data: { attempts: 0 },
