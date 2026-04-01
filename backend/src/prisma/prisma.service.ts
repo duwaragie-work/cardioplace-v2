@@ -18,7 +18,15 @@ export class PrismaService extends PrismaClient {
   }
 
   async onModuleInit() {
-    await this.$connect()
+    const dbUrl = this.configService.get<string>('DATABASE_URL') ?? '(not set)'
+    const masked = dbUrl.replace(/:([^@]+)@/, ':***@')
+    console.log(`🔌 Connecting to database: ${masked}`)
+    try {
+      await this.$connect()
+    } catch (err) {
+      console.error('❌ Database connection failed:', err)
+      throw err
+    }
     console.log('✅ Database connected')
 
     try {
