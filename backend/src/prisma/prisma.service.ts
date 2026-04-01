@@ -1,15 +1,25 @@
 import { Injectable, OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { PrismaClient } from '../generated/prisma/client.js'
+import { PrismaPg } from '@prisma/adapter-pg'
+import pg from 'pg'
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit {
   private readonly configService: ConfigService
 
   constructor(configService: ConfigService) {
-    super({
-      accelerateUrl: configService.get<string>('DATABASE_URL')!,
-    })
+    const dbUrl = configService.get<string>('DATABASE_URL')!
+    const isAccelerate = dbUrl.startsWith('prisma://')
+
+    if (isAccelerate) {
+      super({ accelerateUrl: dbUrl })
+    } else {
+      const pool = new pg.Pool({ connectionString: dbUrl })
+      const adapter = new PrismaPg(pool)
+      super({ adapter })
+    }
+
     this.configService = configService
   }
 

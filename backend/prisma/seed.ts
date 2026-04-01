@@ -1,10 +1,14 @@
 import { PrismaClient } from '../src/generated/prisma/client.js'
+import { PrismaPg } from '@prisma/adapter-pg'
+import pg from 'pg'
 import bcrypt from 'bcrypt'
 import 'dotenv/config'
 
-const prisma = new PrismaClient({
-  accelerateUrl: process.env.DATABASE_URL!,
-})
+const dbUrl = process.env.DATABASE_URL!
+const isAccelerate = dbUrl.startsWith('prisma://')
+const prisma = isAccelerate
+  ? new PrismaClient({ accelerateUrl: dbUrl })
+  : new PrismaClient({ adapter: new PrismaPg(new pg.Pool({ connectionString: dbUrl })) })
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
