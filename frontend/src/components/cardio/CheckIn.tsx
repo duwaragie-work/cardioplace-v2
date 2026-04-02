@@ -648,6 +648,15 @@ function Step4Medication({
     { name: 'Amlodipine', dose: '5mg', time: 'Morning' },
     { name: 'Metformin', dose: '500mg', time: 'With dinner' },
   ];
+  const [checkedMeds, setCheckedMeds] = useState<boolean[]>([false, false, false]);
+
+  const toggleMed = (index: number) => {
+    setCheckedMeds((prev) => {
+      const next = [...prev];
+      next[index] = !next[index];
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -662,37 +671,48 @@ function Step4Medication({
       </div>
 
       <div className="space-y-3">
-        {meds.map((med, i) => (
-          <div
-            key={i}
-            className="flex items-center justify-between p-4 rounded-xl"
-            style={{ border: '1px solid var(--brand-border)', backgroundColor: 'white' }}
-          >
-            <div className="flex items-center gap-3">
-              <div
-                className="w-9 h-9 rounded-xl flex items-center justify-center"
-                style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
-              >
-                <Pill className="w-4 h-4" style={{ color: 'var(--brand-primary-purple)' }} />
-              </div>
-              <div>
-                <p className="text-[14px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                  {med.name} {med.dose}
-                </p>
-                <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>{med.time}</p>
-              </div>
-            </div>
-            <div
-              className="w-6 h-6 rounded-full flex items-center justify-center border-2"
+        {meds.map((med, i) => {
+          const checked = checkedMeds[i];
+          return (
+            <motion.button
+              key={i}
+              type="button"
+              onClick={() => { if (form.medication !== 'no') toggleMed(i); }}
+              className="w-full flex items-center justify-between p-4 rounded-xl transition-all"
               style={{
-                borderColor: 'var(--brand-success-green)',
-                backgroundColor: 'var(--brand-success-green-light)',
+                border: checked ? '1.5px solid var(--brand-success-green)' : '1.5px solid var(--brand-border)',
+                backgroundColor: checked ? 'var(--brand-success-green-light)' : 'white',
+                opacity: form.medication === 'no' ? 0.45 : 1,
+                pointerEvents: form.medication === 'no' ? 'none' : 'auto',
               }}
+              whileTap={{ scale: 0.98 }}
             >
-              <Check className="w-3.5 h-3.5" style={{ color: 'var(--brand-success-green)' }} />
-            </div>
-          </div>
-        ))}
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-9 h-9 rounded-xl flex items-center justify-center"
+                  style={{ backgroundColor: checked ? 'var(--brand-success-green)' : 'var(--brand-primary-purple-light)' }}
+                >
+                  <Pill className="w-4 h-4" style={{ color: checked ? 'white' : 'var(--brand-primary-purple)' }} />
+                </div>
+                <div className="text-left">
+                  <p className="text-[14px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                    {med.name} {med.dose}
+                  </p>
+                  <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>{med.time}</p>
+                </div>
+              </div>
+              <div
+                className="w-6 h-6 rounded-full flex items-center justify-center border-2 transition-all"
+                style={{
+                  borderColor: checked ? 'var(--brand-success-green)' : 'var(--brand-border)',
+                  backgroundColor: checked ? 'var(--brand-success-green)' : 'transparent',
+                }}
+              >
+                {checked && <Check className="w-3.5 h-3.5 text-white" />}
+              </div>
+            </motion.button>
+          );
+        })}
       </div>
 
       <div>
@@ -708,7 +728,7 @@ function Step4Medication({
             return (
               <motion.button
                 key={opt.value}
-                onClick={() => onChange('medication', opt.value)}
+                onClick={() => { onChange('medication', opt.value); if (opt.value === 'no') setCheckedMeds([false, false, false]); }}
                 className="h-12 rounded-full text-sm font-semibold transition-all border-2"
                 style={{
                   backgroundColor: isActive ? opt.activeColor : 'white',
