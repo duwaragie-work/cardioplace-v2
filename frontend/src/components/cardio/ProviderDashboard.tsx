@@ -8,11 +8,12 @@ import {
   ResponsiveContainer,
   Tooltip,
   ReferenceLine,
+  Label,
 } from 'recharts';
-import { Users, Activity, Bell, Heart } from 'lucide-react';
+import { Users, Activity, Bell, Heart, X, ChevronUp, Search, ChevronDown, Shield } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n/en';
@@ -26,6 +27,37 @@ import {
   scheduleCall,
 } from '@/lib/services/provider.service';
 
+
+// ─── Custom scrollbar styles ──────────────────────────────────────────────────
+const tableScrollStyles = `
+.provider-scroll::-webkit-scrollbar { width: 5px; }
+.provider-scroll::-webkit-scrollbar-track { background: transparent; }
+.provider-scroll::-webkit-scrollbar-thumb { background: #E0D4F5; border-radius: 99px; }
+.provider-scroll::-webkit-scrollbar-thumb:hover { background: #C4B0E0; }
+.provider-scroll { scrollbar-width: thin; scrollbar-color: #E0D4F5 transparent; }
+`;
+
+// ─── BP Trend Skeleton ────────────────────────────────────────────────────────
+function BPTrendSkeleton() {
+  return (
+    <div className="animate-pulse">
+      <div className="flex items-center justify-between mb-4">
+        <div className="h-4 rounded-full" style={{ backgroundColor: '#EDE9F6', width: 120 }} />
+        <div className="h-3 rounded-full" style={{ backgroundColor: '#F3EEFB', width: 60 }} />
+      </div>
+      <div className="h-48 flex items-end gap-1.5 px-2 pb-4" style={{ borderBottom: '1px solid #F1F5F9' }}>
+        {[45, 60, 35, 70, 50, 65, 40].map((h, i) => (
+          <div key={i} className="flex-1 rounded-t" style={{ height: `${h}%`, backgroundColor: '#EDE9F6' }} />
+        ))}
+      </div>
+      <div className="flex justify-between mt-3 px-2">
+        {[1,2,3,4,5,6,7].map((_, i) => (
+          <div key={i} className="h-2.5 rounded-full" style={{ backgroundColor: '#F3EEFB', width: 16 }} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 interface ProviderStats {
   totalPatients: number;
@@ -91,6 +123,9 @@ export default function ProviderDashboard() {
   const [scheduleAlert, setScheduleAlert] = useState<Alert | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
+  const [alertSearch, setAlertSearch] = useState('');
+  const [severityFilter, setSeverityFilter] = useState<string>('ALL');
+  const [levelFilter, setLevelFilter] = useState<string>('ALL');
   const [alertsList, setAlertsList] = useState<Alert[]>([]);
   const [stats, setStats] = useState<ProviderStats>({
     totalPatients: 0,
@@ -202,7 +237,16 @@ export default function ProviderDashboard() {
     );
   }
 
-  const activeAlerts = alertsList.filter((a) => !reviewedIds.has(a.id));
+  const activeAlerts = alertsList.filter((a) => {
+    if (reviewedIds.has(a.id)) return false;
+    if (severityFilter !== 'ALL' && a.severity !== severityFilter) return false;
+    if (levelFilter !== 'ALL' && a.level !== levelFilter) return false;
+    if (alertSearch) {
+      const q = alertSearch.toLowerCase();
+      return a.name.toLowerCase().includes(q) || a.reading.toLowerCase().includes(q);
+    }
+    return true;
+  });
 
   const handleReview = async (id: string) => {
     try {
@@ -265,25 +309,25 @@ export default function ProviderDashboard() {
     >
       {/* Main Content */}
       <main className="p-4 md:p-8">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
+        <div className="flex items-center gap-3 mb-6">
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+            style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}
+          >
+            <Shield className="w-5 h-5 text-white" />
+          </div>
           <div>
-            <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
+            <h1 className="text-xl font-bold" style={{ color: 'var(--brand-text-primary)' }}>
               {t('provider.dashboard')}
             </h1>
-            <p className="text-sm" style={{ color: 'var(--brand-text-muted)' }}>
+            <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
               {t('provider.dcWards')} &middot; March 2026
             </p>
           </div>
-          <button
-            className="h-10 px-6 rounded-full text-white font-bold text-sm transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap"
-            style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
-          >
-            + {t('provider.addPatient')}
-          </button>
         </div>
 
         {/* Stat Cards Row */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
           {dataLoading ? (
             [0, 1, 2, 3].map((i) => (
               <div key={i} className="bg-white p-5 rounded-2xl animate-pulse" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
@@ -351,8 +395,9 @@ export default function ProviderDashboard() {
           )}
         </div>
 
-        {/* Main Content Row */}
+        {/* Main Content */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          <style>{tableScrollStyles}</style>
 
           {dataLoading ? (
             <>
@@ -385,138 +430,182 @@ export default function ProviderDashboard() {
                 </div>
               </div>
 
-              {/* BP Trend Skeleton */}
-              <div className="lg:col-span-2 bg-white p-6 rounded-2xl animate-pulse" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
-                <div className="flex items-center justify-between mb-5">
-                  <div className="h-4 rounded-full" style={{ backgroundColor: '#EDE9F6', width: 140 }} />
-                  <div className="h-3 rounded-full" style={{ backgroundColor: '#F3EEFB', width: 70 }} />
-                </div>
-                {/* Fake chart area */}
-                <div className="h-48 flex items-end gap-1 px-2 pb-4" style={{ borderBottom: '1px solid #F1F5F9' }}>
-                  {[40, 55, 35, 65, 50, 70, 45].map((h, i) => (
-                    <div key={i} className="flex-1 rounded-t" style={{ height: `${h}%`, backgroundColor: '#EDE9F6' }} />
-                  ))}
-                </div>
-                <div className="flex justify-between mt-3">
-                  {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((_, i) => (
-                    <div key={i} className="h-2.5 rounded-full" style={{ backgroundColor: '#F3EEFB', width: 14 }} />
-                  ))}
-                </div>
+              {/* BP Trend Skeleton — desktop only */}
+              <div className="hidden lg:block lg:col-span-2 bg-white p-6 rounded-2xl animate-pulse" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+                <BPTrendSkeleton />
               </div>
             </>
           ) : (
             <>
 
           {/* Alert Queue */}
-          <div className="lg:col-span-3 bg-white p-6 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
-              <h2 className="text-base font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                {t('provider.alertQueue')}
-              </h2>
-              <div
-                className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold w-fit"
-                style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }}
-              >
-                {t('provider.requiresAction')}
+          <div className="lg:col-span-3 bg-white p-4 md:p-6 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+            <div className="flex flex-col gap-3 mb-4">
+              {/* Title row */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                    {t('provider.alertQueue')}
+                  </h2>
+                  <span
+                    className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold"
+                    style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }}
+                  >
+                    {activeAlerts.length}
+                  </span>
+                </div>
+                <span
+                  className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold"
+                  style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }}
+                >
+                  {t('provider.requiresAction')}
+                </span>
+              </div>
+
+              {/* Filters row */}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Search */}
+                <div
+                  className="flex items-center gap-2 px-3 h-8 rounded-full flex-1 min-w-[140px] max-w-[220px]"
+                  style={{ backgroundColor: 'var(--brand-background)', border: '1.5px solid var(--brand-border)' }}
+                >
+                  <Search className="w-3 h-3 shrink-0" style={{ color: 'var(--brand-text-muted)' }} />
+                  <input
+                    type="text"
+                    value={alertSearch}
+                    onChange={(e) => setAlertSearch(e.target.value)}
+                    placeholder="Search patient..."
+                    className="flex-1 text-[11px] outline-none bg-transparent"
+                    style={{ color: 'var(--brand-text-primary)' }}
+                  />
+                  {alertSearch && (
+                    <button onClick={() => setAlertSearch('')} className="shrink-0">
+                      <X className="w-2.5 h-2.5" style={{ color: 'var(--brand-text-muted)' }} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Severity filter */}
+                <div className="relative">
+                  <select
+                    value={severityFilter}
+                    onChange={(e) => setSeverityFilter(e.target.value)}
+                    className="appearance-none h-8 pl-2.5 pr-6 rounded-full text-[11px] font-semibold outline-none cursor-pointer"
+                    style={{ backgroundColor: 'var(--brand-background)', border: '1.5px solid var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                  >
+                    <option value="ALL">All Severity</option>
+                    <option value="HIGH">High</option>
+                    <option value="MEDIUM">Medium</option>
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none" style={{ color: 'var(--brand-text-muted)' }} />
+                </div>
+
+                {/* Level filter */}
+                <div className="relative">
+                  <select
+                    value={levelFilter}
+                    onChange={(e) => setLevelFilter(e.target.value)}
+                    className="appearance-none h-8 pl-2.5 pr-6 rounded-full text-[11px] font-semibold outline-none cursor-pointer"
+                    style={{ backgroundColor: 'var(--brand-background)', border: '1.5px solid var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                  >
+                    <option value="ALL">All Levels</option>
+                    <option value="L1">Level 1</option>
+                    <option value="L2">Level 2</option>
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none" style={{ color: 'var(--brand-text-muted)' }} />
+                </div>
               </div>
             </div>
 
-            {/* Desktop Table */}
-            <div className="hidden md:block overflow-x-auto">
+            {/* Desktop Table — no horizontal scroll */}
+            <div className="hidden md:block overflow-y-auto provider-scroll" style={{ maxHeight: '55vh' }}>
               <table className="w-full">
                 <thead>
                   <tr
-                    className="text-[13px] font-semibold text-left"
+                    className="text-[11px] font-semibold text-left sticky top-0 z-10 uppercase tracking-wider"
                     style={{ backgroundColor: 'var(--brand-background)', color: 'var(--brand-text-muted)' }}
                   >
-                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>{t('provider.patient')}</th>
-                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>{t('provider.lastReading')}</th>
-                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>{t('provider.type')}</th>
-                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>{t('provider.severity')}</th>
-                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>{t('provider.level')}</th>
-                    <th className="px-4 py-3 border-b" style={{ borderColor: 'var(--brand-border)' }}>{t('provider.action')}</th>
+                    <th className="py-2.5 pl-3 pr-2 border-b" style={{ borderColor: 'var(--brand-border)', width: '30%' }}>Patient</th>
+                    <th className="py-2.5 px-2 border-b" style={{ borderColor: 'var(--brand-border)', width: '14%' }}>BP</th>
+                    <th className="py-2.5 px-2 border-b" style={{ borderColor: 'var(--brand-border)', width: '14%' }}>Type</th>
+                    <th className="py-2.5 px-2 border-b" style={{ borderColor: 'var(--brand-border)', width: '20%' }}>Status</th>
+                    <th className="py-2.5 px-2 pr-3 border-b text-right" style={{ borderColor: 'var(--brand-border)', width: '12%' }}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {activeAlerts.map((alert) => (
                     <tr
                       key={alert.id}
-                      className="hover:bg-red-50 transition-colors relative cursor-pointer"
+                      className={`transition-colors cursor-pointer ${trendAlert?.id === alert.id ? 'bg-purple-50' : 'hover:bg-red-50'}`}
                       style={{ borderLeft: `3px solid ${alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)'}` }}
                       onMouseEnter={() => handleRowHover(alert)}
                       onClick={() => handleRowHover(alert)}
                     >
-                      <td className="px-4 py-4 border-b" style={{ borderColor: '#F1F5F9' }}>
-                        <div className="flex items-center gap-3">
+                      {/* Patient */}
+                      <td className="py-3 pl-3 pr-2 border-b" style={{ borderColor: '#F1F5F9' }}>
+                        <div className="flex items-center gap-2.5">
                           <div
-                            className="w-8 h-8 rounded-full flex items-center justify-center text-white font-semibold text-xs"
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-white font-semibold text-[10px] shrink-0"
                             style={{ backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}
                           >
                             {alert.initials}
                           </div>
-                          <div>
-                            <div className="text-sm font-bold" style={{ color: 'var(--brand-text-primary)' }}>{alert.name}</div>
-                            <div className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>{alert.location}</div>
+                          <div className="min-w-0">
+                            <div className="text-[13px] font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>{alert.name}</div>
+                            <div className="text-[10px] truncate" style={{ color: 'var(--brand-text-muted)' }}>{alert.location}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-4 border-b" style={{ borderColor: '#F1F5F9' }}>
-                        <div
-                          className="text-[13px] font-bold"
-                          style={{ color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}
-                        >
+                      {/* BP Reading */}
+                      <td className="py-3 px-2 border-b" style={{ borderColor: '#F1F5F9' }}>
+                        <div className="text-[12px] font-bold" style={{ color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}>
                           {alert.reading}
                         </div>
                       </td>
-                      <td className="px-4 py-4 border-b" style={{ borderColor: '#F1F5F9' }}>
-                        <div className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>{alert.type}</div>
+                      {/* Type */}
+                      <td className="py-3 px-2 border-b" style={{ borderColor: '#F1F5F9' }}>
+                        <div className="text-[11px] truncate" style={{ color: 'var(--brand-text-muted)' }}>{alert.type}</div>
                       </td>
-                      <td className="px-4 py-4 border-b" style={{ borderColor: '#F1F5F9' }}>
-                        <div
-                          className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-semibold"
-                          style={{
-                            backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
-                            color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
-                          }}
-                        >
-                          {alert.severity}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 border-b" style={{ borderColor: '#F1F5F9' }}>
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold"
+                      {/* Severity + Level + Follow-up combined */}
+                      <td className="py-3 px-2 border-b" style={{ borderColor: '#F1F5F9' }}>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span
+                            className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold"
                             style={{
                               backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
                               color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
                             }}
                           >
-                            <div
-                              className="w-1.5 h-1.5 rounded-full animate-pulse"
-                              style={{ backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}
-                            />
+                            {alert.severity}
+                          </span>
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold"
+                            style={{
+                              backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
+                              color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
+                            }}
+                          >
+                            <span className="w-1 h-1 rounded-full animate-pulse" style={{ backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }} />
                             {alert.level}
-                          </div>
+                          </span>
                           {alert.followUpScheduledAt && (
-                            <span
-                              className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold whitespace-nowrap"
-                              style={{ backgroundColor: '#CCFBF1', color: '#0D9488' }}
-                            >
-                              {t('provider.callScheduled')}
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ backgroundColor: '#CCFBF1', color: '#0D9488' }}>
+                              Call
                             </span>
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-4 border-b" style={{ borderColor: '#F1F5F9' }}>
+                      {/* Action */}
+                      <td className="py-3 px-2 pr-3 border-b text-right" style={{ borderColor: '#F1F5F9' }}>
                         <button
-                          className="h-8 px-4 rounded-lg text-xs font-semibold border transition-all hover:bg-opacity-10"
+                          className="h-7 px-3 rounded-lg text-[11px] font-semibold border transition-all hover:bg-opacity-10"
                           style={{
                             borderColor: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
                             color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
                           }}
-                          onClick={() => handleSelectAlert(alert)}
+                          onClick={(e) => { e.stopPropagation(); handleSelectAlert(alert); }}
                         >
-                          {t('provider.review')} &rarr;
+                          Review
                         </button>
                       </td>
                     </tr>
@@ -526,157 +615,128 @@ export default function ProviderDashboard() {
             </div>
 
             {/* Mobile Card View */}
-            <div className="md:hidden space-y-3">
-              {activeAlerts.map((alert) => (
-                <div
-                  key={alert.id}
-                  className="p-4 rounded-xl cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--brand-background)',
-                    borderLeft: `3px solid ${alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)'}`,
-                  }}
-                  onClick={() => handleRowHover(alert)}
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-3">
+            <div className="md:hidden space-y-2.5 overflow-y-auto provider-scroll" style={{ maxHeight: '60vh' }}>
+              {activeAlerts.map((alert) => {
+                const isSelected = trendAlert?.id === alert.id;
+                return (
+                  <div
+                    key={alert.id}
+                    className={`p-3.5 rounded-xl cursor-pointer transition-colors ${isSelected ? 'ring-2 ring-purple-300' : ''}`}
+                    style={{
+                      backgroundColor: isSelected ? '#FAF5FF' : 'var(--brand-background)',
+                      borderLeft: `3px solid ${alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)'}`,
+                    }}
+                    onClick={() => handleRowHover(alert)}
+                  >
+                    {/* Row 1: Avatar + Name + Level badge */}
+                    <div className="flex items-center gap-2.5 mb-2.5">
                       <div
-                        className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm"
+                        className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-[11px] shrink-0"
                         style={{ backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}
                       >
                         {alert.initials}
                       </div>
-                      <div>
-                        <div className="text-sm font-bold" style={{ color: 'var(--brand-text-primary)' }}>{alert.name}</div>
-                        <div className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>{alert.location}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>{alert.name}</div>
+                        <div className="text-[10px] truncate" style={{ color: 'var(--brand-text-muted)' }}>{alert.type}</div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span
+                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold"
+                          style={{
+                            backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
+                            color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
+                          }}
+                        >
+                          <span className="w-1 h-1 rounded-full animate-pulse" style={{ backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }} />
+                          {alert.level}
+                        </span>
+                        <span
+                          className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold"
+                          style={{
+                            backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
+                            color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
+                          }}
+                        >
+                          {alert.severity}
+                        </span>
                       </div>
                     </div>
-                    <div
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold"
-                      style={{
-                        backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
-                        color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
-                      }}
-                    >
-                      <div
-                        className="w-1.5 h-1.5 rounded-full animate-pulse"
-                        style={{ backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}
-                      />
-                      {alert.level}
-                    </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-3 mb-3">
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>
-                        {t('provider.lastReading')}
+                    {/* Row 2: BP reading + Review button */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="text-[14px] font-bold"
+                          style={{ color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}
+                        >
+                          {alert.reading}
+                        </div>
+                        {alert.followUpScheduledAt && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-bold" style={{ backgroundColor: '#CCFBF1', color: '#0D9488' }}>
+                            Call scheduled
+                          </span>
+                        )}
                       </div>
-                      <div
-                        className="text-sm font-bold"
-                        style={{ color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}
+                      <button
+                        className="h-7 px-3 rounded-lg text-[11px] font-semibold border transition-all"
+                        style={{
+                          borderColor: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
+                          color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
+                        }}
+                        onClick={(e) => { e.stopPropagation(); handleSelectAlert(alert); }}
                       >
-                        {alert.reading}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>
-                        {t('provider.type')}
-                      </div>
-                      <div className="text-xs" style={{ color: 'var(--brand-text-secondary)' }}>{alert.type}</div>
+                        Review
+                      </button>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <div
-                      className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-semibold"
-                      style={{
-                        backgroundColor: alert.color === 'red' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
-                        color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
-                      }}
-                    >
-                      {alert.severity}
-                    </div>
-                    {alert.followUpScheduledAt && (
-                      <span
-                        className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold"
-                        style={{ backgroundColor: '#CCFBF1', color: '#0D9488' }}
-                      >
-                        Call scheduled
-                      </span>
-                    )}
-                    <button
-                      className="ml-auto h-8 px-4 rounded-lg text-xs font-semibold border"
-                      style={{
-                        borderColor: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
-                        color: alert.color === 'red' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)',
-                      }}
-                      onClick={() => handleSelectAlert(alert)}
-                    >
-                      {t('provider.review')} &rarr;
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
-          {/* BP Trend Panel */}
-          <div className="lg:col-span-2 bg-white p-6 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+          {/* BP Trend Panel — desktop only (lg:), sticky */}
+          <div className="hidden lg:block lg:col-span-2 lg:sticky lg:top-24 lg:self-start bg-white p-6 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                {t('provider.bpTrend')} &middot; {trendDetail?.patient?.name ?? trendAlert?.name ?? t('provider.selectPatient')}
+              <h2 className="text-sm font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                BP Trend &middot; {trendDetail?.patient?.name ?? trendAlert?.name ?? 'Select a patient'}
               </h2>
-              <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>{t('provider.last7Days')}</span>
+              <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>Last 7 Days</span>
             </div>
 
-            {trendDetail?.bpTrend && trendDetail.bpTrend.length > 0 ? (() => {
+            {trendLoading ? (
+              <BPTrendSkeleton />
+            ) : trendDetail?.bpTrend && trendDetail.bpTrend.length > 0 ? (() => {
               const trendData = trendDetail.bpTrend;
-              const systolicVals = trendData
-                .map((d) => d.systolic)
-                .filter((v): v is number => v != null);
-              const yMin = systolicVals.length > 0
-                ? Math.floor((Math.min(...systolicVals) - 10) / 10) * 10
-                : 130;
-              const yMax = systolicVals.length > 0
-                ? Math.ceil((Math.max(...systolicVals) + 10) / 10) * 10
-                : 190;
+              const systolicVals = trendData.map((d) => d.systolic).filter((v): v is number => v != null);
+              const yMin = systolicVals.length > 0 ? Math.floor((Math.min(...systolicVals) - 10) / 10) * 10 : 130;
+              const yMax = systolicVals.length > 0 ? Math.ceil((Math.max(...systolicVals) + 10) / 10) * 10 : 190;
               const yTicks: number[] = [];
               for (let t = yMin; t <= yMax; t += 10) yTicks.push(t);
 
               return (
-                <div className="h-50 relative">
+                <div style={{ height: 250 }} className="relative">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={trendData}>
                       <defs>
-                        <linearGradient id="colorBP" x1="0" y1="0" x2="0" y2="1">
+                        <linearGradient id="colorBPDesktop" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#DC2626" stopOpacity={0.06} />
                           <stop offset="95%" stopColor="#DC2626" stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <XAxis
-                        dataKey="day"
-                        axisLine={true}
-                        tickLine={false}
-                        tick={{ fill: '#94A3B8', fontSize: 12 }}
-                      />
-                      <YAxis
-                        domain={[yMin, yMax]}
-                        ticks={yTicks}
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: '#94A3B8', fontSize: 12 }}
-                      />
+                      <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 11 }}>
+                        <Label value="Day" position="insideBottom" offset={-2} style={{ fill: '#000000', fontSize: 10 }} />
+                      </XAxis>
+                      <YAxis domain={[yMin, yMax]} ticks={yTicks} axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 11 }} width={38}>
+                        <Label value="mmHg" angle={-90} position="insideLeft" offset={-3} style={{ fill: '#000000', fontSize: 10 }} />
+                      </YAxis>
                       <Tooltip
                         content={({ active, payload }) => {
                           if (active && payload && payload.length) {
                             const item = payload[0].payload as { diastolic?: number; date?: string };
-                            const dateStr = item.date
-                              ? new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                              : '';
+                            const dateStr = item.date ? new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
                             return (
-                              <div
-                                className="bg-white px-3 py-2 rounded-lg text-xs font-semibold"
-                                style={{ boxShadow: '0 4px 6px rgba(0,0,0,0.1)', color: 'var(--brand-text-primary)' }}
-                              >
+                              <div className="bg-white px-3 py-2 rounded-xl text-xs font-semibold" style={{ boxShadow: '0 4px 12px rgba(0,0,0,0.1)', color: 'var(--brand-text-primary)', border: '1px solid #E9D5FF' }}>
                                 {payload[0].value}/{item.diastolic ?? '—'} mmHg{dateStr ? ` · ${dateStr}` : ''}
                               </div>
                             );
@@ -685,38 +745,115 @@ export default function ProviderDashboard() {
                         }}
                       />
                       <ReferenceLine y={160} stroke="#DC2626" strokeWidth={1} strokeDasharray="4 4" />
-                      <Area
-                        type="monotone"
-                        dataKey="systolic"
-                        stroke="#DC2626"
-                        strokeWidth={2.5}
-                        fill="url(#colorBP)"
-                        dot={{ fill: '#DC2626', r: 4 }}
-                        activeDot={{ r: 6 }}
-                      />
+                      <Area type="monotone" dataKey="systolic" stroke="#DC2626" strokeWidth={2.5} fill="url(#colorBPDesktop)" dot={{ fill: '#DC2626', r: 3.5, stroke: '#fff', strokeWidth: 1.5 }} activeDot={{ r: 5.5 }} />
                     </AreaChart>
                   </ResponsiveContainer>
-
-                  <div
-                    className="absolute right-2 text-[11px] font-semibold"
-                    style={{ top: '40%', transform: 'translateY(-50%)', color: 'var(--brand-alert-red)' }}
-                  >
-                    {t('provider.alertThreshold')}
-                  </div>
                 </div>
               );
             })() : (
-              <div className="h-50 flex items-center justify-center">
-                <p className="text-sm" style={{ color: 'var(--brand-text-muted)' }}>
-                  {trendLoading ? t('provider.loadingTrend') : t('provider.hoverToSee')}
+              <div className="h-40 flex items-center justify-center">
+                <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
+                  {trendAlert ? 'No BP data for this patient' : 'Hover or click an alert to see BP trend'}
                 </p>
               </div>
             )}
           </div>
+
             </>
           )}
         </div>
       </main>
+
+      {/* BP Trend Bottom Sheet — mobile/tablet only (below lg:) */}
+      <AnimatePresence>
+        {trendAlert && (
+          <motion.div
+            key="bp-sheet"
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '100%' }}
+            transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+            className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white rounded-t-2xl provider-scroll"
+            style={{ boxShadow: '0 -8px 40px rgba(123,0,224,0.12)', maxHeight: '45vh' }}
+          >
+            {/* Handle bar */}
+            <div className="flex justify-center pt-2 pb-1">
+              <div className="w-10 h-1 rounded-full" style={{ backgroundColor: 'var(--brand-border)' }} />
+            </div>
+
+            <div className="px-5 pb-5">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <ChevronUp className="w-4 h-4" style={{ color: 'var(--brand-primary-purple)' }} />
+                  <h3 className="text-[14px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                    BP Trend &middot; {trendDetail?.patient?.name ?? trendAlert.name}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => { setTrendAlert(null); setTrendDetail(null); }}
+                  className="w-7 h-7 rounded-full flex items-center justify-center transition hover:bg-gray-100"
+                >
+                  <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
+                </button>
+              </div>
+
+              {/* Content */}
+              {trendLoading ? (
+                <BPTrendSkeleton />
+              ) : trendDetail?.bpTrend && trendDetail.bpTrend.length > 0 ? (() => {
+                const trendData = trendDetail.bpTrend;
+                const systolicVals = trendData.map((d) => d.systolic).filter((v): v is number => v != null);
+                const yMin = systolicVals.length > 0 ? Math.floor((Math.min(...systolicVals) - 10) / 10) * 10 : 130;
+                const yMax = systolicVals.length > 0 ? Math.ceil((Math.max(...systolicVals) + 10) / 10) * 10 : 190;
+                const yTicks: number[] = [];
+                for (let t = yMin; t <= yMax; t += 10) yTicks.push(t);
+
+                return (
+                  <div style={{ height: 200 }} className="relative">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={trendData}>
+                        <defs>
+                          <linearGradient id="colorBPSheet" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#DC2626" stopOpacity={0.08} />
+                            <stop offset="95%" stopColor="#DC2626" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 11 }}>
+                        <Label value="Day" position="insideBottom" offset={-2} style={{ fill: '#000000', fontSize: 10 }} />
+                      </XAxis>
+                      <YAxis domain={[yMin, yMax]} ticks={yTicks} axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 11 }} width={38}>
+                        <Label value="mmHg" angle={-90} position="insideLeft" offset={-3} style={{ fill: '#000000', fontSize: 10 }} />
+                      </YAxis>
+                        <Tooltip
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const item = payload[0].payload as { diastolic?: number; date?: string };
+                              const dateStr = item.date ? new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+                              return (
+                                <div className="bg-white px-3 py-2 rounded-xl text-xs font-semibold" style={{ boxShadow: '0 4px 12px rgba(0,0,0,0.1)', color: 'var(--brand-text-primary)', border: '1px solid #E9D5FF' }}>
+                                  {payload[0].value}/{item.diastolic ?? '—'} mmHg{dateStr ? ` · ${dateStr}` : ''}
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <ReferenceLine y={160} stroke="#DC2626" strokeWidth={1} strokeDasharray="4 4" />
+                        <Area type="monotone" dataKey="systolic" stroke="#DC2626" strokeWidth={2.5} fill="url(#colorBPSheet)" dot={{ fill: '#DC2626', r: 3.5, stroke: '#fff', strokeWidth: 1.5 }} activeDot={{ r: 5.5 }} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                );
+              })() : (
+                <div className="h-32 flex items-center justify-center">
+                  <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>No BP data available for this patient</p>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Alert Panel */}
       <AnimatePresence>
