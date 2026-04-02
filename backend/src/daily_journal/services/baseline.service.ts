@@ -52,27 +52,45 @@ export class BaselineService {
         orderBy: { entryDate: 'desc' },
       })
 
-      const sampleSize = entries.length
-      const baselineMet = sampleSize >= 3
+      // Per-day-first averaging: group entries by date, average each day,
+      // then average across days. Prevents days with more readings from
+      // dominating the baseline.
+      const dailyMap = new Map<string, { sys: number[]; dia: number[]; weights: number[] }>()
+      for (const e of entries) {
+        const dateKey = e.entryDate.toISOString().slice(0, 10)
+        if (!dailyMap.has(dateKey)) dailyMap.set(dateKey, { sys: [], dia: [], weights: [] })
+        const day = dailyMap.get(dateKey)!
+        day.sys.push(Number(e.systolicBP))
+        day.dia.push(Number(e.diastolicBP))
+        if (e.weight != null) day.weights.push(Number(e.weight))
+      }
+
+      const dailyAverages = [...dailyMap.values()].map((d) => ({
+        avgSys: d.sys.reduce((a, b) => a + b, 0) / d.sys.length,
+        avgDia: d.dia.reduce((a, b) => a + b, 0) / d.dia.length,
+        avgWeight: d.weights.length > 0
+          ? d.weights.reduce((a, b) => a + b, 0) / d.weights.length
+          : null,
+      }))
+
+      const dayCount = dailyAverages.length
+      const baselineMet = dayCount >= 3
 
       let avgSystolic = 0
       let avgDiastolic = 0
       let avgWeight: number | null = null
 
       if (baselineMet) {
-        avgSystolic =
-          entries.reduce((sum, e) => sum + Number(e.systolicBP), 0) / sampleSize
-        avgDiastolic =
-          entries.reduce((sum, e) => sum + Number(e.diastolicBP), 0) / sampleSize
-        const weightEntries = entries.filter((e) => e.weight != null)
-        if (weightEntries.length > 0) {
+        avgSystolic = dailyAverages.reduce((s, d) => s + d.avgSys, 0) / dayCount
+        avgDiastolic = dailyAverages.reduce((s, d) => s + d.avgDia, 0) / dayCount
+        const daysWithWeight = dailyAverages.filter((d) => d.avgWeight != null)
+        if (daysWithWeight.length > 0) {
           avgWeight =
-            weightEntries.reduce((sum, e) => sum + Number(e.weight), 0) /
-            weightEntries.length
+            daysWithWeight.reduce((s, d) => s + d.avgWeight!, 0) / daysWithWeight.length
         }
       } else {
         this.logger.log(
-          `Baseline threshold not met for user ${payload.userId}: ${sampleSize}/3 entries — storing zeros`,
+          `Baseline threshold not met for user ${payload.userId}: ${dayCount}/3 days — storing zeros`,
         )
       }
 
@@ -88,7 +106,7 @@ export class BaselineService {
           baselineDiastolic: new Prisma.Decimal(avgDiastolic.toFixed(2)),
           baselineWeight:
             avgWeight != null ? new Prisma.Decimal(avgWeight.toFixed(2)) : null,
-          sampleSize,
+          sampleSize: dayCount,
         },
         create: {
           userId: payload.userId,
@@ -97,7 +115,7 @@ export class BaselineService {
           baselineDiastolic: new Prisma.Decimal(avgDiastolic.toFixed(2)),
           baselineWeight:
             avgWeight != null ? new Prisma.Decimal(avgWeight.toFixed(2)) : null,
-          sampleSize,
+          sampleSize: dayCount,
         },
       })
 
@@ -137,25 +155,41 @@ export class BaselineService {
             },
           },
           select: {
+            entryDate: true,
             systolicBP: true,
             diastolicBP: true,
             weight: true,
           },
         })
 
-        if (windowEntries.length < 3) continue
+        // Per-day-first averaging for recomputation
+        const reDailyMap = new Map<string, { sys: number[]; dia: number[]; weights: number[] }>()
+        for (const e of windowEntries) {
+          const dateKey = e.entryDate.toISOString().slice(0, 10)
+          if (!reDailyMap.has(dateKey)) reDailyMap.set(dateKey, { sys: [], dia: [], weights: [] })
+          const day = reDailyMap.get(dateKey)!
+          day.sys.push(Number(e.systolicBP))
+          day.dia.push(Number(e.diastolicBP))
+          if (e.weight != null) day.weights.push(Number(e.weight))
+        }
 
-        const reAvgSystolic =
-          windowEntries.reduce((sum, e) => sum + Number(e.systolicBP), 0) /
-          windowEntries.length
-        const reAvgDiastolic =
-          windowEntries.reduce((sum, e) => sum + Number(e.diastolicBP), 0) /
-          windowEntries.length
-        const reWeightEntries = windowEntries.filter((e) => e.weight != null)
+        const reDailyAvgs = [...reDailyMap.values()].map((d) => ({
+          avgSys: d.sys.reduce((a, b) => a + b, 0) / d.sys.length,
+          avgDia: d.dia.reduce((a, b) => a + b, 0) / d.dia.length,
+          avgWeight: d.weights.length > 0
+            ? d.weights.reduce((a, b) => a + b, 0) / d.weights.length
+            : null,
+        }))
+
+        const reDayCount = reDailyAvgs.length
+        if (reDayCount < 3) continue
+
+        const reAvgSystolic = reDailyAvgs.reduce((s, d) => s + d.avgSys, 0) / reDayCount
+        const reAvgDiastolic = reDailyAvgs.reduce((s, d) => s + d.avgDia, 0) / reDayCount
+        const reDaysWithWeight = reDailyAvgs.filter((d) => d.avgWeight != null)
         const reAvgWeight =
-          reWeightEntries.length > 0
-            ? reWeightEntries.reduce((sum, e) => sum + Number(e.weight), 0) /
-              reWeightEntries.length
+          reDaysWithWeight.length > 0
+            ? reDaysWithWeight.reduce((s, d) => s + d.avgWeight!, 0) / reDaysWithWeight.length
             : null
 
         await this.prisma.baselineSnapshot.update({
@@ -167,7 +201,7 @@ export class BaselineService {
               reAvgWeight != null
                 ? new Prisma.Decimal(reAvgWeight.toFixed(2))
                 : null,
-            sampleSize: windowEntries.length,
+            sampleSize: reDayCount,
           },
         })
 
@@ -202,7 +236,7 @@ export class BaselineService {
           entryDate: payload.entryDate,
           systolicBP: payload.systolicBP,
           diastolicBP: payload.diastolicBP,
-          reason: `Only ${sampleSize} entries in last 7 days (need 3) — baseline set to zero`,
+          reason: `Only ${dayCount} days in last 7 days (need 3) — baseline set to zero`,
         })
       }
     } catch (error) {

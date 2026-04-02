@@ -28,12 +28,22 @@ export class DailyJournalService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
+  private inferMeasurementTime(): string {
+    const now = new Date()
+    const hh = String(now.getHours()).padStart(2, '0')
+    const mm = String(now.getMinutes()).padStart(2, '0')
+    return `${hh}:${mm}`
+  }
+
   async create(userId: string, dto: CreateJournalEntryDto) {
     try {
+      const measurementTime = dto.measurementTime ?? this.inferMeasurementTime()
+
       const entry = await this.prisma.journalEntry.create({
         data: {
           userId,
           entryDate: new Date(dto.entryDate),
+          measurementTime,
           systolicBP: dto.systolicBP ?? null,
           diastolicBP: dto.diastolicBP ?? null,
           weight: dto.weight != null ? new Prisma.Decimal(dto.weight) : null,
@@ -56,6 +66,7 @@ export class DailyJournalService {
         diastolicBP: entry.diastolicBP,
         weight: entry.weight != null ? Number(entry.weight) : null,
         medicationTaken: entry.medicationTaken,
+        measurementTime: entry.measurementTime,
       })
 
       return {
@@ -69,7 +80,7 @@ export class DailyJournalService {
         error.code === 'P2002'
       ) {
         throw new ConflictException(
-          'A journal entry already exists for this date',
+          'A journal entry already exists for this date and time',
         )
       }
 
@@ -93,6 +104,7 @@ export class DailyJournalService {
       const data: Prisma.JournalEntryUpdateInput = {}
 
       if (dto.entryDate !== undefined) data.entryDate = new Date(dto.entryDate)
+      if (dto.measurementTime !== undefined) data.measurementTime = dto.measurementTime
       if (dto.systolicBP !== undefined) data.systolicBP = dto.systolicBP
       if (dto.diastolicBP !== undefined) data.diastolicBP = dto.diastolicBP
       if (dto.weight !== undefined)
@@ -121,6 +133,7 @@ export class DailyJournalService {
         diastolicBP: updated.diastolicBP,
         weight: updated.weight != null ? Number(updated.weight) : null,
         medicationTaken: updated.medicationTaken,
+        measurementTime: updated.measurementTime,
       })
 
       return {
@@ -135,7 +148,7 @@ export class DailyJournalService {
         error.code === 'P2002'
       ) {
         throw new ConflictException(
-          'A journal entry already exists for this date',
+          'A journal entry already exists for this date and time',
         )
       }
 
@@ -164,7 +177,7 @@ export class DailyJournalService {
 
     const entries = await this.prisma.journalEntry.findMany({
       where,
-      orderBy: { entryDate: 'desc' },
+      orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
       take,
     })
 
@@ -181,7 +194,7 @@ export class DailyJournalService {
     const [entries, total] = await Promise.all([
       this.prisma.journalEntry.findMany({
         where: { userId },
-        orderBy: { entryDate: 'desc' },
+        orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
         skip,
         take: limit,
         include: {
@@ -217,6 +230,7 @@ export class DailyJournalService {
       data: entries.map((entry) => ({
         id: entry.id,
         entryDate: entry.entryDate,
+        measurementTime: entry.measurementTime,
         systolicBP: entry.systolicBP,
         diastolicBP: entry.diastolicBP,
         weight: entry.weight != null ? Number(entry.weight) : null,
@@ -699,6 +713,7 @@ export class DailyJournalService {
     id: string
     userId: string
     entryDate: Date
+    measurementTime: string | null
     systolicBP: number | null
     diastolicBP: number | null
     weight: Prisma.Decimal | number | null
@@ -718,6 +733,7 @@ export class DailyJournalService {
       id: entry.id,
       userId: entry.userId,
       entryDate: entry.entryDate,
+      measurementTime: entry.measurementTime,
       systolicBP: entry.systolicBP,
       diastolicBP: entry.diastolicBP,
       weight: entry.weight != null ? Number(entry.weight) : null,

@@ -23,6 +23,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 type Entry = {
   id: string;
   entryDate: string;
+  measurementTime?: string | null;
   systolicBP?: number;
   diastolicBP?: number;
   weight?: number;
@@ -33,6 +34,7 @@ type Entry = {
 
 type EditForm = {
   entryDate: string;
+  measurementTime: string;
   systolic: string;
   diastolic: string;
   weight: string;
@@ -141,13 +143,26 @@ function EntryCard({
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          {/* Date */}
-          <p
-            className="text-[12px] font-semibold mb-2"
-            style={{ color: 'var(--brand-text-muted)' }}
-          >
-            {formatDate(entry.entryDate)}
-          </p>
+          {/* Date + Time */}
+          <div className="flex items-center gap-2 mb-2">
+            <p
+              className="text-[12px] font-semibold"
+              style={{ color: 'var(--brand-text-muted)' }}
+            >
+              {formatDate(entry.entryDate)}
+            </p>
+            {entry.measurementTime && (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                style={{
+                  backgroundColor: 'var(--brand-primary-purple-light)',
+                  color: 'var(--brand-primary-purple)',
+                }}
+              >
+                {entry.measurementTime}
+              </span>
+            )}
+          </div>
 
           {/* BP reading */}
           {hasBP ? (
@@ -348,6 +363,26 @@ function EditModal({
               type="date"
               value={form.entryDate}
               onChange={(e) => onChange('entryDate', e.target.value)}
+              className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
+              style={{
+                borderColor: 'var(--brand-border)',
+                color: 'var(--brand-text-primary)',
+              }}
+            />
+          </div>
+
+          {/* Time */}
+          <div>
+            <label
+              className="block text-[12px] font-semibold mb-1.5"
+              style={{ color: 'var(--brand-text-secondary)' }}
+            >
+              {t('checkin.time')}
+            </label>
+            <input
+              type="time"
+              value={form.measurementTime}
+              onChange={(e) => onChange('measurementTime', e.target.value)}
               className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
               style={{
                 borderColor: 'var(--brand-border)',
@@ -648,6 +683,7 @@ export default function ReadingsPage() {
     setEditEntry(entry);
     setEditForm({
       entryDate: entry.entryDate?.split('T')[0] ?? '',
+      measurementTime: entry.measurementTime ?? '',
       systolic: entry.systolicBP?.toString() ?? '',
       diastolic: entry.diastolicBP?.toString() ?? '',
       weight: entry.weight?.toString() ?? '',
@@ -676,6 +712,7 @@ export default function ReadingsPage() {
     try {
       const payload: Parameters<typeof updateJournalEntry>[1] = {};
       if (editForm.entryDate) payload.entryDate = editForm.entryDate;
+      if (editForm.measurementTime) payload.measurementTime = editForm.measurementTime;
       if (editForm.systolic) payload.systolicBP = parseInt(editForm.systolic, 10);
       if (editForm.diastolic) payload.diastolicBP = parseInt(editForm.diastolic, 10);
       if (editForm.weight) payload.weight = parseFloat(editForm.weight);
@@ -751,7 +788,7 @@ export default function ReadingsPage() {
         </div>
       </div>
 
-      {/* List */}
+      {/* List — grouped by date */}
       <div className="max-w-2xl mx-auto px-4 md:px-8 py-6 space-y-3">
         {loading ? (
           Array.from({ length: 5 }).map((_, i) => <EntrySkeleton key={i} />)
@@ -785,16 +822,44 @@ export default function ReadingsPage() {
             </Link>
           </div>
         ) : (
-          <AnimatePresence mode="popLayout">
-            {entries.map((entry) => (
-              <EntryCard
-                key={entry.id}
-                entry={entry}
-                onEdit={() => openEdit(entry)}
-                onDelete={() => setDeleteId(entry.id)}
-              />
-            ))}
-          </AnimatePresence>
+          (() => {
+            // Group entries by date
+            const grouped: { date: string; items: Entry[] }[] = [];
+            const dateMap = new Map<string, Entry[]>();
+            for (const entry of entries) {
+              const dateKey = entry.entryDate?.split('T')[0] ?? entry.entryDate;
+              if (!dateMap.has(dateKey)) dateMap.set(dateKey, []);
+              dateMap.get(dateKey)!.push(entry);
+            }
+            for (const [date, items] of dateMap) {
+              grouped.push({ date, items });
+            }
+
+            return (
+              <AnimatePresence mode="popLayout">
+                {grouped.map((group) => (
+                  <div key={group.date} className="space-y-2">
+                    {group.items.length > 1 && (
+                      <p
+                        className="text-[11px] font-bold uppercase tracking-wider px-1 pt-2"
+                        style={{ color: 'var(--brand-text-muted)' }}
+                      >
+                        {formatDate(group.date)} — {group.items.length} readings
+                      </p>
+                    )}
+                    {group.items.map((entry) => (
+                      <EntryCard
+                        key={entry.id}
+                        entry={entry}
+                        onEdit={() => openEdit(entry)}
+                        onDelete={() => setDeleteId(entry.id)}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </AnimatePresence>
+            );
+          })()
         )}
       </div>
 

@@ -41,7 +41,7 @@ export class ProviderService {
       },
       include: {
         journalEntries: {
-          orderBy: { entryDate: 'desc' },
+          orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: { systolicBP: true },
         },
@@ -88,10 +88,11 @@ export class ProviderService {
       where,
       include: {
         journalEntries: {
-          orderBy: { entryDate: 'desc' },
+          orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: {
             entryDate: true,
+            measurementTime: true,
             systolicBP: true,
             diastolicBP: true,
           },
@@ -145,6 +146,7 @@ export class ProviderService {
               systolicBP: latestEntry.systolicBP,
               diastolicBP: latestEntry.diastolicBP,
               entryDate: latestEntry.entryDate,
+              measurementTime: latestEntry.measurementTime ?? null,
             }
           : null,
         escalationLevel,
@@ -169,10 +171,11 @@ export class ProviderService {
       where: { id: userId },
       include: {
         journalEntries: {
-          orderBy: { entryDate: 'desc' },
+          orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: {
             entryDate: true,
+            measurementTime: true,
             systolicBP: true,
             diastolicBP: true,
           },
@@ -220,6 +223,7 @@ export class ProviderService {
             systolicBP: latestEntry.systolicBP,
             diastolicBP: latestEntry.diastolicBP,
             entryDate: latestEntry.entryDate,
+            measurementTime: latestEntry.measurementTime ?? null,
           }
         : null,
       escalationLevel:
@@ -229,11 +233,12 @@ export class ProviderService {
     // Recent 14 entries
     const recentEntries = await this.prisma.journalEntry.findMany({
       where: { userId },
-      orderBy: { entryDate: 'desc' },
+      orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
       take: 14,
       select: {
         id: true,
         entryDate: true,
+        measurementTime: true,
         systolicBP: true,
         diastolicBP: true,
         weight: true,
@@ -335,7 +340,7 @@ export class ProviderService {
     const [entries, total] = await Promise.all([
       this.prisma.journalEntry.findMany({
         where: { userId },
-        orderBy: { entryDate: 'desc' },
+        orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
         skip,
         take: limit,
         include: {
@@ -371,6 +376,7 @@ export class ProviderService {
       data: entries.map((entry) => ({
         id: entry.id,
         entryDate: entry.entryDate,
+        measurementTime: entry.measurementTime,
         systolicBP: entry.systolicBP,
         diastolicBP: entry.diastolicBP,
         weight: entry.weight != null ? Number(entry.weight) : null,
@@ -579,10 +585,11 @@ export class ProviderService {
     // Last 7 journal entries for BP trend chart
     const recentEntries = await this.prisma.journalEntry.findMany({
       where: { userId, systolicBP: { not: null } },
-      orderBy: { entryDate: 'desc' },
+      orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
       take: 7,
       select: {
         entryDate: true,
+        measurementTime: true,
         systolicBP: true,
         diastolicBP: true,
       },

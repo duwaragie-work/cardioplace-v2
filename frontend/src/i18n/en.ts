@@ -109,6 +109,7 @@ const en = {
   'checkin.recentReadings': 'Your Recent Readings',
   'checkin.viewAll': 'View All',
   'checkin.date': 'Date',
+  'checkin.time': 'Time of Measurement',
   'checkin.status': 'Status',
   'checkin.normal': 'Normal',
   'checkin.noReadingsYet': 'No readings yet — this is your first check-in!',

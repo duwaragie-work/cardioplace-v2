@@ -423,48 +423,63 @@ async function main() {
       },
     })
 
-    // ── Journal Entries (90 days) ──
-    const entries: { id: string; date: Date; sys: number; dia: number; weight: number; medTaken: boolean }[] = []
+    // ── Journal Entries (90 days, with multiple readings per day ~30%) ──
+    const entries: { id: string; date: Date; sys: number; dia: number; weight: number; medTaken: boolean; time: string }[] = []
     const crisisSet = new Set(def.crisisDays ?? [])
 
     for (let i = def.days; i >= 1; i--) {
       const entryDate = dateOnly(daysAgo(i))
 
-      let sys: number, dia: number
-
-      if (crisisSet.has(i)) {
-        // Forced crisis reading
-        sys = rand(185, 200)
-        dia = rand(120, 135)
-      } else {
-        // Normal with optional trend
-        const dayProgress = (def.days - i) / def.days
-        const trendedSysBase = def.bp.sysBase + (def.bp.trendRise ?? 0) * dayProgress
-        sys = Math.round(trendedSysBase) + rand(-def.bp.sysVar, def.bp.sysVar)
-        dia = def.bp.diaBase + rand(-def.bp.diaVar, def.bp.diaVar)
+      // ~30% of non-crisis days get a second (evening) reading
+      const periods: string[] = ['08:00']
+      if (!crisisSet.has(i) && Math.random() < 0.3) {
+        periods.push('19:00')
       }
 
-      const weight = def.weight.base + rand(-def.weight.variance, def.weight.variance)
-      const medTaken = Math.random() < def.medCompliance
-      const symptoms = crisisSet.has(i)
-        ? ['Severe Headache', 'Chest Pain', 'Blurred Vision'].slice(0, rand(2, 3))
-        : randomSymptoms(def.symptomFreq)
+      for (const measurementTime of periods) {
+        let sys: number, dia: number
 
-      const entry = await prisma.journalEntry.create({
-        data: {
-          userId: user.id,
-          entryDate,
-          systolicBP: sys,
-          diastolicBP: dia,
-          weight,
-          medicationTaken: medTaken,
-          missedDoses: medTaken ? 0 : rand(1, 2),
-          symptoms,
-          notes: symptoms.length > 0 ? `Patient reported: ${symptoms.join(', ')}` : null,
-          source: 'MANUAL',
-        },
-      })
-      entries.push({ id: entry.id, date: entryDate, sys, dia, weight, medTaken })
+        if (crisisSet.has(i)) {
+          // Forced crisis reading
+          sys = rand(185, 200)
+          dia = rand(120, 135)
+        } else {
+          // Normal with optional trend
+          const dayProgress = (def.days - i) / def.days
+          const trendedSysBase = def.bp.sysBase + (def.bp.trendRise ?? 0) * dayProgress
+          sys = Math.round(trendedSysBase) + rand(-def.bp.sysVar, def.bp.sysVar)
+          dia = def.bp.diaBase + rand(-def.bp.diaVar, def.bp.diaVar)
+
+          // Evening readings tend to be slightly lower
+          if (measurementTime === '19:00') {
+            sys = Math.max(90, sys - rand(2, 6))
+            dia = Math.max(55, dia - rand(1, 4))
+          }
+        }
+
+        const weight = def.weight.base + rand(-def.weight.variance, def.weight.variance)
+        const medTaken = Math.random() < def.medCompliance
+        const symptoms = crisisSet.has(i)
+          ? ['Severe Headache', 'Chest Pain', 'Blurred Vision'].slice(0, rand(2, 3))
+          : randomSymptoms(def.symptomFreq)
+
+        const entry = await prisma.journalEntry.create({
+          data: {
+            userId: user.id,
+            entryDate,
+            measurementTime,
+            systolicBP: sys,
+            diastolicBP: dia,
+            weight,
+            medicationTaken: medTaken,
+            missedDoses: medTaken ? 0 : rand(1, 2),
+            symptoms,
+            notes: symptoms.length > 0 ? `Patient reported: ${symptoms.join(', ')}` : null,
+            source: 'MANUAL',
+          },
+        })
+        entries.push({ id: entry.id, date: entryDate, sys, dia, weight, medTaken, time: measurementTime })
+      }
     }
 
     // ── Baseline Snapshots (every 7 days) ──

@@ -4,6 +4,7 @@ const API = process.env.NEXT_PUBLIC_API_URL
 
 export async function createJournalEntry(data: {
   entryDate: string
+  measurementTime?: string
   systolicBP?: number
   diastolicBP?: number
   weight?: number
@@ -29,6 +30,7 @@ export async function updateJournalEntry(
   id: string,
   data: Partial<{
     entryDate: string
+    measurementTime: string
     systolicBP: number
     diastolicBP: number
     weight: number

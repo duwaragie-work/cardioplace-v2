@@ -21,6 +21,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FormData {
   date: string;
+  measurementTime: string;
   systolic: string;
   diastolic: string;
   medication: 'yes' | 'no' | null;
@@ -349,6 +350,24 @@ function Step1Date({
           type="date"
           value={form.date}
           onChange={(e) => onChange('date', e.target.value)}
+          className="w-full h-14 px-4 rounded-xl text-[15px] outline-none transition"
+          style={{
+            border: '2px solid var(--brand-border)',
+            color: 'var(--brand-text-primary)',
+            backgroundColor: 'white',
+          }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+        />
+      </div>
+      <div>
+        <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+          {t('checkin.time')}
+        </label>
+        <input
+          type="time"
+          value={form.measurementTime}
+          onChange={(e) => onChange('measurementTime', e.target.value)}
           className="w-full h-14 px-4 rounded-xl text-[15px] outline-none transition"
           style={{
             border: '2px solid var(--brand-border)',
@@ -875,8 +894,12 @@ export default function CheckIn() {
   const [recentReadings, setRecentReadings] = useState<RecentReading[]>([]);
   const [readingsLoading, setReadingsLoading] = useState(true);
   const [baseline, setBaseline] = useState<Baseline | null>(null);
+  const hh = String(today.getHours()).padStart(2, '0');
+  const min = String(today.getMinutes()).padStart(2, '0');
+
   const [form, setForm] = useState<FormData>({
     date: `${yyyy}-${mm}-${dd}`,
+    measurementTime: `${hh}:${min}`,
     systolic: '',
     diastolic: '',
     medication: null,
@@ -935,6 +958,7 @@ export default function CheckIn() {
     try {
       const payload: Parameters<typeof createJournalEntry>[0] = {
         entryDate: form.date,
+        measurementTime: form.measurementTime,
       };
       if (form.systolic) payload.systolicBP = parseInt(form.systolic, 10);
       if (form.diastolic) payload.diastolicBP = parseInt(form.diastolic, 10);

@@ -258,10 +258,13 @@ export class DeviationService {
       const previousDate = new Date(entryDate)
       previousDate.setDate(previousDate.getDate() - offset)
 
-      const previousEntry =
-        await this.prisma.journalEntry.findUnique({
+      // Multiple entries may exist per day — check if ANY entry that day
+      // has a deviation alert for this type
+      const previousEntries =
+        await this.prisma.journalEntry.findMany({
           where: {
-            userId_entryDate: { userId, entryDate: previousDate },
+            userId,
+            entryDate: previousDate,
           },
           include: {
             deviationAlerts: {
@@ -270,7 +273,7 @@ export class DeviationService {
           },
         })
 
-      if (previousEntry?.deviationAlerts?.length) {
+      if (previousEntries.some((e) => e.deviationAlerts.length > 0)) {
         count += 1
       }
     }

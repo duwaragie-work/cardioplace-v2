@@ -5,6 +5,7 @@ export interface JournalEntryCreatedEvent {
   systolicBP: number | null
   diastolicBP: number | null
   weight: number | null
+  measurementTime?: string | null
 }
 
 export interface JournalEntryUpdatedEvent {
@@ -14,6 +15,7 @@ export interface JournalEntryUpdatedEvent {
   systolicBP: number | null
   diastolicBP: number | null
   weight: number | null
+  measurementTime?: string | null
 }
 
 export interface BaselineComputedEvent {

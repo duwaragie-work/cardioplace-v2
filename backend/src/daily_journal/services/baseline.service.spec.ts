@@ -68,10 +68,10 @@ describe('BaselineService', () => {
       expect(eventEmitter.emit).not.toHaveBeenCalled()
     })
 
-    it('emits BASELINE_UNAVAILABLE when < 3 entries in 7-day window', async () => {
+    it('emits BASELINE_UNAVAILABLE when < 3 days in 7-day window', async () => {
       prisma.journalEntry.findMany.mockResolvedValue([
-        { systolicBP: 128, diastolicBP: 82, weight: 79 },
-        { systolicBP: 132, diastolicBP: 88, weight: 81 },
+        { entryDate: new Date('2026-03-19'), systolicBP: 128, diastolicBP: 82, weight: 79 },
+        { entryDate: new Date('2026-03-20'), systolicBP: 132, diastolicBP: 88, weight: 81 },
       ])
 
       await service.handleEntryCreated(basePayload)
@@ -97,11 +97,11 @@ describe('BaselineService', () => {
       )
     })
 
-    it('computes averages and emits BASELINE_COMPUTED when >= 3 entries', async () => {
+    it('computes averages and emits BASELINE_COMPUTED when >= 3 days', async () => {
       prisma.journalEntry.findMany.mockResolvedValue([
-        { systolicBP: 120, diastolicBP: 80, weight: null },
-        { systolicBP: 130, diastolicBP: 85, weight: null },
-        { systolicBP: 140, diastolicBP: 90, weight: null },
+        { entryDate: new Date('2026-03-18'), systolicBP: 120, diastolicBP: 80, weight: null },
+        { entryDate: new Date('2026-03-19'), systolicBP: 130, diastolicBP: 85, weight: null },
+        { entryDate: new Date('2026-03-20'), systolicBP: 140, diastolicBP: 90, weight: null },
       ])
 
       await service.handleEntryCreated(basePayload)
@@ -137,9 +137,9 @@ describe('BaselineService', () => {
       const entryDate = new Date('2026-03-20')
 
       prisma.journalEntry.findMany.mockResolvedValue([
-        { systolicBP: 120, diastolicBP: 80, weight: 78 },
-        { systolicBP: 130, diastolicBP: 85, weight: 80 },
-        { systolicBP: 140, diastolicBP: 90, weight: 82 },
+        { entryDate: new Date('2026-03-18'), systolicBP: 120, diastolicBP: 80, weight: 78 },
+        { entryDate: new Date('2026-03-19'), systolicBP: 130, diastolicBP: 85, weight: 80 },
+        { entryDate: new Date('2026-03-20'), systolicBP: 140, diastolicBP: 90, weight: 82 },
       ])
 
       await service.handleEntryCreated({ ...basePayload, entryDate })
@@ -158,9 +158,9 @@ describe('BaselineService', () => {
 
     it('includes avgWeight when weight data is present', async () => {
       prisma.journalEntry.findMany.mockResolvedValue([
-        { systolicBP: 120, diastolicBP: 80, weight: 78 },
-        { systolicBP: 130, diastolicBP: 85, weight: 80 },
-        { systolicBP: 140, diastolicBP: 90, weight: 82 },
+        { entryDate: new Date('2026-03-18'), systolicBP: 120, diastolicBP: 80, weight: 78 },
+        { entryDate: new Date('2026-03-19'), systolicBP: 130, diastolicBP: 85, weight: 80 },
+        { entryDate: new Date('2026-03-20'), systolicBP: 140, diastolicBP: 90, weight: 82 },
       ])
 
       await service.handleEntryCreated(basePayload)
@@ -195,9 +195,9 @@ describe('BaselineService', () => {
       }
 
       prisma.journalEntry.findMany.mockResolvedValue([
-        { systolicBP: 120, diastolicBP: 80, weight: null },
-        { systolicBP: 130, diastolicBP: 85, weight: null },
-        { systolicBP: 140, diastolicBP: 90, weight: null },
+        { entryDate: new Date('2026-03-18'), systolicBP: 120, diastolicBP: 80, weight: null },
+        { entryDate: new Date('2026-03-19'), systolicBP: 130, diastolicBP: 85, weight: null },
+        { entryDate: new Date('2026-03-20'), systolicBP: 140, diastolicBP: 90, weight: null },
       ])
 
       await service.handleEntryUpdated(payload)

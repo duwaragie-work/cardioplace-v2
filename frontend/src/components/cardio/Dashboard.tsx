@@ -15,7 +15,7 @@ import {
 import { Flame, Clock, ArrowRight } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { getJournalEntries, getLatestBaseline, getAlerts } from '@/lib/services/journal.service';
+import { getJournalEntries, getLatestBaseline, getAlerts, getJournalStats } from '@/lib/services/journal.service';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function getDateLabel(dateStr: string): string {
@@ -47,6 +47,7 @@ function getLastCheckInText(latestEntry: Record<string, unknown> | null): string
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface JournalEntry {
   entryDate: string;
+  measurementTime?: string | null;
   systolicBP?: number;
   diastolicBP?: number;
   medicationTaken?: boolean;
@@ -91,22 +92,22 @@ export default function Dashboard() {
     if (isLoading || !isAuthenticated) return;
     setDataLoading(true);
     Promise.all([
-      getJournalEntries({ limit: 90 }).catch(() => []),
+      getJournalEntries({ limit: 200 }).catch(() => []),
       getLatestBaseline().catch(() => null),
       getAlerts().catch(() => []),
-    ]).then(([entries, baselineData, alertsData]) => {
+      getJournalStats().catch(() => null),
+    ]).then(([entries, baselineData, alertsData, stats]) => {
       const arr: JournalEntry[] = Array.isArray(entries) ? entries : [];
       const sortedAsc = [...arr].sort((a, b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime());
-      setBpChartData(sortedAsc.map((e) => ({ day: getDateLabel(e.entryDate), systolic: e.systolicBP ?? 0, diastolic: e.diastolicBP ?? 0 })));
+      setBpChartData(sortedAsc.map((e) => ({
+        day: getDateLabel(e.entryDate),
+        systolic: e.systolicBP ?? 0,
+        diastolic: e.diastolicBP ?? 0,
+      })));
       const sortedDesc = [...arr].sort((a, b) => new Date(b.entryDate).getTime() - new Date(a.entryDate).getTime());
       setLatestEntry(sortedDesc[0] ?? null);
-      setTotalEntries(arr.length);
-      let s = 0;
-      for (const e of sortedDesc) {
-        if (e.medicationTaken === true) s++;
-        else if (e.medicationTaken === false) break;
-      }
-      setStreak(s);
+      setTotalEntries(stats?.totalEntries ?? arr.length);
+      setStreak(stats?.currentStreak ?? 0);
       setBaseline(baselineData ?? null);
       setAlerts(Array.isArray(alertsData) ? alertsData : []);
     }).finally(() => setDataLoading(false));

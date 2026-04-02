@@ -111,6 +111,7 @@ const fr: Record<TranslationKey, string> = {
   'checkin.recentReadings': 'Vos Lectures Récentes',
   'checkin.viewAll': 'Voir Tout',
   'checkin.date': 'Date',
+  'checkin.time': 'Heure de Mesure',
   'checkin.status': 'Statut',
   'checkin.normal': 'Normal',
   'checkin.noReadingsYet': 'Aucune lecture — c\'est votre premier contrôle !',

@@ -109,6 +109,7 @@ const am: Record<string, string> = {
   'checkin.recentReadings': 'የቅርብ ጊዜ ንባቦችዎ',
   'checkin.viewAll': 'ሁሉንም ይመልከቱ',
   'checkin.date': 'ቀን',
+  'checkin.time': 'የመለኪያ ሰዓት',
   'checkin.status': 'ሁኔታ',
   'checkin.normal': 'መደበኛ',
   'checkin.noReadingsYet': 'እስካሁን ንባብ የለም — ይህ የመጀመሪያ ቼክ-ኢንዎ ነው!',

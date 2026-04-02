@@ -95,6 +95,13 @@ export class CreateJournalEntryDto {
   notes?: string
 
   @IsOptional()
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
+    message: 'measurementTime must be in HH:mm format (e.g., 08:30, 14:15)',
+  })
+  measurementTime?: string
+
+  @IsOptional()
   @IsString({ message: 'source must be a string' })
   @IsIn(['manual', 'healthkit'], {
     message: 'source must be one of: manual, healthkit',

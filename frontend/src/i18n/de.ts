@@ -111,6 +111,7 @@ const de: Record<TranslationKey, string> = {
   'checkin.recentReadings': 'Ihre Letzten Messwerte',
   'checkin.viewAll': 'Alle Anzeigen',
   'checkin.date': 'Datum',
+  'checkin.time': 'Messzeit',
   'checkin.status': 'Status',
   'checkin.normal': 'Normal',
   'checkin.noReadingsYet': 'Noch keine Messwerte — dies ist Ihre erste Kontrolle!',

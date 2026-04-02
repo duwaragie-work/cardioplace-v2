@@ -23,6 +23,7 @@ describe('DeviationService', () => {
       },
       journalEntry: {
         findUnique: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
       },
     }
     eventEmitter = { emit: jest.fn() }
