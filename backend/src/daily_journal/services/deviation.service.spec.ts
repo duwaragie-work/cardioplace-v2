@@ -18,6 +18,7 @@ describe('DeviationService', () => {
     prisma = {
       deviationAlert: {
         upsert: (jest.fn() as jest.Mock<any>).mockResolvedValue({ id: 'alert-1', escalated: false }),
+        findUnique: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
         updateMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 0 }),
       },

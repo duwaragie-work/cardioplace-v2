@@ -28,12 +28,15 @@ export class EscalationService {
         return
       }
 
-      // Fetch journal entry data for clinical context
+      // Fetch journal entry + user data for clinical context
       const alert = await this.prisma.deviationAlert.findUnique({
         where: { id: payload.alertId },
         include: {
           journalEntry: {
-            select: { systolicBP: true, diastolicBP: true, symptoms: true },
+            select: { entryDate: true, measurementTime: true, systolicBP: true, diastolicBP: true, symptoms: true },
+          },
+          user: {
+            select: { name: true },
           },
         },
       })
@@ -41,6 +44,11 @@ export class EscalationService {
       const systolicBP = alert?.journalEntry?.systolicBP ?? 0
       const diastolicBP = alert?.journalEntry?.diastolicBP ?? 0
       const symptoms = alert?.journalEntry?.symptoms ?? []
+      const patientName = alert?.user?.name ?? 'Patient'
+      const entryDate = alert?.journalEntry?.entryDate
+        ? new Date(alert.journalEntry.entryDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+        : 'Unknown date'
+      const entryTime = alert?.journalEntry?.measurementTime ?? ''
 
       // Determine escalation level
       const hasHighSeverity = payload.severity === 'HIGH'
@@ -51,19 +59,22 @@ export class EscalationService {
           : EscalationLevel.LEVEL_1
 
       const typeLabel = payload.type.toLowerCase().replace('_', ' ')
-      const reason = `${payload.occurrencesInLast3Days} occurrence(s) of ${typeLabel} deviation in the last 3 days (${payload.severity})`
+      const reason = `${payload.occurrencesInLast3Days} consecutive day(s) of ${typeLabel} deviation (${payload.severity})`
 
-      // Patient-facing message
+      const readingStr = `${systolicBP}/${diastolicBP} mmHg`
+      const dateTimeStr = entryTime ? `${entryDate} at ${entryTime}` : entryDate
+
+      // Patient-facing message — personalized with reading and date
       const patientMessage =
         level === EscalationLevel.LEVEL_2
-          ? '🚨 URGENT: Your blood pressure reading indicates a medical emergency. Call 911 immediately or go to your nearest emergency room.'
-          : '📋 Your recent blood pressure reading has been flagged. Your care team has been notified and will follow up with you within 24 hours.'
+          ? `🚨 URGENT: Your blood pressure reading of ${readingStr} on ${dateTimeStr} is critically high. This is ${payload.occurrencesInLast3Days} consecutive days of dangerous readings. Call 911 immediately or go to your nearest emergency room.`
+          : `📋 Your blood pressure reading of ${readingStr} on ${dateTimeStr} has been flagged. This is ${payload.occurrencesInLast3Days} consecutive days of elevated readings. Your care team has been notified and will follow up within 24 hours.`
 
-      // Care team notification
+      // Care team notification — personalized
       const careTeamMessage =
         level === EscalationLevel.LEVEL_2
-          ? `IMMEDIATE ACTION REQUIRED: Patient ${payload.userId} has critical BP readings (${systolicBP}/${diastolicBP} mmHg). Emergency escalation triggered.`
-          : `FOLLOW-UP WITHIN 24H: Patient ${payload.userId} has elevated BP readings (${systolicBP}/${diastolicBP} mmHg). Review recommended.`
+          ? `IMMEDIATE ACTION REQUIRED: ${patientName} recorded ${readingStr} on ${dateTimeStr}. ${payload.occurrencesInLast3Days} consecutive days of critical BP. Emergency escalation triggered.`
+          : `FOLLOW-UP WITHIN 24H: ${patientName} recorded ${readingStr} on ${dateTimeStr}. ${payload.occurrencesInLast3Days} consecutive days of elevated BP. Review recommended.`
 
       const escalation = await this.prisma.escalationEvent.create({
         data: {

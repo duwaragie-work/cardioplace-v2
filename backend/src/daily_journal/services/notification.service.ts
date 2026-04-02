@@ -66,8 +66,8 @@ export class JournalNotificationService {
         await this.emailService.sendEmail(
           user.email,
           isLevel2
-            ? 'URGENT: Blood Pressure Emergency Alert'
-            : 'Blood Pressure Notice — Action Required',
+            ? 'Healplace Alert: Blood Pressure Reading Requires Attention'
+            : 'Healplace: Blood Pressure Follow-Up Notice',
           escalationEmailHtml(
             user.name ?? 'Patient',
             payload.escalationLevel,
@@ -100,7 +100,7 @@ export class JournalNotificationService {
 
     return {
       title: titles[payload.escalationLevel] ?? 'Health Alert',
-      body: payload.patientMessage ?? payload.reason,
+      body: payload.patientMessage,
     }
   }
 

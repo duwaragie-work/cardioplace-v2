@@ -156,7 +156,7 @@ describe('EscalationService', () => {
           alertId: 'alert-1',
           escalationLevel: EscalationLevel.LEVEL_1,
           deviationType: 'SYSTOLIC_BP',
-          reason: expect.stringContaining('3 occurrence(s)'),
+          reason: expect.stringContaining('3 consecutive day(s)'),
           symptoms: [],
           patientMessage: expect.any(String),
           careTeamMessage: expect.any(String),

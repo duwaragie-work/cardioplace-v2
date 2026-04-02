@@ -144,7 +144,9 @@ export class DeviationService {
         },
       })
 
-      const occurrencesInLast3Days = await this.countOccurrencesInLast3Days(
+      // Check for 3 consecutive days with this deviation type
+      // Look at a 5-day window (2 days back, today, 2 days forward)
+      const consecutiveResult = await this.findConsecutiveDeviationDays(
         userId,
         entryDate,
         deviation.type,
@@ -152,17 +154,51 @@ export class DeviationService {
 
       this.logger.log(
         `Deviation detected: ${deviation.type} (${deviation.severity}) for user ${userId}, ` +
-          `occurrences in last 3 days: ${occurrencesInLast3Days}`,
+          `max consecutive days: ${consecutiveResult.maxConsecutive}`,
       )
+
+      // Fire escalation if:
+      // - streak is 3+ days AND
+      // - THIS specific alert hasn't been escalated yet
+      // This means: every new day extending a streak gets its own
+      // escalation, but reprocessing the same entry won't duplicate.
+      const shouldEscalate =
+        consecutiveResult.maxConsecutive >= 3 && !alert.escalated
 
       this.eventEmitter.emit(JOURNAL_EVENTS.ANOMALY_TRACKED, {
         userId,
         alertId: alert.id,
         type: deviation.type,
         severity: deviation.severity,
-        occurrencesInLast3Days,
+        occurrencesInLast3Days: consecutiveResult.maxConsecutive,
         escalated: alert.escalated,
       })
+
+      // If this entry is new to the streak, also check if any
+      // neighbour alerts were never escalated (backdated fill-in scenario)
+      if (shouldEscalate) {
+        for (const neighbourAlertId of consecutiveResult.neighbourAlertIds) {
+          if (neighbourAlertId === alert.id) continue
+          const neighbour = await this.prisma.deviationAlert.findUnique({
+            where: { id: neighbourAlertId },
+            include: {
+              journalEntry: {
+                select: { systolicBP: true, diastolicBP: true },
+              },
+            },
+          })
+          if (neighbour && !neighbour.escalated) {
+            this.eventEmitter.emit(JOURNAL_EVENTS.ANOMALY_TRACKED, {
+              userId,
+              alertId: neighbourAlertId,
+              type: deviation.type,
+              severity: neighbour.severity,
+              occurrencesInLast3Days: consecutiveResult.maxConsecutive,
+              escalated: false,
+            })
+          }
+        }
+      }
     }
   }
 
@@ -247,38 +283,64 @@ export class DeviationService {
     return deviations
   }
 
-  private async countOccurrencesInLast3Days(
+  /**
+   * Check a 5-day window (2 days back, today, 2 days forward) for this
+   * deviation type. Returns the longest consecutive run of days with alerts
+   * that includes the current entryDate, plus the alert IDs in that run.
+   *
+   * This handles backdated entries: if submitting Mar 31 completes a
+   * Mar 31 → Apr 1 → Apr 2 streak, the escalation fires immediately.
+   */
+  private async findConsecutiveDeviationDays(
     userId: string,
     entryDate: Date,
     type: DeviationType,
-  ): Promise<number> {
-    let count = 1 // today already has an alert
-
-    for (let offset = 1; offset <= 2; offset++) {
-      const previousDate = new Date(entryDate)
-      previousDate.setDate(previousDate.getDate() - offset)
-
-      // Multiple entries may exist per day — check if ANY entry that day
-      // has a deviation alert for this type
-      const previousEntries =
-        await this.prisma.journalEntry.findMany({
-          where: {
-            userId,
-            entryDate: previousDate,
-          },
-          include: {
-            deviationAlerts: {
-              where: { type },
-            },
-          },
-        })
-
-      if (previousEntries.some((e) => e.deviationAlerts.length > 0)) {
-        count += 1
-      }
+  ): Promise<{ maxConsecutive: number; neighbourAlertIds: string[]; anyAlreadyEscalated: boolean }> {
+    // Build a 5-day window: [D-2, D-1, D, D+1, D+2]
+    const days: Date[] = []
+    for (let offset = -2; offset <= 2; offset++) {
+      const d = new Date(entryDate)
+      d.setDate(d.getDate() + offset)
+      days.push(d)
     }
 
-    return count
+    // For each day, check if any entry has a deviation alert of this type
+    const dayHasAlert: boolean[] = []
+    const dayAlertIds: string[][] = []
+    const dayHasEscalated: boolean[] = []
+
+    for (const day of days) {
+      const entries = await this.prisma.journalEntry.findMany({
+        where: { userId, entryDate: day },
+        include: {
+          deviationAlerts: { where: { type } },
+        },
+      })
+
+      const alerts = entries.flatMap((e) => e.deviationAlerts)
+      dayHasAlert.push(alerts.length > 0)
+      dayAlertIds.push(alerts.map((a) => a.id))
+      dayHasEscalated.push(alerts.some((a) => a.escalated))
+    }
+
+    // Find the longest consecutive run that includes the center day (index 2)
+    let start = 2
+    while (start > 0 && dayHasAlert[start - 1]) {
+      start--
+    }
+
+    let end = 2
+    while (end < 4 && dayHasAlert[end + 1]) {
+      end++
+    }
+
+    const maxConsecutive = end - start + 1
+    const neighbourAlertIds = dayAlertIds.slice(start, end + 1).flat()
+    const anyAlreadyEscalated = dayHasEscalated
+      .slice(start, end + 1)
+      .some((v) => v)
+
+    return { maxConsecutive, neighbourAlertIds, anyAlreadyEscalated }
   }
 
   private async resolveOpenAlerts(userId: string) {
