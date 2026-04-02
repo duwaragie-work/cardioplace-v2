@@ -55,7 +55,6 @@ export interface AnomalyTrackedEvent {
   alertId: string
   type: string
   severity: string
-  occurrencesInLast3Days: number
   escalated: boolean
 }
 

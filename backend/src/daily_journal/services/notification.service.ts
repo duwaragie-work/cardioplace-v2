@@ -19,9 +19,22 @@ export class JournalNotificationService {
   @OnEvent(JOURNAL_EVENTS.ESCALATION_CREATED, { async: true })
   async handleEscalation(payload: EscalationCreatedEvent) {
     try {
+      // ── Idempotency: skip if this escalation already has notifications ──
+      const existingNotif = await this.prisma.notification.findFirst({
+        where: { escalationEventId: payload.escalationEventId },
+      })
+
+      if (existingNotif) {
+        this.logger.log(
+          `Escalation ${payload.escalationEventId}: notifications already sent — skipping`,
+        )
+        return
+      }
+
       const { title, body } = this.generateContent(payload)
       const tips = this.selectTips(payload)
 
+      // ── PUSH notification ──
       const notification = await this.prisma.notification.create({
         data: {
           userId: payload.userId,
@@ -43,7 +56,7 @@ export class JournalNotificationService {
         `Notification ${notification.id} sent to user ${payload.userId} [${payload.escalationLevel}]`,
       )
 
-      // ─── Email notification ──────────────────────────────────────────
+      // ── Email notification ──
       const user = await this.prisma.user.findUnique({
         where: { id: payload.userId },
         select: { email: true, name: true },
@@ -62,12 +75,15 @@ export class JournalNotificationService {
           },
         })
 
-        const isLevel2 = payload.escalationLevel === 'LEVEL_2'
+        const isLow = payload.reason?.includes('without symptoms')
+        const emailSubject = isLow
+          ? 'Healplace: Blood Pressure Trend Update'
+          : payload.escalationLevel === 'LEVEL_2'
+            ? 'Healplace Alert: Blood Pressure Reading Requires Attention'
+            : 'Healplace: Blood Pressure — Please Take Your Medication'
         await this.emailService.sendEmail(
           user.email,
-          isLevel2
-            ? 'Healplace Alert: Blood Pressure Reading Requires Attention'
-            : 'Healplace: Blood Pressure Follow-Up Notice',
+          emailSubject,
           escalationEmailHtml(
             user.name ?? 'Patient',
             payload.escalationLevel,
@@ -93,20 +109,22 @@ export class JournalNotificationService {
     title: string
     body: string
   } {
-    const titles: Record<string, string> = {
-      LEVEL_1: 'Blood Pressure Notice',
-      LEVEL_2: 'Urgent Blood Pressure Alert',
-    }
+    // Determine title from reason context (LOW vs LEVEL_1 vs LEVEL_2)
+    const isLow = payload.reason?.includes('without symptoms')
+    const title = isLow
+      ? 'Blood Pressure Trend Notice'
+      : payload.escalationLevel === 'LEVEL_2'
+        ? 'Urgent Blood Pressure Alert'
+        : 'Blood Pressure Alert — Action Needed'
 
-    return {
-      title: titles[payload.escalationLevel] ?? 'Health Alert',
-      body: payload.patientMessage,
-    }
+    return { title, body: payload.patientMessage }
   }
 
   private selectTips(payload: EscalationCreatedEvent): string[] {
     const deviationType = payload.deviationType ?? ''
-    const typeTips = CARDIO_TIPS[deviationType] ?? []
+    // For consolidated BP alerts, use systolic tips
+    const tipKey = deviationType === 'BP_COMBINED' ? 'SYSTOLIC_BP' : deviationType
+    const typeTips = CARDIO_TIPS[tipKey] ?? []
 
     const tipCount = payload.escalationLevel === 'LEVEL_2' ? 4 : 2
 
@@ -117,7 +135,7 @@ export class JournalNotificationService {
     const allTips = [
       ...typeTips,
       ...Object.entries(CARDIO_TIPS)
-        .filter(([key]) => key !== deviationType)
+        .filter(([key]) => key !== tipKey)
         .flatMap(([, tips]) => tips),
     ]
 

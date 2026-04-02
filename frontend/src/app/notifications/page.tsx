@@ -25,7 +25,7 @@ import {
 import { useLanguage } from '@/contexts/LanguageContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type AlertType = 'SYSTOLIC_BP' | 'DIASTOLIC_BP' | 'WEIGHT' | 'MEDICATION_ADHERENCE';
+type AlertType = 'SYSTOLIC_BP' | 'DIASTOLIC_BP' | 'BP_COMBINED' | 'WEIGHT' | 'MEDICATION_ADHERENCE';
 type AlertSeverity = 'LOW' | 'MEDIUM' | 'HIGH';
 type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
 
@@ -43,6 +43,7 @@ type Alert = {
   journalEntry?: {
     id: string;
     entryDate: string;
+    measurementTime?: string;
     systolicBP?: number;
     diastolicBP?: number;
     weight?: number;
@@ -60,9 +61,10 @@ type Notif = {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const TYPE_META: Record<AlertType, { label: string; icon: typeof Activity }> = {
+const TYPE_META: Record<string, { label: string; icon: typeof Activity }> = {
   SYSTOLIC_BP: { label: 'Elevated Systolic BP', icon: Activity },
   DIASTOLIC_BP: { label: 'Elevated Diastolic BP', icon: Activity },
+  BP_COMBINED: { label: 'Elevated Blood Pressure', icon: Activity },
   WEIGHT: { label: 'Weight Change Detected', icon: Scale },
   MEDICATION_ADHERENCE: { label: 'Missed Medication', icon: Pill },
 };
@@ -91,12 +93,13 @@ function timeAgo(dateStr: string): string {
 
 function formatAlertDate(dateStr: string): string {
   try {
-    return new Date(dateStr).toLocaleDateString('en-US', {
+    // entryDate is date-only (no time) — parse as UTC to avoid timezone shift
+    const d = new Date(dateStr)
+    return d.toLocaleDateString('en-US', {
+      timeZone: 'UTC',
       weekday: 'short',
       month: 'short',
       day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
     });
   } catch {
     return dateStr;
@@ -186,9 +189,10 @@ function AlertCard({
   const isOpen = alert.status === 'OPEN';
   const isAcking = acknowledging === alert.id;
 
-  const alertTypeLabels: Record<AlertType, string> = {
+  const alertTypeLabels: Record<string, string> = {
     SYSTOLIC_BP: t('alert.systolicBP'),
     DIASTOLIC_BP: t('alert.diastolicBP'),
+    BP_COMBINED: t('alert.bpCombined') || 'Elevated Blood Pressure',
     WEIGHT: t('alert.weight'),
     MEDICATION_ADHERENCE: t('alert.medication'),
   };
@@ -251,25 +255,44 @@ function AlertCard({
               )}
             </div>
 
-            {/* Values */}
-            {alert.actualValue != null && alert.baselineValue != null && (
-              <p className="text-[12px] mb-2" style={{ color: 'var(--brand-text-muted)' }}>
+            {/* BP reading for combined/BP alerts */}
+            {alert.journalEntry && (alert.type === 'BP_COMBINED' || alert.type.includes('BP')) && (
+              <p className="text-[12px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('alert.recorded')}{' '}
                 <span className="font-semibold" style={{ color: sevMeta.text }}>
-                  {Number(alert.actualValue).toFixed(0)}
-                </span>{' '}
-                {t('alert.vsBaseline')}{' '}
-                <span className="font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
-                  {Number(alert.baselineValue).toFixed(0)}
+                  {alert.journalEntry.systolicBP ?? '—'}/{alert.journalEntry.diastolicBP ?? '—'} mmHg
                 </span>
-                {alert.type.includes('BP') ? ' mmHg' : alert.type === 'WEIGHT' ? ' lbs' : ''}
+                {alert.baselineValue != null && (
+                  <>
+                    {' '}{t('alert.vsBaseline')}{' '}
+                    <span className="font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
+                      {Number(alert.baselineValue).toFixed(0)} mmHg
+                    </span>
+                  </>
+                )}
               </p>
             )}
 
-            {/* Entry date */}
+            {/* Non-BP values (weight, medication) */}
+            {alert.actualValue != null && !alert.type.includes('BP') && alert.type !== 'BP_COMBINED' && (
+              <p className="text-[12px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>
+                {t('alert.recorded')}{' '}
+                <span className="font-semibold" style={{ color: sevMeta.text }}>
+                  {Number(alert.actualValue).toFixed(0)}
+                </span>
+                {alert.type === 'WEIGHT' ? ' lbs' : ''}
+              </p>
+            )}
+
+            {/* Entry date + measurement time */}
             {alert.journalEntry?.entryDate && (
               <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
                 {formatAlertDate(alert.journalEntry.entryDate)}
+                {alert.journalEntry.measurementTime && (
+                  <span className="ml-1 font-semibold">
+                    {alert.journalEntry.measurementTime}
+                  </span>
+                )}
               </p>
             )}
           </div>
@@ -563,7 +586,9 @@ export default function NotificationsPage() {
       const alertArr: Alert[] = Array.isArray(alertData) ? alertData : [];
       const notifArr: Notif[] = Array.isArray(notifData) ? notifData : [];
       setAlerts(alertArr.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-      setNotifs(notifArr.sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime()));
+      // Only show PUSH notifications in-app — EMAIL records are for tracking only
+      const pushOnly = notifArr.filter((n) => !n.channel || n.channel === 'PUSH');
+      setNotifs(pushOnly.sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime()));
     } finally {
       setLoading(false);
     }
@@ -571,6 +596,9 @@ export default function NotificationsPage() {
 
   useEffect(() => {
     load();
+    // Poll every 30s for new alerts/notifications
+    const interval = setInterval(() => { load(); }, 30_000);
+    return () => clearInterval(interval);
   }, [load]);
 
   async function handleAcknowledge(id: string) {
@@ -610,8 +638,33 @@ export default function NotificationsPage() {
     }
   }
 
-  const openAlerts = alerts.filter((a) => a.status === 'OPEN');
-  const pastAlerts = alerts.filter((a) => a.status !== 'OPEN');
+  // Consolidate alerts from the same journal entry into one
+  // (e.g., systolic + diastolic from same reading = 1 alert card)
+  const consolidatedAlerts = (() => {
+    const byEntry = new Map<string, Alert[]>();
+    for (const a of alerts) {
+      const key = a.journalEntry?.id ?? a.id;
+      if (!byEntry.has(key)) byEntry.set(key, []);
+      byEntry.get(key)!.push(a);
+    }
+    return [...byEntry.values()].map((group) => {
+      if (group.length === 1) return group[0];
+      // Merge: pick worst severity, combine types, keep first alert's ID for actions
+      const worst = group.find((a) => a.severity === 'HIGH') ?? group[0];
+      const types = group.map((a) => a.type);
+      const hasBoth = types.includes('SYSTOLIC_BP') && types.includes('DIASTOLIC_BP');
+      return {
+        ...worst,
+        type: (hasBoth ? 'BP_COMBINED' : worst.type) as AlertType,
+        // Keep OPEN status if any in group is OPEN
+        status: (group.some((a) => a.status === 'OPEN') ? 'OPEN' : worst.status) as AlertStatus,
+        escalated: group.some((a) => a.escalated),
+      };
+    });
+  })();
+
+  const openAlerts = consolidatedAlerts.filter((a) => a.status === 'OPEN');
+  const pastAlerts = consolidatedAlerts.filter((a) => a.status !== 'OPEN');
   const unreadCount = notifs.filter((n) => !n.watched).length;
 
   const filteredNotifs =

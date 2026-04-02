@@ -6,13 +6,13 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { Bell, Menu, X, Globe } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
-import { getAlerts } from '@/lib/services/journal.service';
+import { getAlerts, getNotifications } from '@/lib/services/journal.service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { ALL_LOCALES, isLocaleSupported, type LocaleCode } from '@/i18n';
 
 export default function Navbar() {
   const pathname = usePathname();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const { locale, setLocale, t } = useLanguage();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
@@ -21,12 +21,29 @@ export default function Navbar() {
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    getAlerts()
-      .then((data) => {
-        const arr = Array.isArray(data) ? data : [];
-        setAlertCount(arr.filter((a: { status: string }) => a.status === 'OPEN').length);
-      })
-      .catch(() => {});
+    Promise.all([
+      getAlerts().catch(() => []),
+      getNotifications('unread').catch(() => []),
+    ]).then(([alertData, notifData]) => {
+      const alerts = Array.isArray(alertData) ? alertData : [];
+      const notifs = Array.isArray(notifData) ? notifData : [];
+
+      // Consolidate alerts by journal entry (same as notifications page)
+      const byEntry = new Map<string, typeof alerts>();
+      for (const a of alerts.filter((a: { status: string }) => a.status === 'OPEN')) {
+        const key = a.journalEntry?.id ?? a.id;
+        if (!byEntry.has(key)) byEntry.set(key, []);
+        byEntry.get(key)!.push(a);
+      }
+      const consolidatedAlertCount = byEntry.size;
+
+      // Only count PUSH notifications (EMAIL is for tracking)
+      const pushNotifCount = notifs.filter((n: { channel?: string }) =>
+        !n.channel || n.channel === 'PUSH',
+      ).length;
+
+      setAlertCount(consolidatedAlertCount + pushNotifCount);
+    });
   }, [isAuthenticated]);
 
   // Close language dropdown on outside click
@@ -40,13 +57,14 @@ export default function Navbar() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [langOpen]);
 
-  const userInitials =
-    user?.name
-      ?.split(' ')
-      .map((n: string) => n[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2) ?? 'U';
+  const userInitials = isLoading
+    ? ''
+    : user?.name
+        ?.split(' ')
+        .map((n: string) => n[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2) ?? 'U';
 
   const isProviderOnly = user?.email === 'support@healplace.com';
 

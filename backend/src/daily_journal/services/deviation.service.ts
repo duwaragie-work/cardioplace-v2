@@ -105,7 +105,10 @@ export class DeviationService {
   }
 
   /**
-   * Shared logic: upsert alerts, track anomalies, emit events.
+   * Upsert individual DeviationAlert records (for analytics), then emit
+   * a SINGLE consolidated ANOMALY_TRACKED event per entry using the
+   * worst severity alert. This prevents duplicate escalations when both
+   * systolic and diastolic are high in the same reading.
    */
   private async processDeviations(
     deviations: DetectedDeviation[],
@@ -113,6 +116,9 @@ export class DeviationService {
     entryId: string,
     entryDate: Date,
   ) {
+    // 1. Upsert all individual alerts (keeps per-type analytics)
+    const upsertedAlerts: { id: string; type: string; severity: string; escalated: boolean }[] = []
+
     for (const deviation of deviations) {
       const alert = await this.prisma.deviationAlert.upsert({
         where: {
@@ -144,62 +150,35 @@ export class DeviationService {
         },
       })
 
-      // Check for 3 consecutive days with this deviation type
-      // Look at a 5-day window (2 days back, today, 2 days forward)
-      const consecutiveResult = await this.findConsecutiveDeviationDays(
-        userId,
-        entryDate,
-        deviation.type,
-      )
-
-      this.logger.log(
-        `Deviation detected: ${deviation.type} (${deviation.severity}) for user ${userId}, ` +
-          `max consecutive days: ${consecutiveResult.maxConsecutive}`,
-      )
-
-      // Fire escalation if:
-      // - streak is 3+ days AND
-      // - THIS specific alert hasn't been escalated yet
-      // This means: every new day extending a streak gets its own
-      // escalation, but reprocessing the same entry won't duplicate.
-      const shouldEscalate =
-        consecutiveResult.maxConsecutive >= 3 && !alert.escalated
-
-      this.eventEmitter.emit(JOURNAL_EVENTS.ANOMALY_TRACKED, {
-        userId,
-        alertId: alert.id,
+      upsertedAlerts.push({
+        id: alert.id,
         type: deviation.type,
         severity: deviation.severity,
-        occurrencesInLast3Days: consecutiveResult.maxConsecutive,
         escalated: alert.escalated,
       })
 
-      // If this entry is new to the streak, also check if any
-      // neighbour alerts were never escalated (backdated fill-in scenario)
-      if (shouldEscalate) {
-        for (const neighbourAlertId of consecutiveResult.neighbourAlertIds) {
-          if (neighbourAlertId === alert.id) continue
-          const neighbour = await this.prisma.deviationAlert.findUnique({
-            where: { id: neighbourAlertId },
-            include: {
-              journalEntry: {
-                select: { systolicBP: true, diastolicBP: true },
-              },
-            },
-          })
-          if (neighbour && !neighbour.escalated) {
-            this.eventEmitter.emit(JOURNAL_EVENTS.ANOMALY_TRACKED, {
-              userId,
-              alertId: neighbourAlertId,
-              type: deviation.type,
-              severity: neighbour.severity,
-              occurrencesInLast3Days: consecutiveResult.maxConsecutive,
-              escalated: false,
-            })
-          }
-        }
-      }
+      this.logger.log(
+        `Deviation detected: ${deviation.type} (${deviation.severity}) for user ${userId}`,
+      )
     }
+
+    // 2. Emit ONE consolidated event per entry — pick the worst severity alert
+    //    HIGH > MEDIUM. If both systolic and diastolic, report as "BP" combined.
+    const worstAlert = upsertedAlerts.find((a) => a.severity === 'HIGH')
+      ?? upsertedAlerts[0]
+
+    const types = upsertedAlerts.map((a) => a.type)
+    const consolidatedType = (types.includes('SYSTOLIC_BP') && types.includes('DIASTOLIC_BP'))
+      ? 'BP_COMBINED'
+      : worstAlert.type
+
+    this.eventEmitter.emit(JOURNAL_EVENTS.ANOMALY_TRACKED, {
+      userId,
+      alertId: worstAlert.id,
+      type: consolidatedType,
+      severity: worstAlert.severity,
+      escalated: worstAlert.escalated,
+    })
   }
 
   /**
@@ -281,66 +260,6 @@ export class DeviationService {
     }
 
     return deviations
-  }
-
-  /**
-   * Check a 5-day window (2 days back, today, 2 days forward) for this
-   * deviation type. Returns the longest consecutive run of days with alerts
-   * that includes the current entryDate, plus the alert IDs in that run.
-   *
-   * This handles backdated entries: if submitting Mar 31 completes a
-   * Mar 31 → Apr 1 → Apr 2 streak, the escalation fires immediately.
-   */
-  private async findConsecutiveDeviationDays(
-    userId: string,
-    entryDate: Date,
-    type: DeviationType,
-  ): Promise<{ maxConsecutive: number; neighbourAlertIds: string[]; anyAlreadyEscalated: boolean }> {
-    // Build a 5-day window: [D-2, D-1, D, D+1, D+2]
-    const days: Date[] = []
-    for (let offset = -2; offset <= 2; offset++) {
-      const d = new Date(entryDate)
-      d.setDate(d.getDate() + offset)
-      days.push(d)
-    }
-
-    // For each day, check if any entry has a deviation alert of this type
-    const dayHasAlert: boolean[] = []
-    const dayAlertIds: string[][] = []
-    const dayHasEscalated: boolean[] = []
-
-    for (const day of days) {
-      const entries = await this.prisma.journalEntry.findMany({
-        where: { userId, entryDate: day },
-        include: {
-          deviationAlerts: { where: { type } },
-        },
-      })
-
-      const alerts = entries.flatMap((e) => e.deviationAlerts)
-      dayHasAlert.push(alerts.length > 0)
-      dayAlertIds.push(alerts.map((a) => a.id))
-      dayHasEscalated.push(alerts.some((a) => a.escalated))
-    }
-
-    // Find the longest consecutive run that includes the center day (index 2)
-    let start = 2
-    while (start > 0 && dayHasAlert[start - 1]) {
-      start--
-    }
-
-    let end = 2
-    while (end < 4 && dayHasAlert[end + 1]) {
-      end++
-    }
-
-    const maxConsecutive = end - start + 1
-    const neighbourAlertIds = dayAlertIds.slice(start, end + 1).flat()
-    const anyAlreadyEscalated = dayHasEscalated
-      .slice(start, end + 1)
-      .some((v) => v)
-
-    return { maxConsecutive, neighbourAlertIds, anyAlreadyEscalated }
   }
 
   private async resolveOpenAlerts(userId: string) {

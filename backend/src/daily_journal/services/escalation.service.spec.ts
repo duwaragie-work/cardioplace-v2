@@ -14,18 +14,32 @@ describe('EscalationService', () => {
 
   beforeEach(async () => {
     prisma = {
+      escalationEvent: {
+        findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
+        create: (jest.fn() as jest.Mock<any>).mockResolvedValue({ id: 'esc-1' }),
+      },
       deviationAlert: {
         findUnique: (jest.fn() as jest.Mock<any>).mockResolvedValue({
+          id: 'alert-1',
           journalEntry: {
+            entryDate: new Date('2026-03-20'),
+            measurementTime: '08:30',
             systolicBP: 170,
             diastolicBP: 105,
-            symptoms: [],
+            symptoms: ['Severe Headache'],
+            medicationTaken: true,
           },
+          user: { name: 'Test Patient' },
         }),
         update: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
+        count: (jest.fn() as jest.Mock<any>).mockResolvedValue(1),
       },
-      escalationEvent: {
-        create: (jest.fn() as jest.Mock<any>).mockResolvedValue({ id: 'esc-1' }),
+      journalEntry: {
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([
+          { medicationTaken: true },
+          { medicationTaken: true },
+          { medicationTaken: false },
+        ]),
       },
     }
     eventEmitter = { emit: jest.fn() }
@@ -46,8 +60,21 @@ describe('EscalationService', () => {
     alertId: 'alert-1',
     type: 'SYSTOLIC_BP',
     severity: 'MEDIUM',
-    occurrencesInLast3Days: 3,
     escalated: false,
+  }
+
+  // Helper to mock streak of N consecutive days (centered)
+  function mockStreak(n: number) {
+    // 5-day window: [D-2, D-1, D, D+1, D+2]
+    // For streak=3: [0, 1, 1, 1, 0]
+    const pattern = [false, false, true, false, false]
+    const half = Math.floor(n / 2)
+    for (let i = 2 - half; i <= 2 + (n - 1 - half); i++) {
+      if (i >= 0 && i < 5) pattern[i] = true
+    }
+    for (const has of pattern) {
+      prisma.deviationAlert.count.mockResolvedValueOnce(has ? 1 : 0)
+    }
   }
 
   it('should be defined', () => {
@@ -55,88 +82,105 @@ describe('EscalationService', () => {
   })
 
   describe('handleAnomalyTracked', () => {
-    it('skips when occurrencesInLast3Days < 3', async () => {
-      await service.handleAnomalyTracked({
-        ...basePayload,
-        occurrencesInLast3Days: 2,
-      })
+    it('skips if alert already has an escalation (idempotency)', async () => {
+      prisma.escalationEvent.findFirst.mockResolvedValue({ id: 'existing-esc' })
 
-      expect(prisma.deviationAlert.findUnique).not.toHaveBeenCalled()
+      await service.handleAnomalyTracked(basePayload)
+
       expect(prisma.escalationEvent.create).not.toHaveBeenCalled()
       expect(eventEmitter.emit).not.toHaveBeenCalled()
     })
 
-    it('creates LEVEL_1 escalation for MEDIUM severity, no emergency symptoms', async () => {
+    it('skips if consecutive days < 3', async () => {
+      mockStreak(1)
+      await service.handleAnomalyTracked(basePayload)
+      expect(prisma.escalationEvent.create).not.toHaveBeenCalled()
+    })
+
+    it('skips if consecutive days = 2', async () => {
+      mockStreak(2)
+      await service.handleAnomalyTracked(basePayload)
+      expect(prisma.escalationEvent.create).not.toHaveBeenCalled()
+    })
+
+    it('LEVEL_2: symptoms + medication compliant (meds not working)', async () => {
+      mockStreak(3)
+      // Default mock: symptoms=['Severe Headache'], medicationTaken=true
+      // journalEntry.findMany returns 2 taken + 1 not → 66% compliance → compliant
+      prisma.journalEntry.findMany.mockResolvedValue([
+        { medicationTaken: true },
+        { medicationTaken: true },
+        { medicationTaken: false },
+      ])
+
       await service.handleAnomalyTracked(basePayload)
 
-      expect(prisma.escalationEvent.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          alertId: 'alert-1',
-          userId: 'user-1',
-          escalationLevel: EscalationLevel.LEVEL_1,
-        }),
-      })
-    })
-
-    it('creates LEVEL_2 escalation for HIGH severity', async () => {
-      await service.handleAnomalyTracked({
-        ...basePayload,
-        severity: 'HIGH',
-      })
-
-      expect(prisma.escalationEvent.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
+      expect(prisma.escalationEvent.create).toHaveBeenCalled()
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        JOURNAL_EVENTS.ESCALATION_CREATED,
+        expect.objectContaining({
           escalationLevel: EscalationLevel.LEVEL_2,
+          patientMessage: expect.stringContaining('despite taking medication'),
+          careTeamMessage: expect.stringContaining('Medication review required'),
         }),
-      })
+      )
     })
 
-    it('creates LEVEL_2 when emergency symptoms present', async () => {
+    it('LEVEL_1: symptoms + medication non-compliant', async () => {
+      mockStreak(3)
+      // Override: medication not taken on most days
+      prisma.journalEntry.findMany.mockResolvedValue([
+        { medicationTaken: false },
+        { medicationTaken: false },
+        { medicationTaken: true },
+      ])
+
+      await service.handleAnomalyTracked(basePayload)
+
+      expect(prisma.escalationEvent.create).toHaveBeenCalled()
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        JOURNAL_EVENTS.ESCALATION_CREATED,
+        expect.objectContaining({
+          escalationLevel: EscalationLevel.LEVEL_1,
+          patientMessage: expect.stringContaining('take your medication regularly'),
+          careTeamMessage: expect.stringContaining('non-adherence'),
+        }),
+      )
+    })
+
+    it('LOW: no symptoms (mild alert)', async () => {
+      mockStreak(3)
+      // Override: no symptoms
       prisma.deviationAlert.findUnique.mockResolvedValue({
+        id: 'alert-1',
         journalEntry: {
+          entryDate: new Date('2026-03-20'),
+          measurementTime: '08:30',
           systolicBP: 170,
           diastolicBP: 105,
-          symptoms: ['chest pain'],
+          symptoms: [],
+          medicationTaken: true,
         },
+        user: { name: 'Test Patient' },
       })
 
       await service.handleAnomalyTracked(basePayload)
 
-      expect(prisma.escalationEvent.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          escalationLevel: EscalationLevel.LEVEL_2,
-        }),
-      })
-    })
-
-    it('sets correct patient message for LEVEL_1', async () => {
-      await service.handleAnomalyTracked(basePayload)
-
+      expect(prisma.escalationEvent.create).toHaveBeenCalled()
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         JOURNAL_EVENTS.ESCALATION_CREATED,
         expect.objectContaining({
-          patientMessage: expect.stringContaining(
-            'Your care team has been notified',
-          ),
+          escalationLevel: EscalationLevel.LEVEL_1, // LOW maps to LEVEL_1 in DB
+          patientMessage: expect.stringContaining('Continue monitoring'),
+          careTeamMessage: expect.stringContaining('No symptoms reported'),
+          reason: expect.stringContaining('without symptoms'),
         }),
       )
     })
 
-    it('sets correct patient message for LEVEL_2', async () => {
-      await service.handleAnomalyTracked({
-        ...basePayload,
-        severity: 'HIGH',
-      })
+    it('marks alert as escalated after creating escalation', async () => {
+      mockStreak(3)
 
-      expect(eventEmitter.emit).toHaveBeenCalledWith(
-        JOURNAL_EVENTS.ESCALATION_CREATED,
-        expect.objectContaining({
-          patientMessage: expect.stringContaining('Call 911'),
-        }),
-      )
-    })
-
-    it('marks alert as escalated', async () => {
       await service.handleAnomalyTracked(basePayload)
 
       expect(prisma.deviationAlert.update).toHaveBeenCalledWith({
@@ -145,21 +189,16 @@ describe('EscalationService', () => {
       })
     })
 
-    it('emits ESCALATION_CREATED with full payload', async () => {
+    it('includes personalized reading + date in messages', async () => {
+      mockStreak(3)
+
       await service.handleAnomalyTracked(basePayload)
 
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         JOURNAL_EVENTS.ESCALATION_CREATED,
         expect.objectContaining({
-          userId: 'user-1',
-          escalationEventId: 'esc-1',
-          alertId: 'alert-1',
-          escalationLevel: EscalationLevel.LEVEL_1,
-          deviationType: 'SYSTOLIC_BP',
-          reason: expect.stringContaining('3 consecutive day(s)'),
-          symptoms: [],
-          patientMessage: expect.any(String),
-          careTeamMessage: expect.any(String),
+          patientMessage: expect.stringContaining('170/105 mmHg'),
+          careTeamMessage: expect.stringContaining('Test Patient'),
         }),
       )
     })
