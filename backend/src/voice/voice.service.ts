@@ -509,7 +509,24 @@ export class VoiceService implements OnModuleDestroy {
       // Save individual transcript lines as separate Conversation rows + update rolling summary
       await this.conversationHistory.saveVoiceTranscriptLines(session.sessionId, lines)
 
-      this.logger.log(`Saved voice transcript [session=${session.sessionId}, lines=${lines.length}]`)
+      // Generate a meaningful session title based on what happened
+      let title = 'Voice Chat'
+      if (activitySnapshot.checkins.length > 0) {
+        const c = activitySnapshot.checkins[0]
+        const bp = c.systolicBP && c.diastolicBP ? `${c.systolicBP}/${c.diastolicBP}` : null
+        title = bp ? `BP Check-in ${bp}` : 'Voice Check-in'
+      } else if (activitySnapshot.userTexts.length > 0) {
+        // Use first user message as title hint (truncated)
+        const firstMsg = activitySnapshot.userTexts[0].slice(0, 40)
+        title = `Voice: ${firstMsg}${activitySnapshot.userTexts[0].length > 40 ? '…' : ''}`
+      }
+
+      await this.prisma.session.update({
+        where: { id: session.sessionId },
+        data: { title },
+      }).catch(() => {}) // best-effort
+
+      this.logger.log(`Saved voice transcript [session=${session.sessionId}, lines=${lines.length}, title=${title}]`)
     } catch (err) {
       this.logger.error('Failed to save voice transcript', err)
     }

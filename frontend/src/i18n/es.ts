@@ -47,6 +47,7 @@ const es: Record<TranslationKey, string> = {
   'dashboard.checkIns': 'Controles',
   'dashboard.totalLogged': 'Total registrados',
   'dashboard.bpThisWeek': 'PA esta semana',
+  'dashboard.bpTrend': 'Tendencia de PA - 90 días',
   'dashboard.fullHistory': 'Historial completo →',
   'dashboard.noBpData': 'Aún no hay datos de PA registrados.',
   'dashboard.firstCheckin': 'Completa tu primer control para ver tu tendencia.',
@@ -482,12 +483,15 @@ const es: Record<TranslationKey, string> = {
   // ─── Language Names ────────────────────────────────────────────────────────
   'lang.en': 'English',
   'lang.es': 'Español',
+  'lang.am': 'አማርኛ',
   'lang.fr': 'Français',
   'lang.de': 'Deutsch',
   'lang.pt': 'Português',
   'lang.zh': '中文',
+  'lang.vi': 'Tiếng Việt',
   'lang.ar': 'العربية',
   'lang.ko': '한국어',
+  'lang.ht': 'Kreyòl Ayisyen',
 };
 
 export default es;

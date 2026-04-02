@@ -47,6 +47,7 @@ const de: Record<TranslationKey, string> = {
   'dashboard.checkIns': 'Kontrollen',
   'dashboard.totalLogged': 'Gesamt erfasst',
   'dashboard.bpThisWeek': 'BD diese Woche',
+  'dashboard.bpTrend': '90-Tage BD-Trend',
   'dashboard.fullHistory': 'Vollständiger Verlauf →',
   'dashboard.noBpData': 'Noch keine BD-Daten erfasst.',
   'dashboard.firstCheckin': 'Schließen Sie Ihre erste Kontrolle ab, um Ihren Trend zu sehen.',
@@ -482,12 +483,15 @@ const de: Record<TranslationKey, string> = {
   // ─── Language Names ────────────────────────────────────────────────────────
   'lang.en': 'English',
   'lang.es': 'Español',
+  'lang.am': 'አማርኛ',
   'lang.fr': 'Français',
   'lang.de': 'Deutsch',
   'lang.pt': 'Português',
   'lang.zh': '中文',
+  'lang.vi': 'Tiếng Việt',
   'lang.ar': 'العربية',
   'lang.ko': '한국어',
+  'lang.ht': 'Kreyòl Ayisyen',
 };
 
 export default de;

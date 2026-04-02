@@ -85,3 +85,13 @@ export async function getSessionHistory(
   }
   return res.json()
 }
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  const res = await fetchWithAuth(`${API}/api/chat/sessions/${sessionId}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+}

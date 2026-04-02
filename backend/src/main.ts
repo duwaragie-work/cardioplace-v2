@@ -5,7 +5,9 @@ import { IoAdapter } from '@nestjs/platform-socket.io'
 import { AppModule } from './app.module.js'
 
 async function bootstrap() {
-  
+  console.log('🚀 Starting Healplace Cardio backend...')
+  console.log(`   PORT=${process.env.PORT}, DATABASE_URL=${process.env.DATABASE_URL ? 'set' : 'NOT SET'}`)
+
   const app = await NestFactory.create(AppModule)
 
   app.useWebSocketAdapter(new IoAdapter(app))
@@ -24,6 +26,11 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api', { exclude: ['/'] })
 
-  await app.listen(process.env.PORT ?? 3000)
+  const port = process.env.PORT ?? 3000
+  await app.listen(port, '0.0.0.0')
+  console.log(`✅ App listening on port ${port}`)
 }
-bootstrap()
+bootstrap().catch((err) => {
+  console.error('❌ Bootstrap failed:', err)
+  process.exit(1)
+})

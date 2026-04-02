@@ -18,8 +18,8 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { getJournalEntries, getLatestBaseline, getAlerts } from '@/lib/services/journal.service';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-function getDayLabel(dateStr: string): string {
-  try { return new Date(dateStr).toLocaleDateString('en-US', { weekday: 'short' }); }
+function getDateLabel(dateStr: string): string {
+  try { return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
   catch { return ''; }
 }
 
@@ -79,6 +79,7 @@ export default function Dashboard() {
   const { t } = useLanguage();
 
   const [bpChartData, setBpChartData] = useState<{ day: string; systolic: number; diastolic: number }[]>([]);
+  const [chartRange, setChartRange] = useState<7 | 90>(7);
   const [latestEntry, setLatestEntry] = useState<JournalEntry | null>(null);
   const [baseline, setBaseline] = useState<Baseline | null>(null);
   const [alerts, setAlerts] = useState<DeviationAlert[]>([]);
@@ -90,13 +91,13 @@ export default function Dashboard() {
     if (isLoading || !isAuthenticated) return;
     setDataLoading(true);
     Promise.all([
-      getJournalEntries({ limit: 7 }).catch(() => []),
+      getJournalEntries({ limit: 90 }).catch(() => []),
       getLatestBaseline().catch(() => null),
       getAlerts().catch(() => []),
     ]).then(([entries, baselineData, alertsData]) => {
       const arr: JournalEntry[] = Array.isArray(entries) ? entries : [];
       const sortedAsc = [...arr].sort((a, b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime());
-      setBpChartData(sortedAsc.map((e) => ({ day: getDayLabel(e.entryDate), systolic: e.systolicBP ?? 0, diastolic: e.diastolicBP ?? 0 })));
+      setBpChartData(sortedAsc.map((e) => ({ day: getDateLabel(e.entryDate), systolic: e.systolicBP ?? 0, diastolic: e.diastolicBP ?? 0 })));
       const sortedDesc = [...arr].sort((a, b) => new Date(b.entryDate).getTime() - new Date(a.entryDate).getTime());
       setLatestEntry(sortedDesc[0] ?? null);
       setTotalEntries(arr.length);
@@ -112,6 +113,7 @@ export default function Dashboard() {
   }, [isAuthenticated, isLoading]);
 
   // ─── Derived values ───────────────────────────────────────────────────────
+  const visibleChartData = chartRange === 7 ? bpChartData.slice(-7) : bpChartData;
   const loading = isLoading || dataLoading;
   const userName = user?.name?.split(' ')[0] ?? '';
 
@@ -143,8 +145,8 @@ export default function Dashboard() {
 
   const openAlerts = alerts.filter((a) => a.status === 'OPEN');
 
-  const bpDomain: [number | string, number | string] = bpChartData.length > 0
-    ? [Math.max(0, Math.min(...bpChartData.map((d) => d.systolic)) - 15), Math.max(...bpChartData.map((d) => d.systolic)) + 15]
+  const bpDomain: [number | string, number | string] = visibleChartData.length > 0
+    ? [Math.max(0, Math.min(...visibleChartData.map((d) => d.systolic)) - 15), Math.max(...visibleChartData.map((d) => d.systolic)) + 15]
     : [100, 180];
 
   return (
@@ -253,11 +255,23 @@ export default function Dashboard() {
           <div className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                {t('dashboard.bpThisWeek')}
+                {chartRange === 7 ? t('dashboard.bpThisWeek') : t('dashboard.bpTrend')}
               </h3>
-              <a href="#" className="text-[11px]" style={{ color: 'var(--brand-accent-teal)' }}>
-                {t('dashboard.fullHistory')}
-              </a>
+              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+                {([7, 90] as const).map((range) => (
+                  <button
+                    key={range}
+                    onClick={() => setChartRange(range)}
+                    className="px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all"
+                    style={{
+                      backgroundColor: chartRange === range ? 'var(--brand-primary-purple)' : 'transparent',
+                      color: chartRange === range ? '#fff' : 'var(--brand-text-muted)',
+                    }}
+                  >
+                    {range === 7 ? '7D' : '90D'}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="flex-1" style={{ minHeight: 220 }}>
@@ -277,9 +291,9 @@ export default function Dashboard() {
                     ))}
                   </div>
                 </div>
-              ) : bpChartData.length > 0 ? (
+              ) : visibleChartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={bpChartData}>
+                  <AreaChart data={visibleChartData}>
                     <defs>
                       <linearGradient id="colorSystolic" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#7B00E0" stopOpacity={0.18} />
@@ -287,8 +301,8 @@ export default function Dashboard() {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F1EEFF" vertical={false} />
-                    <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }}>
-                      <Label value="Day" position="insideBottom" offset={-2} style={{ fill: '#1d1d1d', fontSize: 10, fontWeight: 600 }} />
+                    <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} interval={Math.max(0, Math.floor(visibleChartData.length / 8) - 1)}>
+                      <Label value="" position="insideBottom" offset={-2} style={{ fill: '#1d1d1d', fontSize: 10, fontWeight: 600 }} />
                     </XAxis>
                     <YAxis domain={bpDomain} axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} width={38}>
                       <Label value="mmHg" angle={-90} position="insideLeft" offset={4} style={{ fill: '#1d1d1d', fontSize: 10 ,fontWeight: 600}} />
@@ -299,7 +313,7 @@ export default function Dashboard() {
                       itemStyle={{ color: '#7B00E0', fontWeight: 600 }}
                       cursor={{ stroke: '#7B00E0', strokeWidth: 1, strokeDasharray: '4 4' }}
                     />
-                    <Area type="natural" dataKey="systolic" stroke="#7B00E0" strokeWidth={2.5} fill="url(#colorSystolic)" dot={{ r: 3.5, fill: '#fff', stroke: '#7B00E0', strokeWidth: 2 }} activeDot={{ r: 5, fill: '#7B00E0', stroke: '#fff', strokeWidth: 2 }} />
+                    <Area type="natural" dataKey="systolic" stroke="#7B00E0" strokeWidth={2} fill="url(#colorSystolic)" dot={visibleChartData.length > 14 ? false : { r: 3.5, fill: '#fff', stroke: '#7B00E0', strokeWidth: 2 }} activeDot={{ r: 4, fill: '#7B00E0', stroke: '#fff', strokeWidth: 2 }} />
                   </AreaChart>
                 </ResponsiveContainer>
               ) : (

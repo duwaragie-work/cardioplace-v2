@@ -48,22 +48,26 @@ export default function Navbar() {
       .toUpperCase()
       .slice(0, 2) ?? 'U';
 
+  const isProviderOnly = user?.email === 'support@healplace.com';
+
+  const PROVIDER_LINKS = [
+    { labelKey: 'nav.provider' as const, href: '/provider/dashboard' },
+    { labelKey: 'nav.patients' as const, href: '/provider/patients' },
+    { labelKey: 'nav.calls' as const, href: '/provider/scheduled-calls' },
+  ];
+
   const BASE_LINKS = [
     { labelKey: 'nav.home' as const, href: '/dashboard' },
     { labelKey: 'nav.checkin' as const, href: '/check-in' },
     { labelKey: 'nav.chat' as const, href: '/chat' },
   ];
 
-  const links = [
-    ...BASE_LINKS,
-    ...(user?.roles?.includes('SUPER_ADMIN')
-      ? [
-          { labelKey: 'nav.provider' as const, href: '/provider/dashboard' },
-          { labelKey: 'nav.patients' as const, href: '/provider/patients' },
-          { labelKey: 'nav.calls' as const, href: '/provider/scheduled-calls' },
-        ]
-      : []),
-  ];
+  const links = isProviderOnly
+    ? PROVIDER_LINKS
+    : [
+        ...BASE_LINKS,
+        ...(user?.roles?.includes('SUPER_ADMIN') ? PROVIDER_LINKS : []),
+      ];
 
   const currentLocale = ALL_LOCALES.find((l) => l.code === locale);
 
@@ -77,7 +81,7 @@ export default function Navbar() {
         }}
       >
         {/* Logo */}
-        <Link href="/dashboard" className="flex items-center gap-2 shrink-0">
+        <Link href={isProviderOnly ? '/provider/dashboard' : '/dashboard'} className="flex items-center gap-2 shrink-0">
           <Image
             src="/logo.svg"
             alt="Healplace logo"

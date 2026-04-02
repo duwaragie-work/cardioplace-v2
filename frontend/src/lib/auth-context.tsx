@@ -232,6 +232,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(newToken);
     setUser(newUser);
 
+    if (newUser?.email) {
+      localStorage.setItem('healplace_user_email', newUser.email);
+    }
+
     if (newToken) {
       localStorage.setItem(TOKEN_KEY, newToken);
       setAuthCookie(newToken);

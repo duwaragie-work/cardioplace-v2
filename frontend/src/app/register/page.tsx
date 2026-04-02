@@ -54,13 +54,18 @@ export default function RegisterPage() {
   const [resendCooldown, setResendCooldown] = useState(0);
   const resendTimerRef = useRef<number | null>(null);
 
+  const [mounted, setMounted] = useState(false);
   const emailIsValid = useMemo(() => isEmailValid(email.trim()), [email]);
   const canVerifyOtp = otp.length === OTP_LENGTH;
+
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     if (!isLoading && user) {
       if (user.onboardingRequired) {
         router.replace("/onboarding");
+      } else if (user.email === 'support@healplace.com') {
+        router.replace("/provider/dashboard");
       } else {
         router.replace("/dashboard");
       }
@@ -73,7 +78,8 @@ export default function RegisterPage() {
     };
   }, []);
 
-  if (isLoading || user) return null;
+  // Render nothing until mounted to avoid SSR/client hydration mismatch
+  if (!mounted || isLoading || user) return null;
 
   async function sendOtpRequest(emailToUse: string) {
     const deviceId = getOrCreateDeviceId();
@@ -170,6 +176,8 @@ export default function RegisterPage() {
       login(data as OtpVerifyResponse);
       if (data.onboarding_required) {
         router.push("/onboarding");
+      } else if (data.email === 'support@healplace.com') {
+        router.push("/provider/dashboard");
       } else {
         router.push("/dashboard");
       }

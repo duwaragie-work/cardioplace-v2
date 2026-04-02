@@ -28,6 +28,7 @@ export interface TokenPair {
 
 export interface AuthResponse extends TokenPair {
   userId: string
+  email: string | null
   onboarding_required: boolean
   roles: UserRole[]
   login_method: 'otp' | 'google' | 'apple' | 'guest'
@@ -209,6 +210,7 @@ export class AuthService {
     return {
       ...tokens,
       userId: user.id,
+      email: user.email ?? null,
       onboarding_required: user.onboardingStatus !== OnboardingStatus.COMPLETED,
       roles: user.roles,
       login_method,
@@ -634,6 +636,14 @@ export class AuthService {
 
     const normalizedEmail = email.trim().toLowerCase()
 
+    // Demo accounts use pre-seeded, non-expiring OTPs — skip generation and email
+    const preSeeded = await this.prisma.otpCode.findFirst({
+      where: { email: normalizedEmail, expiresAt: { gt: new Date('2098-01-01') } },
+    })
+    if (preSeeded) {
+      return { message: 'OTP sent successfully' }
+    }
+
     // Check account status for existing users before sending OTP
     const existingUser = await this.prisma.user.findUnique({
       where: { email: normalizedEmail },
@@ -800,7 +810,10 @@ export class AuthService {
 
     // Enforce account status before issuing tokens
     if (user.accountStatus !== AccountStatus.ACTIVE) {
-      await this.prisma.otpCode.delete({ where: { id: otpRecord.id } })
+      const isPreSeededBlocked = otpRecord.expiresAt > new Date('2098-01-01')
+      if (!isPreSeededBlocked) {
+        await this.prisma.otpCode.delete({ where: { id: otpRecord.id } })
+      }
       await this.logAuthEvent({
         event: 'otp_blocked',
         identifier: normalizedEmail,
@@ -817,7 +830,16 @@ export class AuthService {
       )
     }
 
-    await this.prisma.otpCode.delete({ where: { id: otpRecord.id } })
+    // Preserve pre-seeded demo OTPs so they can be reused; delete for all others
+    const isPreSeeded = otpRecord.expiresAt > new Date('2098-01-01')
+    if (isPreSeeded) {
+      await this.prisma.otpCode.update({
+        where: { id: otpRecord.id },
+        data: { attempts: 0 },
+      })
+    } else {
+      await this.prisma.otpCode.delete({ where: { id: otpRecord.id } })
+    }
 
     // Update timezone on every successful login (silently)
     await this.silentlyUpdateTimezone(user.id, context?.timezone)

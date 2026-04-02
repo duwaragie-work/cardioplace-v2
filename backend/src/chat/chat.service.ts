@@ -642,6 +642,17 @@ Keep your message short, clear, and supportive.`,
     })
   }
 
+  async deleteSession(sessionId: string, userId: string) {
+    const session = await this.prisma.session.findUnique({ where: { id: sessionId } })
+    if (!session) throw new NotFoundException('Session not found')
+    if (session.userId && session.userId !== userId) throw new UnauthorizedException('Access denied')
+
+    // Delete conversations first, then the session
+    await this.prisma.conversation.deleteMany({ where: { sessionId } })
+    await this.prisma.session.delete({ where: { id: sessionId } })
+    return { statusCode: 200, message: 'Session deleted' }
+  }
+
   async createSession(sessionId: string, userId?: string): Promise<void> {
     try {
       await this.prisma.session.create({

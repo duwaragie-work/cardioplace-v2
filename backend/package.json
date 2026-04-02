@@ -99,6 +99,7 @@
     "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0"
   },
@@ -106,5 +107,8 @@
     "ajv": "^8.17.2",
     "path-to-regexp": "^8.4.0",
     "picomatch": "^4.0.4"
+  },
+  "prisma": {
+    "seed": "npx tsx prisma/seed.ts"
   }
 }

@@ -47,6 +47,7 @@ const fr: Record<TranslationKey, string> = {
   'dashboard.checkIns': 'Contrôles',
   'dashboard.totalLogged': 'Total enregistrés',
   'dashboard.bpThisWeek': 'TA cette semaine',
+  'dashboard.bpTrend': 'Tendance TA - 90 jours',
   'dashboard.fullHistory': 'Historique complet →',
   'dashboard.noBpData': 'Aucune donnée de TA enregistrée.',
   'dashboard.firstCheckin': 'Complétez votre premier contrôle pour voir votre tendance.',
@@ -482,12 +483,15 @@ const fr: Record<TranslationKey, string> = {
   // ─── Language Names ────────────────────────────────────────────────────────
   'lang.en': 'English',
   'lang.es': 'Español',
+  'lang.am': 'አማርኛ',
   'lang.fr': 'Français',
   'lang.de': 'Deutsch',
   'lang.pt': 'Português',
   'lang.zh': '中文',
+  'lang.vi': 'Tiếng Việt',
   'lang.ar': 'العربية',
   'lang.ko': '한국어',
+  'lang.ht': 'Kreyòl Ayisyen',
 };
 
 export default fr;
