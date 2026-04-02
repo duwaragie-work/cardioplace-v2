@@ -25,7 +25,7 @@ import {
 import { useLanguage } from '@/contexts/LanguageContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type AlertType = 'SYSTOLIC_BP' | 'DIASTOLIC_BP' | 'WEIGHT' | 'MEDICATION_ADHERENCE';
+type AlertType = 'SYSTOLIC_BP' | 'DIASTOLIC_BP' | 'BP_COMBINED' | 'WEIGHT' | 'MEDICATION_ADHERENCE';
 type AlertSeverity = 'LOW' | 'MEDIUM' | 'HIGH';
 type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
 
