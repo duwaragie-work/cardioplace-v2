@@ -303,6 +303,7 @@ export class DailyJournalService {
           select: {
             id: true,
             entryDate: true,
+            measurementTime: true,
             systolicBP: true,
             diastolicBP: true,
             weight: true,

@@ -225,6 +225,7 @@ const am: Record<string, string> = {
   // ─── Alert Types ───────────────────────────────────────────────────────────
   'alert.systolicBP': 'ከፍ ያለ ሲስቶሊክ ደም ግፊት',
   'alert.diastolicBP': 'ከፍ ያለ ዲያስቶሊክ ደም ግፊት',
+  'alert.bpCombined': 'ከፍ ያለ ደም ግፊት',
   'alert.weight': 'የክብደት ለውጥ ተገኝቷል',
   'alert.medication': 'መድሃኒት ተዘልሏል',
   'alert.urgent': 'አስቸኳይ',

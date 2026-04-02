@@ -225,6 +225,7 @@ const en = {
   // ─── Alert Types ───────────────────────────────────────────────────────────
   'alert.systolicBP': 'Elevated Systolic BP',
   'alert.diastolicBP': 'Elevated Diastolic BP',
+  'alert.bpCombined': 'Elevated Blood Pressure',
   'alert.weight': 'Weight Change Detected',
   'alert.medication': 'Missed Medication',
   'alert.urgent': 'Urgent',

@@ -105,7 +105,10 @@ export class DeviationService {
   }
 
   /**
-   * Shared logic: upsert alerts, track anomalies, emit events.
+   * Upsert individual DeviationAlert records (for analytics), then emit
+   * a SINGLE consolidated ANOMALY_TRACKED event per entry using the
+   * worst severity alert. This prevents duplicate escalations when both
+   * systolic and diastolic are high in the same reading.
    */
   private async processDeviations(
     deviations: DetectedDeviation[],
@@ -113,6 +116,9 @@ export class DeviationService {
     entryId: string,
     entryDate: Date,
   ) {
+    // 1. Upsert all individual alerts (keeps per-type analytics)
+    const upsertedAlerts: { id: string; type: string; severity: string; escalated: boolean }[] = []
+
     for (const deviation of deviations) {
       const alert = await this.prisma.deviationAlert.upsert({
         where: {
@@ -144,26 +150,35 @@ export class DeviationService {
         },
       })
 
-      const occurrencesInLast3Days = await this.countOccurrencesInLast3Days(
-        userId,
-        entryDate,
-        deviation.type,
-      )
-
-      this.logger.log(
-        `Deviation detected: ${deviation.type} (${deviation.severity}) for user ${userId}, ` +
-          `occurrences in last 3 days: ${occurrencesInLast3Days}`,
-      )
-
-      this.eventEmitter.emit(JOURNAL_EVENTS.ANOMALY_TRACKED, {
-        userId,
-        alertId: alert.id,
+      upsertedAlerts.push({
+        id: alert.id,
         type: deviation.type,
         severity: deviation.severity,
-        occurrencesInLast3Days,
         escalated: alert.escalated,
       })
+
+      this.logger.log(
+        `Deviation detected: ${deviation.type} (${deviation.severity}) for user ${userId}`,
+      )
     }
+
+    // 2. Emit ONE consolidated event per entry — pick the worst severity alert
+    //    HIGH > MEDIUM. If both systolic and diastolic, report as "BP" combined.
+    const worstAlert = upsertedAlerts.find((a) => a.severity === 'HIGH')
+      ?? upsertedAlerts[0]
+
+    const types = upsertedAlerts.map((a) => a.type)
+    const consolidatedType = (types.includes('SYSTOLIC_BP') && types.includes('DIASTOLIC_BP'))
+      ? 'BP_COMBINED'
+      : worstAlert.type
+
+    this.eventEmitter.emit(JOURNAL_EVENTS.ANOMALY_TRACKED, {
+      userId,
+      alertId: worstAlert.id,
+      type: consolidatedType,
+      severity: worstAlert.severity,
+      escalated: worstAlert.escalated,
+    })
   }
 
   /**
@@ -245,40 +260,6 @@ export class DeviationService {
     }
 
     return deviations
-  }
-
-  private async countOccurrencesInLast3Days(
-    userId: string,
-    entryDate: Date,
-    type: DeviationType,
-  ): Promise<number> {
-    let count = 1 // today already has an alert
-
-    for (let offset = 1; offset <= 2; offset++) {
-      const previousDate = new Date(entryDate)
-      previousDate.setDate(previousDate.getDate() - offset)
-
-      // Multiple entries may exist per day — check if ANY entry that day
-      // has a deviation alert for this type
-      const previousEntries =
-        await this.prisma.journalEntry.findMany({
-          where: {
-            userId,
-            entryDate: previousDate,
-          },
-          include: {
-            deviationAlerts: {
-              where: { type },
-            },
-          },
-        })
-
-      if (previousEntries.some((e) => e.deviationAlerts.length > 0)) {
-        count += 1
-      }
-    }
-
-    return count
   }
 
   private async resolveOpenAlerts(userId: string) {

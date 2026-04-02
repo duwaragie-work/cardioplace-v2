@@ -21,10 +21,6 @@ describe('DeviationService', () => {
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
         updateMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 0 }),
       },
-      journalEntry: {
-        findUnique: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
-        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
-      },
     }
     eventEmitter = { emit: jest.fn() }
 
@@ -99,8 +95,6 @@ describe('DeviationService', () => {
     })
 
     it('detects SYSTOLIC_BP via relative trigger when systolic > baseline + 20', async () => {
-      // systolic=155, baseline=130 → 155 > 130+20=150 triggers relative
-      // but 155 <= 160 so absolute alone wouldn't fire
       await service.handleBaselineComputed({
         ...basePayload,
         systolicBP: 155,
@@ -183,23 +177,46 @@ describe('DeviationService', () => {
       })
     })
 
-    it('emits ANOMALY_TRACKED with correct occurrence count', async () => {
-      // Trigger a deviation
+    it('emits ONE consolidated ANOMALY_TRACKED per entry', async () => {
       await service.handleBaselineComputed({
         ...basePayload,
         systolicBP: 165,
         baselineSystolic: 140,
       })
 
-      expect(eventEmitter.emit).toHaveBeenCalledWith(
-        JOURNAL_EVENTS.ANOMALY_TRACKED,
+      // Should emit exactly once, not per deviation type
+      const anomalyCalls = eventEmitter.emit.mock.calls.filter(
+        ([event]: [string]) => event === JOURNAL_EVENTS.ANOMALY_TRACKED,
+      )
+      expect(anomalyCalls).toHaveLength(1)
+      expect(anomalyCalls[0][1]).toEqual(
         expect.objectContaining({
           userId: 'user-1',
           alertId: 'alert-1',
-          type: 'SYSTOLIC_BP',
           severity: 'MEDIUM',
-          occurrencesInLast3Days: expect.any(Number),
           escalated: false,
+        }),
+      )
+    })
+
+    it('emits BP_COMBINED type when both systolic and diastolic deviate', async () => {
+      // Both systolic > 160 and diastolic > 100
+      await service.handleBaselineComputed({
+        ...basePayload,
+        systolicBP: 185,
+        diastolicBP: 115,
+        baselineSystolic: 140,
+        baselineDiastolic: 85,
+      })
+
+      const anomalyCalls = eventEmitter.emit.mock.calls.filter(
+        ([event]: [string]) => event === JOURNAL_EVENTS.ANOMALY_TRACKED,
+      )
+      expect(anomalyCalls).toHaveLength(1)
+      expect(anomalyCalls[0][1]).toEqual(
+        expect.objectContaining({
+          type: 'BP_COMBINED',
+          severity: 'HIGH', // worst of the two
         }),
       )
     })
@@ -212,7 +229,7 @@ describe('DeviationService', () => {
       entryDate: new Date('2026-03-20'),
       systolicBP: 165,
       diastolicBP: 85,
-      reason: 'Only 2 entries in last 7 days (need 3) — baseline set to zero',
+      reason: 'Only 2 days in last 7 days (need 3) — baseline set to zero',
     }
 
     it('uses absolute thresholds only — triggers when systolic > 160', async () => {
@@ -234,7 +251,6 @@ describe('DeviationService', () => {
         systolicBP: 155,
       })
 
-      // 155 <= 160 absolute threshold, no baseline for relative check
       expect(prisma.deviationAlert.upsert).not.toHaveBeenCalled()
     })
   })

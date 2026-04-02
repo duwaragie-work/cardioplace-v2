@@ -227,6 +227,7 @@ const de: Record<TranslationKey, string> = {
   // ─── Alert Types ───────────────────────────────────────────────────────────
   'alert.systolicBP': 'Erhöhter Systolischer BD',
   'alert.diastolicBP': 'Erhöhter Diastolischer BD',
+  'alert.bpCombined': 'Erhöhter Blutdruck',
   'alert.weight': 'Gewichtsveränderung Erkannt',
   'alert.medication': 'Medikation Versäumt',
   'alert.urgent': 'Dringend',

@@ -227,6 +227,7 @@ const es: Record<TranslationKey, string> = {
   // ─── Alert Types ───────────────────────────────────────────────────────────
   'alert.systolicBP': 'PA Sistólica Elevada',
   'alert.diastolicBP': 'PA Diastólica Elevada',
+  'alert.bpCombined': 'Presión Arterial Elevada',
   'alert.weight': 'Cambio de Peso Detectado',
   'alert.medication': 'Medicación Omitida',
   'alert.urgent': 'Urgente',
