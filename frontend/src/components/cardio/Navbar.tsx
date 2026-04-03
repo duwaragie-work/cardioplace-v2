@@ -66,7 +66,7 @@ export default function Navbar() {
         .toUpperCase()
         .slice(0, 2) ?? 'U';
 
-  const isProviderOnly = user?.email === 'support@healplace.com';
+  const isProviderOnly = user?.roles?.includes('SUPER_ADMIN') ?? false;
 
   const PROVIDER_LINKS = [
     { labelKey: 'nav.provider' as const, href: '/provider/dashboard' },
