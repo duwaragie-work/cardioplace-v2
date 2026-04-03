@@ -118,7 +118,7 @@ export default function About() {
           <div className="max-w-[1280px] mx-auto px-4 sm:px-6 md:px-8">
             <div className="flex flex-col items-center gap-4 md:gap-6 mb-10 md:mb-16">
               <div className="bg-white rounded-2xl p-3 shadow-sm border border-[#eedbff]">
-                <Image src="/DCHA-Logo.png" alt="DC Hospital Association" width={120} height={48} className="object-contain" />
+                <Image src="/DCHA-Logo.png" alt="DC Hospital Association" width={120} height={48} className="object-contain" style={{ width: 'auto', height: 'auto' }} />
               </div>
               <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center">{t('about.partnershipTitle')}</h2>
             </div>
