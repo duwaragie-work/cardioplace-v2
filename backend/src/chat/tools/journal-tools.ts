@@ -108,10 +108,13 @@ export function createJournalTools(
         const days = input.days && input.days > 0 ? input.days : 7
         const startDate = new Date()
         startDate.setDate(startDate.getDate() - days)
+        // Use tomorrow as end boundary to include entries from users ahead of UTC
+        const endDate = new Date()
+        endDate.setDate(endDate.getDate() + 1)
         const result = await journalService.findAll(
           userId,
           startDate.toISOString().slice(0, 10),
-          undefined,
+          endDate.toISOString().slice(0, 10),
           15,
         )
         const entries = (result.data ?? []).map((e: any) => ({

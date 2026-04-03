@@ -31,9 +31,11 @@ function IsDateNotInFuture(validationOptions?: ValidationOptions) {
           if (typeof value !== 'string') return false
           const d = new Date(value)
           if (isNaN(d.getTime())) return false
-          const today = new Date()
-          today.setHours(23, 59, 59, 999)
-          return d <= today
+          // Allow up to 1 day ahead of UTC to handle all timezones (max UTC+14)
+          const tomorrow = new Date()
+          tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
+          tomorrow.setUTCHours(23, 59, 59, 999)
+          return d <= tomorrow
         },
       },
     })
