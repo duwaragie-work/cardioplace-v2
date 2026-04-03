@@ -495,6 +495,14 @@ const es: Record<TranslationKey, string> = {
   'landing.legal': 'Legal',
   'landing.privacy': 'Privacidad',
   'landing.terms': 'Términos',
+  'landing.contact': 'Contacto',
+  'landing.dashboard': 'Panel',
+  'landing.getInTouch': 'Contáctanos',
+  'landing.messageSent': '¡Mensaje enviado!',
+  'landing.messageReply': 'Nos comunicaremos contigo pronto.',
+  'landing.yourEmail': 'Tu correo electrónico',
+  'landing.yourMessage': 'Tu mensaje',
+  'landing.sendMessage': 'Enviar Mensaje',
 
   // ─── Homepage ─────────────────────────────────────────────────────────────
   'home.heroBadge': 'MONITOREO CARDÍACO CON IA',
@@ -555,7 +563,7 @@ const es: Record<TranslationKey, string> = {
   'about.silentLiteracyDesc1': 'Nuestro <highlight>modo Audio-Primero</highlight> está diseñado con una perspectiva profunda: las instrucciones médicas son a menudo demasiado densas para quienes luchan con la alfabetización en salud.',
   'about.silentLiteracyDesc2': 'En lugar de exigir a los pacientes que revelen sus dificultades, Healplace Cardio transiciona naturalmente a una guía conversacional. Escucha, confirma y explica usando lenguaje natural, apoyando a los usuarios en cada control sin hacerlos sentir evaluados.',
   'about.silentFeature1': 'IA conversacional que evita la jerga clínica.',
-  'about.silentFeature2': 'No se requiere revelación; la dignidad está integrada en el diseño.',
+  'about.silentFeature2': 'No se requiere revelación, la dignidad está integrada en el diseño.',
   'about.silentFeature3': 'Apoya la adherencia a través de recordatorios empáticos.',
 
   // ─── Language Names ────────────────────────────────────────────────────────

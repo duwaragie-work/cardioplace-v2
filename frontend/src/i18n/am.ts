@@ -493,6 +493,14 @@ const am: Record<string, string> = {
   'landing.legal': 'ህጋዊ',
   'landing.privacy': 'ግላዊነት',
   'landing.terms': 'ውሎች',
+  'landing.contact': 'ያግኙን',
+  'landing.dashboard': 'ዳሽቦርድ',
+  'landing.getInTouch': 'ያግኙን',
+  'landing.messageSent': 'መልዕክት ተልኳል!',
+  'landing.messageReply': 'በቅርቡ እናገኝዎታለን።',
+  'landing.yourEmail': 'ኢሜልዎ',
+  'landing.yourMessage': 'መልዕክትዎ',
+  'landing.sendMessage': 'መልዕክት ላክ',
 
   // ─── Homepage ─────────────────────────────────────────────────────────────
   'home.heroBadge': 'AI-ተኮር የልብ ክትትል',
@@ -551,7 +559,7 @@ const am: Record<string, string> = {
   'about.principle4Desc': 'ለታካሚዎቻችን ህይወት እንጂ ለተቃራኒው አንመጥም። ቀላል፣ ተፈጥሯዊ፣ ሰብዓዊ።',
   'about.silentLiteracyTitle': 'ጸጥታ ያለ ማንበብ',
   'about.silentLiteracyDesc1': 'የ<highlight>ኦዲዮ-ቅድሚያ ሁነታችን</highlight> ጥልቅ ግንዛቤ ላይ ተመስርቶ ተነድፏል፡ ሕክምናዊ መመሪያዎች ብዙ ጊዜ ከጤና ማንበብ ችግር ላላቸው ሰዎች በጣም ጥቅጥቅ ያሉ ናቸው።',
-  'about.silentLiteracyDesc2': 'ታካሚዎች ችግራቸውን እንዲገልጹ ከመጠየቅ ይልቅ Healplace Cardio በተፈጥሯዊ መንገድ ወደ ውይይት መመሪያ ይቀየራል። ያዳምጣል፣ ያረጋግጣል፣ እና በተፈጥሯዊ ቋንቋ ያብራራል — ተጠቃሚዎችን በእያንዳንዱ ቼክ-አፕ ሳይገመገሙ ይደግፋል።',
+  'about.silentLiteracyDesc2': 'ታካሚዎች ችግራቸውን እንዲገልጹ ከመጠየቅ ይልቅ Healplace Cardio በተፈጥሯዊ መንገድ ወደ ውይይት መመሪያ ይቀየራል። ያዳምጣል፣ ያረጋግጣል፣ እና በተፈጥሯዊ ቋንቋ ያብራራል ተጠቃሚዎችን በእያንዳንዱ ቼክ-አፕ ሳይገመገሙ ይደግፋል።',
   'about.silentFeature1': 'ክሊኒካዊ ቃላትን የሚያስወግድ ንግግር AI።',
   'about.silentFeature2': 'ምንም ይፋ ማድረግ አያስፈልግም፤ ክብር በንድፉ ውስጥ ተገንብቷል።',
   'about.silentFeature3': 'ርህርሄ ማስታወሻዎች በኩል ተገዢነትን ይደግፋል።',

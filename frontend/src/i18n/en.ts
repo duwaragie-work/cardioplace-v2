@@ -493,6 +493,14 @@ const en = {
   'landing.legal': 'Legal',
   'landing.privacy': 'Privacy',
   'landing.terms': 'Terms',
+  'landing.contact': 'Contact',
+  'landing.dashboard': 'Dashboard',
+  'landing.getInTouch': 'Get in Touch',
+  'landing.messageSent': 'Message sent!',
+  'landing.messageReply': "We'll get back to you soon.",
+  'landing.yourEmail': 'Your email',
+  'landing.yourMessage': 'Your message',
+  'landing.sendMessage': 'Send Message',
 
   // ─── Homepage ─────────────────────────────────────────────────────────────
   'home.heroBadge': 'AI-POWERED HEART MONITORING',
@@ -551,9 +559,9 @@ const en = {
   'about.principle4Desc': "We adapt to our patients' lives, not the other way around. Simple, intuitive, human.",
   'about.silentLiteracyTitle': 'Silent Literacy',
   'about.silentLiteracyDesc1': 'Our <highlight>Audio-First mode</highlight> is designed with a profound insight: medical instructions are often too dense for those struggling with health literacy.',
-  'about.silentLiteracyDesc2': 'Instead of requiring patients to disclose their struggles, Healplace Cardio naturally transitions into a conversational guide. It listens, confirms, and explains using natural language—supporting users through every check-up without making them feel evaluated.',
+  'about.silentLiteracyDesc2': 'Instead of requiring patients to disclose their struggles, Healplace Cardio naturally transitions into a conversational guide. It listens, confirms, and explains using natural language supporting users through every check-up without making them feel evaluated.',
   'about.silentFeature1': 'Conversational AI that avoids clinical jargon.',
-  'about.silentFeature2': 'Zero disclosure required; dignity is built into the design.',
+  'about.silentFeature2': 'Zero disclosure required, dignity is built into the design.',
   'about.silentFeature3': 'Supports adherence through empathetic reminders.',
 
   // ─── Language Names ────────────────────────────────────────────────────────

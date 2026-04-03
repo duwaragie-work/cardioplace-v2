@@ -59,7 +59,7 @@ export default function LandingFooter() {
         <div>
           <div className="flex items-center gap-2 mb-4">
             <Mail className="w-4 h-4 text-white" />
-            <span className="font-bold text-white text-sm">Get in Touch</span>
+            <span className="font-bold text-white text-sm">{t('landing.getInTouch')}</span>
           </div>
 
           {sent ? (
@@ -67,8 +67,8 @@ export default function LandingFooter() {
               <div className="w-10 h-10 mx-auto mb-2 rounded-full bg-white/20 flex items-center justify-center">
                 <Send className="w-4 h-4 text-white" />
               </div>
-              <p className="text-white font-semibold text-sm">Message sent!</p>
-              <p className="text-white/70 text-xs mt-1">We&apos;ll get back to you soon.</p>
+              <p className="text-white font-semibold text-sm">{t('landing.messageSent')}</p>
+              <p className="text-white/70 text-xs mt-1">{t('landing.messageReply')}</p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="flex flex-col gap-3">
@@ -76,14 +76,14 @@ export default function LandingFooter() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="Your email"
+                placeholder={t('landing.yourEmail')}
                 required
                 className="w-full h-10 px-4 rounded-xl text-sm outline-none bg-white/15 backdrop-blur-sm text-white placeholder-white/50 border border-white/20 focus:border-white/50 transition"
               />
               <textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                placeholder="Your message"
+                placeholder={t('landing.yourMessage')}
                 required
                 rows={3}
                 className="w-full px-4 py-2.5 rounded-xl text-sm outline-none bg-white/15 backdrop-blur-sm text-white placeholder-white/50 border border-white/20 focus:border-white/50 transition resize-none"
@@ -93,7 +93,7 @@ export default function LandingFooter() {
                 className="w-full h-10 rounded-xl text-sm font-bold flex items-center justify-center gap-2 bg-white text-[#5c00a9] hover:bg-white/90 transition active:scale-[0.98]"
               >
                 <Send className="w-3.5 h-3.5" />
-                Send Message
+                {t('landing.sendMessage')}
               </button>
             </form>
           )}

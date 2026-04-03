@@ -495,6 +495,14 @@ const fr: Record<TranslationKey, string> = {
   'landing.legal': 'Mentions Légales',
   'landing.privacy': 'Confidentialité',
   'landing.terms': 'Conditions',
+  'landing.contact': 'Contact',
+  'landing.dashboard': 'Tableau de bord',
+  'landing.getInTouch': 'Nous Contacter',
+  'landing.messageSent': 'Message envoyé !',
+  'landing.messageReply': 'Nous vous répondrons bientôt.',
+  'landing.yourEmail': 'Votre e-mail',
+  'landing.yourMessage': 'Votre message',
+  'landing.sendMessage': 'Envoyer le Message',
 
   // ─── Homepage ─────────────────────────────────────────────────────────────
   'home.heroBadge': 'SUIVI CARDIAQUE PAR IA',
@@ -553,9 +561,9 @@ const fr: Record<TranslationKey, string> = {
   'about.principle4Desc': 'Nous nous adaptons à la vie de nos patients, pas l\'inverse. Simple, intuitif, humain.',
   'about.silentLiteracyTitle': 'Alphabétisation Silencieuse',
   'about.silentLiteracyDesc1': 'Notre <highlight>mode Audio-Prioritaire</highlight> est conçu avec une idée profonde : les instructions médicales sont souvent trop denses pour ceux qui luttent avec l\'alphabétisation en santé.',
-  'about.silentLiteracyDesc2': 'Au lieu d\'exiger des patients qu\'ils révèlent leurs difficultés, Healplace Cardio se transforme naturellement en guide conversationnel. Il écoute, confirme et explique en langage naturel — accompagnant les utilisateurs à chaque contrôle sans qu\'ils se sentent évalués.',
+  'about.silentLiteracyDesc2': 'Au lieu d\'exiger des patients qu\'ils révèlent leurs difficultés, Healplace Cardio se transforme naturellement en guide conversationnel. Il écoute, confirme et explique en langage naturel accompagnant les utilisateurs à chaque contrôle sans qu\'ils se sentent évalués.',
   'about.silentFeature1': 'IA conversationnelle qui évite le jargon clinique.',
-  'about.silentFeature2': 'Aucune divulgation requise ; la dignité est intégrée dans la conception.',
+  'about.silentFeature2': 'Aucune divulgation requise, la dignité est intégrée dans la conception.',
   'about.silentFeature3': 'Soutient l\'observance grâce à des rappels empathiques.',
 
   // ─── Language Names ────────────────────────────────────────────────────────

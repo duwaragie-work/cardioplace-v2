@@ -495,6 +495,14 @@ const de: Record<TranslationKey, string> = {
   'landing.legal': 'Rechtliches',
   'landing.privacy': 'Datenschutz',
   'landing.terms': 'Nutzungsbedingungen',
+  'landing.contact': 'Kontakt',
+  'landing.dashboard': 'Dashboard',
+  'landing.getInTouch': 'Kontaktieren Sie uns',
+  'landing.messageSent': 'Nachricht gesendet!',
+  'landing.messageReply': 'Wir melden uns bald bei Ihnen.',
+  'landing.yourEmail': 'Ihre E-Mail',
+  'landing.yourMessage': 'Ihre Nachricht',
+  'landing.sendMessage': 'Nachricht Senden',
 
   // ─── Homepage ─────────────────────────────────────────────────────────────
   'home.heroBadge': 'KI-GESTÜTZTES HERZMONITORING',
@@ -553,9 +561,9 @@ const de: Record<TranslationKey, string> = {
   'about.principle4Desc': 'Wir passen uns dem Leben unserer Patienten an, nicht umgekehrt. Einfach, intuitiv, menschlich.',
   'about.silentLiteracyTitle': 'Stille Alphabetisierung',
   'about.silentLiteracyDesc1': 'Unser <highlight>Audio-Zuerst-Modus</highlight> wurde mit einer tiefgreifenden Erkenntnis entwickelt: Medizinische Anweisungen sind oft zu komplex für Menschen mit eingeschränkter Gesundheitskompetenz.',
-  'about.silentLiteracyDesc2': 'Anstatt von Patienten zu verlangen, ihre Schwierigkeiten offenzulegen, geht Healplace Cardio natürlich in einen gesprächsbasierten Leitfaden über. Es hört zu, bestätigt und erklärt in natürlicher Sprache — und unterstützt Nutzer bei jeder Kontrolle, ohne dass sie sich bewertet fühlen.',
+  'about.silentLiteracyDesc2': 'Anstatt von Patienten zu verlangen, ihre Schwierigkeiten offenzulegen, geht Healplace Cardio natürlich in einen gesprächsbasierten Leitfaden über. Es hört zu, bestätigt und erklärt in natürlicher Sprache und unterstützt Nutzer bei jeder Kontrolle, ohne dass sie sich bewertet fühlen.',
   'about.silentFeature1': 'Konversations-KI, die klinischen Fachjargon vermeidet.',
-  'about.silentFeature2': 'Keine Offenlegung erforderlich; Würde ist in das Design integriert.',
+  'about.silentFeature2': 'Keine Offenlegung erforderlich, Würde ist in das Design integriert.',
   'about.silentFeature3': 'Unterstützt die Therapietreue durch einfühlsame Erinnerungen.',
 
   // ─── Language Names ────────────────────────────────────────────────────────

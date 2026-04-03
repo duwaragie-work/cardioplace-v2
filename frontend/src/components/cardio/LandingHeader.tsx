@@ -21,7 +21,7 @@ export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProp
   const links = [
     { label: 'Home', href: '/', text: t('landing.home') },
     { label: 'About', href: '/about', text: t('landing.about') },
-    { label: 'Contact', href: '#contact', text: 'Contact' },
+    { label: 'Contact', href: '#contact', text: t('landing.contact') },
   ];
 
   return (
@@ -71,7 +71,7 @@ export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProp
                 className="flex items-center gap-2 bg-[#6b00d1] text-white font-semibold text-sm px-4 py-2 rounded-full hover:bg-[#5a00b0] transition-colors"
               >
                 <LayoutDashboard className="w-4 h-4" />
-                <span className="hidden sm:inline">Dashboard</span>
+                <span className="hidden sm:inline">{t('landing.dashboard')}</span>
               </Link>
             ) : (
               <Link
