@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { getJwtRoles } from './lib/jwt-utils'
 
 const PUBLIC_ROUTES = ['/', '/about', '/welcome', '/sign-in', '/auth/callback']
+const PROVIDER_ROUTES = ['/provider']
 
 export function proxy(request: NextRequest) {
   const token = request.cookies.get('access_token')?.value
@@ -12,34 +12,18 @@ export function proxy(request: NextRequest) {
     (r) => path === r || path.startsWith(r + '/'),
   )
 
-  // Not logged in → only public pages allowed
+  // Not logged in, trying to access protected route
   if (!token && !isPublic) {
     return NextResponse.redirect(new URL('/', request.url))
   }
 
-  if (token) {
-    const roles = getJwtRoles(token)
-
-    // Malformed token → clear and redirect
-    if (roles === null) {
-      const res = NextResponse.redirect(new URL('/sign-in', request.url))
-      res.cookies.delete('access_token')
-      return res
-    }
-
-    const isSuperAdmin = roles.includes('SUPER_ADMIN')
-
-    // Authenticated user on auth pages → redirect to appropriate dashboard
-    if (path === '/welcome' || path === '/sign-in') {
-      const dest = isSuperAdmin ? '/provider/dashboard' : '/dashboard'
-      return NextResponse.redirect(new URL(dest, request.url))
-    }
-
-    // Non-admin trying to access provider routes → redirect to patient dashboard
-    if (path.startsWith('/provider') && !isSuperAdmin) {
-      return NextResponse.redirect(new URL('/dashboard', request.url))
-    }
+  // Already logged in, trying to access welcome/sign-in
+  if (token && (path === '/' || path === '/welcome' || path === '/sign-in')) {
+    return NextResponse.redirect(new URL('/dashboard', request.url))
   }
+
+  // Suppress unused variable warning for PROVIDER_ROUTES (reserved for future role checks)
+  void PROVIDER_ROUTES
 
   return NextResponse.next()
 }

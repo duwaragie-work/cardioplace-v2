@@ -203,7 +203,7 @@ export default function ProviderDashboard() {
     );
   }
 
-  if (!user?.roles?.includes('SUPER_ADMIN')) {
+  if (user?.email !== 'support@healplace.com') {
     return (
       <div style={{
         display: 'flex',

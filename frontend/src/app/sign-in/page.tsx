@@ -66,7 +66,7 @@ export default function RegisterPage() {
     if (!isLoading && user) {
       if (user.onboardingRequired) {
         router.replace("/onboarding");
-      } else if (user.roles?.includes('SUPER_ADMIN')) {
+      } else if (user.email === 'support@healplace.com') {
         router.replace("/provider/dashboard");
       } else {
         router.replace("/dashboard");
@@ -178,7 +178,7 @@ export default function RegisterPage() {
       login(data as OtpVerifyResponse);
       if (data.onboarding_required) {
         router.push("/onboarding");
-      } else if ((data.user?.roles || data.roles || []).includes('SUPER_ADMIN')) {
+      } else if (data.email === 'support@healplace.com') {
         router.push("/provider/dashboard");
       } else {
         router.push("/dashboard");

@@ -10,12 +10,12 @@ export default function DashboardPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (user?.roles?.includes('SUPER_ADMIN')) {
+    if (user?.email === 'support@healplace.com') {
       router.replace('/provider/dashboard');
     }
   }, [user, router]);
 
-  if (user?.roles?.includes('SUPER_ADMIN')) return null;
+  if (user?.email === 'support@healplace.com') return null;
 
   return <Dashboard />;
 }
