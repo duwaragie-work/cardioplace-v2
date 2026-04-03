@@ -38,7 +38,7 @@ export default function OnboardingPage() {
   useEffect(() => {
     if (isLoading) return;
     if (!user) {
-      router.replace("/register");
+      router.replace("/sign-in");
       return;
     }
 
@@ -89,7 +89,7 @@ export default function OnboardingPage() {
     setIsSubmitting(true);
     try {
       if (!user) {
-        router.push("/register");
+        router.push("/sign-in");
         return;
       }
       const timezone = getBrowserTimezone();
@@ -136,7 +136,7 @@ export default function OnboardingPage() {
   async function handleSkip() {
     if (isSubmitting) return;
     if (!user) {
-      router.push("/register");
+      router.push("/sign-in");
       return;
     }
     if (typeof window !== "undefined") {

@@ -71,7 +71,7 @@ export default function Homepage() {
                 </button>
               </form>
               <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6">
-                <Link href="/register" className="bg-[#7b00e0] text-white font-bold text-base md:text-lg px-8 md:px-10 py-3.5 rounded-full hover:bg-[#6600bc] transition-colors">
+                <Link href="/sign-in" className="bg-[#7b00e0] text-white font-bold text-base md:text-lg px-8 md:px-10 py-3.5 rounded-full hover:bg-[#6600bc] transition-colors">
                   {t('home.startCheckin')}
                 </Link>
                 <Link href="#features" className="backdrop-blur-sm bg-white/80 border border-[#cfc2d8] text-black font-semibold text-base md:text-lg px-8 md:px-10 py-3.5 rounded-full hover:bg-white transition-colors">
@@ -223,7 +223,7 @@ export default function Homepage() {
           <div className="max-w-[1024px] w-full rounded-[48px] p-10 md:p-16 flex flex-col items-center gap-8 overflow-hidden" style={{ backgroundImage: 'linear-gradient(153deg, #5c00a9 0%, #a04cee 46%, #c79afd 93%)' }}>
             <h2 className="text-white text-3xl md:text-4xl lg:text-[48px] text-center font-normal">{t('home.ctaTitle')}</h2>
             <p className="text-[#eedbff] text-base md:text-xl text-center leading-relaxed max-w-[672px]">{t('home.ctaDesc')}</p>
-            <Link href="/register" className="bg-white text-[#5c00a9] font-bold text-lg px-12 py-3.5 rounded-full hover:bg-[#f5eafa] transition-colors mt-2">
+            <Link href="/sign-in" className="bg-white text-[#5c00a9] font-bold text-lg px-12 py-3.5 rounded-full hover:bg-[#f5eafa] transition-colors mt-2">
               {t('landing.getStarted')}
             </Link>
           </div>

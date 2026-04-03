@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { getJwtRoles } from './lib/jwt-utils'
 
-const PUBLIC_ROUTES = ['/', '/about', '/welcome', '/register', '/auth/callback']
+const PUBLIC_ROUTES = ['/', '/about', '/welcome', '/sign-in', '/auth/callback']
 
 export function proxy(request: NextRequest) {
   const token = request.cookies.get('access_token')?.value
@@ -22,7 +22,7 @@ export function proxy(request: NextRequest) {
 
     // Malformed token → clear and redirect
     if (roles === null) {
-      const res = NextResponse.redirect(new URL('/register', request.url))
+      const res = NextResponse.redirect(new URL('/sign-in', request.url))
       res.cookies.delete('access_token')
       return res
     }
@@ -30,7 +30,7 @@ export function proxy(request: NextRequest) {
     const isSuperAdmin = roles.includes('SUPER_ADMIN')
 
     // Authenticated user on auth pages → redirect to appropriate dashboard
-    if (path === '/welcome' || path === '/register') {
+    if (path === '/welcome' || path === '/sign-in') {
       const dest = isSuperAdmin ? '/provider/dashboard' : '/dashboard'
       return NextResponse.redirect(new URL(dest, request.url))
     }

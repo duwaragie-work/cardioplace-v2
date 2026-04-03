@@ -222,7 +222,7 @@ export default function Profile() {
 
   useEffect(() => {
     if (isAuthLoading) return;
-    if (!user) router.replace("/register");
+    if (!user) router.replace("/sign-in");
   }, [isAuthLoading, user, router]);
 
   useEffect(() => {
@@ -254,7 +254,7 @@ export default function Profile() {
           signal: controller.signal,
         });
         if (!res.ok) {
-          if (res.status === 401) { router.replace("/register"); return; }
+          if (res.status === 401) { router.replace("/sign-in"); return; }
           setLoadError("We couldn't load your profile. Please try again.");
           return;
         }

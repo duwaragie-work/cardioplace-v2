@@ -75,7 +75,7 @@ export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProp
               </Link>
             ) : (
               <Link
-                href="/register"
+                href="/sign-in"
                 className="bg-[#6b00d1] text-white font-semibold text-sm md:text-base px-5 md:px-6 py-2 rounded-full hover:bg-[#5a00b0] transition-colors"
               >
                 {t('landing.getStarted')}

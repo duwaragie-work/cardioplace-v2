@@ -16,7 +16,7 @@ function CallbackHandler() {
     const onboardingRequired = searchParams.get('onboarding_required');
 
     if (!accessToken) {
-      router.replace('/register');
+      router.replace('/sign-in');
       return;
     }
 
