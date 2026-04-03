@@ -1,13 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useRouter } from 'next/navigation';
 import { Mic, Send, Activity, Heart, MessageCircle, CheckCircle } from 'lucide-react';
-import { BsSoundwave } from "react-icons/bs";
 import { BsSoundwave } from "react-icons/bs";
 import { useLanguage } from '@/contexts/LanguageContext';
 import LandingHeader from './LandingHeader';
@@ -15,8 +12,6 @@ import LandingFooter from './LandingFooter';
 
 export default function Homepage() {
   const { t } = useLanguage();
-  const router = useRouter();
-  const [chatInput, setChatInput] = useState('');
   const router = useRouter();
   const [chatInput, setChatInput] = useState('');
 
@@ -27,12 +22,9 @@ export default function Homepage() {
       <main className="flex flex-col items-center pt-[64px]">
         {/* ============ HERO SECTION ============ */}
         <section className="relative w-full h-[calc(100vh-64px)] flex items-start lg:items-center justify-center overflow-hidden px-6 md:px-8">
-        <section className="relative w-full h-[calc(100vh-64px)] flex items-start lg:items-center justify-center overflow-hidden px-6 md:px-8">
           <div className="absolute inset-0">
             <Image src="/ai-healthcare 2.jpg" alt="" fill sizes="100vw" className="object-cover" priority />
-            <Image src="/ai-healthcare 2.jpg" alt="" fill sizes="100vw" className="object-cover" priority />
           </div>
-          <div className="absolute inset-0" style={{ backgroundImage: 'linear-gradient(240deg, rgba(46, 45, 46, 0) 14%,  rgb(10, 10, 10) 83%)' }} />
           <div className="absolute inset-0" style={{ backgroundImage: 'linear-gradient(240deg, rgba(46, 45, 46, 0) 14%,  rgb(10, 10, 10) 83%)' }} />
 
           <div className="relative z-10 max-w-[1280px] w-full grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-16 py-16 md:py-20 px-4 md:px-8">
@@ -45,26 +37,18 @@ export default function Homepage() {
                 <h1 className="text-white font-bold text-4xl md:text-5xl lg:text-[72px] leading-[1] tracking-tight">
                   {t('home.heroTitle1')}
                 </h1>
-                <h1 className="font-bold italic text-4xl md:text-5xl lg:text-[72px] leading-[1] tracking-tight mt-1]"
-                  style={{ textShadow: '0 -2px 10px rgba(228, 197, 255, 0.68)',color: '#ead8ff' }}
-                >
-                <h1 className="font-bold italic text-4xl md:text-5xl lg:text-[72px] leading-[1] tracking-tight mt-1]"
-                  style={{ textShadow: '0 -2px 10px rgba(228, 197, 255, 0.68)',color: '#ead8ff' }}
+                <h1 className="font-bold italic text-4xl md:text-5xl lg:text-[72px] leading-[1] tracking-tight mt-1"
+                  style={{ textShadow: '0 -2px 10px rgba(228, 197, 255, 0.68)', color: '#ead8ff' }}
                 >
                   {t('home.heroTitle2')}
                 </h1>
               </div>
-              <p className="text-white text-base md:text-lg lg:text-xl leading-relaxed max-w-[576px]">
               <p className="text-white text-base md:text-lg lg:text-xl leading-relaxed max-w-[576px]">
                 {t('home.heroDesc')}
               </p>
             </div>
 
             <div className="flex flex-col items-center justify-center gap-6 max-w-[672px] mx-auto w-full">
-              <form
-                onSubmit={(e) => { e.preventDefault(); if (chatInput.trim()) router.push(`/chat?q=${encodeURIComponent(chatInput.trim())}`); }}
-                className="w-full backdrop-blur-md bg-white/80 border-2 border-[rgba(92,0,169,0.2)] rounded-full p-2.5 flex items-center shadow-2xl"
-              >
               <form
                 onSubmit={(e) => { e.preventDefault(); if (chatInput.trim()) router.push(`/chat?q=${encodeURIComponent(chatInput.trim())}`); }}
                 className="w-full backdrop-blur-md bg-white/80 border-2 border-[rgba(92,0,169,0.2)] rounded-full p-2.5 flex items-center shadow-2xl"
@@ -83,20 +67,8 @@ export default function Homepage() {
                   type="submit"
                   className="bg-[#7b00e0] rounded-full w-14 h-14 flex items-center justify-center shrink-0 shadow-lg hover:bg-[#6600bc] transition-colors"
                 >
-                <input
-                  type="text"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  placeholder={t('home.aiPlaceholder')}
-                  className="flex-1 px-4 py-3 text-base bg-transparent outline-none text-black placeholder-black/50"
-                />
-                <button
-                  type="submit"
-                  className="bg-[#7b00e0] rounded-full w-14 h-14 flex items-center justify-center shrink-0 shadow-lg hover:bg-[#6600bc] transition-colors"
-                >
                   <Send className="w-5 h-5 text-white" />
                 </button>
-              </form>
               </form>
               <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6">
                 <Link href="/sign-in" className="bg-[#7b00e0] text-white font-bold text-base md:text-lg px-8 md:px-10 py-3.5 rounded-full hover:bg-[#6600bc] transition-colors">
@@ -164,7 +136,6 @@ export default function Homepage() {
               </div>
               <div className="mt-8 rounded-lg overflow-hidden relative h-40">
                 <Image src="/BP Trend.png" alt="BP Trend chart" fill sizes="(max-width: 768px) 100vw, 50vw" className="object-cover rounded-lg" />
-                <Image src="/BP Trend.png" alt="BP Trend chart" fill sizes="(max-width: 768px) 100vw, 50vw" className="object-cover rounded-lg" />
               </div>
             </div>
           </div>
@@ -188,18 +159,14 @@ export default function Homepage() {
               </div>
               <div className="absolute -top-4 -right-4 bg-white w-12 h-12 rounded-full flex items-center justify-center shadow-lg">
                 <BsSoundwave className="w-5 h-5 text-[#7b00e0]" />
-              <div className="absolute -top-4 -right-4 bg-white w-12 h-12 rounded-full flex items-center justify-center shadow-lg">
-                <BsSoundwave className="w-5 h-5 text-[#7b00e0]" />
               </div>
             </div>
           </div>
         </section>
 
         {/* ============ TARGET AUDIENCE ============ */}
-        <section className="w-full max-w-[1280px] px-6 md:px-8 py-12 ">
-        <section className="w-full max-w-[1280px] px-6 md:px-8 py-12 ">
+        <section className="w-full max-w-[1280px] px-6 md:px-8 py-12">
           <div className="flex flex-col items-center gap-6 mb-16 md:mb-20">
-            <h2 className="font-semibold text-[#7b00e0] text-3xl md:text-4xl lg:text-[48px] text-center tracking-tight">
             <h2 className="font-semibold text-[#7b00e0] text-3xl md:text-4xl lg:text-[48px] text-center tracking-tight">
               {t('home.designedForEveryone')}
             </h2>

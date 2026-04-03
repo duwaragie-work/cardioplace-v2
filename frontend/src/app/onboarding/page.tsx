@@ -157,23 +157,16 @@ export default function OnboardingPage() {
     <div className="bg-white">
       <LandingHeader activeLink="" />
       <div className="lg:min-h-screen pt-24 lg:pt-[64px] pb-10 lg:pb-0 flex items-start lg:items-center justify-center px-4 sm:px-6 lg:px-12">
-    <div className="bg-white">
-      <LandingHeader activeLink="" />
-      <div className="lg:min-h-screen pt-24 lg:pt-[64px] pb-10 lg:pb-0 flex items-start lg:items-center justify-center px-4 sm:px-6 lg:px-12">
       <div className="w-full max-w-300 mx-auto">
         <div className="flex flex-col items-center md:items-center md:flex-row gap-8 lg:gap-20">
           {/* Left side - Form */}
-          <div className="flex-1 w-full max-w-[400px] md:max-w-105 lg:max-w-130">
           <div className="flex-1 w-full max-w-[400px] md:max-w-105 lg:max-w-130">
 
             {/* Heading */}
             <div className="mb-6 md:mb-10">
               <h1 className="font-semibold text-[#171717] text-2xl sm:text-3xl lg:text-4xl tracking-[-0.04em] mb-2 text-center md:text-left">
-            <div className="mb-6 md:mb-10">
-              <h1 className="font-semibold text-[#171717] text-2xl sm:text-3xl lg:text-4xl tracking-[-0.04em] mb-2 text-center md:text-left">
                 {t('onboarding.title')}
               </h1>
-              <p className="text-[#4b5563] text-sm lg:text-base leading-relaxed max-w-105 text-center md:text-left">
               <p className="text-[#4b5563] text-sm lg:text-base leading-relaxed max-w-105 text-center md:text-left">
                 {t('onboarding.subtitle')}
               </p>

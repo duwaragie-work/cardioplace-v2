@@ -76,7 +76,6 @@ export default function Navbar() {
 
   const BASE_LINKS = [
     { labelKey: 'nav.dashboard' as const, href: '/dashboard' },
-    { labelKey: 'nav.dashboard' as const, href: '/dashboard' },
     { labelKey: 'nav.checkin' as const, href: '/check-in' },
     { labelKey: 'nav.chat' as const, href: '/chat' },
   ];

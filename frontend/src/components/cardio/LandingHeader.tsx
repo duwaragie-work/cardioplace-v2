@@ -1,13 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { LayoutDashboard } from 'lucide-react';
-import { LayoutDashboard } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useAuth } from '@/lib/auth-context';
 import { useAuth } from '@/lib/auth-context';
 import LanguageSelector from './LanguageSelector';
 
@@ -20,14 +17,10 @@ export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProp
   const { isAuthenticated, isLoading } = useAuth();
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
-  const { isAuthenticated, isLoading } = useAuth();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
 
   const links = [
     { label: 'Home', href: '/', text: t('landing.home') },
     { label: 'About', href: '/about', text: t('landing.about') },
-    { label: 'Contact', href: '#contact', text: 'Contact' },
     { label: 'Contact', href: '#contact', text: 'Contact' },
   ];
 
@@ -41,33 +34,6 @@ export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProp
           </span>
         </Link>
         <div className="hidden md:flex items-center gap-10">
-          {links.map((link) =>
-            link.href.startsWith('#') ? (
-              <button
-                key={link.label}
-                onClick={() => document.querySelector(link.href)?.scrollIntoView({ behavior: 'smooth' })}
-                className={
-                  activeLink === link.label
-                    ? 'font-semibold text-[#6d28d9] text-base border-b-2 border-[#6d28d9] pb-0.5'
-                    : 'text-[#475569] text-base hover:text-[#6d28d9] transition-colors cursor-pointer'
-                }
-              >
-                {link.text}
-              </button>
-            ) : (
-              <Link
-                key={link.label}
-                href={link.href}
-                className={
-                  activeLink === link.label
-                    ? 'font-semibold text-[#6d28d9] text-base border-b-2 border-[#6d28d9] pb-0.5'
-                    : 'text-[#475569] text-base hover:text-[#6d28d9] transition-colors'
-                }
-              >
-                {link.text}
-              </Link>
-            )
-          )}
           {links.map((link) =>
             link.href.startsWith('#') ? (
               <button
