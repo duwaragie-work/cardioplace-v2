@@ -86,7 +86,7 @@ export default function Homepage() {
         <section className="w-full bg-[#f5eafa] border-y border-[#eedbff]">
           <div className="max-w-[1280px] mx-auto px-4 sm:px-6 md:px-8 py-6 md:py-8 flex flex-col sm:flex-row items-center gap-4 sm:gap-6 md:gap-10">
             <div className="shrink-0 bg-white rounded-2xl p-3 shadow-sm">
-              <Image src="/DCHA-Logo.png" alt="DC Hospital Association" width={80} height={80} className="object-contain" />
+              <Image src="/DCHA-Logo.png" alt="DC Hospital Association" width={80} height={80} className="object-contain" style={{ width: 'auto', height: 'auto' }} />
             </div>
             <p className="text-[#4c4355] text-sm sm:text-base md:text-lg leading-relaxed text-center sm:text-left">
               {t('home.partnershipBanner')}
