@@ -254,7 +254,7 @@ export default function Profile() {
           signal: controller.signal,
         });
         if (!res.ok) {
-          if (res.status === 401) { router.replace("/welcome"); return; }
+          if (res.status === 401) { router.replace("/register"); return; }
           setLoadError("We couldn't load your profile. Please try again.");
           return;
         }

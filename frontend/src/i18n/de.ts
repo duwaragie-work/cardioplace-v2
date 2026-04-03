@@ -3,6 +3,7 @@ import type { TranslationKey } from './en';
 const de: Record<TranslationKey, string> = {
   // ─── Nav ───────────────────────────────────────────────────────────────────
   'nav.home': 'Startseite',
+  'nav.dashboard': 'Dashboard',
   'nav.checkin': 'Kontrolle',
   'nav.chat': 'Chat',
   'nav.provider': 'Pflegeteam',

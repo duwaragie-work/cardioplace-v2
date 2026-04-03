@@ -1,6 +1,7 @@
 const am: Record<string, string> = {
   // ─── Nav ───────────────────────────────────────────────────────────────────
   'nav.home': 'መነሻ',
+  'nav.dashboard': 'ዳሽቦርድ',
   'nav.checkin': 'ቼክ-ኢን',
   'nav.chat': 'ውይይት',
   'nav.provider': 'የእንክብካቤ ቡድን',

@@ -1,8 +1,11 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { LayoutDashboard } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useAuth } from '@/lib/auth-context';
 import LanguageSelector from './LanguageSelector';
 
 interface LandingHeaderProps {
@@ -11,6 +14,9 @@ interface LandingHeaderProps {
 
 export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProps) {
   const { t } = useLanguage();
+  const { isAuthenticated, isLoading } = useAuth();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   const links = [
     { label: 'Home', href: '/', text: t('landing.home') },
@@ -58,12 +64,24 @@ export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProp
         </div>
         <div className="flex items-center gap-3">
           <LanguageSelector />
-          <Link
-            href="/welcome"
-            className="bg-[#6b00d1] text-white font-semibold text-sm md:text-base px-5 md:px-6 py-2 rounded-full hover:bg-[#5a00b0] transition-colors"
-          >
-            {t('landing.getStarted')}
-          </Link>
+          {mounted && !isLoading && (
+            isAuthenticated ? (
+              <Link
+                href="/dashboard"
+                className="flex items-center gap-2 bg-[#6b00d1] text-white font-semibold text-sm px-4 py-2 rounded-full hover:bg-[#5a00b0] transition-colors"
+              >
+                <LayoutDashboard className="w-4 h-4" />
+                <span className="hidden sm:inline">Dashboard</span>
+              </Link>
+            ) : (
+              <Link
+                href="/register"
+                className="bg-[#6b00d1] text-white font-semibold text-sm md:text-base px-5 md:px-6 py-2 rounded-full hover:bg-[#5a00b0] transition-colors"
+              >
+                {t('landing.getStarted')}
+              </Link>
+            )
+          )}
         </div>
       </div>
     </nav>

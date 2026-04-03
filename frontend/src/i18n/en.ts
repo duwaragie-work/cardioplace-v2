@@ -1,6 +1,7 @@
 const en = {
   // ─── Nav ───────────────────────────────────────────────────────────────────
   'nav.home': 'Home',
+  'nav.dashboard': 'Dashboard',
   'nav.checkin': 'Check-In',
   'nav.chat': 'Chat',
   'nav.provider': 'Provider',

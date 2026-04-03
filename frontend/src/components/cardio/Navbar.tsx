@@ -75,7 +75,7 @@ export default function Navbar() {
   ];
 
   const BASE_LINKS = [
-    { labelKey: 'nav.home' as const, href: '/dashboard' },
+    { labelKey: 'nav.dashboard' as const, href: '/dashboard' },
     { labelKey: 'nav.checkin' as const, href: '/check-in' },
     { labelKey: 'nav.chat' as const, href: '/chat' },
   ];
@@ -94,6 +94,7 @@ export default function Navbar() {
       <nav
         className="fixed top-0 left-0 right-0 z-50 h-16 bg-white flex items-center justify-between px-4 md:px-8"
         style={{
+          borderTop: '3px solid var(--brand-primary-purple)',
           borderBottom: '1px solid var(--brand-border)',
           boxShadow: '0 1px 6px rgba(0,0,0,0.06)',
         }}
