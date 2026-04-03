@@ -10,8 +10,7 @@ interface LandingHeaderProps {
 export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProps) {
   const links = [
     { label: 'Home', href: '/' },
-    { label: 'About', href: '#features' },
-    { label: 'Contact', href: '#contact' },
+    { label: 'About', href: '/about' },
   ];
 
   return (

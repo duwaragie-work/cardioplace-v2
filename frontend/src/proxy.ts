@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-const PUBLIC_ROUTES = ['/', '/welcome', '/register']
+const PUBLIC_ROUTES = ['/', '/about', '/welcome', '/register']
 const PROVIDER_ROUTES = ['/provider']
 
 export function proxy(request: NextRequest) {
