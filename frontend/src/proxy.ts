@@ -29,8 +29,8 @@ export function proxy(request: NextRequest) {
 
     const isSuperAdmin = roles.includes('SUPER_ADMIN')
 
-    // Authenticated user on public pages → redirect to appropriate dashboard
-    if (path === '/' || path === '/welcome' || path === '/register') {
+    // Authenticated user on auth pages → redirect to appropriate dashboard
+    if (path === '/welcome' || path === '/register') {
       const dest = isSuperAdmin ? '/provider/dashboard' : '/dashboard'
       return NextResponse.redirect(new URL(dest, request.url))
     }
