@@ -21,24 +21,10 @@ export default function Homepage() {
         {/* ============ HERO SECTION ============ */}
         <section className="relative w-full min-h-[calc(100vh-64px)] flex items-center justify-center overflow-hidden px-4 sm:px-6 md:px-8">
           <div className="absolute inset-0">
-            <Image src="/ai-healthcare 2.png" alt="" fill sizes="100vw" className="object-cover" priority />
+            <Image src="/ai-healthcare 4.jpg" alt="" fill sizes="100vw" className="object-cover" priority />
           </div>
           <div className="absolute inset-0" style={{ backgroundImage: 'linear-gradient(240deg, rgba(46, 45, 46, 0) 14%,  rgb(10, 10, 10) 83%)' }} />
-          {/* Hero logo — centered with light glow behind */}
-          <div className="absolute inset-0 flex items-center justify-center z-[1] pointer-events-none">
-            {/* White light spread behind logo */}
-            <div
-              className="absolute w-[300px] h-[300px] sm:w-[400px] sm:h-[400px] md:w-[600px] md:h-[600px] lg:w-[700px] lg:h-[700px] rounded-full"
-              style={{ background: 'radial-gradient(circle, rgba(255, 255, 255, 0.39) 0%, rgba(255,255,255,0.15) 30%, rgba(255,255,255,0.05) 55%, transparent 75%)' }}
-            />
-            <Image
-              src="/hero-logo.png"
-              alt="Healplace Cardio"
-              width={400}
-              height={400}
-              className="relative w-[300px] h-[300px] sm:w-[400px] sm:h-[400px] md:w-[600px] md:h-[600px] lg:w-[700px] lg:h-[700px] object-contain opacity-90"
-            />
-          </div>
+          
 
           <div className="relative z-10 max-w-[1280px] w-full grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 py-12 md:py-20 px-2 sm:px-4 md:px-8">
             <div className="flex flex-col gap-5 md:gap-6 justify-center">
