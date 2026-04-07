@@ -75,7 +75,7 @@ export default function Homepage() {
                 <Link href="/sign-in" className="bg-[#7b00e0] text-white font-bold text-sm sm:text-base md:text-lg px-6 sm:px-8 md:px-10 py-3 md:py-3.5 rounded-full hover:bg-[#6600bc] transition-colors">
                   {t('home.startCheckin')}
                 </Link>
-                <Link href="#features" className="backdrop-blur-sm bg-white/80 border border-[#cfc2d8] text-black font-semibold text-sm sm:text-base md:text-lg px-6 sm:px-8 md:px-10 py-3 md:py-3.5 rounded-full hover:bg-white transition-colors">
+                <Link href="#features" className="backdrop-blur-sm bg-white/80 border border-[#cfc2d8] text-gray-600 font-semibold text-sm sm:text-base md:text-lg px-6 sm:px-8 md:px-10 py-3 md:py-3.5 rounded-full hover:bg-white transition-colors">
                   {t('home.howItWorks')}
                 </Link>
               </div>
