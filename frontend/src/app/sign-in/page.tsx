@@ -101,7 +101,7 @@ export default function RegisterPage() {
     return data;
   }
 
-  function startResendCooldown(seconds = 30) {
+  function startResendCooldown(seconds = 60) {
     if (resendTimerRef.current !== null) window.clearInterval(resendTimerRef.current);
     setResendCooldown(seconds);
     resendTimerRef.current = window.setInterval(() => {
