@@ -229,7 +229,13 @@ export default function Homepage() {
             <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center tracking-tight">
               {t('home.designedForEveryone')}
             </h2>
-            <p className="text-[#4c4355] text-base md:text-lg lg:text-xl text-center italic max-w-[672px]">{t('home.designedSubtitle')}</p>
+            <p className="text-[#4c4355] text-lg md:text-xl lg:text-2xl text-center italic font-bold max-w-[672px]">{t('home.forPatientsOpening')}</p>
+            <p className="text-[#4c4355] text-sm md:text-base lg:text-lg text-center leading-relaxed max-w-[720px]">
+              {t('home.healthLiteracyParagraph')}
+            </p>
+            <p className="text-[#5c00a9] text-base md:text-lg lg:text-xl text-center italic font-semibold">
+              {t('home.builtForSilence')}
+            </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
@@ -241,7 +247,7 @@ export default function Homepage() {
                 </div>
                 <div>
                   <h3 className="text-[#1f1924] text-lg sm:text-xl md:text-2xl font-normal">{t('home.forPatients')}</h3>
-                  <p className="text-[#5c00a9] text-xs sm:text-sm">{t('home.forPatientsSubtitle')}</p>
+                  <p className="text-[#5c00a9] text-xs sm:text-sm font-bold">{t('home.forPatientsSubtitle')}</p>
                 </div>
               </div>
               <div className="flex flex-col gap-4 sm:gap-5">
