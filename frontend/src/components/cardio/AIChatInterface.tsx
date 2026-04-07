@@ -1031,6 +1031,7 @@ export default function AIChatInterface() {
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const justCreatedSessionRef = useRef(false);
 
   const userInitials = getUserInitials(user?.name);
   const userName = user?.name ?? 'Patient';
@@ -1180,6 +1181,12 @@ export default function AIChatInterface() {
       setMessages([]);
       return;
     }
+    // Skip history fetch when we just created this session in handleSend —
+    // messages are already in state and the backend hasn't persisted them yet.
+    if (justCreatedSessionRef.current) {
+      justCreatedSessionRef.current = false;
+      return;
+    }
     setIsLoadingHistory(true);
     setMessages([]);
     const currentSession = sessions.find((s) => s.id === activeSessionId);
@@ -1241,6 +1248,7 @@ export default function AIChatInterface() {
       setIsTyping(false);
 
       if (!activeSessionId && response.sessionId) {
+        justCreatedSessionRef.current = true;
         setActiveSessionId(response.sessionId);
         getChatSessions()
           .then((data) => {

@@ -26,13 +26,13 @@ export class ConversationHistoryService {
 
       type RawRow = { userMessage: string; aiSummary: string; timestamp: Date }
 
-      // 1. Always get the last 6 turns chronologically (ensures recent context)
+      // 1. Always get the last 12 turns chronologically (ensures recent context)
       const recentRows: RawRow[] = await (this.prisma as any).$queryRawUnsafe(
         `SELECT "userMessage", "aiSummary", timestamp
          FROM "Conversation"
          WHERE "sessionId" = $1
          ORDER BY timestamp DESC
-         LIMIT 6`,
+         LIMIT 12`,
         sessionId,
       )
 
