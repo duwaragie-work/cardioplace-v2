@@ -435,6 +435,10 @@ const fr: Record<TranslationKey, string> = {
   'provider.superAdminOnly': 'Super Admin uniquement',
   'provider.goToDashboard': 'Aller au Tableau de Bord',
   'provider.failedSchedule': 'Échec de la programmation de l\'appel',
+  'provider.allLevels': 'Tous les Niveaux',
+  'provider.alertLegendTitle': 'Référence des Niveaux d\'Alerte',
+  'provider.legendL1Desc': 'Systolique hors de la plage personnelle. Révision par l\'équipe soignante dans les 24 heures.',
+  'provider.legendL2Desc': 'Systolique \u2265 180 / Douleur thoracique / Céphalée sévère soudaine / Symptômes neurologiques / Essoufflement. Patient dirigé à appeler le 911 immédiatement.',
 
   // ─── Welcome Page ──────────────────────────────────────────────────────────
   'welcome.title': 'Healplace Cardio',

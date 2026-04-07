@@ -435,6 +435,10 @@ const am: Record<TranslationKey, string> = {
   'provider.superAdminOnly': 'ለሱፐር አድሚን ብቻ',
   'provider.goToDashboard': 'ወደ ዳሽቦርድ ሂድ',
   'provider.failedSchedule': 'ጥሪ ማዘጋጀት አልተቻለም',
+  'provider.allLevels': 'ሁሉም ደረጃዎች',
+  'provider.alertLegendTitle': 'የማንቂያ ደረጃ ማጣቀሻ',
+  'provider.legendL1Desc': 'ሲስቶሊክ ከግል መነሻ ክልል ውጭ። በ24 ሰዓታት ውስጥ የእንክብካቤ ቡድን ግምገማ።',
+  'provider.legendL2Desc': 'ሲስቶሊክ \u2265 180 / የደረት ህመም / ድንገተኛ ከባድ ራስ ምታት / የነርቭ ምልክቶች / የትንፋሽ ማጠር። ታካሚው ወዲያውኑ 911 እንዲደውል ተመርቷል።',
 
   // ─── Welcome Page ──────────────────────────────────────────────────────────
   'welcome.title': 'Healplace Cardio',

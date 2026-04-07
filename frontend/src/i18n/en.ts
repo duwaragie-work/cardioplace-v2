@@ -433,6 +433,10 @@ const en = {
   'provider.superAdminOnly': 'Super Admin only',
   'provider.goToDashboard': 'Go to Dashboard',
   'provider.failedSchedule': 'Failed to schedule call',
+  'provider.allLevels': 'All Levels',
+  'provider.alertLegendTitle': 'Alert Level Reference',
+  'provider.legendL1Desc': 'Systolic out of personal baseline range. Care team review within 24 hours.',
+  'provider.legendL2Desc': 'Systolic \u2265 180 / Chest pain / Sudden severe headache / Neurological symptoms / Shortness of breath. Patient directed to call 911 immediately.',
 
   // ─── Welcome Page ──────────────────────────────────────────────────────────
   'welcome.title': 'Healplace Cardio',

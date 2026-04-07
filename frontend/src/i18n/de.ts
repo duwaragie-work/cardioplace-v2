@@ -435,6 +435,10 @@ const de: Record<TranslationKey, string> = {
   'provider.superAdminOnly': 'Nur Super-Admin',
   'provider.goToDashboard': 'Zum Dashboard',
   'provider.failedSchedule': 'Anrufplanung fehlgeschlagen',
+  'provider.allLevels': 'Alle Stufen',
+  'provider.alertLegendTitle': 'Warnstufen-Referenz',
+  'provider.legendL1Desc': 'Systolisch außerhalb des persönlichen Bereichs. Überprüfung durch das Pflegeteam innerhalb von 24 Stunden.',
+  'provider.legendL2Desc': 'Systolisch \u2265 180 / Brustschmerzen / Plötzlicher starker Kopfschmerz / Neurologische Symptome / Atemnot. Patient angewiesen, sofort 911 anzurufen.',
 
   // ─── Welcome Page ──────────────────────────────────────────────────────────
   'welcome.title': 'Healplace Cardio',

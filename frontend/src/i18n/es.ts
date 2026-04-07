@@ -435,6 +435,10 @@ const es: Record<TranslationKey, string> = {
   'provider.superAdminOnly': 'Solo Super Admin',
   'provider.goToDashboard': 'Ir al Panel',
   'provider.failedSchedule': 'Error al programar la llamada',
+  'provider.allLevels': 'Todos los Niveles',
+  'provider.alertLegendTitle': 'Referencia de Niveles de Alerta',
+  'provider.legendL1Desc': 'Sistólica fuera del rango personal. Revisión del equipo de atención dentro de 24 horas.',
+  'provider.legendL2Desc': 'Sistólica \u2265 180 / Dolor en el pecho / Dolor de cabeza severo repentino / Síntomas neurológicos / Dificultad para respirar. Paciente dirigido a llamar al 911 inmediatamente.',
 
   // ─── Welcome Page ──────────────────────────────────────────────────────────
   'welcome.title': 'Healplace Cardio',

@@ -493,7 +493,7 @@ export default function ProviderDashboard() {
                     type="text"
                     value={alertSearch}
                     onChange={(e) => setAlertSearch(e.target.value)}
-                    placeholder="Search patient..."
+                    placeholder={t('provider.searchPatients')}
                     className="flex-1 text-[11px] outline-none bg-transparent"
                     style={{ color: 'var(--brand-text-primary)' }}
                   />
@@ -512,9 +512,9 @@ export default function ProviderDashboard() {
                     className="appearance-none h-8 pl-2.5 pr-6 rounded-full text-[11px] font-semibold outline-none cursor-pointer"
                     style={{ backgroundColor: 'var(--brand-background)', border: '1.5px solid var(--brand-border)', color: 'var(--brand-text-secondary)' }}
                   >
-                    <option value="ALL">All Levels</option>
-                    <option value="L1">Level 1</option>
-                    <option value="L2">Level 2</option>
+                    <option value="ALL">{t('provider.allLevels')}</option>
+                    <option value="L1">{t('provider.level1')}</option>
+                    <option value="L2">{t('provider.level2')}</option>
                   </select>
                   <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none" style={{ color: 'var(--brand-text-muted)' }} />
                 </div>
@@ -522,7 +522,7 @@ export default function ProviderDashboard() {
             </div>
 
             {/* Desktop Table */}
-            <div className="hidden md:block overflow-y-auto provider-scroll" style={{ maxHeight: '55vh' }}>
+            <div className="hidden md:block overflow-y-auto provider-scroll" style={{ maxHeight: '75vh' }}>
               <table className="w-full" style={{ borderSpacing: '0 8px', borderCollapse: 'separate' }}>
                 <thead>
                   <tr
@@ -677,8 +677,9 @@ export default function ProviderDashboard() {
             </div>
           </div>
 
-          {/* BP Trend Panel — desktop only (lg:), sticky */}
-          <div className="hidden lg:block lg:col-span-2 lg:sticky lg:top-24 lg:self-start bg-white p-6 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+          {/* Right column: BP Trend + Legend — desktop only */}
+          <div className="hidden lg:flex lg:flex-col lg:col-span-2 gap-6 lg:sticky lg:top-24 lg:self-start">
+          <div className="bg-white p-6 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
                 {t('provider.bpTrend')} &middot; {trendDetail?.patient?.name ?? trendAlert?.name ?? t('provider.selectPatient')}
@@ -739,6 +740,40 @@ export default function ProviderDashboard() {
                 </p>
               </div>
             )}
+          </div>
+
+          {/* Alert Level Legend */}
+          <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+            <h3 className="text-[13px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
+              {t('provider.alertLegendTitle')}
+            </h3>
+            <div className="space-y-3">
+              {/* Level 1 */}
+              <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--brand-warning-amber-light)', borderLeft: '3px solid var(--brand-warning-amber)' }}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--brand-warning-amber)' }} />
+                  <span className="text-[11px] font-extrabold uppercase" style={{ color: 'var(--brand-warning-amber)' }}>
+                    {t('provider.level1')}
+                  </span>
+                </div>
+                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
+                  {t('provider.legendL1Desc')}
+                </p>
+              </div>
+              {/* Level 2 */}
+              <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--brand-alert-red-light)', borderLeft: '3px solid var(--brand-alert-red)' }}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--brand-alert-red)' }} />
+                  <span className="text-[11px] font-extrabold uppercase" style={{ color: 'var(--brand-alert-red)' }}>
+                    {t('provider.level2')}
+                  </span>
+                </div>
+                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
+                  {t('provider.legendL2Desc')}
+                </p>
+              </div>
+            </div>
+          </div>
           </div>
 
             </>
