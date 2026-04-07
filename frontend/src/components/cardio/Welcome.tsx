@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowRight, Lock, Building2, BarChart3, ClipboardCheck, Check, Pill } from 'lucide-react';
+import { ArrowRight, Building2, BarChart3, ClipboardCheck, Check, Pill } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { type TranslationKey } from '@/i18n';
 import LandingHeader from './LandingHeader';
@@ -152,8 +152,8 @@ export default function Welcome() {
     >
       <LandingHeader />
 
-      <div className="flex-1 flex items-center max-w-300 mx-auto px-4 md:px-8 pt-24 pb-12 md:pb-16">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 lg:items-center overflow-visible">
+      <div className="flex-1 flex items-start lg:items-center max-w-300 mx-auto px-4 md:px-8 pt-20 lg:pt-0">
+        <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-16 lg:items-center overflow-visible">
           {/* LEFT COLUMN */}
           <div className="flex flex-col space-y-8">
             {/* Heading */}
@@ -183,7 +183,7 @@ export default function Welcome() {
 
             {/* CTA Button */}
             <Link
-              href="/register"
+              href="/sign-in"
               className="relative z-10 block w-full lg:w-[320px] py-4 px-8 text-center transition-all hover:scale-[1.02] active:scale-[0.98]"
               style={{
                 backgroundColor: 'var(--brand-primary-purple)',
@@ -202,19 +202,6 @@ export default function Welcome() {
 
             {/* Trust Badges */}
             <div className="flex flex-wrap gap-3">
-              <div
-                className="flex items-center gap-2 px-4 py-2"
-                style={{
-                  backgroundColor: '#F1F5F9',
-                  borderRadius: '8px',
-                  fontSize: '0.8125rem',
-                  color: 'var(--brand-text-primary)',
-                  fontWeight: 500,
-                }}
-              >
-                <Lock className="w-4 h-4" />
-                {t('welcome.hipaa')}
-              </div>
               <div
                 className="flex items-center gap-2 px-4 py-2"
                 style={{

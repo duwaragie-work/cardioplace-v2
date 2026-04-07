@@ -24,14 +24,15 @@ export default function LanguageSelector() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[13px] font-semibold transition hover:opacity-80"
+        className="flex items-center gap-1 sm:gap-1.5 h-8 sm:h-9 px-2 sm:px-3 rounded-full text-[12px] sm:text-[13px] font-semibold transition hover:opacity-80"
         style={{
           backgroundColor: open ? 'var(--brand-primary-purple-light)' : 'rgba(0,0,0,0.05)',
           color: open ? 'var(--brand-primary-purple)' : 'var(--brand-text-secondary)',
         }}
       >
         <Globe className="w-4 h-4" />
-        <span>{current?.flag} {current?.nativeName}</span>
+        <span>{current?.flag}</span>
+        <span className="hidden sm:inline">{current?.nativeName}</span>
       </button>
 
       {open && (

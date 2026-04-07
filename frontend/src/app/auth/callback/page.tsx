@@ -3,7 +3,6 @@
 import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import { getJwtRoles } from '@/lib/jwt-utils';
 import SpinnerIndicator from '@/components/ui/SpinnerIndicator';
 
 function CallbackHandler() {
@@ -16,7 +15,7 @@ function CallbackHandler() {
     const onboardingRequired = searchParams.get('onboarding_required');
 
     if (!accessToken) {
-      router.replace('/register');
+      router.replace('/sign-in');
       return;
     }
 
@@ -28,9 +27,7 @@ function CallbackHandler() {
     if (onboardingRequired === 'true') {
       router.replace('/onboarding');
     } else {
-      const roles = getJwtRoles(accessToken);
-      const dest = roles.includes('SUPER_ADMIN') ? '/provider/dashboard' : '/dashboard';
-      router.replace(dest);
+      router.replace('/dashboard');
     }
   }, [searchParams, login, router]);
 

@@ -58,6 +58,15 @@ export class ProviderController {
     return this.providerService.getPatientJournal(userId, p, l)
   }
 
+  @Get('patients/:userId/bp-trend')
+  getPatientBpTrend(
+    @Param('userId') userId: string,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    return this.providerService.getPatientBpTrend(userId, startDate, endDate)
+  }
+
   @Get('alerts')
   getAlerts(
     @Query('severity') severity?: string,

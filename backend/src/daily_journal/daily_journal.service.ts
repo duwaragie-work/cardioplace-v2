@@ -591,13 +591,19 @@ export class DailyJournalService {
       }),
     ])
 
-    // Current streak: consecutive days ending today
+    // Current streak: consecutive days ending today or tomorrow (timezone tolerance)
     let currentStreak = 0
     if (allEntries.length > 0) {
-      const checkDate = new Date(today)
       const entryDates = new Set(
         allEntries.map((e) => e.entryDate.toISOString().slice(0, 10)),
       )
+      // Start from tomorrow UTC to handle users ahead of UTC
+      const checkDate = new Date(today)
+      checkDate.setDate(checkDate.getDate() + 1)
+      // Skip forward dates that have no entry
+      while (!entryDates.has(checkDate.toISOString().slice(0, 10)) && checkDate >= today) {
+        checkDate.setDate(checkDate.getDate() - 1)
+      }
       while (entryDates.has(checkDate.toISOString().slice(0, 10))) {
         currentStreak++
         checkDate.setDate(checkDate.getDate() - 1)

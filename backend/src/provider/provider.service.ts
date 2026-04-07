@@ -20,7 +20,9 @@ export class ProviderService {
     const now = new Date()
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
 
-    const [totalActivePatients, monthlyInteractions, activeAlertsCount] =
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+
+    const [totalActivePatients, monthlyInteractions, activeAlertsCount, readingsThisMonth, recentAlertPatients] =
       await Promise.all([
         this.prisma.user.count({
           where: { onboardingStatus: 'COMPLETED' },
@@ -30,6 +32,20 @@ export class ProviderService {
         }),
         this.prisma.deviationAlert.count({
           where: { status: 'OPEN' },
+        }),
+        this.prisma.journalEntry.count({
+          where: {
+            entryDate: { gte: startOfMonth },
+            systolicBP: { not: null },
+          },
+        }),
+        this.prisma.deviationAlert.findMany({
+          where: {
+            status: 'OPEN',
+            createdAt: { gte: twentyFourHoursAgo },
+          },
+          select: { userId: true },
+          distinct: ['userId'],
         }),
       ])
 
@@ -64,8 +80,10 @@ export class ProviderService {
       statusCode: 200,
       data: {
         totalActivePatients,
+        readingsThisMonth,
         monthlyInteractions,
         activeAlertsCount,
+        patientsNeedingAttention: recentAlertPatients.length,
         bpControlledPercent,
       },
     }
@@ -426,6 +444,40 @@ export class ProviderService {
     }
   }
 
+  // ─── GET /provider/patients/:userId/bp-trend ────────────────────────────────
+
+  async getPatientBpTrend(userId: string, startDate: string, endDate: string) {
+    const entries = await this.prisma.journalEntry.findMany({
+      where: {
+        userId,
+        entryDate: {
+          gte: new Date(startDate),
+          lte: new Date(endDate),
+        },
+        systolicBP: { not: null },
+      },
+      orderBy: [{ entryDate: 'asc' }, { createdAt: 'asc' }],
+      select: {
+        entryDate: true,
+        measurementTime: true,
+        systolicBP: true,
+        diastolicBP: true,
+      },
+    })
+
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    return {
+      statusCode: 200,
+      data: entries.map((e) => ({
+        day: dayNames[new Date(e.entryDate).getDay()],
+        systolic: e.systolicBP,
+        diastolic: e.diastolicBP,
+        date: e.entryDate,
+        time: e.measurementTime ?? null,
+      })),
+    }
+  }
+
   // ─── GET /provider/alerts ─────────────────────────────────────────────────────
 
   async getAlerts(filters: { severity?: string; escalated?: boolean }) {
@@ -697,20 +749,8 @@ export class ProviderService {
 
     const aiSummary = `Patient shows ${trendDirection} BP trend over the last ${entryCount} readings with ${medAdherence}. ${action} to assess current cardiovascular status.`
 
-    // Build communication preference info
-    const commPref = alert.user?.communicationPreference
-    let commLabel = 'Standard Communication'
-    let commDescription =
-      'No specific communication preference indicated.'
-    if (commPref === 'AUDIO_FIRST') {
-      commLabel = 'Audio-First Patient'
-      commDescription =
-        'Use verbal communication and visual aids at next visit. Patient prefers spoken over written instructions.'
-    } else if (commPref === 'TEXT_FIRST') {
-      commLabel = 'Text-First Patient'
-      commDescription =
-        'Patient prefers written communication. Use text messages and written care plans.'
-    }
+    // Communication preference — return code, frontend translates
+    const commPref = alert.user?.communicationPreference ?? 'STANDARD'
 
     // Format BP trend for chart (reverse to chronological order)
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -756,8 +796,7 @@ export class ProviderService {
         triggerReasons,
         aiSummary,
         communication: {
-          label: commLabel,
-          description: commDescription,
+          preference: commPref,
         },
         bpTrend,
         escalation: alert.escalationEvents[0]

@@ -66,7 +66,7 @@ export default function Navbar() {
         .toUpperCase()
         .slice(0, 2) ?? 'U';
 
-  const isProviderOnly = user?.roles?.includes('SUPER_ADMIN') ?? false;
+  const isProviderOnly = user?.email === 'support@healplace.com';
 
   const PROVIDER_LINKS = [
     { labelKey: 'nav.provider' as const, href: '/provider/dashboard' },
@@ -75,7 +75,7 @@ export default function Navbar() {
   ];
 
   const BASE_LINKS = [
-    { labelKey: 'nav.home' as const, href: '/dashboard' },
+    { labelKey: 'nav.dashboard' as const, href: '/dashboard' },
     { labelKey: 'nav.checkin' as const, href: '/check-in' },
     { labelKey: 'nav.chat' as const, href: '/chat' },
   ];
@@ -84,7 +84,7 @@ export default function Navbar() {
     ? PROVIDER_LINKS
     : [
         ...BASE_LINKS,
-        ...(user?.roles?.includes('SUPER_ADMIN') ? PROVIDER_LINKS : []),
+        ...(user?.email === 'support@healplace.com' ? PROVIDER_LINKS : []),
       ];
 
   const currentLocale = ALL_LOCALES.find((l) => l.code === locale);
@@ -92,24 +92,23 @@ export default function Navbar() {
   return (
     <>
       <nav
-        className="fixed top-0 left-0 right-0 z-50 h-16 bg-white flex items-center justify-between px-4 md:px-8"
+        className="fixed top-0 left-0 right-0 z-50 h-16 flex items-center justify-between px-4 md:px-8"
         style={{
-          borderBottom: '1px solid var(--brand-border)',
-          boxShadow: '0 1px 6px rgba(0,0,0,0.06)',
+          background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
+          boxShadow: '0 2px 12px rgba(123,0,224,0.2)',
         }}
       >
         {/* Logo */}
-        <Link href={isProviderOnly ? '/provider/dashboard' : '/dashboard'} className="flex items-center gap-1.5 shrink-0">
+        <Link href="/" className="flex items-center gap-1.5 shrink-0">
           <Image
             src="/logo.svg"
             alt="Healplace logo"
             width={32}
             height={32}
-            className="w-8 h-8"
+            className="w-8 h-8 brightness-0 invert"
           />
           <span
-            className="font-bold text-[14px] sm:text-base"
-            style={{ color: 'var(--brand-primary-purple)' }}
+            className="font-bold text-[14px] sm:text-base text-white"
           >
             Healplace Cardio
           </span>
@@ -127,16 +126,13 @@ export default function Navbar() {
                 href={link.href}
                 className="text-sm font-semibold relative pb-1"
                 style={{
-                  color: active
-                    ? 'var(--brand-primary-purple)'
-                    : 'var(--brand-text-secondary)',
+                  color: active ? '#ffffff' : 'rgba(255,255,255,0.7)',
                 }}
               >
                 {t(link.labelKey)}
                 {active && (
                   <div
-                    className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full"
-                    style={{ backgroundColor: 'var(--brand-primary-purple)' }}
+                    className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-white"
                   />
                 )}
               </Link>
@@ -152,8 +148,8 @@ export default function Navbar() {
               onClick={() => setLangOpen((v) => !v)}
               className="flex items-center gap-1 h-8 px-2 rounded-lg text-[12px] font-semibold transition hover:opacity-80"
               style={{
-                backgroundColor: langOpen ? 'var(--brand-primary-purple-light)' : 'transparent',
-                color: langOpen ? 'var(--brand-primary-purple)' : 'var(--brand-text-muted)',
+                backgroundColor: langOpen ? 'rgba(255,255,255,0.2)' : 'transparent',
+                color: 'rgba(255,255,255,0.85)',
               }}
               aria-label="Change language"
             >
@@ -220,8 +216,8 @@ export default function Navbar() {
               style={{
                 color:
                   alertCount > 0
-                    ? 'var(--brand-warning-amber)'
-                    : 'var(--brand-text-muted)',
+                    ? '#fbbf24'
+                    : 'rgba(255,255,255,0.7)',
               }}
             />
             {alertCount > 0 && (
@@ -236,8 +232,8 @@ export default function Navbar() {
 
           <Link
             href="/profile"
-            className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm shrink-0"
-            style={{ backgroundColor: 'var(--brand-primary-purple)' }}
+            className="w-9 h-9 rounded-full flex items-center justify-center font-semibold text-sm shrink-0"
+            style={{ backgroundColor: 'rgba(255,255,255,0.2)', color: 'white', border: '1.5px solid rgba(255,255,255,0.3)' }}
           >
             {userInitials}
           </Link>
@@ -248,9 +244,9 @@ export default function Navbar() {
             aria-label="Toggle menu"
           >
             {mobileOpen ? (
-              <X className="w-6 h-6" style={{ color: 'var(--brand-text-primary)' }} />
+              <X className="w-6 h-6 text-white" />
             ) : (
-              <Menu className="w-6 h-6" style={{ color: 'var(--brand-text-primary)' }} />
+              <Menu className="w-6 h-6 text-white" />
             )}
           </button>
         </div>

@@ -518,7 +518,7 @@ export default function PatientsPage() {
   // ─── Auth guard ───────────────────────────────────────────────────────────
   if (isLoading) return null;
 
-  if (!user?.roles?.includes('SUPER_ADMIN')) {
+  if (user?.email !== 'support@healplace.com') {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
         <div className="text-center p-8 rounded-2xl bg-white" style={{ boxShadow: 'var(--brand-shadow-card)' }}>

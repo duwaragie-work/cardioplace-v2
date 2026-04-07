@@ -92,3 +92,35 @@ export function scheduleCallEmailHtml(
     </p>
   `)
 }
+
+export function contactFormEmailHtml(
+  senderEmail: string,
+  message: string,
+): string {
+  return wrap(`
+    <h2 style="color: #1f2937; font-size: 18px; margin: 0 0 16px;">
+      New Contact Form Message
+    </h2>
+    <div style="background: #f3f0ff; border-left: 4px solid #7B00E0; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+      <table style="width: 100%; font-size: 14px; color: #374151;">
+        <tr>
+          <td style="padding: 6px 0; font-weight: 600; width: 80px; vertical-align: top;">From</td>
+          <td style="padding: 6px 0;">
+            <a href="mailto:${senderEmail}" style="color: #7B00E0; text-decoration: none;">${senderEmail}</a>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; font-weight: 600; vertical-align: top;">Date</td>
+          <td style="padding: 6px 0;">${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</td>
+        </tr>
+      </table>
+    </div>
+    <div style="background: #fafafa; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+      <p style="color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 8px;">Message</p>
+      <p style="color: #1f2937; font-size: 14px; line-height: 1.7; margin: 0; white-space: pre-wrap;">${message}</p>
+    </div>
+    <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+      Reply directly to <a href="mailto:${senderEmail}" style="color: #7B00E0;">${senderEmail}</a> to respond.
+    </p>
+  `)
+}

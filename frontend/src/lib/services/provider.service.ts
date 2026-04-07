@@ -56,6 +56,17 @@ export async function getPatientJournal(userId: string, page?: number, limit?: n
   return json.data ?? json
 }
 
+export async function getPatientBpTrend(userId: string, startDate: string, endDate: string) {
+  const qs = new URLSearchParams({ startDate, endDate })
+  const res = await fetchWithAuth(`${API}/api/provider/patients/${userId}/bp-trend?${qs}`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json()
+  return json.data ?? json
+}
+
 export async function getProviderAlerts(filters?: {
   severity?: string
   escalated?: boolean

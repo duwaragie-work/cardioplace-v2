@@ -56,8 +56,9 @@ export interface AlertDetail {
   triggerReasons: string[];
   aiSummary: string;
   communication: {
-    label: string;
-    description: string;
+    preference?: string;
+    label?: string;
+    description?: string;
   };
   bpTrend: {
     day: string;
@@ -165,11 +166,10 @@ export default function AlertPanel({
             className="text-xl font-bold mb-2"
             style={{ color: 'var(--brand-text-primary)' }}
           >
-            Alert Reviewed
+            {t('provider.alertReviewed')}
           </h3>
           <p className="text-sm" style={{ color: 'var(--brand-text-muted)' }}>
-            {alert.name}&apos;s alert has been marked as reviewed and removed
-            from the queue.
+            {t('provider.alertReviewedDesc').replace('{name}', alert.name)}
           </p>
         </motion.div>
       ) : detailLoading ? (
@@ -223,7 +223,7 @@ export default function AlertPanel({
             >
               {isLevel1
                 ? t('provider.followUpRequired')
-                : 'Immediate action required'}
+                : t('provider.immediateAction')}
             </p>
           </div>
 
@@ -352,15 +352,22 @@ export default function AlertPanel({
                   className="text-[13px] font-semibold"
                   style={{ color: 'var(--brand-accent-teal)' }}
                 >
-                  {detail?.communication?.label ?? 'Communication Preference'}
+                  {detail?.communication?.preference === 'AUDIO_FIRST'
+                    ? t('provider.commAudioLabel')
+                    : detail?.communication?.preference === 'TEXT_FIRST'
+                      ? t('provider.commTextLabel')
+                      : t('provider.commStandardLabel')}
                 </h4>
               </div>
               <p
                 className="text-[11px] leading-relaxed"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
-                {detail?.communication?.description ??
-                  'No specific communication preference indicated.'}
+                {detail?.communication?.preference === 'AUDIO_FIRST'
+                  ? t('provider.commAudioDesc')
+                  : detail?.communication?.preference === 'TEXT_FIRST'
+                    ? t('provider.commTextDesc')
+                    : t('provider.commStandardDesc')}
               </p>
             </div>
           </div>
@@ -443,7 +450,7 @@ export default function AlertPanel({
                   cursor: 'default',
                 }}
               >
-                Follow-up Scheduled &mdash;{' '}
+                {t('provider.followUpScheduled')} &mdash;{' '}
                 {new Date(alert.followUpScheduledAt).toLocaleDateString('en-US', {
                   month: 'short',
                   day: 'numeric',
