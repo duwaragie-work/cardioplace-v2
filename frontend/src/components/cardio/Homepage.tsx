@@ -21,7 +21,7 @@ export default function Homepage() {
         {/* ============ HERO SECTION ============ */}
         <section className="relative w-full min-h-[calc(100vh-64px)] flex items-center justify-center overflow-hidden px-4 sm:px-6 md:px-8">
           <div className="absolute inset-0">
-            <Image src="/ai-healthcare 1.png" alt="" fill sizes="100vw" className="object-cover" priority />
+            <Image src="/ai-healthcare.png" alt="" fill sizes="100vw" quality={500} unoptimized className="object-cover" priority />
           </div>
           <div className="absolute inset-0"  />
           
