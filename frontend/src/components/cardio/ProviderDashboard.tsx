@@ -775,6 +775,7 @@ export default function ProviderDashboard() {
                 <input
                   type="date"
                   value={trendStartDate}
+                  max={trendEndDate}
                   onChange={(e) => { setTrendStartDate(e.target.value); setTrendPreset(''); }}
                   className="text-[10px] px-1.5 py-0.5 rounded border outline-none"
                   style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
@@ -783,6 +784,8 @@ export default function ProviderDashboard() {
                 <input
                   type="date"
                   value={trendEndDate}
+                  min={trendStartDate}
+                  max={new Date().toISOString().slice(0, 10)}
                   onChange={(e) => { setTrendEndDate(e.target.value); setTrendPreset(''); }}
                   className="text-[10px] px-1.5 py-0.5 rounded border outline-none"
                   style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
