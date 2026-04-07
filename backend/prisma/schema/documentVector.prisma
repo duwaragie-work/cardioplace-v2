@@ -1,7 +1,7 @@
 model DocumentVector {
   id                 String                 @id @default(uuid())
   content            String
-  embedding          Unsupported("vector(384)")?
+  embedding          Unsupported("vector(768)")?
   documentId         String
   sourceActiveStatus Boolean                @default(true)
   document           Document               @relation(fields: [documentId], references: [id], onDelete: Cascade)
