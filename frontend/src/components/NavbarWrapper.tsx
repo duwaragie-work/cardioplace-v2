@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 import Navbar from '@/components/cardio/Navbar';
 
-const HIDE_NAV_PATHS = ['/', '/about', '/welcome', '/sign-in', '/auth/callback', '/onboarding'];
+const HIDE_NAV_PATHS = ['/', '/home', '/about', '/contact', '/welcome', '/sign-in', '/auth/callback', '/onboarding'];
 
 export default function NavbarWrapper({ children }: { children: ReactNode }) {
   const pathname = usePathname();
