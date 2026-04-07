@@ -21,9 +21,9 @@ export default function Homepage() {
         {/* ============ HERO SECTION ============ */}
         <section className="relative w-full min-h-[calc(100vh-64px)] flex items-center justify-center overflow-hidden px-4 sm:px-6 md:px-8">
           <div className="absolute inset-0">
-            <Image src="/ai-healthcare 4.jpg" alt="" fill sizes="100vw" className="object-cover" priority />
+            <Image src="/ai-healthcare 1.png" alt="" fill sizes="100vw" className="object-cover" priority />
           </div>
-          <div className="absolute inset-0" style={{ backgroundImage: 'linear-gradient(240deg, rgba(46, 45, 46, 0) 14%,  rgb(10, 10, 10) 83%)' }} />
+          <div className="absolute inset-0"  />
           
 
           <div className="relative z-10 max-w-[1280px] w-full grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 py-12 md:py-20 px-2 sm:px-4 md:px-8">
@@ -33,16 +33,18 @@ export default function Homepage() {
                 <span className="font-semibold text-white text-xs md:text-sm">{t('home.heroBadge')}</span>
               </div>
               <div>
-                <h1 className="text-white font-bold text-2xl sm:text-3xl md:text-5xl lg:text-[72px] leading-[1.05] tracking-tight">
+                <h1 className=" font-bold text-2xl sm:text-3xl md:text-5xl lg:text-[72px] leading-[1.05] tracking-tight"
+                 style={{ textShadow: '0 -2px 10px rgba(201, 150, 245, 0.68)', color: '#ffffff' }}>
                   {t('home.heroTitle1')}
                 </h1>
                 <h1 className="font-bold italic text-2xl sm:text-3xl md:text-5xl lg:text-[72px] leading-[1.05] tracking-tight mt-1"
-                  style={{ textShadow: '0 -2px 10px rgba(228, 197, 255, 0.68)', color: '#ead8ff' }}
+                  style={{ textShadow: '0 -2px 10px rgba(228, 197, 255, 0.68)', color: '#7b00e0' }}
                 >
                   {t('home.heroTitle2')}
                 </h1>
               </div>
-              <p className="text-white text-sm sm:text-base md:text-lg lg:text-xl leading-relaxed max-w-[576px]">
+              <p className=" text-sm sm:text-base md:text-lg lg:text-xl leading-relaxed max-w-[576px]"
+               style={{ textShadow: '0 -2px 10px rgba(71, 19, 105, 0.68)', color: '#ffffff' }}>
                 {t('home.heroDesc')}
               </p>
             </div>
@@ -50,7 +52,7 @@ export default function Homepage() {
             <div className="flex flex-col items-center justify-center gap-5 md:gap-6 max-w-[672px] mx-auto w-full">
               <form
                 onSubmit={(e) => { e.preventDefault(); router.push('/sign-in'); }}
-                className="w-full backdrop-blur-md bg-white/50 border-2 border-[rgba(92,0,169,0.2)] rounded-full p-1.5 sm:p-2.5 flex items-center shadow-2xl"
+                className="w-full backdrop-blur-md bg-white/10 border-2 border-[rgba(92,0,169,0.2)] rounded-full p-1.5 sm:p-2.5 flex items-center shadow-2xl"
               >
                 <div className="pl-2 sm:pl-4 shrink-0">
                   <Image src="/logo.svg" alt="" width={36} height={36} className="md:w-[42px] md:h-[42px]" />
@@ -60,7 +62,7 @@ export default function Homepage() {
                   readOnly
                   onFocus={() => router.push('/sign-in')}
                   placeholder={t('home.aiPlaceholder')}
-                  className="flex-1 px-2 sm:px-4 py-2 sm:py-3 text-sm sm:text-base bg-transparent outline-none text-black placeholder-white/70 min-w-0 cursor-pointer"
+                  className="flex-1 px-2 sm:px-4 py-2 sm:py-3 text-sm sm:text-base bg-transparent outline-none text-black placeholder-gray-500 min-w-0 cursor-pointer"
                 />
                 <button
                   type="submit"
