@@ -303,7 +303,7 @@ export default function Dashboard() {
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F1EEFF" vertical={false} />
                     <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} interval={Math.max(0, Math.floor(visibleChartData.length / 8) - 1)}>
-                      <Label value="" position="insideBottom" offset={-2} style={{ fill: '#1d1d1d', fontSize: 10, fontWeight: 600 }} />
+                      <Label value="Date" position="insideBottom" offset={-2} style={{ fill: '#1d1d1d', fontSize: 10, fontWeight: 600 }} />
                     </XAxis>
                     <YAxis domain={bpDomain} axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} width={38}>
                       <Label value="mmHg" angle={-90} position="insideLeft" offset={4} style={{ fill: '#1d1d1d', fontSize: 10 ,fontWeight: 600}} />
