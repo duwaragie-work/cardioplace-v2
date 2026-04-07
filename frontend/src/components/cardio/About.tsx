@@ -113,12 +113,32 @@ export default function About() {
           </div>
         </section>
 
+        {/* ============ WHERE IT STARTED ============ */}
+        <section className="w-full bg-white py-12 md:py-20">
+          <div className="max-w-[800px] mx-auto px-4 sm:px-6 md:px-8 flex flex-col gap-6 md:gap-8">
+            <div className="flex flex-col gap-3">
+              <span className="text-[#5c00a9] text-xs md:text-sm font-bold tracking-[0.2em] uppercase">{t('about.whereItStartedLabel')}</span>
+              <h2 className="font-bold text-[#191c1d] text-2xl sm:text-3xl md:text-4xl leading-tight">{t('about.whereItStartedHeading')}</h2>
+            </div>
+            <div className="flex flex-col gap-5 text-[#4c4355] text-base md:text-lg leading-relaxed">
+              <p>{t('about.whereItStartedP1')}</p>
+              <p>{t('about.whereItStartedP2')}</p>
+              <p className="italic font-semibold text-[#191c1d]">{t('about.whereItStartedQuestions')}</p>
+              <p>{t('about.whereItStartedP3')}</p>
+              <p>{t('about.whereItStartedP4')}</p>
+              <p>{t('about.whereItStartedP5')}</p>
+              <p className="font-semibold text-[#191c1d]">{t('about.whereItStartedP6')}</p>
+              <p className="italic text-[#5c00a9] text-sm md:text-base">{t('about.whereItStartedAttribution')}</p>
+            </div>
+          </div>
+        </section>
+
         {/* ============ PARTNERSHIP SECTION ============ */}
         <section className="w-full bg-[#f5eafa] py-12 md:py-24">
           <div className="max-w-[1280px] mx-auto px-4 sm:px-6 md:px-8">
             <div className="flex flex-col items-center gap-4 md:gap-6 mb-10 md:mb-16">
-              <div className="bg-white rounded-2xl p-3 shadow-sm border border-[#eedbff]">
-                <Image src="/DCHA-Logo.png" alt="DC Hospital Association" width={120} height={48} className="object-contain" style={{ width: 'auto', height: 'auto' }} />
+              <div className="bg-white rounded-2xl px-4 py-2 sm:px-5 sm:py-3 shadow-md border border-[#eedbff]">
+                <Image src="/DCHA-Logo.png" alt="DC Hospital Association" width={300} height={300} className="w-28 h-20 sm:w-32 sm:h-24 md:w-36 md:h-28 object-contain" />
               </div>
               <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center">{t('about.partnershipTitle')}</h2>
             </div>
@@ -240,7 +260,6 @@ export default function About() {
           <div className="max-w-[1280px] mx-auto px-4 sm:px-6 md:px-8">
             <div className="flex flex-col items-center gap-4 md:gap-6 mb-10 md:mb-20 text-center">
               <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px]">{t('about.teamTitle')}</h2>
-              <p className="text-[#4c4355] text-base sm:text-lg md:text-xl leading-relaxed max-w-[896px]">{t('about.teamSubtitle')}</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 mb-8 md:mb-12">
@@ -252,7 +271,6 @@ export default function About() {
                 <h3 className="text-[#1f1924] text-lg sm:text-xl font-semibold">Gayle Olano Hurt</h3>
                 <p className="text-[#7b00e0] text-xs sm:text-sm mt-1">{t('about.gayleCredentials')}</p>
                 <p className="text-[#4c4355] text-xs sm:text-sm font-medium mt-2">{t('about.gayleRole')}</p>
-                <p className="text-[#5c00a9] text-[10px] sm:text-xs mt-0.5">{t('about.gayleOrg')}</p>
                 <p className="text-[#4c4355] text-xs sm:text-sm leading-relaxed mt-4 sm:mt-5">{t('about.gayleBio')}</p>
               </div>
 
