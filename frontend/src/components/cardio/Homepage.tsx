@@ -23,14 +23,24 @@ export default function Homepage() {
           <div className="absolute inset-0">
             <Image src="/ai-healthcare.png" alt="" fill sizes="100vw" quality={500} unoptimized className="object-cover" priority />
           </div>
-          <div className="absolute inset-0"  />
-          
+          {/* Dark overlay — stronger on mobile so text is readable on light image */}
+          <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/50 to-black/20 md:from-black/60 md:via-black/30 md:to-transparent" />
 
-          <div className="relative z-10 max-w-[1280px] w-full grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 py-12 md:py-20 px-2 sm:px-4 md:px-8">
+          {/* Badge — absolute top-left on mobile/tablet */}
+          <div className="lg:hidden absolute top-9 left-4 sm:top-6 sm:left-6 z-20">
+            <div className="bg-[#7b00e0] inline-flex items-center gap-2 px-3 py-1.5 rounded-full">
+              <Activity className="w-3.5 h-3.5 text-white" />
+              <span className="font-semibold text-white text-xs sm:text-sm">{t('home.heroBadge')}</span>
+            </div>
+          </div>
+
+          <div className="relative z-10 max-w-[1280px] w-full py-12 md:py-20 px-2 sm:px-4 md:px-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16">
             <div className="flex flex-col gap-5 md:gap-6 justify-center">
-              <div className="bg-[#7b00e0] inline-flex items-center gap-2 px-3 md:px-4 py-1.5 md:py-2 rounded-full w-fit">
+              {/* Badge — desktop only, inside left column */}
+              <div className="hidden lg:inline-flex bg-[#7b00e0] items-center gap-2 px-4 py-2 rounded-full w-fit">
                 <Activity className="w-3.5 h-3.5 text-white" />
-                <span className="font-semibold text-white text-xs md:text-sm">{t('home.heroBadge')}</span>
+                <span className="font-semibold text-white text-sm">{t('home.heroBadge')}</span>
               </div>
               <div>
                 <h1 className=" font-bold text-2xl sm:text-3xl md:text-5xl lg:text-[72px] leading-[1.05] tracking-tight"
@@ -38,7 +48,7 @@ export default function Homepage() {
                   {t('home.heroTitle1')}
                 </h1>
                 <h1 className="font-bold italic text-2xl sm:text-3xl md:text-5xl lg:text-[72px] leading-[1.05] tracking-tight mt-1"
-                  style={{ textShadow: '0 -2px 10px rgba(228, 197, 255, 0.68)', color: '#7b00e0' }}
+                  style={{ textShadow: '0 2px 16px rgba(0, 0, 0, 0.3)', color: '#d4a5ff' }}
                 >
                   {t('home.heroTitle2')}
                 </h1>
@@ -62,7 +72,7 @@ export default function Homepage() {
                   readOnly
                   onFocus={() => router.push('/sign-in')}
                   placeholder={t('home.aiPlaceholder')}
-                  className="flex-1 px-2 sm:px-4 py-2 sm:py-3 text-sm sm:text-base bg-transparent outline-none text-black placeholder-gray-500 min-w-0 cursor-pointer"
+                  className="flex-1 px-2 sm:px-4 py-2 sm:py-3 text-sm sm:text-base bg-transparent outline-none text-black placeholder-white min-w-0 cursor-pointer"
                 />
                 <button
                   type="submit"
@@ -80,6 +90,7 @@ export default function Homepage() {
                 </Link>
               </div>
             </div>
+          </div>
           </div>
         </section>
 
