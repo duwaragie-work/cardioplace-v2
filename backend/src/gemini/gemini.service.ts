@@ -109,27 +109,6 @@ export class GeminiService implements OnModuleInit {
   }
 
   /**
-   * Generate embeddings via Gemini text-embedding-004.
-   * Returns 768-dimensional vectors.
-   */
-  async getEmbeddings(input: string | string[]): Promise<{
-    data: Array<{ embedding: number[] }>
-  }> {
-    const inputs = Array.isArray(input) ? input : [input]
-    return this.withRetry('getEmbeddings', async () => {
-      const data: Array<{ embedding: number[] }> = []
-      for (const text of inputs) {
-        const response = await this.client.models.embedContent({
-          model: 'text-embedding-004',
-          contents: text,
-        })
-        data.push({ embedding: response.embeddings?.[0]?.values ?? [] })
-      }
-      return { data }
-    })
-  }
-
-  /**
    * Generate content with function calling support.
    * Returns the raw Gemini response so the caller can inspect functionCall parts.
    */
