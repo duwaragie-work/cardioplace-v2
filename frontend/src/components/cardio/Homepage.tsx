@@ -241,18 +241,18 @@ export default function Homepage() {
             <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center tracking-tight">
               {t('home.designedForEveryone')}
             </h2>
-            <p className="text-[#4c4355] text-lg md:text-xl lg:text-2xl text-center italic font-bold max-w-[672px]">{t('home.forPatientsOpening')}</p>
+            <p className="text-[#4c4355] text-lg md:text-xl lg:text-2xl text-left md:text-center italic font-bold max-w-[672px]">{t('home.forPatientsOpening')}</p>
             <p className="text-[#4c4355] text-sm md:text-base lg:text-lg text-left leading-relaxed max-w-[720px]">
               {t('home.healthLiteracyParagraph')}
             </p>
-            <p className="text-[#5c00a9] text-base md:text-lg lg:text-xl text-center italic font-semibold">
+            <p className="text-[#5c00a9] text-lg md:text-xl font-bold text-left md:text-center italic mt-6 mb-4 md:mt-10 md:mb-6">
               {t('home.builtForSilence')}
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
             {/* For Patients */}
-            <div className="bg-[#f5eafa] rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 md:p-10 shadow-sm">
+            <div className="bg-[#f9fafb] md:bg-[#f9fafb] border border-[#e5e7eb] rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 md:p-10 shadow-sm">
               <div className="flex items-center gap-4 sm:gap-5 mb-6 sm:mb-8">
                 <div className="bg-white border border-[#ececec] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shrink-0 overflow-hidden">
                   <Image src="/patient.png" alt="Patient" width={32} height={32} className="object-cover" />
@@ -273,7 +273,7 @@ export default function Homepage() {
             </div>
 
             {/* For Care Teams */}
-            <div className="bg-[#f5eafa] rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 md:p-10 shadow-sm">
+            <div className="bg-[#f9fafb] border border-[#e5e7eb] rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 md:p-10 shadow-sm">
               <div className="flex items-center gap-4 sm:gap-5 mb-6 sm:mb-8">
                 <div className="bg-white border border-[#ececec] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shrink-0 overflow-hidden">
                   <Image src="/care team.png" alt="Care Team" width={32} height={32} className="object-cover" />
@@ -294,7 +294,7 @@ export default function Homepage() {
             </div>
 
             {/* For Health Systems */}
-            <div className="bg-[#f5eafa] rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 md:p-10 shadow-sm">
+            <div className="bg-[#f9fafb] border border-[#e5e7eb] rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 md:p-10 shadow-sm">
               <div className="flex items-center gap-4 sm:gap-5 mb-6 sm:mb-8">
                 <div className="bg-white border border-[#ececec] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shrink-0">
                   <Building2 className="w-6 h-6 sm:w-7 sm:h-7 text-[#7b00e0]" />
