@@ -56,9 +56,12 @@ export default function LandingFooter() {
               Cardioplace
             </span>
           </div>
-          <p className="text-white/70 text-sm leading-relaxed">
-            {t('landing.copyright')}
-          </p>
+          <div className="flex items-center gap-3">
+            <Image src="/DCHA-Logo.png" alt="DC Hospital Association" width={48} height={48} className="w-10 h-10 object-contain brightness-0 invert opacity-70" />
+            <p className="text-white/70 text-sm leading-relaxed">
+              {t('landing.copyright')}
+            </p>
+          </div>
         </div>
 
         {/* Col 2 - Links */}
@@ -100,7 +103,7 @@ export default function LandingFooter() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder={t('landing.yourEmail')}
                 required
-                className="w-full h-11 px-4 rounded-xl text-sm outline-none bg-white/15 backdrop-blur-sm text-white placeholder-white/50 border border-white/20 focus:border-white/50 transition"
+                className="w-full h-11 px-4 rounded-xl text-sm outline-none bg-white/15 backdrop-blur-sm text-white placeholder-white/60 border border-white/40 focus:border-white/60 transition"
               />
               <textarea
                 value={message}
@@ -108,12 +111,12 @@ export default function LandingFooter() {
                 placeholder={t('landing.yourMessage')}
                 required
                 rows={3}
-                className="w-full px-4 py-2.5 rounded-xl text-sm outline-none bg-white/15 backdrop-blur-sm text-white placeholder-white/50 border border-white/20 focus:border-white/50 transition resize-none"
+                className="w-full px-4 py-2.5 rounded-xl text-sm outline-none bg-white/15 backdrop-blur-sm text-white placeholder-white/60 border border-white/40 focus:border-white/60 transition resize-none"
               />
               <button
                 type="submit"
                 disabled={sending}
-                className="w-full h-11 rounded-xl text-sm font-bold flex items-center justify-center gap-2 bg-white text-[#5c00a9] hover:bg-white/90 transition active:scale-[0.98] disabled:opacity-60"
+                className="w-full h-11 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 bg-white text-[#5B21B6] hover:bg-white/90 transition active:scale-[0.98] disabled:opacity-60"
               >
                 <Send className={`w-3.5 h-3.5 ${sending ? 'animate-pulse' : ''}`} />
                 {sending ? t('landing.sending') : t('landing.sendMessage')}

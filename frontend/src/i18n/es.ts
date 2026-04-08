@@ -586,7 +586,7 @@ const es: Record<TranslationKey, string> = {
   'home.system4': 'Sostenible a través del reembolso de CMS por Monitoreo Remoto de Pacientes.',
   'home.ctaTitle': 'Así Se Ve Cerrar el Ciclo.',
   'home.ctaDesc': "Desarrollado con la DC Hospital Association. Implementado en las comunidades de mayor riesgo de Washington DC. Diseñado para alcanzar a los pacientes que la tecnología de salud tradicional deja atrás.",
-  'home.ctaButton': 'Conoce Más Sobre el Programa',
+  'home.ctaButton': 'Sobre el Programa',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'NUESTRA HISTORIA',

@@ -586,7 +586,7 @@ const am: Record<TranslationKey, string> = {
   'home.system4': 'በ CMS Remote Patient Monitoring ክፍያ ተመላሽ ዘላቂ።',
   'home.ctaTitle': 'ምልልሱን መዝጋት ይህን ይመስላል።',
   'home.ctaDesc': "ከ DC Hospital Association ጋር የተገነባ። በዋሽንግተን ዲሲ ከፍተኛ-አደጋ ማህበረሰቦች ውስጥ ተሰማርቷል። ባህላዊ የጤና ቴክኖሎጂ ከኋላ የሚያስቀራቸውን ታካሚዎች ለመድረስ የተዘጋጀ።",
-  'home.ctaButton': 'ስለ ፕሮግራሙ የበለጠ ይወቁ',
+  'home.ctaButton': 'ስለ ፕሮግራሙ',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'ታሪካችን',

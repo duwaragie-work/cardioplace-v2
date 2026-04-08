@@ -317,11 +317,11 @@ export default function Homepage() {
         </section>
 
         {/* ============ CTA ============ */}
-        <section className="w-full px-4 sm:px-6 md:px-8 pb-12 md:pb-20 flex justify-center">
-          <div className="max-w-[1024px] w-full rounded-[32px] sm:rounded-[48px] p-8 sm:p-10 md:p-16 flex flex-col items-center gap-6 md:gap-8 overflow-hidden" style={{ backgroundImage: 'linear-gradient(153deg, #5c00a9 0%, #a04cee 46%, #c79afd 93%)' }}>
-            <h2 className="text-white text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center font-normal">{t('home.ctaTitle')}</h2>
-            <p className="text-[#eedbff] text-sm sm:text-base md:text-xl text-left leading-relaxed max-w-[672px]">{t('home.ctaDesc')}</p>
-            <Link href="/about" className="bg-white text-[#5c00a9] font-bold text-base md:text-lg px-8 md:px-12 py-3 md:py-3.5 rounded-full hover:bg-[#f5eafa] transition-colors mt-2">
+        <section className="w-full pb-0">
+          <div className="w-full p-8 sm:p-10 md:p-16 flex flex-col items-center gap-6 md:gap-8" style={{ backgroundImage: 'linear-gradient(153deg, #5c00a9 0%, #a04cee 46%, #c79afd 93%)' }}>
+            <h2 className="text-white text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center font-normal max-w-[1024px]">{t('home.ctaTitle')}</h2>
+            <p className="text-[#eedbff] text-sm sm:text-base md:text-xl text-left md:text-center leading-relaxed max-w-[672px]">{t('home.ctaDesc')}</p>
+            <Link href="/about" className="bg-white text-[#5B21B6] font-semibold text-base md:text-lg px-8 md:px-12 py-3 md:py-3.5 rounded-full hover:bg-white/90 transition-colors mt-2">
               {t('home.ctaButton')}
             </Link>
           </div>

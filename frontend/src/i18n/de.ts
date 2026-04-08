@@ -586,7 +586,7 @@ const de: Record<TranslationKey, string> = {
   'home.system4': 'Nachhaltig durch CMS-Erstattung für Fernüberwachung von Patienten.',
   'home.ctaTitle': 'So sieht es aus, die Versorgungslücke zu schließen.',
   'home.ctaDesc': 'Entwickelt mit der DC Hospital Association. Eingesetzt in den am stärksten gefährdeten Gemeinschaften Washingtons. Konzipiert, um die Patienten zu erreichen, die herkömmliche Gesundheitstechnologie zurücklässt.',
-  'home.ctaButton': 'Mehr über das Programm erfahren',
+  'home.ctaButton': 'Über das Programm',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'UNSERE GESCHICHTE',

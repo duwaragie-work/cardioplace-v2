@@ -586,7 +586,7 @@ const fr: Record<TranslationKey, string> = {
   'home.system4': 'Durable grâce au remboursement CMS du Suivi à Distance des Patients.',
   'home.ctaTitle': 'Voici à Quoi Ressemble la Boucle Fermée.',
   'home.ctaDesc': "Développé avec la DC Hospital Association. Déployé dans les communautés les plus à risque de Washington DC. Conçu pour atteindre les patients que la technologie de santé traditionnelle laisse de côté.",
-  'home.ctaButton': 'En Savoir Plus sur le Programme',
+  'home.ctaButton': 'À Propos du Programme',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'NOTRE HISTOIRE',

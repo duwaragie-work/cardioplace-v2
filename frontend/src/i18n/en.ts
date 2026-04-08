@@ -584,7 +584,7 @@ const en = {
   'home.system4': 'Sustainable through CMS Remote Patient Monitoring reimbursement.',
   'home.ctaTitle': 'This Is What Closing the Loop Looks Like.',
   'home.ctaDesc': "Developed with the DC Hospital Association. Deployed in Washington DC's highest-risk communities. Designed to reach the patients traditional health technology leaves behind.",
-  'home.ctaButton': 'Learn More About the Program',
+  'home.ctaButton': 'About the Program',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'OUR STORY',
