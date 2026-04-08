@@ -57,7 +57,7 @@ jobs:
           npx prisma migrate deploy
 
       - name: Run text chat E2E + LLM-as-Judge
-        run: cd backend && npm run test:e2e -- --testPathPattern=llm-judge/text --forceExit
+        run: cd backend && npm run test:e2e -- --testPathPatterns=llm-judge/text --forceExit
         timeout-minutes: 15
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -111,5 +111,5 @@ jobs:
           echo "ADK service failed to start" && exit 1
 
       - name: Run voice chat E2E + LLM-as-Judge
-        run: cd backend && npm run test:e2e -- --testPathPattern=llm-judge/voice --forceExit
+        run: cd backend && npm run test:e2e -- --testPathPatterns=llm-judge/voice --forceExit
         timeout-minutes: 15
