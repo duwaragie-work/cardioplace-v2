@@ -168,6 +168,7 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
         mode = init.mode or "chat"
         patient_context = init.patient_context or "No context available."
         auth_token = init.auth_token
+        language = init.language or "en-US"
 
         logger.info(
             "New voice session [user=%s mode=%s]", user_id, mode
@@ -203,14 +204,16 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
         # ── Step 4a: Task — run ADK agent, push events to out_queue ───────
         async def run_agent_task() -> None:
             try:
-                # gemini-3.1-flash-live-preview is a native-audio model.
-                # Transcription configs with language_codes=null cause 1007,
-                # so we disable them. History is captured via tool call args
-                # and text sent through the input queue.
+                # Enable transcription so voice conversations are persisted.
+                # Explicit language_codes avoids the 1007 error that occurs
+                # when language_codes=null with gemini-3.1-flash-live-preview.
+                _tx_config = genai_types.AudioTranscriptionConfig(
+                    language_codes=[language],
+                )
                 run_config = RunConfig(
                     response_modalities=["AUDIO"],
-                    output_audio_transcription=None,
-                    input_audio_transcription=None,
+                    output_audio_transcription=_tx_config,
+                    input_audio_transcription=_tx_config,
                 )
                 async for event in runner.run_live(
                     user_id=user_id,
