@@ -869,7 +869,7 @@ export class ProviderService {
 
       await this.emailService.sendEmail(
         patient.email,
-        'Follow-up Call Scheduled — Healplace Cardio',
+        'Follow-up Call Scheduled — Cardioplace',
         scheduleCallEmailHtml(
           patient.name ?? 'Patient',
           body.callType,

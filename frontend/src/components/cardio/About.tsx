@@ -302,7 +302,7 @@ export default function About() {
             <div className="bg-white rounded-[24px] sm:rounded-[32px] p-6 sm:p-8 md:p-10 border border-[#eedbff] shadow-sm">
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6 mb-4 sm:mb-6">
                 <div className="bg-[#eedbff] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shrink-0 border-2 border-[#7b00e0]/20">
-                  <Image src="/logo.svg" alt="Healplace" width={32} height={32} className="w-7 h-7 sm:w-8 sm:h-8" />
+                  <Image src="/logo.svg" alt="Cardioplace" width={32} height={32} className="w-7 h-7 sm:w-8 sm:h-8" />
                 </div>
                 <div>
                   <h3 className="text-[#1f1924] text-lg sm:text-xl font-semibold">{t('about.engTeamTitle')}</h3>

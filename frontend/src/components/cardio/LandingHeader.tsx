@@ -29,9 +29,9 @@ export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProp
     <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl bg-white/80 shadow-[0_1px_2px_rgba(76,29,149,0.05)]">
       <div className="max-w-[1280px] mx-auto flex items-center justify-between px-6 md:px-8 py-4">
         <Link href="/" className="flex items-center gap-1">
-          <Image src="/logo.svg" alt="Healplace Cardio" width={42} height={42} />
+          <Image src="/logo.svg" alt="Cardioplace" width={42} height={42} />
           <span className="font-bold text-[#6b00d1] text-xl md:text-2xl tracking-tight">
-            Healplace Cardio
+            Cardioplace
           </span>
         </Link>
 

@@ -128,7 +128,7 @@ describe('AuthService', () => {
                 GOOGLE_CLIENT_ID: 'mock-google-client-id',
                 APPLE_CLIENT_ID: 'mock-apple-client-id',
                 RESEND_API_KEY: 'test-resend-key',
-                EMAIL_FROM: 'Healplace <onboarding@resend.dev>',
+                EMAIL_FROM: 'Cardioplace <onboarding@resend.dev>',
               }
               return config[key] ?? defaultValue
             }),

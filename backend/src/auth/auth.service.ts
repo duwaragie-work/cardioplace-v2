@@ -17,6 +17,7 @@ import {
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { BcryptService } from './bcrypt.service.js'
+import { otpEmailHtml } from '../email/email-templates.js'
 import type { ProfileDto } from './dto/profile.dto.js'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -1123,21 +1124,8 @@ export class AuthService {
   private async sendOtpEmail(email: string, otp: string): Promise<void> {
     await this.emailService.sendEmail(
       email,
-      'Your Healplace verification code',
-      `
-        <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-          <h2 style="color: #1a1a2e;">Your verification code</h2>
-          <p style="font-size: 36px; font-weight: bold; letter-spacing: 10px;
-                     color: #4f46e5; background: #f5f3ff; padding: 16px;
-                     border-radius: 8px; text-align: center;">
-            ${otp}
-          </p>
-          <p>This code expires in <strong>10 minutes</strong>.</p>
-          <p style="color: #6b7280; font-size: 13px;">
-            If you didn't request this, you can safely ignore this email.
-          </p>
-        </div>
-      `,
+      'Your Cardioplace verification code',
+      otpEmailHtml(otp),
     )
   }
 }

@@ -12,7 +12,7 @@ export class EmailService {
     this.resend = new Resend(this.config.get<string>('RESEND_API_KEY'))
     this.from = this.config.get<string>(
       'EMAIL_FROM',
-      'Healplace <onboarding@resend.dev>',
+      'Cardioplace <onboarding@resend.dev>',
     )
   }
 

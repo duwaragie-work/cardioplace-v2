@@ -1,5 +1,5 @@
 """
-gRPC servicer for the Healplace Cardio voice agent.
+gRPC servicer for the Cardioplace voice agent.
 
 Each call to StreamSession:
   1. Reads the first ClientMessage (must be SessionInit).

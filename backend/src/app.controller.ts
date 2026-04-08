@@ -25,7 +25,7 @@ export class AppController {
     const { email, message } = body;
     await this.emailService.sendEmail(
       'info@healplace.com',
-      `Healplace Cardio — New message from ${email}`,
+      `Cardioplace — New message from ${email}`,
       contactFormEmailHtml(email, message),
     );
     return { statusCode: 200, message: 'Message sent' };

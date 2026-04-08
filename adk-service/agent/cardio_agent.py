@@ -1,5 +1,5 @@
 """
-Healplace Cardio ADK agent factory.
+Cardioplace ADK agent factory.
 
 Creates a per-session Agent with the correct system prompt, language,
 and tool set.

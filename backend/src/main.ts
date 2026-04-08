@@ -5,7 +5,7 @@ import { IoAdapter } from '@nestjs/platform-socket.io'
 import { AppModule } from './app.module.js'
 
 async function bootstrap() {
-  console.log('🚀 Starting Healplace Cardio backend...')
+  console.log('🚀 Starting Cardioplace backend...')
   console.log(`   PORT=${process.env.PORT}, DATABASE_URL=${process.env.DATABASE_URL ? 'set' : 'NOT SET'}`)
 
   const app = await NestFactory.create(AppModule)

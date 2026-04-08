@@ -77,10 +77,10 @@ export class JournalNotificationService {
 
         const isLow = payload.reason?.includes('without symptoms')
         const emailSubject = isLow
-          ? 'Healplace: Blood Pressure Trend Update'
+          ? 'Cardioplace: Blood Pressure Trend Update'
           : payload.escalationLevel === 'LEVEL_2'
-            ? 'Healplace Alert: Blood Pressure Reading Requires Attention'
-            : 'Healplace: Blood Pressure — Please Take Your Medication'
+            ? 'Cardioplace Alert: Blood Pressure Reading Requires Attention'
+            : 'Cardioplace: Blood Pressure — Please Take Your Medication'
         await this.emailService.sendEmail(
           user.email,
           emailSubject,

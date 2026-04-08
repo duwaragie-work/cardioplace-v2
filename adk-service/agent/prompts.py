@@ -1,4 +1,4 @@
-"""System prompt for the Healplace Cardio unified voice agent."""
+"""System prompt for the Cardioplace unified voice agent."""
 
 _LANGUAGE_RULE = (
     "LANGUAGE: Detect the language the patient speaks from their very first words "
@@ -20,7 +20,7 @@ def build_prompt(mode: str, patient_context: str) -> str:
     _today = _now.strftime("%Y-%m-%d")
     _time = _now.strftime("%H:%M")
 
-    return f"""You are a warm, knowledgeable cardiovascular health assistant for Healplace Cardio.
+    return f"""You are a warm, knowledgeable cardiovascular health assistant for Cardioplace.
 
 TODAY'S DATE: {_today}
 CURRENT TIME: {_time}

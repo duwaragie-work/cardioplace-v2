@@ -102,7 +102,7 @@ export default function Navbar() {
         <Link href="/" className="flex items-center gap-1.5 shrink-0">
           <Image
             src="/logo.svg"
-            alt="Healplace logo"
+            alt="Cardioplace logo"
             width={32}
             height={32}
             className="w-8 h-8 brightness-0 invert"
@@ -110,7 +110,7 @@ export default function Navbar() {
           <span
             className="font-bold text-[14px] sm:text-base text-white"
           >
-            Healplace Cardio
+            Cardioplace
           </span>
         </Link>
 

@@ -43,9 +43,9 @@ export default function LandingFooter() {
         {/* Col 1 - Brand */}
         <div className="flex flex-col gap-6">
           <div className="flex items-center gap-1">
-            <Image src="/logo2.png" alt="Healplace Cardio" width={42} height={42} />
+            <Image src="/logo2.png" alt="Cardioplace" width={42} height={42} />
             <span className="font-bold text-white text-2xl tracking-tight">
-              Healplace Cardio
+              Cardioplace
             </span>
           </div>
           <p className="text-white/70 text-sm leading-relaxed">

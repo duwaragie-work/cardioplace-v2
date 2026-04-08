@@ -1,5 +1,5 @@
 """
-Tool functions for the Healplace Cardio ADK agent.
+Tool functions for the Cardioplace ADK agent.
 
 These functions are called by the Gemini model via ADK's function-calling mechanism.
 Each tool closure captures the auth_token and loop/queue needed to notify the gRPC

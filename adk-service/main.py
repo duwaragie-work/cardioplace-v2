@@ -1,5 +1,5 @@
 """
-Healplace Cardio — ADK Voice Service
+Cardioplace — ADK Voice Service
 Entry point: starts the gRPC server and waits for connections.
 
 Local dev:
