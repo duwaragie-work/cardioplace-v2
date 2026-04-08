@@ -97,6 +97,18 @@ export default function Homepage() {
                   <Send className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                 </button>
               </form>
+              {/* Prompt chips */}
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {(['home.chip1', 'home.chip2', 'home.chip3'] as const).map((key) => (
+                  <button
+                    key={key}
+                    onClick={handleChatClick}
+                    className="backdrop-blur-md bg-white/20 border border-white/30 text-white text-xs sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full hover:bg-white/30 transition-colors cursor-pointer"
+                  >
+                    {t(key)}
+                  </button>
+                ))}
+              </div>
               <div className="flex flex-wrap items-center justify-center gap-3 md:gap-6">
                 <Link href="/sign-in" className="bg-[#7b00e0] text-white font-bold text-sm sm:text-base md:text-lg px-6 sm:px-8 md:px-10 py-3 md:py-3.5 rounded-full hover:bg-[#6600bc] transition-colors">
                   {t('home.startCheckin')}
@@ -122,7 +134,7 @@ export default function Homepage() {
                 className="w-28 h-20 sm:w-32 sm:h-24 md:w-36 md:h-28 object-contain"
               />
             </div>
-            <p className="text-[#4c4355] text-sm sm:text-base md:text-lg leading-relaxed text-center">
+            <p className="text-[#4c4355] text-sm sm:text-base md:text-lg leading-relaxed text-left">
               {t('home.partnershipBanner')}
             </p>
           </div>
@@ -175,7 +187,7 @@ export default function Homepage() {
             <div className="bg-[#f5eafa] rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 flex flex-col min-h-[320px] sm:min-h-[480px] transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:bg-[#efe5f4] active:scale-[0.98]">
               <div>
                 <div className="bg-[#eedbff] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mb-6 sm:mb-8">
-                  <AlertTriangle className="w-6 h-6 sm:w-7 sm:h-7 text-[#7b00e0]" />
+                  <AlertTriangle className="w-6 h-6 sm:w-7 sm:h-7 text-[#D97706]" />
                 </div>
                 <h3 className="text-[#1f1924] text-xl sm:text-xl font-bold leading-snug mb-3 sm:mb-4">{t('home.escalation')}</h3>
                 <p className="text-[#4c4355] text-sm sm:text-base leading-[1.8]">{t('home.escalationDesc')}</p>
@@ -259,7 +271,7 @@ export default function Homepage() {
               {t('home.designedForEveryone')}
             </h2>
             <p className="text-[#4c4355] text-lg md:text-xl lg:text-2xl text-center italic font-bold max-w-[672px]">{t('home.forPatientsOpening')}</p>
-            <p className="text-[#4c4355] text-sm md:text-base lg:text-lg text-center leading-relaxed max-w-[720px]">
+            <p className="text-[#4c4355] text-sm md:text-base lg:text-lg text-left leading-relaxed max-w-[720px]">
               {t('home.healthLiteracyParagraph')}
             </p>
             <p className="text-[#5c00a9] text-base md:text-lg lg:text-xl text-center italic font-semibold">
@@ -337,7 +349,7 @@ export default function Homepage() {
         <section className="w-full px-4 sm:px-6 md:px-8 pb-12 md:pb-20 flex justify-center">
           <div className="max-w-[1024px] w-full rounded-[32px] sm:rounded-[48px] p-8 sm:p-10 md:p-16 flex flex-col items-center gap-6 md:gap-8 overflow-hidden" style={{ backgroundImage: 'linear-gradient(153deg, #5c00a9 0%, #a04cee 46%, #c79afd 93%)' }}>
             <h2 className="text-white text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center font-normal">{t('home.ctaTitle')}</h2>
-            <p className="text-[#eedbff] text-sm sm:text-base md:text-xl text-center leading-relaxed max-w-[672px]">{t('home.ctaDesc')}</p>
+            <p className="text-[#eedbff] text-sm sm:text-base md:text-xl text-left leading-relaxed max-w-[672px]">{t('home.ctaDesc')}</p>
             <Link href="/about" className="bg-white text-[#5c00a9] font-bold text-base md:text-lg px-8 md:px-12 py-3 md:py-3.5 rounded-full hover:bg-[#f5eafa] transition-colors mt-2">
               {t('home.ctaButton')}
             </Link>
