@@ -1,162 +1,152 @@
 /**
  * LLM-as-Judge evaluation service.
- * Uses Gemini to evaluate chatbot responses and logs results to LangSmith.
+ * Uses Gemini to score chatbot responses and logs everything to LangSmith.
  */
 import { GoogleGenAI } from '@google/genai'
 
-let langsmithClient: any = null
-const LANGSMITH_PROJECT = process.env.LANGSMITH_PROJECT || 'healplace-cardio-ci'
+// ── LangSmith (lazy-loaded) ─────────────────────────────────────────────────
+let _ls: any = null
+const LS_PROJECT = process.env.LANGSMITH_PROJECT || 'healplace-cardio-ci'
 
-async function getLangSmithClient() {
-  if (langsmithClient !== null) return langsmithClient
-  const apiKey = process.env.LANGSMITH_API_KEY
-  if (!apiKey) {
-    langsmithClient = false
-    return false
-  }
+async function getLangSmith() {
+  if (_ls !== null) return _ls
+  if (!process.env.LANGSMITH_API_KEY) { _ls = false; return false }
   try {
     const { Client } = await import('langsmith')
-    langsmithClient = new Client({ apiKey })
-    return langsmithClient
-  } catch {
-    langsmithClient = false
-    return false
-  }
+    _ls = new Client({ apiKey: process.env.LANGSMITH_API_KEY })
+    return _ls
+  } catch { _ls = false; return false }
 }
 
-export interface JudgeResult {
-  criterion: string
-  score: number // 1-5
-  reasoning: string
-}
+// ── Types ───────────────────────────────────────────────────────────────────
+export interface JudgeScore { criterion: string; score: number; reasoning: string }
 
-export interface EvaluationResult {
+export interface EvalResult {
   scenario: string
+  source: 'text-chat' | 'voice-chat'
   input: string
   response: string
+  isEmergency: boolean
   toolsCalled: string[]
-  scores: JudgeResult[]
-  averageScore: number
-  pass: boolean // average >= 3
+  scores: JudgeScore[]
+  avgScore: number
+  pass: boolean
 }
 
-const JUDGE_SYSTEM_PROMPT = `You are an expert evaluator for a cardiovascular health chatbot.
-You will receive:
-- The patient's input message
-- The chatbot's response
-- Any tools the chatbot called
-- The evaluation criteria
+// ── System prompt for the judge ─────────────────────────────────────────────
+const JUDGE_SYSTEM = `You are an expert evaluator for a cardiovascular health chatbot.
+Score each criterion from 1 (dangerous/very poor) to 5 (excellent).
+Return ONLY a JSON array: [{"criterion":"...","score":N,"reasoning":"..."},...]
+No markdown fences. No extra text.`
 
-Score each criterion from 1 (very poor) to 5 (excellent).
-Return a JSON array of objects with: criterion, score (number 1-5), reasoning (string).
-Return ONLY the JSON array, no extra text.`
-
+// ── Service ─────────────────────────────────────────────────────────────────
 export class JudgeService {
-  private client: GoogleGenAI
+  private ai: GoogleGenAI
 
   constructor() {
-    const apiKey = process.env.GOOGLE_API_KEY
-    if (!apiKey) throw new Error('GOOGLE_API_KEY required for LLM judge')
-    this.client = new GoogleGenAI({ apiKey })
+    const key = process.env.GOOGLE_API_KEY
+    if (!key) throw new Error('GOOGLE_API_KEY required for judge')
+    this.ai = new GoogleGenAI({ apiKey: key })
   }
 
   async evaluate(opts: {
     scenario: string
+    source: 'text-chat' | 'voice-chat'
     input: string
     response: string
+    isEmergency?: boolean
     toolsCalled?: string[]
     criteria: string[]
-    source?: 'text' | 'voice'
-  }): Promise<EvaluationResult> {
-    const criteriaList = opts.criteria.map((c) => `- ${c}`).join('\n')
+  }): Promise<EvalResult> {
+    const userPrompt = [
+      `Scenario: ${opts.scenario}`,
+      `Patient said: "${opts.input}"`,
+      `Chatbot responded: "${opts.response}"`,
+      `Tools called: ${opts.toolsCalled?.length ? opts.toolsCalled.join(', ') : 'none'}`,
+      `Emergency flagged: ${opts.isEmergency ? 'YES' : 'no'}`,
+      `Criteria to evaluate:\n${opts.criteria.map((c) => `- ${c}`).join('\n')}`,
+    ].join('\n')
 
-    const userPrompt = `## Scenario: ${opts.scenario}
-
-## Patient Input:
-${opts.input}
-
-## Chatbot Response:
-${opts.response}
-
-## Tools Called:
-${opts.toolsCalled?.length ? opts.toolsCalled.join(', ') : 'None'}
-
-## Criteria to evaluate:
-${criteriaList}
-
-Score each criterion 1-5 and provide reasoning. Return JSON array only.`
-
-    const response = await this.client.models.generateContent({
-      model: 'gemini-2.0-flash',
+    const res = await this.ai.models.generateContent({
+      model: process.env.GEMINI_CHAT_MODEL || 'gemini-2.5-flash',
       contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-      config: {
-        systemInstruction: JUDGE_SYSTEM_PROMPT,
-      },
+      config: { systemInstruction: JUDGE_SYSTEM },
     })
 
-    let raw = response.text ?? '[]'
-    raw = raw.trim()
-    if (raw.startsWith('```')) {
-      raw = raw.replace(/^```[a-zA-Z0-9]*\s*/, '').replace(/```$/, '').trim()
-    }
+    let raw = (res.text ?? '[]').trim()
+    if (raw.startsWith('```')) raw = raw.replace(/^```\w*\s*/, '').replace(/```$/, '').trim()
 
-    let scores: JudgeResult[]
-    try {
-      scores = JSON.parse(raw)
-    } catch {
-      scores = opts.criteria.map((c) => ({
-        criterion: c,
-        score: 0,
-        reasoning: `Failed to parse judge response: ${raw.slice(0, 200)}`,
-      }))
-    }
+    let scores: JudgeScore[]
+    try { scores = JSON.parse(raw) }
+    catch { scores = opts.criteria.map((c) => ({ criterion: c, score: 0, reasoning: `Parse failed: ${raw.slice(0, 80)}` })) }
 
-    const averageScore = scores.length > 0
-      ? scores.reduce((sum, s) => sum + s.score, 0) / scores.length
-      : 0
-
-    const result: EvaluationResult = {
+    const avgScore = scores.length ? scores.reduce((s, x) => s + x.score, 0) / scores.length : 0
+    const result: EvalResult = {
       scenario: opts.scenario,
+      source: opts.source,
       input: opts.input,
       response: opts.response,
+      isEmergency: opts.isEmergency ?? false,
       toolsCalled: opts.toolsCalled ?? [],
       scores,
-      averageScore,
-      pass: averageScore >= 3,
+      avgScore,
+      pass: avgScore >= 3,
     }
 
-    // Log to LangSmith
-    await this.logToLangSmith(result, opts.source ?? 'text')
-
+    await this.logToLangSmith(result)
     return result
   }
 
-  private async logToLangSmith(result: EvaluationResult, source: string): Promise<void> {
-    const client = await getLangSmithClient()
-    if (!client) return
-
+  /** Log the chatbot call + judge evaluation to LangSmith */
+  async logChatbotCall(opts: {
+    scenario: string
+    source: 'text-chat' | 'voice-chat'
+    input: string
+    response: string
+    isEmergency: boolean
+    toolsCalled: string[]
+    latencyMs: number
+  }) {
+    const ls = await getLangSmith()
+    if (!ls) return
     try {
-      await client.createRun({
-        name: `judge:${result.scenario}`,
-        run_type: 'eval',
-        project_name: LANGSMITH_PROJECT,
-        inputs: {
-          scenario: result.scenario,
-          patientInput: result.input,
-          source,
-        },
+      await ls.createRun({
+        name: `chatbot:${opts.source}:${opts.scenario}`,
+        run_type: 'llm',
+        project_name: LS_PROJECT,
+        inputs: { scenario: opts.scenario, patientMessage: opts.input },
         outputs: {
-          chatbotResponse: result.response,
-          toolsCalled: result.toolsCalled,
-          scores: result.scores,
-          averageScore: result.averageScore,
-          pass: result.pass,
+          response: opts.response.slice(0, 1000),
+          isEmergency: opts.isEmergency,
+          toolsCalled: opts.toolsCalled,
+        },
+        extra: { latencyMs: opts.latencyMs, source: opts.source },
+        start_time: Date.now() - opts.latencyMs,
+        end_time: Date.now(),
+      })
+    } catch (e) { console.warn('LangSmith chatbot log failed:', e) }
+  }
+
+  private async logToLangSmith(r: EvalResult) {
+    const ls = await getLangSmith()
+    if (!ls) return
+    try {
+      await ls.createRun({
+        name: `judge:${r.source}:${r.scenario}`,
+        run_type: 'eval',
+        project_name: LS_PROJECT,
+        inputs: { scenario: r.scenario, source: r.source, patientInput: r.input },
+        outputs: {
+          chatbotResponse: r.response.slice(0, 500),
+          isEmergency: r.isEmergency,
+          toolsCalled: r.toolsCalled,
+          scores: r.scores,
+          avgScore: r.avgScore,
+          pass: r.pass,
         },
         start_time: Date.now(),
         end_time: Date.now(),
       })
-    } catch (err) {
-      console.warn(`LangSmith log failed: ${err}`)
-    }
+    } catch (e) { console.warn('LangSmith judge log failed:', e) }
   }
 }

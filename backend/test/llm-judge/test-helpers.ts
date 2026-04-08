@@ -26,14 +26,13 @@ export async function setupTestApp(): Promise<TestContext> {
   const prisma = app.get(PrismaService)
   const jwtService = app.get(JwtService)
 
-  // Create or find a test user
-  const testEmail = 'llm-judge-test@healplace.test'
-  let user = await prisma.user.findFirst({ where: { email: testEmail } })
-
+  // Create or find test user
+  const email = 'llm-judge-test@healplace.test'
+  let user = await prisma.user.findFirst({ where: { email } })
   if (!user) {
     user = await prisma.user.create({
       data: {
-        email: testEmail,
+        email,
         name: 'Test Patient',
         primaryCondition: 'hypertension',
         riskTier: 'moderate',
@@ -43,7 +42,6 @@ export async function setupTestApp(): Promise<TestContext> {
     })
   }
 
-  // Generate JWT
   const jwt = jwtService.sign(
     { sub: user.id, email: user.email },
     { secret: process.env.JWT_ACCESS_SECRET || 'test-secret' },
@@ -52,22 +50,16 @@ export async function setupTestApp(): Promise<TestContext> {
   return { app, jwt, userId: user.id, prisma }
 }
 
-export async function teardownTestApp(ctx: TestContext): Promise<void> {
-  // Clean up test sessions and conversations
+export async function teardownTestApp(ctx: TestContext) {
+  // Clean up test data
   const sessions = await ctx.prisma.session.findMany({
     where: { userId: ctx.userId },
     select: { id: true },
   })
-  const sessionIds = sessions.map((s) => s.id)
-
-  if (sessionIds.length > 0) {
-    await ctx.prisma.conversation.deleteMany({
-      where: { sessionId: { in: sessionIds } },
-    })
-    await ctx.prisma.session.deleteMany({
-      where: { id: { in: sessionIds } },
-    })
+  const ids = sessions.map((s) => s.id)
+  if (ids.length) {
+    await ctx.prisma.conversation.deleteMany({ where: { sessionId: { in: ids } } })
+    await ctx.prisma.session.deleteMany({ where: { id: { in: ids } } })
   }
-
   await ctx.app.close()
 }

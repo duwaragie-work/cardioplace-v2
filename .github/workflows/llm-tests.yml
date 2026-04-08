@@ -1,40 +1,39 @@
-name: LLM Evaluation Tests
+name: Chatbot E2E + LLM-as-Judge
 
 on:
   push:
-    branches: ['phase/*', main]
+    branches: ['phase/*', main, main2]
   pull_request:
-    branches: [main]
+    branches: [main, main2]
 
 env:
   GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+  GEMINI_CHAT_MODEL: gemini-2.5-flash
+  JWT_ACCESS_SECRET: ci-test-jwt-secret
+  JWT_REFRESH_SECRET: ci-test-jwt-refresh-secret
   LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
   LANGSMITH_PROJECT: healplace-cardio-ci
   LANGSMITH_TRACING_V2: 'true'
-  JWT_ACCESS_SECRET: test-jwt-secret-for-ci
-  JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci
 
 jobs:
+  # ─────────────────────────────────────────────────────────────────────────
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Install backend dependencies
-        run: cd backend && npm ci
-      - name: Generate Prisma client
-        run: cd backend && npx prisma generate
-      - name: Run unit tests
-        run: cd backend && npm test -- --passWithNoTests
+        with: { node-version: 20 }
+      - run: cd backend && npm ci
+      - run: cd backend && npx prisma generate
+      - run: cd backend && npm test -- --passWithNoTests
 
-  llm-judge-text:
-    name: LLM-as-Judge (Text Chat — Real)
+  # ─────────────────────────────────────────────────────────────────────────
+  text-chat-eval:
+    name: Text Chat — E2E + LLM Judge
     runs-on: ubuntu-latest
     needs: unit-tests
-    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    if: github.event_name == 'push' || !github.event.pull_request.draft
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -42,34 +41,31 @@ jobs:
           POSTGRES_DB: healplace_test
           POSTGRES_USER: test
           POSTGRES_PASSWORD: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     env:
       DATABASE_URL: postgresql://test:test@localhost:5432/healplace_test
-      GEMINI_CHAT_MODEL: gemini-2.0-flash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Install backend dependencies
-        run: cd backend && npm ci
-      - name: Generate Prisma client and run migrations
-        run: cd backend && npx prisma generate && npx prisma migrate deploy
-      - name: Run LLM-as-Judge text chat tests (real)
-        run: cd backend && npm run test:e2e -- --testPathPattern=llm-judge/text --forceExit
-        timeout-minutes: 10
+        with: { node-version: 20 }
 
-  llm-judge-voice:
-    name: LLM-as-Judge (Voice Chat — Real)
+      - name: Install & setup
+        run: |
+          cd backend && npm ci
+          npx prisma generate
+          npx prisma migrate deploy
+
+      - name: Run text chat E2E + LLM-as-Judge
+        run: cd backend && npm run test:e2e -- --testPathPattern=llm-judge/text --forceExit
+        timeout-minutes: 15
+
+  # ─────────────────────────────────────────────────────────────────────────
+  voice-chat-eval:
+    name: Voice Chat — E2E + LLM Judge
     runs-on: ubuntu-latest
     needs: unit-tests
-    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    if: github.event_name == 'push' || !github.event.pull_request.draft
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -77,92 +73,43 @@ jobs:
           POSTGRES_DB: healplace_test
           POSTGRES_USER: test
           POSTGRES_PASSWORD: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     env:
       DATABASE_URL: postgresql://test:test@localhost:5432/healplace_test
-      GEMINI_CHAT_MODEL: gemini-2.0-flash
       ADK_SERVICE_HOST: localhost
       ADK_SERVICE_PORT: '50051'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: 20
+        with: { node-version: 20 }
       - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+        with: { python-version: '3.12' }
 
-      - name: Install backend dependencies
-        run: cd backend && npm ci
-      - name: Generate Prisma client and run migrations
-        run: cd backend && npx prisma generate && npx prisma migrate deploy
+      - name: Install backend
+        run: |
+          cd backend && npm ci
+          npx prisma generate
+          npx prisma migrate deploy
 
-      - name: Install ADK service dependencies
-        run: cd adk-service && pip install -r requirements.txt
-
-      - name: Start ADK service in background
-        run: cd adk-service && python main.py &
+      - name: Install & start ADK service
+        run: |
+          cd adk-service && pip install -r requirements.txt
+          python main.py &
         env:
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GEMINI_MODEL: gemini-2.0-flash-live-preview
           GRPC_HOST: '0.0.0.0'
           GRPC_PORT: '50051'
           NESTJS_INTERNAL_URL: http://localhost:8080/api
 
-      - name: Wait for ADK service to be ready
+      - name: Wait for ADK service
         run: |
-          echo "Waiting for ADK gRPC service on port 50051..."
           for i in $(seq 1 30); do
-            if python -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('localhost',50051)); s.close()" 2>/dev/null; then
-              echo "ADK service is ready!"
-              exit 0
-            fi
+            python -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('localhost',50051)); s.close()" 2>/dev/null && exit 0
             sleep 2
           done
-          echo "ADK service failed to start"
-          exit 1
+          echo "ADK service failed to start" && exit 1
 
-      - name: Run LLM-as-Judge voice chat tests (real)
+      - name: Run voice chat E2E + LLM-as-Judge
         run: cd backend && npm run test:e2e -- --testPathPattern=llm-judge/voice --forceExit
         timeout-minutes: 15
-
-  e2e-tests:
-    name: E2E Tests
-    runs-on: ubuntu-latest
-    needs: unit-tests
-    if: github.event_name == 'push' || github.event.pull_request.draft == false
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_DB: healplace_test
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      DATABASE_URL: postgresql://test:test@localhost:5432/healplace_test
-      GEMINI_CHAT_MODEL: gemini-2.0-flash
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Install backend dependencies
-        run: cd backend && npm ci
-      - name: Generate Prisma client and run migrations
-        run: cd backend && npx prisma generate && npx prisma migrate deploy
-      - name: Run E2E tests
-        run: cd backend && npm run test:e2e -- --testPathPattern=chat.e2e --forceExit
-        timeout-minutes: 5

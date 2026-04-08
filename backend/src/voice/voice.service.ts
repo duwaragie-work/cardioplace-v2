@@ -442,15 +442,21 @@ export class VoiceService implements OnModuleDestroy {
         ? profileLines.join('. ') + '.'
         : 'Patient profile not available.'
 
-      const readingsSummary =
-        entries.length > 0
-          ? entries
-              .map(
-                (e) =>
-                  `${new Date(e.entryDate).toLocaleDateString()}: ${e.systolicBP ?? '?'}/${e.diastolicBP ?? '?'} mmHg`,
-              )
-              .join('; ')
-          : 'No recent readings'
+      let readingsSummary: string
+      if (entries.length > 0) {
+        const lines = entries.map((e) => {
+          const date = new Date(e.entryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+          const time = e.measurementTime ?? 'unknown time'
+          const bp = (e.systolicBP != null && e.diastolicBP != null) ? `${e.systolicBP}/${e.diastolicBP} mmHg` : 'not recorded'
+          const weight = e.weight != null ? `${e.weight} lbs` : 'no weight'
+          const meds = e.medicationTaken === true ? 'meds taken' : e.medicationTaken === false ? 'meds missed' : 'meds unknown'
+          const symptoms = (e.symptoms as string[] | null)?.length ? (e.symptoms as string[]).join(', ') : 'no symptoms'
+          return `- ${date} at ${time}: BP ${bp}, ${weight}, ${meds}, ${symptoms}`
+        })
+        readingsSummary = 'Recent BP readings (last 7 days):\n' + lines.join('\n')
+      } else {
+        readingsSummary = 'No recent readings'
+      }
 
       const completeEntries = entries.filter((e) => e.systolicBP != null && e.diastolicBP != null)
       const entryCount = completeEntries.length
