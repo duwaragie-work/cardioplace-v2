@@ -213,11 +213,11 @@ export default function Homepage() {
           {/* Silent Literacy Section */}
           <div className="mt-10 md:mt-16 bg-gradient-to-r from-[#efe5f4] to-[#f5eafa] rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 md:p-12 flex flex-col lg:flex-row items-center gap-8 lg:gap-16">
             <div className="flex-1 flex flex-col gap-4 md:gap-6">
-              <div className="bg-[rgba(92,0,169,0.1)] inline-flex items-center gap-2 px-4 py-2 rounded-full w-fit">
+              <div className="bg-[rgba(92,0,169,0.1)] inline-flex items-center gap-2 px-5 py-3 rounded-full w-fit">
                 <svg width="13" height="11" viewBox="0 0 13 11" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <path d="M1 5.5h2l1.5-4L7 9.5l1.5-4H12" stroke="#5c00a9" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
-                <span className="text-[#5c00a9] text-sm font-normal">{t('home.silentLiteracy')}</span>
+                <span className="text-[#5c00a9] text-xs md:text-sm font-semibold tracking-wide">{t('home.silentLiteracy')}</span>
               </div>
               <h3 className="text-[#1f1924] text-xl sm:text-2xl md:text-3xl lg:text-4xl leading-tight">{t('home.soundTitle')}</h3>
               <div className="text-[#4c4355] text-base md:text-lg lg:text-xl leading-relaxed max-w-[672px]">
@@ -227,12 +227,9 @@ export default function Homepage() {
               </div>
             </div>
             <div className="relative shrink-0">
-              <div className="w-40 h-40 sm:w-48 sm:h-48 md:w-64 md:h-64 rounded-full flex items-center justify-center border border-black shadow-[0_0_40px_rgba(130,25,231,0.3)]" style={{ backgroundImage: 'linear-gradient(135deg, #5c00a9 0%, #7b00e0 50%, #c79afd 100%)' }}>
-                <Mic className="w-8 h-8 sm:w-10 sm:h-10 md:w-14 md:h-14 text-white" />
+              <div className="w-20 h-20 sm:w-20 sm:h-20 md:w-48 md:h-48 lg:w-64 lg:h-64 rounded-full flex items-center justify-center border border-black shadow-[0_0_40px_rgba(130,25,231,0.3)]" style={{ backgroundImage: 'linear-gradient(135deg, #5c00a9 0%, #7b00e0 50%, #c79afd 100%)' }}>
+                <Mic className="w-6 h-6 md:w-10 md:h-10 lg:w-14 lg:h-14 text-white" />
                 <div className="absolute inset-[-1px] rounded-full border-4 border-white/20" />
-              </div>
-              <div className="absolute -top-4 -right-4 bg-white w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center shadow-lg">
-                <BsSoundwave className="w-4 h-4 sm:w-5 sm:h-5 text-[#7b00e0]" />
               </div>
             </div>
           </div>
