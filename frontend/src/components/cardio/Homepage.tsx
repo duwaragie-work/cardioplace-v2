@@ -27,82 +27,115 @@ export default function Homepage() {
 
       <main className="flex flex-col items-center pt-[64px] w-full overflow-x-hidden">
         {/* ============ HERO SECTION ============ */}
-        <section className="relative w-full min-h-[calc(100vh-64px)] flex items-center justify-center overflow-hidden px-4 sm:px-6 md:px-8">
+        <section className="relative w-full min-h-[calc(100vh-64px)] flex items-end lg:items-center justify-center overflow-hidden px-4 sm:px-6 md:px-8 pb-6 lg:pb-0">
           <div className="absolute inset-0">
-            <Image src="/ai-healthcare.png" alt="" fill sizes="100vw" quality={500} unoptimized className="object-cover" priority />
+            <Image src="/ai-healthcare.png" alt="" fill sizes="100vw" quality={500} unoptimized className="object-cover object-[center_20%] sm:object-[center_30%] md:object-center" priority />
           </div>
           {/* Dark overlay — stronger on mobile so text is readable on light image */}
           <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/50 to-black/20 md:from-black/60 md:via-black/30 md:to-transparent" />
 
-          <div className="relative z-10 max-w-[1280px] w-full py-12 md:py-20 px-2 sm:px-4 md:px-8">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-16">
-            <div className="flex flex-col gap-4 md:gap-6 justify-center">
-              {/* Badge */}
-              <div className="bg-[#7b00e0] inline-flex items-center gap-2 px-3 py-1.5 lg:px-4 lg:py-2 rounded-full w-fit">
-                <Activity className="w-3.5 h-3.5 text-white" />
-                <span className="font-semibold text-white text-xs sm:text-sm">{t('home.heroBadge')}</span>
-              </div>
-              {/* Title */}
-              <div>
-                <h1 className="font-bold text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-[72px] leading-[1.05] tracking-tight"
-                 style={{ textShadow: '0 2px 10px rgba(0,0,0,0.4)', color: '#ffffff' }}>
-                  {t('home.heroTitle1')}
-                </h1>
-                <h1 className="font-bold italic text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-[72px] leading-[1.05] tracking-tight mt-1"
-                  style={{ textShadow: '0 2px 16px rgba(0, 0, 0, 0.3)', color: '#d4a5ff' }}>
-                  {t('home.heroTitle2')}
-                </h1>
-              </div>
-              <p className="text-sm sm:text-base md:text-lg lg:text-xl leading-relaxed max-w-[576px]"
-               style={{ textShadow: '0 2px 10px rgba(0,0,0,0.4)', color: '#ffffff' }}>
-                {t('home.heroDesc')}
-              </p>
-            </div>
-
-            <div className="flex flex-col items-center justify-center gap-5 md:gap-6 max-w-[672px] mx-auto w-full">
-              <form
-                onSubmit={(e) => { e.preventDefault(); handleChatClick(); }}
-                className="w-full backdrop-blur-md bg-white/10 border-2 border-[rgba(92,0,169,0.2)] rounded-full p-1.5 sm:p-2.5 flex items-center shadow-2xl"
-              >
-                <div className="pl-2 sm:pl-4 shrink-0">
-                  <Image src="/logo.svg" alt="" width={36} height={36} className="md:w-[42px] md:h-[42px]" />
-                </div>
-                <input
-                  type="text"
-                  readOnly
-                  onFocus={handleChatClick}
-                  placeholder={t('home.aiPlaceholder')}
-                  className="flex-1 px-2 sm:px-4 py-2 sm:py-3 text-sm sm:text-base bg-transparent outline-none text-black placeholder-white min-w-0 cursor-text"
-                />
-                <button
-                  type="submit"
-                  className="bg-[#7b00e0] rounded-full w-10 h-10 sm:w-14 sm:h-14 flex items-center justify-center shrink-0 shadow-lg hover:bg-[#6600bc] transition-colors"
-                >
-                  <Send className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-                </button>
-              </form>
-              {/* Prompt chips */}
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                {(['home.chip1', 'home.chip2', 'home.chip3'] as const).map((key) => (
-                  <button
-                    key={key}
-                    onClick={handleChatClick}
-                    className="backdrop-blur-md bg-white/20 border border-white/30 text-white text-xs sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full hover:bg-white/30 transition-colors cursor-pointer"
-                  >
-                    {t(key)}
-                  </button>
-                ))}
-              </div>
-              <div className="flex flex-wrap items-center justify-center gap-3 md:gap-6">
-                <Link href="/sign-in" className="bg-[#7b00e0] text-white font-bold text-sm sm:text-base md:text-lg px-6 sm:px-8 md:px-10 py-3 md:py-3.5 rounded-full hover:bg-[#6600bc] transition-colors">
-                  {t('home.startCheckin')}
-                </Link>
-                <Link href="#features" className="backdrop-blur-sm bg-white/80 border border-[#cfc2d8] text-gray-600 font-semibold text-sm sm:text-base md:text-lg px-6 sm:px-8 md:px-10 py-3 md:py-3.5 rounded-full hover:bg-white transition-colors">
-                  {t('home.howItWorks')}
-                </Link>
-              </div>
+          {/* Badge + Title — pinned top-left on mobile/tablet */}
+          {/* Badge only — pinned top-left on mobile/tablet */}
+          <div className="lg:hidden absolute top-10 left-4 sm:top-6 sm:left-6 z-20">
+            <div className="bg-[#7b00e0] inline-flex items-center gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full">
+              <Activity className="w-3 h-3 text-white" />
+              <span className="font-semibold text-white text-[9px] sm:text-[10px] md:text-xs">{t('home.heroBadge')}</span>
             </div>
           </div>
+
+          <div className="relative z-10 max-w-[1280px] w-full py-12 md:py-20 px-2 sm:px-4 md:px-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-16">
+              <div className="flex flex-col gap-4 md:gap-6 justify-center">
+                {/* Badge — desktop only */}
+                <div className="hidden lg:inline-flex bg-[#7b00e0] items-center gap-2 px-4 py-2 rounded-full w-fit">
+                  <Activity className="w-3.5 h-3.5 text-white" />
+                  <span className="font-semibold text-white text-sm">{t('home.heroBadge')}</span>
+                </div>
+                {/* Title — desktop only */}
+                <div className="hidden lg:block">
+                  <h1 className="font-bold text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-[72px] leading-[1.05] tracking-tight"
+                    style={{ textShadow: '0 2px 10px rgba(0,0,0,0.4)', color: '#ffffff' }}>
+                    {t('home.heroTitle1')}
+                  </h1>
+                  <h1 className="font-bold italic text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-[72px] leading-[1.05] tracking-tight mt-1"
+                    style={{ textShadow: '0 2px 16px rgba(0, 0, 0, 0.3)', color: '#d4a5ff' }}>
+                    {t('home.heroTitle2')}
+                  </h1>
+                </div>
+                <p className="hidden lg:block text-lg lg:text-xl leading-relaxed max-w-[576px]"
+                  style={{ textShadow: '0 2px 10px rgba(0,0,0,0.4)', color: '#ffffff' }}>
+                  {t('home.heroDesc')}
+                </p>
+              </div>
+
+              <div className="flex flex-col items-center justify-end gap-3 sm:gap-4 md:gap-5 max-w-[672px] mx-auto w-full">
+                {/* Title — above chat input on tablet only */}
+                {/* Title — above chat input on all mobile/tablet */}
+                <div className="lg:hidden text-center">
+                  <h2 className="font-bold text-xl sm:text-2xl md:text-4xl leading-tight tracking-tight" style={{ color: '#ffffff', textShadow: '0 2px 10px rgba(0,0,0,0.5)' }}>
+                    {t('home.heroTitle1')}
+                  </h2>
+                  <h2 className="font-bold italic text-xl sm:text-2xl md:text-4xl leading-tight tracking-tight mt-0.5" style={{ color: '#d4a5ff', textShadow: '0 2px 10px rgba(0,0,0,0.4)' }}>
+                    {t('home.heroTitle2')}
+                  </h2>
+                </div>
+                <form
+                  onSubmit={(e) => { e.preventDefault(); handleChatClick(); }}
+                  className="w-full backdrop-blur-md bg-white/10 border-2 border-[rgba(92,0,169,0.2)] rounded-full p-1.5 sm:p-2.5 flex items-center shadow-2xl"
+                >
+                  <div className="pl-2 sm:pl-4 shrink-0">
+                    <Image src="/logo.svg" alt="" width={36} height={36} className="md:w-[42px] md:h-[42px]" />
+                  </div>
+                  <input
+                    type="text"
+                    readOnly
+                    onFocus={handleChatClick}
+                    placeholder={t('home.aiPlaceholder')}
+                    className="flex-1 px-2 sm:px-4 py-2 sm:py-3 text-sm sm:text-base bg-transparent outline-none text-black placeholder-white min-w-0 cursor-text"
+                  />
+                  <button
+                    type="submit"
+                    className="bg-[#7b00e0] rounded-full w-10 h-10 sm:w-14 sm:h-14 flex items-center justify-center shrink-0 shadow-lg hover:bg-[#6600bc] transition-colors"
+                  >
+                    <Send className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                  </button>
+                </form>
+                {/* Prompt chips — single row */}
+                <div className="flex items-center gap-1.5 sm:gap-2 flex-nowrap overflow-x-auto">
+                  <span className="text-white/70 text-[8px] sm:text-[10px] font-semibold uppercase tracking-wider shrink-0">Try now</span>
+                  {(['home.chip1', 'home.chip2', 'home.chip3'] as const).map((key) => (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        const text = t(key);
+                        if (isAuthenticated) {
+                          router.push(`/chat?q=${encodeURIComponent(text)}`);
+                        } else {
+                          router.push('/sign-in');
+                        }
+                      }}
+                      className="backdrop-blur-md bg-white/15 border border-white/25 text-white text-[8px] sm:text-[10px] md:text-xs px-2 sm:px-2.5 md:px-3 py-0.5 sm:py-1 md:py-1.5 rounded-full hover:bg-white/25 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+                    >
+                      {t(key)}
+                    </button>
+                  ))}
+                </div>
+                {/* CTA buttons — single row */}
+                <div className="flex items-center gap-2 sm:gap-3 md:gap-6 flex-nowrap">
+                  <Link href="/sign-in" className="bg-[#7b00e0] text-white font-bold text-[10px] sm:text-sm md:text-lg px-4 sm:px-6 md:px-10 py-2 sm:py-2.5 md:py-3.5 rounded-full hover:bg-[#6600bc] transition-colors whitespace-nowrap shrink-0">
+                    {t('home.startCheckin')}
+                  </Link>
+                  <Link href="#features" className="backdrop-blur-sm bg-white/80 border border-[#cfc2d8] text-gray-600 font-semibold text-[10px] sm:text-sm md:text-lg px-4 sm:px-6 md:px-10 py-2 sm:py-2.5 md:py-3.5 rounded-full hover:bg-white transition-colors whitespace-nowrap shrink-0">
+                    {t('home.howItWorks')}
+                  </Link>
+                </div>
+                {/* Description — below buttons on mobile, hidden here on desktop (shown in left col) */}
+                <p className="lg:hidden text-white/80 text-[10px] sm:text-xs leading-relaxed max-w-[500px] text-center"
+                  style={{ textShadow: '0 1px 6px rgba(0,0,0,0.3)' }}>
+                  {t('home.heroDesc')}
+                </p>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -138,10 +171,10 @@ export default function Homepage() {
             <div className="bg-[#f5eafa] rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 flex flex-col min-h-[320px] sm:min-h-[480px] transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:bg-[#efe5f4] active:scale-[0.98]">
               <div className="bg-[#eedbff] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mb-6 sm:mb-8">
                 <svg width="25" height="20" viewBox="0 0 25 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <rect x="1" y="1" width="23" height="18" rx="3" stroke="#7b00e0" strokeWidth="2"/>
-                  <path d="M1 7h23" stroke="#7b00e0" strokeWidth="2"/>
-                  <rect x="5" y="11" width="4" height="3" rx="0.5" fill="#7b00e0"/>
-                  <rect x="11" y="11" width="4" height="3" rx="0.5" fill="#7b00e0"/>
+                  <rect x="1" y="1" width="23" height="18" rx="3" stroke="#7b00e0" strokeWidth="2" />
+                  <path d="M1 7h23" stroke="#7b00e0" strokeWidth="2" />
+                  <rect x="5" y="11" width="4" height="3" rx="0.5" fill="#7b00e0" />
+                  <rect x="11" y="11" width="4" height="3" rx="0.5" fill="#7b00e0" />
                 </svg>
               </div>
               <h3 className="text-[#1f1924] text-xl sm:text-xl font-bold leading-snug mb-3 sm:mb-4">{t('home.bpCheckins')}</h3>
@@ -215,7 +248,7 @@ export default function Homepage() {
             <div className="flex-1 flex flex-col gap-4 md:gap-6">
               <div className="bg-[rgba(92,0,169,0.1)] inline-flex items-center gap-2 px-5 py-3 rounded-full w-fit">
                 <svg width="13" height="11" viewBox="0 0 13 11" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M1 5.5h2l1.5-4L7 9.5l1.5-4H12" stroke="#5c00a9" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M1 5.5h2l1.5-4L7 9.5l1.5-4H12" stroke="#5c00a9" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
                 <span className="text-[#5c00a9] text-xs md:text-sm font-semibold tracking-wide">{t('home.silentLiteracy')}</span>
               </div>

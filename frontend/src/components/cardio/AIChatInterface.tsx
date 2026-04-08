@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -1016,6 +1017,7 @@ function mapSessions(arr: Array<{ id: string; title: string; summary?: string | 
 export default function AIChatInterface() {
   const { user, token } = useAuth();
   const { t } = useLanguage();
+  const searchParams = useSearchParams();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -1161,6 +1163,17 @@ export default function AIChatInterface() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping, transcript]);
+
+  // ── Pre-fill input from query param (e.g. /chat?q=My%20BP%20readings) ────
+  const qParamHandled = useRef(false);
+  useEffect(() => {
+    if (qParamHandled.current) return;
+    const q = searchParams?.get('q');
+    if (q) {
+      setInputValue(q);
+      qParamHandled.current = true;
+    }
+  }, [searchParams]);
 
   // ── Load sessions ─────────────────────────────────────────────────────────
   useEffect(() => {
