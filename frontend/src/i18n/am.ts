@@ -516,7 +516,7 @@ const am: Record<TranslationKey, string> = {
   // ─── Landing Header / Footer ────────────────────────────────────────────────
   'landing.home': 'መነሻ',
   'landing.about': 'ስለ እኛ',
-  'landing.getStarted': 'ጀምር',
+  'landing.getStarted': 'ቼክ-ኢንዎን ይጀምሩ',
   'landing.copyright': '© 2026 Cardioplace. ከ DC Hospital Association ጋር በመተባበር የተገነባ።',
   'landing.company': 'ኩባንያ',
   'landing.mission': 'ተልዕኮ',

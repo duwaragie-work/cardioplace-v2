@@ -514,7 +514,7 @@ const en = {
   // ─── Landing Header / Footer ────────────────────────────────────────────────
   'landing.home': 'Home',
   'landing.about': 'About',
-  'landing.getStarted': 'Get Started',
+  'landing.getStarted': 'Start Your Check-in',
   'landing.copyright': '© 2026 Cardioplace. Developed in partnership with the DC Hospital Association.',
   'landing.company': 'Company',
   'landing.mission': 'Mission',

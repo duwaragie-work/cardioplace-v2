@@ -516,7 +516,7 @@ const fr: Record<TranslationKey, string> = {
   // ─── Landing Header / Footer ────────────────────────────────────────────────
   'landing.home': 'Accueil',
   'landing.about': 'À propos',
-  'landing.getStarted': 'Commencer',
+  'landing.getStarted': 'Commencez Votre Contrôle',
   'landing.copyright': '© 2026 Cardioplace. Développé en partenariat avec la DC Hospital Association.',
   'landing.company': 'Entreprise',
   'landing.mission': 'Mission',
