@@ -133,7 +133,7 @@ export class JudgeService {
     try {
       await ls.createRun({
         name: `judge:${r.source}:${r.scenario}`,
-        run_type: 'eval',
+        run_type: 'chain',
         project_name: LS_PROJECT,
         inputs: { scenario: r.scenario, source: r.source, patientInput: r.input },
         outputs: {
