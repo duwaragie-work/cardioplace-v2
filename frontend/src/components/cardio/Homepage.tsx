@@ -135,22 +135,17 @@ export default function Homepage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
             {/* Card 1 - BP Check-ins */}
-            <div className="bg-[#f5eafa] rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 flex flex-col justify-between min-h-[320px] sm:min-h-[480px] transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:bg-[#efe5f4] active:scale-[0.98]">
-              <div>
-                <div className="bg-[#eedbff] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mb-6 sm:mb-8">
-                  <svg width="25" height="20" viewBox="0 0 25 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect x="1" y="1" width="23" height="18" rx="3" stroke="#7b00e0" strokeWidth="2"/>
-                    <path d="M1 7h23" stroke="#7b00e0" strokeWidth="2"/>
-                    <rect x="5" y="11" width="4" height="3" rx="0.5" fill="#7b00e0"/>
-                    <rect x="11" y="11" width="4" height="3" rx="0.5" fill="#7b00e0"/>
-                  </svg>
-                </div>
-                <h3 className="text-[#1f1924] text-xl sm:text-xl font-bold leading-snug mb-3 sm:mb-4">{t('home.bpCheckins')}</h3>
-                <p className="text-[#4c4355] text-sm sm:text-base leading-[1.8]">{t('home.bpCheckinsDesc')}</p>
+            <div className="bg-[#f5eafa] rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 flex flex-col min-h-[320px] sm:min-h-[480px] transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:bg-[#efe5f4] active:scale-[0.98]">
+              <div className="bg-[#eedbff] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mb-6 sm:mb-8">
+                <svg width="25" height="20" viewBox="0 0 25 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="1" y="1" width="23" height="18" rx="3" stroke="#7b00e0" strokeWidth="2"/>
+                  <path d="M1 7h23" stroke="#7b00e0" strokeWidth="2"/>
+                  <rect x="5" y="11" width="4" height="3" rx="0.5" fill="#7b00e0"/>
+                  <rect x="11" y="11" width="4" height="3" rx="0.5" fill="#7b00e0"/>
+                </svg>
               </div>
-              <div className="flex justify-center mt-6 sm:mt-8">
-                <Heart className="w-20 h-20 sm:w-24 sm:h-24 text-[#7b00e0] opacity-20" strokeWidth={1} />
-              </div>
+              <h3 className="text-[#1f1924] text-xl sm:text-xl font-bold leading-snug mb-3 sm:mb-4">{t('home.bpCheckins')}</h3>
+              <p className="text-[#4c4355] text-sm sm:text-base leading-[1.8]">{t('home.bpCheckinsDesc')}</p>
             </div>
 
             {/* Card 2 - AI Assistant */}
@@ -206,17 +201,12 @@ export default function Homepage() {
             </div>
 
             {/* Card 4 - Continuously Learning */}
-            <div className="rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 flex flex-col justify-between min-h-[320px] sm:min-h-[480px] transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:brightness-110 active:scale-[0.98]" style={{ backgroundImage: 'linear-gradient(148deg, #7b00e0 6%, #c79afd 98%)' }}>
-              <div>
-                <div className="bg-[#c79afd] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mb-6 sm:mb-8">
-                  <Brain className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
-                </div>
-                <h3 className="text-white font-bold text-xl sm:text-xl leading-snug mb-3 sm:mb-4">{t('home.learning')}</h3>
-                <p className="text-white text-sm sm:text-base leading-[1.8]">{t('home.learningDesc')}</p>
+            <div className="rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 flex flex-col min-h-[320px] sm:min-h-[480px] transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:brightness-110 active:scale-[0.98]" style={{ backgroundImage: 'linear-gradient(148deg, #7b00e0 6%, #c79afd 98%)' }}>
+              <div className="bg-[#c79afd] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mb-6 sm:mb-8">
+                <Brain className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
               </div>
-              <div className="mt-auto pt-4 sm:pt-6 flex justify-center">
-                <Activity className="w-20 h-20 sm:w-24 sm:h-24 text-white opacity-20" strokeWidth={1} />
-              </div>
+              <h3 className="text-white font-bold text-xl sm:text-xl leading-snug mb-3 sm:mb-4">{t('home.learning')}</h3>
+              <p className="text-white text-sm sm:text-base leading-[1.8]">{t('home.learningDesc')}</p>
             </div>
           </div>
 

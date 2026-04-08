@@ -560,7 +560,7 @@ const de: Record<TranslationKey, string> = {
   'home.escalation': 'Eskalation, wenn es darauf ankommt',
   'home.escalationDesc': 'Wenn Messwerte vom individuellen Ausgangswert eines Patienten abweichen, generiert die Plattform eine strukturierte Warnung an das Pflegeteam. Stufe 1: Überprüfung innerhalb von 24 Stunden. Stufe 2: Patient wird aufgefordert, sofort 911 anzurufen. Das Pflegeteam wird gleichzeitig benachrichtigt.',
   'home.learning': 'Kontinuierliches Lernen',
-  'home.learningDesc': 'Die Plattform verwendet keine Einheitsgrenzwerte. Sie ist auf forschungsbasierten kardiovaskulären Datensätzen trainiert, einschließlich der NHANES-Erhebung des CDC, und lernt aus jeder Patienteninteraktion — wird mit der Zeit präziser und speziell für die Gemeinschaften, die sie betreut, intelligenter.',
+  'home.learningDesc': 'Keine Einheitsgrenzwerte. Trainiert auf CDC-NHANES-Herz-Kreislauf-Daten und lernt aus jeder Patienteninteraktion wird mit der Zeit präziser für die Gemeinschaften, die sie betreut.',
   'home.silentLiteracy': 'DESIGN FÜR STILLE ALPHABETISIERUNG',
   'home.soundTitle': 'Kein Lesen erforderlich. Nie.',
   'home.soundDesc': 'Die meisten Gesundheitstechnologien bitten Patienten offenzulegen, was sie brauchen. Cardioplace schließt darauf. Die Plattform liest Antwortmuster — wie schnell ein Patient antwortet, welchen Modus er wählt, ob seine Antworten auf Verständnis hindeuten — und passt sich automatisch an.\n\nKein Patient wird jemals gekennzeichnet. Kein Patient wird jemals gefragt, ob er lesen kann. Die Versorgung erreicht ihn genau dort, wo er ist.',

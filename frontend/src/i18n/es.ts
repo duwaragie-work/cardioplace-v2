@@ -560,7 +560,7 @@ const es: Record<TranslationKey, string> = {
   'home.escalation': 'Escalación Cuando Importa',
   'home.escalationDesc': 'Cuando las lecturas se desvían de la línea base individual del paciente, la plataforma genera una alerta estructurada al equipo de atención. Nivel 1: revisado dentro de 24 horas. Nivel 2: se le indica al paciente que llame al 911 inmediatamente. El equipo de atención es notificado simultáneamente.',
   'home.learning': 'Aprendizaje Continuo',
-  'home.learningDesc': 'La plataforma no usa umbrales únicos para todos. Está entrenada con conjuntos de datos cardiovasculares de grado investigativo, incluyendo la encuesta NHANES del CDC, y aprende de cada interacción con el paciente — volviéndose más precisa con el tiempo y más inteligente específicamente para las comunidades a las que sirve.',
+  'home.learningDesc': 'Sin umbrales únicos para todos. Entrenada con datos cardiovasculares NHANES del CDC y aprende de cada interacción con el paciente volviéndose más precisa con el tiempo para las comunidades a las que sirve.',
   'home.silentLiteracy': 'DISEÑO DE ALFABETIZACIÓN SILENCIOSA',
   'home.soundTitle': 'No Requiere Leer. Nunca.',
   'home.soundDesc': 'La mayoría de la tecnología de salud pide a los pacientes que revelen lo que necesitan. Cardioplace lo infiere. La plataforma lee patrones de respuesta — qué tan rápido responde un paciente, qué modo eligen, si sus respuestas sugieren comprensión — y se adapta automáticamente.\n\nNingún paciente es etiquetado. A ningún paciente se le pregunta si sabe leer. La atención les llega exactamente donde están.',

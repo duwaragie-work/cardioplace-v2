@@ -558,7 +558,7 @@ const en = {
   'home.escalation': 'Escalation When It Matters',
   'home.escalationDesc': 'When readings deviate from a patient\'s individual baseline, the platform generates a structured alert to the care team. Level 1: reviewed within 24 hours. Level 2: patient told to call 911 immediately. The care team is notified simultaneously.',
   'home.learning': 'Continuously Learning',
-  'home.learningDesc': 'The platform does not use one-size-fits-all thresholds. It is trained on research-grade cardiovascular datasets including the CDC\'s NHANES survey and learns from every patient interaction, getting more precise over time, and getting smarter specifically for the communities it serves.',
+  'home.learningDesc': 'No one-size-fits-all thresholds. Trained on CDC NHANES cardiovascular data and learns from every patient interaction getting more precise over time for the communities it serves.',
   'home.silentLiteracy': 'SILENT LITERACY ARCHITECTURE',
   'home.soundTitle': 'No Reading Required. Ever.',
   'home.soundDesc': 'Most health technology asks patients to disclose what they need. Cardioplace infers it. The platform reads response patterns, how fast a patient replies, which mode they choose, whether their answers suggest comprehension, and adapts automatically.\n\nNo patient is ever labelled. No patient is ever asked if they can read. Care reaches them exactly where they are.',
