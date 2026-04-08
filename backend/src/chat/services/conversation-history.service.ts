@@ -274,11 +274,29 @@ export class ConversationHistoryService {
       const combined = turns
         .map((t) => `Patient: ${t.userMessage}\nAI: ${t.aiSummary}`)
         .join('\n')
+
+      console.log(`[Voice Summary] Updating rolling summary for session ${sessionId} (${turns.length} turns, ${combined.length} chars)`)
       await this.updateRollingSummary(sessionId, '[Voice session]', combined, 'voice')
 
       console.log(`Saved ${turns.length} voice transcript turns for session ${sessionId}`)
     } catch (error) {
       console.error('Error saving voice transcript lines:', error)
+      // Even if conversation rows failed, try to save a basic summary directly
+      try {
+        const lines2 = lines as Array<{ speaker: string; text: string }>
+        const basicSummary = lines2
+          .map((l) => `- [Voice] ${l.speaker === 'user' ? 'Patient' : 'AI'}: ${l.text.slice(0, 150)}`)
+          .join('\n')
+        if (basicSummary) {
+          await this.prisma.session.update({
+            where: { id: sessionId },
+            data: { summary: basicSummary },
+          })
+          console.log(`[Voice Summary] Fallback summary saved for session ${sessionId}`)
+        }
+      } catch (fallbackErr) {
+        console.error('Fallback summary also failed:', fallbackErr)
+      }
     }
   }
 
@@ -345,8 +363,9 @@ export class ConversationHistoryService {
         where: { id: sessionId },
         data: { summary: updatedSummary, messageCount: newCount },
       })
+      console.log(`[Rolling Summary] Updated session ${sessionId} (count=${newCount}, len=${updatedSummary.length})`)
     } catch (error) {
-      console.error('Error updating rolling summary:', error)
+      console.error('[Rolling Summary] FAILED for session', sessionId, error)
     }
   }
 

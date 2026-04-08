@@ -47,6 +47,7 @@ interface SessionActivity {
   userTexts: string[]
   agentTexts: string[]
   checkins: CheckinSummary[]
+  actions: Array<{ type: string; detail: string; timestamp: number }>
 }
 
 interface ActiveSession {
@@ -57,6 +58,7 @@ interface ActiveSession {
   transcriptBuffer: TranscriptEntry[]
   activity: SessionActivity
   callbacks: VoiceSessionCallbacks
+  savedTranscript: boolean
 }
 
 @Injectable()
@@ -127,7 +129,8 @@ export class VoiceService implements OnModuleDestroy {
 
     const activeSession: ActiveSession = {
       call, userId, sessionId, transcriptBuffer: [],
-      activity: { userTexts: [], agentTexts: [], checkins: [] },
+      activity: { userTexts: [], agentTexts: [], checkins: [], actions: [] },
+      savedTranscript: false,
       callbacks,
     }
     this.sessions.set(socketId, activeSession)
@@ -165,7 +168,16 @@ export class VoiceService implements OnModuleDestroy {
           }
         }
       } else if (payload === 'action') {
-        callbacks.onAction(msg.action.type ?? '', msg.action.detail ?? '')
+        const actionType = msg.action.type ?? ''
+        const actionDetail = msg.action.detail ?? ''
+        this.logger.log(`[ACTION RECEIVED] type=${actionType} detail=${actionDetail} socket=${socketId}`)
+        callbacks.onAction(actionType, actionDetail)
+        // Track action for summary
+        const sess = this.sessions.get(socketId)
+        if (sess) {
+          sess.activity.actions.push({ type: actionType, detail: actionDetail, timestamp: Date.now() })
+          this.logger.log(`[ACTION TRACKED] total actions=${sess.activity.actions.length}`)
+        }
       } else if (payload === 'checkin') {
         const c = msg.checkin
         callbacks.onCheckinSaved({
@@ -318,12 +330,17 @@ export class VoiceService implements OnModuleDestroy {
   private async saveVoiceTranscript(socketId: string): Promise<void> {
     const session = this.sessions.get(socketId)
     if (!session) return
+    if (session.savedTranscript) {
+      this.logger.log(`saveVoiceTranscript [socket=${socketId}] — already saved, skipping`)
+      return
+    }
+    session.savedTranscript = true
 
     const { transcriptBuffer, activity } = session
 
     this.logger.log(
       `saveVoiceTranscript [socket=${socketId}] transcripts=${transcriptBuffer.length} ` +
-      `userTexts=${activity.userTexts.length} agentTexts=${activity.agentTexts.length} checkins=${activity.checkins.length}`,
+      `userTexts=${activity.userTexts.length} agentTexts=${activity.agentTexts.length} checkins=${activity.checkins.length} actions=${activity.actions.length} actionTypes=${activity.actions.map(a => a.type).join(',')}`,
     )
 
     // Take snapshots and clear
@@ -333,8 +350,9 @@ export class VoiceService implements OnModuleDestroy {
       userTexts: [...activity.userTexts],
       agentTexts: [...activity.agentTexts],
       checkins: [...activity.checkins],
+      actions: [...activity.actions],
     }
-    session.activity = { userTexts: [], agentTexts: [], checkins: [] }
+    session.activity = { userTexts: [], agentTexts: [], checkins: [], actions: [] }
 
     try {
       // Build the lines to save — prefer transcript buffer, fall back to activity
@@ -364,7 +382,60 @@ export class VoiceService implements OnModuleDestroy {
       }
 
       if (lines.length === 0) {
-        this.logger.log(`No data to save for voice session [socket=${socketId}]`)
+        // No data at all — skip (another call may have already saved)
+        if (activitySnapshot.actions.length === 0 && activitySnapshot.checkins.length === 0) {
+          // Check if summary already exists from a previous call
+          const existing = await this.prisma.session.findUnique({
+            where: { id: session.sessionId },
+            select: { summary: true },
+          })
+          if (existing?.summary) {
+            this.logger.log(`Summary already saved for session [socket=${socketId}] — skipping`)
+            return
+          }
+          // Truly nothing happened
+          this.logger.log(`No data to save for voice session [socket=${socketId}]`)
+          await this.prisma.session.update({
+            where: { id: session.sessionId },
+            data: { summary: '- Voice conversation about cardiovascular health', title: 'Voice Chat' },
+          }).catch(() => {})
+          return
+        }
+
+        this.logger.log(`No transcript lines for voice session [socket=${socketId}] — generating summary from ${activitySnapshot.actions.length} actions, ${activitySnapshot.checkins.length} checkins`)
+
+        const summaryParts: string[] = []
+        let title = 'Voice Chat'
+
+        for (const action of activitySnapshot.actions) {
+          if (action.type === 'fetching_readings') {
+            summaryParts.push(`- Patient requested to view past BP readings (${action.detail || 'last 7 days'})`)
+          } else if (action.type === 'submitting_checkin') {
+            summaryParts.push(`- Patient submitted a new check-in: ${action.detail || 'values recorded'}`)
+          } else if (action.type === 'updating_checkin') {
+            summaryParts.push(`- Patient updated a reading: ${action.detail || 'values changed'}`)
+            title = 'Voice: Updated reading'
+          } else if (action.type === 'deleting_checkin') {
+            summaryParts.push(`- Patient deleted a reading: ${action.detail || 'entry removed'}`)
+            title = 'Voice: Deleted reading'
+          }
+        }
+
+        for (const c of activitySnapshot.checkins) {
+          const bp = c.systolicBP && c.diastolicBP ? `${c.systolicBP}/${c.diastolicBP}` : 'unknown'
+          const meds = c.medicationTaken === true ? 'taken' : c.medicationTaken === false ? 'missed' : 'not reported'
+          const symp = c.symptoms.length > 0 ? c.symptoms.join(', ') : 'none'
+          summaryParts.push(`- Check-in saved: BP ${bp} mmHg, medications ${meds}, symptoms: ${symp}`)
+          title = `BP Check-in ${bp}`
+        }
+
+        const basicSummary = summaryParts.join('\n')
+        this.logger.log(`[SUMMARY SAVING] session=${session.sessionId} summary="${basicSummary}" title="${title}"`)
+
+        await this.prisma.session.update({
+          where: { id: session.sessionId },
+          data: { summary: basicSummary, title },
+        }).catch((err) => this.logger.error('Failed to save summary', err))
         return
       }
 

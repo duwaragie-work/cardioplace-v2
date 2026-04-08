@@ -80,7 +80,7 @@ def make_tools(
             voice_pb2.ServerMessage(
                 action=voice_pb2.ActionNotice(
                     type="submitting_checkin",
-                    detail="Saving your check-in…",
+                    detail=f"BP={systolic_bp}/{diastolic_bp} meds={'taken' if medication_taken else 'missed'} symptoms={','.join(symptoms) if symptoms else 'none'} weight={weight or 'N/A'}",
                 )
             )
         )
@@ -165,6 +165,12 @@ def make_tools(
             dict with 'readings' (list of entries) and 'count' (int).
         """
         days = max(1, min(30, days))
+        from generated import voice_pb2 as _vpb_fetch
+        _put(
+            _vpb_fetch.ServerMessage(
+                action=_vpb_fetch.ActionNotice(type="fetching_readings", detail=f"Fetching last {days} days")
+            )
+        )
         try:
             resp = requests.get(
                 f"{NESTJS_URL}/daily-journal",
@@ -245,14 +251,27 @@ def make_tools(
         if not payload:
             return {"updated": False, "message": "No fields to update."}
 
-        # Notify client that we are updating
+        # Notify client that we are updating — include changed values in detail
+        changes = []
+        if systolic_bp is not None:
+            changes.append(f"systolic={systolic_bp}")
+        if diastolic_bp is not None:
+            changes.append(f"diastolic={diastolic_bp}")
+        if medication_taken is not None:
+            changes.append(f"medication={'taken' if medication_taken else 'missed'}")
+        if weight is not None and weight > 0:
+            changes.append(f"weight={weight}lbs")
+        if symptoms is not None:
+            changes.append(f"symptoms={','.join(symptoms) if symptoms else 'none'}")
+        detail_str = f"entry={entry_id or entry_date or 'unknown'} changes=[{', '.join(changes)}]"
+
         from generated import voice_pb2
 
         _put(
             voice_pb2.ServerMessage(
                 action=voice_pb2.ActionNotice(
                     type="updating_checkin",
-                    detail="Updating your reading…",
+                    detail=detail_str,
                 )
             )
         )
@@ -342,6 +361,12 @@ def make_tools(
         Returns:
             dict with 'deleted' (bool) and 'message' (str).
         """
+        from generated import voice_pb2 as _vpb_del
+        _put(
+            _vpb_del.ServerMessage(
+                action=_vpb_del.ActionNotice(type="deleting_checkin", detail=f"Deleting entry {entry_id}")
+            )
+        )
         try:
             resp = requests.delete(
                 f"{NESTJS_URL}/daily-journal/{entry_id}",
