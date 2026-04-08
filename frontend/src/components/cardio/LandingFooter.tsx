@@ -57,7 +57,9 @@ export default function LandingFooter() {
             </span>
           </div>
           <div className="flex items-center gap-3">
-            <Image src="/DCHA-Logo.png" alt="DC Hospital Association" width={48} height={48} className="w-10 h-10 object-contain brightness-0 invert opacity-70" />
+            <div className="bg-white rounded-lg px-2 py-1.5 shrink-0">
+              <Image src="/DCHA-Logo.png" alt="DC Hospital Association" width={64} height={48} className="w-16 h-10 object-contain" />
+            </div>
             <p className="text-white/70 text-sm leading-relaxed">
               {t('landing.copyright')}
             </p>
