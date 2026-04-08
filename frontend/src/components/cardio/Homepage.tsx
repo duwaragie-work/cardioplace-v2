@@ -27,7 +27,7 @@ export default function Homepage() {
 
       <main className="flex flex-col items-center pt-[64px] w-full overflow-x-hidden">
         {/* ============ HERO SECTION ============ */}
-        <section className="relative w-full min-h-[calc(100vh-64px)] flex items-end lg:items-center justify-center overflow-hidden px-4 sm:px-6 md:px-8 pb-6 lg:pb-0">
+        <section className="relative w-full min-h-[calc(100vh-64px)] flex items-end lg:items-center justify-center overflow-hidden px-4 sm:px-6 md:px-8 pb-4 sm:pb-6 lg:pb-0">
           <div className="absolute inset-0">
             <Image src="/ai-healthcare.png" alt="" fill sizes="100vw" quality={500} unoptimized className="object-cover object-[center_20%] sm:object-[center_30%] md:object-center" priority />
           </div>
@@ -72,10 +72,10 @@ export default function Homepage() {
                 {/* Title — above chat input on tablet only */}
                 {/* Title — above chat input on all mobile/tablet */}
                 <div className="lg:hidden text-center">
-                  <h2 className="font-bold text-xl sm:text-2xl md:text-4xl leading-tight tracking-tight" style={{ color: '#ffffff', textShadow: '0 2px 10px rgba(0,0,0,0.5)' }}>
+                  <h2 className="font-bold text-2xl sm:text-3xl md:text-5xl leading-tight tracking-tight" style={{ color: '#ffffff', textShadow: '0 2px 10px rgba(0,0,0,0.5)' }}>
                     {t('home.heroTitle1')}
                   </h2>
-                  <h2 className="font-bold italic text-xl sm:text-2xl md:text-4xl leading-tight tracking-tight mt-0.5" style={{ color: '#d4a5ff', textShadow: '0 2px 10px rgba(0,0,0,0.4)' }}>
+                  <h2 className="font-bold italic text-2xl sm:text-3xl md:text-5xl leading-tight tracking-tight mt-0.5" style={{ color: '#d4a5ff', textShadow: '0 2px 10px rgba(0,0,0,0.4)' }}>
                     {t('home.heroTitle2')}
                   </h2>
                 </div>
@@ -102,7 +102,7 @@ export default function Homepage() {
                 </form>
                 {/* Prompt chips — single row */}
                 <div className="flex items-center gap-1.5 sm:gap-2 flex-nowrap overflow-x-auto">
-                  <span className="text-white/70 text-[8px] sm:text-[10px] font-semibold uppercase tracking-wider shrink-0">Try now</span>
+                  <span className="text-white/70 text-[10px] sm:text-xs font-semibold uppercase tracking-wider shrink-0">Try now</span>
                   {(['home.chip1', 'home.chip2', 'home.chip3'] as const).map((key) => (
                     <button
                       key={key}
@@ -114,7 +114,7 @@ export default function Homepage() {
                           router.push('/sign-in');
                         }
                       }}
-                      className="backdrop-blur-md bg-white/15 border border-white/25 text-white text-[8px] sm:text-[10px] md:text-xs px-2 sm:px-2.5 md:px-3 py-0.5 sm:py-1 md:py-1.5 rounded-full hover:bg-white/25 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+                      className="backdrop-blur-md bg-white/15 border border-white/25 text-white text-[8px] sm:text-xs md:text-sm px-2.5 sm:px-3 md:px-4 py-1 sm:py-1.5 rounded-full hover:bg-white/25 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
                     >
                       {t(key)}
                     </button>
@@ -122,15 +122,15 @@ export default function Homepage() {
                 </div>
                 {/* CTA buttons — single row */}
                 <div className="flex items-center gap-2 sm:gap-3 md:gap-6 flex-nowrap">
-                  <Link href="/sign-in" className="bg-[#7b00e0] text-white font-bold text-[10px] sm:text-sm md:text-lg px-4 sm:px-6 md:px-10 py-2 sm:py-2.5 md:py-3.5 rounded-full hover:bg-[#6600bc] transition-colors whitespace-nowrap shrink-0">
+                  <Link href="/sign-in" className="bg-[#7b00e0] text-white font-bold text-xs sm:text-sm md:text-lg px-5 sm:px-7 md:px-10 py-2.5 sm:py-3 md:py-3.5 rounded-full hover:bg-[#6600bc] transition-colors whitespace-nowrap shrink-0">
                     {t('home.startCheckin')}
                   </Link>
-                  <Link href="#features" className="backdrop-blur-sm bg-white/80 border border-[#cfc2d8] text-gray-600 font-semibold text-[10px] sm:text-sm md:text-lg px-4 sm:px-6 md:px-10 py-2 sm:py-2.5 md:py-3.5 rounded-full hover:bg-white transition-colors whitespace-nowrap shrink-0">
+                  <Link href="#features" className="backdrop-blur-sm bg-white/80 border border-[#cfc2d8] text-gray-600 font-semibold text-xs sm:text-sm md:text-lg px-5 sm:px-7 md:px-10 py-2.5 sm:py-3 md:py-3.5 rounded-full hover:bg-white transition-colors whitespace-nowrap shrink-0">
                     {t('home.howItWorks')}
                   </Link>
                 </div>
-                {/* Description — below buttons on mobile, hidden here on desktop (shown in left col) */}
-                <p className="lg:hidden text-white/80 text-[10px] sm:text-xs leading-relaxed max-w-[500px] text-center"
+                {/* Description — below buttons on mobile/tablet */}
+                <p className="lg:hidden text-white/80 text-xs sm:text-sm leading-relaxed max-w-[500px] text-center"
                   style={{ textShadow: '0 1px 6px rgba(0,0,0,0.3)' }}>
                   {t('home.heroDesc')}
                 </p>
@@ -350,15 +350,18 @@ export default function Homepage() {
         </section>
 
         {/* ============ CTA ============ */}
-        <section className="w-full pb-0">
-          <div className="w-full p-8 sm:p-10 md:p-16 flex flex-col items-center gap-6 md:gap-8" style={{ backgroundImage: 'linear-gradient(153deg, #5c00a9 0%, #a04cee 46%, #c79afd 93%)' }}>
-            <h2 className="text-white text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center font-normal max-w-[1024px]">{t('home.ctaTitle')}</h2>
-            <p className="text-[#eedbff] text-sm sm:text-base md:text-xl text-left md:text-center leading-relaxed max-w-[672px]">{t('home.ctaDesc')}</p>
-            <Link href="/about" className="bg-white text-[#5B21B6] font-semibold text-base md:text-lg px-8 md:px-12 py-3 md:py-3.5 rounded-full hover:bg-white/90 transition-colors mt-2">
+        <section className="w-full">
+          <div className="w-full p-8 sm:p-10 md:p-16 flex flex-col items-center gap-6 md:gap-8 bg-[#f5eafa]" >
+            <h2 className="text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center font-semibold max-w-[1024px]">{t('home.ctaTitle')}</h2>
+            <p className="text-gray-500 text-sm sm:text-base md:text-xl text-left md:text-center leading-relaxed max-w-[672px]">{t('home.ctaDesc')}</p>
+            <Link href="/about" className="bg-[#7b00e0] text-white font-semibold text-base md:text-lg px-8 md:px-12 py-3 md:py-3.5 rounded-full hover:bg-[#9333ea] transition-colors mt-2">
               {t('home.ctaButton')}
             </Link>
           </div>
         </section>
+
+        {/* Divider */}
+        <div className="w-full h-px bg-white/10" />
 
         <LandingFooter />
       </main>

@@ -520,7 +520,7 @@ function SidebarContent({
                   {/* Delete button — visible on hover */}
                   <button
                     onClick={(e) => { e.stopPropagation(); onDeleteSession(s.id); }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg flex items-center justify-center hover:bg-red-50 transition-colors"
                     title="Delete"
                   >
                     <Trash2 className="w-3 h-3" style={{ color: 'var(--brand-alert-red)' }} />
