@@ -36,7 +36,11 @@ def create_session_runner(
     Returns (runner, session_service) so the caller can create a session
     and call runner.run_live().
     """
-    tools = make_tools(auth_token, out_queue, loop)
+    # Extract timezone from patient context
+    import re
+    tz_match = re.search(r'patient timezone (\S+)\)', patient_context)
+    patient_tz = tz_match.group(1) if tz_match else "America/New_York"
+    tools = make_tools(auth_token, out_queue, loop, patient_timezone=patient_tz)
     instruction = build_prompt(mode, patient_context)
 
     agent = Agent(

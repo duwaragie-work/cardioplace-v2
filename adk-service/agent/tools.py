@@ -24,6 +24,7 @@ def make_tools(
     auth_token: str,
     out_queue: asyncio.Queue,
     loop: asyncio.AbstractEventLoop,
+    patient_timezone: str = "America/New_York",
 ) -> list:
     """
     Return the list of ADK tool functions for a single voice session.
@@ -85,17 +86,29 @@ def make_tools(
             )
         )
 
-        resolved_date = datetime.now().strftime("%Y-%m-%d")
+        # Resolve date/time in the patient's timezone
+        try:
+            from zoneinfo import ZoneInfo
+            patient_now = datetime.now(ZoneInfo(patient_timezone))
+        except Exception:
+            patient_now = datetime.now()
+
+        resolved_date = patient_now.strftime("%Y-%m-%d")
         if entry_date and entry_date.strip():
             try:
                 datetime.strptime(entry_date.strip(), "%Y-%m-%d")
                 resolved_date = entry_date.strip()
             except ValueError:
-                logger.warning("Invalid entry_date '%s', defaulting to today", entry_date)
+                logger.warning("Invalid entry_date '%s', defaulting to today in %s", entry_date, patient_timezone)
 
-        resolved_time = ""
+        resolved_time = patient_now.strftime("%H:%M")
         if measurement_time and measurement_time.strip():
-            resolved_time = measurement_time.strip()
+            mt = measurement_time.strip().lower()
+            if mt in ("now", "current", "current time", "right now"):
+                resolved_time = patient_now.strftime("%H:%M")
+                logger.info("Resolved 'now' to %s in timezone %s", resolved_time, patient_timezone)
+            else:
+                resolved_time = measurement_time.strip()
 
         payload: dict[str, Any] = {
             "entryDate": resolved_date,

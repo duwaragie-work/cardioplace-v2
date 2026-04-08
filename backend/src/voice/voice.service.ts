@@ -592,6 +592,7 @@ export class VoiceService implements OnModuleDestroy {
 
       // ── Current date/time in patient timezone ─────────────────────────────
       const tz = user?.timezone ?? 'America/New_York'
+      this.logger.log(`[TIMEZONE] user=${userId} stored=${user?.timezone ?? 'null'} using=${tz} now=${new Date().toISOString()}`)
       const now = new Date()
       const formatter = new Intl.DateTimeFormat('en-US', {
         timeZone: tz,
