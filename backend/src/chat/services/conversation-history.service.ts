@@ -42,7 +42,7 @@ export class ConversationHistoryService {
         try {
           const embeddingResponse = await this.embeddingService.getEmbeddings(query)
           const queryEmbedding = embeddingResponse.data[0]?.embedding
-          if (queryEmbedding) {
+          if (queryEmbedding && queryEmbedding.length > 0) {
             const embeddingString = `[${queryEmbedding.join(',')}]`
             similarRows = await (this.prisma as any).$queryRawUnsafe(
               `SELECT "userMessage", "aiSummary", timestamp
@@ -126,7 +126,7 @@ export class ConversationHistoryService {
       const embeddingResponse = await this.embeddingService.getEmbeddings(content)
       const embedding = embeddingResponse.data[0]?.embedding
 
-      if (embedding) {
+      if (embedding && embedding.length > 0) {
         const embeddingString = `[${embedding.join(',')}]`
         await (this.prisma as any).$executeRawUnsafe(
           `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "aiSummary", source, embedding)
@@ -169,7 +169,7 @@ export class ConversationHistoryService {
       const embeddingResponse = await this.embeddingService.getEmbeddings(content)
       const embedding = embeddingResponse.data[0]?.embedding
 
-      if (embedding) {
+      if (embedding && embedding.length > 0) {
         const embeddingString = `[${embedding.join(',')}]`
         await (this.prisma as any).$executeRawUnsafe(
           `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "aiSummary", source, embedding)
@@ -243,7 +243,7 @@ export class ConversationHistoryService {
         try {
           const embeddingResponse = await this.embeddingService.getEmbeddings(content)
           const embedding = embeddingResponse.data[0]?.embedding
-          if (embedding) {
+          if (embedding && embedding.length > 0) {
             embeddingString = `[${embedding.join(',')}]`
           }
         } catch {

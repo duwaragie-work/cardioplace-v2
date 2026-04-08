@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.47.0",
+    "@huggingface/transformers": "^3.5.1",
     "@grpc/grpc-js": "^1.14.3",
     "@grpc/proto-loader": "^0.8.0",
     "@langchain/core": "^1.1.22",

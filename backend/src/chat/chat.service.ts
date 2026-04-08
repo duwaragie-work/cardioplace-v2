@@ -202,26 +202,29 @@ export class ChatService {
 
         let resultStr: string
 
-        // Guard submit_checkin: verify the model actually asked about medication,
-        // symptoms, and weight in the conversation before allowing the save.
+        // Guard submit_checkin: ensure medication and symptoms were discussed.
+        // If the patient provided the values (tool args have them), allow it.
+        // If not, check if the model asked about them in the conversation.
         if (toolName === 'submit_checkin') {
-          const allModelText = contents
-            .filter((c) => c.role === 'model')
+          const allText = contents
             .flatMap((c) => (c.parts as any[])?.filter((p: any) => p.text).map((p: any) => p.text) ?? [])
             .join(' ')
             .toLowerCase()
 
-          const askedMedication = /medication|meds|medicine|pills/.test(allModelText)
-          const askedSymptoms = /symptom|headache|dizziness|chest/.test(allModelText)
-          const askedWeight = /weight|weigh|lbs|pounds/.test(allModelText)
+          // The patient provided medication_taken explicitly OR the model discussed it
+          const hasMedication = toolArgs.medication_taken != null || /medication|meds|medicine|pills/.test(allText)
+          // The patient provided symptoms explicitly OR the model discussed it
+          const hasSymptoms = Array.isArray(toolArgs.symptoms) || /symptom|headache|dizziness|chest|no symptom|none|nothing|fine/.test(allText)
+          // Weight was discussed or provided
+          const hasWeight = toolArgs.weight != null || /weight|weigh|lbs|pounds|skip/.test(allText)
 
           const missing: string[] = []
-          if (!askedMedication) missing.push('medication (ask: "Did you take your medication today?")')
-          if (!askedSymptoms) missing.push('symptoms (ask: "Any symptoms like headache, dizziness, or chest tightness?")')
-          if (!askedWeight) missing.push('weight (ask: "Do you know your weight today? Totally fine to skip.")')
+          if (!hasMedication) missing.push('medication (ask: "Did you take your medication today?")')
+          if (!hasSymptoms) missing.push('symptoms (ask: "Any symptoms like headache, dizziness, or chest tightness?")')
+          if (!hasWeight) missing.push('weight (ask: "Do you know your weight today? Totally fine to skip.")')
 
           if (missing.length > 0) {
-            console.log(`[submit_checkin BLOCKED] Not yet asked about: ${missing.join(', ')}`)
+            console.log(`[submit_checkin BLOCKED] Missing: ${missing.join(', ')}`)
             resultStr = JSON.stringify({
               saved: false,
               message: `You still need to ask the patient about: ${missing.join('; ')}. Ask the next missing question now.`,

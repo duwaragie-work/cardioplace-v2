@@ -19,7 +19,7 @@ export class RagService {
 
       const embeddingResponse = await this.embeddingService.getEmbeddings(query)
       const queryEmbedding = embeddingResponse.data[0]?.embedding
-      if (!queryEmbedding) {
+      if (!queryEmbedding || queryEmbedding.length === 0) {
         console.warn('Failed to generate embedding for RAG query')
         return []
       }
