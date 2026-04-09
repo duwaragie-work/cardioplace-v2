@@ -156,8 +156,10 @@ def make_tools(
 
         return {
             "saved": saved,
+            "entry_date_used": resolved_date,
+            "measurement_time_used": resolved_time,
             "message": (
-                "Check-in saved successfully. The care team has been notified."
+                f"Check-in saved successfully for {resolved_date} at {resolved_time}. The care team has been notified."
                 if saved
                 else "There was a problem saving the check-in. Please try again later."
             ),

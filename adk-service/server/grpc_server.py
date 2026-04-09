@@ -232,6 +232,14 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
                     response_modalities=["AUDIO"],
                     output_audio_transcription=_tx_config,
                     input_audio_transcription=_tx_config,
+                    realtime_input_config=genai_types.RealtimeInputConfig(
+                        automatic_activity_detection=genai_types.AutomaticActivityDetection(
+                            start_of_speech_sensitivity=genai_types.StartSensitivity.START_SENSITIVITY_LOW,
+                            end_of_speech_sensitivity=genai_types.EndSensitivity.END_SENSITIVITY_LOW,
+                            prefix_padding_ms=600,
+                            silence_duration_ms=1500,
+                        ),
+                    ),
                 )
                 logger.info("[Config] RunConfig: modalities=AUDIO, transcription=%s", "enabled" if _tx_config else "disabled")
                 async for event in runner.run_live(
