@@ -59,6 +59,7 @@ interface ActiveSession {
   activity: SessionActivity
   callbacks: VoiceSessionCallbacks
   savedTranscript: boolean
+  streamClosed: boolean
 }
 
 @Injectable()
@@ -97,9 +98,6 @@ export class VoiceService implements OnModuleDestroy {
       `${host}:${port}`,
       grpc.credentials.createInsecure(),
       {
-        'grpc.keepalive_time_ms': 10_000,
-        'grpc.keepalive_timeout_ms': 5_000,
-        'grpc.keepalive_permit_without_calls': 1,
         'grpc.max_receive_message_length': 10 * 1024 * 1024,
         'grpc.max_send_message_length': 10 * 1024 * 1024,
       },
@@ -138,6 +136,7 @@ export class VoiceService implements OnModuleDestroy {
       call, userId, sessionId, transcriptBuffer: [],
       activity: { userTexts: [], agentTexts: [], checkins: [], actions: [] },
       savedTranscript: false,
+      streamClosed: false,
       callbacks,
     }
     this.sessions.set(socketId, activeSession)
@@ -161,10 +160,11 @@ export class VoiceService implements OnModuleDestroy {
         const isFinal: boolean = t.isFinal ?? false
         const speaker = (t.speaker as 'user' | 'agent') ?? 'agent'
         callbacks.onTranscript(text, isFinal, speaker)
-        // Accumulate all non-empty transcript lines for persistence.
+        // Accumulate non-empty transcript lines for persistence (cap at 200 to
+        // avoid RESOURCE_EXHAUSTED when sessions run long).
         if (text.trim()) {
           const sess = this.sessions.get(socketId)
-          if (sess) {
+          if (sess && sess.transcriptBuffer.length < 200) {
             sess.transcriptBuffer.push({ speaker, text: text.trim() })
             // Also track in activity for fallback summary
             if (speaker === 'user') {
@@ -223,6 +223,7 @@ export class VoiceService implements OnModuleDestroy {
         this.logger.warn(`ADK error [socket=${socketId}]: ${msg.error.message}`)
         callbacks.onError(msg.error.message ?? 'Unknown voice service error')
       } else if (payload === 'closed') {
+        activeSession.streamClosed = true
         this.saveVoiceTranscript(socketId)
           .then(() => {
             this.sessions.delete(socketId)
@@ -233,6 +234,7 @@ export class VoiceService implements OnModuleDestroy {
 
     call.on('error', (err: Error) => {
       this.logger.error(`gRPC stream error [socket=${socketId}]`, err.message)
+      activeSession.streamClosed = true
       this.saveVoiceTranscript(socketId)
         .then(() => {
           this.sessions.delete(socketId)
@@ -242,6 +244,7 @@ export class VoiceService implements OnModuleDestroy {
 
     call.on('end', () => {
       this.logger.log(`gRPC stream ended [socket=${socketId}]`)
+      activeSession.streamClosed = true
       this.saveVoiceTranscript(socketId)
         .then(() => {
           this.sessions.delete(socketId)
@@ -264,7 +267,7 @@ export class VoiceService implements OnModuleDestroy {
 
   sendAudio(socketId: string, audioBase64: string): void {
     const session = this.sessions.get(socketId)
-    if (!session) return
+    if (!session || session.streamClosed) return
     try {
       const data = Buffer.from(audioBase64, 'base64')
       session.call.write({
@@ -272,6 +275,7 @@ export class VoiceService implements OnModuleDestroy {
       })
     } catch (err) {
       this.logger.error('Failed to forward audio to ADK service', err)
+      session.streamClosed = true
       session.callbacks.onError('Voice connection lost. Please try again.')
       void this.endSession(socketId)
     }
@@ -279,7 +283,7 @@ export class VoiceService implements OnModuleDestroy {
 
   sendText(socketId: string, text: string): void {
     const session = this.sessions.get(socketId)
-    if (!session) return
+    if (!session || session.streamClosed) return
     try {
       session.call.write({ text: { text } })
       // Track user text input in activity
@@ -288,6 +292,7 @@ export class VoiceService implements OnModuleDestroy {
       }
     } catch (err) {
       this.logger.error('Failed to forward text to ADK service', err)
+      session.streamClosed = true
       session.callbacks.onError('Voice connection lost. Please try again.')
       void this.endSession(socketId)
     }
@@ -301,11 +306,14 @@ export class VoiceService implements OnModuleDestroy {
     const session = this.sessions.get(socketId)
     if (!session) return
 
-    try {
-      session.call.write({ end: {} })
-      session.call.end()
-    } catch {
-      // Stream may already be closed
+    if (!session.streamClosed) {
+      session.streamClosed = true
+      try {
+        session.call.write({ end: {} })
+        session.call.end()
+      } catch {
+        // Stream may already be closed
+      }
     }
 
     await this.saveVoiceTranscript(socketId)

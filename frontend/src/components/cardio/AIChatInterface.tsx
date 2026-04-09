@@ -1338,7 +1338,7 @@ export default function AIChatInterface() {
     if (isVoiceActive || isVoiceConnecting) {
       await endVoice();
     } else if (token) {
-      await startVoice({ token, sessionId: activeSessionId ?? undefined });
+      await startVoice({ token });
     }
   };
 

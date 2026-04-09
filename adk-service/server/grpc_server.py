@@ -75,7 +75,7 @@ def _map_event(event) -> list[voice_pb2.ServerMessage]:
 
     # If we extracted transcription, this event is transcription-only — return early.
     if messages:
-        logger.info("[EVENT] Transcription: %s", [(m.transcript.speaker, m.transcript.text[:80]) for m in messages])
+        logger.debug("[EVENT] Transcription: %s", [(m.transcript.speaker, m.transcript.text[:80]) for m in messages])
         return messages
 
     # ── 2. Audio / text content ──────────────────────────────────────────
@@ -153,9 +153,9 @@ def _map_event(event) -> list[voice_pb2.ServerMessage]:
     transcript_msgs = [m for m in messages if m.HasField("transcript") and m.transcript.text.strip()]
     audio_msgs = [m for m in messages if m.HasField("audio")]
     if transcript_msgs:
-        logger.info("[EVENT] Extracted %d transcripts: %s", len(transcript_msgs), [(m.transcript.speaker, m.transcript.text[:50]) for m in transcript_msgs])
+        logger.debug("[EVENT] Extracted %d transcripts: %s", len(transcript_msgs), [(m.transcript.speaker, m.transcript.text[:50]) for m in transcript_msgs])
     if audio_msgs:
-        logger.info("[EVENT] Extracted %d audio chunks", len(audio_msgs))
+        logger.debug("[EVENT] Extracted %d audio chunks", len(audio_msgs))
 
     return messages
 
