@@ -19,6 +19,8 @@ interface StartSessionPayload {
 
 @WebSocketGateway({
   namespace: '/voice',
+  pingInterval: 10_000,
+  pingTimeout: 15_000,
   cors: {
     origin: (origin: string, callback: (err: Error | null, allow?: boolean) => void) => {
       callback(null, true)

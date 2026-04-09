@@ -35,49 +35,55 @@ def _map_event(event) -> list[voice_pb2.ServerMessage]:
     """
     Convert one ADK event into zero or more ServerMessage protos.
 
-    ADK events expose audio/text via either:
-      - event.content.parts   (standard ADK path)
-      - event.server_content  (raw Gemini Live path — also present in ADK)
-    We check both so we work across ADK versions.
+    Transcription events arrive as top-level fields on the ADK Event
+    (event.input_transcription / event.output_transcription), NOT inside
+    event.server_content.  Audio and text content come through either
+    event.server_content (preferred) or event.content (fallback).
     """
     messages: list[voice_pb2.ServerMessage] = []
 
-    # Debug: log event attributes to see what Gemini is sending
-    event_attrs = [a for a in dir(event) if not a.startswith('_')]
-    has_content = hasattr(event, 'content') and event.content is not None
-    has_sc = hasattr(event, 'server_content') and event.server_content is not None
-    logger.info("[EVENT] attrs=%s has_content=%s has_server_content=%s", event_attrs[:10], has_content, has_sc)
-
-    # ── Standard ADK content path ──────────────────────────────────────────
-    content = getattr(event, "content", None)
-    if content:
-        for part in getattr(content, "parts", []) or []:
-            inline = getattr(part, "inline_data", None)
-            if inline and getattr(inline, "data", None):
-                mime = getattr(inline, "mime_type", "") or ""
-                if "audio" in mime:
-                    messages.append(
-                        voice_pb2.ServerMessage(
-                            audio=voice_pb2.AudioChunk(
-                                data=inline.data,
-                                mime_type=mime,
-                            )
-                        )
-                    )
-            text = getattr(part, "text", None)
-            if text and str(text).strip():
-                messages.append(
-                    voice_pb2.ServerMessage(
-                        transcript=voice_pb2.Transcript(
-                            text=str(text),
-                            is_final=False,
-                            speaker="agent",
-                        )
+    # ── 1. Transcription events (top-level on ADK Event) ─────────────────
+    #    The ADK sets these directly on the event and returns early,
+    #    so server_content / content are NOT populated for these events.
+    input_tx = getattr(event, "input_transcription", None)
+    if input_tx:
+        tx_text = getattr(input_tx, "text", None)
+        if tx_text and str(tx_text).strip():
+            messages.append(
+                voice_pb2.ServerMessage(
+                    transcript=voice_pb2.Transcript(
+                        text=str(tx_text),
+                        is_final=True,
+                        speaker="user",
                     )
                 )
+            )
 
-    # ── Raw Gemini server_content path ────────────────────────────────────
+    output_tx = getattr(event, "output_transcription", None)
+    if output_tx:
+        tx_text = getattr(output_tx, "text", None)
+        if tx_text and str(tx_text).strip():
+            messages.append(
+                voice_pb2.ServerMessage(
+                    transcript=voice_pb2.Transcript(
+                        text=str(tx_text),
+                        is_final=True,
+                        speaker="agent",
+                    )
+                )
+            )
+
+    # If we extracted transcription, this event is transcription-only — return early.
+    if messages:
+        logger.info("[EVENT] Transcription: %s", [(m.transcript.speaker, m.transcript.text[:80]) for m in messages])
+        return messages
+
+    # ── 2. Audio / text content ──────────────────────────────────────────
+    #    Prefer server_content (raw Gemini Live path); fall back to
+    #    content (standard ADK path) to avoid duplicates.
     sc = getattr(event, "server_content", None)
+    content = getattr(event, "content", None)
+
     if sc:
         model_turn = getattr(sc, "model_turn", None)
         if model_turn:
@@ -106,35 +112,6 @@ def _map_event(event) -> list[voice_pb2.ServerMessage]:
                         )
                     )
 
-        # ── Transcription events (native audio model) ────────────────────
-        output_tx = getattr(sc, "output_transcription", None)
-        if output_tx:
-            tx_text = getattr(output_tx, "text", None)
-            if tx_text and str(tx_text).strip():
-                messages.append(
-                    voice_pb2.ServerMessage(
-                        transcript=voice_pb2.Transcript(
-                            text=str(tx_text),
-                            is_final=True,
-                            speaker="agent",
-                        )
-                    )
-                )
-
-        input_tx = getattr(sc, "input_transcription", None)
-        if input_tx:
-            tx_text = getattr(input_tx, "text", None)
-            if tx_text and str(tx_text).strip():
-                messages.append(
-                    voice_pb2.ServerMessage(
-                        transcript=voice_pb2.Transcript(
-                            text=str(tx_text),
-                            is_final=True,
-                            speaker="user",
-                        )
-                    )
-                )
-
         if getattr(sc, "turn_complete", False):
             messages.append(
                 voice_pb2.ServerMessage(
@@ -145,6 +122,32 @@ def _map_event(event) -> list[voice_pb2.ServerMessage]:
                     )
                 )
             )
+
+    elif content:
+        for part in getattr(content, "parts", []) or []:
+            inline = getattr(part, "inline_data", None)
+            if inline and getattr(inline, "data", None):
+                mime = getattr(inline, "mime_type", "") or ""
+                if "audio" in mime:
+                    messages.append(
+                        voice_pb2.ServerMessage(
+                            audio=voice_pb2.AudioChunk(
+                                data=inline.data,
+                                mime_type=mime,
+                            )
+                        )
+                    )
+            text = getattr(part, "text", None)
+            if text and str(text).strip():
+                messages.append(
+                    voice_pb2.ServerMessage(
+                        transcript=voice_pb2.Transcript(
+                            text=str(text),
+                            is_final=False,
+                            speaker="agent",
+                        )
+                    )
+                )
 
     # Debug: log what was extracted
     transcript_msgs = [m for m in messages if m.HasField("transcript") and m.transcript.text.strip()]
@@ -221,7 +224,8 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
                 # Enable transcription so voice conversations are persisted.
                 try:
                     _tx_config = genai_types.AudioTranscriptionConfig()
-                except Exception:
+                except Exception as e:
+                    logger.warning("AudioTranscriptionConfig failed — transcription disabled: %s", e)
                     _tx_config = None
 
                 run_config = RunConfig(
@@ -242,8 +246,14 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
                 pass
             except APIError as exc:
                 if exc.code == 1000:
-                    # Normal WebSocket closure — frontend ended the session cleanly.
                     logger.info("Voice session closed normally [user=%s]", user_id)
+                    await out_queue.put(
+                        voice_pb2.ServerMessage(
+                            error=voice_pb2.SessionError(
+                                message="Voice session ended — maximum duration reached. Please start a new session."
+                            )
+                        )
+                    )
                 else:
                     logger.exception("run_live API error [code=%s]", exc.code)
                     await out_queue.put(

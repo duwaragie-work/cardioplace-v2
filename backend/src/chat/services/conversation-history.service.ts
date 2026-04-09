@@ -270,30 +270,67 @@ export class ConversationHistoryService {
         }
       }
 
-      // Update rolling summary with a combined summary of all turns
-      const combined = turns
+      // Generate a concise LLM summary for the session (not the raw transcript)
+      const transcript = turns
         .map((t) => `Patient: ${t.userMessage}\nAI: ${t.aiSummary}`)
         .join('\n')
 
-      console.log(`[Voice Summary] Updating rolling summary for session ${sessionId} (${turns.length} turns, ${combined.length} chars)`)
-      await this.updateRollingSummary(sessionId, '[Voice session]', combined, 'voice')
+      let summary: string
+      try {
+        const result = await this.geminiService.getChatCompletion([
+          {
+            role: 'system',
+            content:
+              'You are a medical scribe. Summarise this voice conversation in 3–5 concise bullet points. ' +
+              'Preserve specific numbers (BP values, weight, dates). Focus on what the patient reported, ' +
+              'what actions were taken (check-ins saved, readings viewed, entries updated/deleted), ' +
+              'and any health concerns discussed. Return only bullet points, no preamble.',
+          },
+          { role: 'user', content: transcript },
+        ])
+        summary = (result.choices?.[0]?.message?.content as string | undefined)?.trim() ?? ''
+      } catch {
+        summary = ''
+      }
 
-      console.log(`Saved ${turns.length} voice transcript turns for session ${sessionId}`)
+      // Fallback: generate a basic summary from the turns if LLM failed
+      if (!summary) {
+        summary = turns
+          .slice(0, 3)
+          .map((t) => `- Patient: ${t.userMessage.slice(0, 80)}`)
+          .join('\n')
+      }
+
+      // Merge with any existing summary (from action events saved earlier)
+      const existing = await this.prisma.session.findUnique({
+        where: { id: sessionId },
+        select: { summary: true, messageCount: true },
+      })
+      const prevSummary = existing?.summary ?? ''
+      const mergedSummary = prevSummary && !prevSummary.includes('Voice conversation about cardiovascular health')
+        ? prevSummary + '\n' + summary
+        : summary
+
+      await this.prisma.session.update({
+        where: { id: sessionId },
+        data: { summary: mergedSummary, messageCount: (existing?.messageCount ?? 0) + turns.length },
+      })
+
+      console.log(`Saved ${turns.length} voice transcript turns for session ${sessionId} with LLM summary`)
     } catch (error) {
       console.error('Error saving voice transcript lines:', error)
-      // Even if conversation rows failed, try to save a basic summary directly
+      // Even if conversation rows failed, try to save a brief summary
       try {
-        const lines2 = lines as Array<{ speaker: string; text: string }>
-        const basicSummary = lines2
-          .map((l) => `- [Voice] ${l.speaker === 'user' ? 'Patient' : 'AI'}: ${l.text.slice(0, 150)}`)
-          .join('\n')
-        if (basicSummary) {
-          await this.prisma.session.update({
-            where: { id: sessionId },
-            data: { summary: basicSummary },
-          })
-          console.log(`[Voice Summary] Fallback summary saved for session ${sessionId}`)
-        }
+        const userLines = lines.filter((l) => l.speaker === 'user')
+        const topics = userLines.slice(0, 3).map((l) => l.text.slice(0, 60))
+        const basicSummary = topics.length > 0
+          ? `- Voice conversation topics: ${topics.join('; ')}`
+          : '- Voice conversation (transcript save failed)'
+        await this.prisma.session.update({
+          where: { id: sessionId },
+          data: { summary: basicSummary },
+        })
+        console.log(`[Voice Summary] Fallback summary saved for session ${sessionId}`)
       } catch (fallbackErr) {
         console.error('Fallback summary also failed:', fallbackErr)
       }

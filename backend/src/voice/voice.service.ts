@@ -59,6 +59,7 @@ interface ActiveSession {
   activity: SessionActivity
   callbacks: VoiceSessionCallbacks
   savedTranscript: boolean
+  streamEnded: boolean
 }
 
 @Injectable()
@@ -96,6 +97,13 @@ export class VoiceService implements OnModuleDestroy {
     this.voiceClient = new protoDesc.voice.VoiceAgent(
       `${host}:${port}`,
       grpc.credentials.createInsecure(),
+      {
+        'grpc.keepalive_time_ms': 30_000,
+        'grpc.keepalive_timeout_ms': 10_000,
+        'grpc.keepalive_permit_without_calls': 1,
+        'grpc.max_receive_message_length': 10 * 1024 * 1024,
+        'grpc.max_send_message_length': 10 * 1024 * 1024,
+      },
     )
 
     this.logger.log(`gRPC client configured → ${host}:${port}`)
@@ -131,6 +139,7 @@ export class VoiceService implements OnModuleDestroy {
       call, userId, sessionId, transcriptBuffer: [],
       activity: { userTexts: [], agentTexts: [], checkins: [], actions: [] },
       savedTranscript: false,
+      streamEnded: false,
       callbacks,
     }
     this.sessions.set(socketId, activeSession)
@@ -226,6 +235,8 @@ export class VoiceService implements OnModuleDestroy {
 
     call.on('error', (err: Error) => {
       this.logger.error(`gRPC stream error [socket=${socketId}]`, err.message)
+      const errSess = this.sessions.get(socketId)
+      if (errSess) errSess.streamEnded = true
       this.saveVoiceTranscript(socketId)
         .then(() => {
           this.sessions.delete(socketId)
@@ -235,6 +246,8 @@ export class VoiceService implements OnModuleDestroy {
 
     call.on('end', () => {
       this.logger.log(`gRPC stream ended [socket=${socketId}]`)
+      const endSess = this.sessions.get(socketId)
+      if (endSess) endSess.streamEnded = true
       this.saveVoiceTranscript(socketId)
         .then(() => {
           this.sessions.delete(socketId)
@@ -257,7 +270,7 @@ export class VoiceService implements OnModuleDestroy {
 
   sendAudio(socketId: string, audioBase64: string): void {
     const session = this.sessions.get(socketId)
-    if (!session) return
+    if (!session || session.streamEnded) return
     try {
       const data = Buffer.from(audioBase64, 'base64')
       session.call.write({
@@ -265,12 +278,14 @@ export class VoiceService implements OnModuleDestroy {
       })
     } catch (err) {
       this.logger.error('Failed to forward audio to ADK service', err)
+      session.callbacks.onError('Voice connection lost. Please try again.')
+      void this.endSession(socketId)
     }
   }
 
   sendText(socketId: string, text: string): void {
     const session = this.sessions.get(socketId)
-    if (!session) return
+    if (!session || session.streamEnded) return
     try {
       session.call.write({ text: { text } })
       // Track user text input in activity
@@ -279,6 +294,8 @@ export class VoiceService implements OnModuleDestroy {
       }
     } catch (err) {
       this.logger.error('Failed to forward text to ADK service', err)
+      session.callbacks.onError('Voice connection lost. Please try again.')
+      void this.endSession(socketId)
     }
   }
 

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/LENOVO/Desktop/WORK/healplace-cardio-prototype/adk-service/.venv/Lib/site-packages/google_genai* -name \"*.py\" -path \"*types*\")"
+    ]
+  }
+}

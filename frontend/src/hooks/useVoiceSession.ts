@@ -260,7 +260,10 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
       const socket = io(`${wsUrl}/voice`, {
         auth: { token },
         transports: ['websocket'],
-        reconnection: false,
+        reconnection: true,
+        reconnectionAttempts: 3,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
       });
       socketRef.current = socket;
 
