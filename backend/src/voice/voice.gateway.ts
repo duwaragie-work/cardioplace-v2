@@ -41,12 +41,13 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {}
 
   async handleConnection(client: Socket) {
+    const t0 = Date.now()
     const token =
       (client.handshake.auth as Record<string, string>)?.token ??
       (client.handshake.query as Record<string, string>)?.token
 
     if (!token) {
-      this.logger.warn(`Voice WS rejected — no token [socket=${client.id}]`)
+      this.logger.warn(`[FLOW] Step 2 FAIL — no token [socket=${client.id}] (${Date.now() - t0}ms)`)
       client.emit('session_error', { message: 'Authentication required' })
       client.disconnect()
       return
@@ -57,7 +58,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
         secret: this.config.getOrThrow('JWT_ACCESS_SECRET'),
       })
       client.data = { userId: payload.sub, token }
-      this.logger.log(`Voice WS connected [socket=${client.id}, user=${payload.sub}]`)
+      this.logger.log(`[FLOW] Step 2 — WS connected + JWT verified [socket=${client.id}, user=${payload.sub}] (${Date.now() - t0}ms)`)
     } catch {
       this.logger.warn(`Voice WS rejected — invalid token [socket=${client.id}]`)
       client.emit('session_error', { message: 'Invalid or expired token' })
@@ -85,7 +86,8 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const authToken = data?.token ?? ''
     const chatSessionId = payload?.sessionId
 
-    this.logger.log(`Starting voice session [socket=${client.id}, chatSession=${chatSessionId ?? 'new'}]`)
+    const sessionStart = Date.now()
+    this.logger.log(`[FLOW] Step 3 START — creating session [socket=${client.id}, chatSession=${chatSessionId ?? 'new'}]`)
 
     await this.voiceService.createSession(
       client.id,
@@ -93,18 +95,22 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       {
         onReady: () => {
           const sessionId = this.voiceService.getSessionId(client.id)
+          this.logger.log(`[FLOW] Step 3 DONE — session ready [socket=${client.id}] (${Date.now() - sessionStart}ms)`)
           client.emit('session_ready', { sessionId })
         },
         onAudio: (audioBase64: string) => {
           client.emit('audio_response', { audio: audioBase64 })
         },
         onTranscript: (text: string, isFinal: boolean, speaker: 'user' | 'agent') => {
+          if (isFinal && text.trim()) this.logger.log(`[FLOW] Step 8/9 — transcript [${speaker}] "${text.slice(0, 60)}"`)
           client.emit('transcript', { text, isFinal, speaker })
         },
         onAction: (type: string, detail: string) => {
+          this.logger.log(`[FLOW] Step 8 — tool action [${type}] ${detail.slice(0, 80)}`)
           client.emit('action', { type, detail })
         },
         onCheckinSaved: (summary) => {
+          this.logger.log(`[FLOW] Step 8 — checkin_saved BP=${summary.systolicBP}/${summary.diastolicBP}`)
           client.emit('checkin_saved', summary)
         },
         onCheckinUpdated: (summary) => {
@@ -114,6 +120,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
           client.emit('session_error', { message })
         },
         onClose: () => {
+          this.logger.log(`[FLOW] Step 10 DONE — session closed [socket=${client.id}] (total ${Date.now() - sessionStart}ms)`)
           client.emit('session_closed', {})
         },
       },

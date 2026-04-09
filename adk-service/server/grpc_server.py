@@ -14,6 +14,7 @@ Each call to StreamSession:
 
 import asyncio
 import logging
+import time
 from typing import AsyncIterator
 
 from google.adk.agents.live_request_queue import LiveRequestQueue
@@ -187,8 +188,9 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
         auth_token = init.auth_token
         language = init.language or "en-US"
 
+        session_t0 = time.time()
         logger.info(
-            "New voice session [user=%s mode=%s]", user_id, mode
+            "[FLOW] Step 5 START — creating AI agent [user=%s mode=%s]", user_id, mode
         )
 
         # ── Step 2: Create ADK runner + session ───────────────────────────
@@ -208,14 +210,16 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
             session = await session_service.create_session(
                 app_name=APP_NAME, user_id=user_id
             )
+            logger.info("[FLOW] Step 5 DONE — AI agent created (%.0fms)", (time.time() - session_t0) * 1000)
         except Exception as exc:
-            logger.exception("Failed to create ADK session")
+            logger.exception("[FLOW] Step 5 FAIL — AI agent creation failed (%.0fms)", (time.time() - session_t0) * 1000)
             yield voice_pb2.ServerMessage(
                 error=voice_pb2.SessionError(message=f"Session init failed: {exc}")
             )
             return
 
         # ── Step 3: Signal ready ──────────────────────────────────────────
+        logger.info("[FLOW] Step 5 — sending SessionReady (%.0fms)", (time.time() - session_t0) * 1000)
         yield voice_pb2.ServerMessage(ready=voice_pb2.SessionReady())
 
         # ── Step 4a: Task — run ADK agent, push events to out_queue ───────
@@ -318,11 +322,14 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
         )
 
         # ── Step 5: Yield from out_queue until done ───────────────────────
+        msg_count = 0
         try:
             while True:
                 item = await out_queue.get()
                 if item is _DONE:
+                    logger.info("[FLOW] Session DONE — %d messages yielded (%.0fms total)", msg_count, (time.time() - session_t0) * 1000)
                     break
+                msg_count += 1
                 yield item
         except asyncio.CancelledError:
             pass

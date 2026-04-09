@@ -9,6 +9,7 @@ stream when a tool completes.
 import asyncio
 import logging
 import os
+import time as _time
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -125,12 +126,15 @@ def make_tools(
 
         saved = False
         try:
+            _t = _time.time()
+            logger.info("[FLOW] Step 8 — submit_checkin HTTP POST START")
             resp = requests.post(
                 f"{NESTJS_URL}/daily-journal",
                 headers=headers,
                 json=payload,
                 timeout=REQUEST_TIMEOUT,
             )
+            logger.info("[FLOW] Step 8 — submit_checkin HTTP POST END (%.0fms, status=%s)", (_time.time() - _t) * 1000, resp.status_code)
             saved = resp.status_code in (200, 201, 202)
             if not saved:
                 logger.warning(
@@ -197,13 +201,15 @@ def make_tools(
             start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
             end_date = now.strftime("%Y-%m-%d")
 
+            _t2 = _time.time()
+            logger.info("[FLOW] Step 8 — get_recent_readings HTTP GET START")
             resp = requests.get(
                 f"{NESTJS_URL}/daily-journal",
                 headers=headers,
                 params={"startDate": start_date, "endDate": end_date, "limit": "5"},
                 timeout=REQUEST_TIMEOUT,
             )
-            logger.info("GET /daily-journal responded %s (%d bytes)", resp.status_code, len(resp.content))
+            logger.info("[FLOW] Step 8 — get_recent_readings HTTP GET END (%.0fms, status=%s)", (_time.time() - _t2) * 1000, resp.status_code)
             if resp.status_code == 200:
                 data = resp.json()
                 entries = data if isinstance(data, list) else data.get("data", [])
@@ -305,12 +311,15 @@ def make_tools(
 
         updated = False
         try:
+            _t3 = _time.time()
+            logger.info("[FLOW] Step 8 — update_checkin HTTP PUT START")
             resp = requests.put(
                 f"{NESTJS_URL}/daily-journal/{entry_id}",
                 headers=headers,
                 json=payload,
                 timeout=REQUEST_TIMEOUT,
             )
+            logger.info("[FLOW] Step 8 — update_checkin HTTP PUT END (%.0fms, status=%s)", (_time.time() - _t3) * 1000, resp.status_code)
             updated = resp.status_code in (200, 201, 202)
             if not updated:
                 logger.warning(
@@ -416,6 +425,8 @@ def make_tools(
 
         deleted_count = 0
         failed_count = 0
+        _t4 = _time.time()
+        logger.info("[FLOW] Step 8 — delete_checkin HTTP DELETE START (%d entries)", len(ids))
         for eid in ids:
             try:
                 resp = requests.delete(
@@ -434,6 +445,8 @@ def make_tools(
             except requests.RequestException as exc:
                 failed_count += 1
                 logger.error("Failed to DELETE /daily-journal/%s: %s", eid, exc)
+
+        logger.info("[FLOW] Step 8 — delete_checkin HTTP DELETE END (%.0fms, deleted=%d, failed=%d)", (_time.time() - _t4) * 1000, deleted_count, failed_count)
 
         if failed_count == 0:
             msg = (

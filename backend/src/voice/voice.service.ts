@@ -113,21 +113,25 @@ export class VoiceService implements OnModuleDestroy {
     authToken = '',
     chatSessionId?: string,
   ): Promise<void> {
+    const t0 = Date.now()
     // Clean up any existing session for this socket
     await this.endSession(socketId)
 
     // Resolve or create a chat session for this voice interaction
     const sessionId = await this.resolveSession(chatSessionId, userId)
+    this.logger.log(`[FLOW] Step 3a — session resolved [${sessionId}] (${Date.now() - t0}ms)`)
 
     const patientContext = await this.buildPatientContext(userId, sessionId)
+    this.logger.log(`[FLOW] Step 3b — patient context built (${Date.now() - t0}ms)`)
 
-    // Open bidirectional gRPC stream
+    // Open bidirectional gRPC stream (Step 4)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let call: any
     try {
       call = this.voiceClient.StreamSession()
+      this.logger.log(`[FLOW] Step 4 — gRPC stream opened to ADK (${Date.now() - t0}ms)`)
     } catch (err) {
-      this.logger.error('Failed to open gRPC stream to ADK service', err)
+      this.logger.error(`[FLOW] Step 4 FAIL — gRPC stream failed (${Date.now() - t0}ms)`, err)
       callbacks.onError('Could not connect to voice service. Please try again.')
       return
     }
@@ -347,13 +351,15 @@ export class VoiceService implements OnModuleDestroy {
   }
 
   private async saveVoiceTranscript(socketId: string): Promise<void> {
+    const saveStart = Date.now()
     const session = this.sessions.get(socketId)
     if (!session) return
     if (session.savedTranscript) {
-      this.logger.log(`saveVoiceTranscript [socket=${socketId}] — already saved, skipping`)
+      this.logger.log(`[FLOW] Step 10 — already saved, skipping [socket=${socketId}]`)
       return
     }
     session.savedTranscript = true
+    this.logger.log(`[FLOW] Step 10 START — saving transcript [socket=${socketId}]`)
 
     const { transcriptBuffer, activity } = session
 
@@ -477,7 +483,7 @@ export class VoiceService implements OnModuleDestroy {
         data: { title },
       }).catch(() => {}) // best-effort
 
-      this.logger.log(`Saved voice transcript [session=${session.sessionId}, lines=${lines.length}, title=${title}]`)
+      this.logger.log(`[FLOW] Step 10 DONE — saved transcript [session=${session.sessionId}, lines=${lines.length}, title=${title}] (${Date.now() - saveStart}ms)`)
     } catch (err) {
       this.logger.error('Failed to save voice transcript', err)
     }
