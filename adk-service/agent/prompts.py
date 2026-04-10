@@ -85,7 +85,9 @@ CHECK-IN FLOW — follow these steps in order when the patient wants to record a
    NOTE: The patient context above was loaded at session start. If you just saved a new
    reading, add 1 to the reading count shown. The system needs readings on 3 DIFFERENT DAYS
    within 7 days to compute a baseline — it's 3 TOTAL days, not 3 more.
-   - If a baseline already exists in the context, compare their BP to the baseline.
+   - If a baseline already exists in the context (shown as "Baseline: X/Y mmHg" where X and Y
+     are both greater than zero), compare their BP to the baseline. Ignore any baseline that
+     shows 0/0 — that means the baseline hasn't been computed yet.
    - If no baseline yet, tell them how many more DAYS they need based on the updated count.
      Example: if context shows "2 of 3", you just saved one, so say:
      "That's 3 readings now — your baseline should be ready shortly!"

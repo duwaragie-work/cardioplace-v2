@@ -614,9 +614,11 @@ export class VoiceService implements OnModuleDestroy {
       lines.push('')
       const completeEntries = entries.filter((e) => e.systolicBP != null && e.diastolicBP != null)
       const entryCount = completeEntries.length
-      if (baseline && baseline.baselineSystolic != null && baseline.baselineDiastolic != null) {
+      const bSys = baseline ? Number(baseline.baselineSystolic) : 0
+      const bDia = baseline ? Number(baseline.baselineDiastolic) : 0
+      if (bSys > 0 && bDia > 0) {
         lines.push(
-          `Baseline: ${Number(baseline.baselineSystolic)}/${Number(baseline.baselineDiastolic)} mmHg`,
+          `Baseline: ${bSys}/${bDia} mmHg`,
         )
       } else if (entryCount >= 3) {
         lines.push(

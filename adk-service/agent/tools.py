@@ -17,7 +17,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 NESTJS_URL = os.getenv("NESTJS_INTERNAL_URL", "http://localhost:8080/api")
-REQUEST_TIMEOUT = 8  # seconds — keep short to avoid long silences on failure
+REQUEST_TIMEOUT = 15  # seconds
 
 
 def make_tools(
