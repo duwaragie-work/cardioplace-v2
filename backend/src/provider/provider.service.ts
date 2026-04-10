@@ -465,16 +465,26 @@ export class ProviderService {
       },
     })
 
-    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    // Make every point unique by appending index for same-day entries
+    const dateCounts = new Map<string, number>()
+
     return {
       statusCode: 200,
-      data: entries.map((e) => ({
-        day: dayNames[new Date(e.entryDate).getDay()],
-        systolic: e.systolicBP,
-        diastolic: e.diastolicBP,
-        date: e.entryDate,
-        time: e.measurementTime ?? null,
-      })),
+      data: entries.map((e, i) => {
+        const dateLabel = new Date(e.entryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        const count = (dateCounts.get(dateLabel) ?? 0) + 1
+        dateCounts.set(dateLabel, count)
+        // Every point gets a unique key — append #N for duplicates
+        const day = count > 1 ? `${dateLabel} #${count}` : dateLabel
+        return {
+          day,
+          systolic: e.systolicBP,
+          diastolic: e.diastolicBP,
+          date: e.entryDate,
+          time: e.measurementTime ?? null,
+          _index: i,
+        }
+      }),
     }
   }
 

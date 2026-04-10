@@ -186,7 +186,7 @@ function Field({
 export default function Profile() {
   const router = useRouter();
   const { t } = useLanguage();
-  const { user, isLoading: isAuthLoading, logout, markOnboardingComplete } = useAuth();
+  const { user, isLoading: isAuthLoading, logout, markOnboardingComplete, updateUser } = useAuth();
 
   const [isEditing, setIsEditing] = useState(false);
   const [userData, setUserData] = useState<User>(initialUserData);
@@ -305,13 +305,18 @@ export default function Profile() {
     }
 
     try {
-      const payload: Record<string, unknown> = {
+      const raw: Record<string, unknown> = {
         name: userData.name,
         dateOfBirth: toDateInputValue(userData.dateOfBirth),
         primaryCondition: userData.primaryCondition,
         communicationPreference: userData.communicationPreference || undefined,
         ...(timezoneLooksValid ? { timezone: userData.timezone } : {}),
       };
+      // Strip empty strings so the backend @IsOptional() skips unfilled fields
+      const payload: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(raw)) {
+        if (v !== "" && v !== undefined) payload[k] = v;
+      }
       const res = await fetchWithAuth(`${API_BASE_URL}/api/v2/auth/profile`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -336,6 +341,7 @@ export default function Profile() {
         timezone: data.timezone ?? userData.timezone,
       };
       setServerSnapshot(next); setUserData(next); setIsEditing(false);
+      updateUser({ name: next.name });
       if (data.onboardingStatus === "COMPLETED") markOnboardingComplete();
     } catch { setSaveError("We couldn't save your profile. Please try again."); }
     finally { setIsSaving(false); }

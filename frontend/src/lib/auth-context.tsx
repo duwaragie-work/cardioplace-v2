@@ -70,6 +70,7 @@ interface AuthContextType {
   login: (response: OtpVerifyResponse) => void;
   logout: () => void;
   markOnboardingComplete: () => void;
+  updateUser: (fields: Partial<AuthUser>) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -80,6 +81,7 @@ const AuthContext = createContext<AuthContextType>({
   login: () => {},
   logout: () => {},
   markOnboardingComplete: () => {},
+  updateUser: () => {},
 });
 
 function setAuthCookie(token: string) {
@@ -264,6 +266,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
   };
 
+  const updateUser = (fields: Partial<AuthUser>) => {
+    setUser((prev) => (prev ? { ...prev, ...fields } : prev));
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -274,6 +280,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         logout,
         markOnboardingComplete,
+        updateUser,
       }}
     >
       {children}

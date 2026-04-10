@@ -65,6 +65,7 @@ export interface AlertDetail {
     systolic: number | null;
     diastolic: number | null;
     date: string;
+    time?: string | null;
   }[];
   escalation: {
     level: string;

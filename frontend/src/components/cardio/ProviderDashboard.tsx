@@ -128,7 +128,7 @@ export default function ProviderDashboard() {
     const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10);
   });
   const [trendEndDate, setTrendEndDate] = useState(() => new Date().toISOString().slice(0, 10));
-  type BpPoint = { day: string; systolic: number | null; diastolic: number | null; date: string };
+  type BpPoint = { day: string; systolic: number | null; diastolic: number | null; date: string; time: string | null };
   const [bpTrendData, setBpTrendData] = useState<BpPoint[]>([]);
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
   const [scheduleAlert, setScheduleAlert] = useState<Alert | null>(null);
@@ -185,7 +185,9 @@ export default function ProviderDashboard() {
   const fetchBpTrend = useCallback(async (patientId: string, start: string, end: string) => {
     try {
       const data = await getPatientBpTrend(patientId, start, end);
-      setBpTrendData(Array.isArray(data) ? data : []);
+      const arr = Array.isArray(data) ? data : [];
+      console.log('[BP TREND DATA]', JSON.stringify(arr.map(d => ({ day: d.day, sys: d.systolic, dia: d.diastolic, time: d.time }))));
+      setBpTrendData(arr);
     } catch {
       setBpTrendData([]);
     }
@@ -835,11 +837,11 @@ export default function ProviderDashboard() {
                               </linearGradient>
                             </defs>
                             <XAxis
-                              dataKey="date"
+                              dataKey="day"
                               axisLine={false}
                               tickLine={false}
                               tick={{ fill: '#94A3B8', fontSize: 10 }}
-                              tickFormatter={(v: string) => { try { return new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); } catch { return String(v); } }}
+                              tickFormatter={(v: string) => v.replace(/ #\d+$/, '')}
                               interval={bpTrendData.length <= 7 ? 0 : Math.max(0, Math.floor(bpTrendData.length / 6) - 1)}
                             >
                               <Label value="Date" position="insideBottom" offset={-2} style={{ fill: '#000000', fontSize: 10 }} />
@@ -851,12 +853,12 @@ export default function ProviderDashboard() {
                               content={({ active, payload }) => {
                                 if (active && payload && payload.length) {
                                   const item = payload[0].payload as BpPoint;
-                                  const dateStr = item.date ? new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+                                  const dateStr = item.date ? new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
                                   return (
                                     <div className="bg-white px-3 py-2 rounded-xl text-xs font-semibold" style={{ boxShadow: '0 4px 12px rgba(0,0,0,0.1)', color: 'var(--brand-text-primary)', border: '1px solid #E9D5FF' }}>
                                       {showSys && <div style={{ color: '#DC2626' }}>Sys: {item.systolic ?? '—'}</div>}
                                       {showDia && <div style={{ color: '#2563EB' }}>Dia: {item.diastolic ?? '—'}</div>}
-                                      {dateStr && <div style={{ color: '#94A3B8' }}>{dateStr}</div>}
+                                      <div style={{ color: '#94A3B8' }}>{dateStr}{item.time ? ` at ${item.time}` : ''}</div>
                                     </div>
                                   );
                                 }
@@ -1050,8 +1052,8 @@ export default function ProviderDashboard() {
                             <stop offset="95%" stopColor="#2563EB" stopOpacity={0} />
                           </linearGradient>
                         </defs>
-                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }}
-                          tickFormatter={(v: string) => new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }}
+                          tickFormatter={(v: string) => v.replace(/ #\d+$/, '')}
                           interval={Math.max(0, Math.floor(bpTrendData.length / 5) - 1)}
                         >
                           <Label value="Date" position="insideBottom" offset={-2} style={{ fill: '#000000', fontSize: 10 }} />

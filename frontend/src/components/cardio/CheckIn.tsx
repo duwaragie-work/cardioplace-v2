@@ -330,7 +330,7 @@ function Step1Date({
 }) {
   const { t } = useLanguage();
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 overflow-hidden">
       <div>
         <p className="text-[13px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>
           {t('checkin.stepOf').replace('{x}', '1')}
@@ -350,7 +350,7 @@ function Step1Date({
           type="date"
           value={form.date}
           onChange={(e) => onChange('date', e.target.value)}
-          className="w-full h-14 px-4 rounded-xl text-[15px] outline-none transition"
+          className="w-full max-w-full h-14 px-4 rounded-xl text-[15px] outline-none transition box-border"
           style={{
             border: '2px solid var(--brand-border)',
             color: 'var(--brand-text-primary)',
@@ -368,7 +368,7 @@ function Step1Date({
           type="time"
           value={form.measurementTime}
           onChange={(e) => onChange('measurementTime', e.target.value)}
-          className="w-full h-14 px-4 rounded-xl text-[15px] outline-none transition"
+          className="w-full max-w-full h-14 px-4 rounded-xl text-[15px] outline-none transition box-border"
           style={{
             border: '2px solid var(--brand-border)',
             color: 'var(--brand-text-primary)',

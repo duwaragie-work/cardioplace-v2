@@ -79,7 +79,7 @@ export default function Dashboard() {
   const { user, isAuthenticated, isLoading } = useAuth();
   const { t } = useLanguage();
 
-  const [bpChartData, setBpChartData] = useState<{ day: string; systolic: number; diastolic: number }[]>([]);
+  const [bpChartData, setBpChartData] = useState<{ day: string; systolic: number; diastolic: number; fullDate: string; time: string }[]>([]);
   const [chartRange, setChartRange] = useState<7 | 90>(7);
   const [latestEntry, setLatestEntry] = useState<JournalEntry | null>(null);
   const [baseline, setBaseline] = useState<Baseline | null>(null);
@@ -99,11 +99,19 @@ export default function Dashboard() {
     ]).then(([entries, baselineData, alertsData, stats]) => {
       const arr: JournalEntry[] = Array.isArray(entries) ? entries : [];
       const sortedAsc = [...arr].sort((a, b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime());
-      setBpChartData(sortedAsc.map((e) => ({
-        day: getDateLabel(e.entryDate),
-        systolic: e.systolicBP ?? 0,
-        diastolic: e.diastolicBP ?? 0,
-      })));
+      const dateCounts = new Map<string, number>();
+      setBpChartData(sortedAsc.map((e) => {
+        const label = getDateLabel(e.entryDate);
+        const count = (dateCounts.get(label) ?? 0) + 1;
+        dateCounts.set(label, count);
+        return {
+          day: count > 1 ? `${label} #${count}` : label,
+          systolic: e.systolicBP ?? 0,
+          diastolic: e.diastolicBP ?? 0,
+          fullDate: e.entryDate,
+          time: e.measurementTime ?? '',
+        };
+      }));
       const sortedDesc = [...arr].sort((a, b) => new Date(b.entryDate).getTime() - new Date(a.entryDate).getTime());
       setLatestEntry(sortedDesc[0] ?? null);
       setTotalEntries(stats?.totalEntries ?? arr.length);
@@ -302,17 +310,27 @@ export default function Dashboard() {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F1EEFF" vertical={false} />
-                    <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} interval={Math.max(0, Math.floor(visibleChartData.length / 8) - 1)}>
+                    <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} interval={Math.max(0, Math.floor(visibleChartData.length / 8) - 1)} tickFormatter={(v: string) => v.replace(/ #\d+$/, '')}>
                       <Label value="Date" position="insideBottom" offset={-2} style={{ fill: '#1d1d1d', fontSize: 10, fontWeight: 600 }} />
                     </XAxis>
                     <YAxis domain={bpDomain} axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} width={38}>
                       <Label value="mmHg" angle={-90} position="insideLeft" offset={4} style={{ fill: '#1d1d1d', fontSize: 10 ,fontWeight: 600}} />
                     </YAxis>
                     <Tooltip
-                      contentStyle={{ backgroundColor: '#fff', border: '1px solid #E9D5FF', borderRadius: 12, boxShadow: '0 4px 16px rgba(123,0,224,0.1)', fontSize: 12 }}
-                      labelStyle={{ color: '#94A3B8', fontSize: 11, marginBottom: 2 }}
-                      itemStyle={{ color: '#7B00E0', fontWeight: 600 }}
                       cursor={{ stroke: '#7B00E0', strokeWidth: 1, strokeDasharray: '4 4' }}
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const d = payload[0].payload as { systolic: number; diastolic: number; fullDate: string; time: string };
+                          const dateStr = d.fullDate ? new Date(d.fullDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+                          return (
+                            <div className="bg-white px-3 py-2 rounded-xl text-xs" style={{ boxShadow: '0 4px 16px rgba(123,0,224,0.1)', border: '1px solid #E9D5FF' }}>
+                              <p className="font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{d.systolic}/{d.diastolic} mmHg</p>
+                              <p style={{ color: '#94A3B8' }}>{dateStr}{d.time ? ` at ${d.time}` : ''}</p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
                     />
                     <Area type="natural" dataKey="systolic" stroke="#7B00E0" strokeWidth={2} fill="url(#colorSystolic)" dot={visibleChartData.length > 14 ? false : { r: 3.5, fill: '#fff', stroke: '#7B00E0', strokeWidth: 2 }} activeDot={{ r: 4, fill: '#7B00E0', stroke: '#fff', strokeWidth: 2 }} />
                   </AreaChart>
