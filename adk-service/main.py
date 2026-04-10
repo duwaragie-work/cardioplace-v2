@@ -152,7 +152,7 @@ async def _sequential_handle_live(invocation_context, function_call_event, tools
         return None
 
     agent = invocation_context.agent
-    streaming_lock = __import__('asyncio').Lock()
+    streaming_lock = asyncio.Lock()
     function_response_events = []
 
     for fc in function_calls:

@@ -64,6 +64,7 @@ interface ActiveSession {
   callbacks: VoiceSessionCallbacks
   savedTranscript: boolean
   streamClosed: boolean
+  closedNotified: boolean
   userAudioChunks: Buffer[]
   agentAudioChunks: Buffer[]
   userAudioBytes: number
@@ -170,6 +171,7 @@ export class VoiceService implements OnModuleDestroy {
       activity: { userTexts: [], agentTexts: [], checkins: [], actions: [] },
       savedTranscript: false,
       streamClosed: false,
+      closedNotified: false,
       userAudioChunks: [],
       agentAudioChunks: [],
       userAudioBytes: 0,
@@ -269,7 +271,10 @@ export class VoiceService implements OnModuleDestroy {
         this.saveVoiceTranscript(socketId)
           .then(() => {
             this.sessions.delete(socketId)
-            callbacks.onClose()
+            if (!activeSession.closedNotified) {
+              activeSession.closedNotified = true
+              callbacks.onClose()
+            }
           })
       }
     })
@@ -290,7 +295,10 @@ export class VoiceService implements OnModuleDestroy {
       this.saveVoiceTranscript(socketId)
         .then(() => {
           this.sessions.delete(socketId)
-          callbacks.onClose()
+          if (!activeSession.closedNotified) {
+            activeSession.closedNotified = true
+            callbacks.onClose()
+          }
         })
     })
 

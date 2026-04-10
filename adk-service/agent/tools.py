@@ -76,6 +76,14 @@ def make_tools(
         Returns:
             dict with 'saved' (bool) and 'message' (str).
         """
+        # Validate BP ranges before submitting
+        if not (60 <= systolic_bp <= 250) or not (40 <= diastolic_bp <= 150):
+            logger.warning("BP out of range: %d/%d — rejecting", systolic_bp, diastolic_bp)
+            return {
+                "saved": False,
+                "message": f"BP values out of range (got {systolic_bp}/{diastolic_bp}). Systolic must be 60-250, diastolic 40-150. Please ask the patient to repeat.",
+            }
+
         from generated import voice_pb2
 
         _put(
