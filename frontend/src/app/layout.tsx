@@ -5,6 +5,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import NavbarWrapper from "@/components/NavbarWrapper";
 import ScrollToTop from "@/components/ScrollToTop";
+import PoweredByFooter from "@/components/PoweredByFooter";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -39,6 +40,7 @@ export default function RootLayout({
           <LanguageProvider>
             <ScrollToTop />
             <NavbarWrapper>{children}</NavbarWrapper>
+            <PoweredByFooter />
           </LanguageProvider>
         </AuthProvider>
       </body>
