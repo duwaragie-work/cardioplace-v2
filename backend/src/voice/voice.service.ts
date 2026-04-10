@@ -6,6 +6,7 @@ import * as path from 'path'
 import { randomUUID } from 'crypto'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { ConversationHistoryService } from '../chat/services/conversation-history.service.js'
+import { GeminiService } from '../gemini/gemini.service.js'
 
 export interface VoiceSessionCallbacks {
   onReady: () => void
@@ -50,6 +51,9 @@ interface SessionActivity {
   actions: Array<{ type: string; detail: string; timestamp: number }>
 }
 
+// Max audio buffer: ~10 minutes at 16kHz 16-bit mono = ~19.2MB
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024
+
 interface ActiveSession {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   call: any
@@ -60,6 +64,10 @@ interface ActiveSession {
   callbacks: VoiceSessionCallbacks
   savedTranscript: boolean
   streamClosed: boolean
+  userAudioChunks: Buffer[]
+  agentAudioChunks: Buffer[]
+  userAudioBytes: number
+  agentAudioBytes: number
 }
 
 @Injectable()
@@ -73,8 +81,29 @@ export class VoiceService implements OnModuleDestroy {
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
     private readonly conversationHistory: ConversationHistoryService,
+    private readonly geminiService: GeminiService,
   ) {
     this.initGrpcClient()
+  }
+
+  /** Convert raw PCM buffers to a WAV file (adds 44-byte header). */
+  private pcmToWav(pcmBuffers: Buffer[], sampleRate: number, channels = 1, bitsPerSample = 16): Buffer {
+    const pcm = Buffer.concat(pcmBuffers)
+    const header = Buffer.alloc(44)
+    header.write('RIFF', 0)
+    header.writeUInt32LE(36 + pcm.length, 4)
+    header.write('WAVE', 8)
+    header.write('fmt ', 12)
+    header.writeUInt32LE(16, 16)
+    header.writeUInt16LE(1, 20)
+    header.writeUInt16LE(channels, 22)
+    header.writeUInt32LE(sampleRate, 24)
+    header.writeUInt32LE(sampleRate * channels * bitsPerSample / 8, 28)
+    header.writeUInt16LE(channels * bitsPerSample / 8, 32)
+    header.writeUInt16LE(bitsPerSample, 34)
+    header.write('data', 36)
+    header.writeUInt32LE(pcm.length, 40)
+    return Buffer.concat([header, pcm])
   }
 
   private initGrpcClient(): void {
@@ -141,6 +170,10 @@ export class VoiceService implements OnModuleDestroy {
       activity: { userTexts: [], agentTexts: [], checkins: [], actions: [] },
       savedTranscript: false,
       streamClosed: false,
+      userAudioChunks: [],
+      agentAudioChunks: [],
+      userAudioBytes: 0,
+      agentAudioBytes: 0,
       callbacks,
     }
     this.sessions.set(socketId, activeSession)
@@ -156,6 +189,11 @@ export class VoiceService implements OnModuleDestroy {
         const rawData = Buffer.isBuffer(msg.audio.data)
           ? msg.audio.data
           : Buffer.from(msg.audio.data)
+        // Buffer agent audio for post-session transcription
+        if (activeSession.agentAudioBytes < MAX_AUDIO_BYTES) {
+          activeSession.agentAudioChunks.push(rawData)
+          activeSession.agentAudioBytes += rawData.length
+        }
         const audioBase64 = rawData.toString('base64')
         callbacks.onAudio(audioBase64)
       } else if (payload === 'transcript') {
@@ -274,6 +312,11 @@ export class VoiceService implements OnModuleDestroy {
     if (!session || session.streamClosed) return
     try {
       const data = Buffer.from(audioBase64, 'base64')
+      // Buffer user audio for post-session transcription
+      if (session.userAudioBytes < MAX_AUDIO_BYTES) {
+        session.userAudioChunks.push(data)
+        session.userAudioBytes += data.length
+      }
       session.call.write({
         audio: { data, mimeType: 'audio/pcm;rate=16000' },
       })
@@ -361,80 +404,73 @@ export class VoiceService implements OnModuleDestroy {
     session.savedTranscript = true
     this.logger.log(`[FLOW] Step 10 START — saving transcript [socket=${socketId}]`)
 
-    const { transcriptBuffer, activity } = session
+    const { activity } = session
 
-    this.logger.log(
-      `saveVoiceTranscript [socket=${socketId}] transcripts=${transcriptBuffer.length} ` +
-      `userTexts=${activity.userTexts.length} agentTexts=${activity.agentTexts.length} checkins=${activity.checkins.length} actions=${activity.actions.length} actionTypes=${activity.actions.map(a => a.type).join(',')}`,
-    )
+    // Snapshot audio buffers and activity, then clear
+    const userAudio = session.userAudioChunks
+    const agentAudio = session.agentAudioChunks
+    session.userAudioChunks = []
+    session.agentAudioChunks = []
+    session.userAudioBytes = 0
+    session.agentAudioBytes = 0
 
-    // Take snapshots and clear
-    const buffer = [...transcriptBuffer]
-    session.transcriptBuffer = []
     const activitySnapshot = {
-      userTexts: [...activity.userTexts],
-      agentTexts: [...activity.agentTexts],
       checkins: [...activity.checkins],
       actions: [...activity.actions],
     }
     session.activity = { userTexts: [], agentTexts: [], checkins: [], actions: [] }
 
-    try {
-      // Build the lines to save — prefer transcript buffer, fall back to activity
-      let lines: Array<{ speaker: 'user' | 'agent'; text: string }> = []
+    this.logger.log(
+      `saveVoiceTranscript [socket=${socketId}] userAudioChunks=${userAudio.length} agentAudioChunks=${agentAudio.length} ` +
+      `checkins=${activitySnapshot.checkins.length} actions=${activitySnapshot.actions.length}`,
+    )
 
-      if (buffer.length > 0) {
-        lines = buffer
-      } else {
-        for (const t of activitySnapshot.userTexts) {
-          lines.push({ speaker: 'user', text: t })
-        }
-        for (const c of activitySnapshot.checkins) {
-          const bp = c.systolicBP && c.diastolicBP ? `${c.systolicBP}/${c.diastolicBP} mmHg` : 'unknown'
-          const meds = c.medicationTaken === true ? 'taken' : c.medicationTaken === false ? 'missed' : 'not reported'
-          const symp = c.symptoms.length > 0 ? c.symptoms.join(', ') : 'no symptoms'
-          lines.push({ speaker: 'user', text: `BP ${bp}, medications ${meds}, ${symp}` })
-          lines.push({
-            speaker: 'agent',
-            text: c.saved
-              ? `Saved check-in: BP ${bp}, medications ${meds}, ${symp}`
-              : 'Attempted to save check-in but failed',
-          })
-        }
-        for (const t of activitySnapshot.agentTexts) {
-          lines.push({ speaker: 'agent', text: t })
+    try {
+      // ── Transcribe audio using Gemini Flash (post-session) ──────────────
+      let userTranscript = ''
+      let agentTranscript = ''
+
+      if (userAudio.length > 0) {
+        try {
+          const userWav = this.pcmToWav(userAudio, 16000)
+          const userBase64 = userWav.toString('base64')
+          this.logger.log(`Transcribing user audio [${(userWav.length / 1024).toFixed(0)} KB]`)
+          userTranscript = await this.geminiService.transcribeAudio(userBase64)
+          this.logger.log(`User transcript [${userTranscript.length} chars]: ${userTranscript.slice(0, 100)}`)
+        } catch (err) {
+          this.logger.error('Failed to transcribe user audio', err)
         }
       }
 
-      if (lines.length === 0) {
-        // No data at all — skip (another call may have already saved)
-        if (activitySnapshot.actions.length === 0 && activitySnapshot.checkins.length === 0) {
-          // Check if summary already exists from a previous call
-          const existing = await this.prisma.session.findUnique({
-            where: { id: session.sessionId },
-            select: { summary: true },
-          })
-          if (existing?.summary) {
-            this.logger.log(`Summary already saved for session [socket=${socketId}] — skipping`)
-            return
-          }
-          // Truly nothing happened
-          this.logger.log(`No data to save for voice session [socket=${socketId}]`)
-          await this.prisma.session.update({
-            where: { id: session.sessionId },
-            data: { summary: '- Voice conversation about cardiovascular health', title: 'Voice Chat' },
-          }).catch(() => {})
-          return
+      if (agentAudio.length > 0) {
+        try {
+          const agentWav = this.pcmToWav(agentAudio, 24000)
+          const agentBase64 = agentWav.toString('base64')
+          this.logger.log(`Transcribing agent audio [${(agentWav.length / 1024).toFixed(0)} KB]`)
+          agentTranscript = await this.geminiService.transcribeAudio(agentBase64)
+          this.logger.log(`Agent transcript [${agentTranscript.length} chars]: ${agentTranscript.slice(0, 100)}`)
+        } catch (err) {
+          this.logger.error('Failed to transcribe agent audio', err)
         }
+      }
 
-        this.logger.log(`No transcript lines for voice session [socket=${socketId}] — generating summary from ${activitySnapshot.actions.length} actions, ${activitySnapshot.checkins.length} checkins`)
+      // ── Build transcript lines ─────────────────────────────────────────
+      const lines: Array<{ speaker: 'user' | 'agent'; text: string }> = []
+      if (userTranscript.trim()) {
+        lines.push({ speaker: 'user', text: userTranscript.trim() })
+      }
+      if (agentTranscript.trim()) {
+        lines.push({ speaker: 'agent', text: agentTranscript.trim() })
+      }
 
+      if (lines.length === 0) {
+        // No transcription — fall back to activity-based summary
         const summaryParts: string[] = []
         let title = 'Voice Chat'
 
         for (const action of activitySnapshot.actions) {
           if (action.type === 'fetching_readings') {
-            summaryParts.push(`- Patient requested to view past BP readings (${action.detail || 'last 7 days'})`)
+            summaryParts.push(`- Patient requested to view past BP readings`)
           } else if (action.type === 'submitting_checkin') {
             summaryParts.push(`- Patient submitted a new check-in: ${action.detail || 'values recorded'}`)
           } else if (action.type === 'updating_checkin') {
@@ -445,7 +481,6 @@ export class VoiceService implements OnModuleDestroy {
             title = 'Voice: Deleted reading'
           }
         }
-
         for (const c of activitySnapshot.checkins) {
           const bp = c.systolicBP && c.diastolicBP ? `${c.systolicBP}/${c.diastolicBP}` : 'unknown'
           const meds = c.medicationTaken === true ? 'taken' : c.medicationTaken === false ? 'missed' : 'not reported'
@@ -454,36 +489,40 @@ export class VoiceService implements OnModuleDestroy {
           title = `BP Check-in ${bp}`
         }
 
-        const basicSummary = summaryParts.join('\n')
-        this.logger.log(`[SUMMARY SAVING] session=${session.sessionId} summary="${basicSummary}" title="${title}"`)
+        const summary = summaryParts.length > 0
+          ? summaryParts.join('\n')
+          : '- Voice conversation about cardiovascular health'
 
         await this.prisma.session.update({
           where: { id: session.sessionId },
-          data: { summary: basicSummary, title },
+          data: { summary, title },
         }).catch((err) => this.logger.error('Failed to save summary', err))
+
+        this.logger.log(`Saved activity-based summary [session=${session.sessionId}]`)
         return
       }
 
-      // Save individual transcript lines as separate Conversation rows + update rolling summary
+      // ── Save transcripts + generate LLM summary ───────────────────────
       await this.conversationHistory.saveVoiceTranscriptLines(session.sessionId, lines)
 
-      // Generate a meaningful session title based on what happened
+      // Generate a meaningful session title
       let title = 'Voice Chat'
       if (activitySnapshot.checkins.length > 0) {
         const c = activitySnapshot.checkins[0]
         const bp = c.systolicBP && c.diastolicBP ? `${c.systolicBP}/${c.diastolicBP}` : null
         title = bp ? `BP Check-in ${bp}` : 'Voice Check-in'
-      } else if (activitySnapshot.userTexts.length > 0) {
-        const firstMsg = activitySnapshot.userTexts[0].slice(0, 40)
-        title = `Voice: ${firstMsg}${activitySnapshot.userTexts[0].length > 40 ? '…' : ''}`
+      } else if (userTranscript.trim()) {
+        const firstMsg = userTranscript.trim().slice(0, 40)
+        title = `Voice: ${firstMsg}${userTranscript.length > 40 ? '…' : ''}`
       }
 
       await this.prisma.session.update({
         where: { id: session.sessionId },
         data: { title },
-      }).catch(() => {}) // best-effort
+      }).catch(() => {})
 
       this.logger.log(`[FLOW] Step 10 DONE — saved transcript [session=${session.sessionId}, lines=${lines.length}, title=${title}] (${Date.now() - saveStart}ms)`)
+      this.logger.log(`Saved voice transcript [session=${session.sessionId}, title=${title}]`)
     } catch (err) {
       this.logger.error('Failed to save voice transcript', err)
     }
@@ -508,6 +547,7 @@ export class VoiceService implements OnModuleDestroy {
           where: { userId },
           orderBy: { entryDate: 'desc' },
           select: {
+            id: true,
             entryDate: true,
             systolicBP: true,
             diastolicBP: true,
@@ -573,7 +613,7 @@ export class VoiceService implements OnModuleDestroy {
                 : 'not recorded'
           const wt = e.weight != null ? `, Weight: ${Number(e.weight)} lbs` : ''
           const sym = (e.symptoms as string[] | null)?.length ? `, Symptoms: ${(e.symptoms as string[]).join(', ')}` : ''
-          lines.push(`- ${date} at ${time}: ${bp}, Medication: ${med}${wt}${sym}`)
+          lines.push(`- [entry_id="${e.id}"] ${date} at ${time}: ${bp}, Medication: ${med}${wt}${sym}`)
         }
       }
 

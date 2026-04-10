@@ -26,6 +26,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ── OpenTelemetry / LangSmith tracing ─────────────────────────────────────────
+# ADK instruments agent invocations, LLM calls, and tool calls via OTEL.
+# If OTEL_EXPORTER_OTLP_ENDPOINT is set, traces are exported to LangSmith.
+if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"):
+    try:
+        from google.adk.telemetry.setup import maybe_set_otel_providers
+        maybe_set_otel_providers()
+        logger.info("OpenTelemetry tracing enabled → %s", os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+    except Exception as e:
+        logger.warning("Failed to set up OpenTelemetry tracing: %s", e)
+else:
+    logger.info("OpenTelemetry tracing disabled (OTEL_EXPORTER_OTLP_ENDPOINT not set)")
+
 # ── Generate proto stubs if missing ──────────────────────────────────────────
 import subprocess
 import pathlib
@@ -60,63 +73,64 @@ if not _PB2.exists():
 #    the generated grpc stub resolves correctly ─────────────────────────────
 sys.path.insert(0, str(_GENERATED.resolve()))
 
-# ── Patches for gemini-3.1-flash-live-preview compatibility ─────────────────
-# This model only accepts `realtime_input` messages; it rejects the
-# `client_content` (LiveClientContent) format that ADK uses by default.
-# It also requires the `audio` field (not deprecated `media_chunks`).
+# ── Conditional patches for Gemini model compatibility ─────────────────────
+# gemini-3.1-flash-live-preview requires special handling (realtime_input
+# instead of LiveClientContent, audio field instead of media_chunks).
+# gemini-2.0-flash-live-preview-04-09 works with standard ADK paths.
+_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-live-preview-04-09")
+
 from google.adk.models.gemini_llm_connection import GeminiLlmConnection
 from google.genai import types as _genai_types
 
-# Patch 1: send_realtime — use `audio` field instead of deprecated `media_chunks`
-_original_send_realtime = GeminiLlmConnection.send_realtime
+if "3.1" in _GEMINI_MODEL:
+    # Patch 1: send_realtime — use `audio` field instead of deprecated `media_chunks`
+    _original_send_realtime = GeminiLlmConnection.send_realtime
 
-async def _patched_send_realtime(self, input):  # noqa: A002
-    if isinstance(input, _genai_types.Blob):
-        await self._gemini_session.send_realtime_input(audio=input)
-    else:
-        await _original_send_realtime(self, input)
+    async def _patched_send_realtime(self, input):  # noqa: A002
+        if isinstance(input, _genai_types.Blob):
+            await self._gemini_session.send_realtime_input(audio=input)
+        else:
+            await _original_send_realtime(self, input)
 
-GeminiLlmConnection.send_realtime = _patched_send_realtime
-logger.info("Applied send_realtime patch: audio field replaces media_chunks")
+    GeminiLlmConnection.send_realtime = _patched_send_realtime
+    logger.info("Applied send_realtime patch for %s", _GEMINI_MODEL)
 
-# Patch 2: send_content — use `send_realtime_input(text=...)` for user text
-# content instead of LiveClientContent which gemini-3.1-flash-live-preview
-# rejects with 1007 "invalid argument".
-_original_send_content = GeminiLlmConnection.send_content
+    # Patch 2: send_content — use send_realtime_input(text=...) and send_tool_response
+    _original_send_content = GeminiLlmConnection.send_content
 
-async def _patched_send_content(self, content):
-    parts = content.parts or []
-    has_function_response = any(
-        getattr(p, "function_response", None) for p in parts
-    )
-    if has_function_response:
-        # Function responses — send via tool_response API for reliability
-        func_responses = []
-        for p in parts:
-            fr = getattr(p, "function_response", None)
-            if fr:
-                func_responses.append(fr)
-        if func_responses:
-            try:
-                await self._gemini_session.send_tool_response(
-                    function_responses=func_responses
-                )
-                logger.info("Sent %d function response(s) via send_tool_response", len(func_responses))
-            except Exception as exc:
-                logger.error("send_tool_response failed, falling back to original: %s", exc)
+    async def _patched_send_content(self, content):
+        parts = content.parts or []
+        has_function_response = any(
+            getattr(p, "function_response", None) for p in parts
+        )
+        if has_function_response:
+            func_responses = []
+            for p in parts:
+                fr = getattr(p, "function_response", None)
+                if fr:
+                    func_responses.append(fr)
+            if func_responses:
+                try:
+                    await self._gemini_session.send_tool_response(
+                        function_responses=func_responses
+                    )
+                    logger.info("Sent %d function response(s) via send_tool_response", len(func_responses))
+                except Exception as exc:
+                    logger.error("send_tool_response failed, falling back to original: %s", exc)
+                    await _original_send_content(self, content)
+            else:
                 await _original_send_content(self, content)
         else:
-            await _original_send_content(self, content)
-    else:
-        # Non-function content — send as realtime text input
-        text = "".join(
-            p.text for p in parts if getattr(p, "text", None)
-        )
-        if text:
-            await self._gemini_session.send_realtime_input(text=text)
+            text = "".join(
+                p.text for p in parts if getattr(p, "text", None)
+            )
+            if text:
+                await self._gemini_session.send_realtime_input(text=text)
 
-GeminiLlmConnection.send_content = _patched_send_content
-logger.info("Applied send_content patch: realtime_input text replaces LiveClientContent")
+    GeminiLlmConnection.send_content = _patched_send_content
+    logger.info("Applied send_content patch for %s", _GEMINI_MODEL)
+else:
+    logger.info("Using standard ADK paths — no patches needed for %s", _GEMINI_MODEL)
 
 # ── Imports that depend on generated stubs ───────────────────────────────────
 import grpc
