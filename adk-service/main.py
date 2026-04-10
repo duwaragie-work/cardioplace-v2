@@ -132,6 +132,44 @@ if "3.1" in _GEMINI_MODEL:
 else:
     logger.info("Using standard ADK paths — no patches needed for %s", _GEMINI_MODEL)
 
+# ── Patch: disable parallel tool execution in ADK Live mode ──────────────────
+# By default ADK runs multiple function calls in parallel via asyncio.gather().
+# This causes "(merged tools)" spans and can confuse the voice model.
+# Patch it to execute tools sequentially — one at a time.
+from google.adk.flows.llm_flows import functions as _adk_functions
+
+_original_handle_live = _adk_functions.handle_function_calls_live
+
+async def _sequential_handle_live(invocation_context, function_call_event, tools_dict):
+    """Execute tool calls one at a time instead of in parallel."""
+    from google.adk.flows.llm_flows.functions import (
+        _execute_single_function_call_live,
+        merge_parallel_function_response_events,
+    )
+
+    function_calls = function_call_event.get_function_calls()
+    if not function_calls:
+        return None
+
+    agent = invocation_context.agent
+    streaming_lock = __import__('asyncio').Lock()
+    function_response_events = []
+
+    for fc in function_calls:
+        result = await _execute_single_function_call_live(
+            invocation_context, fc, tools_dict, agent, streaming_lock,
+        )
+        if result is not None:
+            function_response_events.append(result)
+
+    if not function_response_events:
+        return None
+
+    return merge_parallel_function_response_events(function_response_events)
+
+_adk_functions.handle_function_calls_live = _sequential_handle_live
+logger.info("Applied sequential tool execution patch for Live mode")
+
 # ── Imports that depend on generated stubs ───────────────────────────────────
 import grpc
 from grpc import aio
