@@ -5,11 +5,13 @@ import { VoiceGateway } from './voice.gateway.js'
 import { VoiceService } from './voice.service.js'
 import { PrismaModule } from '../prisma/prisma.module.js'
 import { ChatModule } from '../chat/chat.module.js'
+import { GeminiModule } from '../gemini/gemini.module.js'
 
 @Module({
   imports: [
     PrismaModule,
     ChatModule,
+    GeminiModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

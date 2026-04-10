@@ -23,10 +23,13 @@ from google.genai import types as genai_types
 from google.genai.errors import APIError
 from grpc import aio
 
+from opentelemetry import trace as otel_trace
+
 from agent.cardio_agent import create_session_runner, APP_NAME
 from generated import voice_pb2, voice_pb2_grpc
 
 logger = logging.getLogger(__name__)
+_tracer = otel_trace.get_tracer("healplace.voice")
 
 # Sentinel that signals run_agent task has finished
 _DONE = object()
@@ -36,10 +39,8 @@ def _map_event(event) -> list[voice_pb2.ServerMessage]:
     """
     Convert one ADK event into zero or more ServerMessage protos.
 
-    Transcription events arrive as top-level fields on the ADK Event
-    (event.input_transcription / event.output_transcription), NOT inside
-    event.server_content.  Audio and text content come through either
-    event.server_content (preferred) or event.content (fallback).
+    Transcription is handled separately by the NestJS backend (post-session),
+    so we only extract audio/text content and tool call notifications here.
     """
     messages: list[voice_pb2.ServerMessage] = []
 
@@ -65,43 +66,7 @@ def _map_event(event) -> list[voice_pb2.ServerMessage]:
             )
             logger.info("[EVENT] Tool call detected: %s → action %s", tool_name, action_type)
 
-    # ── 1. Transcription events (top-level on ADK Event) ─────────────────
-    #    The ADK sets these directly on the event and returns early,
-    #    so server_content / content are NOT populated for these events.
-    input_tx = getattr(event, "input_transcription", None)
-    if input_tx:
-        tx_text = getattr(input_tx, "text", None)
-        if tx_text and str(tx_text).strip():
-            messages.append(
-                voice_pb2.ServerMessage(
-                    transcript=voice_pb2.Transcript(
-                        text=str(tx_text),
-                        is_final=True,
-                        speaker="user",
-                    )
-                )
-            )
-
-    output_tx = getattr(event, "output_transcription", None)
-    if output_tx:
-        tx_text = getattr(output_tx, "text", None)
-        if tx_text and str(tx_text).strip():
-            messages.append(
-                voice_pb2.ServerMessage(
-                    transcript=voice_pb2.Transcript(
-                        text=str(tx_text),
-                        is_final=True,
-                        speaker="agent",
-                    )
-                )
-            )
-
-    # If we extracted transcription, this event is transcription-only — return early.
-    if messages:
-        logger.debug("[EVENT] Transcription: %s", [(m.transcript.speaker, m.transcript.text[:80]) for m in messages])
-        return messages
-
-    # ── 2. Audio / text content ──────────────────────────────────────────
+    # ── 1. Audio / text content ──────────────────────────────────────────
     #    Prefer server_content (raw Gemini Live path); fall back to
     #    content (standard ADK path) to avoid duplicates.
     sc = getattr(event, "server_content", None)
@@ -220,6 +185,13 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
         out_queue: asyncio.Queue = asyncio.Queue()
         live_queue = LiveRequestQueue()
 
+        # Create a root span for the entire voice session
+        session_span = _tracer.start_span(
+            "voice_session",
+            attributes={"user_id": user_id, "mode": mode},
+        )
+        session_ctx = otel_trace.set_span_in_context(session_span)
+
         try:
             runner, session_service = create_session_runner(
                 user_id=user_id,
@@ -235,10 +207,15 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
             logger.info("[FLOW] Step 5 DONE — AI agent created (%.0fms)", (time.time() - session_t0) * 1000)
         except Exception as exc:
             logger.exception("[FLOW] Step 5 FAIL — AI agent creation failed (%.0fms)", (time.time() - session_t0) * 1000)
+            logger.exception("Failed to create ADK session")
+            session_span.set_status(otel_trace.StatusCode.ERROR, str(exc))
+            session_span.end()
             yield voice_pb2.ServerMessage(
                 error=voice_pb2.SessionError(message=f"Session init failed: {exc}")
             )
             return
+
+        session_span.set_attribute("session_id", session.id)
 
         # ── Step 3: Signal ready ──────────────────────────────────────────
         logger.info("[FLOW] Step 5 — sending SessionReady (%.0fms)", (time.time() - session_t0) * 1000)
@@ -247,39 +224,41 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
         # ── Step 4a: Task — run ADK agent, push events to out_queue ───────
         async def run_agent_task() -> None:
             try:
-                # Enable transcription so voice conversations are persisted.
-                try:
-                    _tx_config = genai_types.AudioTranscriptionConfig()
-                except Exception as e:
-                    logger.warning("AudioTranscriptionConfig failed — transcription disabled: %s", e)
-                    _tx_config = None
-
                 run_config = RunConfig(
                     response_modalities=["AUDIO"],
-                    output_audio_transcription=_tx_config,
-                    input_audio_transcription=_tx_config,
-                    realtime_input_config=genai_types.RealtimeInputConfig(
-                        automatic_activity_detection=genai_types.AutomaticActivityDetection(
-                            start_of_speech_sensitivity=genai_types.StartSensitivity.START_SENSITIVITY_LOW,
-                            end_of_speech_sensitivity=genai_types.EndSensitivity.END_SENSITIVITY_LOW,
-                            prefix_padding_ms=800,
-                            silence_duration_ms=1500,
-                        ),
-                    ),
                 )
-                logger.info("[Config] RunConfig: modalities=AUDIO, transcription=%s", "enabled" if _tx_config else "disabled")
+                logger.info("[Config] RunConfig: modalities=AUDIO, defaults")
+                event_count = 0
+                tool_call_count = 0
+                audio_chunk_count = 0
                 async for event in runner.run_live(
                     user_id=user_id,
                     session_id=session.id,
                     live_request_queue=live_queue,
                     run_config=run_config,
                 ):
-                    for msg in _map_event(event):
+                    event_count += 1
+                    mapped = _map_event(event)
+                    for msg in mapped:
+                        if msg.HasField("audio"):
+                            audio_chunk_count += 1
+                        elif msg.HasField("action"):
+                            tool_call_count += 1
+                            with _tracer.start_span(
+                                f"tool_call {msg.action.type}",
+                                context=session_ctx,
+                            ) as tc_span:
+                                tc_span.set_attribute("tool.type", msg.action.type)
+                                tc_span.set_attribute("tool.detail", msg.action.detail)
                         await out_queue.put(msg)
             except asyncio.CancelledError:
                 pass
             except APIError as exc:
                 if exc.code == 1000:
+                    session_span.set_status(otel_trace.StatusCode.OK)
+                    session_span.set_attribute("events_total", event_count)
+                    session_span.set_attribute("audio_chunks", audio_chunk_count)
+                    session_span.set_attribute("tool_calls", tool_call_count)
                     logger.info("Voice session closed normally [user=%s]", user_id)
                     await out_queue.put(
                         voice_pb2.ServerMessage(
@@ -359,6 +338,14 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
             agent_task.cancel()
             input_task.cancel()
             live_queue.close()
+            # End the session span and flush to LangSmith
+            session_span.end()
+            try:
+                provider = otel_trace.get_tracer_provider()
+                if hasattr(provider, 'force_flush'):
+                    provider.force_flush(timeout_millis=5000)
+            except Exception:
+                pass
             logger.info("Voice session ended [user=%s]", user_id)
 
         yield voice_pb2.ServerMessage(closed=voice_pb2.SessionClosed())

@@ -109,6 +109,26 @@ export class GeminiService implements OnModuleInit {
   }
 
   /**
+   * Transcribe audio using Gemini Flash.
+   * Accepts a base64-encoded WAV and returns the transcription text.
+   */
+  async transcribeAudio(audioBase64: string, mimeType = 'audio/wav'): Promise<string> {
+    return this.withRetry('transcribeAudio', async () => {
+      const response = await this.client.models.generateContent({
+        model: this.chatModel,
+        contents: [{
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: audioBase64 } },
+            { text: 'Transcribe this audio exactly as spoken. Return only the transcription text, nothing else. If the audio is silent or unintelligible, return an empty string.' },
+          ],
+        }],
+      })
+      return response.text?.trim() ?? ''
+    })
+  }
+
+  /**
    * Generate content with function calling support.
    * Returns the raw Gemini response so the caller can inspect functionCall parts.
    */
