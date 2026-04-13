@@ -2,6 +2,8 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
+ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
+
 COPY package*.json ./
 RUN npm ci
 
@@ -13,6 +15,8 @@ RUN npm run build
 FROM node:20-slim
 
 WORKDIR /app
+
+ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 
 COPY package*.json ./
 RUN npm ci --omit=dev
