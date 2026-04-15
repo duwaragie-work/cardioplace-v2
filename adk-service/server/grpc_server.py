@@ -226,8 +226,17 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
             try:
                 run_config = RunConfig(
                     response_modalities=["AUDIO"],
+                    output_audio_transcription=genai_types.AudioTranscriptionConfig(),
+                    input_audio_transcription=genai_types.AudioTranscriptionConfig(),
+                    realtime_input_config=genai_types.RealtimeInputConfig(
+                        automatic_activity_detection=genai_types.AutomaticActivityDetection(
+                            end_of_speech_sensitivity=genai_types.EndSensitivity.END_SENSITIVITY_HIGH,
+                            silence_duration_ms=200,
+                        ),
+                        activity_handling=genai_types.ActivityHandling.NO_INTERRUPTION,
+                    ),
                 )
-                logger.info("[Config] RunConfig: modalities=AUDIO, defaults")
+                logger.info("[Config] RunConfig: modalities=AUDIO, audio_transcription=enabled, VAD=high/200ms")
                 event_count = 0
                 tool_call_count = 0
                 audio_chunk_count = 0
