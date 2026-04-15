@@ -121,21 +121,12 @@ async def _patched_send_content_for_tool(self, content):
                 "[ToolResponsePatch] Sent %d function response(s) via send_tool_response",
                 len(func_responses),
             )
-            # Nudge: AI Studio Live API does NOT auto-respond after a bare
-            # tool response. Without an explicit turn_complete the model
-            # sits idle waiting for VAD-end that never fires, then the
-            # connection idle-times-out at ~30s. This signal forces the
-            # model to start its response turn immediately.
-            try:
-                await self._gemini_session.send(
-                    input=_genai_types.LiveClientContent(turn_complete=True)
-                )
-                logger.info("[ToolResponsePatch] Sent turn_complete nudge after tool response")
-            except Exception as nudge_err:
-                logger.warning(
-                    "[ToolResponsePatch] turn_complete nudge failed: %s",
-                    nudge_err,
-                )
+            # Per official Gemini Live docs, the model auto-continues its
+            # turn after receiving a tool response — no follow-up signal
+            # required. The actual cause of post-tool-call silence is VAD
+            # interruption from the user's mic; that's fixed via
+            # RealtimeInputConfig.activity_handling=NO_INTERRUPTION in
+            # grpc_server.py's RunConfig.
             return
         except Exception as exc:
             logger.warning(
