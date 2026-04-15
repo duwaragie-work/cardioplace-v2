@@ -250,12 +250,12 @@ export default function OnboardingPage() {
           </div>
 
           {/* Right side - Info Panel (match register panel) */}
-          <div className="hidden md:flex flex-1 items-center justify-center">
-            <div className="bg-linear-to-br from-[#f3e8ff] to-[#e9d5ff] rounded-3xl md:p-6 lg:p-10 md:w-80 md:h-80 lg:w-105 lg:h-auto flex">
+          <div className="hidden md:flex flex-1 items-center justify-center lg:justify-end">
+            <div className="bg-linear-to-br from-[#f3e8ff] to-[#e9d5ff] rounded-3xl md:p-6 lg:p-10 md:w-80 md:h-80 lg:w-110 lg:h-auto flex">
               <div className="space-y-4 my-auto w-full">
                 <div className="flex items-center gap-3">
-                  <div className="bg-[#7B00E0] size-12 lg:size-16 rounded-2xl flex items-center justify-center">
-                    <svg className="w-6 h-6 lg:w-8 lg:h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <div className="bg-[#7B00E0] size-10 lg:size-16 rounded-2xl flex items-center justify-center shrink-0">
+                    <svg className="w-5 h-5 lg:w-8 lg:h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -263,31 +263,31 @@ export default function OnboardingPage() {
                       />
                     </svg>
                   </div>
-                  <h3 className="font-bold text-[#170c1d] text-base md:text-lg lg:text-2xl">
+                  <h3 className="font-bold text-[#170c1d] text-base lg:text-2xl whitespace-nowrap">
                     {t('onboarding.cardTitle')}
                   </h3>
                 </div>
-                <p className="text-[#4b3b55] text-xs md:text-sm lg:text-base leading-relaxed">
+                <p className="text-[#4b3b55] text-xs lg:text-base leading-relaxed">
                   {t('onboarding.cardDesc')}
                 </p>
                 <div className="space-y-3 pt-2">
-                  <div className="flex items-start gap-3">
-                    <div className="bg-white rounded-full p-1 mt-1">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-white rounded-full p-1">
                       <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
                     </div>
-                    <p className="text-[#4b3b55] text-xs md:text-sm">{t('onboarding.benefit1')}</p>
+                    <p className="text-[#4b3b55] text-xs lg:text-sm">{t('onboarding.benefit1')}</p>
                   </div>
-                  <div className="flex items-start gap-3">
-                    <div className="bg-white rounded-full p-1 mt-1">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-white rounded-full p-1">
                       <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
                     </div>
-                    <p className="text-[#4b3b55] text-xs md:text-sm">{t('onboarding.benefit2')}</p>
+                    <p className="text-[#4b3b55] text-xs lg:text-sm">{t('onboarding.benefit2')}</p>
                   </div>
-                  <div className="flex items-start gap-3">
-                    <div className="bg-white rounded-full p-1 mt-1">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-white rounded-full p-1">
                       <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
                     </div>
-                    <p className="text-[#4b3b55] text-xs md:text-sm">{t('onboarding.benefit3')}</p>
+                    <p className="text-[#4b3b55] text-xs lg:text-sm">{t('onboarding.benefit3')}</p>
                   </div>
                 </div>
               </div>

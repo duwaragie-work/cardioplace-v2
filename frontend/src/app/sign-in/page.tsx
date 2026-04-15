@@ -327,42 +327,42 @@ export default function RegisterPage() {
           </div>
 
           {/* Right side - Info Panel */}
-          <div className="hidden md:flex flex-1 items-center justify-center">
-            <div className="bg-linear-to-br from-[#f3e8ff] to-[#e9d5ff] rounded-3xl md:p-6 lg:p-10 md:w-80 md:h-80 lg:w-105 lg:h-auto flex">
+          <div className="hidden md:flex flex-1 items-center justify-center lg:justify-end">
+            <div className="bg-linear-to-br from-[#f3e8ff] to-[#e9d5ff] rounded-3xl md:p-6 lg:p-10 md:w-80 md:h-80 lg:w-120 lg:h-auto flex">
               <div className="space-y-4 my-auto w-full">
                 <div className="flex items-center gap-3">
-                  <div className="bg-[#7B00E0] size-12 lg:size-16 rounded-2xl flex items-center justify-center">
-                    <CheckCircle2 className="w-6 h-6 lg:w-8 lg:h-8 text-white" strokeWidth={2} />
+                  <div className="bg-[#7B00E0] size-10 lg:size-16 rounded-2xl flex items-center justify-center">
+                    <CheckCircle2 className="w-5 h-5 lg:w-8 lg:h-8 text-white" strokeWidth={2} />
                   </div>
-                  <h3 className="font-bold text-[#170c1d] text-base md:text-lg lg:text-2xl">
+                  <h3 className="font-bold text-[#170c1d] text-base lg:text-2xl">
                     {t('register.secureAccess')}
                   </h3>
                 </div>
-                <p className="text-[#4b3b55] text-xs md:text-sm lg:text-base leading-relaxed">
+                <p className="text-[#4b3b55] text-xs lg:text-base leading-relaxed">
                   {t('register.secureDesc')}
                 </p>
                 <div className="space-y-3 pt-2">
-                  <div className="flex items-start gap-3">
-                    <div className="bg-white rounded-full p-1 mt-1">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-white rounded-full p-1">
                       <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
                     </div>
-                    <p className="text-[#4b3b55] text-xs md:text-sm">
+                    <p className="text-[#4b3b55] text-xs lg:text-sm">
                       {t('register.noPassword')}
                     </p>
                   </div>
-                  <div className="flex items-start gap-3">
-                    <div className="bg-white rounded-full p-1 mt-1">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-white rounded-full p-1">
                       <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
                     </div>
-                    <p className="text-[#4b3b55] text-xs md:text-sm">
+                    <p className="text-[#4b3b55] text-xs lg:text-sm">
                       {t('register.codeExpires')}
                     </p>
                   </div>
-                  <div className="flex items-start gap-3">
-                    <div className="bg-white rounded-full p-1 mt-1">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-white rounded-full p-1">
                       <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
                     </div>
-                    <p className="text-[#4b3b55] text-xs md:text-sm">
+                    <p className="text-[#4b3b55] text-xs lg:text-sm">
                       {t('register.dataEncrypted')}
                     </p>
                   </div>
@@ -374,6 +374,16 @@ export default function RegisterPage() {
       </div>
       </div>
       <LandingFooter />
+      <footer className="w-full py-3 text-center text-sm font-medium text-white" style={{ backgroundColor: '#7b00e0' }}>
+        <a
+          href="https://healplace.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:underline hover:text-gray-200 transition-colors"
+        >
+          A Healplace Company
+        </a>
+      </footer>
     </div>
     </Suspense>
   );
