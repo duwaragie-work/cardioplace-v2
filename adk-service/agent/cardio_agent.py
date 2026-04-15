@@ -18,7 +18,7 @@ from .tools import make_tools
 
 logger = logging.getLogger(__name__)
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-live-2.5-flash-preview")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-live-preview")
 APP_NAME = "healplace_cardio"
 
 

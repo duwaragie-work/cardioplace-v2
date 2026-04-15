@@ -74,15 +74,17 @@ if not _PB2.exists():
 sys.path.insert(0, str(_GENERATED.resolve()))
 
 # ── Conditional patches for Gemini model compatibility ─────────────────────
-# gemini-3.1-flash-live-preview requires special handling (realtime_input
-# instead of LiveClientContent, audio field instead of media_chunks).
-# gemini-2.0-flash-live-preview-04-09 works with standard ADK paths.
-_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-live-preview-04-09")
+# Live preview models (gemini-3.1-flash-live-preview, gemini-live-2.5-flash-preview,
+# etc.) use the newer Live API (send_realtime_input, send_tool_response) — the
+# standard ADK paths route tool responses through LiveClientToolResponse without
+# turn_complete, which causes the model to go silent after function calls.
+# Apply the patches for any Live preview model.
+_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-live-preview")
 
 from google.adk.models.gemini_llm_connection import GeminiLlmConnection
 from google.genai import types as _genai_types
 
-if "3.1" in _GEMINI_MODEL:
+if "live" in _GEMINI_MODEL:
     # Patch 1: send_realtime — use `audio` field instead of deprecated `media_chunks`
     _original_send_realtime = GeminiLlmConnection.send_realtime
 
