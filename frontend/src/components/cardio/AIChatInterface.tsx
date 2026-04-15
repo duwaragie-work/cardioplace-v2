@@ -33,6 +33,7 @@ import {
   type TranscriptLine,
   type CheckinSummary,
   type UpdateSummary,
+  type DeleteSummary,
 } from '@/hooks/useVoiceSession';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -701,12 +702,15 @@ function LiveTranscriptBubbles({ lines }: { lines: TranscriptLine[] }) {
 
 // ─── Voice Active Screen (replaces chat area during voice) ────────────────────
 
-function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpdate, onDismissUpdate, actionType }: {
+function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpdate, onDismissUpdate, pendingDelete, onDismissDelete, onAutoEndSession, actionType }: {
   state: SessionState;
   pendingCheckin: CheckinSummary | null;
   onDismissCheckin: () => void;
   pendingUpdate: UpdateSummary | null;
   onDismissUpdate: () => void;
+  pendingDelete: DeleteSummary | null;
+  onDismissDelete: () => void;
+  onAutoEndSession: () => void;
   actionType: string | null;
 }) {
   const isConnecting = state === 'connecting' || state === 'ready';
@@ -718,9 +722,21 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
 
   useEffect(() => {
     if (!pendingUpdate) return;
-    const timer = setTimeout(onDismissUpdate, 3000);
+    const timer = setTimeout(() => {
+      onDismissUpdate();
+      onAutoEndSession();
+    }, 3000);
     return () => clearTimeout(timer);
-  }, [pendingUpdate, onDismissUpdate]);
+  }, [pendingUpdate, onDismissUpdate, onAutoEndSession]);
+
+  useEffect(() => {
+    if (!pendingDelete) return;
+    const timer = setTimeout(() => {
+      onDismissDelete();
+      onAutoEndSession();
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [pendingDelete, onDismissDelete, onAutoEndSession]);
 
   const orbColor = isListening ? '#ef4444' : isSpeaking ? '#7B00E0' : isProcessing ? '#f59e0b' : '#7B00E0';
   const orbGradient = isListening
@@ -729,12 +745,15 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
     : isProcessing ? 'linear-gradient(135deg, #f59e0b, #d97706)'
     : 'linear-gradient(135deg, #7B00E0, #9333EA)';
 
-  // Auto-dismiss checkin after 3s — AI resumes talking, no user action needed
+  // Auto-dismiss checkin after 3s, then end the voice session
   useEffect(() => {
     if (!isCheckin || !pendingCheckin) return;
-    const timer = setTimeout(onDismissCheckin, 3000);
+    const timer = setTimeout(() => {
+      onDismissCheckin();
+      onAutoEndSession();
+    }, 3000);
     return () => clearTimeout(timer);
-  }, [isCheckin, pendingCheckin, onDismissCheckin]);
+  }, [isCheckin, pendingCheckin, onDismissCheckin, onAutoEndSession]);
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-6 relative overflow-hidden" style={{ backgroundColor: '#FAFBFF' }}>
@@ -1040,7 +1059,42 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
               <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--brand-border)' }}>
                 <motion.div className="h-full rounded-full" style={{ backgroundColor: 'var(--brand-accent-teal)' }} initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: 3, ease: 'linear' }} />
               </div>
-              <p className="text-[10px] mt-1.5 text-center" style={{ color: 'var(--brand-text-muted)' }}>AI will resume talking…</p>
+              <p className="text-[10px] mt-1.5 text-center" style={{ color: 'var(--brand-text-muted)' }}>Ending session…</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete confirmation — overlays the orb briefly, then session ends */}
+      <AnimatePresence>
+        {pendingDelete && (
+          <motion.div
+            key="delete-confirm"
+            initial={{ opacity: 0, scale: 0.92, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ type: 'spring', stiffness: 220, damping: 22 }}
+            className="absolute z-20 inset-x-0 top-6 flex justify-center pointer-events-none"
+          >
+            <div
+              className="rounded-2xl px-5 py-4 max-w-xs w-full mx-4 pointer-events-auto"
+              style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)', boxShadow: '0 8px 28px rgba(0,0,0,0.12)' }}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                {pendingDelete.success
+                  ? <Trash2 className="w-5 h-5" style={{ color: '#ef4444' }} />
+                  : <AlertCircle className="w-5 h-5 text-red-500" />}
+                <p className="font-bold text-[14px]" style={{ color: 'var(--brand-text-primary)' }}>
+                  {pendingDelete.success ? 'Reading deleted' : 'Could not delete reading'}
+                </p>
+              </div>
+              {pendingDelete.detail && (
+                <p className="text-[12px] mb-3" style={{ color: 'var(--brand-text-muted)' }}>{pendingDelete.detail}</p>
+              )}
+              <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--brand-border)' }}>
+                <motion.div className="h-full rounded-full" style={{ backgroundColor: '#ef4444' }} initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: 3, ease: 'linear' }} />
+              </div>
+              <p className="text-[10px] mt-1.5 text-center" style={{ color: 'var(--brand-text-muted)' }}>Ending session…</p>
             </div>
           </motion.div>
         )}
@@ -1108,8 +1162,10 @@ export default function AIChatInterface() {
     end: endVoice,
     dismissCheckin,
     dismissUpdate,
+    dismissDelete,
     clearTranscript,
     pendingUpdate: voicePendingUpdate,
+    pendingDelete: voicePendingDelete,
   } = useVoiceSession(handleVoiceSessionCreated);
 
   const isVoiceActive = voiceState !== 'idle' && voiceState !== 'error' && voiceState !== 'checkin_confirm';
@@ -1488,6 +1544,9 @@ export default function AIChatInterface() {
             onDismissCheckin={handleDismissCheckin}
             pendingUpdate={voicePendingUpdate}
             onDismissUpdate={dismissUpdate}
+            pendingDelete={voicePendingDelete}
+            onDismissDelete={dismissDelete}
+            onAutoEndSession={() => void endVoice()}
             actionType={voiceActionType}
           />
         ) : (
