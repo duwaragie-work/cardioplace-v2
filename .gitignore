@@ -40,3 +40,5 @@ coverage/
 # Temp
 .temp
 .tmp
+
+.cluade
