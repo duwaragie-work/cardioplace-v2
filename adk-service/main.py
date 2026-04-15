@@ -83,7 +83,8 @@ from google.adk.models.gemini_llm_connection import GeminiLlmConnection
 from google.genai import types as _genai_types
 
 if "3.1" in _GEMINI_MODEL:
-    # Patch 1: send_realtime — use `audio` field instead of deprecated `media_chunks`
+    # Patch 1: send_realtime — use `audio` field instead of deprecated `media_chunks`.
+    # 3.1-only because 2.0 uses the legacy `media_chunks` field which the patch would break.
     _original_send_realtime = GeminiLlmConnection.send_realtime
 
     async def _patched_send_realtime(self, input):  # noqa: A002
@@ -95,55 +96,43 @@ if "3.1" in _GEMINI_MODEL:
     GeminiLlmConnection.send_realtime = _patched_send_realtime
     logger.info("Applied send_realtime patch for %s", _GEMINI_MODEL)
 
-    # Patch 2: send_content — use send_realtime_input(text=...) and send_tool_response
-    _original_send_content = GeminiLlmConnection.send_content
+# ── Always-on tool-response patch (model-agnostic) ─────────────────────────
+# ADK's default send_content() sends LiveClientToolResponse without a
+# turn_complete signal, which causes Gemini Live (in audio mode) to wait for
+# user-VAD-end that never fires after a function call. The agent then stays
+# silent forever. send_tool_response() is the proper Live API v1 path and
+# triggers the model's follow-up turn correctly. This patch ONLY intercepts
+# function-response sends; all other content flows are untouched.
+_orig_send_content_for_tool = GeminiLlmConnection.send_content
 
-    async def _patched_send_content(self, content):
-        parts = content.parts or []
-        has_function_response = any(
-            getattr(p, "function_response", None) for p in parts
-        )
-        if has_function_response:
-            func_responses = []
-            for p in parts:
-                fr = getattr(p, "function_response", None)
-                if fr:
-                    func_responses.append(fr)
-            if func_responses:
-                # Try send_tool_response first, then realtime text fallback,
-                # then original send_content as last resort
-                sent = False
-                try:
-                    await self._gemini_session.send_tool_response(
-                        function_responses=func_responses
-                    )
-                    logger.info("Sent %d function response(s) via send_tool_response", len(func_responses))
-                    sent = True
-                except Exception as exc:
-                    logger.error("send_tool_response failed: %s", exc)
-                if not sent:
-                    # Fallback: send as realtime text so model at least gets the result
-                    try:
-                        import json
-                        for fr in func_responses:
-                            text = json.dumps({"name": fr.name, "response": fr.response}, default=str)
-                            await self._gemini_session.send_realtime_input(text=text)
-                        logger.info("Sent %d function response(s) via realtime text fallback", len(func_responses))
-                    except Exception as exc2:
-                        logger.error("Realtime text fallback also failed: %s", exc2)
-            else:
-                await _original_send_content(self, content)
-        else:
-            text = "".join(
-                p.text for p in parts if getattr(p, "text", None)
+async def _patched_send_content_for_tool(self, content):
+    parts = content.parts or []
+    func_responses = [
+        getattr(p, "function_response", None)
+        for p in parts
+        if getattr(p, "function_response", None)
+    ]
+    if func_responses:
+        try:
+            await self._gemini_session.send_tool_response(
+                function_responses=func_responses
             )
-            if text:
-                await self._gemini_session.send_realtime_input(text=text)
+            logger.info(
+                "[ToolResponsePatch] Sent %d function response(s) via send_tool_response",
+                len(func_responses),
+            )
+            return
+        except Exception as exc:
+            logger.warning(
+                "[ToolResponsePatch] send_tool_response failed (%s); falling back to original send_content",
+                exc,
+            )
+    # Anything that isn't a function response, or any failure above, falls
+    # through to the original ADK behaviour — no risk of regressing text/audio paths.
+    await _orig_send_content_for_tool(self, content)
 
-    GeminiLlmConnection.send_content = _patched_send_content
-    logger.info("Applied send_content patch for %s", _GEMINI_MODEL)
-else:
-    logger.info("Using standard ADK paths — no patches needed for %s", _GEMINI_MODEL)
+GeminiLlmConnection.send_content = _patched_send_content_for_tool
+logger.info("Applied tool-response patch (model-agnostic) for %s", _GEMINI_MODEL)
 
 # NOTE: Sequential tool execution is enforced via the system prompt
 # ("STRICTLY call only ONE tool per turn"). We do NOT patch the ADK's

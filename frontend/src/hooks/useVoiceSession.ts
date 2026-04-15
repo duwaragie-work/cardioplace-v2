@@ -284,6 +284,11 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
 
       socket.on('audio_response', (data: { audio: string }) => {
         playAudio(data.audio);
+        // First agent audio after a tool call implies the tool finished and the
+        // agent is now speaking the result — clear any in-flight action overlay.
+        // Safety net for tools (delete, fetch) that don't emit a dedicated
+        // completion event.
+        setActionType((current) => (current ? null : current));
       });
 
       socket.on('transcript', (data: { text: string; isFinal: boolean; speaker: 'user' | 'agent' }) => {
@@ -325,6 +330,8 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
 
       socket.on('checkin_updated', (summary: UpdateSummary) => {
         setPendingUpdate(summary);
+        setActionType(null);
+        setSessionState((prev) => (prev === 'processing' ? 'listening' : prev));
       });
 
       socket.on('session_error', (data: { message: string }) => {
