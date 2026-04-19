@@ -1,17 +1,8 @@
+google-adk>=1.0.0
+google-genai>=1.0.0
 grpcio>=1.63.0
 grpcio-tools>=1.63.0
 protobuf>=5.0.0
-groq>=0.11.0
-cerebras-cloud-sdk>=1.35.0
-piper-tts>=1.2.0
-numpy>=1.24.0
 requests>=2.31.0
 python-dotenv>=1.0.0
 opentelemetry-exporter-otlp-proto-http>=1.20.0
-# Legacy (rollback only)
-google-adk>=1.0.0
-google-genai>=1.0.0 
-groq 
-cerebras-cloud-sdk 
-piper-tts 
-numpy

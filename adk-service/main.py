@@ -1,28 +1,24 @@
 """
-Cardioplace voice service — Groq + Cerebras + Piper hybrid.
+Cardioplace — ADK Voice Service
+Entry point: starts the gRPC server and waits for connections.
 
-Entry point:
+Local dev:
     python main.py
 
-Replaces the previous Google ADK / Gemini Live setup. Targets ~650-950 ms
-user→agent first-audio latency using:
-    ASR  → Groq Whisper-large-v3-turbo (hosted, free tier)
-    LLM  → Cerebras Llama 3.3 70B (hosted, free tier; Groq fallback on 429)
-    TTS  → Piper en_US-lessac-medium (local, CPU, open-source)
+Railway:
+    CMD ["python", "main.py"]
 """
 
 import asyncio
 import logging
 import os
-import pathlib
-import subprocess
 import sys
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Logging ───────────────────────────────────────────────────────────────────
+# ── Logging setup ─────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -31,26 +27,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── OpenTelemetry / LangSmith tracing ─────────────────────────────────────────
+# ADK instruments agent invocations, LLM calls, and tool calls via OTEL.
+# If OTEL_EXPORTER_OTLP_ENDPOINT is set, traces are exported to LangSmith.
 if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"):
     try:
-        # Keep the legacy ADK telemetry helper if available; otherwise fall
-        # back to standard OTEL exporters. Harmless either way — spans from
-        # VoiceSession are emitted via the `healplace.voice` tracer in grpc_server.
-        try:
-            from google.adk.telemetry.setup import maybe_set_otel_providers  # type: ignore
-            maybe_set_otel_providers()
-        except Exception:
-            pass
-        logger.info(
-            "OpenTelemetry tracing enabled → %s",
-            os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
-        )
+        from google.adk.telemetry.setup import maybe_set_otel_providers
+        maybe_set_otel_providers()
+        logger.info("OpenTelemetry tracing enabled → %s", os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
     except Exception as e:
         logger.warning("Failed to set up OpenTelemetry tracing: %s", e)
 else:
-    logger.info("OpenTelemetry tracing disabled")
+    logger.info("OpenTelemetry tracing disabled (OTEL_EXPORTER_OTLP_ENDPOINT not set)")
 
-# ── Generate proto stubs if missing ───────────────────────────────────────────
+# ── Generate proto stubs if missing ──────────────────────────────────────────
+import subprocess
+import pathlib
+
 _GENERATED = pathlib.Path("generated")
 _PROTO = pathlib.Path("proto/voice.proto")
 _PB2 = _GENERATED / "voice_pb2.py"
@@ -77,54 +69,159 @@ if not _PB2.exists():
         sys.exit(1)
     logger.info("Protobuf stubs generated.")
 
-# Make the generated package importable via its flat name (the generated
-# grpc stub uses `import voice_pb2` rather than `from generated import …`).
+# ── Add generated/ to sys.path so the bare `import voice_pb2` inside
+#    the generated grpc stub resolves correctly ─────────────────────────────
 sys.path.insert(0, str(_GENERATED.resolve()))
 
-# ── Imports that depend on generated stubs ────────────────────────────────────
-from grpc import aio  # noqa: E402
-from generated import voice_pb2_grpc  # noqa: E402
-from server.grpc_server import VoiceAgentServicer  # noqa: E402
-from piper_tts import get_tts  # noqa: E402
+# ── Conditional patches for Gemini model compatibility ─────────────────────
+# - gemini-2.0-flash-live-* uses the legacy `media_chunks` field; keep ADK
+#   default send_realtime for that path.
+# - gemini-2.5-flash-native-audio-* and gemini-3.1-flash-live-preview use the
+#   new `audio=Blob` field on send_realtime_input; patch for those.
+_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-native-audio-latest")
+_IS_LEGACY_2_0 = "2.0" in _GEMINI_MODEL
+
+from google.adk.models.gemini_llm_connection import GeminiLlmConnection
+from google.genai import types as _genai_types
+
+if not _IS_LEGACY_2_0:
+    # Patch 1: send_realtime — use `audio` field instead of deprecated `media_chunks`.
+    # Applied for any non-2.0 model (2.5 native-audio, 3.1, future).
+    _original_send_realtime = GeminiLlmConnection.send_realtime
+    _rt_chunk_count = {"n": 0}
+
+    async def _patched_send_realtime(self, input):  # noqa: A002
+        if isinstance(input, _genai_types.Blob):
+            # Sentinel Blob from grpc_server.forward_input_task: client-side
+            # VAD says user paused. Translate to Gemini Live's audio_stream_end
+            # signal so the model finalises the user turn immediately instead
+            # of waiting for its own silence detector.
+            if input.mime_type == "application/x-audio-stream-end":
+                try:
+                    await self._gemini_session.send_realtime_input(audio_stream_end=True)
+                    logger.info("[VOICE realtime] audio_stream_end=True sent to Gemini")
+                except Exception as exc:
+                    logger.warning("[VOICE realtime] audio_stream_end failed: %s", exc)
+                return
+            _rt_chunk_count["n"] += 1
+            if _rt_chunk_count["n"] <= 3 or _rt_chunk_count["n"] % 50 == 0:
+                logger.info(
+                    "[VOICE realtime] chunk #%d mime=%s bytes=%d",
+                    _rt_chunk_count["n"],
+                    input.mime_type,
+                    len(input.data) if input.data else 0,
+                )
+            await self._gemini_session.send_realtime_input(audio=input)
+        else:
+            logger.info("[VOICE realtime] non-blob input type=%s", type(input).__name__)
+            await _original_send_realtime(self, input)
+
+    GeminiLlmConnection.send_realtime = _patched_send_realtime
+    logger.info("Applied send_realtime patch (audio=Blob) for %s", _GEMINI_MODEL)
+
+# ── Always-on tool-response patch (model-agnostic) ─────────────────────────
+# ADK's default send_content() sends LiveClientToolResponse without a
+# turn_complete signal, which causes Gemini Live (in audio mode) to wait for
+# user-VAD-end that never fires after a function call. The agent then stays
+# silent forever. send_tool_response() is the proper Live API v1 path and
+# triggers the model's follow-up turn correctly. This patch ONLY intercepts
+# function-response sends; all other content flows are untouched.
+_orig_send_content_for_tool = GeminiLlmConnection.send_content
+
+import time as _patch_time
+
+async def _patched_send_content_for_tool(self, content):
+    parts = content.parts or []
+    func_responses = [
+        getattr(p, "function_response", None)
+        for p in parts
+        if getattr(p, "function_response", None)
+    ]
+    logger.info(
+        "[VOICE patch] send_content intercept parts=%d func_responses=%d names=%s",
+        len(parts),
+        len(func_responses),
+        [getattr(fr, "name", "?") for fr in func_responses],
+    )
+    if func_responses:
+        t0 = _patch_time.time()
+        try:
+            logger.info("[VOICE patch] calling send_tool_response with %d response(s)", len(func_responses))
+            await self._gemini_session.send_tool_response(
+                function_responses=func_responses
+            )
+            logger.info(
+                "[VOICE patch] send_tool_response OK (%.0fms) — awaiting Gemini follow-up turn",
+                (_patch_time.time() - t0) * 1000,
+            )
+            return
+        except Exception as exc:
+            logger.warning(
+                "[VOICE patch] send_tool_response FAILED after %.0fms (%s); falling back to original send_content",
+                (_patch_time.time() - t0) * 1000,
+                exc,
+            )
+    # Anything that isn't a function response, or any failure above, falls
+    # through to the original ADK behaviour — no risk of regressing text/audio paths.
+    logger.info("[VOICE patch] delegating to original send_content")
+    await _orig_send_content_for_tool(self, content)
+
+GeminiLlmConnection.send_content = _patched_send_content_for_tool
+logger.info("Applied tool-response patch (model-agnostic) for %s", _GEMINI_MODEL)
+
+# ── Strip session_resumption from Gemini.connect() (AI Studio 2.0 only) ────
+# Needed for gemini-2.0-flash-live-* on AI Studio, which rejects transparent
+# session resumption with `ValueError: Transparent session resumption is only
+# supported for Vertex AI backend.`
+# gemini-2.5-flash-native-audio-* and gemini-3.1-flash-live-preview DO support
+# resumption on AI Studio (server continuously issues `Update session
+# resumption handle` frames). Stripping it for those sends a partial/null
+# session_resumption object that Gemini 3.1+ rejects with WS 1008.
+import contextlib as _contextlib
+from google.adk.models.google_llm import Gemini as _AdkGemini
+
+if _IS_LEGACY_2_0:
+    _orig_adk_gemini_connect = _AdkGemini.connect
+
+    @_contextlib.asynccontextmanager
+    async def _patched_adk_gemini_connect(self, llm_request):
+        if (
+            llm_request.live_connect_config
+            and llm_request.live_connect_config.session_resumption
+        ):
+            llm_request.live_connect_config.session_resumption = None
+        async with _orig_adk_gemini_connect(self, llm_request) as conn:
+            yield conn
+
+    _AdkGemini.connect = _patched_adk_gemini_connect
+    logger.info("Applied Gemini.connect patch (strip session_resumption for AI Studio 2.0)")
+else:
+    logger.info("Skipping Gemini.connect session_resumption strip (model=%s supports resumption)", _GEMINI_MODEL)
+
+# NOTE: Sequential tool execution is enforced via the system prompt
+# ("STRICTLY call only ONE tool per turn"). We do NOT patch the ADK's
+# parallel execution — that can break the internal async flow and cause hangs.
+
+# ── Imports that depend on generated stubs ───────────────────────────────────
+import grpc
+from grpc import aio
+from generated import voice_pb2_grpc
+from server.grpc_server import VoiceAgentServicer
 
 
 async def serve() -> None:
     host = os.getenv("GRPC_HOST", "0.0.0.0")
     port = int(os.getenv("GRPC_PORT", "50051"))
 
-    # ── Warm Piper once at startup ───────────────────────────────────────
-    # This eats the ~400 ms ONNX cold-start so the first turn doesn't feel
-    # sluggish. Also pre-synthesises filler acknowledgments.
-    tts = get_tts()
-    tts.load()
-    tts.warm()
-
-    logger.info(
-        "[VOICE boot] asr=groq/%s llm=cerebras/%s tts=piper/%s",
-        os.getenv("GROQ_ASR_MODEL", "whisper-large-v3-turbo"),
-        os.getenv("CEREBRAS_LLM_MODEL", "llama-3.3-70b"),
-        os.getenv("PIPER_VOICE", "en_US-lessac-medium"),
-    )
-
-    if os.getenv("ENABLE_FILLER_ACK", "true").lower() == "true":
-        fillers = tts.presynth_fillers()
-    else:
-        fillers = []
-        logger.info("[VOICE boot] ENABLE_FILLER_ACK=false — skipping filler pre-synth")
-
-    # ── Launch gRPC server ───────────────────────────────────────────────
-    server = aio.server(
-        options=[
-            ("grpc.max_receive_message_length", 10 * 1024 * 1024),
-            ("grpc.max_send_message_length", 10 * 1024 * 1024),
-        ]
-    )
-    servicer = VoiceAgentServicer(tts_synth=tts.synth, piper_fillers=fillers)
-    voice_pb2_grpc.add_VoiceAgentServicer_to_server(servicer, server)
+    server = aio.server(options=[
+        ("grpc.max_receive_message_length", 10 * 1024 * 1024),
+        ("grpc.max_send_message_length", 10 * 1024 * 1024),
+    ])
+    voice_pb2_grpc.add_VoiceAgentServicer_to_server(VoiceAgentServicer(), server)
     server.add_insecure_port(f"{host}:{port}")
 
     await server.start()
-    logger.info("Voice gRPC server listening on %s:%d", host, port)
+    logger.info("ADK Voice gRPC server listening on %s:%d", host, port)
 
     try:
         await server.wait_for_termination()

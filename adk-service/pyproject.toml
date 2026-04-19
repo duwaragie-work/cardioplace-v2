@@ -1,25 +1,16 @@
 [project]
 name = "adk-service"
-version = "0.2.0"
-description = "Healplace cardio voice service — Groq + Cerebras + Piper hybrid"
+version = "0.1.0"
+description = "Healplace cardio voice service — Google ADK / Gemini Live"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    # ── gRPC transport (NestJS ⇄ this service) ─────────────────────────────
+    "google-adk>=1.0.0",
+    "google-genai>=1.0.0",
     "grpcio>=1.63.0",
     "grpcio-tools>=1.63.0",
     "protobuf>=5.0.0",
-    # ── Voice stack ────────────────────────────────────────────────────────
-    "groq>=0.11.0",
-    "cerebras-cloud-sdk>=1.35.0",
-    "piper-tts>=1.2.0",
-    "numpy>=1.24.0",
-    # ── HTTP tool calls to NestJS ─────────────────────────────────────────
-    "requests>=2.31.0",
-    # ── Misc ──────────────────────────────────────────────────────────────
     "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
     "opentelemetry-exporter-otlp-proto-http>=1.20.0",
-    # ── Legacy (kept for rollback; safe to remove once Groq path is stable) ─
-    "google-adk>=1.0.0",
-    "google-genai>=1.0.0",
 ]
