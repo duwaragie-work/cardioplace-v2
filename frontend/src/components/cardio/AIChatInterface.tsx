@@ -33,7 +33,18 @@ import {
   type TranscriptLine,
   type CheckinSummary,
   type UpdateSummary,
+  type DeleteSummary,
 } from '@/hooks/useVoiceSession';
+
+// ── Debug logging (mirrors useVoiceSession helper) ───────────────────────────
+const VOICE_DEBUG =
+  typeof process !== 'undefined' && process.env.NEXT_PUBLIC_VOICE_DEBUG === '1';
+function voiceDebug(tag: string, ...args: unknown[]) {
+  if (VOICE_DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log(`[VOICE ${tag}]`, ...args);
+  }
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type MessageSource = 'text' | 'voice';
@@ -701,12 +712,14 @@ function LiveTranscriptBubbles({ lines }: { lines: TranscriptLine[] }) {
 
 // ─── Voice Active Screen (replaces chat area during voice) ────────────────────
 
-function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpdate, onDismissUpdate, actionType }: {
+function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpdate, onDismissUpdate, pendingDelete, onDismissDelete, actionType }: {
   state: SessionState;
   pendingCheckin: CheckinSummary | null;
   onDismissCheckin: () => void;
   pendingUpdate: UpdateSummary | null;
   onDismissUpdate: () => void;
+  pendingDelete: DeleteSummary | null;
+  onDismissDelete: () => void;
   actionType: string | null;
 }) {
   const isConnecting = state === 'connecting' || state === 'ready';
@@ -717,10 +730,20 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
   const isActive = isListening || isSpeaking;
 
   useEffect(() => {
+    voiceDebug('VoiceActiveScreen', `render state=${state} actionType=${actionType ?? 'null'} pendingCheckin=${!!pendingCheckin} pendingUpdate=${!!pendingUpdate} pendingDelete=${!!pendingDelete}`);
+  }, [state, actionType, pendingCheckin, pendingUpdate, pendingDelete]);
+
+  useEffect(() => {
     if (!pendingUpdate) return;
     const timer = setTimeout(onDismissUpdate, 3000);
     return () => clearTimeout(timer);
   }, [pendingUpdate, onDismissUpdate]);
+
+  useEffect(() => {
+    if (!pendingDelete) return;
+    const timer = setTimeout(onDismissDelete, 3000);
+    return () => clearTimeout(timer);
+  }, [pendingDelete, onDismissDelete]);
 
   const orbColor = isListening ? '#ef4444' : isSpeaking ? '#7B00E0' : isProcessing ? '#f59e0b' : '#7B00E0';
   const orbGradient = isListening
@@ -1045,6 +1068,47 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Delete confirmation — same overlay pattern, red accent */}
+      <AnimatePresence>
+        {pendingDelete && (
+          <motion.div
+            key="delete-confirm"
+            initial={{ opacity: 0, scale: 0.92, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ type: 'spring', stiffness: 220, damping: 22 }}
+            className="absolute z-20 inset-x-0 top-6 flex justify-center pointer-events-none"
+          >
+            <div
+              className="rounded-2xl px-5 py-4 max-w-xs w-full mx-4 pointer-events-auto"
+              style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)', boxShadow: '0 8px 28px rgba(0,0,0,0.12)' }}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                {pendingDelete.success
+                  ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-alert-red)' }} />
+                  : <AlertCircle className="w-5 h-5 text-red-500" />}
+                <p className="font-bold text-[14px]" style={{ color: 'var(--brand-text-primary)' }}>
+                  {pendingDelete.success
+                    ? (pendingDelete.deletedCount === 1 ? 'Reading deleted' : `${pendingDelete.deletedCount} readings deleted`)
+                    : 'Could not delete reading'}
+                </p>
+              </div>
+              <div className="rounded-xl p-2.5 text-center mb-2" style={{ backgroundColor: 'var(--brand-alert-red-light)' }}>
+                <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Removed</p>
+                <p className="text-[14px] font-bold" style={{ color: 'var(--brand-alert-red)' }}>
+                  {pendingDelete.deletedCount} entry{pendingDelete.deletedCount === 1 ? '' : 'ies'}
+                  {pendingDelete.failedCount > 0 ? ` (${pendingDelete.failedCount} failed)` : ''}
+                </p>
+              </div>
+              <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--brand-border)' }}>
+                <motion.div className="h-full rounded-full" style={{ backgroundColor: 'var(--brand-alert-red)' }} initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: 3, ease: 'linear' }} />
+              </div>
+              <p className="text-[10px] mt-1.5 text-center" style={{ color: 'var(--brand-text-muted)' }}>AI will resume talking…</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1105,12 +1169,27 @@ export default function AIChatInterface() {
     errorMessage: voiceError,
     actionType: voiceActionType,
     start: startVoice,
+    prewarm: prewarmVoice,
     end: endVoice,
     dismissCheckin,
     dismissUpdate,
+    dismissDelete,
     clearTranscript,
     pendingUpdate: voicePendingUpdate,
+    pendingDelete: voicePendingDelete,
   } = useVoiceSession(handleVoiceSessionCreated);
+
+  // Pre-warm the voice session in the background as soon as we have a token.
+  // Opens the WebSocket, builds patient context, and establishes the Gemini
+  // Live connection while the user is still reading the UI — so the first mic
+  // click has no setup delay. Only runs once per AIChatInterface mount per token.
+  const prewarmedOnceRef = useRef(false);
+  useEffect(() => {
+    if (!token || prewarmedOnceRef.current) return;
+    prewarmedOnceRef.current = true;
+    prewarmVoice({ token, sessionId: activeSessionId ?? undefined });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   const isVoiceActive = voiceState !== 'idle' && voiceState !== 'error' && voiceState !== 'checkin_confirm';
   const isVoiceConnecting = voiceState === 'connecting';
@@ -1125,9 +1204,22 @@ export default function AIChatInterface() {
   // When a reading is updated via voice, show the update card
   useEffect(() => {
     if (voicePendingUpdate) {
+      voiceDebug('AIChat', `voicePendingUpdate mirrored entryId=${voicePendingUpdate.entryId}`);
       setPendingUpdateCard(voicePendingUpdate);
     }
   }, [voicePendingUpdate]);
+
+  useEffect(() => {
+    if (voicePendingCheckin) {
+      voiceDebug('AIChat', `voicePendingCheckin mirrored saved=${voicePendingCheckin.saved}`);
+    }
+  }, [voicePendingCheckin]);
+
+  useEffect(() => {
+    if (voicePendingDelete) {
+      voiceDebug('AIChat', `voicePendingDelete observed deleted=${voicePendingDelete.deletedCount} failed=${voicePendingDelete.failedCount}`);
+    }
+  }, [voicePendingDelete]);
 
   // When voice session ends, convert the live transcript lines into permanent messages
   // (keeps the full conversation visible instead of replacing with DB summaries)
@@ -1138,6 +1230,7 @@ export default function AIChatInterface() {
     const prev = prevVoiceStateRef.current;
     prevVoiceStateRef.current = voiceState;
     if (prev !== 'idle' && voiceState === 'idle') {
+      voiceDebug('AIChat', `idle transition from=${prev} — tearing down voice session and loading summary`);
       // Clear everything immediately — show skeleton
       clearTranscript();
       setMessages([]);
@@ -1488,6 +1581,8 @@ export default function AIChatInterface() {
             onDismissCheckin={handleDismissCheckin}
             pendingUpdate={voicePendingUpdate}
             onDismissUpdate={dismissUpdate}
+            pendingDelete={voicePendingDelete}
+            onDismissDelete={dismissDelete}
             actionType={voiceActionType}
           />
         ) : (
