@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, Mail, KeyRound } from "lucide-react";
 import { useAuth, type OtpVerifyResponse } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import Logo from "@/components/Logo";
@@ -55,7 +55,7 @@ export default function RegisterPage() {
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const resendTimerRef = useRef<number | null>(null);
-  const [authMode, setAuthMode] = useState<"otp" | "magic_link">("otp");
+  const [authMode, setAuthMode] = useState<"otp" | "magic_link">("magic_link");
   const [magicLinkSent, setMagicLinkSent] = useState(false);
   const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
 
@@ -251,17 +251,17 @@ export default function RegisterPage() {
               <div className="w-full max-w-105 flex rounded-lg border border-[#e5d9f2] overflow-hidden">
                 <button
                   type="button"
-                  onClick={() => { setAuthMode("otp"); setErrorMessage(""); setStatusMessage(""); setMagicLinkSent(false); }}
-                  className={`flex-1 py-2.5 text-sm font-semibold transition-colors cursor-pointer ${authMode === "otp" ? "bg-[#7B00E0] text-white" : "bg-white text-[#6B00D1]"}`}
-                >
-                  {t('register.otpTab') || 'OTP Code'}
-                </button>
-                <button
-                  type="button"
                   onClick={() => { setAuthMode("magic_link"); setErrorMessage(""); setStatusMessage(""); setOtpSent(false); setOtp(""); }}
                   className={`flex-1 py-2.5 text-sm font-semibold transition-colors cursor-pointer ${authMode === "magic_link" ? "bg-[#7B00E0] text-white" : "bg-white text-[#6B00D1]"}`}
                 >
                   {t('register.magicLinkTab') || 'Magic Link'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode("otp"); setErrorMessage(""); setStatusMessage(""); setMagicLinkSent(false); }}
+                  className={`flex-1 py-2.5 text-sm font-semibold transition-colors cursor-pointer ${authMode === "otp" ? "bg-[#7B00E0] text-white" : "bg-white text-[#6B00D1]"}`}
+                >
+                  {t('register.otpTab') || 'OTP Code'}
                 </button>
               </div>
 
@@ -404,44 +404,48 @@ export default function RegisterPage() {
 
           {/* Right side - Info Panel */}
           <div className="hidden md:flex flex-1 items-center justify-center lg:justify-end">
-            <div className="bg-linear-to-br from-[#f3e8ff] to-[#e9d5ff] rounded-3xl md:p-6 lg:p-10 md:w-80 md:h-80 lg:w-120 lg:h-auto flex">
-              <div className="space-y-4 my-auto w-full">
-                <div className="flex items-center gap-3">
-                  <div className="bg-[#7B00E0] size-10 lg:size-16 rounded-2xl flex items-center justify-center">
-                    <CheckCircle2 className="w-5 h-5 lg:w-8 lg:h-8 text-white" strokeWidth={2} />
+            <div className="bg-linear-to-br from-[#f3e8ff] to-[#e9d5ff] rounded-3xl p-6 lg:p-8 md:w-80 lg:w-120 flex">
+              <div className="space-y-5 my-auto w-full">
+                <h3 className="font-bold text-[#170c1d] text-base lg:text-xl">
+                  {t('register.chooseMethod') || 'Choose how to sign in'}
+                </h3>
+
+                {/* Magic Link info */}
+                <div className="bg-white/60 rounded-2xl p-4 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="bg-[#7B00E0] size-8 rounded-lg flex items-center justify-center">
+                      <Mail className="w-4 h-4 text-white" strokeWidth={2.5} />
+                    </div>
+                    <h4 className="font-bold text-[#170c1d] text-sm lg:text-base">
+                      {t('register.magicLinkTitle') || 'Magic Link'}
+                    </h4>
                   </div>
-                  <h3 className="font-bold text-[#170c1d] text-base lg:text-2xl">
-                    {t('register.secureAccess')}
-                  </h3>
+                  <p className="text-[#4b3b55] text-xs lg:text-sm leading-relaxed">
+                    {t('register.magicLinkInfo') || 'We email you a secure link. Tap it from your email and you are signed in, no codes to type.'}
+                  </p>
                 </div>
-                <p className="text-[#4b3b55] text-xs lg:text-base leading-relaxed">
-                  {t('register.secureDesc')}
-                </p>
-                <div className="space-y-3 pt-2">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-white rounded-full p-1">
-                      <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
+
+                {/* OTP info */}
+                <div className="bg-white/60 rounded-2xl p-4 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="bg-[#7B00E0] size-8 rounded-lg flex items-center justify-center">
+                      <KeyRound className="w-4 h-4 text-white" strokeWidth={2.5} />
                     </div>
-                    <p className="text-[#4b3b55] text-xs lg:text-sm">
-                      {t('register.noPassword')}
-                    </p>
+                    <h4 className="font-bold text-[#170c1d] text-sm lg:text-base">
+                      {t('register.otpTitle') || 'OTP Code'}
+                    </h4>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="bg-white rounded-full p-1">
-                      <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
-                    </div>
-                    <p className="text-[#4b3b55] text-xs lg:text-sm">
-                      {t('register.codeExpires')}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="bg-white rounded-full p-1">
-                      <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
-                    </div>
-                    <p className="text-[#4b3b55] text-xs lg:text-sm">
-                      {t('register.dataEncrypted')}
-                    </p>
-                  </div>
+                  <p className="text-[#4b3b55] text-xs lg:text-sm leading-relaxed">
+                    {t('register.otpInfo') || 'We email you a 6-digit code. Type it here to sign in.'}
+                  </p>
+                </div>
+
+                {/* Shared security note */}
+                <div className="flex items-center gap-2 pt-1">
+                  <CheckCircle2 className="w-4 h-4 text-[#7B00E0] shrink-0" strokeWidth={2.5} />
+                  <p className="text-[#4b3b55] text-xs lg:text-sm">
+                    {t('register.noPassword')}
+                  </p>
                 </div>
               </div>
             </div>

@@ -501,6 +501,11 @@ const am: Record<TranslationKey, string> = {
   'register.checkEmail': 'ኢሜልዎን ይፈትሹ!',
   'register.magicLinkDesc': 'የመግቢያ ሊንክ ልከንልዎታል። ለመግባት ይጫኑት።',
   'register.sendAnother': 'ሌላ ሊንክ ላክ',
+  'register.chooseMethod': 'እንዴት እንደሚገቡ ይምረጡ',
+  'register.magicLinkTitle': 'አስማት ሊንክ',
+  'register.magicLinkInfo': 'ደህንነቱ የተጠበቀ ሊንክ በኢሜል እንልካለን። ከኢሜልዎ ይጫኑት እና ይገባሉ፣ ኮድ መጻፍ አያስፈልግም።',
+  'register.otpTitle': 'OTP ኮድ',
+  'register.otpInfo': '6-አሃዝ ኮድ በኢሜል እንልካለን። ለመግባት እዚህ ይጻፉት።',
 
   // ─── Onboarding Page ──────────────────────────────────────────────────────
   'onboarding.title': 'ስለ ጤናዎ ይንገሩን',

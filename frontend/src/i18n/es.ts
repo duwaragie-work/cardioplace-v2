@@ -501,6 +501,11 @@ const es: Record<TranslationKey, string> = {
   'register.checkEmail': 'Revisa tu correo!',
   'register.magicLinkDesc': 'Te enviamos un enlace para iniciar sesion. Tocalo para entrar.',
   'register.sendAnother': 'Enviar otro enlace',
+  'register.chooseMethod': 'Elige como iniciar sesion',
+  'register.magicLinkTitle': 'Enlace magico',
+  'register.magicLinkInfo': 'Te enviamos un enlace seguro por correo. Tocalo desde tu email y entraras, sin codigos que escribir.',
+  'register.otpTitle': 'Codigo OTP',
+  'register.otpInfo': 'Te enviamos un codigo de 6 digitos por correo. Escribelo aqui para entrar.',
 
   // ─── Onboarding Page ──────────────────────────────────────────────────────
   'onboarding.title': 'Cuéntanos Sobre Tu Salud',

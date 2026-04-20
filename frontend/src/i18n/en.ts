@@ -499,6 +499,11 @@ const en = {
   'register.checkEmail': 'Check your email!',
   'register.magicLinkDesc': 'We sent a sign-in link. Tap it to log in.',
   'register.sendAnother': 'Send another link',
+  'register.chooseMethod': 'Choose how to sign in',
+  'register.magicLinkTitle': 'Magic Link',
+  'register.magicLinkInfo': 'We email you a secure link. Tap it from your email and you are signed in, no codes to type.',
+  'register.otpTitle': 'OTP Code',
+  'register.otpInfo': 'We email you a 6-digit code. Type it here to sign in.',
 
   // ─── Onboarding Page ──────────────────────────────────────────────────────
   'onboarding.title': 'Tell Us About Your Health',

@@ -501,6 +501,11 @@ const de: Record<TranslationKey, string> = {
   'register.checkEmail': 'Prufen Sie Ihre E-Mail!',
   'register.magicLinkDesc': 'Wir haben Ihnen einen Anmeldelink gesendet. Tippen Sie darauf, um sich anzumelden.',
   'register.sendAnother': 'Neuen Link senden',
+  'register.chooseMethod': 'Wahlen Sie Ihre Anmeldemethode',
+  'register.magicLinkTitle': 'Magic Link',
+  'register.magicLinkInfo': 'Wir senden Ihnen einen sicheren Link per E-Mail. Tippen Sie darauf und Sie sind angemeldet, keine Codes zum Eingeben.',
+  'register.otpTitle': 'OTP-Code',
+  'register.otpInfo': 'Wir senden Ihnen einen 6-stelligen Code per E-Mail. Geben Sie ihn hier ein, um sich anzumelden.',
 
   // ─── Onboarding Page ──────────────────────────────────────────────────────
   'onboarding.title': 'Erzählen Sie Uns von Ihrer Gesundheit',
