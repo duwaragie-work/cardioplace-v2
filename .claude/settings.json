@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(find /c/Users/LENOVO/Desktop/WORK/healplace-cardio-prototype/adk-service/.venv/Lib/site-packages/google_genai* -name \"*.py\" -path \"*types*\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('server/grpc_server.py'\\).read\\(\\)\\); ast.parse\\(open\\('main.py'\\).read\\(\\)\\); print\\('python ok'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('server/grpc_server.py'\\).read\\(\\)\\); print\\('grpc_server.py ok'\\)\")",
+      "Bash(python -c ' *)"
     ]
   }
 }

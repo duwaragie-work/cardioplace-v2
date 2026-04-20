@@ -40,6 +40,8 @@ def make_tools(
 
     def _put(msg: Any) -> None:
         """Thread-safe put into the async out_queue."""
+        field = msg.WhichOneof("payload") if hasattr(msg, "WhichOneof") else "?"
+        logger.info("[VOICE tools] _put payload=%s", field)
         asyncio.run_coroutine_threadsafe(out_queue.put(msg), loop)
 
     # ── Tool 1: Submit a new check-in ─────────────────────────────────────────
@@ -49,7 +51,7 @@ def make_tools(
         diastolic_bp: int,
         medication_taken: bool,
         weight: float = 0.0,
-        symptoms: list[str] | None = None,
+        symptoms: list[str] = [],
         notes: str = "",
         entry_date: str = "",
         measurement_time: str = "",
@@ -176,7 +178,7 @@ def make_tools(
             )
         )
 
-        return {
+        result = {
             "saved": saved,
             "entry_date_used": resolved_date,
             "measurement_time_used": resolved_time,
@@ -186,6 +188,8 @@ def make_tools(
                 else "There was a problem saving the check-in. Please try again later."
             ),
         }
+        logger.info("[VOICE tools] submit_checkin RETURN saved=%s → Gemini", saved)
+        return result
 
     # ── Tool 2: Get recent readings ───────────────────────────────────────────
 
@@ -246,61 +250,72 @@ def make_tools(
                 summary = "\n".join(lines) if lines else "No readings found."
                 logger.info("Returning %d readings to Gemini (%d chars)", len(lines), len(summary))
                 _put(_vpb_fetch.ServerMessage(action_complete=_vpb_fetch.ActionComplete(type="fetching_readings", success=True, detail=f"Found {len(lines)} readings")))
+                logger.info("[VOICE tools] get_recent_readings RETURN count=%d → Gemini", len(lines))
                 return {"summary": summary, "count": len(lines)}
             else:
                 logger.warning("GET /daily-journal returned %s: %s", resp.status_code, resp.text[:200])
                 _put(_vpb_fetch.ServerMessage(action_complete=_vpb_fetch.ActionComplete(type="fetching_readings", success=False, detail=f"HTTP {resp.status_code}")))
+                logger.info("[VOICE tools] get_recent_readings RETURN http_error=%s → Gemini", resp.status_code)
                 return {"readings": [], "count": 0}
         except requests.RequestException as exc:
             logger.error("Failed to GET /daily-journal (url=%s): %s", NESTJS_URL, exc)
             _put(_vpb_fetch.ServerMessage(action_complete=_vpb_fetch.ActionComplete(type="fetching_readings", success=False, detail="Connection failed")))
+            logger.info("[VOICE tools] get_recent_readings RETURN connection_failed → Gemini")
             return {"summary": f"Could not fetch readings — connection to backend failed ({exc})", "count": 0}
 
     # ── Tool 3: Update an existing reading ────────────────────────────────────
 
     def update_checkin(
         entry_id: str,
-        systolic_bp: int | None = None,
-        diastolic_bp: int | None = None,
-        medication_taken: bool | None = None,
-        weight: float | None = None,
-        symptoms: list[str] | None = None,
-        notes: str | None = None,
-        measurement_time: str | None = None,
+        systolic_bp: int = 0,
+        diastolic_bp: int = 0,
+        medication_taken: str = "",
+        weight: float = 0.0,
+        symptoms: list[str] = [],
+        notes: str = "",
+        measurement_time: str = "",
     ) -> dict:
         """
         Update an existing blood pressure reading. Use this when the patient
         wants to correct a value they previously recorded. You MUST first call
         get_recent_readings to find the entry_id of the reading to update.
-        Only include the fields that need to change.
+
+        IMPORTANT: pass sentinel values for fields you do NOT want to change
+        (0 for numbers, empty string for strings, empty list for symptoms).
+        Only non-sentinel values will be sent to the server.
 
         Args:
             entry_id:         The ID of the journal entry to update (from get_recent_readings).
-            systolic_bp:      New systolic BP value (60–250), or None to keep unchanged.
-            diastolic_bp:     New diastolic BP value (40–150), or None to keep unchanged.
-            medication_taken: New medication status, or None to keep unchanged.
-            weight:           New weight in lbs, or None to keep unchanged.
-            symptoms:         New symptom list, or None to keep unchanged. ALWAYS in English.
-            notes:            New notes, or None to keep unchanged. ALWAYS in English.
-            measurement_time: New time in HH:mm 24-hour format, or None to keep unchanged.
+            systolic_bp:      New systolic BP value (60–250); pass 0 to leave unchanged.
+            diastolic_bp:     New diastolic BP value (40–150); pass 0 to leave unchanged.
+            medication_taken: "yes" if now taken, "no" if now missed, "" to leave unchanged.
+            weight:           New weight in lbs (> 0); pass 0 to leave unchanged.
+            symptoms:         New symptom list (replaces existing) — empty list leaves unchanged.
+                              ALWAYS in English regardless of conversation language.
+            notes:            New notes; empty string leaves unchanged. ALWAYS in English.
+            measurement_time: New time in HH:mm 24-hour format; empty string leaves unchanged.
 
         Returns:
             dict with 'updated' (bool) and 'message' (str).
         """
         payload: dict[str, Any] = {}
-        if measurement_time is not None:
+        if measurement_time:
             payload["measurementTime"] = measurement_time
-        if systolic_bp is not None:
+        if systolic_bp and systolic_bp > 0:
             payload["systolicBP"] = systolic_bp
-        if diastolic_bp is not None:
+        if diastolic_bp and diastolic_bp > 0:
             payload["diastolicBP"] = diastolic_bp
-        if medication_taken is not None:
-            payload["medicationTaken"] = medication_taken
-        if weight is not None and weight > 0:
+        if medication_taken:
+            med_lower = medication_taken.strip().lower()
+            if med_lower in ("yes", "true", "taken"):
+                payload["medicationTaken"] = True
+            elif med_lower in ("no", "false", "missed", "not taken"):
+                payload["medicationTaken"] = False
+        if weight and weight > 0:
             payload["weight"] = weight
-        if symptoms is not None:
+        if symptoms:
             payload["symptoms"] = symptoms
-        if notes is not None:
+        if notes:
             payload["notes"] = notes
 
         if not payload:
@@ -308,16 +323,17 @@ def make_tools(
 
         # Notify client that we are updating — include changed values in detail
         changes = []
-        if systolic_bp is not None:
-            changes.append(f"systolic={systolic_bp}")
-        if diastolic_bp is not None:
-            changes.append(f"diastolic={diastolic_bp}")
-        if medication_taken is not None:
-            changes.append(f"medication={'taken' if medication_taken else 'missed'}")
-        if weight is not None and weight > 0:
-            changes.append(f"weight={weight}lbs")
-        if symptoms is not None:
-            changes.append(f"symptoms={','.join(symptoms) if symptoms else 'none'}")
+        if "systolicBP" in payload:
+            changes.append(f"systolic={payload['systolicBP']}")
+        if "diastolicBP" in payload:
+            changes.append(f"diastolic={payload['diastolicBP']}")
+        if "medicationTaken" in payload:
+            changes.append(f"medication={'taken' if payload['medicationTaken'] else 'missed'}")
+        if "weight" in payload:
+            changes.append(f"weight={payload['weight']}lbs")
+        if "symptoms" in payload:
+            syms = payload["symptoms"]
+            changes.append(f"symptoms={','.join(syms) if syms else 'none'}")
         detail_str = f"entry={entry_id} changes=[{', '.join(changes)}]"
 
         from generated import voice_pb2
@@ -355,11 +371,11 @@ def make_tools(
 
         # Fetch the updated entry to get current values
         entry_date = ""
-        final_systolic = systolic_bp or 0
-        final_diastolic = diastolic_bp or 0
-        final_weight = weight or 0.0
-        final_med = medication_taken if medication_taken is not None else False
-        final_symptoms = symptoms or []
+        final_systolic = payload.get("systolicBP", 0) or 0
+        final_diastolic = payload.get("diastolicBP", 0) or 0
+        final_weight = payload.get("weight", 0.0) or 0.0
+        final_med = payload.get("medicationTaken", False)
+        final_symptoms = payload.get("symptoms", []) or []
 
         if updated:
             try:
@@ -405,7 +421,7 @@ def make_tools(
             )
         )
 
-        return {
+        result = {
             "updated": updated,
             "message": (
                 "Reading updated successfully."
@@ -413,6 +429,8 @@ def make_tools(
                 else "Could not update the reading. Please try again."
             ),
         }
+        logger.info("[VOICE tools] update_checkin RETURN updated=%s entry_id=%s → Gemini", updated, entry_id)
+        return result
 
     # ── Tool 4: Delete reading(s) ───────────────────────────────────────────
 
@@ -453,6 +471,7 @@ def make_tools(
                     )
                 )
             )
+            logger.info("[VOICE tools] delete_checkin RETURN no_ids → Gemini")
             return {"deleted_count": 0, "failed_count": 0, "message": "No entry IDs provided."}
 
         _put(
@@ -502,6 +521,18 @@ def make_tools(
 
         _put(
             _vpb_del.ServerMessage(
+                deleted=_vpb_del.CheckinDeleted(
+                    entry_ids=ids,
+                    deleted_count=deleted_count,
+                    failed_count=failed_count,
+                    success=(failed_count == 0),
+                    message=msg,
+                )
+            )
+        )
+
+        _put(
+            _vpb_del.ServerMessage(
                 action_complete=_vpb_del.ActionComplete(
                     type="deleting_checkin",
                     success=(failed_count == 0),
@@ -510,6 +541,7 @@ def make_tools(
             )
         )
 
+        logger.info("[VOICE tools] delete_checkin RETURN deleted=%d failed=%d → Gemini", deleted_count, failed_count)
         return {"deleted_count": deleted_count, "failed_count": failed_count, "message": msg}
 
     return [submit_checkin, get_recent_readings, update_checkin, delete_checkin]

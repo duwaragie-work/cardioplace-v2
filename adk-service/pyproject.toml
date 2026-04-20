@@ -1,7 +1,7 @@
 [project]
 name = "adk-service"
 version = "0.1.0"
-description = "Add your description here"
+description = "Healplace cardio voice service — Google ADK / Gemini Live"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

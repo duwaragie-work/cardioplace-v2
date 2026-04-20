@@ -2,6 +2,18 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { io, Socket } from 'socket.io-client';
+
+// ── Debug logging ─────────────────────────────────────────────────────────────
+// Gate on NEXT_PUBLIC_VOICE_DEBUG=1 to keep prod console clean.
+const VOICE_DEBUG =
+  typeof process !== 'undefined' && process.env.NEXT_PUBLIC_VOICE_DEBUG === '1';
+function debug(tag: string, ...args: unknown[]) {
+  if (VOICE_DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log(`[VOICE ${tag}]`, ...args);
+  }
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type SessionState =
@@ -39,6 +51,14 @@ export interface UpdateSummary {
   medicationTaken?: boolean;
   symptoms: string[];
   updated: boolean;
+}
+
+export interface DeleteSummary {
+  entryIds: string[];
+  deletedCount: number;
+  failedCount: number;
+  success: boolean;
+  message: string;
 }
 
 export interface StartOptions {
@@ -91,12 +111,36 @@ function base64ToFloat32(base64: string, sampleRate: number): AudioBuffer | null
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) {
-  const [sessionState, setSessionState] = useState<SessionState>('idle');
+  const [sessionState, setSessionStateRaw] = useState<SessionState>('idle');
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
   const [pendingCheckin, setPendingCheckin] = useState<CheckinSummary | null>(null);
   const [pendingUpdate, setPendingUpdate] = useState<UpdateSummary | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<DeleteSummary | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
-  const [actionType, setActionType] = useState<string | null>(null);
+  const [actionTypeState, setActionTypeRaw] = useState<string | null>(null);
+
+  // Logged wrappers so every state/actionType transition is visible when debug is on.
+  const setSessionState = useCallback(
+    (updater: SessionState | ((prev: SessionState) => SessionState), reason?: string) => {
+      setSessionStateRaw((prev) => {
+        const next = typeof updater === 'function' ? (updater as (p: SessionState) => SessionState)(prev) : updater;
+        if (next !== prev) debug('state', `${prev} → ${next}${reason ? ` (${reason})` : ''}`);
+        return next;
+      });
+    },
+    [],
+  );
+  const setActionType = useCallback(
+    (updater: string | null | ((prev: string | null) => string | null), reason?: string) => {
+      setActionTypeRaw((prev) => {
+        const next = typeof updater === 'function' ? (updater as (p: string | null) => string | null)(prev) : updater;
+        if (next !== prev) debug('actionType', `${prev} → ${next}${reason ? ` (${reason})` : ''}`);
+        return next;
+      });
+    },
+    [],
+  );
+  const actionType = actionTypeState;
 
   const socketRef = useRef<Socket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -105,8 +149,26 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const processorRef = useRef<any>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const audioQueueRef = useRef<AudioBuffer[]>([]);
-  const isPlayingRef = useRef(false);
+  // Scheduled playback — each arriving audio chunk is scheduled to start at
+  // nextStartTimeRef on the playback AudioContext, avoiding the onended gap
+  // that caused choppy output. When no chunks arrive for ~200ms after the
+  // last scheduled end, drainTimerRef fires and reverts state to 'listening'.
+  const nextStartTimeRef = useRef<number>(0);
+  const drainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Latency: stamp when user's final transcript arrives, measure again on the
+  // first agent audio chunk of the reply. Cleared after one measurement so we
+  // don't keep rewriting the stamp as more audio streams in.
+  const lastUserFinalTimeRef = useRef<number | null>(null);
+  // Client-side VAD — track whether we're currently in a "speaking" span, and
+  // when silence began, so we can emit audio_stream_end after a pause. Gemini
+  // Live otherwise waits ~300-500ms of trailing silence to finalise the turn.
+  const speakingRef = useRef(false);
+  const silenceStartRef = useRef<number | null>(null);
+  // Session pre-warm: prewarmedRef becomes true once 'session_ready' arrives.
+  // startMicPendingRef says "when ready, start the mic" — set by start() when
+  // the user clicks before prewarm completed, cleared once startMic runs.
+  const prewarmedRef = useRef(false);
+  const startMicPendingRef = useRef(false);
   const transcriptIdRef = useRef(0);
   const onSessionCreatedRef = useRef(onSessionCreated);
 
@@ -124,15 +186,21 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
       socketRef.current.disconnect();
       socketRef.current = null;
     }
+    if (drainTimerRef.current) {
+      clearTimeout(drainTimerRef.current);
+      drainTimerRef.current = null;
+    }
     if (playbackContextRef.current) {
       await playbackContextRef.current.close().catch(() => {});
       playbackContextRef.current = null;
     }
-    audioQueueRef.current = [];
-    isPlayingRef.current = false;
+    nextStartTimeRef.current = 0;
+    prewarmedRef.current = false;
+    startMicPendingRef.current = false;
   }, []);
 
   const stopMic = useCallback(() => {
+    debug('mic', 'stopMic');
     if (processorRef.current) {
       processorRef.current.disconnect();
       processorRef.current = null;
@@ -149,9 +217,12 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
       micStreamRef.current.getTracks().forEach((t) => t.stop());
       micStreamRef.current = null;
     }
+    speakingRef.current = false;
+    silenceStartRef.current = null;
   }, []);
 
   const startMic = useCallback(async () => {
+    debug('mic', 'startMic');
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         sampleRate: 16000,
@@ -169,16 +240,69 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
     const source = ctx.createMediaStreamSource(stream);
     sourceRef.current = source;
 
-    // ScriptProcessorNode — captures raw PCM and sends to backend
-    // 2048 samples at 16kHz = 128ms chunks (lower = less input latency)
-    const bufferSize = 2048;
+    // ScriptProcessorNode — captures raw PCM and sends to backend.
+    // createScriptProcessor requires a power-of-2 bufferSize in {256, 512,
+    // 1024, 2048, 4096, 8192, 16384}. 512 @ 16kHz = 32ms chunks, which sits
+    // in Google Live API's recommended 20–40ms window. Down from 2048 (128ms)
+    // for ~96ms lower server-side VAD buffering per turn.
+    const bufferSize = 512;
     // eslint-disable-next-line @typescript-eslint/no-deprecated
     const processor = ctx.createScriptProcessor(bufferSize, 1, 1);
     processorRef.current = processor;
 
+    // Client-side VAD thresholds.
+    //  - RMS_THRESHOLD 0.02: distinguishes real speech from low-level noise
+    //    (breathing, mic self-noise) after echoCancellation/noiseSuppression.
+    //  - END_OF_UTTERANCE_MS 500: shaves ~300 ms off Gemini's own VAD tail.
+    //    Short decisive utterances ("save it", "yes", "no") shouldn't wait
+    //    800 ms to be finalised. Mid-sentence pauses up to ~400 ms are still
+    //    safe because the cooldown + the user resuming speech both protect
+    //    against premature turn-ends.
+    //  - COOLDOWN_MS 2000: after an emit, suppress further emits for 2 s so a
+    //    user who pauses, resumes, pauses again doesn't spam the signal.
+    const RMS_THRESHOLD = 0.02;
+    const END_OF_UTTERANCE_MS = 300;
+    const COOLDOWN_MS = 2000;
+    let lastEmitAt = 0;
+
     processor.onaudioprocess = (e: AudioProcessingEvent) => {
       if (!socketRef.current?.connected) return;
       const float32 = e.inputBuffer.getChannelData(0);
+
+      // RMS of this frame for VAD. Cheap: sum of squares / N, then sqrt.
+      let sumSq = 0;
+      for (let i = 0; i < float32.length; i++) sumSq += float32[i] * float32[i];
+      const rms = Math.sqrt(sumSq / float32.length);
+      const now = performance.now();
+
+      if (rms >= RMS_THRESHOLD) {
+        // Speech frame.
+        if (!speakingRef.current) {
+          speakingRef.current = true;
+          debug('vad', 'speech start');
+        }
+        silenceStartRef.current = null;
+      } else {
+        // Silence frame.
+        if (speakingRef.current) {
+          if (silenceStartRef.current === null) {
+            silenceStartRef.current = now;
+          } else if (now - silenceStartRef.current >= END_OF_UTTERANCE_MS) {
+            speakingRef.current = false;
+            silenceStartRef.current = null;
+            if (now - lastEmitAt >= COOLDOWN_MS) {
+              lastEmitAt = now;
+              debug('vad', `speech end — emit audio_stream_end after ${END_OF_UTTERANCE_MS}ms silence`);
+              socketRef.current.emit('audio_stream_end');
+            } else {
+              debug('vad', 'speech end — suppressed (cooldown)');
+            }
+          }
+        }
+      }
+
+      // Always forward the audio frame. Even during silence, trailing context
+      // helps Gemini's ASR; if the user resumes mid-pause, no frames are dropped.
       const int16 = floatTo16BitPCM(float32);
       const base64 = arrayBufferToBase64(int16.buffer as ArrayBuffer);
       socketRef.current.emit('audio_chunk', base64);
@@ -186,44 +310,62 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
 
     source.connect(processor);
     processor.connect(ctx.destination);
-    setSessionState('listening');
-  }, []);
+    setSessionState('listening', 'startMic success');
+  }, [setSessionState]);
 
+  // Scheduled playback — eliminates the onended gap that causes choppy audio.
+  // Each arriving chunk is decoded and scheduled to start at nextStartTimeRef.
+  // If the first chunk in a turn, seed the scheduler PREROLL_MS ahead of
+  // currentTime so one late-arriving second chunk can't underrun. After the
+  // last scheduled chunk ends, DRAIN_MS of silence triggers a revert to
+  // 'listening' state.
   const playAudio = useCallback((audioBase64: string) => {
     const OUTPUT_SAMPLE_RATE = 24000;
+    // Playback pre-roll. Seeds the scheduler this many ms ahead of
+    // currentTime on the first chunk of a turn so one late-arriving second
+    // chunk can't underrun. Lower = first syllable arrives sooner; higher =
+    // more tolerant of network jitter. 60 ms is tight but tolerable on a
+    // wired/good-WiFi connection for most listeners.
+    const PREROLL_MS = 60;
+    const DRAIN_MS = 200;
 
     if (!playbackContextRef.current) {
       playbackContextRef.current = new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
     }
+    const ctx = playbackContextRef.current;
 
     const buffer = base64ToFloat32(audioBase64, OUTPUT_SAMPLE_RATE);
-    if (!buffer) return;
-
-    audioQueueRef.current.push(buffer);
-    setSessionState('agent_speaking');
-
-    if (!isPlayingRef.current) {
-      playNextBuffer();
-    }
-  }, []);
-
-  const playNextBuffer = useCallback(() => {
-    if (audioQueueRef.current.length === 0) {
-      isPlayingRef.current = false;
-      // Only revert to 'listening' if we're still in agent_speaking
-      setSessionState((prev) => (prev === 'agent_speaking' ? 'listening' : prev));
+    if (!buffer) {
+      debug('audio', 'playAudio: decode failed');
       return;
     }
-    isPlayingRef.current = true;
-    const buffer = audioQueueRef.current.shift()!;
 
-    if (!playbackContextRef.current) return;
-    const source = playbackContextRef.current.createBufferSource();
+    // Seed the scheduler if this is the first chunk of a new agent turn.
+    // nextStartTime is "behind" the clock when there's been a gap.
+    const now = ctx.currentTime;
+    if (nextStartTimeRef.current < now + 0.01) {
+      nextStartTimeRef.current = now + PREROLL_MS / 1000;
+      debug('audio', `first chunk of turn — seeded scheduler at +${PREROLL_MS}ms`);
+    }
+
+    const source = ctx.createBufferSource();
     source.buffer = buffer;
-    source.connect(playbackContextRef.current.destination);
-    source.onended = () => playNextBuffer();
-    source.start();
-  }, []);
+    source.connect(ctx.destination);
+    source.start(nextStartTimeRef.current);
+    nextStartTimeRef.current += buffer.duration;
+
+    setSessionState('agent_speaking', 'audio_response');
+
+    // Reset the drain timer — if no more chunks arrive for DRAIN_MS after the
+    // last scheduled chunk ends, revert to listening.
+    if (drainTimerRef.current) clearTimeout(drainTimerRef.current);
+    const msUntilEnd = Math.max(0, (nextStartTimeRef.current - now) * 1000) + DRAIN_MS;
+    drainTimerRef.current = setTimeout(() => {
+      debug('audio', 'drain timer fired — reverting to listening');
+      setSessionState((prev) => (prev === 'agent_speaking' ? 'listening' : prev), 'audio drained');
+      drainTimerRef.current = null;
+    }, msUntilEnd);
+  }, [setSessionState]);
 
   const appendTranscript = useCallback(
     (text: string, speaker: 'user' | 'agent', isFinal: boolean) => {
@@ -248,12 +390,62 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
-  const start = useCallback(
-    async ({ token, sessionId }: StartOptions) => {
-      setSessionState('connecting');
-      setTranscript([]);
-      setPendingCheckin(null);
-      setErrorMessage('');
+  // Shared entry used by both start() (user clicked mic) and prewarm() (page
+  // mounted — open the socket in the background so the first click has no
+  // session-setup latency). `requestMic` controls whether we also start the
+  // mic as soon as session_ready arrives.
+  const _open = useCallback(
+    async ({ token, sessionId }: StartOptions, requestMic: boolean) => {
+      debug(requestMic ? 'start' : 'prewarm', `sessionId=${sessionId ?? 'new'} socketOpen=${!!socketRef.current} prewarmed=${prewarmedRef.current}`);
+
+      // Fast path: socket already open and session ready — user just clicked.
+      if (socketRef.current && prewarmedRef.current && requestMic) {
+        setSessionState('connecting', 'start() (warm)');
+        setTranscript([]);
+        setPendingCheckin(null);
+        setPendingUpdate(null);
+        setPendingDelete(null);
+        setErrorMessage('');
+        startMicPendingRef.current = false;
+        try {
+          await startMic();
+        } catch (err) {
+          debug('start', 'warm startMic failed', err);
+          setSessionState('error', 'mic denied');
+          setErrorMessage('Microphone access denied. Please allow microphone access and try again.');
+        }
+        return;
+      }
+
+      // Socket exists but session not ready yet (prewarm still in flight).
+      // If the user clicked, flag the pending intent; session_ready will run
+      // startMic when it fires. If it's another prewarm call, just no-op.
+      if (socketRef.current) {
+        if (requestMic) {
+          startMicPendingRef.current = true;
+          setSessionState('connecting', 'start() awaiting ready');
+          setTranscript([]);
+          setPendingCheckin(null);
+          setPendingUpdate(null);
+          setPendingDelete(null);
+          setErrorMessage('');
+        }
+        return;
+      }
+
+      // Fresh setup: build the socket from scratch.
+      if (requestMic) {
+        setSessionState('connecting', 'start()');
+        setTranscript([]);
+        setPendingCheckin(null);
+        setPendingUpdate(null);
+        setPendingDelete(null);
+        setErrorMessage('');
+        startMicPendingRef.current = true;
+      } else {
+        startMicPendingRef.current = false;
+      }
+      prewarmedRef.current = false;
 
       const wsUrl =
         process.env.NEXT_PUBLIC_VOICE_WS_URL ?? 'http://localhost:8080';
@@ -269,130 +461,205 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
       socketRef.current = socket;
 
       socket.on('session_ready', async (data?: { sessionId?: string }) => {
+        debug('socket', `session_ready sessionId=${data?.sessionId ?? 'none'} micPending=${startMicPendingRef.current}`);
+        prewarmedRef.current = true;
         // Notify consumer of resolved sessionId (may be a newly created one)
         if (data?.sessionId) {
           onSessionCreatedRef.current?.(data.sessionId);
         }
+        // Only start the mic if the user actually clicked. Pre-warm paths
+        // (page-load background setup) leave startMicPendingRef false and
+        // keep the session idle until the user engages.
+        if (!startMicPendingRef.current) return;
+        startMicPendingRef.current = false;
         try {
           await startMic();
-        } catch {
-          setSessionState('error');
+        } catch (err) {
+          debug('socket', 'session_ready → startMic failed', err);
+          setSessionState('error', 'mic denied');
           setErrorMessage('Microphone access denied. Please allow microphone access and try again.');
           socket.disconnect();
         }
       });
 
       socket.on('audio_response', (data: { audio: string }) => {
+        if (VOICE_DEBUG) debug('socket', `audio_response bytes=${data.audio?.length ?? 0}`);
+        // Latency: first audio chunk after a user final closes the loop.
+        if (lastUserFinalTimeRef.current !== null) {
+          const ms = Math.round(performance.now() - lastUserFinalTimeRef.current);
+          debug('latency', `user→agent_first_audio=${ms}ms`);
+          lastUserFinalTimeRef.current = null;
+        }
         playAudio(data.audio);
         // First agent audio after a tool call implies the tool finished and the
         // agent is now speaking the result — clear any in-flight action overlay.
         // Safety net for tools (delete, fetch) that don't emit a dedicated
         // completion event.
-        setActionType((current) => (current ? null : current));
+        setActionType((current) => (current ? null : current), 'audio_response safety net');
       });
 
       socket.on('transcript', (data: { text: string; isFinal: boolean; speaker: 'user' | 'agent' }) => {
+        if (data.isFinal && data.text.trim()) {
+          debug('socket', `transcript [${data.speaker}] "${data.text.slice(0, 60)}"`);
+        }
+        // Stamp the moment the user's speaking turn ended so we can measure
+        // the gap until the first agent audio chunk arrives.
+        if (data.speaker === 'user' && data.isFinal && data.text.trim()) {
+          lastUserFinalTimeRef.current = performance.now();
+        }
         appendTranscript(data.text, data.speaker, data.isFinal);
         // Detect end-call voice commands from user
         if (data.speaker === 'user' && data.isFinal) {
           const lower = data.text.toLowerCase();
           const endPhrases = ['end the call', 'end call', 'hang up', 'stop the call', 'cut the call', 'bye', 'goodbye', 'end session', 'stop session'];
           if (endPhrases.some((p) => lower.includes(p))) {
+            debug('socket', 'end phrase detected — scheduling cleanup in 1500ms');
             setTimeout(() => {
               socketRef.current?.emit('end_session');
               void cleanup();
-              setSessionState('idle');
+              setSessionState('idle', 'end-phrase cleanup');
               setPendingCheckin(null);
-              setActionType(null);
+              setPendingUpdate(null);
+              setPendingDelete(null);
+              setActionType(null, 'end-phrase cleanup');
             }, 1500); // Small delay so AI can say goodbye
           }
         }
       });
 
       socket.on('action', (data: { type: string; detail: string }) => {
-        setActionType(data.type);
+        debug('socket', `action type=${data.type} detail="${data.detail?.slice(0, 80)}"`);
+        setActionType(data.type, `action ${data.type}`);
         if (['submitting_checkin', 'updating_checkin', 'deleting_checkin', 'fetching_readings'].includes(data.type)) {
-          setSessionState('processing');
+          setSessionState('processing', `action ${data.type}`);
         }
       });
 
       socket.on('action_complete', (data: { type: string; success: boolean; detail: string }) => {
-        setActionType((current) => (current === data.type ? null : current));
-        setSessionState((prev) => (prev === 'processing' ? 'listening' : prev));
+        debug('socket', `action_complete type=${data.type} success=${data.success}`);
+        setActionType((current) => (current === data.type ? null : current), `action_complete ${data.type}`);
+        setSessionState((prev) => (prev === 'processing' ? 'listening' : prev), 'action_complete');
       });
 
       socket.on('checkin_saved', (summary: CheckinSummary) => {
+        debug('socket', `checkin_saved BP=${summary.systolicBP}/${summary.diastolicBP} saved=${summary.saved}`);
         setPendingCheckin(summary);
-        setActionType(null);
-        setSessionState('checkin_confirm');
-        stopMic();
+        setActionType(null, 'checkin_saved');
+        setSessionState('checkin_confirm', 'checkin_saved');
+        // Do NOT stop mic here — NO_INTERRUPTION on the backend prevents the
+        // mic from cancelling the agent's confirmation. Keeping it open lets
+        // the conversation continue after the card auto-dismisses.
       });
 
       socket.on('checkin_updated', (summary: UpdateSummary) => {
+        debug('socket', `checkin_updated entryId=${summary.entryId} updated=${summary.updated}`);
         setPendingUpdate(summary);
-        setActionType(null);
-        setSessionState((prev) => (prev === 'processing' ? 'listening' : prev));
+        setActionType(null, 'checkin_updated');
+        setSessionState((prev) => (prev === 'processing' ? 'listening' : prev), 'checkin_updated');
+      });
+
+      socket.on('checkin_deleted', (summary: DeleteSummary) => {
+        debug('socket', `checkin_deleted count=${summary.deletedCount}/${summary.failedCount} success=${summary.success}`);
+        setPendingDelete(summary);
+        setActionType(null, 'checkin_deleted');
+        setSessionState((prev) => (prev === 'processing' ? 'listening' : prev), 'checkin_deleted');
       });
 
       socket.on('session_error', (data: { message: string }) => {
+        debug('socket', `session_error "${data.message}"`);
         setErrorMessage(data.message);
-        setSessionState('error');
+        setSessionState('error', 'session_error');
         stopMic();
       });
 
       socket.on('session_closed', () => {
+        debug('socket', 'session_closed');
         stopMic();
-        setSessionState('idle');
+        setSessionState('idle', 'session_closed');
       });
 
       socket.on('connect_error', (err) => {
+        debug('socket', `connect_error ${err.message}`);
         setErrorMessage(`Connection failed: ${err.message}`);
-        setSessionState('error');
+        setSessionState('error', 'connect_error');
       });
 
-      socket.on('disconnect', () => {
+      socket.on('disconnect', (reason) => {
+        debug('socket', `disconnect reason=${reason}`);
         // Safety net for WS drops that don't carry an explicit
         // session_error/session_closed event (Railway proxy idle timeout,
         // ADK crash that outraces the cleanup chain). Without this the UI
         // would stay stuck on "Listening" forever.
         stopMic();
-        setSessionState((prev) => (prev === 'error' ? prev : 'idle'));
+        setSessionState((prev) => (prev === 'error' ? prev : 'idle'), 'ws disconnect');
       });
 
       socket.on('connect', () => {
+        debug('socket', `connect → emit start_session sessionId=${sessionId ?? 'new'}`);
         socket.emit('start_session', { sessionId: sessionId ?? null });
       });
     },
-    [startMic, stopMic, playAudio, appendTranscript],
+    [startMic, stopMic, playAudio, appendTranscript, setSessionState, setActionType],
+  );
+
+  // Public: user clicked the mic.
+  const start = useCallback(
+    (opts: StartOptions) => _open(opts, true),
+    [_open],
+  );
+
+  // Public: background pre-warm on page mount. Opens the socket and runs
+  // session setup (patient context build, gRPC stream, Gemini connect) while
+  // the user is still reading the UI, so the first click has no setup delay.
+  const prewarm = useCallback(
+    (opts: StartOptions) => _open(opts, false),
+    [_open],
   );
 
   const sendText = useCallback((text: string) => {
     if (!socketRef.current?.connected || !text.trim()) return;
+    debug('sendText', `len=${text.length}`);
     socketRef.current.emit('text_input', { text });
     appendTranscript(text, 'user', true);
-    setSessionState('processing');
-  }, [appendTranscript]);
+    setSessionState('processing', 'sendText');
+  }, [appendTranscript, setSessionState]);
 
   const end = useCallback(async () => {
+    debug('end', 'user end()');
     socketRef.current?.emit('end_session');
     await cleanup();
-    setSessionState('idle');
+    setSessionState('idle', 'user end()');
     // Don't clear transcript here — AIChatInterface converts them to
     // permanent message bubbles when it detects the idle transition.
     setPendingCheckin(null);
-  }, [cleanup]);
+    setPendingUpdate(null);
+    setPendingDelete(null);
+  }, [cleanup, setSessionState]);
 
   const dismissCheckin = useCallback(() => {
+    debug('dismissCheckin', 'auto or user');
     setPendingCheckin(null);
-    setSessionState('idle');
-  }, []);
+    // Return to 'listening' (not 'idle') — the voice call continues so the
+    // agent can speak its confirmation. Setting 'idle' here would trigger
+    // the AIChatInterface idle transition and tear down the whole session.
+    setSessionState(
+      (prev) => (prev === 'checkin_confirm' ? 'listening' : prev),
+      'dismissCheckin',
+    );
+  }, [setSessionState]);
 
   const clearTranscript = useCallback(() => {
     setTranscript([]);
   }, []);
 
   const dismissUpdate = useCallback(() => {
+    debug('dismissUpdate', 'auto or user');
     setPendingUpdate(null);
+  }, []);
+
+  const dismissDelete = useCallback(() => {
+    debug('dismissDelete', 'auto or user');
+    setPendingDelete(null);
   }, []);
 
   return {
@@ -400,13 +667,16 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
     transcript,
     pendingCheckin,
     pendingUpdate,
+    pendingDelete,
     errorMessage,
     actionType,
     start,
+    prewarm,
     sendText,
     end,
     dismissCheckin,
     dismissUpdate,
+    dismissDelete,
     clearTranscript,
   };
 }

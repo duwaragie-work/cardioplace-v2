@@ -18,7 +18,7 @@ from .tools import make_tools
 
 logger = logging.getLogger(__name__)
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-live-preview-04-09")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-live-preview")
 APP_NAME = "healplace_cardio"
 
 
@@ -43,11 +43,19 @@ def create_session_runner(
     tools = make_tools(auth_token, out_queue, loop, patient_timezone=patient_tz)
     instruction = build_prompt(mode, patient_context)
 
+    # Diagnostic: set DISABLE_TOOLS=1 to prove whether tool declarations are
+    # the source of Gemini's 1008 "Operation is not implemented" close. If
+    # the session survives past a user utterance with tools off but dies
+    # with them on, the tool-declaration format is the culprit.
+    disable_tools = os.getenv("DISABLE_TOOLS", "") == "1"
+    if disable_tools:
+        logger.warning("DISABLE_TOOLS=1 — creating agent with NO tools (diagnostic mode)")
+
     agent = Agent(
         name="cardio_voice_agent",
         model=GEMINI_MODEL,
         instruction=instruction,
-        tools=tools,
+        tools=[] if disable_tools else tools,
     )
 
     session_service = InMemorySessionService()

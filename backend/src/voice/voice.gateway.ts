@@ -95,36 +95,50 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       {
         onReady: () => {
           const sessionId = this.voiceService.getSessionId(client.id)
-          this.logger.log(`[FLOW] Step 3 DONE — session ready [socket=${client.id}] (${Date.now() - sessionStart}ms)`)
+          this.logger.log(`[VOICE NestJS→WS] emit session_ready [socket=${client.id}] (${Date.now() - sessionStart}ms)`)
           client.emit('session_ready', { sessionId })
         },
         onAudio: (audioBase64: string) => {
+          if (process.env.VOICE_DEBUG_AUDIO === '1') {
+            this.logger.log(`[VOICE NestJS→WS] emit audio_response bytes=${audioBase64.length} [socket=${client.id}]`)
+          }
           client.emit('audio_response', { audio: audioBase64 })
         },
         onTranscript: (text: string, isFinal: boolean, speaker: 'user' | 'agent') => {
-          if (isFinal && text.trim()) this.logger.log(`[FLOW] Step 8/9 — transcript [${speaker}] "${text.slice(0, 60)}"`)
+          if (isFinal && text.trim()) {
+            this.logger.log(`[VOICE NestJS→WS] emit transcript [${speaker}] isFinal=${isFinal} "${text.slice(0, 60)}" [socket=${client.id}]`)
+          }
           client.emit('transcript', { text, isFinal, speaker })
         },
         onAction: (type: string, detail: string) => {
-          this.logger.log(`[FLOW] Step 8 — tool action [${type}] ${detail.slice(0, 80)}`)
+          this.logger.log(`[VOICE NestJS→WS] emit action type=${type} detail="${detail.slice(0, 80)}" [socket=${client.id}]`)
           client.emit('action', { type, detail })
         },
         onActionComplete: (type: string, success: boolean, detail: string) => {
-          this.logger.log(`[FLOW] Step 8 — tool complete [${type}] success=${success} ${detail.slice(0, 80)}`)
+          this.logger.log(`[VOICE NestJS→WS] emit action_complete type=${type} success=${success} [socket=${client.id}]`)
           client.emit('action_complete', { type, success, detail })
         },
         onCheckinSaved: (summary) => {
-          this.logger.log(`[FLOW] Step 8 — checkin_saved BP=${summary.systolicBP}/${summary.diastolicBP}`)
+          this.logger.log(`[VOICE NestJS→WS] emit checkin_saved BP=${summary.systolicBP}/${summary.diastolicBP} saved=${summary.saved} [socket=${client.id}]`)
+          this.voiceService.invalidateContextCache(userId)
           client.emit('checkin_saved', summary)
         },
         onCheckinUpdated: (summary) => {
+          this.logger.log(`[VOICE NestJS→WS] emit checkin_updated entryId=${summary.entryId} updated=${summary.updated} [socket=${client.id}]`)
+          this.voiceService.invalidateContextCache(userId)
           client.emit('checkin_updated', summary)
         },
+        onCheckinDeleted: (summary) => {
+          this.logger.log(`[VOICE NestJS→WS] emit checkin_deleted count=${summary.deletedCount}/${summary.failedCount} success=${summary.success} [socket=${client.id}]`)
+          this.voiceService.invalidateContextCache(userId)
+          client.emit('checkin_deleted', summary)
+        },
         onError: (message: string) => {
+          this.logger.log(`[VOICE NestJS→WS] emit session_error msg="${message}" [socket=${client.id}]`)
           client.emit('session_error', { message })
         },
         onClose: () => {
-          this.logger.log(`[FLOW] Step 10 DONE — session closed [socket=${client.id}] (total ${Date.now() - sessionStart}ms)`)
+          this.logger.log(`[VOICE NestJS→WS] emit session_closed [socket=${client.id}] (total ${Date.now() - sessionStart}ms)`)
           client.emit('session_closed', {})
         },
       },
@@ -141,6 +155,14 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.voiceService.sendAudio(client.id, audioBase64)
   }
 
+  // Client-side VAD tells us the user just paused for > 400ms. Forward the
+  // signal so Gemini finalises the turn instead of waiting for its own silence
+  // detection. Shaves ~300-500ms off every reply.
+  @SubscribeMessage('audio_stream_end')
+  handleAudioStreamEnd(@ConnectedSocket() client: Socket) {
+    this.voiceService.sendAudioStreamEnd(client.id)
+  }
+
   @SubscribeMessage('text_input')
   handleTextInput(
     @ConnectedSocket() client: Socket,
@@ -153,6 +175,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('end_session')
   async handleEndSession(@ConnectedSocket() client: Socket) {
+    this.logger.log(`[VOICE WS] end_session received [socket=${client.id}]`)
     await this.voiceService.endSession(client.id)
     client.emit('session_closed', {})
   }

@@ -16,6 +16,7 @@ export interface VoiceSessionCallbacks {
   onActionComplete: (type: string, success: boolean, detail: string) => void
   onCheckinSaved: (summary: CheckinSummary) => void
   onCheckinUpdated: (summary: UpdateSummary) => void
+  onCheckinDeleted: (summary: DeleteSummary) => void
   onError: (message: string) => void
   onClose: () => void
 }
@@ -38,6 +39,14 @@ export interface UpdateSummary {
   medicationTaken?: boolean
   symptoms: string[]
   updated: boolean
+}
+
+export interface DeleteSummary {
+  entryIds: string[]
+  deletedCount: number
+  failedCount: number
+  success: boolean
+  message: string
 }
 
 interface TranscriptEntry {
@@ -70,12 +79,22 @@ interface ActiveSession {
   agentAudioChunks: Buffer[]
   userAudioBytes: number
   agentAudioBytes: number
+  // Latency — stamp (Date.now) when the user's final transcript arrives,
+  // logged again on the next agent audio chunk to measure round-trip time.
+  // Null until the next user turn; cleared after one measurement.
+  lastUserFinalAt: number | null
 }
 
 @Injectable()
 export class VoiceService implements OnModuleDestroy {
   private readonly logger = new Logger(VoiceService.name)
   private readonly sessions = new Map<string, ActiveSession>()
+  // Per-user patient-context cache. The 3s DB aggregation in
+  // buildPatientContext dominates first-turn latency; pre-warmed sessions and
+  // back-to-back sessions can reuse the last build within CONTEXT_TTL_MS.
+  // Invalidated on any CRUD action so readings/baseline stay fresh.
+  private readonly contextCache = new Map<string, { value: string; at: number }>()
+  private static readonly CONTEXT_TTL_MS = 60_000
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private voiceClient: any
 
@@ -152,8 +171,18 @@ export class VoiceService implements OnModuleDestroy {
     const sessionId = await this.resolveSession(chatSessionId, userId)
     this.logger.log(`[FLOW] Step 3a — session resolved [${sessionId}] (${Date.now() - t0}ms)`)
 
-    const patientContext = await this.buildPatientContext(userId, sessionId)
-    this.logger.log(`[FLOW] Step 3b — patient context built (${Date.now() - t0}ms)`)
+    // Use cached context if fresh; otherwise rebuild + store. CRUD tool
+    // events invalidate via invalidateContextCache(userId).
+    const cached = this.contextCache.get(userId)
+    let patientContext: string
+    if (cached && Date.now() - cached.at < VoiceService.CONTEXT_TTL_MS) {
+      patientContext = cached.value
+      this.logger.log(`[FLOW] Step 3b — patient context cache HIT (${Date.now() - t0}ms)`)
+    } else {
+      patientContext = await this.buildPatientContext(userId, sessionId)
+      this.contextCache.set(userId, { value: patientContext, at: Date.now() })
+      this.logger.log(`[FLOW] Step 3b — patient context built + cached (${Date.now() - t0}ms)`)
+    }
 
     // Open bidirectional gRPC stream (Step 4)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -177,6 +206,7 @@ export class VoiceService implements OnModuleDestroy {
       agentAudioChunks: [],
       userAudioBytes: 0,
       agentAudioBytes: 0,
+      lastUserFinalAt: null,
       callbacks,
     }
     this.sessions.set(socketId, activeSession)
@@ -187,6 +217,7 @@ export class VoiceService implements OnModuleDestroy {
       const payload: string = msg.payload
 
       if (payload === 'ready') {
+        this.logger.log(`[VOICE gRPC→NestJS] ready [socket=${socketId}]`)
         callbacks.onReady()
       } else if (payload === 'audio') {
         const rawData = Buffer.isBuffer(msg.audio.data)
@@ -197,13 +228,29 @@ export class VoiceService implements OnModuleDestroy {
           activeSession.agentAudioChunks.push(rawData)
           activeSession.agentAudioBytes += rawData.length
         }
+        // Latency: first agent audio chunk after a user final — log and clear.
+        if (activeSession.lastUserFinalAt !== null) {
+          const ms = Date.now() - activeSession.lastUserFinalAt
+          this.logger.log(`[VOICE latency] user_final→first_audio=${ms}ms [socket=${socketId}]`)
+          activeSession.lastUserFinalAt = null
+        }
         const audioBase64 = rawData.toString('base64')
+        // Audio arrives at ~50Hz — only log when VOICE_DEBUG_AUDIO=1
+        if (process.env.VOICE_DEBUG_AUDIO === '1') {
+          this.logger.log(`[VOICE gRPC→NestJS] audio bytes=${rawData.length} [socket=${socketId}]`)
+        }
         callbacks.onAudio(audioBase64)
       } else if (payload === 'transcript') {
         const t = msg.transcript
         const text: string = t.text ?? ''
         const isFinal: boolean = t.isFinal ?? false
         const speaker = (t.speaker as 'user' | 'agent') ?? 'agent'
+        this.logger.log(`[VOICE gRPC→NestJS] transcript speaker=${speaker} isFinal=${isFinal} len=${text.length} [socket=${socketId}]`)
+        // Latency: stamp user's final transcript so the next audio chunk can
+        // measure round-trip time at the NestJS layer.
+        if (speaker === 'user' && isFinal && text.trim()) {
+          activeSession.lastUserFinalAt = Date.now()
+        }
         callbacks.onTranscript(text, isFinal, speaker)
         // Accumulate non-empty transcript lines for persistence (cap at 200 to
         // avoid RESOURCE_EXHAUSTED when sessions run long).
@@ -222,7 +269,7 @@ export class VoiceService implements OnModuleDestroy {
       } else if (payload === 'action') {
         const actionType = msg.action.type ?? ''
         const actionDetail = msg.action.detail ?? ''
-        this.logger.log(`[ACTION RECEIVED] type=${actionType} detail=${actionDetail} socket=${socketId}`)
+        this.logger.log(`[VOICE gRPC→NestJS] action type=${actionType} detail=${actionDetail.slice(0, 80)} [socket=${socketId}]`)
         callbacks.onAction(actionType, actionDetail)
         // Track action for summary
         const sess = this.sessions.get(socketId)
@@ -235,10 +282,11 @@ export class VoiceService implements OnModuleDestroy {
         const type = ac?.type ?? ''
         const success = ac?.success ?? false
         const detail = ac?.detail ?? ''
-        this.logger.log(`[ACTION COMPLETE] type=${type} success=${success} socket=${socketId}`)
+        this.logger.log(`[VOICE gRPC→NestJS] action_complete type=${type} success=${success} [socket=${socketId}]`)
         callbacks.onActionComplete(type, success, detail)
       } else if (payload === 'checkin') {
         const c = msg.checkin
+        this.logger.log(`[VOICE gRPC→NestJS] checkin BP=${c.systolicBp}/${c.diastolicBp} saved=${c.saved} [socket=${socketId}]`)
         callbacks.onCheckinSaved({
           systolicBP: c.systolicBp ?? undefined,
           diastolicBP: c.diastolicBp ?? undefined,
@@ -261,6 +309,7 @@ export class VoiceService implements OnModuleDestroy {
         }
       } else if (payload === 'updated') {
         const u = msg.updated
+        this.logger.log(`[VOICE gRPC→NestJS] updated entryId=${u.entryId} updated=${u.updated} [socket=${socketId}]`)
         callbacks.onCheckinUpdated({
           entryId: u.entryId ?? '',
           entryDate: u.entryDate ?? undefined,
@@ -271,10 +320,21 @@ export class VoiceService implements OnModuleDestroy {
           symptoms: u.symptoms ?? [],
           updated: u.updated ?? false,
         })
+      } else if (payload === 'deleted') {
+        const d = msg.deleted
+        this.logger.log(`[VOICE gRPC→NestJS] deleted count=${d.deletedCount}/${d.failedCount} success=${d.success} [socket=${socketId}]`)
+        callbacks.onCheckinDeleted({
+          entryIds: d.entryIds ?? [],
+          deletedCount: d.deletedCount ?? 0,
+          failedCount: d.failedCount ?? 0,
+          success: d.success ?? false,
+          message: d.message ?? '',
+        })
       } else if (payload === 'error') {
-        this.logger.warn(`ADK error [socket=${socketId}]: ${msg.error.message}`)
+        this.logger.warn(`[VOICE gRPC→NestJS] error msg="${msg.error.message}" [socket=${socketId}]`)
         callbacks.onError(msg.error.message ?? 'Unknown voice service error')
       } else if (payload === 'closed') {
+        this.logger.log(`[VOICE gRPC→NestJS] closed [socket=${socketId}]`)
         activeSession.streamClosed = true
         this.saveVoiceTranscript(socketId)
           .then(() => {
@@ -284,11 +344,13 @@ export class VoiceService implements OnModuleDestroy {
               callbacks.onClose()
             }
           })
+      } else {
+        this.logger.warn(`[VOICE gRPC→NestJS] UNKNOWN payload="${payload}" [socket=${socketId}]`)
       }
     })
 
     call.on('error', (err: Error) => {
-      this.logger.error(`gRPC stream error [socket=${socketId}]`, err.message)
+      this.logger.error(`[VOICE gRPC→NestJS] STREAM ERROR name=${err.name} msg=${err.message} [socket=${socketId}]`, err.stack)
       activeSession.streamClosed = true
       this.saveVoiceTranscript(socketId)
         .then(() => {
@@ -298,7 +360,7 @@ export class VoiceService implements OnModuleDestroy {
     })
 
     call.on('end', () => {
-      this.logger.log(`gRPC stream ended [socket=${socketId}]`)
+      this.logger.log(`[VOICE gRPC→NestJS] STREAM END alreadyClosed=${activeSession.streamClosed} notified=${activeSession.closedNotified} [socket=${socketId}]`)
       activeSession.streamClosed = true
       this.saveVoiceTranscript(socketId)
         .then(() => {
@@ -361,8 +423,31 @@ export class VoiceService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Forward client-side VAD "user paused" signal to ADK. Gemini Live's
+   * server-side VAD otherwise waits ~300-500ms of trailing silence before
+   * finalising the user turn; this shortcuts that wait.
+   */
+  sendAudioStreamEnd(socketId: string): void {
+    const session = this.sessions.get(socketId)
+    if (!session || session.streamClosed) return
+    try {
+      session.call.write({ endOfUtterance: {} })
+    } catch (err) {
+      // Non-fatal — worst case the turn just takes longer to finalise.
+      this.logger.warn(`Failed to forward audio_stream_end to ADK: ${(err as Error).message}`)
+    }
+  }
+
   getSessionId(socketId: string): string | undefined {
     return this.sessions.get(socketId)?.sessionId
+  }
+
+  /** CRUD events invalidate so the next session rebuilds fresh context. */
+  invalidateContextCache(userId: string): void {
+    if (this.contextCache.delete(userId)) {
+      this.logger.log(`[VOICE cache] invalidated patient context for user=${userId}`)
+    }
   }
 
   async endSession(socketId: string): Promise<void> {
@@ -559,18 +644,19 @@ export class VoiceService implements OnModuleDestroy {
             communicationPreference: true,
           },
         }),
+        // Fetch only the minimum needed for the in-prompt summary:
+        // all entry dates so we can compute total count + distinct-day count
+        // for the baseline progress explanation. The per-entry values and
+        // entry_ids are NOT injected — the agent calls get_recent_readings
+        // on demand, which keeps per-turn prompt size ~1-2k tokens and first
+        // audio byte latency under 3-5s.
         this.prisma.journalEntry.findMany({
           where: { userId },
           orderBy: { entryDate: 'desc' },
           select: {
-            id: true,
             entryDate: true,
             systolicBP: true,
             diastolicBP: true,
-            weight: true,
-            medicationTaken: true,
-            measurementTime: true,
-            symptoms: true,
           },
         }),
         this.prisma.baselineSnapshot.findFirst({
@@ -607,53 +693,41 @@ export class VoiceService implements OnModuleDestroy {
         ? profileLines.join('. ') + '.'
         : 'Patient profile not available.'
 
-      // ── BP readings (all entries, Decimal→Number) ─────────────────────────
-      const lines: string[] = ['--- PATIENT HEALTH DATA (HISTORICAL — do NOT treat as current conversation input) ---']
-      lines.push(`All BP readings (${entries.length} total):`)
-      if (entries.length === 0) {
-        lines.push('- No readings recorded yet')
+      // ── BP readings summary (count + distinct-day count only) ─────────────
+      // Per-entry detail and entry_ids are NOT included — the agent calls the
+      // get_recent_readings tool when it needs them. This keeps the per-turn
+      // prompt small and TTFB low.
+      const completeEntries = entries.filter((e) => e.systolicBP != null && e.diastolicBP != null)
+      const entryCount = completeEntries.length
+      const distinctDays = new Set(
+        completeEntries.map((e) => new Date(e.entryDate).toISOString().slice(0, 10)),
+      ).size
+
+      const lines: string[] = ['--- PATIENT HEALTH DATA ---']
+      if (entryCount === 0) {
+        lines.push('BP readings: none recorded yet.')
       } else {
-        for (const e of entries) {
-          const date = new Date(e.entryDate).toLocaleDateString('en-US', {
-            month: 'short', day: 'numeric', year: 'numeric',
-          })
-          const time = e.measurementTime ?? 'unknown time'
-          const sys = e.systolicBP != null ? Number(e.systolicBP) : null
-          const dia = e.diastolicBP != null ? Number(e.diastolicBP) : null
-          const bp = sys != null && dia != null ? `${sys}/${dia} mmHg` : 'not recorded'
-          const med =
-            e.medicationTaken === true
-              ? 'taken'
-              : e.medicationTaken === false
-                ? 'missed'
-                : 'not recorded'
-          const wt = e.weight != null ? `, Weight: ${Number(e.weight)} lbs` : ''
-          const sym = (e.symptoms as string[] | null)?.length ? `, Symptoms: ${(e.symptoms as string[]).join(', ')}` : ''
-          lines.push(`- [entry_id="${e.id}"] ${date} at ${time}: ${bp}, Medication: ${med}${wt}${sym}`)
-        }
+        lines.push(
+          `BP readings: ${entryCount} recorded across ${distinctDays} distinct day(s). ` +
+          `Call get_recent_readings to list them or look up entry_ids.`,
+        )
       }
 
       // ── Baseline ───────────────────────────────────────────────────────────
       lines.push('')
-      const completeEntries = entries.filter((e) => e.systolicBP != null && e.diastolicBP != null)
-      const entryCount = completeEntries.length
       const bSys = baseline ? Number(baseline.baselineSystolic) : 0
       const bDia = baseline ? Number(baseline.baselineDiastolic) : 0
       if (bSys > 0 && bDia > 0) {
+        lines.push(`Baseline: ${bSys}/${bDia} mmHg`)
+      } else if (distinctDays >= 3) {
         lines.push(
-          `Baseline: ${bSys}/${bDia} mmHg`,
-        )
-      } else if (entryCount >= 3) {
-        lines.push(
-          `Baseline: Not yet computed (${entryCount} readings recorded — baseline should be available shortly, may need readings on 3 different days)`,
-        )
-      } else if (entryCount > 0) {
-        const remaining = 3 - entryCount
-        lines.push(
-          `Baseline: Not yet established — ${entryCount} of 3 required readings recorded (needs ${remaining} more on different days within 7 days)`,
+          `Baseline: Not yet computed (readings on ${distinctDays} distinct days recorded — baseline should be available shortly).`,
         )
       } else {
-        lines.push('Baseline: Not yet established — 0 of 3 required readings recorded (needs readings on 3 different days within 7 days)')
+        const remainingDays = 3 - distinctDays
+        lines.push(
+          `Baseline: Not yet established — readings on ${distinctDays} of 3 required distinct days (needs ${remainingDays} more day(s), all within a 7-day window).`,
+        )
       }
 
       // ── Alerts (aligned filter: acknowledgedAt: null) ─────────────────────
@@ -691,11 +765,13 @@ export class VoiceService implements OnModuleDestroy {
       const currentDate = `${y}-${mo}-${d}`
       const currentTime = `${h}:${mi}`
 
-      const historySummary = sessionData?.summary
-        ? `\n\nSESSION HISTORY SUMMARY:\n${sessionData.summary}`
-        : ''
+      // historySummary (sessionData?.summary) intentionally NOT injected.
+      // Gemini Live already accumulates conversation context turn-by-turn;
+      // appending our rolling summary duplicates tokens and inflates per-turn
+      // prefill. Kept fetched above only so downstream code can still read it.
+      void sessionData
 
-      return `${profileSummary}\n\n${lines.join('\n')}\n\nCURRENT DATE AND TIME (patient timezone ${tz}): ${currentDate} at ${currentTime}. When the patient says "now", "today", or "right now", use EXACTLY this date and time. NEVER guess a different date or time.${historySummary}`
+      return `${profileSummary}\n\n${lines.join('\n')}\n\nCURRENT DATE AND TIME (patient timezone ${tz}): ${currentDate} at ${currentTime}. When the patient says "now", "today", or "right now", use EXACTLY this date and time. NEVER guess a different date or time.`
     } catch {
       return 'Patient context unavailable.'
     }

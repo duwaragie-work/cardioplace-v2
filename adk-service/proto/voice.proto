@@ -17,12 +17,18 @@ service VoiceAgent {
 
 message ClientMessage {
   oneof payload {
-    SessionInit init  = 1;
-    AudioChunk  audio = 2;
-    TextInput   text  = 3;
-    EndSession  end   = 4;
+    SessionInit    init              = 1;
+    AudioChunk     audio             = 2;
+    TextInput      text              = 3;
+    EndSession     end               = 4;
+    EndOfUtterance end_of_utterance  = 5;
   }
 }
+
+// Client signals that the user has stopped speaking (based on local VAD).
+// Tells Gemini to finalize the user turn immediately instead of waiting for
+// its own server-side silence detection.
+message EndOfUtterance {}
 
 message SessionInit {
   string user_id         = 1;  // Patient user ID
@@ -58,6 +64,7 @@ message ServerMessage {
     SessionClosed  closed          = 7;
     CheckinUpdated updated         = 8;
     ActionComplete action_complete = 9;
+    CheckinDeleted deleted         = 10;
   }
 }
 
@@ -100,6 +107,14 @@ message CheckinUpdated {
   repeated string symptoms         = 6;
   bool            updated          = 7;
   string          entry_date       = 8;
+}
+
+message CheckinDeleted {
+  repeated string entry_ids     = 1;
+  int32           deleted_count = 2;
+  int32           failed_count  = 3;
+  bool            success       = 4;
+  string          message       = 5;
 }
 
 message SessionError {
