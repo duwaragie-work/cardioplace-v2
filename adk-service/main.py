@@ -78,8 +78,9 @@ sys.path.insert(0, str(_GENERATED.resolve()))
 #   default send_realtime for that path.
 # - gemini-2.5-flash-native-audio-* and gemini-3.1-flash-live-preview use the
 #   new `audio=Blob` field on send_realtime_input; patch for those.
-_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-native-audio-latest")
+_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-live-preview")
 _IS_LEGACY_2_0 = "2.0" in _GEMINI_MODEL
+_IS_3_1 = "3.1" in _GEMINI_MODEL
 
 from google.adk.models.gemini_llm_connection import GeminiLlmConnection
 from google.genai import types as _genai_types
@@ -180,23 +181,51 @@ logger.info("Applied tool-response patch (model-agnostic) for %s", _GEMINI_MODEL
 import contextlib as _contextlib
 from google.adk.models.google_llm import Gemini as _AdkGemini
 
+_orig_adk_gemini_connect = _AdkGemini.connect
+
+
+@_contextlib.asynccontextmanager
+async def _patched_adk_gemini_connect(self, llm_request):
+    cfg = llm_request.live_connect_config
+    if _IS_LEGACY_2_0:
+        # AI Studio 2.0 rejects transparent session resumption.
+        if cfg and cfg.session_resumption:
+            cfg.session_resumption = None
+    elif _IS_3_1 and cfg is not None:
+        # 3.1 Flash Live forbids send_client_content mid-session. The only way
+        # to seed the agent's first turn is via LiveConnectConfig's initial
+        # content field, which the SDK surfaces under a couple of aliases
+        # depending on version. Try the known ones; silently skip if neither
+        # exists (the system prompt already carries a greet-first instruction).
+        seed = _genai_types.Content(
+            role="user",
+            parts=[_genai_types.Part(text="[Session started]")],
+        )
+        injected = False
+        for attr in ("initial_client_content", "initial_content"):
+            if hasattr(cfg, attr):
+                try:
+                    setattr(cfg, attr, [seed])
+                    injected = True
+                    logger.info("[VOICE 3.1 connect] seeded initial content via %s", attr)
+                    break
+                except Exception as exc:
+                    logger.warning("[VOICE 3.1 connect] failed to set %s: %s", attr, exc)
+        if not injected:
+            logger.info(
+                "[VOICE 3.1 connect] no initial_client_content field on LiveConnectConfig — relying on system-prompt greet-first"
+            )
+    async with _orig_adk_gemini_connect(self, llm_request) as conn:
+        yield conn
+
+
+_AdkGemini.connect = _patched_adk_gemini_connect
 if _IS_LEGACY_2_0:
-    _orig_adk_gemini_connect = _AdkGemini.connect
-
-    @_contextlib.asynccontextmanager
-    async def _patched_adk_gemini_connect(self, llm_request):
-        if (
-            llm_request.live_connect_config
-            and llm_request.live_connect_config.session_resumption
-        ):
-            llm_request.live_connect_config.session_resumption = None
-        async with _orig_adk_gemini_connect(self, llm_request) as conn:
-            yield conn
-
-    _AdkGemini.connect = _patched_adk_gemini_connect
     logger.info("Applied Gemini.connect patch (strip session_resumption for AI Studio 2.0)")
+elif _IS_3_1:
+    logger.info("Applied Gemini.connect patch (inject initial_client_content for 3.1)")
 else:
-    logger.info("Skipping Gemini.connect session_resumption strip (model=%s supports resumption)", _GEMINI_MODEL)
+    logger.info("Applied Gemini.connect patch (no-op for %s)", _GEMINI_MODEL)
 
 # NOTE: Sequential tool execution is enforced via the system prompt
 # ("STRICTLY call only ONE tool per turn"). We do NOT patch the ADK's

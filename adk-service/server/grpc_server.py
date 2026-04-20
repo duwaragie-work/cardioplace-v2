@@ -19,7 +19,8 @@ import time
 from typing import AsyncIterator
 
 _VOICE_DEBUG = os.getenv("VOICE_DEBUG", "") == "1"
-_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-native-audio-latest")
+_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-live-preview")
+_IS_3_1 = "3.1" in _GEMINI_MODEL
 
 from google.adk.agents.live_request_queue import LiveRequestQueue
 from google.adk.agents.run_config import RunConfig
@@ -316,14 +317,36 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
                         ),
                     )
                     logger.info("[Config] RunConfig: modalities=AUDIO, activity_handling=NO_INTERRUPTION (2.0 model)")
-                else:
+                elif _IS_3_1:
+                    # 3.1 Flash Live: thinking_level (str) replaces thinking_budget.
+                    # "minimal" is documented as default but explicit removes ambiguity
+                    # in case ADK's RunConfig builder overrides.
                     run_config = RunConfig(
                         response_modalities=["AUDIO"],
                         input_audio_transcription=genai_types.AudioTranscriptionConfig(),
                         output_audio_transcription=genai_types.AudioTranscriptionConfig(),
                         speech_config=genai_types.SpeechConfig(language_code="en-US"),
                     )
-                    logger.info("[Config] RunConfig: modalities=AUDIO + in/out transcription + language=en-US (non-2.0 model: %s)", _GEMINI_MODEL)
+                    # thinking_config lives on LiveConnectConfig in some SDK paths;
+                    # try RunConfig first, silently skip if unsupported.
+                    try:
+                        run_config.thinking_config = genai_types.ThinkingConfig(thinking_level="minimal")
+                    except Exception as exc:
+                        logger.info("[Config] could not set thinking_level on RunConfig: %s", exc)
+                    logger.info("[Config] RunConfig: AUDIO + in/out transcription + en-US + thinking_level=minimal (3.1: %s)", _GEMINI_MODEL)
+                else:
+                    # 2.5 native-audio — dynamic thinking by default; pin budget=0 for low TTFA.
+                    run_config = RunConfig(
+                        response_modalities=["AUDIO"],
+                        input_audio_transcription=genai_types.AudioTranscriptionConfig(),
+                        output_audio_transcription=genai_types.AudioTranscriptionConfig(),
+                        speech_config=genai_types.SpeechConfig(language_code="en-US"),
+                    )
+                    try:
+                        run_config.thinking_config = genai_types.ThinkingConfig(thinking_budget=0)
+                    except Exception as exc:
+                        logger.info("[Config] could not set thinking_budget on RunConfig: %s", exc)
+                    logger.info("[Config] RunConfig: AUDIO + in/out transcription + en-US + thinking_budget=0 (2.5: %s)", _GEMINI_MODEL)
                 event_count = 0
                 tool_call_count = 0
                 audio_chunk_count = 0
@@ -451,12 +474,33 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
         input_task = asyncio.create_task(forward_input_task())
 
         # ── Trigger the agent to speak first ─────────────────────────────
-        live_queue.send_content(
-            content=genai_types.Content(
-                role="user",
-                parts=[genai_types.Part(text="[Session started]")],
-            )
-        )
+        # 3.1 Flash Live forbids send_client_content mid-session (it's reserved
+        # for initial history seeding via LiveConnectConfig, handled in main.py's
+        # Gemini.connect patch). For 3.1 the system prompt itself drives the
+        # greeting — no runtime kickoff needed.
+        # For 2.5 native-audio / 2.0 legacy, run the delayed send_content
+        # kickoff so the Gemini Live WebSocket has time to finish handshaking
+        # before the kickoff turn lands.
+        if _IS_3_1:
+            kickoff_task = None
+            logger.info("[VOICE kickoff] skipped (3.1 greets via system-prompt + initial_client_content)")
+        else:
+            async def kickoff_greeting() -> None:
+                await asyncio.sleep(0.4)
+                try:
+                    live_queue.send_content(
+                        content=genai_types.Content(
+                            role="user",
+                            parts=[genai_types.Part(
+                                text="[Session started] Greet the patient warmly by name if known, then ask how you can help today. Speak now — do not wait for the patient."
+                            )],
+                        )
+                    )
+                    logger.info("[VOICE kickoff] greeting trigger sent to Gemini")
+                except Exception as exc:
+                    logger.warning("[VOICE kickoff] failed: %s", exc)
+
+            kickoff_task = asyncio.create_task(kickoff_greeting())
 
         # ── Step 5: Yield from out_queue until done ───────────────────────
         msg_count = 0
@@ -481,6 +525,8 @@ class VoiceAgentServicer(voice_pb2_grpc.VoiceAgentServicer):
         finally:
             agent_task.cancel()
             input_task.cancel()
+            if kickoff_task is not None:
+                kickoff_task.cancel()
             live_queue.close()
             # End the session span and flush to LangSmith
             session_span.end()

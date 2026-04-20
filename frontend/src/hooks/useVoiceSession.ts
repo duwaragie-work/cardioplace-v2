@@ -240,9 +240,12 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
     const source = ctx.createMediaStreamSource(stream);
     sourceRef.current = source;
 
-    // ScriptProcessorNode — captures raw PCM and sends to backend
-    // 2048 samples at 16kHz = 128ms chunks (lower = less input latency)
-    const bufferSize = 2048;
+    // ScriptProcessorNode — captures raw PCM and sends to backend.
+    // createScriptProcessor requires a power-of-2 bufferSize in {256, 512,
+    // 1024, 2048, 4096, 8192, 16384}. 512 @ 16kHz = 32ms chunks, which sits
+    // in Google Live API's recommended 20–40ms window. Down from 2048 (128ms)
+    // for ~96ms lower server-side VAD buffering per turn.
+    const bufferSize = 512;
     // eslint-disable-next-line @typescript-eslint/no-deprecated
     const processor = ctx.createScriptProcessor(bufferSize, 1, 1);
     processorRef.current = processor;
@@ -258,7 +261,7 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
     //  - COOLDOWN_MS 2000: after an emit, suppress further emits for 2 s so a
     //    user who pauses, resumes, pauses again doesn't spam the signal.
     const RMS_THRESHOLD = 0.02;
-    const END_OF_UTTERANCE_MS = 500;
+    const END_OF_UTTERANCE_MS = 300;
     const COOLDOWN_MS = 2000;
     let lastEmitAt = 0;
 
