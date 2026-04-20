@@ -120,6 +120,33 @@ export function otpEmailHtml(otp: string): string {
   `)
 }
 
+export function magicLinkEmailHtml(url: string): string {
+  return wrap(`
+    <div style="text-align: center;">
+      <div style="margin-bottom: 16px;">
+        <span style="display: inline-block; width: 56px; height: 56px; line-height: 56px;
+                     border-radius: 50%; background: #f3f0ff; font-size: 28px;">
+          &#9993;
+        </span>
+      </div>
+      <h2 style="margin: 0 0 8px; color: #1a1a2e; font-size: 20px;">Sign in to Cardioplace</h2>
+      <p style="color: #6b7280; margin: 0 0 24px; font-size: 14px;">Tap the button below to sign in securely</p>
+      <a href="${url}"
+         style="display: inline-block; background: #7B00E0; color: #ffffff; font-size: 16px;
+                font-weight: 600; padding: 14px 40px; border-radius: 30px;
+                text-decoration: none; letter-spacing: 0.5px;">
+        Sign in
+      </a>
+      <p style="color: #374151; margin: 24px 0 8px; font-size: 14px; line-height: 1.6;">
+        This link expires in <strong>30 minutes</strong>.
+      </p>
+      <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+        If you didn't request this, you can safely ignore this email.
+      </p>
+    </div>
+  `)
+}
+
 export function contactFormEmailHtml(
   senderEmail: string,
   message: string,

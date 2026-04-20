@@ -27,7 +27,7 @@ function getBrowserTimezone(): string | undefined {
 export default function OnboardingPage() {
   const router = useRouter();
   const { t } = useLanguage();
-  const { user, isLoading, logout, markOnboardingComplete } = useAuth();
+  const { user, isLoading, logout, markOnboardingComplete, updateUser } = useAuth();
   const [name, setName] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [communicationPreference, setCommunicationPreference] = useState("");
@@ -81,7 +81,11 @@ export default function OnboardingPage() {
   const isFormPartiallyFilled = name.trim() !== "" || dateOfBirth !== "" || communicationPreference !== "";
 
   if (isLoading || !user || isRedirecting) {
-    return <SpinnerIndicator />;
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <SpinnerIndicator size={40} className="text-[#7B00E0]" />
+      </div>
+    );
   }
 
   async function submitProfile(body: Record<string, unknown>) {
@@ -113,6 +117,7 @@ export default function OnboardingPage() {
       }
 
       markOnboardingComplete();
+      if (name.trim()) updateUser({ name: name.trim() });
       router.push("/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to complete onboarding");

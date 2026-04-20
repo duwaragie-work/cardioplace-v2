@@ -17,7 +17,7 @@ import {
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { BcryptService } from './bcrypt.service.js'
-import { otpEmailHtml } from '../email/email-templates.js'
+import { otpEmailHtml, magicLinkEmailHtml } from '../email/email-templates.js'
 import type { ProfileDto } from './dto/profile.dto.js'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ export interface AuthResponse extends TokenPair {
   email: string | null
   onboarding_required: boolean
   roles: UserRole[]
-  login_method: 'otp' | 'google' | 'apple' | 'guest'
+  login_method: 'otp' | 'magic_link' | 'google' | 'apple' | 'guest'
   name: string | null
 }
 
@@ -206,7 +206,7 @@ export class AuthService {
   private buildAuthResponse(
     tokens: TokenPair,
     user: MinimalUser,
-    login_method: 'otp' | 'google' | 'apple' | 'guest',
+    login_method: 'otp' | 'magic_link' | 'google' | 'apple' | 'guest',
   ): AuthResponse {
     return {
       ...tokens,
@@ -1119,13 +1119,199 @@ export class AuthService {
     }
   }
 
-  // ─── Email Helper ────────────────────────────────────────────────────────────
+  // ─── Magic Link — Send ───────────────────────────────────────────────────────
+
+  async sendMagicLink(
+    email: string,
+    context?: {
+      deviceId?: string
+      ipAddress?: string
+      userAgent?: string
+    },
+  ): Promise<{ message: string }> {
+    if (!email?.trim()) {
+      throw new BadRequestException('Email is required')
+    }
+
+    const normalizedEmail = email.trim().toLowerCase()
+
+    // Check account status for existing users
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: { accountStatus: true },
+    })
+    if (existingUser && existingUser.accountStatus !== AccountStatus.ACTIVE) {
+      await this.logAuthEvent({
+        event: 'magic_link_blocked',
+        identifier: normalizedEmail,
+        method: 'otp',
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        success: false,
+        errorCode: 'account_not_active',
+      })
+      throw new ForbiddenException(
+        `Account is ${existingUser.accountStatus.toLowerCase()}`,
+      )
+    }
+
+    // Rate limiting: 1 magic link per email per 60s
+    const recentLink = await this.prisma.magicLink.findFirst({
+      where: {
+        email: normalizedEmail,
+        createdAt: { gt: new Date(Date.now() - 60_000) },
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (recentLink) {
+      throw new BadRequestException(
+        'Please wait 60 seconds before requesting a new magic link',
+      )
+    }
+
+    const rawToken = randomBytes(32).toString('hex')
+    const tokenHash = sha256(rawToken)
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000) // 30 minutes
+
+    await this.prisma.magicLink.create({
+      data: { email: normalizedEmail, tokenHash, expiresAt },
+    })
+
+    const port = this.config.get<string>('PORT', '8080')
+    const backendUrl = process.env.NODE_ENV === 'production'
+      ? this.config.get<string>('BACKEND_URL', `http://localhost:${port}`)
+      : `http://localhost:${port}`
+    const magicUrl = `${backendUrl}/api/v2/auth/magic-link/verify?token=${rawToken}`
+
+    this.sendMagicLinkEmail(normalizedEmail, magicUrl) // fire-and-forget
+
+    await this.logAuthEvent({
+      event: 'magic_link_requested',
+      identifier: normalizedEmail,
+      method: 'otp',
+      deviceId: context?.deviceId,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      success: true,
+    })
+
+    return { message: 'Magic link sent successfully' }
+  }
+
+  // ─── Magic Link — Verify ──────────────────────────────────────────────────────
+
+  async verifyMagicLink(
+    token: string,
+    context?: {
+      deviceId?: string
+      ipAddress?: string
+      userAgent?: string
+      timezone?: string
+    },
+  ): Promise<AuthResponse> {
+    if (!token?.trim()) {
+      throw new BadRequestException('Token is required')
+    }
+
+    const tokenHash = sha256(token.trim())
+
+    const record = await this.prisma.magicLink.findFirst({
+      where: {
+        tokenHash,
+        expiresAt: { gt: new Date() },
+        usedAt: null,
+      },
+    })
+
+    if (!record) {
+      await this.logAuthEvent({
+        event: 'magic_link_failed',
+        method: 'otp',
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        success: false,
+        errorCode: 'invalid_or_expired_token',
+      })
+      throw new BadRequestException('Magic link is invalid or expired')
+    }
+
+    // Mark as used
+    await this.prisma.magicLink.update({
+      where: { id: record.id },
+      data: { usedAt: new Date() },
+    })
+
+    // Upsert user (same logic as OTP verify)
+    let user = await this.prisma.user.findUnique({
+      where: { email: record.email },
+    })
+
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          email: record.email,
+          isVerified: true,
+          roles: [UserRole.REGISTERED_USER],
+        },
+      })
+    } else if (!user.isVerified) {
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { isVerified: true },
+      })
+    }
+
+    if (user.accountStatus !== AccountStatus.ACTIVE) {
+      await this.logAuthEvent({
+        event: 'magic_link_blocked',
+        identifier: record.email,
+        userId: user.id,
+        method: 'otp',
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        success: false,
+        errorCode: 'account_not_active',
+      })
+      throw new ForbiddenException(
+        `Account is ${user.accountStatus.toLowerCase()}`,
+      )
+    }
+
+    await this.silentlyUpdateTimezone(user.id, context?.timezone)
+
+    await this.logAuthEvent({
+      event: 'magic_link_verified',
+      identifier: record.email,
+      userId: user.id,
+      method: 'otp',
+      deviceId: context?.deviceId,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      success: true,
+    })
+
+    const tokens = await this.issueTokenPair(user, context?.userAgent)
+    return this.buildAuthResponse(tokens, user, 'magic_link')
+  }
+
+  // ─── Email Helpers ──────────────────────────────────────────────────────────
 
   private async sendOtpEmail(email: string, otp: string): Promise<void> {
     await this.emailService.sendEmail(
       email,
       'Your Cardioplace verification code',
       otpEmailHtml(otp),
+    )
+  }
+
+  private async sendMagicLinkEmail(email: string, url: string): Promise<void> {
+    await this.emailService.sendEmail(
+      email,
+      'Sign in to Cardioplace',
+      magicLinkEmailHtml(url),
     )
   }
 }

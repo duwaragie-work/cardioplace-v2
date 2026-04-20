@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-const PUBLIC_ROUTES = ['/', '/home', '/about', '/contact', '/welcome', '/sign-in', '/auth/callback']
+const PUBLIC_ROUTES = ['/', '/home', '/about', '/contact', '/welcome', '/sign-in', '/auth/callback', '/auth/magic-link']
 const PROVIDER_ROUTES = ['/provider']
 
 export function proxy(request: NextRequest) {

@@ -5,6 +5,7 @@ import {
   Get,
   Patch,
   Post,
+  Query,
   Req,
   Res,
   UnauthorizedException,
@@ -105,6 +106,45 @@ export class AuthController {
       })
     }
     return result
+  }
+
+  // ─── Magic Link ────────────────────────────────────────────────────────────────
+
+  @Public()
+  @Post('magic-link/send')
+  sendMagicLink(@Body() dto: SendOtpDto, @Req() req: Request) {
+    const context = this.buildAuthContext(req)
+    return this.authService.sendMagicLink(dto.email, context)
+  }
+
+  @Public()
+  @Get('magic-link/verify')
+  async verifyMagicLink(
+    @Query('token') token: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const webAppUrl = this.config.get<string>('WEB_APP_URL', 'http://localhost:3000')
+
+    try {
+      const context = this.buildAuthContext(req)
+      const result = await this.authService.verifyMagicLink(token, context)
+      this.setRefreshCookie(res, result.refreshToken)
+
+      const params = new URLSearchParams({
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+        userId: result.userId,
+        email: result.email ?? '',
+        name: result.name ?? '',
+        roles: result.roles.join(','),
+        login_method: result.login_method,
+        onboarding_required: String(result.onboarding_required),
+      })
+      res.redirect(`${webAppUrl}/auth/magic-link?${params.toString()}`)
+    } catch {
+      res.redirect(`${webAppUrl}/auth/magic-link?error=expired`)
+    }
   }
 
   // ─── Refresh ─────────────────────────────────────────────────────────────────

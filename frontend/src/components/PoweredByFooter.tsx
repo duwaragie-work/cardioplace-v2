@@ -2,7 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 
-const SHOW_PATHS = ['/', '/home', '/about', '/onboarding'];
+const SHOW_PATHS: string[] = [];
 
 export default function PoweredByFooter() {
   const pathname = usePathname();
