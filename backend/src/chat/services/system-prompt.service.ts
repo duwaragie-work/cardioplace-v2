@@ -14,8 +14,8 @@ interface PatientContext {
     baselineDiastolic: number | null
   } | null
   activeAlerts: Array<{
-    type: string
-    severity: string
+    type: string | null
+    severity: string | null
   }>
   communicationPreference: string | null
   preferredLanguage: string | null
