@@ -2,27 +2,24 @@ import { Injectable } from '@nestjs/common'
 
 interface PatientContext {
   recentEntries: Array<{
-    entryDate: Date
+    measuredAt: Date
     systolicBP: number | null
     diastolicBP: number | null
     weight: number | null
     medicationTaken: boolean | null
-    measurementTime?: string | null
-    symptoms?: string[]
+    otherSymptoms?: string[]
   }>
   baseline: {
     baselineSystolic: number | null
     baselineDiastolic: number | null
   } | null
   activeAlerts: Array<{
-    type: string
-    severity: string
+    type: string | null
+    severity: string | null
   }>
   communicationPreference: string | null
   preferredLanguage: string | null
   patientName?: string | null
-  primaryCondition?: string | null
-  riskTier?: string | null
   dateOfBirth?: Date | null
 }
 
@@ -250,10 +247,10 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
     ]
 
     // ── Patient profile ───────────────────────────────────────────────────
+    // TODO(phase/16): add structured condition summary from PatientProfile
+    // (HF type, pregnancy, AFib, CAD, etc.) + verified medications list.
     const profileParts: string[] = []
     if (data.patientName) profileParts.push(`Patient name: ${data.patientName}`)
-    if (data.primaryCondition) profileParts.push(`Primary condition: ${data.primaryCondition}`)
-    if (data.riskTier) profileParts.push(`Risk tier: ${data.riskTier}`)
     if (data.dateOfBirth) {
       const age = Math.floor(
         (Date.now() - new Date(data.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000),
@@ -271,12 +268,17 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
       lines.push('- No readings recorded yet')
     } else {
       for (const entry of data.recentEntries) {
-        const date = new Date(entry.entryDate).toLocaleDateString('en-US', {
+        const measured = new Date(entry.measuredAt)
+        const date = measured.toLocaleDateString('en-US', {
           month: 'short',
           day: 'numeric',
           year: 'numeric',
         })
-        const time = entry.measurementTime ?? 'unknown time'
+        const time = measured.toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        })
         const bp =
           entry.systolicBP != null && entry.diastolicBP != null
             ? `${entry.systolicBP}/${entry.diastolicBP} mmHg`
@@ -288,7 +290,9 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
               ? 'missed'
               : 'not recorded'
         const wt = entry.weight != null ? `, Weight: ${entry.weight} lbs` : ''
-        const sym = entry.symptoms?.length ? `, Symptoms: ${entry.symptoms.join(', ')}` : ''
+        const sym = entry.otherSymptoms?.length
+          ? `, Symptoms: ${entry.otherSymptoms.join(', ')}`
+          : ''
         lines.push(`- ${date} at ${time}: ${bp}, Medication: ${med}${wt}${sym}`)
       }
     }

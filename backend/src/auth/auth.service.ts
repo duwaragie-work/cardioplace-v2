@@ -32,7 +32,7 @@ export interface AuthResponse extends TokenPair {
   email: string | null
   onboarding_required: boolean
   roles: UserRole[]
-  login_method: 'otp' | 'magic_link' | 'google' | 'apple' | 'guest'
+  login_method: 'otp' | 'magic_link' | 'google' | 'apple'
   name: string | null
 }
 
@@ -51,8 +51,6 @@ export interface ProfileResult {
   dateOfBirth: Date | null
   communicationPreference?: string | null
   preferredLanguage?: string | null
-  riskTier?: string | null
-  primaryCondition?: string | null
   timezone: string | null
   onboardingStatus: OnboardingStatus
 }
@@ -206,7 +204,7 @@ export class AuthService {
   private buildAuthResponse(
     tokens: TokenPair,
     user: MinimalUser,
-    login_method: 'otp' | 'magic_link' | 'google' | 'apple' | 'guest',
+    login_method: 'otp' | 'magic_link' | 'google' | 'apple',
   ): AuthResponse {
     return {
       ...tokens,
@@ -238,7 +236,7 @@ export class AuthService {
     event: string
     identifier?: string
     userId?: string
-    method?: 'otp' | 'google' | 'apple' | 'guest'
+    method?: 'otp' | 'google' | 'apple'
     deviceId?: string
     ipAddress?: string
     userAgent?: string
@@ -612,7 +610,7 @@ export class AuthService {
         email: email ?? null,
         name: name ?? null,
         isVerified: emailVerified,
-        roles: [UserRole.REGISTERED_USER],
+        roles: [UserRole.PATIENT],
         accounts: {
           create: { provider, providerId, email },
         },
@@ -799,7 +797,7 @@ export class AuthService {
         data: {
           email: normalizedEmail,
           isVerified: true,
-          roles: [UserRole.REGISTERED_USER],
+          roles: [UserRole.PATIENT],
         },
       })
     } else if (!user.isVerified) {
@@ -859,100 +857,6 @@ export class AuthService {
 
     const tokens = await this.issueTokenPair(user, context?.userAgent)
     return this.buildAuthResponse(tokens, user, 'otp')
-  }
-
-  // ─── Guest (device-linked) ──────────────────────────────────────────────────
-
-  /**
-   * Continue as guest: find or create a GUEST user keyed by device ID.
-   *
-   * Decision tree:
-   *  1. Upsert the Device record (hardware fingerprint).
-   *  2. Look for a UserDevice row where the linked user has role GUEST.
-   *     → Found  : resume the same guest session.
-   *     → Missing: the device is new, or only has registered/verified users
-   *                linked to it — create a fresh GUEST user + UserDevice row.
-   *
-   * This prevents a guest login from ever returning a registered user's account
-   * while still preserving guest session continuity for returning devices.
-   */
-  async guestLogin(context: {
-    deviceId: string
-    userAgent?: string
-    platform?: string
-    deviceType?: string
-    deviceName?: string
-    ipAddress?: string
-  }): Promise<AuthResponse> {
-    const { deviceId } = context
-    if (!deviceId?.trim()) {
-      throw new BadRequestException('Device ID is required (header x-device-id or body deviceId)')
-    }
-
-    // 1. Upsert the Device record (hardware fingerprint only — no userId)
-    const device = await this.prisma.device.upsert({
-      where: { deviceId },
-      create: {
-        deviceId,
-        platform: context.platform,
-        deviceType: context.deviceType,
-        deviceName: context.deviceName,
-        userAgent: context.userAgent,
-      },
-      update: {
-        lastSeenAt: new Date(),
-        platform: context.platform ?? undefined,
-        deviceType: context.deviceType ?? undefined,
-        deviceName: context.deviceName ?? undefined,
-        userAgent: context.userAgent ?? undefined,
-      },
-    })
-
-    let user: MinimalUser
-
-    // 2. Look for an existing GUEST-role user already linked to this device
-    const existingLink = await this.prisma.userDevice.findFirst({
-      where: {
-        deviceId: device.id,
-        user: { roles: { has: UserRole.GUEST } },
-      },
-      include: { user: true },
-    })
-
-    if (existingLink) {
-      // Resume same guest session
-      user = existingLink.user
-      this.assertAccountActive(user)
-      await this.logAuthEvent({
-        event: 'guest_login_success',
-        userId: user.id,
-        method: 'guest',
-        deviceId,
-        ipAddress: context.ipAddress,
-        userAgent: context.userAgent,
-        success: true,
-      })
-    } else {
-      // No GUEST user found for this device — create a fresh one
-      user = await this.prisma.user.create({
-        data: { roles: [UserRole.GUEST] },
-      })
-      await this.prisma.userDevice.create({
-        data: { userId: user.id, deviceId: device.id },
-      })
-      await this.logAuthEvent({
-        event: 'guest_login_success',
-        userId: user.id,
-        method: 'guest',
-        deviceId,
-        ipAddress: context.ipAddress,
-        userAgent: context.userAgent,
-        success: true,
-      })
-    }
-
-    const tokens = await this.issueTokenPair(user, context.userAgent)
-    return this.buildAuthResponse(tokens, user, 'guest')
   }
 
   // ─── Device Tracking ────────────────────────────────────────────────────────
@@ -1016,8 +920,6 @@ export class AuthService {
         dateOfBirth: true,
         communicationPreference: true,
         preferredLanguage: true,
-        riskTier: true,
-        primaryCondition: true,
         timezone: true,
         onboardingStatus: true,
       },
@@ -1039,8 +941,6 @@ export class AuthService {
         dateOfBirth: true,
         communicationPreference: true,
         preferredLanguage: true,
-        riskTier: true,
-        primaryCondition: true,
         timezone: true,
         onboardingStatus: true,
       },
@@ -1057,13 +957,8 @@ export class AuthService {
       patch.dateOfBirth = dto.dateOfBirth ? new Date(dto.dateOfBirth) : null
     }
     if (dto.timezone !== undefined) patch.timezone = dto.timezone
-    if (dto.primaryCondition !== undefined) patch.primaryCondition = dto.primaryCondition
     if (dto.preferredLanguage !== undefined) patch.preferredLanguage = dto.preferredLanguage
-    if (dto.riskTier !== undefined) patch.riskTier = dto.riskTier
     if (dto.communicationPreference !== undefined) patch.communicationPreference = dto.communicationPreference
-    if (dto.diagnosisDate !== undefined) {
-      patch.diagnosisDate = dto.diagnosisDate ? new Date(dto.diagnosisDate) : null
-    }
 
     return patch
   }
@@ -1084,9 +979,6 @@ export class AuthService {
         dateOfBirth: true,
         communicationPreference: true,
         preferredLanguage: true,
-        riskTier: true,
-        primaryCondition: true,
-        diagnosisDate: true,
         timezone: true,
         createdAt: true,
       },
@@ -1107,13 +999,8 @@ export class AuthService {
       dateOfBirth: user.dateOfBirth
         ? user.dateOfBirth.toISOString().slice(0, 10)
         : null,
-      diagnosisDate: user.diagnosisDate
-        ? user.diagnosisDate.toISOString().slice(0, 10)
-        : null,
       communicationPreference: user.communicationPreference,
       preferredLanguage: user.preferredLanguage,
-      riskTier: user.riskTier,
-      primaryCondition: user.primaryCondition,
       timezone: user.timezone,
       onboardingStatus: user.onboardingStatus,
     }
@@ -1251,7 +1138,7 @@ export class AuthService {
         data: {
           email: record.email,
           isVerified: true,
-          roles: [UserRole.REGISTERED_USER],
+          roles: [UserRole.PATIENT],
         },
       })
     } else if (!user.isVerified) {

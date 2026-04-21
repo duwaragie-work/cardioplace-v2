@@ -9,8 +9,8 @@ Live v1 app runs at `www.cardioplaceai.com` — this repo (`cardioplace-v2`) is 
 ## Monorepo structure (npm workspaces)
 
 - `/backend`       → NestJS + Prisma + PostgreSQL (shared API for both frontends)
-- `/frontend`      → Next.js 14 patient app → app.cardioplaceai.com
-- `/admin`         → Next.js 14 admin/provider app → admin.cardioplaceai.com (NEW, being scaffolded in phase/1)
+- `/frontend`      → Next.js 16 patient app → app.cardioplaceai.com
+- `/admin`         → Next.js 16 admin/provider app → admin.cardioplaceai.com (NEW, being scaffolded in phase/1)
 - `/shared`        → npm workspace package: DTOs, enums, alert-message registry (NEW)
 - `/adk-service`   → Python voice/Gemini service (untouched in v2)
 
@@ -27,13 +27,17 @@ Existing legacy v1 docs (`CLINICAL_LOGIC_REVIEW.md`, `HEALPLACE_CARDIO_OVERVIEW.
 ## What's reusable from v1 (audit summary)
 
 REUSABLE:
-- Schema foundations: `User`, `JournalEntry`, `DeviationAlert`, `EscalationEvent`, `BaselineSnapshot`, `Notification`
-- `/backend/src/daily_journal/services/deviation.service.ts` (~287 LOC, already rule-based — needs threshold externalization)
-- `/backend/src/daily_journal/services/baseline.service.ts` (~249 LOC — keep for trend charts only, not rule input)
-- `/backend/src/daily_journal/services/escalation.service.ts` (~275 LOC, 2-tier — needs T+N ladder expansion)
-- `/backend/src/chat/services/system-prompt.service.ts` (~350 LOC — needs expansion to include meds, conditions, verified fields)
+- Schema foundations: `User`, `JournalEntry`, `DeviationAlert`, `EscalationEvent`, `Notification` (all reshaped in phase/2, kept the table names)
+- `/backend/src/daily_journal/services/escalation.service.ts` (2-tier today — needs T+N ladder expansion in phase/7)
+- `/backend/src/chat/services/system-prompt.service.ts` (needs expansion to include meds, conditions, verified fields in phase/16)
 - Notification service (push + email, idempotent, event-driven)
 - Magic link auth, JWT, role guards
+
+DELETED IN v2 (phase/2):
+- `BaselineSnapshot` model + `baseline.service.ts` (~249 LOC) — no rolling baselines in v2; trend averages compute on-the-fly from `JournalEntry`.
+- `User.primaryCondition` / `riskTier` / `diagnosisDate` — superseded by structured booleans on `PatientProfile` + age-bucket derivation.
+- Guest-auth flow (`continueAsGuest` + `UserRole.GUEST`) — v2 requires sign-in before clinical interaction.
+- `UserRole` v1 values (`GUEST`, `REGISTERED_USER`, `VERIFIED_USER`, `CONTENT_*`, `ARTICLE_*`, `KB_*`, `CHAT_REVIEWER`) — collapsed to 5: `PATIENT, PROVIDER, MEDICAL_DIRECTOR, HEALPLACE_OPS, SUPER_ADMIN`. Content/KB modules still exist but their authz is collapsed to `SUPER_ADMIN` only.
 
 NEEDS BUILD (mostly greenfield):
 - `/admin` app (0%)

@@ -7,7 +7,6 @@ import { DailyJournalService } from './daily_journal.service.js';
 
 const mockPrisma = {
   journalEntry: { create: jest.fn(), findMany: jest.fn(), findUnique: jest.fn() },
-  baselineSnapshot: { findFirst: jest.fn() },
   deviationAlert: { findMany: jest.fn() },
 }
 const mockEventEmitter = { emit: jest.fn() }

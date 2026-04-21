@@ -1,5 +1,8 @@
--- Enable pgvector extension
-CREATE EXTENSION IF NOT EXISTS vector;
+-- CreateSchema
+CREATE SCHEMA IF NOT EXISTS "public";
+
+-- CreateExtension
+CREATE EXTENSION IF NOT EXISTS "vector";
 
 -- CreateEnum
 CREATE TYPE "ContentType" AS ENUM ('ARTICLE', 'TIP', 'FAQ');
@@ -17,6 +20,9 @@ CREATE TYPE "ReviewType" AS ENUM ('EDITORIAL', 'CLINICAL');
 CREATE TYPE "ReviewOutcome" AS ENUM ('APPROVED', 'APPROVED_WITH_MINOR_REVISIONS', 'REJECTED');
 
 -- CreateEnum
+CREATE TYPE "Position" AS ENUM ('SITTING', 'STANDING', 'LYING');
+
+-- CreateEnum
 CREATE TYPE "DeviationType" AS ENUM ('SYSTOLIC_BP', 'DIASTOLIC_BP', 'WEIGHT', 'MEDICATION_ADHERENCE');
 
 -- CreateEnum
@@ -26,7 +32,7 @@ CREATE TYPE "DeviationSeverity" AS ENUM ('LOW', 'MEDIUM', 'HIGH');
 CREATE TYPE "AlertStatus" AS ENUM ('OPEN', 'ACKNOWLEDGED', 'RESOLVED');
 
 -- CreateEnum
-CREATE TYPE "NotificationChannel" AS ENUM ('PUSH', 'EMAIL', 'SMS');
+CREATE TYPE "NotificationChannel" AS ENUM ('PUSH', 'EMAIL', 'PHONE', 'DASHBOARD');
 
 -- CreateEnum
 CREATE TYPE "EscalationLevel" AS ENUM ('LEVEL_1', 'LEVEL_2');
@@ -38,10 +44,46 @@ CREATE TYPE "CommunicationPreference" AS ENUM ('TEXT_FIRST', 'AUDIO_FIRST');
 CREATE TYPE "EntrySource" AS ENUM ('MANUAL', 'HEALTHKIT');
 
 -- CreateEnum
-CREATE TYPE "UserRole" AS ENUM ('GUEST', 'REGISTERED_USER', 'VERIFIED_USER', 'CONTENT_ADMIN', 'ARTICLE_ADMIN', 'ARTICLE_APPROVER', 'CONTENT_APPROVER', 'KB_UPLOADER', 'KB_APPROVER', 'CHAT_REVIEWER', 'SUPER_ADMIN');
+CREATE TYPE "AlertTier" AS ENUM ('TIER_1_CONTRAINDICATION', 'TIER_2_DISCREPANCY', 'TIER_3_INFO', 'BP_LEVEL_1_HIGH', 'BP_LEVEL_1_LOW', 'BP_LEVEL_2', 'BP_LEVEL_2_SYMPTOM_OVERRIDE');
 
 -- CreateEnum
-CREATE TYPE "RiskTier" AS ENUM ('STANDARD', 'ELEVATED', 'HIGH');
+CREATE TYPE "AlertMode" AS ENUM ('STANDARD', 'PERSONALIZED');
+
+-- CreateEnum
+CREATE TYPE "LadderStep" AS ENUM ('T0', 'T4H', 'T8H', 'T24H', 'T48H', 'TIER2_48H', 'TIER2_7D', 'TIER2_14D');
+
+-- CreateEnum
+CREATE TYPE "DrugClass" AS ENUM ('ACE_INHIBITOR', 'ARB', 'BETA_BLOCKER', 'DHP_CCB', 'NDHP_CCB', 'LOOP_DIURETIC', 'THIAZIDE', 'MRA', 'SGLT2', 'ANTICOAGULANT', 'STATIN', 'ANTIARRHYTHMIC', 'VASODILATOR_NITRATE', 'ARNI', 'OTHER_UNVERIFIED');
+
+-- CreateEnum
+CREATE TYPE "MedicationFrequency" AS ENUM ('ONCE_DAILY', 'TWICE_DAILY', 'THREE_TIMES_DAILY', 'UNSURE');
+
+-- CreateEnum
+CREATE TYPE "MedicationSource" AS ENUM ('PATIENT_SELF_REPORT', 'PROVIDER_ENTERED', 'PATIENT_VOICE', 'PATIENT_PHOTO');
+
+-- CreateEnum
+CREATE TYPE "MedicationVerificationStatus" AS ENUM ('UNVERIFIED', 'VERIFIED', 'REJECTED', 'AWAITING_PROVIDER');
+
+-- CreateEnum
+CREATE TYPE "Gender" AS ENUM ('MALE', 'FEMALE', 'OTHER');
+
+-- CreateEnum
+CREATE TYPE "HeartFailureType" AS ENUM ('HFREF', 'HFPEF', 'UNKNOWN', 'NOT_APPLICABLE');
+
+-- CreateEnum
+CREATE TYPE "ProfileVerificationStatus" AS ENUM ('UNVERIFIED', 'VERIFIED', 'CORRECTED');
+
+-- CreateEnum
+CREATE TYPE "VerifierRole" AS ENUM ('PATIENT', 'ADMIN', 'PROVIDER');
+
+-- CreateEnum
+CREATE TYPE "VerificationChangeType" AS ENUM ('PATIENT_REPORT', 'ADMIN_VERIFY', 'ADMIN_CORRECT', 'ADMIN_REJECT');
+
+-- CreateEnum
+CREATE TYPE "CallStatus" AS ENUM ('UPCOMING', 'COMPLETED', 'MISSED', 'CANCELLED');
+
+-- CreateEnum
+CREATE TYPE "UserRole" AS ENUM ('PATIENT', 'PROVIDER', 'MEDICAL_DIRECTOR', 'HEALPLACE_OPS', 'SUPER_ADMIN');
 
 -- CreateEnum
 CREATE TYPE "OnboardingStatus" AS ENUM ('NOT_COMPLETED', 'COMPLETED');
@@ -77,20 +119,6 @@ CREATE TABLE "AuthLog" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "AuthLog_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "BaselineSnapshot" (
-    "id" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
-    "computedForDate" DATE NOT NULL,
-    "baselineSystolic" DECIMAL(5,2),
-    "baselineDiastolic" DECIMAL(5,2),
-    "baselineWeight" DECIMAL(6,2),
-    "sampleSize" INTEGER DEFAULT 7,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "BaselineSnapshot_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -190,13 +218,9 @@ CREATE TABLE "Conversation" (
     "id" TEXT NOT NULL,
     "sessionId" TEXT NOT NULL,
     "userMessage" TEXT NOT NULL,
-    "aiResponse" TEXT NOT NULL,
-    "embedding" vector(1024),
-    "medicalLens" TEXT,
-    "tone" TEXT,
-    "detailLevel" TEXT,
-    "careApproach" TEXT,
-    "spirituality" BOOLEAN,
+    "aiSummary" TEXT NOT NULL,
+    "source" TEXT NOT NULL DEFAULT 'text',
+    "embedding" vector(384),
     "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Conversation_pkey" PRIMARY KEY ("id")
@@ -206,19 +230,31 @@ CREATE TABLE "Conversation" (
 CREATE TABLE "JournalEntry" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
-    "entryDate" DATE NOT NULL,
+    "measuredAt" TIMESTAMP(3) NOT NULL,
     "systolicBP" INTEGER,
     "diastolicBP" INTEGER,
+    "pulse" INTEGER,
     "weight" DECIMAL(65,30),
+    "position" "Position",
+    "sessionId" TEXT,
+    "measurementConditions" JSONB,
     "medicationTaken" BOOLEAN,
     "missedDoses" INTEGER DEFAULT 0,
-    "symptoms" TEXT[],
+    "severeHeadache" BOOLEAN NOT NULL DEFAULT false,
+    "visualChanges" BOOLEAN NOT NULL DEFAULT false,
+    "alteredMentalStatus" BOOLEAN NOT NULL DEFAULT false,
+    "chestPainOrDyspnea" BOOLEAN NOT NULL DEFAULT false,
+    "focalNeuroDeficit" BOOLEAN NOT NULL DEFAULT false,
+    "severeEpigastricPain" BOOLEAN NOT NULL DEFAULT false,
+    "newOnsetHeadache" BOOLEAN NOT NULL DEFAULT false,
+    "ruqPain" BOOLEAN NOT NULL DEFAULT false,
+    "edema" BOOLEAN NOT NULL DEFAULT false,
+    "otherSymptoms" TEXT[],
     "teachBackAnswer" TEXT,
     "teachBackCorrect" BOOLEAN,
     "notes" TEXT,
     "source" "EntrySource" NOT NULL DEFAULT 'MANUAL',
     "sourceMetadata" JSONB,
-    "snapshotId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -244,11 +280,23 @@ CREATE TABLE "DeviationAlert" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "journalEntryId" TEXT NOT NULL,
-    "type" "DeviationType" NOT NULL,
-    "severity" "DeviationSeverity" NOT NULL,
-    "magnitude" DECIMAL(6,2) NOT NULL,
+    "type" "DeviationType",
+    "severity" "DeviationSeverity",
+    "magnitude" DECIMAL(6,2),
     "baselineValue" DECIMAL(6,2),
     "actualValue" DECIMAL(6,2),
+    "tier" "AlertTier",
+    "ruleId" TEXT,
+    "mode" "AlertMode",
+    "pulsePressure" INTEGER,
+    "suboptimalMeasurement" BOOLEAN NOT NULL DEFAULT false,
+    "patientMessage" TEXT,
+    "caregiverMessage" TEXT,
+    "physicianMessage" TEXT,
+    "dismissible" BOOLEAN NOT NULL DEFAULT true,
+    "resolutionAction" TEXT,
+    "resolutionRationale" TEXT,
+    "resolvedBy" TEXT,
     "escalated" BOOLEAN NOT NULL DEFAULT false,
     "status" "AlertStatus" NOT NULL DEFAULT 'OPEN',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -278,7 +326,7 @@ CREATE TABLE "Document" (
 CREATE TABLE "DocumentVector" (
     "id" TEXT NOT NULL,
     "content" TEXT NOT NULL,
-    "embedding" vector(1024),
+    "embedding" vector(384),
     "documentId" TEXT NOT NULL,
     "sourceActiveStatus" BOOLEAN NOT NULL DEFAULT true,
 
@@ -307,8 +355,29 @@ CREATE TABLE "EscalationEvent" (
     "reason" TEXT,
     "triggeredAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "notificationSentAt" TIMESTAMP(3),
+    "ladderStep" "LadderStep",
+    "recipientIds" TEXT[],
+    "recipientRoles" TEXT[],
+    "acknowledgedAt" TIMESTAMP(3),
+    "acknowledgedBy" TEXT,
+    "resolvedAt" TIMESTAMP(3),
+    "resolvedBy" TEXT,
+    "notificationChannel" "NotificationChannel",
+    "afterHours" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "EscalationEvent_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "MagicLink" (
+    "id" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "tokenHash" TEXT NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "usedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "MagicLink_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -340,6 +409,117 @@ CREATE TABLE "OtpCode" (
 );
 
 -- CreateTable
+CREATE TABLE "PatientMedication" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "drugName" TEXT NOT NULL,
+    "drugClass" "DrugClass" NOT NULL,
+    "isCombination" BOOLEAN NOT NULL DEFAULT false,
+    "combinationComponents" TEXT[],
+    "frequency" "MedicationFrequency" NOT NULL,
+    "source" "MedicationSource" NOT NULL,
+    "verificationStatus" "MedicationVerificationStatus" NOT NULL DEFAULT 'UNVERIFIED',
+    "verifiedByAdminId" TEXT,
+    "verifiedAt" TIMESTAMP(3),
+    "reportedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "discontinuedAt" TIMESTAMP(3),
+    "rawInputText" TEXT,
+    "notes" TEXT,
+
+    CONSTRAINT "PatientMedication_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "PatientProfile" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "gender" "Gender",
+    "heightCm" INTEGER,
+    "isPregnant" BOOLEAN NOT NULL DEFAULT false,
+    "pregnancyDueDate" TIMESTAMP(3),
+    "historyPreeclampsia" BOOLEAN NOT NULL DEFAULT false,
+    "hasHeartFailure" BOOLEAN NOT NULL DEFAULT false,
+    "heartFailureType" "HeartFailureType" NOT NULL DEFAULT 'NOT_APPLICABLE',
+    "hasAFib" BOOLEAN NOT NULL DEFAULT false,
+    "hasCAD" BOOLEAN NOT NULL DEFAULT false,
+    "hasHCM" BOOLEAN NOT NULL DEFAULT false,
+    "hasDCM" BOOLEAN NOT NULL DEFAULT false,
+    "hasTachycardia" BOOLEAN NOT NULL DEFAULT false,
+    "hasBradycardia" BOOLEAN NOT NULL DEFAULT false,
+    "diagnosedHypertension" BOOLEAN NOT NULL DEFAULT false,
+    "profileVerificationStatus" "ProfileVerificationStatus" NOT NULL DEFAULT 'UNVERIFIED',
+    "profileVerifiedAt" TIMESTAMP(3),
+    "profileVerifiedBy" TEXT,
+    "profileLastEditedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "PatientProfile_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "PatientProviderAssignment" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "practiceId" TEXT NOT NULL,
+    "primaryProviderId" TEXT NOT NULL,
+    "backupProviderId" TEXT NOT NULL,
+    "medicalDirectorId" TEXT NOT NULL,
+    "assignedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "PatientProviderAssignment_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "PatientThreshold" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "sbpUpperTarget" INTEGER,
+    "sbpLowerTarget" INTEGER,
+    "dbpUpperTarget" INTEGER,
+    "dbpLowerTarget" INTEGER,
+    "hrUpperTarget" INTEGER,
+    "hrLowerTarget" INTEGER,
+    "setByProviderId" TEXT NOT NULL,
+    "setAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "replacedAt" TIMESTAMP(3),
+    "notes" TEXT,
+
+    CONSTRAINT "PatientThreshold_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Practice" (
+    "id" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "businessHoursStart" TEXT NOT NULL,
+    "businessHoursEnd" TEXT NOT NULL,
+    "businessHoursTimezone" TEXT NOT NULL,
+    "afterHoursProtocol" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Practice_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ProfileVerificationLog" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "fieldPath" TEXT NOT NULL,
+    "previousValue" JSONB,
+    "newValue" JSONB,
+    "changedBy" TEXT NOT NULL,
+    "changedByRole" "VerifierRole" NOT NULL,
+    "changeType" "VerificationChangeType" NOT NULL,
+    "discrepancyFlag" BOOLEAN NOT NULL DEFAULT false,
+    "rationale" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "ProfileVerificationLog_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "RefreshToken" (
     "id" TEXT NOT NULL,
     "tokenHash" TEXT NOT NULL,
@@ -353,10 +533,28 @@ CREATE TABLE "RefreshToken" (
 );
 
 -- CreateTable
+CREATE TABLE "ScheduledCall" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "alertId" TEXT,
+    "callDate" TEXT NOT NULL,
+    "callTime" TEXT NOT NULL,
+    "callType" TEXT NOT NULL,
+    "notes" TEXT,
+    "status" "CallStatus" NOT NULL DEFAULT 'UPCOMING',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ScheduledCall_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "Session" (
     "id" TEXT NOT NULL,
     "title" TEXT,
     "userId" TEXT,
+    "summary" TEXT,
+    "messageCount" INTEGER NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -373,11 +571,8 @@ CREATE TABLE "User" (
     "timezone" TEXT,
     "communicationPreference" "CommunicationPreference",
     "preferredLanguage" TEXT DEFAULT 'en',
-    "riskTier" "RiskTier" DEFAULT 'STANDARD',
-    "diagnosisDate" TIMESTAMP(3),
-    "primaryCondition" TEXT,
     "isVerified" BOOLEAN NOT NULL DEFAULT false,
-    "roles" "UserRole"[] DEFAULT ARRAY['GUEST']::"UserRole"[],
+    "roles" "UserRole"[] DEFAULT ARRAY['PATIENT']::"UserRole"[],
     "onboardingStatus" "OnboardingStatus" NOT NULL DEFAULT 'NOT_COMPLETED',
     "accountStatus" "AccountStatus" NOT NULL DEFAULT 'ACTIVE',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -410,12 +605,6 @@ CREATE INDEX "AuthLog_event_idx" ON "AuthLog"("event");
 
 -- CreateIndex
 CREATE INDEX "AuthLog_createdAt_idx" ON "AuthLog"("createdAt");
-
--- CreateIndex
-CREATE INDEX "BaselineSnapshot_userId_computedForDate_idx" ON "BaselineSnapshot"("userId", "computedForDate" DESC);
-
--- CreateIndex
-CREATE UNIQUE INDEX "BaselineSnapshot_userId_computedForDate_key" ON "BaselineSnapshot"("userId", "computedForDate");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Content_humanId_key" ON "Content"("humanId");
@@ -487,10 +676,10 @@ CREATE INDEX "ContentView_viewedAt_idx" ON "ContentView"("viewedAt");
 CREATE INDEX "Conversation_sessionId_idx" ON "Conversation"("sessionId");
 
 -- CreateIndex
-CREATE INDEX "JournalEntry_userId_entryDate_idx" ON "JournalEntry"("userId", "entryDate" DESC);
+CREATE INDEX "JournalEntry_userId_measuredAt_idx" ON "JournalEntry"("userId", "measuredAt" DESC);
 
 -- CreateIndex
-CREATE UNIQUE INDEX "JournalEntry_userId_entryDate_key" ON "JournalEntry"("userId", "entryDate");
+CREATE UNIQUE INDEX "JournalEntry_userId_measuredAt_key" ON "JournalEntry"("userId", "measuredAt");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Device_deviceId_key" ON "Device"("deviceId");
@@ -517,6 +706,15 @@ CREATE INDEX "EscalationEvent_alertId_triggeredAt_idx" ON "EscalationEvent"("ale
 CREATE INDEX "EscalationEvent_userId_triggeredAt_idx" ON "EscalationEvent"("userId", "triggeredAt" DESC);
 
 -- CreateIndex
+CREATE INDEX "MagicLink_email_idx" ON "MagicLink"("email");
+
+-- CreateIndex
+CREATE INDEX "MagicLink_tokenHash_idx" ON "MagicLink"("tokenHash");
+
+-- CreateIndex
+CREATE INDEX "MagicLink_expiresAt_idx" ON "MagicLink"("expiresAt");
+
+-- CreateIndex
 CREATE INDEX "Notification_userId_sentAt_idx" ON "Notification"("userId", "sentAt" DESC);
 
 -- CreateIndex
@@ -527,6 +725,45 @@ CREATE INDEX "OtpCode_email_idx" ON "OtpCode"("email");
 
 -- CreateIndex
 CREATE INDEX "OtpCode_expiresAt_idx" ON "OtpCode"("expiresAt");
+
+-- CreateIndex
+CREATE INDEX "PatientMedication_userId_discontinuedAt_idx" ON "PatientMedication"("userId", "discontinuedAt");
+
+-- CreateIndex
+CREATE INDEX "PatientMedication_userId_verificationStatus_idx" ON "PatientMedication"("userId", "verificationStatus");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PatientProfile_userId_key" ON "PatientProfile"("userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PatientProviderAssignment_userId_key" ON "PatientProviderAssignment"("userId");
+
+-- CreateIndex
+CREATE INDEX "PatientProviderAssignment_practiceId_idx" ON "PatientProviderAssignment"("practiceId");
+
+-- CreateIndex
+CREATE INDEX "PatientProviderAssignment_primaryProviderId_idx" ON "PatientProviderAssignment"("primaryProviderId");
+
+-- CreateIndex
+CREATE INDEX "PatientProviderAssignment_backupProviderId_idx" ON "PatientProviderAssignment"("backupProviderId");
+
+-- CreateIndex
+CREATE INDEX "PatientProviderAssignment_medicalDirectorId_idx" ON "PatientProviderAssignment"("medicalDirectorId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PatientThreshold_userId_key" ON "PatientThreshold"("userId");
+
+-- CreateIndex
+CREATE INDEX "ProfileVerificationLog_userId_createdAt_idx" ON "ProfileVerificationLog"("userId", "createdAt" DESC);
+
+-- CreateIndex
+CREATE INDEX "ScheduledCall_userId_status_idx" ON "ScheduledCall"("userId", "status");
+
+-- CreateIndex
+CREATE INDEX "ScheduledCall_status_callDate_idx" ON "ScheduledCall"("status", "callDate");
+
+-- CreateIndex
+CREATE INDEX "ScheduledCall_alertId_idx" ON "ScheduledCall"("alertId");
 
 -- CreateIndex
 CREATE INDEX "Session_id_idx" ON "Session"("id");
@@ -551,9 +788,6 @@ ALTER TABLE "Account" ADD CONSTRAINT "Account_userId_fkey" FOREIGN KEY ("userId"
 
 -- AddForeignKey
 ALTER TABLE "AuthLog" ADD CONSTRAINT "AuthLog_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "BaselineSnapshot" ADD CONSTRAINT "BaselineSnapshot_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Content" ADD CONSTRAINT "Content_submittedById_fkey" FOREIGN KEY ("submittedById") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -583,9 +817,6 @@ ALTER TABLE "ContentView" ADD CONSTRAINT "ContentView_contentId_fkey" FOREIGN KE
 ALTER TABLE "JournalEntry" ADD CONSTRAINT "JournalEntry_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "JournalEntry" ADD CONSTRAINT "JournalEntry_snapshotId_fkey" FOREIGN KEY ("snapshotId") REFERENCES "BaselineSnapshot"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "DeviationAlert" ADD CONSTRAINT "DeviationAlert_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -601,22 +832,55 @@ ALTER TABLE "EscalationEvent" ADD CONSTRAINT "EscalationEvent_alertId_fkey" FORE
 ALTER TABLE "EscalationEvent" ADD CONSTRAINT "EscalationEvent_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "Notification" ADD CONSTRAINT "Notification_alertId_fkey" FOREIGN KEY ("alertId") REFERENCES "DeviationAlert"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Notification" ADD CONSTRAINT "Notification_escalationEventId_fkey" FOREIGN KEY ("escalationEventId") REFERENCES "EscalationEvent"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PatientMedication" ADD CONSTRAINT "PatientMedication_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PatientProfile" ADD CONSTRAINT "PatientProfile_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PatientProviderAssignment" ADD CONSTRAINT "PatientProviderAssignment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PatientProviderAssignment" ADD CONSTRAINT "PatientProviderAssignment_practiceId_fkey" FOREIGN KEY ("practiceId") REFERENCES "Practice"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PatientProviderAssignment" ADD CONSTRAINT "PatientProviderAssignment_primaryProviderId_fkey" FOREIGN KEY ("primaryProviderId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PatientProviderAssignment" ADD CONSTRAINT "PatientProviderAssignment_backupProviderId_fkey" FOREIGN KEY ("backupProviderId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PatientProviderAssignment" ADD CONSTRAINT "PatientProviderAssignment_medicalDirectorId_fkey" FOREIGN KEY ("medicalDirectorId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PatientThreshold" ADD CONSTRAINT "PatientThreshold_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProfileVerificationLog" ADD CONSTRAINT "ProfileVerificationLog_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "RefreshToken" ADD CONSTRAINT "RefreshToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ScheduledCall" ADD CONSTRAINT "ScheduledCall_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ScheduledCall" ADD CONSTRAINT "ScheduledCall_alertId_fkey" FOREIGN KEY ("alertId") REFERENCES "DeviationAlert"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Session" ADD CONSTRAINT "Session_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "UserDevice" ADD CONSTRAINT "UserDevice_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "UserDevice" ADD CONSTRAINT "UserDevice_deviceId_fkey" FOREIGN KEY ("deviceId") REFERENCES "Device"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "UserDevice" ADD CONSTRAINT "UserDevice_deviceId_fkey" FOREIGN KEY ("deviceId") REFERENCES "Device"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "UserDevice" ADD CONSTRAINT "UserDevice_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

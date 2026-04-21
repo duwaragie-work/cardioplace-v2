@@ -7,49 +7,43 @@ model User {
   timezone                String?
   communicationPreference CommunicationPreference?
   preferredLanguage       String?                  @default("en")
-  riskTier                RiskTier?                @default(STANDARD)
-  diagnosisDate           DateTime?
-  primaryCondition        String?
   isVerified              Boolean                  @default(false)
-  roles                   UserRole[]               @default([GUEST])
+  roles                   UserRole[]               @default([PATIENT])
   onboardingStatus        OnboardingStatus         @default(NOT_COMPLETED)
   accountStatus           AccountStatus            @default(ACTIVE)
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
-  accounts                Account[]
-  authLogs                AuthLog[]
-  baselineSnapshots       BaselineSnapshot[]
-  contentSubmitted        Content[]                @relation("ContentSubmittedBy")
-  contentRatings          ContentRating[]          @relation("ContentRatings")
-  contentReviews          ContentReview[]          @relation("ContentReviewedBy")
-  deviationAlerts         DeviationAlert[]
-  escalationEvents        EscalationEvent[]
-  journalEntries          JournalEntry[]
-  notifications           Notification[]
-  refreshTokens           RefreshToken[]
-  scheduledCalls          ScheduledCall[]
-  sessions                Session[]
-  userDevices             UserDevice[]
+
+  accounts                             Account[]
+  authLogs                             AuthLog[]
+  contentSubmitted                     Content[]                   @relation("ContentSubmittedBy")
+  contentRatings                       ContentRating[]             @relation("ContentRatings")
+  contentReviews                       ContentReview[]             @relation("ContentReviewedBy")
+  deviationAlerts                      DeviationAlert[]
+  escalationEvents                     EscalationEvent[]
+  journalEntries                       JournalEntry[]
+  notifications                        Notification[]
+  refreshTokens                        RefreshToken[]
+  scheduledCalls                       ScheduledCall[]
+  sessions                             Session[]
+  userDevices                          UserDevice[]
+
+  patientProfile                       PatientProfile?
+  patientMedications                   PatientMedication[]
+  patientThreshold                     PatientThreshold?
+  providerAssignmentAsPatient          PatientProviderAssignment?
+  providerAssignmentsAsPrimary         PatientProviderAssignment[] @relation("PrimaryProvider")
+  providerAssignmentsAsBackup          PatientProviderAssignment[] @relation("BackupProvider")
+  providerAssignmentsAsMedicalDirector PatientProviderAssignment[] @relation("MedicalDirector")
+  profileVerificationLogs              ProfileVerificationLog[]
 }
 
 enum UserRole {
-  GUEST
-  REGISTERED_USER
-  VERIFIED_USER
-  CONTENT_ADMIN
-  ARTICLE_ADMIN
-  ARTICLE_APPROVER
-  CONTENT_APPROVER
-  KB_UPLOADER
-  KB_APPROVER
-  CHAT_REVIEWER
+  PATIENT
+  PROVIDER
+  MEDICAL_DIRECTOR
+  HEALPLACE_OPS
   SUPER_ADMIN
-}
-
-enum RiskTier {
-  STANDARD
-  ELEVATED
-  HIGH
 }
 
 enum OnboardingStatus {

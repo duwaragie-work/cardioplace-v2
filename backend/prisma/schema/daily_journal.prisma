@@ -1,28 +1,50 @@
 model JournalEntry {
-  id               String            @id @default(uuid())
-  userId           String
-  entryDate        DateTime          @db.Date
-  systolicBP       Int?
-  diastolicBP      Int?
-  weight           Decimal?
-  medicationTaken  Boolean?
-  missedDoses      Int?              @default(0)
-  symptoms         String[]
+  id                    String      @id @default(uuid())
+  userId                String
+  measuredAt            DateTime
+  systolicBP            Int?
+  diastolicBP           Int?
+  pulse                 Int?
+  weight                Decimal?
+  position              Position?
+  sessionId             String?
+  measurementConditions Json?
+  medicationTaken       Boolean?
+  missedDoses           Int?        @default(0)
+
+  severeHeadache       Boolean @default(false)
+  visualChanges        Boolean @default(false)
+  alteredMentalStatus  Boolean @default(false)
+  chestPainOrDyspnea   Boolean @default(false)
+  focalNeuroDeficit    Boolean @default(false)
+  severeEpigastricPain Boolean @default(false)
+
+  newOnsetHeadache Boolean @default(false)
+  ruqPain          Boolean @default(false)
+  edema            Boolean @default(false)
+
+  otherSymptoms String[]
+
   teachBackAnswer  String?
   teachBackCorrect Boolean?
   notes            String?
-  source           EntrySource       @default(MANUAL)
+  source           EntrySource @default(MANUAL)
   sourceMetadata   Json?
-  measurementTime  String?           // "08:30", "14:15" — HH:mm format
-  snapshotId       String?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  deviationAlerts  DeviationAlert[]
-  snapshot         BaselineSnapshot? @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
-  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, entryDate, measurementTime])
-  @@index([userId, entryDate(sort: Desc)])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deviationAlerts DeviationAlert[]
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, measuredAt])
+  @@index([userId, measuredAt(sort: Desc)])
+}
+
+enum Position {
+  SITTING
+  STANDING
+  LYING
 }
 
 enum DeviationType {
@@ -47,7 +69,8 @@ enum AlertStatus {
 enum NotificationChannel {
   PUSH
   EMAIL
-  SMS
+  PHONE
+  DASHBOARD
 }
 
 enum EscalationLevel {

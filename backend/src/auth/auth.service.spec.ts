@@ -13,7 +13,6 @@ import {
   AccountStatus,
   CommunicationPreference,
   OnboardingStatus,
-  RiskTier,
   UserRole,
 } from '../generated/prisma/enums.js'
 import { EmailService } from '../email/email.service.js'
@@ -37,15 +36,13 @@ describe('AuthService', () => {
     id: '01JCEXAMPLE123456789',
     email: 'test@example.com',
     name: 'Test User',
-    roles: [UserRole.REGISTERED_USER],
+    roles: [UserRole.PATIENT],
     isVerified: true,
     onboardingStatus: OnboardingStatus.COMPLETED,
     accountStatus: AccountStatus.ACTIVE,
     dateOfBirth: null,
     communicationPreference: null,
     preferredLanguage: 'en',
-    riskTier: RiskTier.STANDARD,
-    primaryCondition: null,
     timezone: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -436,7 +433,7 @@ describe('AuthService', () => {
         data: {
           email: 'test@example.com',
           isVerified: true,
-          roles: [UserRole.REGISTERED_USER],
+          roles: [UserRole.PATIENT],
         },
       })
     })
@@ -661,7 +658,6 @@ describe('AuthService', () => {
       const dto = Object.assign(new ProfileDto(), {
         name: 'Alice',
         dateOfBirth: '1986-04-12',
-        riskTier: 'ELEVATED',
         timezone: 'America/New_York',
       })
       const errors = await validate(dto)
@@ -693,14 +689,6 @@ describe('AuthService', () => {
       expect(errors.some((e) => e.property === 'dateOfBirth')).toBe(true)
     })
 
-    it('should reject an invalid riskTier value', async () => {
-      const dto = Object.assign(new ProfileDto(), {
-        riskTier: 'INVALID_TIER',
-      })
-      const errors = await validate(dto)
-      expect(errors.some((e) => e.property === 'riskTier')).toBe(true)
-    })
-
     it('should reject a timezone without a slash', async () => {
       const dto = Object.assign(new ProfileDto(), { timezone: 'UTC' })
       const errors = await validate(dto)
@@ -717,8 +705,6 @@ describe('AuthService', () => {
         dateOfBirth: null,
         communicationPreference: null,
         preferredLanguage: 'en',
-        riskTier: RiskTier.STANDARD,
-        primaryCondition: null,
         timezone: null,
         onboardingStatus: OnboardingStatus.COMPLETED,
       })
@@ -740,8 +726,6 @@ describe('AuthService', () => {
             dateOfBirth: true,
             communicationPreference: true,
             preferredLanguage: true,
-            riskTier: true,
-            primaryCondition: true,
             timezone: true,
             onboardingStatus: true,
           },
@@ -755,16 +739,12 @@ describe('AuthService', () => {
         dateOfBirth: null,
         communicationPreference: null,
         preferredLanguage: 'en',
-        riskTier: RiskTier.ELEVATED,
-        primaryCondition: 'hypertension',
         timezone: 'Asia/Colombo',
         onboardingStatus: OnboardingStatus.COMPLETED,
       })
 
       await service.submitProfile(mockUser.id, {
         name: 'Alice',
-        riskTier: 'ELEVATED',
-        primaryCondition: 'hypertension',
         timezone: 'Asia/Colombo',
       })
 
@@ -773,8 +753,6 @@ describe('AuthService', () => {
           where: { id: mockUser.id },
           data: expect.objectContaining({
             name: 'Alice',
-            riskTier: 'ELEVATED',
-            primaryCondition: 'hypertension',
             timezone: 'Asia/Colombo',
             onboardingStatus: OnboardingStatus.COMPLETED,
           }),
@@ -809,7 +787,6 @@ describe('AuthService', () => {
 
       const call = (prisma.user.update as jest.Mock).mock.calls[0][0]
       expect(call.data).not.toHaveProperty('timezone')
-      expect(call.data).not.toHaveProperty('riskTier')
     })
   })
 
@@ -822,8 +799,6 @@ describe('AuthService', () => {
         dateOfBirth: null,
         communicationPreference: null,
         preferredLanguage: 'en',
-        riskTier: RiskTier.STANDARD,
-        primaryCondition: null,
         timezone: 'Asia/Colombo',
         onboardingStatus: OnboardingStatus.COMPLETED,
       })
@@ -840,8 +815,6 @@ describe('AuthService', () => {
         dateOfBirth: null,
         communicationPreference: null,
         preferredLanguage: 'en',
-        riskTier: RiskTier.STANDARD,
-        primaryCondition: null,
         timezone: null,
         onboardingStatus: OnboardingStatus.COMPLETED,
       })
@@ -867,8 +840,6 @@ describe('AuthService', () => {
         dateOfBirth: null,
         communicationPreference: null,
         preferredLanguage: 'en',
-        riskTier: RiskTier.STANDARD,
-        primaryCondition: null,
         timezone: 'Asia/Colombo',
         createdAt: mockUser.createdAt,           // service converts to ISO string
       }
@@ -885,11 +856,8 @@ describe('AuthService', () => {
         emailVerified: mockUser.isVerified,
         accountStatus: 'active',
         dateOfBirth: null,
-        diagnosisDate: null,
         communicationPreference: null,
         preferredLanguage: 'en',
-        riskTier: RiskTier.STANDARD,
-        primaryCondition: null,
         timezone: 'Asia/Colombo',
         onboardingStatus: OnboardingStatus.COMPLETED,
         createdAt: mockUser.createdAt.toISOString(),
@@ -906,149 +874,6 @@ describe('AuthService', () => {
     })
   })
 
-
-  // ─── Guest Login ────────────────────────────────────────────────────────
-
-  describe('guestLogin', () => {
-    // Shared mock data
-    const mockDevice = {
-      id: '01DEVICE123456789000',
-      deviceId: 'device-guest-1',
-      platform: null,
-      deviceType: null,
-      deviceName: null,
-      userAgent: null,
-      lastSeenAt: new Date(),
-      createdAt: new Date(),
-    }
-
-    const guestUser = {
-      id: '01JCGUEST123456789',
-      email: null,
-      name: null,
-      roles: [UserRole.GUEST],
-      isVerified: false,
-      onboardingStatus: OnboardingStatus.NOT_COMPLETED,
-      accountStatus: AccountStatus.ACTIVE,
-      dateOfBirth: null,
-      communicationPreference: null,
-      preferredLanguage: 'en',
-      riskTier: RiskTier.STANDARD,
-      primaryCondition: null,
-      timezone: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }
-
-    beforeEach(() => {
-      // Device.upsert always returns the mock device
-      ;(prisma.device.upsert as jest.Mock).mockResolvedValue(mockDevice)
-      ;(prisma.authLog.create as jest.Mock).mockResolvedValue({})
-      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({})
-    })
-
-    it('should throw BadRequestException when deviceId is missing', async () => {
-      await expect(
-        service.guestLogin({ deviceId: '' }),
-      ).rejects.toThrow('Device ID is required')
-      await expect(
-        service.guestLogin({ deviceId: '   ' }),
-      ).rejects.toThrow('Device ID is required')
-    })
-
-    it('Case: new device — creates new GUEST user and UserDevice link', async () => {
-      // No existing GUEST link for this device
-      ;(prisma.userDevice.findFirst as jest.Mock).mockResolvedValue(null)
-      ;(prisma.user.create as jest.Mock).mockResolvedValue(guestUser)
-      ;(prisma.userDevice.create as jest.Mock).mockResolvedValue({})
-
-      const result = await service.guestLogin({
-        deviceId: 'device-guest-1',
-        userAgent: 'Mozilla/5.0',
-      })
-
-      // Device upserted
-      expect(prisma.device.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { deviceId: 'device-guest-1' } }),
-      )
-      // Looked for existing GUEST link
-      expect(prisma.userDevice.findFirst).toHaveBeenCalledWith({
-        where: { deviceId: mockDevice.id, user: { roles: { has: UserRole.GUEST } } },
-        include: { user: true },
-      })
-      // Created new GUEST user
-      expect(prisma.user.create).toHaveBeenCalledWith({
-        data: { roles: [UserRole.GUEST] },
-      })
-      // Created UserDevice join row
-      expect(prisma.userDevice.create).toHaveBeenCalledWith({
-        data: { userId: guestUser.id, deviceId: mockDevice.id },
-      })
-      expect(result).toMatchObject({
-        userId: guestUser.id,
-        roles: [UserRole.GUEST],
-        login_method: 'guest',
-        onboarding_required: true,
-      })
-      expect(result).toHaveProperty('accessToken')
-      expect(result).toHaveProperty('refreshToken')
-    })
-
-    it('Case: returning guest — resumes same session (same GUEST user returned)', async () => {
-      // Existing GUEST user already linked to this device
-      ;(prisma.userDevice.findFirst as jest.Mock).mockResolvedValue({
-        id: '01LINK000000000001',
-        userId: guestUser.id,
-        deviceId: mockDevice.id,
-        user: guestUser,
-      })
-
-      const result = await service.guestLogin({ deviceId: 'device-guest-1' })
-
-      // Should NOT create a new user
-      expect(prisma.user.create).not.toHaveBeenCalled()
-      expect(prisma.userDevice.create).not.toHaveBeenCalled()
-
-      expect(result).toMatchObject({
-        userId: guestUser.id,
-        login_method: 'guest',
-      })
-    })
-
-    it('Case: device has only registered user — creates NEW GUEST user', async () => {
-      // No GUEST-role UserDevice found (device only linked to registered user)
-      ;(prisma.userDevice.findFirst as jest.Mock).mockResolvedValue(null)
-      const newGuestUser = { ...guestUser, id: '01JCGUEST_NEW_000001' }
-      ;(prisma.user.create as jest.Mock).mockResolvedValue(newGuestUser)
-      ;(prisma.userDevice.create as jest.Mock).mockResolvedValue({})
-
-      const result = await service.guestLogin({ deviceId: 'device-guest-1' })
-
-      expect(prisma.user.create).toHaveBeenCalledWith({
-        data: { roles: [UserRole.GUEST] },
-      })
-      expect(prisma.userDevice.create).toHaveBeenCalledWith({
-        data: { userId: newGuestUser.id, deviceId: mockDevice.id },
-      })
-      // Must NOT return the registered user
-      expect(result.userId).toBe(newGuestUser.id)
-      expect(result.login_method).toBe('guest')
-    })
-
-    it('should throw ForbiddenException when existing guest account is blocked', async () => {
-      const blockedGuest = { ...guestUser, accountStatus: AccountStatus.BLOCKED }
-      ;(prisma.userDevice.findFirst as jest.Mock).mockResolvedValue({
-        id: '01LINK000000000002',
-        userId: blockedGuest.id,
-        deviceId: mockDevice.id,
-        user: blockedGuest,
-      })
-
-      await expect(
-        service.guestLogin({ deviceId: 'device-guest-1' }),
-      ).rejects.toThrow(ForbiddenException)
-    })
-  })
 
   // ─── Device Linking (upsertOrTrackDevice) ──────────────────────────────────────
 

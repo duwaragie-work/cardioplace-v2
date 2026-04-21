@@ -1,0 +1,61 @@
+model PatientMedication {
+  id                    String                         @id @default(uuid())
+  userId                String
+  drugName              String
+  drugClass             DrugClass
+  isCombination         Boolean                        @default(false)
+  combinationComponents String[]
+  frequency             MedicationFrequency
+  source                MedicationSource
+  verificationStatus    MedicationVerificationStatus   @default(UNVERIFIED)
+  verifiedByAdminId     String?
+  verifiedAt            DateTime?
+  reportedAt            DateTime                       @default(now())
+  discontinuedAt        DateTime?
+  rawInputText          String?
+  notes                 String?                        @db.Text
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, discontinuedAt])
+  @@index([userId, verificationStatus])
+}
+
+enum DrugClass {
+  ACE_INHIBITOR
+  ARB
+  BETA_BLOCKER
+  DHP_CCB
+  NDHP_CCB
+  LOOP_DIURETIC
+  THIAZIDE
+  MRA
+  SGLT2
+  ANTICOAGULANT
+  STATIN
+  ANTIARRHYTHMIC
+  VASODILATOR_NITRATE
+  ARNI
+  OTHER_UNVERIFIED
+}
+
+enum MedicationFrequency {
+  ONCE_DAILY
+  TWICE_DAILY
+  THREE_TIMES_DAILY
+  UNSURE
+}
+
+enum MedicationSource {
+  PATIENT_SELF_REPORT
+  PROVIDER_ENTERED
+  PATIENT_VOICE
+  PATIENT_PHOTO
+}
+
+enum MedicationVerificationStatus {
+  UNVERIFIED
+  VERIFIED
+  REJECTED
+  AWAITING_PROVIDER
+}

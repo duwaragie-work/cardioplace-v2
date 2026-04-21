@@ -37,8 +37,6 @@ export async function setupTestApp(): Promise<TestContext> {
       data: {
         email,
         name: 'Test Patient',
-        primaryCondition: 'hypertension',
-        riskTier: 'ELEVATED' as any,
         preferredLanguage: 'en',
         dateOfBirth: new Date('1975-06-15'),
       },

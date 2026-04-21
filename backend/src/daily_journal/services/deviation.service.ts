@@ -5,8 +5,8 @@ import { Prisma } from '../../generated/prisma/client.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import type {
-  BaselineComputedEvent,
-  BaselineUnavailableEvent,
+  JournalEntryCreatedEvent,
+  JournalEntryUpdatedEvent,
 } from '../interfaces/events.interface.js'
 
 type DeviationType = 'SYSTOLIC_BP' | 'DIASTOLIC_BP' | 'WEIGHT' | 'MEDICATION_ADHERENCE'
@@ -16,10 +16,14 @@ interface DetectedDeviation {
   type: DeviationType
   severity: DeviationSeverity
   magnitude: number
-  baselineValue: number | null
   actualValue: number
 }
 
+// TODO(phase/5): replace this entire service with AlertEngineService (Dev 2).
+// v2 has no rolling baseline, so the v1 baseline-relative triggers are gone.
+// For phase/2 we keep only absolute-threshold alerts so existing patient/admin
+// dashboards continue to surface critical BP readings while the real rule
+// engine is built.
 @Injectable()
 export class DeviationService {
   private readonly logger = new Logger(DeviationService.name)
@@ -29,36 +33,38 @@ export class DeviationService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  /**
-   * When baseline IS available (>= 10 entries in 14-day window):
-   * Check all deviation types using baseline-relative + absolute thresholds.
-   */
-  @OnEvent(JOURNAL_EVENTS.BASELINE_COMPUTED, { async: true })
-  async handleBaselineComputed(payload: BaselineComputedEvent) {
+  @OnEvent(JOURNAL_EVENTS.ENTRY_CREATED, { async: true })
+  async handleEntryCreated(payload: JournalEntryCreatedEvent) {
+    await this.evaluate(payload)
+  }
+
+  @OnEvent(JOURNAL_EVENTS.ENTRY_UPDATED, { async: true })
+  async handleEntryUpdated(payload: JournalEntryUpdatedEvent) {
+    await this.evaluate(payload)
+  }
+
+  private async evaluate(
+    payload: JournalEntryCreatedEvent | JournalEntryUpdatedEvent,
+  ) {
+    if (payload.systolicBP == null || payload.diastolicBP == null) {
+      this.logger.log(
+        `Skipping deviation check for entry ${payload.entryId} — incomplete BP`,
+      )
+      return
+    }
+
     try {
       const deviations = this.detectDeviations({
         systolicBP: payload.systolicBP,
         diastolicBP: payload.diastolicBP,
-        medicationTaken: payload.medicationTaken ?? null,
-        baselineSystolic: payload.baselineSystolic,
-        baselineDiastolic: payload.baselineDiastolic,
-        hasBaseline: true,
       })
 
       if (deviations.length === 0) {
-        this.logger.log(
-          `No deviations detected for entry ${payload.entryId}`,
-        )
         await this.resolveOpenAlerts(payload.userId)
         return
       }
 
-      await this.processDeviations(
-        deviations,
-        payload.userId,
-        payload.entryId,
-        payload.entryDate,
-      )
+      await this.processDeviations(deviations, payload.userId, payload.entryId)
     } catch (error) {
       this.logger.error(
         `Deviation detection failed for entry ${payload.entryId}`,
@@ -67,56 +73,11 @@ export class DeviationService {
     }
   }
 
-  /**
-   * When baseline is NOT available (< 10 entries):
-   * Only check absolute BP thresholds and medication adherence.
-   */
-  @OnEvent(JOURNAL_EVENTS.BASELINE_UNAVAILABLE, { async: true })
-  async handleBaselineUnavailable(payload: BaselineUnavailableEvent) {
-    try {
-      const deviations = this.detectDeviations({
-        systolicBP: payload.systolicBP,
-        diastolicBP: payload.diastolicBP,
-        medicationTaken: payload.medicationTaken ?? null,
-        baselineSystolic: null,
-        baselineDiastolic: null,
-        hasBaseline: false,
-      })
-
-      if (deviations.length === 0) {
-        this.logger.log(
-          `No absolute-threshold deviations for entry ${payload.entryId} (baseline unavailable)`,
-        )
-        return
-      }
-
-      await this.processDeviations(
-        deviations,
-        payload.userId,
-        payload.entryId,
-        payload.entryDate,
-      )
-    } catch (error) {
-      this.logger.error(
-        `Deviation detection failed for entry ${payload.entryId} (baseline unavailable)`,
-        error instanceof Error ? error.stack : error,
-      )
-    }
-  }
-
-  /**
-   * Upsert individual DeviationAlert records (for analytics), then emit
-   * a SINGLE consolidated ANOMALY_TRACKED event per entry using the
-   * worst severity alert. This prevents duplicate escalations when both
-   * systolic and diastolic are high in the same reading.
-   */
   private async processDeviations(
     deviations: DetectedDeviation[],
     userId: string,
     entryId: string,
-    entryDate: Date,
   ) {
-    // 1. Upsert all individual alerts (keeps per-type analytics)
     const upsertedAlerts: { id: string; type: string; severity: string; escalated: boolean }[] = []
 
     for (const deviation of deviations) {
@@ -130,10 +91,6 @@ export class DeviationService {
         update: {
           severity: deviation.severity,
           magnitude: new Prisma.Decimal(deviation.magnitude.toFixed(2)),
-          baselineValue:
-            deviation.baselineValue != null
-              ? new Prisma.Decimal(deviation.baselineValue.toFixed(2))
-              : null,
           actualValue: new Prisma.Decimal(deviation.actualValue.toFixed(2)),
         },
         create: {
@@ -142,10 +99,6 @@ export class DeviationService {
           type: deviation.type,
           severity: deviation.severity,
           magnitude: new Prisma.Decimal(deviation.magnitude.toFixed(2)),
-          baselineValue:
-            deviation.baselineValue != null
-              ? new Prisma.Decimal(deviation.baselineValue.toFixed(2))
-              : null,
           actualValue: new Prisma.Decimal(deviation.actualValue.toFixed(2)),
         },
       })
@@ -162,8 +115,6 @@ export class DeviationService {
       )
     }
 
-    // 2. Emit ONE consolidated event per entry — pick the worst severity alert
-    //    HIGH > MEDIUM. If both systolic and diastolic, report as "BP" combined.
     const worstAlert = upsertedAlerts.find((a) => a.severity === 'HIGH')
       ?? upsertedAlerts[0]
 
@@ -181,81 +132,27 @@ export class DeviationService {
     })
   }
 
-  /**
-   * SYSTOLIC_BP:
-   *   Fires if systolicBP > 160 (absolute) OR systolicBP > baseline + 20
-   *   severity: HIGH if > 180, MEDIUM otherwise
-   *
-   * DIASTOLIC_BP:
-   *   Fires if diastolicBP > 100 (absolute) OR diastolicBP > baseline + 15
-   *   severity: HIGH if > 110, MEDIUM otherwise
-   *
-   * MEDICATION_ADHERENCE:
-   *   Fires if medicationTaken === false
-   *   severity: MEDIUM always
-   */
   private detectDeviations(params: {
     systolicBP: number
     diastolicBP: number
-    medicationTaken: boolean | null
-    baselineSystolic: number | null
-    baselineDiastolic: number | null
-    hasBaseline: boolean
   }): DetectedDeviation[] {
     const deviations: DetectedDeviation[] = []
 
-    // ── SYSTOLIC_BP ────────────────────────────────────────────────
-    {
-      const absoluteTrigger = params.systolicBP > 160
-      const relativeTrigger =
-        params.hasBaseline &&
-        params.baselineSystolic != null &&
-        params.systolicBP > params.baselineSystolic + 20
-
-      if (absoluteTrigger || relativeTrigger) {
-        deviations.push({
-          type: 'SYSTOLIC_BP',
-          severity: params.systolicBP > 180 ? 'HIGH' : 'MEDIUM',
-          magnitude:
-            params.baselineSystolic != null
-              ? Math.abs(params.systolicBP - params.baselineSystolic)
-              : Math.abs(params.systolicBP - 160),
-          baselineValue: params.baselineSystolic,
-          actualValue: params.systolicBP,
-        })
-      }
-    }
-
-    // ── DIASTOLIC_BP ───────────────────────────────────────────────
-    {
-      const absoluteTrigger = params.diastolicBP > 100
-      const relativeTrigger =
-        params.hasBaseline &&
-        params.baselineDiastolic != null &&
-        params.diastolicBP > params.baselineDiastolic + 15
-
-      if (absoluteTrigger || relativeTrigger) {
-        deviations.push({
-          type: 'DIASTOLIC_BP',
-          severity: params.diastolicBP > 110 ? 'HIGH' : 'MEDIUM',
-          magnitude:
-            params.baselineDiastolic != null
-              ? Math.abs(params.diastolicBP - params.baselineDiastolic)
-              : Math.abs(params.diastolicBP - 100),
-          baselineValue: params.baselineDiastolic,
-          actualValue: params.diastolicBP,
-        })
-      }
-    }
-
-    // ── MEDICATION_ADHERENCE ───────────────────────────────────────
-    if (params.medicationTaken === false) {
+    if (params.systolicBP > 160) {
       deviations.push({
-        type: 'MEDICATION_ADHERENCE',
-        severity: 'MEDIUM',
-        magnitude: 1,
-        baselineValue: null,
-        actualValue: 0,
+        type: 'SYSTOLIC_BP',
+        severity: params.systolicBP > 180 ? 'HIGH' : 'MEDIUM',
+        magnitude: Math.abs(params.systolicBP - 160),
+        actualValue: params.systolicBP,
+      })
+    }
+
+    if (params.diastolicBP > 100) {
+      deviations.push({
+        type: 'DIASTOLIC_BP',
+        severity: params.diastolicBP > 110 ? 'HIGH' : 'MEDIUM',
+        magnitude: Math.abs(params.diastolicBP - 100),
+        actualValue: params.diastolicBP,
       })
     }
 

@@ -631,38 +631,30 @@ export class VoiceService implements OnModuleDestroy {
 
   private async buildPatientContext(userId: string, sessionId?: string): Promise<string> {
     try {
-      const [user, entries, baseline, alerts, sessionData] = await Promise.all([
+      // TODO(phase/16): rewrite patient-context injection to pull structured
+      // PatientProfile (conditions, heartFailureType, isPregnant, etc.) plus
+      // verified PatientMedication rows. v1 primaryCondition/riskTier are gone;
+      // baseline was a rolling snapshot that v2 replaces with an on-the-fly
+      // 7-day mean computed by getLatestBaseline() in DailyJournalService.
+      const [user, entries, alerts, sessionData] = await Promise.all([
         this.prisma.user.findUnique({
           where: { id: userId },
           select: {
             name: true,
-            primaryCondition: true,
-            riskTier: true,
             dateOfBirth: true,
             preferredLanguage: true,
             timezone: true,
             communicationPreference: true,
           },
         }),
-        // Fetch only the minimum needed for the in-prompt summary:
-        // all entry dates so we can compute total count + distinct-day count
-        // for the baseline progress explanation. The per-entry values and
-        // entry_ids are NOT injected — the agent calls get_recent_readings
-        // on demand, which keeps per-turn prompt size ~1-2k tokens and first
-        // audio byte latency under 3-5s.
         this.prisma.journalEntry.findMany({
           where: { userId },
-          orderBy: { entryDate: 'desc' },
+          orderBy: { measuredAt: 'desc' },
           select: {
-            entryDate: true,
+            measuredAt: true,
             systolicBP: true,
             diastolicBP: true,
           },
-        }),
-        this.prisma.baselineSnapshot.findFirst({
-          where: { userId },
-          orderBy: { computedForDate: 'desc' },
-          select: { baselineSystolic: true, baselineDiastolic: true },
         }),
         this.prisma.deviationAlert.findMany({
           where: { userId, acknowledgedAt: null },
@@ -680,8 +672,6 @@ export class VoiceService implements OnModuleDestroy {
       // ── Profile ────────────────────────────────────────────────────────────
       const profileLines: string[] = []
       if (user?.name) profileLines.push(`Patient name: ${user.name}`)
-      if (user?.primaryCondition) profileLines.push(`Primary condition: ${user.primaryCondition}`)
-      if (user?.riskTier) profileLines.push(`Risk tier: ${user.riskTier}`)
       if (user?.dateOfBirth) {
         const age = Math.floor(
           (Date.now() - new Date(user.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000),
@@ -694,13 +684,10 @@ export class VoiceService implements OnModuleDestroy {
         : 'Patient profile not available.'
 
       // ── BP readings summary (count + distinct-day count only) ─────────────
-      // Per-entry detail and entry_ids are NOT included — the agent calls the
-      // get_recent_readings tool when it needs them. This keeps the per-turn
-      // prompt small and TTFB low.
       const completeEntries = entries.filter((e) => e.systolicBP != null && e.diastolicBP != null)
       const entryCount = completeEntries.length
       const distinctDays = new Set(
-        completeEntries.map((e) => new Date(e.entryDate).toISOString().slice(0, 10)),
+        completeEntries.map((e) => new Date(e.measuredAt).toISOString().slice(0, 10)),
       ).size
 
       const lines: string[] = ['--- PATIENT HEALTH DATA ---']
@@ -713,21 +700,22 @@ export class VoiceService implements OnModuleDestroy {
         )
       }
 
-      // ── Baseline ───────────────────────────────────────────────────────────
+      // ── Trailing 7-day average (computed from JournalEntry, not stored) ──
       lines.push('')
-      const bSys = baseline ? Number(baseline.baselineSystolic) : 0
-      const bDia = baseline ? Number(baseline.baselineDiastolic) : 0
-      if (bSys > 0 && bDia > 0) {
-        lines.push(`Baseline: ${bSys}/${bDia} mmHg`)
-      } else if (distinctDays >= 3) {
-        lines.push(
-          `Baseline: Not yet computed (readings on ${distinctDays} distinct days recorded — baseline should be available shortly).`,
+      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+      const recent = completeEntries.filter(
+        (e) => new Date(e.measuredAt).getTime() >= sevenDaysAgo,
+      )
+      if (recent.length > 0) {
+        const avgSys = Math.round(
+          recent.reduce((a, e) => a + (e.systolicBP as number), 0) / recent.length,
         )
+        const avgDia = Math.round(
+          recent.reduce((a, e) => a + (e.diastolicBP as number), 0) / recent.length,
+        )
+        lines.push(`7-day average: ${avgSys}/${avgDia} mmHg (${recent.length} reading(s))`)
       } else {
-        const remainingDays = 3 - distinctDays
-        lines.push(
-          `Baseline: Not yet established — readings on ${distinctDays} of 3 required distinct days (needs ${remainingDays} more day(s), all within a 7-day window).`,
-        )
+        lines.push('7-day average: Not yet established — no complete BP readings in the last 7 days.')
       }
 
       // ── Alerts (aligned filter: acknowledgedAt: null) ─────────────────────

@@ -2,8 +2,25 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { EmailService } from '../email/email.service.js'
 import { scheduleCallEmailHtml } from '../email/email-templates.js'
+import { UserRole } from '../generated/prisma/enums.js'
 
 const SEVERITY_ORDER: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 }
+
+type DerivedRiskTier = 'STANDARD' | 'ELEVATED' | 'HIGH'
+
+interface PatientProfileShape {
+  hasHeartFailure: boolean
+  heartFailureType: string | null
+  hasAFib: boolean
+  hasCAD: boolean
+  hasHCM: boolean
+  hasDCM: boolean
+  hasTachycardia: boolean
+  hasBradycardia: boolean
+  diagnosedHypertension: boolean
+  isPregnant: boolean
+  historyPreeclampsia: boolean
+}
 
 @Injectable()
 export class ProviderService {
@@ -14,12 +31,130 @@ export class ProviderService {
     private readonly emailService: EmailService,
   ) {}
 
+  // TODO(phase/4): replace these inline helpers with imports from
+  // /shared/src/derivatives.ts when Dev 2 lands it. Same mapping, single
+  // source of truth for rule engine + dashboards + chat prompt.
+  private derivePrimaryCondition(
+    profile: PatientProfileShape | null,
+  ): string | null {
+    if (!profile) return null
+    if (profile.isPregnant || profile.historyPreeclampsia) {
+      return 'Pregnancy / preeclampsia history'
+    }
+    if (profile.hasHeartFailure) {
+      const t = profile.heartFailureType
+      if (t === 'HFREF') return 'Heart Failure (HFrEF)'
+      if (t === 'HFPEF') return 'Heart Failure (HFpEF)'
+      return 'Heart Failure'
+    }
+    if (profile.hasCAD) return 'CAD'
+    if (profile.hasAFib) return 'AFib'
+    if (profile.hasHCM) return 'HCM'
+    if (profile.hasDCM) return 'DCM'
+    if (profile.hasTachycardia) return 'Tachycardia'
+    if (profile.hasBradycardia) return 'Bradycardia'
+    if (profile.diagnosedHypertension) return 'Hypertension'
+    return null
+  }
+
+  private deriveRiskTier(
+    profile: PatientProfileShape | null,
+    dob: Date | null,
+  ): DerivedRiskTier {
+    if (!profile) {
+      return this.ageBucket(dob) === '65+' ? 'ELEVATED' : 'STANDARD'
+    }
+    if (
+      profile.isPregnant ||
+      profile.historyPreeclampsia ||
+      profile.hasHeartFailure ||
+      profile.hasHCM ||
+      profile.hasDCM
+    ) {
+      return 'HIGH'
+    }
+    if (
+      profile.hasCAD ||
+      profile.hasAFib ||
+      profile.diagnosedHypertension ||
+      this.ageBucket(dob) === '65+'
+    ) {
+      return 'ELEVATED'
+    }
+    return 'STANDARD'
+  }
+
+  private ageBucket(dob: Date | null | undefined): '18-39' | '40-64' | '65+' {
+    if (!dob) return '40-64'
+    const years =
+      (Date.now() - new Date(dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000)
+    if (years >= 65) return '65+'
+    if (years >= 40) return '40-64'
+    return '18-39'
+  }
+
+  // Translate an incoming `riskTier` filter (string) into a PatientProfile
+  // `where` clause equivalent — HIGH → any major cardiac/pregnancy condition,
+  // ELEVATED → CAD/AFib/diagnosedHypertension, STANDARD → no conditions.
+  private profileWhereForRiskTier(
+    riskTier: string,
+  ): Record<string, unknown> | null {
+    if (riskTier === 'HIGH') {
+      return {
+        OR: [
+          { isPregnant: true },
+          { historyPreeclampsia: true },
+          { hasHeartFailure: true },
+          { hasHCM: true },
+          { hasDCM: true },
+        ],
+      }
+    }
+    if (riskTier === 'ELEVATED') {
+      return {
+        OR: [
+          { hasCAD: true },
+          { hasAFib: true },
+          { diagnosedHypertension: true },
+        ],
+      }
+    }
+    if (riskTier === 'STANDARD') {
+      return {
+        AND: [
+          { isPregnant: false },
+          { historyPreeclampsia: false },
+          { hasHeartFailure: false },
+          { hasHCM: false },
+          { hasDCM: false },
+          { hasCAD: false },
+          { hasAFib: false },
+          { diagnosedHypertension: false },
+        ],
+      }
+    }
+    return null
+  }
+
+  private readonly profileSelect = {
+    hasHeartFailure: true,
+    heartFailureType: true,
+    hasAFib: true,
+    hasCAD: true,
+    hasHCM: true,
+    hasDCM: true,
+    hasTachycardia: true,
+    hasBradycardia: true,
+    diagnosedHypertension: true,
+    isPregnant: true,
+    historyPreeclampsia: true,
+  } as const
+
   // ─── GET /provider/stats ──────────────────────────────────────────────────────
 
   async getStats() {
     const now = new Date()
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
 
     const [totalActivePatients, monthlyInteractions, activeAlertsCount, readingsThisMonth, recentAlertPatients] =
@@ -35,7 +170,7 @@ export class ProviderService {
         }),
         this.prisma.journalEntry.count({
           where: {
-            entryDate: { gte: startOfMonth },
+            measuredAt: { gte: startOfMonth },
             systolicBP: { not: null },
           },
         }),
@@ -49,7 +184,6 @@ export class ProviderService {
         }),
       ])
 
-    // BP controlled %: patients whose latest journal entry has systolicBP < 130
     const usersWithEntries = await this.prisma.user.findMany({
       where: {
         onboardingStatus: 'COMPLETED',
@@ -57,7 +191,7 @@ export class ProviderService {
       },
       include: {
         journalEntries: {
-          orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
+          orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: { systolicBP: true },
         },
@@ -96,32 +230,26 @@ export class ProviderService {
     hasActiveAlerts?: boolean
   }) {
     const where: Record<string, unknown> = {
-      roles: { has: 'REGISTERED_USER' },
+      roles: { has: UserRole.PATIENT },
     }
     if (filters.riskTier) {
-      where.riskTier = filters.riskTier
+      const profileWhere = this.profileWhereForRiskTier(filters.riskTier)
+      if (profileWhere) {
+        where.patientProfile = { is: profileWhere }
+      }
     }
 
     const users = await this.prisma.user.findMany({
       where,
       include: {
+        patientProfile: { select: this.profileSelect },
         journalEntries: {
-          orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
+          orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: {
-            entryDate: true,
-            measurementTime: true,
+            measuredAt: true,
             systolicBP: true,
             diastolicBP: true,
-          },
-        },
-        baselineSnapshots: {
-          where: { baselineSystolic: { gt: 0 } },
-          orderBy: { computedForDate: 'desc' },
-          take: 1,
-          select: {
-            baselineSystolic: true,
-            baselineDiastolic: true,
           },
         },
         deviationAlerts: {
@@ -138,33 +266,29 @@ export class ProviderService {
 
     let patients = users.map((u) => {
       const latestEntry = u.journalEntries[0] ?? null
-      const latestBaseline = u.baselineSnapshots[0] ?? null
       const activeAlertsCount = u.deviationAlerts.length
-      const escalationLevel =
-        u.escalationEvents[0]?.escalationLevel ?? null
+      const escalationLevel = u.escalationEvents[0]?.escalationLevel ?? null
+      const profile = (u.patientProfile ?? null) as PatientProfileShape | null
 
       return {
         id: u.id,
         name: u.name,
         email: u.email,
-        riskTier: u.riskTier ?? 'STANDARD',
+        riskTier: this.deriveRiskTier(profile, u.dateOfBirth),
         communicationPreference: u.communicationPreference ?? null,
-        primaryCondition: u.primaryCondition,
+        primaryCondition: this.derivePrimaryCondition(profile),
         onboardingStatus: u.onboardingStatus,
-        latestBaseline: latestBaseline
-          ? {
-              baselineSystolic: Number(latestBaseline.baselineSystolic),
-              baselineDiastolic: Number(latestBaseline.baselineDiastolic),
-            }
-          : null,
+        // latestBaseline (rolling snapshot) is gone in v2. Frontend should
+        // request the BP trend endpoint when it needs averages.
+        latestBaseline: null,
         activeAlertsCount,
-        lastEntryDate: latestEntry?.entryDate ?? null,
+        lastEntryDate: latestEntry?.measuredAt ?? null,
         latestBP: latestEntry
           ? {
               systolicBP: latestEntry.systolicBP,
               diastolicBP: latestEntry.diastolicBP,
-              entryDate: latestEntry.entryDate,
-              measurementTime: latestEntry.measurementTime ?? null,
+              entryDate: latestEntry.measuredAt,
+              measurementTime: null,
             }
           : null,
         escalationLevel,
@@ -188,20 +312,15 @@ export class ProviderService {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
+        patientProfile: { select: this.profileSelect },
         journalEntries: {
-          orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
+          orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: {
-            entryDate: true,
-            measurementTime: true,
+            measuredAt: true,
             systolicBP: true,
             diastolicBP: true,
           },
-        },
-        baselineSnapshots: {
-          where: { baselineSystolic: { gt: 0 } },
-          orderBy: { computedForDate: 'desc' },
-          take: 1,
         },
         deviationAlerts: {
           where: { status: 'OPEN' },
@@ -218,61 +337,56 @@ export class ProviderService {
     if (!user) throw new NotFoundException('Patient not found')
 
     const latestEntry = user.journalEntries[0] ?? null
-    const latestBaseline = user.baselineSnapshots[0] ?? null
+    const profile = (user.patientProfile ?? null) as PatientProfileShape | null
+
+    // v2 baseline: trailing 7-day mean, computed inline (not stored).
+    const baseline = await this.trailing7dayMean(userId)
 
     const patient = {
       id: user.id,
       name: user.name,
       email: user.email,
-      riskTier: user.riskTier ?? 'STANDARD',
+      riskTier: this.deriveRiskTier(profile, user.dateOfBirth),
       communicationPreference: user.communicationPreference ?? null,
-      primaryCondition: user.primaryCondition,
+      primaryCondition: this.derivePrimaryCondition(profile),
       onboardingStatus: user.onboardingStatus,
-      latestBaseline: latestBaseline
-        ? {
-            baselineSystolic: Number(latestBaseline.baselineSystolic),
-            baselineDiastolic: Number(latestBaseline.baselineDiastolic),
-          }
-        : null,
+      latestBaseline: baseline,
       activeAlertsCount: user.deviationAlerts.length,
-      lastEntryDate: latestEntry?.entryDate ?? null,
+      lastEntryDate: latestEntry?.measuredAt ?? null,
       latestBP: latestEntry
         ? {
             systolicBP: latestEntry.systolicBP,
             diastolicBP: latestEntry.diastolicBP,
-            entryDate: latestEntry.entryDate,
-            measurementTime: latestEntry.measurementTime ?? null,
+            entryDate: latestEntry.measuredAt,
+            measurementTime: null,
           }
         : null,
       escalationLevel:
         user.escalationEvents[0]?.escalationLevel ?? null,
     }
 
-    // Recent 14 entries
     const recentEntries = await this.prisma.journalEntry.findMany({
       where: { userId },
-      orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
       take: 14,
       select: {
         id: true,
-        entryDate: true,
-        measurementTime: true,
+        measuredAt: true,
         systolicBP: true,
         diastolicBP: true,
         weight: true,
         medicationTaken: true,
-        symptoms: true,
+        otherSymptoms: true,
       },
     })
 
-    // Active alerts with journal entry data
     const activeAlerts = await this.prisma.deviationAlert.findMany({
       where: { userId, status: 'OPEN' },
       orderBy: { createdAt: 'desc' },
       include: {
         journalEntry: {
           select: {
-            entryDate: true,
+            measuredAt: true,
             systolicBP: true,
             diastolicBP: true,
           },
@@ -280,58 +394,45 @@ export class ProviderService {
       },
     })
 
-    // Active escalations
-    const activeEscalations = await this.prisma.escalationEvent.findMany(
-      {
-        where: { userId },
-        orderBy: { triggeredAt: 'desc' },
-        select: {
-          id: true,
-          escalationLevel: true,
-          reason: true,
-          triggeredAt: true,
-          notificationSentAt: true,
-        },
+    const activeEscalations = await this.prisma.escalationEvent.findMany({
+      where: { userId },
+      orderBy: { triggeredAt: 'desc' },
+      select: {
+        id: true,
+        escalationLevel: true,
+        reason: true,
+        triggeredAt: true,
+        notificationSentAt: true,
       },
-    )
-
-    // Full baseline
-    const baseline = latestBaseline
-      ? {
-          id: latestBaseline.id,
-          computedForDate: latestBaseline.computedForDate,
-          baselineSystolic: Number(latestBaseline.baselineSystolic),
-          baselineDiastolic: Number(latestBaseline.baselineDiastolic),
-          baselineWeight: latestBaseline.baselineWeight
-            ? Number(latestBaseline.baselineWeight)
-            : null,
-          sampleSize: latestBaseline.sampleSize,
-        }
-      : null
+    })
 
     return {
       statusCode: 200,
       data: {
         patient,
         recentEntries: recentEntries.map((e) => ({
-          ...e,
+          id: e.id,
+          entryDate: e.measuredAt,
+          measurementTime: null,
+          systolicBP: e.systolicBP,
+          diastolicBP: e.diastolicBP,
           weight: e.weight != null ? Number(e.weight) : null,
+          medicationTaken: e.medicationTaken,
+          symptoms: e.otherSymptoms,
         })),
         activeAlerts: activeAlerts.map((a) => ({
           id: a.id,
           type: a.type,
           severity: a.severity,
-          magnitude: Number(a.magnitude),
-          baselineValue: a.baselineValue
-            ? Number(a.baselineValue)
-            : null,
+          magnitude: a.magnitude != null ? Number(a.magnitude) : null,
+          baselineValue: a.baselineValue ? Number(a.baselineValue) : null,
           actualValue: a.actualValue ? Number(a.actualValue) : null,
           escalated: a.escalated,
           status: a.status,
           createdAt: a.createdAt,
           journalEntry: a.journalEntry
             ? {
-                entryDate: a.journalEntry.entryDate,
+                entryDate: a.journalEntry.measuredAt,
                 systolicBP: a.journalEntry.systolicBP,
                 diastolicBP: a.journalEntry.diastolicBP,
               }
@@ -358,19 +459,10 @@ export class ProviderService {
     const [entries, total] = await Promise.all([
       this.prisma.journalEntry.findMany({
         where: { userId },
-        orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
         skip,
         take: limit,
         include: {
-          snapshot: {
-            select: {
-              id: true,
-              computedForDate: true,
-              baselineSystolic: true,
-              baselineDiastolic: true,
-              baselineWeight: true,
-            },
-          },
           deviationAlerts: {
             select: {
               id: true,
@@ -393,41 +485,26 @@ export class ProviderService {
       message: 'Journal history retrieved successfully',
       data: entries.map((entry) => ({
         id: entry.id,
-        entryDate: entry.entryDate,
-        measurementTime: entry.measurementTime,
+        entryDate: entry.measuredAt,
+        measurementTime: null,
         systolicBP: entry.systolicBP,
         diastolicBP: entry.diastolicBP,
         weight: entry.weight != null ? Number(entry.weight) : null,
         medicationTaken: entry.medicationTaken,
         missedDoses: entry.missedDoses,
-        symptoms: entry.symptoms,
+        symptoms: entry.otherSymptoms,
         teachBackAnswer: entry.teachBackAnswer,
         teachBackCorrect: entry.teachBackCorrect,
         notes: entry.notes,
         source: entry.source.toLowerCase(),
         sourceMetadata: entry.sourceMetadata,
-        baseline: entry.snapshot
-          ? {
-              id: entry.snapshot.id,
-              baselineSystolic: entry.snapshot.baselineSystolic
-                ? Number(entry.snapshot.baselineSystolic)
-                : null,
-              baselineDiastolic: entry.snapshot.baselineDiastolic
-                ? Number(entry.snapshot.baselineDiastolic)
-                : null,
-              baselineWeight: entry.snapshot.baselineWeight
-                ? Number(entry.snapshot.baselineWeight)
-                : null,
-            }
-          : null,
+        baseline: null,
         deviations: entry.deviationAlerts.map((a) => ({
           id: a.id,
           type: a.type,
           severity: a.severity,
-          magnitude: Number(a.magnitude),
-          baselineValue: a.baselineValue
-            ? Number(a.baselineValue)
-            : null,
+          magnitude: a.magnitude != null ? Number(a.magnitude) : null,
+          baselineValue: a.baselineValue ? Number(a.baselineValue) : null,
           actualValue: a.actualValue ? Number(a.actualValue) : null,
           escalated: a.escalated,
           status: a.status,
@@ -450,38 +527,38 @@ export class ProviderService {
     const entries = await this.prisma.journalEntry.findMany({
       where: {
         userId,
-        entryDate: {
+        measuredAt: {
           gte: new Date(startDate),
           lte: new Date(endDate),
         },
         systolicBP: { not: null },
       },
-      orderBy: [{ entryDate: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [{ measuredAt: 'asc' }, { createdAt: 'asc' }],
       select: {
-        entryDate: true,
-        measurementTime: true,
+        measuredAt: true,
         systolicBP: true,
         diastolicBP: true,
       },
     })
 
-    // Make every point unique by appending index for same-day entries
     const dateCounts = new Map<string, number>()
 
     return {
       statusCode: 200,
       data: entries.map((e, i) => {
-        const dateLabel = new Date(e.entryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        const dateLabel = new Date(e.measuredAt).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+        })
         const count = (dateCounts.get(dateLabel) ?? 0) + 1
         dateCounts.set(dateLabel, count)
-        // Every point gets a unique key — append #N for duplicates
         const day = count > 1 ? `${dateLabel} #${count}` : dateLabel
         return {
           day,
           systolic: e.systolicBP,
           diastolic: e.diastolicBP,
-          date: e.entryDate,
-          time: e.measurementTime ?? null,
+          date: e.measuredAt,
+          time: new Date(e.measuredAt).toISOString().slice(11, 16),
           _index: i,
         }
       }),
@@ -507,13 +584,14 @@ export class ProviderService {
           select: {
             id: true,
             name: true,
-            riskTier: true,
+            dateOfBirth: true,
             communicationPreference: true,
+            patientProfile: { select: this.profileSelect },
           },
         },
         journalEntry: {
           select: {
-            entryDate: true,
+            measuredAt: true,
             systolicBP: true,
             diastolicBP: true,
           },
@@ -521,14 +599,12 @@ export class ProviderService {
       },
     })
 
-    // Sort by severity (HIGH first), then createdAt desc (already from query)
     alerts.sort(
       (a, b) =>
-        (SEVERITY_ORDER[a.severity] ?? 3) -
-        (SEVERITY_ORDER[b.severity] ?? 3),
+        (SEVERITY_ORDER[a.severity ?? ''] ?? 3) -
+        (SEVERITY_ORDER[b.severity ?? ''] ?? 3),
     )
 
-    // Fetch scheduled calls linked to these alerts
     const alertIds = alerts.map((a) => a.id)
     const scheduledCalls = alertIds.length
       ? await this.prisma.scheduledCall.findMany({
@@ -545,7 +621,6 @@ export class ProviderService {
         })
       : []
 
-    // Keep the latest scheduled call per alert
     const followUpMap = new Map<string, (typeof scheduledCalls)[0]>()
     for (const sc of scheduledCalls) {
       if (sc.alertId && !followUpMap.has(sc.alertId)) {
@@ -557,11 +632,12 @@ export class ProviderService {
       statusCode: 200,
       data: alerts.map((a) => {
         const followUp = followUpMap.get(a.id)
+        const profile = (a.user?.patientProfile ?? null) as PatientProfileShape | null
         return {
           id: a.id,
           type: a.type,
           severity: a.severity,
-          magnitude: Number(a.magnitude),
+          magnitude: a.magnitude != null ? Number(a.magnitude) : null,
           baselineValue: a.baselineValue ? Number(a.baselineValue) : null,
           actualValue: a.actualValue ? Number(a.actualValue) : null,
           escalated: a.escalated,
@@ -577,13 +653,13 @@ export class ProviderService {
             ? {
                 id: a.user.id,
                 name: a.user.name,
-                riskTier: a.user.riskTier,
+                riskTier: this.deriveRiskTier(profile, a.user.dateOfBirth),
                 communicationPreference: a.user.communicationPreference,
               }
             : null,
           journalEntry: a.journalEntry
             ? {
-                entryDate: a.journalEntry.entryDate,
+                entryDate: a.journalEntry.measuredAt,
                 systolicBP: a.journalEntry.systolicBP,
                 diastolicBP: a.journalEntry.diastolicBP,
               }
@@ -605,12 +681,12 @@ export class ProviderService {
             name: true,
             dateOfBirth: true,
             communicationPreference: true,
-            riskTier: true,
+            patientProfile: { select: this.profileSelect },
           },
         },
         journalEntry: {
           select: {
-            entryDate: true,
+            measuredAt: true,
             systolicBP: true,
             diastolicBP: true,
             weight: true,
@@ -634,30 +710,19 @@ export class ProviderService {
 
     const userId = alert.userId
 
-    // Latest baseline snapshot
-    const latestBaseline = await this.prisma.baselineSnapshot.findFirst({
-      where: { userId, baselineSystolic: { gt: 0 } },
-      orderBy: { computedForDate: 'desc' },
-      select: {
-        baselineSystolic: true,
-        baselineDiastolic: true,
-      },
-    })
+    const latestBaseline = await this.trailing7dayMean(userId)
 
-    // Last 7 journal entries for BP trend chart
     const recentEntries = await this.prisma.journalEntry.findMany({
       where: { userId, systolicBP: { not: null } },
-      orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
       take: 7,
       select: {
-        entryDate: true,
-        measurementTime: true,
+        measuredAt: true,
         systolicBP: true,
         diastolicBP: true,
       },
     })
 
-    // Recent alerts of the same type in last 3 days (for consecutive reading dates)
     const threeDaysAgo = new Date()
     threeDaysAgo.setDate(threeDaysAgo.getDate() - 3)
     const consecutiveAlerts = await this.prisma.deviationAlert.findMany({
@@ -669,34 +734,28 @@ export class ProviderService {
       orderBy: { createdAt: 'asc' },
       include: {
         journalEntry: {
-          select: { entryDate: true },
+          select: { measuredAt: true },
         },
       },
     })
 
-    // Medication adherence in last 3 days
     const medEntries = await this.prisma.journalEntry.findMany({
       where: {
         userId,
-        entryDate: { gte: threeDaysAgo },
+        measuredAt: { gte: threeDaysAgo },
         medicationTaken: { not: null },
       },
-      orderBy: { entryDate: 'desc' },
+      orderBy: { measuredAt: 'desc' },
       take: 3,
       select: {
-        entryDate: true,
+        measuredAt: true,
         medicationTaken: true,
       },
     })
 
-    const baselineSystolic = latestBaseline?.baselineSystolic
-      ? Number(latestBaseline.baselineSystolic)
-      : null
-    const baselineDiastolic = latestBaseline?.baselineDiastolic
-      ? Number(latestBaseline.baselineDiastolic)
-      : null
+    const baselineSystolic = latestBaseline?.baselineSystolic ?? null
+    const baselineDiastolic = latestBaseline?.baselineDiastolic ?? null
 
-    // Build trigger reasons dynamically
     const triggerReasons: string[] = []
 
     const baselineStr =
@@ -715,7 +774,7 @@ export class ProviderService {
     if (consecutiveAlerts.length >= 2) {
       const dates = consecutiveAlerts
         .map((a) => {
-          const d = a.journalEntry?.entryDate ?? a.createdAt
+          const d = a.journalEntry?.measuredAt ?? a.createdAt
           return new Date(d).toLocaleDateString('en-US', {
             month: 'short',
             day: 'numeric',
@@ -734,7 +793,6 @@ export class ProviderService {
       )
     }
 
-    // Generate AI summary from real data
     const entryCount = recentEntries.length
     const bpValues = recentEntries
       .filter((e) => e.systolicBP != null)
@@ -759,17 +817,17 @@ export class ProviderService {
 
     const aiSummary = `Patient shows ${trendDirection} BP trend over the last ${entryCount} readings with ${medAdherence}. ${action} to assess current cardiovascular status.`
 
-    // Communication preference — return code, frontend translates
     const commPref = alert.user?.communicationPreference ?? 'STANDARD'
 
-    // Format BP trend for chart (reverse to chronological order)
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
     const bpTrend = [...recentEntries].reverse().map((e) => ({
-      day: dayNames[new Date(e.entryDate).getDay()],
+      day: dayNames[new Date(e.measuredAt).getDay()],
       systolic: e.systolicBP,
       diastolic: e.diastolicBP,
-      date: e.entryDate,
+      date: e.measuredAt,
     }))
+
+    const profile = (alert.user?.patientProfile ?? null) as PatientProfileShape | null
 
     return {
       statusCode: 200,
@@ -777,7 +835,7 @@ export class ProviderService {
         id: alert.id,
         type: alert.type,
         severity: alert.severity,
-        magnitude: Number(alert.magnitude),
+        magnitude: alert.magnitude != null ? Number(alert.magnitude) : null,
         baselineValue: alert.baselineValue
           ? Number(alert.baselineValue)
           : null,
@@ -790,11 +848,11 @@ export class ProviderService {
           name: alert.user?.name ?? 'Unknown',
           dateOfBirth: alert.user?.dateOfBirth ?? null,
           communicationPreference: commPref ?? null,
-          riskTier: alert.user?.riskTier ?? 'STANDARD',
+          riskTier: this.deriveRiskTier(profile, alert.user?.dateOfBirth ?? null),
         },
         journalEntry: alert.journalEntry
           ? {
-              entryDate: alert.journalEntry.entryDate,
+              entryDate: alert.journalEntry.measuredAt,
               systolicBP: alert.journalEntry.systolicBP,
               diastolicBP: alert.journalEntry.diastolicBP,
             }
@@ -829,14 +887,12 @@ export class ProviderService {
     callType: string
     notes?: string
   }) {
-    // Verify patient exists
     const patient = await this.prisma.user.findUnique({
       where: { id: body.patientUserId },
       select: { id: true, email: true, name: true },
     })
     if (!patient) throw new NotFoundException('Patient not found')
 
-    // ─── Create ScheduledCall record ─────────────────────────────────
     const scheduledCall = await this.prisma.scheduledCall.create({
       data: {
         userId: body.patientUserId,
@@ -849,7 +905,6 @@ export class ProviderService {
       },
     })
 
-    // ─── Notifications (patient-facing) ──────────────────────────────
     const notifTitle = 'Follow-up Call Scheduled'
     const notifBody = `Your care team has scheduled a ${body.callType} call on ${body.callDate} at ${body.callTime}.${body.notes ? ` Note: ${body.notes}` : ''}`
 
@@ -864,7 +919,6 @@ export class ProviderService {
       },
     })
 
-    // ─── Email notification ──────────────────────────────────────────
     if (patient.email) {
       await this.prisma.notification.create({
         data: {
@@ -950,7 +1004,13 @@ export class ProviderService {
       orderBy: { createdAt: 'desc' },
       include: {
         user: {
-          select: { id: true, name: true, email: true, riskTier: true },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            dateOfBirth: true,
+            patientProfile: { select: this.profileSelect },
+          },
         },
         deviationAlert: {
           select: {
@@ -960,7 +1020,7 @@ export class ProviderService {
             status: true,
             createdAt: true,
             journalEntry: {
-              select: { systolicBP: true, diastolicBP: true, entryDate: true },
+              select: { systolicBP: true, diastolicBP: true, measuredAt: true },
             },
           },
         },
@@ -969,29 +1029,43 @@ export class ProviderService {
 
     return {
       statusCode: 200,
-      data: calls.map((c) => ({
-        id: c.id,
-        callDate: c.callDate,
-        callTime: c.callTime,
-        callType: c.callType,
-        notes: c.notes,
-        status: c.status.toLowerCase(),
-        createdAt: c.createdAt,
-        updatedAt: c.updatedAt,
-        patient: c.user
-          ? { id: c.user.id, name: c.user.name, email: c.user.email, riskTier: c.user.riskTier }
-          : null,
-        alert: c.deviationAlert
-          ? {
-              id: c.deviationAlert.id,
-              type: c.deviationAlert.type,
-              severity: c.deviationAlert.severity,
-              alertStatus: c.deviationAlert.status,
-              createdAt: c.deviationAlert.createdAt,
-              journalEntry: c.deviationAlert.journalEntry,
-            }
-          : null,
-      })),
+      data: calls.map((c) => {
+        const profile = (c.user?.patientProfile ?? null) as PatientProfileShape | null
+        return {
+          id: c.id,
+          callDate: c.callDate,
+          callTime: c.callTime,
+          callType: c.callType,
+          notes: c.notes,
+          status: c.status.toLowerCase(),
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+          patient: c.user
+            ? {
+                id: c.user.id,
+                name: c.user.name,
+                email: c.user.email,
+                riskTier: this.deriveRiskTier(profile, c.user.dateOfBirth),
+              }
+            : null,
+          alert: c.deviationAlert
+            ? {
+                id: c.deviationAlert.id,
+                type: c.deviationAlert.type,
+                severity: c.deviationAlert.severity,
+                alertStatus: c.deviationAlert.status,
+                createdAt: c.deviationAlert.createdAt,
+                journalEntry: c.deviationAlert.journalEntry
+                  ? {
+                      systolicBP: c.deviationAlert.journalEntry.systolicBP,
+                      diastolicBP: c.deviationAlert.journalEntry.diastolicBP,
+                      entryDate: c.deviationAlert.journalEntry.measuredAt,
+                    }
+                  : null,
+              }
+            : null,
+        }
+      }),
     }
   }
 
@@ -1023,5 +1097,33 @@ export class ProviderService {
 
     await this.prisma.scheduledCall.delete({ where: { id } })
     return { statusCode: 200, message: 'Scheduled call deleted' }
+  }
+
+  // ─── Private: trailing 7-day BP mean (v2 replacement for BaselineSnapshot) ─
+  private async trailing7dayMean(
+    userId: string,
+  ): Promise<{ baselineSystolic: number; baselineDiastolic: number } | null> {
+    const sevenDaysAgo = new Date()
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+
+    const entries = await this.prisma.journalEntry.findMany({
+      where: {
+        userId,
+        measuredAt: { gte: sevenDaysAgo },
+        systolicBP: { not: null },
+        diastolicBP: { not: null },
+      },
+      select: { systolicBP: true, diastolicBP: true },
+    })
+
+    if (entries.length === 0) return null
+
+    const sbp = Math.round(
+      entries.reduce((a, e) => a + (e.systolicBP as number), 0) / entries.length,
+    )
+    const dbp = Math.round(
+      entries.reduce((a, e) => a + (e.diastolicBP as number), 0) / entries.length,
+    )
+    return { baselineSystolic: sbp, baselineDiastolic: dbp }
   }
 }

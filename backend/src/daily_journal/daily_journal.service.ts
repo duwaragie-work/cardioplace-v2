@@ -19,6 +19,8 @@ const SOURCE_MAP: Record<string, EntrySource> = {
   healthkit: EntrySource.HEALTHKIT,
 }
 
+const POSITION_VALUES = ['SITTING', 'STANDING', 'LYING'] as const
+
 @Injectable()
 export class DailyJournalService {
   private readonly logger = new Logger(DailyJournalService.name)
@@ -28,28 +30,25 @@ export class DailyJournalService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  private inferMeasurementTime(): string {
-    const now = new Date()
-    const hh = String(now.getHours()).padStart(2, '0')
-    const mm = String(now.getMinutes()).padStart(2, '0')
-    return `${hh}:${mm}`
-  }
-
   async create(userId: string, dto: CreateJournalEntryDto) {
     try {
-      const measurementTime = dto.measurementTime ?? this.inferMeasurementTime()
-
       const entry = await this.prisma.journalEntry.create({
         data: {
           userId,
-          entryDate: new Date(dto.entryDate),
-          measurementTime,
+          measuredAt: new Date(dto.measuredAt),
           systolicBP: dto.systolicBP ?? null,
           diastolicBP: dto.diastolicBP ?? null,
+          pulse: dto.pulse ?? null,
           weight: dto.weight != null ? new Prisma.Decimal(dto.weight) : null,
+          position: dto.position ?? null,
+          sessionId: dto.sessionId ?? null,
+          measurementConditions: (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull,
           medicationTaken: dto.medicationTaken ?? null,
           missedDoses: dto.missedDoses ?? null,
-          symptoms: dto.symptoms ?? [],
+          // TODO(phase/15): replace with structured symptom booleans once
+          // Dev 1 lands the card-based intake UI. v1 clients still send
+          // freeform symptoms[] — we route them to otherSymptoms for now.
+          otherSymptoms: dto.symptoms ?? [],
           teachBackAnswer: dto.teachBackAnswer ?? null,
           teachBackCorrect: dto.teachBackCorrect ?? null,
           notes: dto.notes ?? null,
@@ -61,12 +60,12 @@ export class DailyJournalService {
       this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_CREATED, {
         userId,
         entryId: entry.id,
-        entryDate: entry.entryDate,
+        measuredAt: entry.measuredAt,
         systolicBP: entry.systolicBP,
         diastolicBP: entry.diastolicBP,
+        pulse: entry.pulse,
         weight: entry.weight != null ? Number(entry.weight) : null,
-        medicationTaken: entry.medicationTaken,
-        measurementTime: entry.measurementTime,
+        sessionId: entry.sessionId,
       })
 
       return {
@@ -80,7 +79,7 @@ export class DailyJournalService {
         error.code === 'P2002'
       ) {
         throw new ConflictException(
-          'A journal entry already exists for this date and time',
+          'A journal entry already exists for this timestamp',
         )
       }
 
@@ -103,15 +102,23 @@ export class DailyJournalService {
     try {
       const data: Prisma.JournalEntryUpdateInput = {}
 
-      if (dto.entryDate !== undefined) data.entryDate = new Date(dto.entryDate)
-      if (dto.measurementTime !== undefined) data.measurementTime = dto.measurementTime
+      if (dto.measuredAt !== undefined) data.measuredAt = new Date(dto.measuredAt)
       if (dto.systolicBP !== undefined) data.systolicBP = dto.systolicBP
       if (dto.diastolicBP !== undefined) data.diastolicBP = dto.diastolicBP
+      if (dto.pulse !== undefined) data.pulse = dto.pulse
       if (dto.weight !== undefined)
         data.weight = dto.weight != null ? new Prisma.Decimal(dto.weight) : null
+      if (dto.position !== undefined)
+        data.position = POSITION_VALUES.includes(dto.position as typeof POSITION_VALUES[number])
+          ? (dto.position as typeof POSITION_VALUES[number])
+          : null
+      if (dto.sessionId !== undefined) data.sessionId = dto.sessionId
+      if (dto.measurementConditions !== undefined)
+        data.measurementConditions =
+          (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull
       if (dto.medicationTaken !== undefined) data.medicationTaken = dto.medicationTaken
       if (dto.missedDoses !== undefined) data.missedDoses = dto.missedDoses
-      if (dto.symptoms !== undefined) data.symptoms = dto.symptoms ?? []
+      if (dto.symptoms !== undefined) data.otherSymptoms = dto.symptoms ?? []
       if (dto.teachBackAnswer !== undefined) data.teachBackAnswer = dto.teachBackAnswer
       if (dto.teachBackCorrect !== undefined) data.teachBackCorrect = dto.teachBackCorrect
       if (dto.notes !== undefined) data.notes = dto.notes
@@ -128,12 +135,12 @@ export class DailyJournalService {
       this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
         userId,
         entryId: updated.id,
-        entryDate: updated.entryDate,
+        measuredAt: updated.measuredAt,
         systolicBP: updated.systolicBP,
         diastolicBP: updated.diastolicBP,
+        pulse: updated.pulse,
         weight: updated.weight != null ? Number(updated.weight) : null,
-        medicationTaken: updated.medicationTaken,
-        measurementTime: updated.measurementTime,
+        sessionId: updated.sessionId,
       })
 
       return {
@@ -148,7 +155,7 @@ export class DailyJournalService {
         error.code === 'P2002'
       ) {
         throw new ConflictException(
-          'A journal entry already exists for this date and time',
+          'A journal entry already exists for this timestamp',
         )
       }
 
@@ -168,16 +175,16 @@ export class DailyJournalService {
     const where: Prisma.JournalEntryWhereInput = { userId }
 
     if (startDate || endDate) {
-      where.entryDate = {}
-      if (startDate) where.entryDate.gte = new Date(startDate)
-      if (endDate) where.entryDate.lte = new Date(endDate)
+      where.measuredAt = {}
+      if (startDate) where.measuredAt.gte = new Date(startDate)
+      if (endDate) where.measuredAt.lte = new Date(endDate)
     }
 
     const take = Math.min(limit ?? 50, 200)
 
     const entries = await this.prisma.journalEntry.findMany({
       where,
-      orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
       take,
     })
 
@@ -194,19 +201,10 @@ export class DailyJournalService {
     const [entries, total] = await Promise.all([
       this.prisma.journalEntry.findMany({
         where: { userId },
-        orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
         skip,
         take: limit,
         include: {
-          snapshot: {
-            select: {
-              id: true,
-              computedForDate: true,
-              baselineSystolic: true,
-              baselineDiastolic: true,
-              baselineWeight: true,
-            },
-          },
           deviationAlerts: {
             select: {
               id: true,
@@ -229,38 +227,26 @@ export class DailyJournalService {
       message: 'Journal history retrieved successfully',
       data: entries.map((entry) => ({
         id: entry.id,
-        entryDate: entry.entryDate,
-        measurementTime: entry.measurementTime,
+        measuredAt: entry.measuredAt,
         systolicBP: entry.systolicBP,
         diastolicBP: entry.diastolicBP,
+        pulse: entry.pulse,
         weight: entry.weight != null ? Number(entry.weight) : null,
+        position: entry.position,
+        sessionId: entry.sessionId,
         medicationTaken: entry.medicationTaken,
         missedDoses: entry.missedDoses,
-        symptoms: entry.symptoms,
+        otherSymptoms: entry.otherSymptoms,
         teachBackAnswer: entry.teachBackAnswer,
         teachBackCorrect: entry.teachBackCorrect,
         notes: entry.notes,
         source: entry.source.toLowerCase(),
         sourceMetadata: entry.sourceMetadata,
-        baseline: entry.snapshot
-          ? {
-              id: entry.snapshot.id,
-              baselineSystolic: entry.snapshot.baselineSystolic
-                ? Number(entry.snapshot.baselineSystolic)
-                : null,
-              baselineDiastolic: entry.snapshot.baselineDiastolic
-                ? Number(entry.snapshot.baselineDiastolic)
-                : null,
-              baselineWeight: entry.snapshot.baselineWeight
-                ? Number(entry.snapshot.baselineWeight)
-                : null,
-            }
-          : null,
         deviations: entry.deviationAlerts.map((a) => ({
           id: a.id,
           type: a.type,
           severity: a.severity,
-          magnitude: Number(a.magnitude),
+          magnitude: a.magnitude != null ? Number(a.magnitude) : null,
           baselineValue: a.baselineValue ? Number(a.baselineValue) : null,
           actualValue: a.actualValue ? Number(a.actualValue) : null,
           escalated: a.escalated,
@@ -302,10 +288,10 @@ export class DailyJournalService {
         journalEntry: {
           select: {
             id: true,
-            entryDate: true,
-            measurementTime: true,
+            measuredAt: true,
             systolicBP: true,
             diastolicBP: true,
+            pulse: true,
             weight: true,
           },
         },
@@ -317,7 +303,7 @@ export class DailyJournalService {
       message: 'Alerts retrieved successfully',
       data: alerts.map((alert) => ({
         ...alert,
-        magnitude: Number(alert.magnitude),
+        magnitude: alert.magnitude != null ? Number(alert.magnitude) : null,
         baselineValue: alert.baselineValue
           ? Number(alert.baselineValue)
           : null,
@@ -469,17 +455,25 @@ export class DailyJournalService {
     }
   }
 
+  // v2: trend averages are derived on the fly, not stored. This endpoint used
+  // to read BaselineSnapshot rows; now it computes a trailing 7-day mean of
+  // complete (SBP + DBP) readings from JournalEntry. Returns null when the
+  // window has no usable data.
   async getLatestBaseline(userId: string) {
-    const snapshot = await this.prisma.baselineSnapshot.findFirst({
+    const sevenDaysAgo = new Date()
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+
+    const entries = await this.prisma.journalEntry.findMany({
       where: {
         userId,
-        baselineSystolic: { gt: 0 },
-        baselineDiastolic: { gt: 0 },
+        measuredAt: { gte: sevenDaysAgo },
+        systolicBP: { not: null },
+        diastolicBP: { not: null },
       },
-      orderBy: { computedForDate: 'desc' },
+      select: { systolicBP: true, diastolicBP: true, weight: true },
     })
 
-    if (!snapshot) {
+    if (entries.length === 0) {
       return {
         statusCode: 200,
         message: 'No baseline available yet',
@@ -487,23 +481,23 @@ export class DailyJournalService {
       }
     }
 
+    const sbps = entries.map((e) => e.systolicBP as number)
+    const dbps = entries.map((e) => e.diastolicBP as number)
+    const weights = entries
+      .filter((e) => e.weight != null)
+      .map((e) => Number(e.weight))
+
+    const avg = (xs: number[]) =>
+      xs.length > 0 ? xs.reduce((a, b) => a + b, 0) / xs.length : null
+
     return {
       statusCode: 200,
       message: 'Baseline retrieved successfully',
       data: {
-        id: snapshot.id,
-        userId: snapshot.userId,
-        computedForDate: snapshot.computedForDate,
-        baselineSystolic: snapshot.baselineSystolic
-          ? Number(snapshot.baselineSystolic)
-          : null,
-        baselineDiastolic: snapshot.baselineDiastolic
-          ? Number(snapshot.baselineDiastolic)
-          : null,
-        baselineWeight: snapshot.baselineWeight
-          ? Number(snapshot.baselineWeight)
-          : null,
-        createdAt: snapshot.createdAt,
+        baselineSystolic: avg(sbps),
+        baselineDiastolic: avg(dbps),
+        baselineWeight: avg(weights),
+        sampleSize: entries.length,
       },
     }
   }
@@ -517,55 +511,12 @@ export class DailyJournalService {
       throw new NotFoundException('Journal entry not found')
     }
 
-    const { entryDate, snapshotId } = entry
-    const hadBPData = entry.systolicBP != null && entry.diastolicBP != null
-
     await this.prisma.journalEntry.delete({ where: { id } })
 
-    // Clean up orphaned BaselineSnapshot if no other entries reference it
-    if (snapshotId) {
-      const otherRefs = await this.prisma.journalEntry.count({
-        where: { snapshotId },
-      })
-      if (otherRefs === 0) {
-        await this.prisma.baselineSnapshot
-          .delete({ where: { id: snapshotId } })
-          .catch((err) => {
-            this.logger.warn(
-              `Failed to clean up orphaned snapshot ${snapshotId}`,
-              err,
-            )
-          })
-      }
-    }
-
-    // Recompute baselines only if the deleted entry had BP data
-    // (entries without BP never contributed to any baseline)
-    if (hadBPData) {
-      const affectedWindowEnd = new Date(entryDate)
-      affectedWindowEnd.setDate(affectedWindowEnd.getDate() + 7)
-
-      const affectedEntries = await this.prisma.journalEntry.findMany({
-        where: {
-          userId,
-          entryDate: { gte: entryDate, lte: affectedWindowEnd },
-          systolicBP: { not: null },
-          diastolicBP: { not: null },
-        },
-      })
-
-      for (const affected of affectedEntries) {
-        this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
-          userId: affected.userId,
-          entryId: affected.id,
-          entryDate: affected.entryDate,
-          systolicBP: affected.systolicBP,
-          diastolicBP: affected.diastolicBP,
-          weight: affected.weight != null ? Number(affected.weight) : null,
-        })
-      }
-    }
-
+    // TODO(phase/5): once the rule engine is wired, emit ENTRY_UPDATED for any
+    // session-adjacent readings that might need re-evaluation. For phase/2,
+    // deletion is terminal — no baseline recompute because there is no
+    // rolling baseline in v2.
     return {
       statusCode: 200,
       message: 'Journal entry deleted successfully',
@@ -574,34 +525,36 @@ export class DailyJournalService {
 
   async getStats(userId: string) {
     const now = new Date()
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const thirtyDaysAgo = new Date(today)
+    const thirtyDaysAgo = new Date(now)
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
     const [totalEntries, recentEntries, allEntries] = await Promise.all([
       this.prisma.journalEntry.count({ where: { userId } }),
       this.prisma.journalEntry.findMany({
-        where: { userId, entryDate: { gte: thirtyDaysAgo } },
+        where: { userId, measuredAt: { gte: thirtyDaysAgo } },
         select: { systolicBP: true, diastolicBP: true },
       }),
       this.prisma.journalEntry.findMany({
         where: { userId },
-        orderBy: { entryDate: 'desc' },
-        select: { entryDate: true, medicationTaken: true },
+        orderBy: { measuredAt: 'desc' },
+        select: { measuredAt: true, medicationTaken: true },
       }),
     ])
 
-    // Current streak: consecutive days ending today or tomorrow (timezone tolerance)
+    // Current streak: consecutive days ending today (tolerates UTC drift
+    // by starting from tomorrow UTC for users east of UTC).
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     let currentStreak = 0
     if (allEntries.length > 0) {
       const entryDates = new Set(
-        allEntries.map((e) => e.entryDate.toISOString().slice(0, 10)),
+        allEntries.map((e) => e.measuredAt.toISOString().slice(0, 10)),
       )
-      // Start from tomorrow UTC to handle users ahead of UTC
       const checkDate = new Date(today)
       checkDate.setDate(checkDate.getDate() + 1)
-      // Skip forward dates that have no entry
-      while (!entryDates.has(checkDate.toISOString().slice(0, 10)) && checkDate >= today) {
+      while (
+        !entryDates.has(checkDate.toISOString().slice(0, 10)) &&
+        checkDate >= today
+      ) {
         checkDate.setDate(checkDate.getDate() - 1)
       }
       while (entryDates.has(checkDate.toISOString().slice(0, 10))) {
@@ -610,13 +563,11 @@ export class DailyJournalService {
       }
     }
 
-    // Medication adherence rate
     const medEntries = allEntries.filter((e) => e.medicationTaken !== null)
     const medTaken = medEntries.filter((e) => e.medicationTaken === true).length
     const medicationAdherenceRate =
       medEntries.length > 0 ? Math.round((medTaken / medEntries.length) * 100) : 0
 
-    // Average BP from last 30 days
     const systolicValues = recentEntries
       .filter((e) => e.systolicBP !== null)
       .map((e) => Number(e.systolicBP))
@@ -635,7 +586,7 @@ export class DailyJournalService {
 
     const lastEntryDate =
       allEntries.length > 0
-        ? allEntries[0].entryDate.toISOString().slice(0, 10)
+        ? allEntries[0].measuredAt.toISOString().slice(0, 10)
         : null
 
     return {
@@ -665,7 +616,7 @@ export class DailyJournalService {
             actualValue: true,
             journalEntry: {
               select: {
-                entryDate: true,
+                measuredAt: true,
                 systolicBP: true,
                 diastolicBP: true,
               },
@@ -682,6 +633,9 @@ export class DailyJournalService {
         const systolicBP = e.alert.journalEntry?.systolicBP ?? 0
         const diastolicBP = e.alert.journalEntry?.diastolicBP ?? 0
 
+        // TODO(phase/6): replace this v1 fallback copy with the three-tier
+        // messages persisted on DeviationAlert (patientMessage / caregiverMessage
+        // / physicianMessage) once the message registry lands.
         const patientMessage =
           e.escalationLevel === EscalationLevel.LEVEL_2
             ? 'URGENT: Your blood pressure reading indicates a medical emergency. Call 911 immediately or go to your nearest emergency room.'
@@ -705,7 +659,7 @@ export class DailyJournalService {
             actualValue: e.alert.actualValue ? Number(e.alert.actualValue) : null,
             journalEntry: e.alert.journalEntry
               ? {
-                  entryDate: e.alert.journalEntry.entryDate,
+                  measuredAt: e.alert.journalEntry.measuredAt,
                   systolicBP: e.alert.journalEntry.systolicBP,
                   diastolicBP: e.alert.journalEntry.diastolicBP,
                 }
@@ -719,40 +673,42 @@ export class DailyJournalService {
   private serializeEntry(entry: {
     id: string
     userId: string
-    entryDate: Date
-    measurementTime: string | null
+    measuredAt: Date
     systolicBP: number | null
     diastolicBP: number | null
+    pulse: number | null
     weight: Prisma.Decimal | number | null
+    position: string | null
+    sessionId: string | null
     medicationTaken: boolean | null
     missedDoses: number | null
-    symptoms: string[]
+    otherSymptoms: string[]
     teachBackAnswer: string | null
     teachBackCorrect: boolean | null
     notes: string | null
     source: EntrySource
     sourceMetadata: JsonValue
-    snapshotId: string | null
     createdAt: Date
     updatedAt: Date
   }) {
     return {
       id: entry.id,
       userId: entry.userId,
-      entryDate: entry.entryDate,
-      measurementTime: entry.measurementTime,
+      measuredAt: entry.measuredAt,
       systolicBP: entry.systolicBP,
       diastolicBP: entry.diastolicBP,
+      pulse: entry.pulse,
       weight: entry.weight != null ? Number(entry.weight) : null,
+      position: entry.position,
+      sessionId: entry.sessionId,
       medicationTaken: entry.medicationTaken,
       missedDoses: entry.missedDoses,
-      symptoms: entry.symptoms,
+      otherSymptoms: entry.otherSymptoms,
       teachBackAnswer: entry.teachBackAnswer,
       teachBackCorrect: entry.teachBackCorrect,
       notes: entry.notes,
       source: entry.source.toLowerCase(),
       sourceMetadata: entry.sourceMetadata,
-      snapshotId: entry.snapshotId,
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
     }

@@ -1,11 +1,11 @@
 model Conversation {
-    id          String                       @id @default(uuid())
-    sessionId   String
-    userMessage String
-    aiSummary   String
-    source      String                       @default("text")
-    embedding   Unsupported("vector(384)")?
-    timestamp   DateTime                     @default(now())
+  id          String                       @id @default(uuid())
+  sessionId   String
+  userMessage String
+  aiSummary   String
+  source      String                       @default("text")
+  embedding   Unsupported("vector(384)")?
+  timestamp   DateTime                     @default(now())
 
   @@index([sessionId])
 }

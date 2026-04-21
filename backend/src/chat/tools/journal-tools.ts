@@ -192,9 +192,10 @@ export async function executeJournalTool(
         })
       }
       try {
+        const time = normaliseTime(args.measurement_time) ?? new Date().toISOString().slice(11, 16)
+        const measuredAt = new Date(`${entryDate}T${time}:00.000Z`).toISOString()
         const result = await journalService.create(userId, {
-          entryDate,
-          measurementTime: normaliseTime(args.measurement_time),
+          measuredAt,
           systolicBP: args.systolic_bp,
           diastolicBP: args.diastolic_bp,
           medicationTaken: args.medication_taken,
@@ -222,16 +223,19 @@ export async function executeJournalTool(
           endDate.toISOString().slice(0, 10),
           15,
         )
-        const entries = (result.data ?? []).map((e: any) => ({
-          id: e.id,
-          date: e.entryDate,
-          measurement_time: e.measurementTime ?? null,
-          systolic: e.systolicBP,
-          diastolic: e.diastolicBP,
-          weight: e.weight,
-          medication_taken: e.medicationTaken,
-          symptoms: e.symptoms ?? [],
-        }))
+        const entries = (result.data ?? []).map((e: any) => {
+          const d = new Date(e.measuredAt)
+          return {
+            id: e.id,
+            date: d.toISOString().slice(0, 10),
+            measurement_time: d.toISOString().slice(11, 16),
+            systolic: e.systolicBP,
+            diastolic: e.diastolicBP,
+            weight: e.weight,
+            medication_taken: e.medicationTaken,
+            symptoms: e.otherSymptoms ?? [],
+          }
+        })
         return JSON.stringify({ readings: entries, count: entries.length })
       } catch (err: any) {
         return JSON.stringify({ readings: [], count: 0, error: err.message })
@@ -241,7 +245,13 @@ export async function executeJournalTool(
     case 'update_checkin': {
       try {
         const dto: any = {}
-        if (args.measurement_time != null) dto.measurementTime = normaliseTime(args.measurement_time)
+        if (args.entry_date != null || args.measurement_time != null) {
+          const d = args.entry_date || new Date().toISOString().slice(0, 10)
+          const t =
+            normaliseTime(args.measurement_time) ??
+            new Date().toISOString().slice(11, 16)
+          dto.measuredAt = new Date(`${d}T${t}:00.000Z`).toISOString()
+        }
         if (args.systolic_bp != null) dto.systolicBP = args.systolic_bp
         if (args.diastolic_bp != null) dto.diastolicBP = args.diastolic_bp
         if (args.medication_taken != null) dto.medicationTaken = args.medication_taken
@@ -253,12 +263,10 @@ export async function executeJournalTool(
           return JSON.stringify({ updated: false, message: 'No fields to update.' })
         }
 
-        // Find the entry: look up by date + time (reliable), fall back to entry_id
         const origTime = normaliseTime(args.original_time)
         const argDate = args.entry_date
         let entryId = args.entry_id
 
-        // Always try to find by date + time first (most reliable)
         if (argDate || origTime) {
           const startDate = new Date()
           startDate.setDate(startDate.getDate() - 30)
@@ -268,9 +276,11 @@ export async function executeJournalTool(
           const entries = recent.data ?? []
 
           const match = entries.find((e: any) => {
-            const entryDate = new Date(e.entryDate).toISOString().slice(0, 10)
-            const dateMatch = !argDate || entryDate === argDate
-            const timeMatch = !origTime || e.measurementTime === origTime
+            const d = new Date(e.measuredAt)
+            const entryDateStr = d.toISOString().slice(0, 10)
+            const entryTimeStr = d.toISOString().slice(11, 16)
+            const dateMatch = !argDate || entryDateStr === argDate
+            const timeMatch = !origTime || entryTimeStr === origTime
             return dateMatch && timeMatch
           })
 
@@ -310,14 +320,16 @@ export async function executeJournalTool(
 
           console.log(`[delete_checkin] Found ${entries.length} entries, looking for date=${argDate} time=${origTime}`)
           for (const e of entries) {
-            const d = new Date(e.entryDate).toISOString().slice(0, 10)
-            console.log(`  entry: date=${d} time=${e.measurementTime} id=${e.id}`)
+            const d = new Date(e.measuredAt)
+            console.log(`  entry: date=${d.toISOString().slice(0, 10)} time=${d.toISOString().slice(11, 16)} id=${e.id}`)
           }
 
           const match = entries.find((e: any) => {
-            const entryDate = new Date(e.entryDate).toISOString().slice(0, 10)
-            const dateMatch = !argDate || entryDate === argDate
-            const timeMatch = !origTime || e.measurementTime === origTime
+            const d = new Date(e.measuredAt)
+            const entryDateStr = d.toISOString().slice(0, 10)
+            const entryTimeStr = d.toISOString().slice(11, 16)
+            const dateMatch = !argDate || entryDateStr === argDate
+            const timeMatch = !origTime || entryTimeStr === origTime
             return dateMatch && timeMatch
           })
 

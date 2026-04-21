@@ -22,11 +22,10 @@ describe('EscalationService', () => {
         findUnique: (jest.fn() as jest.Mock<any>).mockResolvedValue({
           id: 'alert-1',
           journalEntry: {
-            entryDate: new Date('2026-03-20'),
-            measurementTime: '08:30',
+            measuredAt: new Date('2026-03-20T08:30:00.000Z'),
             systolicBP: 170,
             diastolicBP: 105,
-            symptoms: ['Severe Headache'],
+            otherSymptoms: ['Severe Headache'],
             medicationTaken: true,
           },
           user: { name: 'Test Patient' },
@@ -154,11 +153,10 @@ describe('EscalationService', () => {
       prisma.deviationAlert.findUnique.mockResolvedValue({
         id: 'alert-1',
         journalEntry: {
-          entryDate: new Date('2026-03-20'),
-          measurementTime: '08:30',
+          measuredAt: new Date('2026-03-20T08:30:00.000Z'),
           systolicBP: 170,
           diastolicBP: 105,
-          symptoms: [],
+          otherSymptoms: [],
           medicationTaken: true,
         },
         user: { name: 'Test Patient' },

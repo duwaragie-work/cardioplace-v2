@@ -23,8 +23,10 @@ import { ListContentQueryDto } from './dto/list-content-query.dto.js'
 import { RateContentDto } from './dto/rate-content.dto.js'
 import { UpdateContentDto } from './dto/update-content.dto.js'
 
-// ─── Admin roles shorthand ───────────────────────────────────────────────────
-const ADMIN_ROLES = [UserRole.CONTENT_ADMIN, UserRole.SUPER_ADMIN]
+// TODO(post-MVP): v1 content authz is collapsed to SUPER_ADMIN only in v2 —
+// content/KB features are out of scope for the rule-based MVP but the modules
+// remain reachable so admins can still manage existing records.
+const ADMIN_ROLES = [UserRole.SUPER_ADMIN]
 const SUPER_ADMIN_ONLY = [UserRole.SUPER_ADMIN]
 
 /** Shape of the JWT-authenticated request injected by @Request() */
@@ -191,14 +193,9 @@ export class ContentController {
 
   // ─── Registered Users: ratings ─────────────────────────────────────────────
 
-  /** POST /content/:id/rate — submit or update a 1–5 star rating (registered users only) */
+  /** POST /content/:id/rate — submit or update a 1–5 star rating. */
   @Post(':id/rate')
-  @Roles(
-    UserRole.REGISTERED_USER,
-    UserRole.VERIFIED_USER,
-    UserRole.CONTENT_ADMIN,
-    UserRole.SUPER_ADMIN,
-  )
+  @Roles(UserRole.PATIENT, UserRole.SUPER_ADMIN)
   rate(
     @Param('id') id: string,
     @Body() dto: RateContentDto,

@@ -1,0 +1,49 @@
+model PatientProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  gender   Gender?
+  heightCm Int?
+
+  isPregnant          Boolean   @default(false)
+  pregnancyDueDate    DateTime?
+  historyPreeclampsia Boolean   @default(false)
+
+  hasHeartFailure       Boolean          @default(false)
+  heartFailureType      HeartFailureType @default(NOT_APPLICABLE)
+  hasAFib               Boolean          @default(false)
+  hasCAD                Boolean          @default(false)
+  hasHCM                Boolean          @default(false)
+  hasDCM                Boolean          @default(false)
+  hasTachycardia        Boolean          @default(false)
+  hasBradycardia        Boolean          @default(false)
+  diagnosedHypertension Boolean          @default(false)
+
+  profileVerificationStatus ProfileVerificationStatus @default(UNVERIFIED)
+  profileVerifiedAt         DateTime?
+  profileVerifiedBy         String?
+  profileLastEditedAt       DateTime                  @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum HeartFailureType {
+  HFREF
+  HFPEF
+  UNKNOWN
+  NOT_APPLICABLE
+}
+
+enum ProfileVerificationStatus {
+  UNVERIFIED
+  VERIFIED
+  CORRECTED
+}
