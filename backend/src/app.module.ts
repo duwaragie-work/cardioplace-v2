@@ -6,6 +6,7 @@ import { AppController } from './app.controller.js'
 import { AppService } from './app.service.js'
 import { AuthModule } from './auth/auth.module.js'
 import { DailyJournalModule } from './daily_journal/daily_journal.module.js'
+import { CronsModule } from './crons/crons.module.js'
 import { IntakeModule } from './intake/intake.module.js'
 import { PracticeModule } from './practice/practice.module.js'
 import { KnowledgebaseModule } from './knowledgebase/knowledgebase.module.js'
@@ -55,6 +56,7 @@ import { CommonModule } from './common/common.module.js'
     DailyJournalModule,
     IntakeModule,
     PracticeModule,
+    CronsModule,
     ContentModule,
     ProviderModule,
     VoiceModule,
