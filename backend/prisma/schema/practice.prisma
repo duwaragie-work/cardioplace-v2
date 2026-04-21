@@ -1,0 +1,12 @@
+model Practice {
+  id                    String   @id @default(uuid())
+  name                  String
+  businessHoursStart    String
+  businessHoursEnd      String
+  businessHoursTimezone String
+  afterHoursProtocol    String?  @db.Text
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  assignments PatientProviderAssignment[]
+}

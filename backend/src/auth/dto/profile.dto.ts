@@ -8,12 +8,7 @@ import {
   ValidationOptions,
 } from 'class-validator'
 
-// ─── Cardio enum values (mirrors Prisma enums) ──────────────────────────────
-
-export const RISK_TIER_VALUES = ['STANDARD', 'ELEVATED', 'HIGH'] as const
 export const COMMUNICATION_PREFERENCE_VALUES = ['TEXT_FIRST', 'AUDIO_FIRST'] as const
-
-// ─── Custom validator: ISO date string that lies in the past ──────────────────
 
 function IsDateInPast(validationOptions?: ValidationOptions) {
   return (object: object, propertyName: string) => {
@@ -37,19 +32,12 @@ function IsDateInPast(validationOptions?: ValidationOptions) {
   }
 }
 
-// ─── DTO ──────────────────────────────────────────────────────────────────────
-
 export class ProfileDto {
-  /** Display name — optional, max 100 chars. */
   @IsOptional()
   @IsString()
   @MaxLength(100)
   name?: string
 
-  /**
-   * Date of birth as YYYY-MM-DD. Must be a past date.
-   * Left as null when not provided — no approximation is made.
-   */
   @IsOptional()
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
@@ -58,39 +46,14 @@ export class ProfileDto {
   @IsDateInPast()
   dateOfBirth?: string | null
 
-  /** Primary cardiovascular condition (e.g. "hypertension"). */
-  @IsOptional()
-  @IsString()
-  primaryCondition?: string
-
-  /** Date of diagnosis as YYYY-MM-DD. Must be a past date. */
-  @IsOptional()
-  @IsString()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
-    message: 'diagnosisDate must be in YYYY-MM-DD format',
-  })
-  @IsDateInPast()
-  diagnosisDate?: string | null
-
-  /** Preferred language code (e.g. "en", "es"). */
   @IsOptional()
   @IsString()
   preferredLanguage?: string
 
-  /** Risk tier for escalation thresholds. */
-  @IsOptional()
-  @IsIn(RISK_TIER_VALUES)
-  riskTier?: (typeof RISK_TIER_VALUES)[number]
-
-  /** Communication preference: text-first or audio-first. */
   @IsOptional()
   @IsIn(COMMUNICATION_PREFERENCE_VALUES)
   communicationPreference?: (typeof COMMUNICATION_PREFERENCE_VALUES)[number]
 
-  /**
-   * IANA timezone identifier (e.g. "Asia/Colombo", "America/New_York").
-   * Auto-detected by the client and sent on first onboarding / after travel.
-   */
   @IsOptional()
   @IsString()
   @Matches(/^[A-Za-z_]+\/[A-Za-z_]/, {

@@ -22,15 +22,7 @@ import { KnowledgebaseService } from './knowledgebase.service.js'
  * Restricted to all admin roles.
  */
 @Controller('v2/knowledgebase')
-@Roles(
-  UserRole.REGISTERED_USER,
-  UserRole.CONTENT_ADMIN,
-  UserRole.CONTENT_APPROVER,
-  UserRole.KB_UPLOADER,
-  UserRole.KB_APPROVER,
-  UserRole.CHAT_REVIEWER,
-  UserRole.SUPER_ADMIN,
-)
+@Roles(UserRole.SUPER_ADMIN)
 export class KnowledgebaseController {
   constructor(private readonly knowledgebaseService: KnowledgebaseService) {}
 

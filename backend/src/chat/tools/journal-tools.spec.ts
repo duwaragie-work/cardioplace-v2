@@ -115,7 +115,7 @@ describe('journal-tools', () => {
 
     it('should execute get_recent_readings', async () => {
       mockJournalService.findAll.mockResolvedValue({
-        data: [{ id: '1', entryDate: '2026-04-05', systolicBP: 120, diastolicBP: 80 }],
+        data: [{ id: '1', measuredAt: '2026-04-05T10:00:00.000Z', systolicBP: 120, diastolicBP: 80 }],
       })
 
       const result = await executeJournalTool(
@@ -132,7 +132,7 @@ describe('journal-tools', () => {
 
     it('should execute update_checkin with date/time lookup', async () => {
       mockJournalService.findAll.mockResolvedValue({
-        data: [{ id: '123', entryDate: '2026-04-07T00:00:00.000Z', measurementTime: '14:30', systolicBP: 120, diastolicBP: 80 }],
+        data: [{ id: '123', measuredAt: '2026-04-07T14:30:00.000Z', systolicBP: 120, diastolicBP: 80 }],
       })
       mockJournalService.update.mockResolvedValue({
         data: { id: '123', systolicBP: 125 },
@@ -151,7 +151,7 @@ describe('journal-tools', () => {
 
     it('should execute delete_checkin with date/time lookup', async () => {
       mockJournalService.findAll.mockResolvedValue({
-        data: [{ id: '123', entryDate: '2026-04-07T00:00:00.000Z', measurementTime: '14:30' }],
+        data: [{ id: '123', measuredAt: '2026-04-07T14:30:00.000Z' }],
       })
       mockJournalService.delete.mockResolvedValue(undefined)
 

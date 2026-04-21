@@ -8,6 +8,10 @@ import type { AnomalyTrackedEvent } from '../interfaces/events.interface.js'
 
 type ClinicalEscalationLevel = 'LEVEL_2' | 'LEVEL_1' | 'LOW'
 
+// TODO(phase/7): replace the 5-day streak heuristic with the T+N ladder cron
+// (T+0 / T+4h / T+8h / T+24h / T+48h) defined in CLINICAL_SPEC V2-D. The
+// 15-field audit trail (ladderStep, recipientIds, acknowledgedAt, etc.) on
+// EscalationEvent is unpopulated by this phase/2 stub.
 @Injectable()
 export class EscalationService {
   private readonly logger = new Logger(EscalationService.name)
@@ -20,7 +24,6 @@ export class EscalationService {
   @OnEvent(JOURNAL_EVENTS.ANOMALY_TRACKED, { async: true })
   async handleAnomalyTracked(payload: AnomalyTrackedEvent) {
     try {
-      // ── Idempotency: skip if this alert already has an escalation ──
       const existingEscalation = await this.prisma.escalationEvent.findFirst({
         where: { alertId: payload.alertId },
       })
@@ -32,17 +35,15 @@ export class EscalationService {
         return
       }
 
-      // ── Fetch alert + journal entry for clinical context ──
       const alert = await this.prisma.deviationAlert.findUnique({
         where: { id: payload.alertId },
         include: {
           journalEntry: {
             select: {
-              entryDate: true,
-              measurementTime: true,
+              measuredAt: true,
               systolicBP: true,
               diastolicBP: true,
-              symptoms: true,
+              otherSymptoms: true,
               medicationTaken: true,
             },
           },
@@ -57,10 +58,9 @@ export class EscalationService {
         return
       }
 
-      // ── Query streak ──
       const streakResult = await this.evaluateStreak(
         payload.userId,
-        alert.journalEntry.entryDate,
+        alert.journalEntry.measuredAt,
       )
 
       if (streakResult.consecutiveDays < 3) {
@@ -70,8 +70,7 @@ export class EscalationService {
         return
       }
 
-      // ── Determine clinical escalation level ──
-      const currentSymptoms = alert.journalEntry.symptoms ?? []
+      const currentSymptoms = alert.journalEntry.otherSymptoms ?? []
       const hasSymptoms = currentSymptoms.length > 0
       const medicationCompliant = streakResult.medicationComplianceRate >= 0.5
 
@@ -80,22 +79,24 @@ export class EscalationService {
         medicationCompliant,
       )
 
-      // Map clinical level to DB enum (LOW uses LEVEL_1 in DB but with different messaging)
       const dbLevel =
         clinicalLevel === 'LEVEL_2'
           ? EscalationLevel.LEVEL_2
           : EscalationLevel.LEVEL_1
 
-      // ── Build personalized messages ──
       const systolicBP = alert.journalEntry.systolicBP ?? 0
       const diastolicBP = alert.journalEntry.diastolicBP ?? 0
       const patientName = alert.user?.name ?? 'Patient'
       const readingStr = `${systolicBP}/${diastolicBP} mmHg`
-      const entryDate = new Date(alert.journalEntry.entryDate).toLocaleDateString('en-US', {
-        weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+      const measuredAt = alert.journalEntry.measuredAt
+      const dateTimeStr = measuredAt.toLocaleString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
       })
-      const entryTime = alert.journalEntry.measurementTime ?? ''
-      const dateTimeStr = entryTime ? `${entryDate} at ${entryTime}` : entryDate
       const days = streakResult.consecutiveDays
 
       const { patientMessage, careTeamMessage } = this.buildMessages(
@@ -118,7 +119,6 @@ export class EscalationService {
             ? 'medication non-adherence with symptoms'
             : 'elevated BP without symptoms')
 
-      // ── Create escalation ──
       const escalation = await this.prisma.escalationEvent.create({
         data: {
           alertId: payload.alertId,
@@ -154,13 +154,6 @@ export class EscalationService {
     }
   }
 
-  /**
-   * Determine clinical escalation level based on symptoms + medication compliance.
-   *
-   * LEVEL_2: Has symptoms + medication taken (meds not working → needs clinical review)
-   * LEVEL_1: Has symptoms + medication NOT taken (remind patient + update care team)
-   * LOW:     No symptoms (mild alert to both)
-   */
   private determineClinicalLevel(
     hasSymptoms: boolean,
     medicationCompliant: boolean,
@@ -170,49 +163,48 @@ export class EscalationService {
     return 'LOW'
   }
 
-  /**
-   * Evaluate the streak: consecutive days with deviation alerts +
-   * medication compliance across the streak window.
-   */
   private async evaluateStreak(
     userId: string,
-    entryDate: Date,
+    measuredAt: Date,
   ): Promise<{ consecutiveDays: number; medicationComplianceRate: number }> {
-    // Build 5-day window: [D-2, D-1, D, D+1, D+2]
-    const days: Date[] = []
+    // Build 5-day window centered on the reading's UTC date: [D-2 .. D+2]
+    const centerDay = new Date(measuredAt)
+    centerDay.setUTCHours(0, 0, 0, 0)
+
+    const dayRanges: { start: Date; end: Date }[] = []
     for (let offset = -2; offset <= 2; offset++) {
-      const d = new Date(entryDate)
-      d.setDate(d.getDate() + offset)
-      days.push(d)
+      const start = new Date(centerDay)
+      start.setUTCDate(start.getUTCDate() + offset)
+      const end = new Date(start)
+      end.setUTCDate(end.getUTCDate() + 1)
+      dayRanges.push({ start, end })
     }
 
     const dayHasAlert: boolean[] = []
-    for (const day of days) {
+    for (const range of dayRanges) {
       const count = await this.prisma.deviationAlert.count({
         where: {
           userId,
-          journalEntry: { entryDate: day },
+          journalEntry: { measuredAt: { gte: range.start, lt: range.end } },
         },
       })
       dayHasAlert.push(count > 0)
     }
 
-    // Walk backward from center (index 2)
     let start = 2
     while (start > 0 && dayHasAlert[start - 1]) start--
 
-    // Walk forward from center
     let end = 2
     while (end < 4 && dayHasAlert[end + 1]) end++
 
     const consecutiveDays = end - start + 1
 
-    // Medication compliance across the streak window
-    const streakDays = days.slice(start, end + 1)
+    const streakWindowStart = dayRanges[start].start
+    const streakWindowEnd = dayRanges[end].end
     const streakEntries = await this.prisma.journalEntry.findMany({
       where: {
         userId,
-        entryDate: { in: streakDays },
+        measuredAt: { gte: streakWindowStart, lt: streakWindowEnd },
         medicationTaken: { not: null },
       },
       select: { medicationTaken: true },
@@ -222,7 +214,7 @@ export class EscalationService {
     const medTakenCount = streakEntries.filter((e) => e.medicationTaken === true).length
     const medicationComplianceRate = totalMedEntries > 0
       ? medTakenCount / totalMedEntries
-      : 1 // default to compliant if no medication data
+      : 1
 
     return { consecutiveDays, medicationComplianceRate }
   }
@@ -239,7 +231,6 @@ export class EscalationService {
 
     switch (level) {
       case 'LEVEL_2':
-        // Meds taken but BP still high + symptoms → critical, care team review
         return {
           patientMessage:
             `Your BP of ${readingStr} on ${dateTimeStr} has been elevated for ${days} consecutive days despite taking medication. ` +
@@ -250,7 +241,6 @@ export class EscalationService {
         }
 
       case 'LEVEL_1':
-        // Meds not taken + symptoms → remind patient, update care team
         return {
           patientMessage:
             `Your BP of ${readingStr} on ${dateTimeStr} has been elevated for ${days} consecutive days. ` +
@@ -262,7 +252,6 @@ export class EscalationService {
 
       case 'LOW':
       default:
-        // No symptoms → mild alert
         return {
           patientMessage:
             `Your BP of ${readingStr} on ${dateTimeStr} has been elevated for ${days} consecutive days. ` +

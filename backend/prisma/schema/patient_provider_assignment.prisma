@@ -1,0 +1,20 @@
+model PatientProviderAssignment {
+  id                 String   @id @default(uuid())
+  userId             String   @unique
+  practiceId         String
+  primaryProviderId  String
+  backupProviderId   String
+  medicalDirectorId  String
+  assignedAt         DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  practice        Practice @relation(fields: [practiceId], references: [id], onDelete: Restrict)
+  primaryProvider User     @relation("PrimaryProvider", fields: [primaryProviderId], references: [id], onDelete: Restrict)
+  backupProvider  User     @relation("BackupProvider", fields: [backupProviderId], references: [id], onDelete: Restrict)
+  medicalDirector User     @relation("MedicalDirector", fields: [medicalDirectorId], references: [id], onDelete: Restrict)
+
+  @@index([practiceId])
+  @@index([primaryProviderId])
+  @@index([backupProviderId])
+  @@index([medicalDirectorId])
+}

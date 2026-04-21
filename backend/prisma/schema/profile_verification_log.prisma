@@ -1,0 +1,30 @@
+model ProfileVerificationLog {
+  id              String                  @id @default(uuid())
+  userId          String
+  fieldPath       String
+  previousValue   Json?
+  newValue        Json?
+  changedBy       String
+  changedByRole   VerifierRole
+  changeType      VerificationChangeType
+  discrepancyFlag Boolean                 @default(false)
+  rationale       String?                 @db.Text
+  createdAt       DateTime                @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+enum VerifierRole {
+  PATIENT
+  ADMIN
+  PROVIDER
+}
+
+enum VerificationChangeType {
+  PATIENT_REPORT
+  ADMIN_VERIFY
+  ADMIN_CORRECT
+  ADMIN_REJECT
+}

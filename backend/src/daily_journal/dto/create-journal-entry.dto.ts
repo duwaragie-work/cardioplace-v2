@@ -1,29 +1,30 @@
 import {
   IsArray,
   IsBoolean,
-  IsInt,
   IsIn,
+  IsInt,
+  IsISO8601,
   IsNotEmpty,
   IsNumber,
   IsObject,
   IsOptional,
   IsString,
-  Matches,
+  IsUUID,
   Max,
   Min,
   registerDecorator,
   ValidationOptions,
 } from 'class-validator'
 
-function IsDateNotInFuture(validationOptions?: ValidationOptions) {
+function IsMeasuredAtReasonable(validationOptions?: ValidationOptions) {
   return (object: object, propertyName: string) => {
     registerDecorator({
-      name: 'isDateNotInFuture',
+      name: 'isMeasuredAtReasonable',
       target: (object as { constructor: new (...args: unknown[]) => unknown })
         .constructor,
       propertyName,
       options: {
-        message: `${propertyName} must not be a future date`,
+        message: `${propertyName} must be within the last 30 days and no more than 5 minutes in the future`,
         ...validationOptions,
       },
       validator: {
@@ -31,11 +32,10 @@ function IsDateNotInFuture(validationOptions?: ValidationOptions) {
           if (typeof value !== 'string') return false
           const d = new Date(value)
           if (isNaN(d.getTime())) return false
-          // Allow up to 1 day ahead of UTC to handle all timezones (max UTC+14)
-          const tomorrow = new Date()
-          tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
-          tomorrow.setUTCHours(23, 59, 59, 999)
-          return d <= tomorrow
+          const now = Date.now()
+          const maxFuture = now + 5 * 60 * 1000
+          const maxPast = now - 30 * 24 * 60 * 60 * 1000
+          return d.getTime() <= maxFuture && d.getTime() >= maxPast
         },
       },
     })
@@ -43,13 +43,10 @@ function IsDateNotInFuture(validationOptions?: ValidationOptions) {
 }
 
 export class CreateJournalEntryDto {
-  @IsNotEmpty({ message: 'entryDate is required' })
-  @IsString()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
-    message: 'entryDate must be in YYYY-MM-DD format',
-  })
-  @IsDateNotInFuture()
-  entryDate!: string
+  @IsNotEmpty({ message: 'measuredAt is required' })
+  @IsISO8601({}, { message: 'measuredAt must be a valid ISO 8601 UTC timestamp' })
+  @IsMeasuredAtReasonable()
+  measuredAt!: string
 
   @IsOptional()
   @IsInt()
@@ -64,10 +61,28 @@ export class CreateJournalEntryDto {
   diastolicBP?: number
 
   @IsOptional()
+  @IsInt()
+  @Min(30)
+  @Max(220)
+  pulse?: number
+
+  @IsOptional()
   @IsNumber()
   @Min(20)
   @Max(300)
   weight?: number
+
+  @IsOptional()
+  @IsIn(['SITTING', 'STANDING', 'LYING'])
+  position?: 'SITTING' | 'STANDING' | 'LYING'
+
+  @IsOptional()
+  @IsUUID()
+  sessionId?: string
+
+  @IsOptional()
+  @IsObject({ message: 'measurementConditions must be a JSON object' })
+  measurementConditions?: Record<string, unknown>
 
   @IsOptional()
   @IsBoolean()
@@ -79,6 +94,10 @@ export class CreateJournalEntryDto {
   @Max(10)
   missedDoses?: number
 
+  // TODO(phase/15): replace this freeform field with the structured Level-2
+  // symptom booleans (severeHeadache, visualChanges, etc.) once Dev 1 lands
+  // the card-based intake UI. For now, incoming symptom[] values are stored
+  // on JournalEntry.otherSymptoms to keep v1 clients compiling.
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
@@ -95,13 +114,6 @@ export class CreateJournalEntryDto {
   @IsOptional()
   @IsString()
   notes?: string
-
-  @IsOptional()
-  @IsString()
-  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
-    message: 'measurementTime must be in HH:mm format (e.g., 08:30, 14:15)',
-  })
-  measurementTime?: string
 
   @IsOptional()
   @IsString({ message: 'source must be a string' })

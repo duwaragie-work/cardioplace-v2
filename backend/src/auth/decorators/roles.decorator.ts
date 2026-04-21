@@ -7,7 +7,7 @@ export const ROLES_KEY = 'roles'
  * Restrict a route to specific user roles.
  *
  * @example
- * @Roles(UserRole.SUPER_ADMIN, UserRole.CONTENT_ADMIN)
+ * @Roles(UserRole.SUPER_ADMIN, UserRole.PROVIDER)
  * @Get('admin/users')
  * listUsers() { ... }
  */

@@ -55,20 +55,20 @@ export class ChatService {
 
     if (!userId) return systemPrompt
 
-    const [recentEntries, baseline, activeAlerts, user] = await Promise.all([
+    // TODO(phase/16): pull structured PatientProfile (conditions, pregnancy,
+    // heart-failure type) + verified PatientMedication rows for the context
+    // injection. For phase/2 we keep a slim version — no primaryCondition /
+    // riskTier (gone in v2) and no BaselineSnapshot (deleted; trend averages
+    // now derive on-the-fly from JournalEntry).
+    const [recentEntries, activeAlerts, user] = await Promise.all([
       this.prisma.journalEntry.findMany({
         where: { userId },
-        orderBy: { entryDate: 'desc' },
+        orderBy: { measuredAt: 'desc' },
         select: {
-          entryDate: true, systolicBP: true, diastolicBP: true,
-          weight: true, medicationTaken: true, measurementTime: true,
-          symptoms: true,
+          measuredAt: true, systolicBP: true, diastolicBP: true,
+          weight: true, medicationTaken: true,
+          otherSymptoms: true,
         },
-      }),
-      this.prisma.baselineSnapshot.findFirst({
-        where: { userId },
-        orderBy: { computedForDate: 'desc' },
-        select: { baselineSystolic: true, baselineDiastolic: true },
       }),
       this.prisma.deviationAlert.findMany({
         where: { userId, acknowledgedAt: null },
@@ -78,11 +78,32 @@ export class ChatService {
         where: { id: userId },
         select: {
           name: true, timezone: true, communicationPreference: true,
-          preferredLanguage: true, primaryCondition: true, riskTier: true,
+          preferredLanguage: true,
           dateOfBirth: true,
         },
       }),
     ])
+
+    // Compute trailing 7-day mean inline (v2: derived, never stored).
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+    const recentComplete = recentEntries.filter(
+      (e) =>
+        e.systolicBP != null &&
+        e.diastolicBP != null &&
+        new Date(e.measuredAt).getTime() >= sevenDaysAgo,
+    )
+    const baseline = recentComplete.length > 0
+      ? {
+          baselineSystolic: Math.round(
+            recentComplete.reduce((a, e) => a + (e.systolicBP as number), 0) /
+              recentComplete.length,
+          ),
+          baselineDiastolic: Math.round(
+            recentComplete.reduce((a, e) => a + (e.diastolicBP as number), 0) /
+              recentComplete.length,
+          ),
+        }
+      : null
 
     const patientContext = this.systemPromptService.buildPatientContext({
       recentEntries: recentEntries.map((e) => ({
@@ -91,18 +112,11 @@ export class ChatService {
         diastolicBP: e.diastolicBP != null ? Number(e.diastolicBP) : null,
         weight: e.weight != null ? Number(e.weight) : null,
       })),
-      baseline: baseline
-        ? {
-            baselineSystolic: baseline.baselineSystolic != null ? Number(baseline.baselineSystolic) : null,
-            baselineDiastolic: baseline.baselineDiastolic != null ? Number(baseline.baselineDiastolic) : null,
-          }
-        : null,
+      baseline,
       activeAlerts,
       communicationPreference: user?.communicationPreference ?? null,
       preferredLanguage: user?.preferredLanguage ?? null,
       patientName: user?.name ?? null,
-      primaryCondition: user?.primaryCondition ?? null,
-      riskTier: user?.riskTier ?? null,
       dateOfBirth: user?.dateOfBirth ?? null,
     })
 

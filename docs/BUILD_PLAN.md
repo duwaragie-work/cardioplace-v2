@@ -678,16 +678,25 @@ Each checklist is organized by the phase branches the dev owns. Phase numbers ma
 - [ ] Commit
 
 #### Phase 2 — Schema Migration (branch `phase/2-rule-based-schema`)
-- [ ] Extend `/backend/prisma/schema/user.prisma` with clinical fields (§2.1)
-- [ ] Extend `/backend/prisma/schema/daily_journal.prisma` with pulse/session/symptoms (§2.2)
+- [ ] Slim `/backend/prisma/schema/user.prisma` to identity + auth only (§2.1); drop `primaryCondition` / `riskTier` / `diagnosisDate` / `RiskTier` enum / `baselineSnapshots` relation; add v2 relations
+- [ ] Collapse `UserRole` enum to 5 values (`PATIENT, PROVIDER, MEDICAL_DIRECTOR, HEALPLACE_OPS, SUPER_ADMIN`), default `[PATIENT]`
+- [ ] New `/backend/prisma/schema/patient_profile.prisma` (§2.1b) — 1:1 with User, holds all clinical fields
+- [ ] Rework `/backend/prisma/schema/daily_journal.prisma` — `entryDate` + `measurementTime` → `measuredAt`; add pulse/position/session/structured symptoms; drop `symptoms[]` + `snapshotId` (§2.2)
 - [ ] New `patient_threshold.prisma` (§2.3)
 - [ ] New `patient_medication.prisma` (§2.4)
 - [ ] New `practice.prisma` + `patient_provider_assignment.prisma` (§2.5)
 - [ ] New `profile_verification_log.prisma` (§2.6)
-- [ ] Extend `diviation_alert.prisma` with tier/ruleId/mode/3-tier text (§2.7)
+- [ ] Rework `diviation_alert.prisma` — nullable `type`/`severity`, add tier/ruleId/mode/3-tier text/resolution (§2.7)
+- [ ] DELETE `/backend/prisma/schema/baseline_snapshot.prisma` (§2.9)
 - [ ] Extend `escalation_event.prisma` with ladderStep/recipients/ack/resolve (§2.8)
-- [ ] Run `cd backend && npx prisma migrate dev --name cardio_v2_rule_based`
+- [ ] Backend surgery: delete baseline.service.ts + spec + check_baseline.js; delete guest-auth path in auth.service.ts; rename daily_journal `entryDate`/`measurementTime` → `measuredAt` everywhere; rewrite deviation.service (absolute thresholds only) and escalation.service for v2 field names; collapse content/KB `@Roles()` lists to `[SUPER_ADMIN]`; remove `primaryCondition` / `riskTier` / `diagnosisDate` from auth/voice/chat/test helpers; rewrite provider.service.ts with inline `derivePrimaryCondition` + `deriveRiskTier` helpers + `TODO(phase/4)` marker
+- [ ] Rewrite `backend/prisma/seed.ts` to MVP (1 admin + 2 patients with PatientProfile + 1 Practice + 2 assignments + a few JournalEntry rows); delete `seed.js`
+- [ ] Doc reconciliation: CLAUDE.md (Next 14 → 16, move `BaselineSnapshot` to deletions list); BUILD_PLAN.md (this checklist)
+- [ ] Wipe migrations: `rm -rf backend/prisma/migrations/*`
+- [ ] Run `cd backend && npx prisma migrate dev --name init_cardio_v2`
 - [ ] Run `cd backend && npx prisma generate`
+- [ ] `npm run build -w backend` green
+- [ ] `cd backend && npx prisma db seed` runs clean
 - [ ] Commit
 
 #### Phase 3 — Patient Intake API (branch `phase/3-patient-intake-api`)

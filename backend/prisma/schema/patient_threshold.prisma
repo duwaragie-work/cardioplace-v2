@@ -1,0 +1,16 @@
+model PatientThreshold {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  sbpUpperTarget  Int?
+  sbpLowerTarget  Int?
+  dbpUpperTarget  Int?
+  dbpLowerTarget  Int?
+  hrUpperTarget   Int?
+  hrLowerTarget   Int?
+  setByProviderId String
+  setAt           DateTime  @default(now())
+  replacedAt      DateTime?
+  notes           String?   @db.Text
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

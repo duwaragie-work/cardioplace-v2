@@ -1,15 +1,37 @@
 model EscalationEvent {
-  id                 String          @id @default(uuid())
+  id                 String           @id @default(uuid())
   alertId            String
   userId             String
   escalationLevel    EscalationLevel
   reason             String?
-  triggeredAt        DateTime        @default(now())
+  triggeredAt        DateTime         @default(now())
   notificationSentAt DateTime?
-  alert              DeviationAlert  @relation(fields: [alertId], references: [id], onDelete: Cascade)
-  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  notifications      Notification[]
+
+  ladderStep          LadderStep?
+  recipientIds        String[]
+  recipientRoles      String[]
+  acknowledgedAt      DateTime?
+  acknowledgedBy      String?
+  resolvedAt          DateTime?
+  resolvedBy          String?
+  notificationChannel NotificationChannel?
+  afterHours          Boolean              @default(false)
+
+  alert         DeviationAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notifications Notification[]
 
   @@index([alertId, triggeredAt(sort: Desc)])
   @@index([userId, triggeredAt(sort: Desc)])
+}
+
+enum LadderStep {
+  T0
+  T4H
+  T8H
+  T24H
+  T48H
+  TIER2_48H
+  TIER2_7D
+  TIER2_14D
 }

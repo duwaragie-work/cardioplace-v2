@@ -8,7 +8,7 @@ import { SubmitReviewDto } from './dto/submit-review.dto.js'
 
 @Controller('v2/content')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.CONTENT_APPROVER, UserRole.SUPER_ADMIN)
+@Roles(UserRole.SUPER_ADMIN)
 export class ContentReviewController {
   constructor(private readonly contentReviewService: ContentReviewService) {}
 

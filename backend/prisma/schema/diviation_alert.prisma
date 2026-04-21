@@ -1,31 +1,59 @@
 model DeviationAlert {
-    id             String @id @default(uuid())
-    userId         String
-    journalEntryId String
+  id             String @id @default(uuid())
+  userId         String
+  journalEntryId String
 
-    user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-    journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
 
-    type      DeviationType
-    severity  DeviationSeverity
-    magnitude Decimal           @db.Decimal(6, 2)
+  type      DeviationType?
+  severity  DeviationSeverity?
+  magnitude Decimal?           @db.Decimal(6, 2)
 
-    // Snapshot values at the time of detection for audit trail
-    baselineValue Decimal? @db.Decimal(6, 2)
-    actualValue   Decimal? @db.Decimal(6, 2)
+  baselineValue Decimal? @db.Decimal(6, 2)
+  actualValue   Decimal? @db.Decimal(6, 2)
 
-    escalated Boolean @default(false)
+  tier                  AlertTier?
+  ruleId                String?
+  mode                  AlertMode?
+  pulsePressure         Int?
+  suboptimalMeasurement Boolean    @default(false)
 
-    status         AlertStatus @default(OPEN)
-    createdAt      DateTime    @default(now())
-    acknowledgedAt DateTime?
+  patientMessage    String? @db.Text
+  caregiverMessage  String? @db.Text
+  physicianMessage  String? @db.Text
 
-    // Relations
-    escalationEvents EscalationEvent[]
-    notifications    Notification[]
-    scheduledCalls   ScheduledCall[]
+  dismissible         Boolean @default(true)
+  resolutionAction    String?
+  resolutionRationale String? @db.Text
+  resolvedBy          String?
+
+  escalated Boolean     @default(false)
+  status    AlertStatus @default(OPEN)
+
+  createdAt      DateTime  @default(now())
+  acknowledgedAt DateTime?
+
+  escalationEvents EscalationEvent[]
+  notifications    Notification[]
+  scheduledCalls   ScheduledCall[]
 
   @@unique([journalEntryId, type])
   @@index([userId, createdAt(sort: Desc)])
   @@index([userId, status, createdAt(sort: Desc)])
+}
+
+enum AlertTier {
+  TIER_1_CONTRAINDICATION
+  TIER_2_DISCREPANCY
+  TIER_3_INFO
+  BP_LEVEL_1_HIGH
+  BP_LEVEL_1_LOW
+  BP_LEVEL_2
+  BP_LEVEL_2_SYMPTOM_OVERRIDE
+}
+
+enum AlertMode {
+  STANDARD
+  PERSONALIZED
 }
