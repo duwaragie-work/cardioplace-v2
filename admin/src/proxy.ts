@@ -4,6 +4,9 @@ const ADMIN_COOKIE_NAME = 'cardioplace_admin_token';
 const REQUIRED_ROLE = 'SUPER_ADMIN';
 
 const PUBLIC_PATHS = new Set<string>([
+  '/',
+  '/home',
+  '/about',
   '/sign-in',
   '/auth/magic-link',
   '/auth/callback',
@@ -20,9 +23,8 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const normalized = parts[1].replace(/-/g, '+').replace(/_/g, '/');
     const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
-    const json = typeof atob === 'function'
-      ? atob(padded)
-      : Buffer.from(padded, 'base64').toString('utf8');
+    // atob is available in Next's Edge runtime where proxy.ts executes.
+    const json = atob(padded);
     return JSON.parse(json) as Record<string, unknown>;
   } catch {
     return null;

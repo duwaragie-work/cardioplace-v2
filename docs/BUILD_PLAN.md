@@ -355,6 +355,7 @@ All work happens on a `phase/N-description` branch (never `main` or `dev`).
 |---|---|---|---|
 | 0 | `phase/0-bootstrap` | Dev 3 | Context docs, this plan, CLAUDE.md |
 | 1 | `phase/1-monorepo-setup` | Dev 3 | npm workspaces, `/shared` package, `/admin` scaffold |
+| 1b | `phase/1b-port-provider-pages` | Dev 3 | Port `/frontend/provider/*` UI to `/admin`, frontend SUPER_ADMIN redirect, `.env.example` files, port allocation (backend 4000) |
 | 2 | `phase/2-rule-based-schema` | Dev 3 | Single Prisma migration for §2 |
 | 3 | `phase/3-patient-intake-api` | Dev 3 | Self-report endpoints + `PatientMedication` CRUD |
 | 4 | `phase/4-profile-resolver` | Dev 2 | Safety-net logic, unverified handling |
@@ -561,15 +562,31 @@ Each checklist is organized by the phase branches the dev owns. Phase numbers ma
 ### 7C. Dev 3 — Backend infra + monorepo glue (**user**)
 
 #### Phase 1 — Monorepo Setup (branch `phase/1-monorepo-setup`)
-- [ ] Root `package.json` with `"workspaces": ["backend", "frontend", "admin", "shared"]`
-- [ ] Delete `package-lock.json` at root if stale; regenerate
-- [ ] Create `/shared` package: `package.json` (name: `@cardioplace/shared`), `tsconfig.json`, `src/index.ts` with placeholder export
-- [ ] Scaffold `/admin` — fresh Next.js 14 app (App Router + TS + Tailwind), copy auth + layout primitives from `/frontend`
-- [ ] Add `SUPER_ADMIN`-only guard at `/admin/src/middleware.ts`
-- [ ] Update `/frontend` + `/admin` `package.json` to depend on `@cardioplace/shared`
-- [ ] Sanity check: `npm install` at root succeeds
-- [ ] Sanity check: `npm run build -w frontend` / `-w admin` / `-w backend` all pass
-- [ ] Add CORS in backend for both subdomains (dev: localhost:3000 + localhost:3001; prod later)
+- [x] Root `package.json` with `"workspaces": ["backend", "frontend", "admin", "shared"]`
+- [x] Delete `package-lock.json` at root if stale; regenerate
+- [x] Create `/shared` package: `package.json` (name: `@cardioplace/shared`), `tsconfig.json`, `src/index.ts` with placeholder export
+- [x] Scaffold `/admin` — fresh Next.js 16 app (App Router + TS + Tailwind v4 + React 19), copy auth + layout primitives from `/frontend`
+- [x] Add `SUPER_ADMIN`-only guard at `/admin/src/proxy.ts` (Next 16 renamed `middleware.ts` → `proxy.ts`)
+- [x] Update `/frontend` + `/admin` `package.json` to depend on `@cardioplace/shared`
+- [x] Sanity check: `npm install` at root succeeds
+- [x] Sanity check: `npm run build -w frontend` / `-w admin` / `-w backend` all pass
+- [x] Add CORS in backend for both subdomains (dev: localhost:3000 + localhost:3001; prod later)
+- [x] Commit
+
+#### Phase 1b — Port Provider Pages + Phase 1 Gap Fills (branch `phase/1b-port-provider-pages`)
+- [ ] Mechanical port of `frontend/src/app/provider/{dashboard,patients,scheduled-calls}` → `admin/src/app/{dashboard,patients,scheduled-calls}`
+- [ ] Port `frontend/src/components/cardio/{ProviderDashboard,AlertPanel,ScheduleModal}.tsx` → `admin/src/components/` (flat, not under `/cardio`)
+- [ ] Port `provider.service.ts`, `LanguageContext.tsx`, `i18n/*.ts` into `/admin` — swap `fetchWithAuth` to admin's `token.ts`
+- [ ] Add TODO(phase/11) markers on every `transformAlert()` / `L1` / `L2` / tier reference — Dev 1 refactors to v2 tier model in phase/11
+- [ ] Add `AdminNavbar` component + wire `LanguageProvider` into `admin/src/app/layout.tsx`
+- [ ] Add `framer-motion`, `recharts`, `@tailwindcss/typography` to `/admin` dependencies; import `theme.css` in admin `globals.css`
+- [ ] Delete `frontend/src/app/provider/` and `frontend/src/components/cardio/{ProviderDashboard,AlertPanel,ScheduleModal}.tsx`
+- [ ] Remove `/provider/*` links from `Navbar.tsx`; remove `isAdmin` / `support@healplace.com` branches from `Homepage.tsx`, `sign-in`, `magic-link`, `dashboard/page.tsx`
+- [ ] Update `frontend/src/proxy.ts`: decode JWT, redirect SUPER_ADMIN users to `NEXT_PUBLIC_ADMIN_URL`
+- [ ] Create `backend/.env.example`, `frontend/.env.example`, `admin/.env.example` — port 4000 backend, 3000 frontend, 3001 admin
+- [ ] Set `backend/src/main.ts` default `PORT ?? 4000` (frees up 3000 for the frontend)
+- [ ] Refresh `CLAUDE.md` + this file for Next 16, `proxy.ts`, local port allocation
+- [ ] Verify `npm run build` passes for all four workspaces
 - [ ] Commit
 
 #### Phase 2 — Schema Migration (branch `phase/2-rule-based-schema`)
@@ -635,38 +652,38 @@ Each checklist is organized by the phase branches the dev owns. Phase numbers ma
 
 ### 8.2 First-time setup
 
+Phase 1b ships an `.env.example` in each workspace (`backend/`, `frontend/`, `admin/`) and the build now expects local ports **backend 4000, frontend 3000, admin 3001**.
+
 ```bash
 # 1. Clone (already done)
 cd c:/git/work/cardioplace-v2
 
-# 2. Provision a new local Postgres DB
+# 2. Install all workspace deps from the repo root (npm workspaces)
+npm install
+
+# 3. Provision a new local Postgres DB
 createdb cardioplace_v2_dev
 # (or use docker-compose.yml in repo root — check if the legacy one works)
 
-# 3. Backend env
-cd backend
-cp .env.example .env    # if .env.example doesn't exist, create from v1 .env
-# Update DATABASE_URL → postgres://localhost/cardioplace_v2_dev
-# Update JWT_SECRET to something new (do NOT reuse the v1 prod secret)
-# Set NEXT_PUBLIC_API_URL, email service keys fresh
+# 4. Copy env examples and fill in secrets
+cp backend/.env.example backend/.env          # DATABASE_URL, JWT_SECRET, PORT=4000, WEB_APP_URL=...
+cp frontend/.env.example frontend/.env.local  # NEXT_PUBLIC_API_URL=http://localhost:4000
+cp admin/.env.example admin/.env.local        # NEXT_PUBLIC_API_URL=http://localhost:4000
+# Update JWT secrets — do NOT reuse the v1 prod values.
 
-# 4. Install deps (from root once npm workspaces are set up in phase/1)
-cd ..
-npm install
-
-# 5. Run migrations
+# 5. Run Prisma migrations + generate client
 cd backend
 npx prisma migrate dev
 npx prisma generate
 
-# 6. Run backend
+# 6. Run backend (port 4000)
 npm run start:dev
 
 # 7. In another terminal — patient app
 cd ../frontend
 npm run dev           # http://localhost:3000
 
-# 8. In another terminal — admin app (after phase/1 scaffolding)
+# 8. In another terminal — admin app
 cd ../admin
 npm run dev           # http://localhost:3001
 ```

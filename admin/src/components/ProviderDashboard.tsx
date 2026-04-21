@@ -17,6 +17,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n/en';
+// TODO(phase/11): migrate to v2 tier model (TIER_1_CONTRAINDICATION, BP_LEVEL_2, etc.)
 import AlertPanel, { type Alert, type AlertDetail } from './AlertPanel';
 import ScheduleModal, { type ScheduleDetails } from './ScheduleModal';
 import {
@@ -68,6 +69,7 @@ interface ProviderStats {
   patientsNeedingAttention: number;
 }
 
+// TODO(phase/11): migrate to v2 tier model (TIER_1_CONTRAINDICATION, BP_LEVEL_2, etc.)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function transformAlert(raw: any, t: (key: TranslationKey) => string): Alert {
   const name: string = raw.patientName ?? raw.user?.name ?? raw.patient?.name ?? 'Unknown';
@@ -81,6 +83,7 @@ function transformAlert(raw: any, t: (key: TranslationKey) => string): Alert {
   const severity: 'HIGH' | 'MEDIUM' =
     rawSeverity === 'HIGH' || rawSeverity === 'CRITICAL' ? 'HIGH' : 'MEDIUM';
   const escalated: boolean = Boolean(raw.escalated);
+  // TODO(phase/11): migrate to v2 tier model (TIER_1_CONTRAINDICATION, BP_LEVEL_2, etc.)
   const level: 'L1' | 'L2' = escalated ? 'L2' : 'L1';
   const color: 'red' | 'amber' = level === 'L2' ? 'red' : 'amber';
 

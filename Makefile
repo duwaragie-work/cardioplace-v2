@@ -1,39 +1,80 @@
-# ── Healplace Cardio — local dev launcher ────────────────────────────────────
+# ── Cardioplace v2 — local dev launcher ─────────────────────────────────────
 #
-# Three-terminal quick-start:
-#   Terminal 1: make adk
-#   Terminal 2: make backend
-#   Terminal 3: make frontend
+# Run all three Node services, each in its own Windows terminal:
+#   make dev
 #
-# Or run everything with Docker:
-#   make docker-up
+# Run all three interleaved in the current terminal (one window):
+#   make dev-inline
+#
+# Run individual services:
+#   make backend    # :4000
+#   make frontend   # :3000
+#   make admin      # :3001
+#   make adk        # :50051
+#
+# Other:
+#   make install        # npm install at root (installs all workspaces)
+#   make stop           # kill anything bound to :3000/:3001/:4000
+#   make restart        # stop + clean .next caches + dev
+#   make docker-up      # docker compose up --build
+#   make docker-down    # docker compose down
 
-.PHONY: adk backend frontend docker-up docker-down install dev stop restart
+.PHONY: dev dev-inline adk backend frontend admin docker-up docker-down install stop restart
 
-# ── Run all services (opens 3 terminals) ─────────────────────────────────────
+ROOT := $(CURDIR)
+
+# ── Spawn one Windows terminal per service ──────────────────────────────────
+# `make dev` opens three separate cmd windows so each service has its own
+# scrollable log. Close the window to stop that service, or use `make stop`
+# to kill all three at once.
 
 dev:
-	powershell -Command "Start-Process cmd '/k cd /d C:/git/work/healplace-cardio/backend & npm run start:dev'"
-	powershell -Command "Start-Process cmd '/k cd /d C:/git/work/healplace-cardio/frontend & npm run dev'"
-	powershell -Command "Start-Process cmd '/k cd /d C:/git/work/healplace-cardio/adk-service & .venv\Scripts\activate.bat & python main.py'"
+	@echo "▶ Opening backend (:4000), frontend (:3000), admin (:3001) in 3 new terminals"
+	powershell -Command "Start-Process cmd '/k cd /d $(ROOT) && npm run start:dev -w backend'"
+	powershell -Command "Start-Process cmd '/k cd /d $(ROOT) && npm run dev -w frontend'"
+	powershell -Command "Start-Process cmd '/k cd /d $(ROOT) && npm run dev -w admin'"
+	@echo "▶ Three terminals launched. Use 'make stop' to kill them all."
 
-# ── Stop all services ────────────────────────────────────────────────────────
+# ── Run all three in the current terminal (interleaved output) ─────────────
+# -j3 runs the three targets concurrently. Useful for CI or a single scrollback.
+# Press Ctrl+C once to stop all (GNU make propagates SIGINT to children).
+
+dev-inline:
+	@echo "▶ Starting backend (:4000), frontend (:3000), admin (:3001) in this terminal"
+	@echo "  Press Ctrl+C once to stop all three."
+	@$(MAKE) -j3 --no-print-directory backend frontend admin
+
+# ── Stop all services by port ──────────────────────────────────────────────
+# Targets only processes bound to our dev ports — safer than killing every
+# node.exe on the machine (which would take down VS Code's TypeScript server
+# and other tooling).
 
 stop:
-	-taskkill /F /IM node.exe >/dev/null 2>&1
-	-taskkill /F /IM python.exe >/dev/null 2>&1
-	-powershell -Command "Get-Process cmd -ErrorAction SilentlyContinue | Where-Object {$$_.MainWindowTitle -match 'healplace-cardio'} | Stop-Process -Force -ErrorAction SilentlyContinue"
-	@echo All services stopped
+	-powershell -Command "Get-NetTCPConnection -LocalPort 4000,3000,3001 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $$_ -Force -ErrorAction SilentlyContinue }"
+	@echo "▶ Killed any process bound to :3000, :3001, :4000"
 
-# ── Restart (stop + clean .next + dev) ───────────────────────────────────────
+# ── Restart (stop + clean Next caches + dev) ───────────────────────────────
 
 restart:
 	$(MAKE) stop
 	powershell -Command "if (Test-Path frontend/.next) { Remove-Item -Recurse -Force frontend/.next }"
-	@echo "▶ Cleaned frontend/.next"
+	powershell -Command "if (Test-Path admin/.next) { Remove-Item -Recurse -Force admin/.next }"
+	@echo "▶ Cleaned .next caches"
 	$(MAKE) dev
 
-# ── Individual service commands ───────────────────────────────────────────────
+# ── Individual service commands ────────────────────────────────────────────
+
+backend:
+	@echo "▶ Starting NestJS backend on :4000"
+	npm run start:dev -w backend
+
+frontend:
+	@echo "▶ Starting Next.js patient frontend on :3000"
+	npm run dev -w frontend
+
+admin:
+	@echo "▶ Starting Next.js admin app on :3001"
+	npm run dev -w admin
 
 adk:
 	@echo "▶ Starting ADK voice service (Python gRPC) on :50051"
@@ -44,28 +85,18 @@ adk:
 		pip install -q -r requirements.txt && \
 		python main.py
 
-backend:
-	@echo "▶ Starting NestJS backend on :8080"
-	cd backend && npm run start:dev
-
-frontend:
-	@echo "▶ Starting Next.js frontend on :3000"
-	cd frontend && npm run dev
-
-# ── Install all dependencies ──────────────────────────────────────────────────
+# ── Install all workspace dependencies ─────────────────────────────────────
 
 install:
-	@echo "▶ Installing backend dependencies"
-	cd backend && npm install
-	@echo "▶ Installing frontend dependencies"
-	cd frontend && npm install
+	@echo "▶ Installing all workspace dependencies from root (npm workspaces)"
+	npm install
 	@echo "▶ Creating Python venv + installing adk-service dependencies"
 	cd adk-service && \
 		[ -d .venv ] || python -m venv .venv && \
 		. .venv/bin/activate && \
 		pip install -r requirements.txt
 
-# ── Docker commands ───────────────────────────────────────────────────────────
+# ── Docker commands ────────────────────────────────────────────────────────
 
 docker-up:
 	@echo "▶ Starting all services with Docker Compose"

@@ -57,9 +57,7 @@ function MagicLinkHandler() {
     // Full page navigation to ensure auth state is read from localStorage
     const dest = authResponse.onboarding_required
       ? "/onboarding"
-      : authResponse.email === "support@healplace.com"
-        ? "/provider/dashboard"
-        : "/dashboard";
+      : "/dashboard";
     window.location.href = dest;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

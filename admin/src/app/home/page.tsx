@@ -1,5 +1,5 @@
 import AdminHomepage from "@/components/AdminHomepage";
 
-export default function AdminRoot() {
+export default function HomePage() {
   return <AdminHomepage />;
 }

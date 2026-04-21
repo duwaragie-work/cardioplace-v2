@@ -55,10 +55,27 @@ NEEDS BUILD (mostly greenfield):
 ## Tech stack
 
 - Backend: NestJS, Prisma, PostgreSQL, `@nestjs/schedule` for cron, event-driven pipeline
-- Frontend + Admin: Next.js 14 App Router, Tailwind CSS, TypeScript
+- Frontend + Admin: **Next.js 16** App Router, Tailwind CSS v4, TypeScript, React 19
 - Auth: JWT + magic link
 - Chat: Gemini 3.1 (text), Piper TTS (voice, via adk-service)
 - Monorepo: **npm workspaces** (npm 7+, native support — chosen over pnpm for lower risk)
+
+### Next.js 16 notes
+
+- Route guards live in `src/proxy.ts` (not `src/middleware.ts`). Export a `proxy()` function — `middleware()` is deprecated in Next 16.
+- `turbopack.root` must be absolute and point at the monorepo root so Turbopack can resolve hoisted `node_modules`.
+- Frontend dep (`next 16.2.1`) is locked; admin matches. When in doubt, read `node_modules/next/dist/docs/` before writing Next-specific code.
+
+### Local ports
+
+| Service | Port | URL |
+|---|---|---|
+| Backend (NestJS) | **4000** | http://localhost:4000 |
+| Patient frontend (Next.js) | **3000** | http://localhost:3000 |
+| Admin app (Next.js) | **3001** | http://localhost:3001 |
+| ADK voice service (Python) | 50051 | grpc://localhost:50051 |
+
+All three workspaces ship a `.env.example` — copy to `.env` / `.env.local` and fill in secrets.
 
 ## Build phases (branch naming: `phase/N-description`)
 
@@ -68,6 +85,7 @@ All work happens on phase branches. Never commit to `main` or `dev` directly.
 |---|---|---|---|
 | 0 | `phase/0-bootstrap` | Dev 3 | This context bootstrap — CLAUDE.md + docs + memory seed |
 | 1 | `phase/1-monorepo-setup` | Dev 3 | npm workspaces, `/shared` package, `/admin` scaffold |
+| 1b | `phase/1b-port-provider-pages` | Dev 3 | Port provider UI from `/frontend` to `/admin`, frontend SUPER_ADMIN redirect, env examples, port allocation |
 | 2 | `phase/2-rule-based-schema` | Dev 3 | Single Prisma migration for all v2 models |
 | 3 | `phase/3-patient-intake-api` | Dev 3 | Self-report endpoints, `PatientMedication` CRUD |
 | 4 | `phase/4-profile-resolver` | Dev 2 | Safety-net logic, unverified handling |

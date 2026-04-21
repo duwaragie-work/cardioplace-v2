@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n/en';
 
+// TODO(phase/11): migrate to v2 tier model (TIER_1_CONTRAINDICATION, BP_LEVEL_2, etc.)
 interface Alert {
   id: string;
   initials: string;
