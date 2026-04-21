@@ -1,67 +1,114 @@
-# Healplace Cardio Prototype — AI Build Context
-
-## Monorepo structure
-- /backend  → NestJS + Prisma + PostgreSQL
-- /frontend → Next.js + Tailwind CSS
+# Cardioplace v2 — Rule-Based BP Alert System
 
 ## What this project is
-A cardiovascular patient monitoring prototype adapted from the Healplace 
-menopause/sleep platform. Built for the Elevance Health Foundation Patient 
-Safety Prize (deadline April 7, 2026).
 
-## Backend (NestJS)
-Key modules in src/:
-- auth/           → JWT auth, OTP, social login (reuse as-is)
-- daily_journal/  → check-in flow, baseline, deviation, escalation (adapt for cardio)
-- chat/           → AI chatbot with RAG (rewrite system prompt, add health data injection)
-- users/          → user profiles (add BP history, CVD risk fields)
-- prisma/         → database service
+A full pivot from the v1 ML-hybrid BP monitoring prototype (adapted from the Healplace menopause platform) to a **pure rule-based BP alert system** per Dr. Manisha Singal's signed-off clinical specification. Built for the Elevance Health Foundation Patient Safety Prize cohort (Cedar Hill / BridgePoint / AmeriHealth, Ward 7 & 8 DC).
 
-Event pipeline: ENTRY_CREATED → BASELINE_COMPUTED → DEVIATION_DETECTED → ESCALATION_CREATED
+Live v1 app runs at `www.cardioplaceai.com` — this repo (`cardioplace-v2`) is the **rewrite workspace**, cloned from the v1 repo. Do not corrupt the live app.
 
-Old migrations deleted. After schema changes run:
-cd backend && npx prisma migrate dev --name <migration_name>
+## Monorepo structure (npm workspaces)
 
-## Frontend (Next.js App Router + Tailwind)
-Mobile-responsive web app. Connects to backend via NEXT_PUBLIC_API_URL.
+- `/backend`       → NestJS + Prisma + PostgreSQL (shared API for both frontends)
+- `/frontend`      → Next.js 14 patient app → app.cardioplaceai.com
+- `/admin`         → Next.js 14 admin/provider app → admin.cardioplaceai.com (NEW, being scaffolded in phase/1)
+- `/shared`        → npm workspace package: DTOs, enums, alert-message registry (NEW)
+- `/adk-service`   → Python voice/Gemini service (untouched in v2)
 
-## What is BUILT vs SIMULATED
-BUILT:
-- Schema migration (sleep fields → BP/cardio fields)
-- Check-in DTO and submission pipeline
-- Baseline algorithm (7-day rolling BP window)
-- Deviation detection (cardiovascular thresholds)
-- Escalation L1 (24hr care team alert) and L2 (immediate 911 message)
-- AI system prompt rewrite + patient health data injection into context
-- Onboarding intake
+## Key reference docs (READ FIRST)
 
-SIMULATED (frontend UI only, no real integration):
-- TTS/STT → audio toggle button, no real Speech API
-- Silent literacy detection → one hardcoded demo patient flips to audio-first
-- Provider dashboard → frontend mock with Chart.js BP trend chart, hardcoded data
-- Multilingual → EN/ES string toggle, hardcoded strings only
+- `docs/CLINICAL_SPEC.md` — Dr. Singal's signed-off rule specs (v1.0 + v2.0 addendum). Canonical source of truth for every alert rule, threshold, and escalation tier.
+- `docs/ARCHITECTURE.md` — Schema plan (new models + field additions), rule-engine pipeline, escalation ladder, three-tier output contract.
+- `docs/BUILD_PLAN.md` — 8-week timeline, phase branches, three-developer role split.
+- `docs/DEV3_TASKS.md` — Backend/infra task checklist (the user owns Dev 3).
+- `docs/SETUP.md` — Getting started: DB provisioning, env vars, first commands.
 
-REMOVED:
-- SafePlace (out of scope entirely)
+Existing legacy v1 docs (`CLINICAL_LOGIC_REVIEW.md`, `HEALPLACE_CARDIO_OVERVIEW.md`, `REMAINING_TASKS_PLAN.md`, `QA_TESTING_GUIDE.md` at repo root and inside `/docs`) are **v1 context only** — do not take as canonical for v2.
 
-## Deployment
-Backend → Railway (set root directory to: backend)
-Frontend → Vercel (set root directory to: frontend)
+## What's reusable from v1 (audit summary)
 
-## Build phases (always work on phase/X branch, never main or dev)
-1. Schema migration — backend/prisma/schema/
-2. Check-in DTO — backend/src/daily_journal/dto/
-3. Baseline algorithm — backend/src/daily_journal/services/baseline.service.ts
-4. Deviation detection — backend/src/daily_journal/services/deviation.service.ts
-5. Escalation L1/L2 — backend/src/daily_journal/services/escalation.service.ts
-6. AI context injection — backend/src/chat/services/system-prompt.service.ts
-7. Onboarding intake — backend/src/users/ and frontend pages
-8. Provider dashboard mock — frontend only
-9. Simulation layer — frontend audio/language toggles
-10. Demo data seeding — backend/prisma/seed.ts
+REUSABLE:
+- Schema foundations: `User`, `JournalEntry`, `DeviationAlert`, `EscalationEvent`, `BaselineSnapshot`, `Notification`
+- `/backend/src/daily_journal/services/deviation.service.ts` (~287 LOC, already rule-based — needs threshold externalization)
+- `/backend/src/daily_journal/services/baseline.service.ts` (~249 LOC — keep for trend charts only, not rule input)
+- `/backend/src/daily_journal/services/escalation.service.ts` (~275 LOC, 2-tier — needs T+N ladder expansion)
+- `/backend/src/chat/services/system-prompt.service.ts` (~350 LOC — needs expansion to include meds, conditions, verified fields)
+- Notification service (push + email, idempotent, event-driven)
+- Magic link auth, JWT, role guards
+
+NEEDS BUILD (mostly greenfield):
+- `/admin` app (0%)
+- `Practice`, `PatientProviderAssignment`, `PatientThreshold`, `PatientMedication`, `ProfileVerificationLog` models
+- `AlertEngineService`, `ProfileResolver`, three-tier message registry
+- Full 5-step escalation ladder (T+0, T+4h, T+8h, T+24h, T+48h) + 15-field audit trail
+- Patient self-report intake UI (card-based medication selection)
+- Admin verification workflow + threshold editor + 3-layer dashboard
+
+## v2 highlights vs v1
+
+- **Pure rule-based** alert engine — no ML model
+- **Patient self-reports** clinical profile + medications; provider verifies within 48–72h ("trust then verify")
+- **Admin portal split** — separate Next.js app on a separate subdomain, so admins and patients can test concurrently without logout-login churn
+- **Multi-practice** support via `Practice` + `PatientProviderAssignment`
+- **Three-tier output**: every alert produces patient text, caregiver text, physician text
+- **Joint Commission-compliant audit trail**: 15 fields per escalation event
+
+## Tech stack
+
+- Backend: NestJS, Prisma, PostgreSQL, `@nestjs/schedule` for cron, event-driven pipeline
+- Frontend + Admin: Next.js 14 App Router, Tailwind CSS, TypeScript
+- Auth: JWT + magic link
+- Chat: Gemini 3.1 (text), Piper TTS (voice, via adk-service)
+- Monorepo: **npm workspaces** (npm 7+, native support — chosen over pnpm for lower risk)
+
+## Build phases (branch naming: `phase/N-description`)
+
+All work happens on phase branches. Never commit to `main` or `dev` directly.
+
+| # | Branch | Owner | Summary |
+|---|---|---|---|
+| 0 | `phase/0-bootstrap` | Dev 3 | This context bootstrap — CLAUDE.md + docs + memory seed |
+| 1 | `phase/1-monorepo-setup` | Dev 3 | npm workspaces, `/shared` package, `/admin` scaffold |
+| 2 | `phase/2-rule-based-schema` | Dev 3 | Single Prisma migration for all v2 models |
+| 3 | `phase/3-patient-intake-api` | Dev 3 | Self-report endpoints, `PatientMedication` CRUD |
+| 4 | `phase/4-profile-resolver` | Dev 2 | Safety-net logic, unverified handling |
+| 5 | `phase/5-alert-engine` | Dev 2 | Rule pipeline (standard + personalized modes) |
+| 6 | `phase/6-three-tier-messages` | Dev 2 | Message registry + OutputGenerator |
+| 7 | `phase/7-escalation-ladder` | Dev 3 | T+N cron + 15-field audit |
+| 8 | `phase/8-admin-shell` | Dev 1 | Admin app auth, layout, patient list |
+| 9 | `phase/9-admin-verification` | Dev 1 | Profile confirm/correct UI |
+| 10 | `phase/10-admin-thresholds` | Dev 1 | `PatientThreshold` editor |
+| 11 | `phase/11-admin-dashboard-3layer` | Dev 1 | Red/yellow/green alert panel |
+| 12 | `phase/12-admin-reconciliation` | Dev 1 | Medication side-by-side view (data model only for MVP) |
+| 13 | `phase/13-practice-config` | Dev 3 | `Practice` model, business hours, backup assignment |
+| 14 | `phase/14-patient-intake-ui` | Dev 1 | Card-based medication + condition intake |
+| 15 | `phase/15-patient-check-in-v2` | Dev 1 | Pulse, checklist, structured symptoms |
+| 16 | `phase/16-chat-system-prompt-v2` | Dev 2 | Chat system prompt rewrite for new schema |
+| 17 | `phase/17-crons` | Dev 3 | Gap alerts, monthly re-ask, escalation reminders |
+| 18 | `phase/18-integration-tests` | all | E2E + rule coverage |
+| 19 | `phase/19-seed-data` | Dev 3 | Medication catalog, demo patients, practices |
+| 20 | `phase/20-prod-deploy` | Dev 3 | Production cutover (deferred until ready) |
+
+Dev roles (see `docs/BUILD_PLAN.md` for detail):
+- Dev 1 — Frontend (patient + admin apps)
+- Dev 2 — Rule engine + chat
+- Dev 3 — Backend infra + monorepo glue (**user**)
 
 ## Rules for AI
-- Always work on phase/X branch, never main or dev
-- Backend changes: cd backend first
-- Frontend changes: cd frontend first
-- After schema changes always run: npx prisma migrate dev && npx prisma generate
+
+- Always work on a `phase/N-description` branch, never `main` or `dev`
+- Backend changes: `cd backend` first
+- Frontend changes: `cd frontend` first
+- Admin changes: `cd admin` first
+- After schema changes always run: `cd backend && npx prisma migrate dev && npx prisma generate`
+- Never run manual SQL — use Prisma migration files
+- Shared types live in `/shared` — never duplicate across apps
+- Commit messages: one short line, no body, no `Co-Authored-By` lines
+- `SUPER_ADMIN` role only accesses `/admin` app — no patient-facing pages
+- Three-tier alert messages live in `/shared/alert-messages.ts` — single source of truth
+- `/frontend` is patient-only. `/admin` is provider/care-team only.
+- Don't touch `/adk-service` (Python voice service) unless the chat integration requires it
+- Live production app is at `www.cardioplaceai.com` (v1) — this repo targets separate domains and a separate database
+
+## Clinical authority
+
+Dr. Manisha Singal owns every clinical decision. Rule thresholds, three-tier message wording, symptom trigger lists, and medication contraindication logic all require her sign-off. See `docs/CLINICAL_SPEC.md` for what's already signed off.
