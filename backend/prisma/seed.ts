@@ -44,6 +44,38 @@ async function main() {
   })
   console.log(`  admin: ${admin.email}`)
 
+  // ─── 1b. Super admin for testing (OTP 666666, never expires) ────────────────
+  // auth.service.sendOtp short-circuits when a row with expiresAt > 2098-01-01
+  // exists, so Resend is never called and the code stays fixed at 666666.
+  const testAdmin = await prisma.user.upsert({
+    where: { email: 'support@healplace.com' },
+    update: {},
+    create: {
+      email: 'support@healplace.com',
+      pwdhash,
+      name: 'Dr. Manisha Singal',
+      roles: ['SUPER_ADMIN'],
+      isVerified: true,
+      onboardingStatus: 'COMPLETED',
+      timezone: 'America/New_York',
+      preferredLanguage: 'en',
+    },
+  })
+  await prisma.otpCode.deleteMany({
+    where: {
+      email: 'support@healplace.com',
+      expiresAt: { gt: new Date('2098-01-01') },
+    },
+  })
+  await prisma.otpCode.create({
+    data: {
+      email: 'support@healplace.com',
+      codeHash: await bcrypt.hash('666666', 10),
+      expiresAt: new Date('2099-12-31'),
+    },
+  })
+  console.log(`  test admin: ${testAdmin.email} (OTP 666666)`)
+
   // ─── 2. Practice ────────────────────────────────────────────────────────────
   const practice = await prisma.practice.upsert({
     where: { id: 'seed-cedar-hill' },
