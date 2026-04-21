@@ -11,7 +11,7 @@ const NAV_ITEMS = [
   { href: '/scheduled-calls', label: 'Calls', icon: Phone },
 ];
 
-const HIDE_ON_PATHS = new Set<string>(['/sign-in']);
+const HIDE_ON_PATHS = new Set<string>(['/', '/home', '/about', '/sign-in']);
 
 export default function AdminNavbar() {
   const pathname = usePathname();
@@ -59,6 +59,7 @@ export default function AdminNavbar() {
             </span>
           )}
           <button
+            type="button"
             onClick={logout}
             className="inline-flex items-center gap-1.5 px-3 h-9 rounded-full text-[12px] font-semibold transition-colors hover:bg-gray-100"
             style={{ color: 'var(--brand-text-secondary, #64748B)' }}
