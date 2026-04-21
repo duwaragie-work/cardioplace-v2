@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { Request, Response } from 'express'
+import { UserRole } from '../generated/prisma/enums.js'
 import { AuthService } from './auth.service.js'
 import { Public } from './decorators/public.decorator.js'
 import { ProfileDto } from './dto/profile.dto.js'
@@ -124,12 +125,19 @@ export class AuthController {
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    const webAppUrl = this.config.get<string>('WEB_APP_URL', 'http://localhost:3000')
+    const [patientAppUrl, adminAppUrl] = this.config
+      .get<string>('WEB_APP_URL', 'http://localhost:3000,http://localhost:3001')
+      .split(',')
+      .map((u) => u.trim())
 
     try {
       const context = this.buildAuthContext(req)
       const result = await this.authService.verifyMagicLink(token, context)
       this.setRefreshCookie(res, result.refreshToken)
+
+      const targetUrl = result.roles.includes(UserRole.SUPER_ADMIN)
+        ? (adminAppUrl ?? patientAppUrl)
+        : patientAppUrl
 
       const params = new URLSearchParams({
         accessToken: result.accessToken,
@@ -141,9 +149,9 @@ export class AuthController {
         login_method: result.login_method,
         onboarding_required: String(result.onboarding_required),
       })
-      res.redirect(`${webAppUrl}/auth/magic-link?${params.toString()}`)
+      res.redirect(`${targetUrl}/auth/magic-link?${params.toString()}`)
     } catch {
-      res.redirect(`${webAppUrl}/auth/magic-link?error=expired`)
+      res.redirect(`${patientAppUrl}/auth/magic-link?error=expired`)
     }
   }
 
