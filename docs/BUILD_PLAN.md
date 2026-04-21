@@ -4,6 +4,26 @@ One document covering: architecture & schema, rule-engine design, escalation lad
 
 ---
 
+## 0. Fixed decisions (locked)
+
+Decisions that are committed — do not re-litigate without user sign-off.
+
+| Area | Decision |
+|---|---|
+| Monorepo manager | **npm workspaces** (not pnpm) |
+| Admin portal | **Split into `/admin` Next.js app** on subdomain `admin.cardioplaceai.com` |
+| Practice model | **Full `Practice` + `PatientProviderAssignment` model** from day one (not minimal three-FK shim) |
+| First cohort | **All three practices at launch**: Cedar Hill + BridgePoint + AmeriHealth |
+| Medication catalog | **Hardcoded in `/shared/medications.ts`** for MVP (~20 meds + 5 combos). DB-editable catalog deferred to post-MVP (Priority 3). |
+| `entryDate` + `measurementTime` | **Consolidated into `measuredAt DateTime`** (single UTC timestamp) |
+| Symptoms field | **Structured booleans** replace `symptoms String[]` for the 9 signed-off triggers. Add `otherSymptoms String[]` for freeform. |
+| HFpEF + post-pregnancy flag + HCM vasodilator flag | **Folded into phase/2 migration** (single migration, no phase/2b follow-up) |
+| Sort ordering | **Always by `measuredAt`** (clinical truth), never `createdAt` (audit only) |
+| DB provisioning | **Prisma Postgres** (managed) — fresh DATABASE_URL, fresh JWT_SECRET, isolated from v1 prod |
+| Live v1 app | `www.cardioplaceai.com` — do not touch |
+
+---
+
 ## 1. Architecture Overview
 
 ### 1.1 Monorepo shape (npm workspaces)
@@ -70,16 +90,24 @@ profileLastEditedAt            DateTime  default(now())
 Deprecate `primaryCondition` (freeform) — migrate to structured booleans.
 Keep `riskTier` but derive it from age + conditions; don't store long-term.
 
-### 2.2 `JournalEntry` additions
+### 2.2 `JournalEntry` — additions + consolidation
+
+**Consolidation (breaking change vs v1):** Replace `entryDate` (`@db.Date`) + `measurementTime` (`String?`) with a single `measuredAt DateTime`. Fresh DB — no data migration needed.
 
 ```
+// REMOVE:
+// entryDate         DateTime  @db.Date
+// measurementTime   String?     // "08:30"
+
+// ADD:
+measuredAt                     DateTime      // full UTC timestamp (e.g. 2026-02-28T13:00:00.000Z)
 pulse                          Int?
 position                       enum SITTING | STANDING | LYING  nullable
-sessionId                      String?   // groups ≥2 readings for averaging (AFib requires ≥3)
-measurementConditions          Json?     // 8-item checklist raw values
-readingContext                 enum MORNING | AFTERNOON | EVENING | NOCTURNAL  // derived server-side
+sessionId                      String?       // groups ≥2 readings for averaging (AFib requires ≥3)
+measurementConditions          Json?         // 8-item checklist raw values
+// readingContext is NOT stored — derived at query time from measuredAt + user.timezone
 
-// Structured Level-2 symptom triggers (replaces freeform symptoms[] for these)
+// Structured Level-2 symptom triggers (REPLACES symptoms String[] entirely for these 6)
 severeHeadache                 Boolean  default(false)
 visualChanges                  Boolean  default(false)
 alteredMentalStatus            Boolean  default(false)
@@ -92,8 +120,28 @@ newOnsetHeadache               Boolean  default(false)
 ruqPain                        Boolean  default(false)
 edema                          Boolean  default(false)
 
-// Keep symptoms String[] for freeform "other"
+// Optional freeform notes for symptoms not covered above
+otherSymptoms                  String[]
+
+// Index + unique — always key off measuredAt (NOT createdAt):
+@@unique([userId, measuredAt])
+@@index([userId, measuredAt(sort: Desc)])
 ```
+
+**Critical ordering rule:** All queries, list views, baseline windows, and rule-engine session grouping must sort by `measuredAt`, never by `createdAt`.
+
+- `createdAt` = when the record was submitted to the server (audit trail only)
+- `measuredAt` = when the BP was actually taken (clinical truth, display order, rule input)
+
+Example: patient enters readings in this insertion order — 1:00 PM, 12:00 PM, 12:30 PM → list displays `12:00 → 12:30 → 1:00 PM`.
+
+**Frontend contract:** date + time picker → `new Date(Date.UTC(y, m, d, h, min)).toISOString()` → backend stores UTC → display converts back using `user.timezone`.
+
+**Validation on `measuredAt`:**
+- Reject if `measuredAt > now + 5 minutes` (prevent future timestamps; 5 min slack for clock skew)
+- Reject if `measuredAt < now - 30 days` (sane backfill limit)
+
+**Session averaging rule (phase/5 implementation, schema-relevant now):** two readings share a session if they have the same `sessionId` OR fall within 30 minutes of each other (`abs(measuredAt.a − measuredAt.b) ≤ 30 min`). Frontend generates a `sessionId` (UUID) client-side when the user taps "add another reading in this session."
 
 ### 2.3 New model: `PatientThreshold` (admin-only write)
 
