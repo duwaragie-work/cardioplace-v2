@@ -7,6 +7,7 @@ import { AppService } from './app.service.js'
 import { AuthModule } from './auth/auth.module.js'
 import { DailyJournalModule } from './daily_journal/daily_journal.module.js'
 import { IntakeModule } from './intake/intake.module.js'
+import { PracticeModule } from './practice/practice.module.js'
 import { KnowledgebaseModule } from './knowledgebase/knowledgebase.module.js'
 import { GeminiModule } from './gemini/gemini.module.js'
 import { PrismaModule } from './prisma/prisma.module.js'
@@ -53,6 +54,7 @@ import { CommonModule } from './common/common.module.js'
     ChatModule,
     DailyJournalModule,
     IntakeModule,
+    PracticeModule,
     ContentModule,
     ProviderModule,
     VoiceModule,

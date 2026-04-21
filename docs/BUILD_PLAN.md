@@ -449,7 +449,7 @@ All work happens on a `phase/N-description` branch (never `main` or `dev`).
 | 4 | `phase/4-profile-resolver` | Dev 2 | Safety-net logic, unverified handling |
 | 5 | `phase/5-alert-engine` | Dev 2 | Rule pipeline standard + personalized |
 | 6 | `phase/6-three-tier-messages` | Dev 2 | Message registry + OutputGenerator |
-| 7 | `phase/7-escalation-ladder` | Dev 3 | T+N cron + 15-field audit |
+| 7 | `phase/7-escalation-ladder` | Dev 3 | T+N cron + 15-field audit — ⚠️ blocks on phase/5 + phase/6 |
 | 8 | `phase/8-admin-shell` | Dev 1 | Admin app auth, layout, patient list |
 | 9 | `phase/9-admin-verification` | Dev 1 | Profile confirm/correct UI |
 | 10 | `phase/10-admin-thresholds` | Dev 1 | Threshold editor |
@@ -709,6 +709,9 @@ Each checklist is organized by the phase branches the dev owns. Phase numbers ma
 - [ ] Commit
 
 #### Phase 7 — Escalation Service (branch `phase/7-escalation-ladder`)
+
+⚠️ **Blocks on phase/5 + phase/6.** Dev 2 must ship AlertEngine + OutputGenerator before phase/7 can read populated `DeviationAlert.tier`, `ruleId`, and three-tier messages. Starting phase/7 on stubs forces rework when the event shapes settle.
+
 - [ ] Extend existing `EscalationService` to write `EscalationEvent.ladderStep`
 - [ ] `@Cron('*/15 * * * *')` scanner: advance overdue ladders
 - [ ] Business-hours math using `Practice.businessHours*` + Luxon or date-fns-tz
