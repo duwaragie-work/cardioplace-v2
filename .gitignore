@@ -1,5 +1,8 @@
+# Workspaces (npm workspaces hoists to root node_modules)
+node_modules/
+**/node_modules/
+
 # Backend
-backend/node_modules/
 backend/dist/
 backend/.env
 backend/.env.production
@@ -7,11 +10,20 @@ backend/.env.local
 backend/src/generated/
 
 # Frontend
-frontend/node_modules/
 frontend/.next/
 frontend/dist/
 frontend/.env.local
 frontend/.env.production
+
+# Admin
+admin/.next/
+admin/dist/
+admin/.env.local
+admin/.env.production
+
+# Shared
+shared/dist/
+shared/*.tsbuildinfo
 
 # Python
 __pycache__/

@@ -27,6 +27,7 @@
     "test:e2e": "NODE_OPTIONS='--experimental-vm-modules' jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@cardioplace/shared": "*",
     "@google/genai": "^1.47.0",
     "@huggingface/transformers": "^3.5.1",
     "@grpc/grpc-js": "^1.14.3",
