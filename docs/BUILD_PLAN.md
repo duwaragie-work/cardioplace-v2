@@ -19,6 +19,11 @@ Decisions that are committed — do not re-litigate without user sign-off.
 | Symptoms field | **Structured booleans** replace `symptoms String[]` for the 9 signed-off triggers. Add `otherSymptoms String[]` for freeform. |
 | HFpEF + post-pregnancy flag + HCM vasodilator flag | **Folded into phase/2 migration** (single migration, no phase/2b follow-up) |
 | Sort ordering | **Always by `measuredAt`** (clinical truth), never `createdAt` (audit only) |
+| `BaselineSnapshot` | **Deleted fully.** No rolling-baseline logic in v2. Trend averages computed on-the-fly from `JournalEntry`. |
+| User table shape | **Split into `User` (identity + auth) + `PatientProfile` (clinical, 1:1)**. Admin users don't carry clinical fields. |
+| `primaryCondition` / `riskTier` / `diagnosisDate` on User | **Dropped** — superseded by structured booleans on `PatientProfile` + age-bucket derivation |
+| BMI, pulse pressure (per reading), age group, reading context | **Derived, not stored.** Helpers in `/shared/src/derivatives.ts`. Pulse pressure cached on `DeviationAlert` only (audit snapshot). |
+| `UserRole` enum | **5 values**: `PATIENT`, `PROVIDER`, `MEDICAL_DIRECTOR`, `HEALPLACE_OPS`, `SUPER_ADMIN`. Default `[PATIENT]`. v1 content/KB/state roles dropped. |
 | DB provisioning | **Prisma Postgres** (managed) — fresh DATABASE_URL, fresh JWT_SECRET, isolated from v1 prod |
 | Live v1 app | `www.cardioplaceai.com` — do not touch |
 
@@ -60,16 +65,60 @@ Messages live in `/shared/alert-messages.ts`, keyed by `ruleId`. Dr. Singal revi
 
 ## 2. Schema Plan — Part 1 (single Prisma migration in phase/2)
 
-### 2.1 `User` additions
+### 2.1 `User` — identity + auth only (slim)
+
+Every user has a User row. Admin users (PROVIDER / MEDICAL_DIRECTOR / HEALPLACE_OPS / SUPER_ADMIN) do not carry clinical fields — those live on `PatientProfile` (§2.1b). This keeps the role boundary clean.
+
+**Keep on `User`:**
+```
+id, email, pwdhash, name
+dateOfBirth                    DateTime?              // used for age-bucket derivation; every user has one
+timezone                       String?
+communicationPreference        CommunicationPreference?
+preferredLanguage              String?  default("en")
+roles                          UserRole[]  default([PATIENT])
+accountStatus                  AccountStatus  default(ACTIVE)
+isVerified                     Boolean  default(false)
+onboardingStatus               OnboardingStatus  default(NOT_COMPLETED)
+createdAt, updatedAt
+
+// Relations
+patientProfile                 PatientProfile?     // 1:1, only for patients
+patientMedications             PatientMedication[]
+patientThreshold               PatientThreshold?
+providerAssignmentAsPatient    PatientProviderAssignment?
+providerAssignmentsAsPrimary   PatientProviderAssignment[]  @relation("PrimaryProvider")
+providerAssignmentsAsBackup    PatientProviderAssignment[]  @relation("BackupProvider")
+providerAssignmentsAsMedicalDirector PatientProviderAssignment[]  @relation("MedicalDirector")
+profileVerificationLogs        ProfileVerificationLog[]
+// plus existing: authLogs, sessions, refreshTokens, notifications, deviationAlerts, escalationEvents, journalEntries, userDevices, accounts, contentSubmitted, contentRatings, contentReviews, scheduledCalls
+```
+
+**Drop from `User` entirely (fresh DB, no compat needed):**
+- `primaryCondition` — superseded by structured condition booleans on PatientProfile
+- `riskTier` — derive from age + conditions at rule-engine time
+- `diagnosisDate` — not referenced in v2 rule engine; bring back per-condition if clinically needed later
+- `baselineSnapshots` relation — `BaselineSnapshot` model is being deleted (see §2.9)
+
+### 2.1b `PatientProfile` — clinical data (1:1 with User, patients only)
+
+New model. All clinical fields that used to live on `User` move here. Created when a user first completes patient intake; absent for admin-only accounts.
 
 ```
-gender                         enum MALE | FEMALE | OTHER
-heightCm                       Int?
+id                             String  @id @default(uuid())
+userId                         String  @unique
+user                           User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-// Clinical condition booleans (patient-reported, admin-verified)
+// Demographics used for clinical rules
+gender                         enum MALE | FEMALE | OTHER
+heightCm                       Int?                    // one-time entry (adults don't change)
+
+// Pregnancy
 isPregnant                     Boolean  default(false)
 pregnancyDueDate               DateTime?
 historyPreeclampsia            Boolean  default(false)
+
+// Cardiac conditions
 hasHeartFailure                Boolean  default(false)
 heartFailureType               enum HFREF | HFPEF | UNKNOWN | NOT_APPLICABLE  default(NOT_APPLICABLE)
 hasAFib                        Boolean  default(false)
@@ -80,15 +129,21 @@ hasTachycardia                 Boolean  default(false)
 hasBradycardia                 Boolean  default(false)
 diagnosedHypertension          Boolean  default(false)
 
-// Verification state (covers all clinical fields above)
+// Verification state — covers every clinical field above
 profileVerificationStatus      enum UNVERIFIED | VERIFIED | CORRECTED  default(UNVERIFIED)
 profileVerifiedAt              DateTime?
-profileVerifiedBy              String?   // → User.id of admin
+profileVerifiedBy              String?                  // → User.id of admin who verified
 profileLastEditedAt            DateTime  default(now())
+
+createdAt, updatedAt
 ```
 
-Deprecate `primaryCondition` (freeform) — migrate to structured booleans.
-Keep `riskTier` but derive it from age + conditions; don't store long-term.
+**Verification-on-edit rule:** any patient-side edit to a `PatientProfile` field (or a new `PatientMedication` added) flips `profileVerificationStatus` back to `UNVERIFIED` and `profileLastEditedAt` to now. Implemented in phase/3 intake endpoints.
+
+Why split (not fully normalized into `PatientCondition` rows)?
+- Dr. Singal's condition list is locked and finite (9 conditions). Row-per-condition flexibility buys nothing for v2.
+- Rule engine reads conditions on every evaluation — fewer joins = faster, simpler.
+- Per-condition verification isn't in spec; profile-level verification is.
 
 ### 2.2 `JournalEntry` — additions + consolidation
 
@@ -276,10 +331,43 @@ afterHours                     Boolean  default(false)
 
 Covers 13 of 15 audit fields; the other 2 (`resolutionAction`, `resolutionRationale`) live on `DeviationAlert`.
 
-### 2.9 Retired / softened
+### 2.9 Deleted from v1 (fully)
 
-- `BaselineSnapshot` — keep for trend charts only. Rule engine doesn't use rolling baselines anymore.
-- `User.primaryCondition` — deprecate after Part 2.1 migration.
+Fresh DB — no compat concerns. Rip these out in phase/2:
+
+- **`BaselineSnapshot` model** — delete `backend/prisma/schema/baseline_snapshot.prisma` entirely
+  - Rule engine doesn't use rolling baselines (that's the v2 pivot)
+  - Trend charts compute "N-day average" on the fly from `JournalEntry` rows
+  - Drop `JournalEntry.snapshotId` + `JournalEntry.snapshot` relation
+  - Drop `User.baselineSnapshots` relation
+- **`User.primaryCondition`** — superseded by structured booleans on `PatientProfile`
+- **`User.riskTier`** — derive from age + conditions at rule-engine time
+- **`User.diagnosisDate`** — not referenced in v2 rules; re-add per-condition if clinically needed later
+
+### 2.10 Derived values — never stored (except audit snapshots)
+
+**Storage principle:** store primary data; compute derived values. The only exception is caching a derived value on an audit row (e.g. `DeviationAlert`) to freeze the exact value that triggered an action.
+
+Derivation helpers live in `/shared/src/derivatives.ts`, imported by rule engine, admin dashboard, patient dashboard, and chat system prompt. Single source of truth.
+
+| Value | Formula | Stored? | Notes |
+|---|---|---|---|
+| **BMI** | `weight(kg) / (height(m))²` | **No** — computed per call | `PatientProfile.heightCm` + latest `JournalEntry.weight`. Returns `null` if either missing. |
+| **Pulse pressure** (per reading) | `systolicBP − diastolicBP` | **No** — computed per call | Displayed on every reading; used by rule engine (>60 → Tier 3 physician flag). |
+| **Pulse pressure** (alert snapshot) | session-averaged SBP − session-averaged DBP at alert-fire time | **Yes** — `DeviationAlert.pulsePressure` | Cached at fire-time for audit. Preserves exact value even if raw readings are later edited. |
+| **Age group** | from `User.dateOfBirth`: 18–39 / 40–64 / 65+ | **No** — computed per call | Only affects lower-bound BP thresholds (65+ → SBP <100). |
+| **Reading context** | from `JournalEntry.measuredAt` + `User.timezone`: MORNING / AFTERNOON / EVENING / NOCTURNAL | **No** — computed per call | Dashboard display + nocturnal-dip rules. |
+
+Example helper shape:
+```ts
+// /shared/src/derivatives.ts
+export function getBMI(heightCm?: number | null, weightKg?: number | Decimal | null): number | null;
+export function getPulsePressure(sbp?: number | null, dbp?: number | null): number | null;
+export function getAgeGroup(dob?: Date | null): '18-39' | '40-64' | '65+' | null;
+export function getReadingContext(measuredAt: Date, timezone?: string | null): 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NOCTURNAL';
+```
+
+Phase/4 `ProfileResolver` and phase/5 `AlertEngineService` import from here. Phase/14/15 UI imports from here for display. Phase/16 chat system prompt imports from here for context injection.
 
 ---
 
