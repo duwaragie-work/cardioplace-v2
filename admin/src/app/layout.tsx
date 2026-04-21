@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
+import { LanguageProvider } from "@/contexts/LanguageContext";
+import AdminNavbar from "@/components/AdminNavbar";
 
 export const metadata: Metadata = {
   title: "Cardioplace Admin",
@@ -15,7 +17,12 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col">
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <LanguageProvider>
+            <AdminNavbar />
+            {children}
+          </LanguageProvider>
+        </AuthProvider>
       </body>
     </html>
   );

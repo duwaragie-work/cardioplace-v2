@@ -13,6 +13,7 @@ import { motion } from 'framer-motion';
 import { useState } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
 
+// TODO(phase/11): migrate to v2 tier model (TIER_1_CONTRAINDICATION, BP_LEVEL_2, etc.)
 export interface Alert {
   id: string;
   initials: string;
@@ -108,6 +109,7 @@ export default function AlertPanel({
   const { t } = useLanguage();
   const [reviewedSuccess, setReviewedSuccess] = useState(false);
 
+  // TODO(phase/11): migrate to v2 tier model (TIER_1_CONTRAINDICATION, BP_LEVEL_2, etc.)
   const isLevel1 = alert.level === 'L1';
   const borderColor = isLevel1
     ? 'var(--brand-warning-amber)'
