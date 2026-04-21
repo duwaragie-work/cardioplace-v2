@@ -439,30 +439,30 @@ Admin picks from enum list (V2-D resolution tables) + free-text rationale (requi
 
 All work happens on a `phase/N-description` branch (never `main` or `dev`).
 
-| # | Branch | Owner | Summary |
-|---|---|---|---|
-| 0 | `phase/0-bootstrap` | Dev 3 | Context docs, this plan, CLAUDE.md |
-| 1 | `phase/1-monorepo-setup` | Dev 3 | npm workspaces, `/shared` package, `/admin` scaffold |
-| 1b | `phase/1b-port-provider-pages` | Dev 3 | Port `/frontend/provider/*` UI to `/admin`, frontend SUPER_ADMIN redirect, `.env.example` files, port allocation (backend 4000) |
-| 2 | `phase/2-rule-based-schema` | Dev 3 | Single Prisma migration for §2 |
-| 3 | `phase/3-patient-intake-api` | Dev 3 | Self-report endpoints + `PatientMedication` CRUD |
-| 4 | `phase/4-profile-resolver` | Dev 2 | Safety-net logic, unverified handling |
-| 5 | `phase/5-alert-engine` | Dev 2 | Rule pipeline standard + personalized |
-| 6 | `phase/6-three-tier-messages` | Dev 2 | Message registry + OutputGenerator |
-| 7 | `phase/7-escalation-ladder` | Dev 3 | T+N cron + 15-field audit — ⚠️ blocks on phase/5 + phase/6 |
-| 8 | `phase/8-admin-shell` | Dev 1 | Admin app auth, layout, patient list |
-| 9 | `phase/9-admin-verification` | Dev 1 | Profile confirm/correct UI |
-| 10 | `phase/10-admin-thresholds` | Dev 1 | Threshold editor |
-| 11 | `phase/11-admin-dashboard-3layer` | Dev 1 | Red/yellow/green alert panel |
-| 12 | `phase/12-admin-reconciliation` | Dev 1 | Medication side-by-side (data model only for MVP) |
-| 13 | `phase/13-practice-config` | Dev 3 | `Practice` model, business hours, backup |
-| 14 | `phase/14-patient-intake-ui` | Dev 1 | Card-based medication + condition intake |
-| 15 | `phase/15-patient-check-in-v2` | Dev 1 | Pulse, checklist, structured symptoms |
-| 16 | `phase/16-chat-system-prompt-v2` | Dev 2 | Chat rewrite for new schema |
-| 17 | `phase/17-crons` | Dev 3 | Gap alert, monthly re-ask |
-| 18 | `phase/18-integration-tests` | all | E2E + rule coverage |
-| 19 | `phase/19-seed-data` | Dev 3 | Medication catalog, demo patients, practices |
-| 20 | `phase/20-prod-deploy` | Dev 3 | Cutover (deferred) |
+| # | Branch | Owner | Status | Summary |
+|---|---|---|---|---|
+| 0 | `phase/0-bootstrap` | Dev 3 | ✅ | Context docs, this plan, CLAUDE.md |
+| 1 | `phase/1-monorepo-setup` | Dev 3 | ✅ | npm workspaces, `/shared` package, `/admin` scaffold |
+| 1b | `phase/1b-port-provider-pages` | Dev 3 | ✅ | Port `/frontend/provider/*` UI to `/admin`, frontend SUPER_ADMIN redirect, `.env.example` files, port allocation (backend 4000) |
+| 2 | `phase/2-rule-based-schema` | Dev 3 | ✅ | Single Prisma migration for §2 |
+| 3 | `phase/3-patient-intake-api` | Dev 3 | ✅ | Self-report endpoints + `PatientMedication` CRUD |
+| 4 | `phase/4-profile-resolver` | Dev 2 | — | Safety-net logic, unverified handling |
+| 5 | `phase/5-alert-engine` | Dev 2 | — | Rule pipeline standard + personalized |
+| 6 | `phase/6-three-tier-messages` | Dev 2 | — | Message registry + OutputGenerator |
+| 7 | `phase/7-escalation-ladder` | Dev 3 | ⏸ | T+N cron + 15-field audit — ⚠️ blocks on phase/5 + phase/6 |
+| 8 | `phase/8-admin-shell` | Dev 1 | — | Admin app auth, layout, patient list |
+| 9 | `phase/9-admin-verification` | Dev 1 | — | Profile confirm/correct UI |
+| 10 | `phase/10-admin-thresholds` | Dev 1 | — | Threshold editor |
+| 11 | `phase/11-admin-dashboard-3layer` | Dev 1 | — | Red/yellow/green alert panel |
+| 12 | `phase/12-admin-reconciliation` | Dev 1 | — | Medication side-by-side (data model only for MVP) |
+| 13 | `phase/13-practice-config` | Dev 3 | ✅ | `Practice` + assignment + threshold CRUD; enrollment gate (incl. HFrEF/HCM/DCM threshold check) |
+| 14 | `phase/14-patient-intake-ui` | Dev 1 | — | Card-based medication + condition intake |
+| 15 | `phase/15-patient-check-in-v2` | Dev 1 | — | Pulse, checklist, structured symptoms |
+| 16 | `phase/16-chat-system-prompt-v2` | Dev 2 | — | Chat rewrite for new schema |
+| 17 | `phase/17-crons` | Dev 3 | ✅ | Gap alert (48h, PUSH + EMAIL), monthly re-ask (per-patient 30d anniversary, PUSH) |
+| 18 | `phase/18-integration-tests` | all | — | E2E + rule coverage |
+| 19 | `phase/19-seed-data` | Dev 3 | ✅ | Med catalog (33 entries) + 5 demo patient archetypes + perma-OTP `666666` for all seed users |
+| 20 | `phase/20-prod-deploy` | Dev 3 | — | Cutover (deferred) |
 
 ---
 
@@ -662,51 +662,53 @@ Each checklist is organized by the phase branches the dev owns. Phase numbers ma
 - [x] Commit
 
 #### Phase 1b — Port Provider Pages + Phase 1 Gap Fills (branch `phase/1b-port-provider-pages`)
-- [ ] Mechanical port of `frontend/src/app/provider/{dashboard,patients,scheduled-calls}` → `admin/src/app/{dashboard,patients,scheduled-calls}`
-- [ ] Port `frontend/src/components/cardio/{ProviderDashboard,AlertPanel,ScheduleModal}.tsx` → `admin/src/components/` (flat, not under `/cardio`)
-- [ ] Port `provider.service.ts`, `LanguageContext.tsx`, `i18n/*.ts` into `/admin` — swap `fetchWithAuth` to admin's `token.ts`
-- [ ] Add TODO(phase/11) markers on every `transformAlert()` / `L1` / `L2` / tier reference — Dev 1 refactors to v2 tier model in phase/11
-- [ ] Add `AdminNavbar` component + wire `LanguageProvider` into `admin/src/app/layout.tsx`
-- [ ] Add `framer-motion`, `recharts`, `@tailwindcss/typography` to `/admin` dependencies; import `theme.css` in admin `globals.css`
-- [ ] Delete `frontend/src/app/provider/` and `frontend/src/components/cardio/{ProviderDashboard,AlertPanel,ScheduleModal}.tsx`
-- [ ] Remove `/provider/*` links from `Navbar.tsx`; remove `isAdmin` / `support@healplace.com` branches from `Homepage.tsx`, `sign-in`, `magic-link`, `dashboard/page.tsx`
-- [ ] Update `frontend/src/proxy.ts`: decode JWT, redirect SUPER_ADMIN users to `NEXT_PUBLIC_ADMIN_URL`
-- [ ] Create `backend/.env.example`, `frontend/.env.example`, `admin/.env.example` — port 4000 backend, 3000 frontend, 3001 admin
-- [ ] Set `backend/src/main.ts` default `PORT ?? 4000` (frees up 3000 for the frontend)
-- [ ] Refresh `CLAUDE.md` + this file for Next 16, `proxy.ts`, local port allocation
-- [ ] Verify `npm run build` passes for all four workspaces
-- [ ] Commit
+- [x] Mechanical port of `frontend/src/app/provider/{dashboard,patients,scheduled-calls}` → `admin/src/app/{dashboard,patients,scheduled-calls}`
+- [x] Port `frontend/src/components/cardio/{ProviderDashboard,AlertPanel,ScheduleModal}.tsx` → `admin/src/components/` (flat, not under `/cardio`)
+- [x] Port `provider.service.ts`, `LanguageContext.tsx`, `i18n/*.ts` into `/admin` — swap `fetchWithAuth` to admin's `token.ts`
+- [x] Add TODO(phase/11) markers on every `transformAlert()` / `L1` / `L2` / tier reference — Dev 1 refactors to v2 tier model in phase/11
+- [x] Add `AdminNavbar` component + wire `LanguageProvider` into `admin/src/app/layout.tsx`
+- [x] Add `framer-motion`, `recharts`, `@tailwindcss/typography` to `/admin` dependencies; import `theme.css` in admin `globals.css`
+- [x] Delete `frontend/src/app/provider/` and `frontend/src/components/cardio/{ProviderDashboard,AlertPanel,ScheduleModal}.tsx`
+- [x] Remove `/provider/*` links from `Navbar.tsx`; remove `isAdmin` / `support@healplace.com` branches from `Homepage.tsx`, `sign-in`, `magic-link`, `dashboard/page.tsx`
+- [x] Update `frontend/src/proxy.ts`: decode JWT, redirect SUPER_ADMIN users to `NEXT_PUBLIC_ADMIN_URL`
+- [x] Create `backend/.env.example`, `frontend/.env.example`, `admin/.env.example` — port 4000 backend, 3000 frontend, 3001 admin
+- [x] Set `backend/src/main.ts` default `PORT ?? 4000` (frees up 3000 for the frontend)
+- [x] Refresh `CLAUDE.md` + this file for Next 16, `proxy.ts`, local port allocation
+- [x] Verify `npm run build` passes for all four workspaces
+- [x] Commit
 
 #### Phase 2 — Schema Migration (branch `phase/2-rule-based-schema`)
-- [ ] Slim `/backend/prisma/schema/user.prisma` to identity + auth only (§2.1); drop `primaryCondition` / `riskTier` / `diagnosisDate` / `RiskTier` enum / `baselineSnapshots` relation; add v2 relations
-- [ ] Collapse `UserRole` enum to 5 values (`PATIENT, PROVIDER, MEDICAL_DIRECTOR, HEALPLACE_OPS, SUPER_ADMIN`), default `[PATIENT]`
-- [ ] New `/backend/prisma/schema/patient_profile.prisma` (§2.1b) — 1:1 with User, holds all clinical fields
-- [ ] Rework `/backend/prisma/schema/daily_journal.prisma` — `entryDate` + `measurementTime` → `measuredAt`; add pulse/position/session/structured symptoms; drop `symptoms[]` + `snapshotId` (§2.2)
-- [ ] New `patient_threshold.prisma` (§2.3)
-- [ ] New `patient_medication.prisma` (§2.4)
-- [ ] New `practice.prisma` + `patient_provider_assignment.prisma` (§2.5)
-- [ ] New `profile_verification_log.prisma` (§2.6)
-- [ ] Rework `diviation_alert.prisma` — nullable `type`/`severity`, add tier/ruleId/mode/3-tier text/resolution (§2.7)
-- [ ] DELETE `/backend/prisma/schema/baseline_snapshot.prisma` (§2.9)
-- [ ] Extend `escalation_event.prisma` with ladderStep/recipients/ack/resolve (§2.8)
-- [ ] Backend surgery: delete baseline.service.ts + spec + check_baseline.js; delete guest-auth path in auth.service.ts; rename daily_journal `entryDate`/`measurementTime` → `measuredAt` everywhere; rewrite deviation.service (absolute thresholds only) and escalation.service for v2 field names; collapse content/KB `@Roles()` lists to `[SUPER_ADMIN]`; remove `primaryCondition` / `riskTier` / `diagnosisDate` from auth/voice/chat/test helpers; rewrite provider.service.ts with inline `derivePrimaryCondition` + `deriveRiskTier` helpers + `TODO(phase/4)` marker
-- [ ] Rewrite `backend/prisma/seed.ts` to MVP (1 admin + 2 patients with PatientProfile + 1 Practice + 2 assignments + a few JournalEntry rows); delete `seed.js`
-- [ ] Doc reconciliation: CLAUDE.md (Next 14 → 16, move `BaselineSnapshot` to deletions list); BUILD_PLAN.md (this checklist)
-- [ ] Wipe migrations: `rm -rf backend/prisma/migrations/*`
-- [ ] Run `cd backend && npx prisma migrate dev --name init_cardio_v2`
-- [ ] Run `cd backend && npx prisma generate`
-- [ ] `npm run build -w backend` green
-- [ ] `cd backend && npx prisma db seed` runs clean
-- [ ] Commit
+- [x] Slim `/backend/prisma/schema/user.prisma` to identity + auth only (§2.1); drop `primaryCondition` / `riskTier` / `diagnosisDate` / `RiskTier` enum / `baselineSnapshots` relation; add v2 relations
+- [x] Collapse `UserRole` enum to 5 values (`PATIENT, PROVIDER, MEDICAL_DIRECTOR, HEALPLACE_OPS, SUPER_ADMIN`), default `[PATIENT]`
+- [x] New `/backend/prisma/schema/patient_profile.prisma` (§2.1b) — 1:1 with User, holds all clinical fields
+- [x] Rework `/backend/prisma/schema/daily_journal.prisma` — `entryDate` + `measurementTime` → `measuredAt`; add pulse/position/session/structured symptoms; drop `symptoms[]` + `snapshotId` (§2.2)
+- [x] New `patient_threshold.prisma` (§2.3)
+- [x] New `patient_medication.prisma` (§2.4)
+- [x] New `practice.prisma` + `patient_provider_assignment.prisma` (§2.5)
+- [x] New `profile_verification_log.prisma` (§2.6)
+- [x] Rework `diviation_alert.prisma` — nullable `type`/`severity`, add tier/ruleId/mode/3-tier text/resolution (§2.7)
+- [x] DELETE `/backend/prisma/schema/baseline_snapshot.prisma` (§2.9)
+- [x] Extend `escalation_event.prisma` with ladderStep/recipients/ack/resolve (§2.8)
+- [x] Backend surgery: delete baseline.service.ts + spec + check_baseline.js; delete guest-auth path in auth.service.ts; rename daily_journal `entryDate`/`measurementTime` → `measuredAt` everywhere; rewrite deviation.service (absolute thresholds only) and escalation.service for v2 field names; collapse content/KB `@Roles()` lists to `[SUPER_ADMIN]`; remove `primaryCondition` / `riskTier` / `diagnosisDate` from auth/voice/chat/test helpers; rewrite provider.service.ts with inline `derivePrimaryCondition` + `deriveRiskTier` helpers + `TODO(phase/4)` marker
+- [x] Rewrite `backend/prisma/seed.ts` to MVP (1 admin + 2 patients with PatientProfile + 1 Practice + 2 assignments + a few JournalEntry rows); delete `seed.js`
+- [x] Doc reconciliation: CLAUDE.md (Next 14 → 16, move `BaselineSnapshot` to deletions list); BUILD_PLAN.md (this checklist)
+- [x] Wipe migrations: `rm -rf backend/prisma/migrations/*`
+- [x] Run `cd backend && npx prisma migrate dev --name init_cardio_v2`
+- [x] Run `cd backend && npx prisma generate`
+- [x] `npm run build -w backend` green
+- [x] `cd backend && npx prisma db seed` runs clean
+- [x] Commit
 
-#### Phase 3 — Patient Intake API (branch `phase/3-patient-intake-api`)
-- [ ] `POST /intake/profile` — writes User clinical fields + `ProfileVerificationLog` row
-- [ ] `POST /intake/medications` — batch create `PatientMedication` + logs
-- [ ] `PATCH /me/medications/:id` — update (soft-delete via `discontinuedAt`) + log
-- [ ] `POST /me/pregnancy` — update `isPregnant` + dueDate + log
-- [ ] Admin verification endpoints: `POST /admin/users/:id/verify-profile`, `POST /admin/users/:id/correct-profile`, `POST /admin/medications/:id/verify`
-- [ ] All writes emit `ProfileVerificationLog` via interceptor or decorator
-- [ ] Commit
+#### Phase 3 — Patient Intake API (branch `phase/3-patient-intake-api`) ✅
+- [x] `POST /intake/profile` — writes User clinical fields + `ProfileVerificationLog` row
+- [x] `POST /intake/medications` — batch create `PatientMedication` + logs
+- [x] `PATCH /me/medications/:id` — update (soft-delete via `discontinuedAt`) + log
+- [x] `POST /me/pregnancy` — update `isPregnant` + dueDate + log
+- [x] Admin verification endpoints: `POST /admin/users/:id/verify-profile`, `POST /admin/users/:id/correct-profile`, `POST /admin/medications/:id/verify`
+- [x] All writes emit `ProfileVerificationLog` via interceptor or decorator
+- [x] 18 e2e tests covering every endpoint + unverify-on-edit + rationale gates
+- [x] Shared DTOs in `/shared/src/intake.ts` (string-literal unions for Prisma enums)
+- [x] Commit
 
 #### Phase 7 — Escalation Service (branch `phase/7-escalation-ladder`)
 
@@ -721,24 +723,34 @@ Each checklist is organized by the phase branches the dev owns. Phase numbers ma
 - [ ] 15-field audit trail populated (13 auto + 2 from resolution)
 - [ ] Commit
 
-#### Phase 13 — Practice Config (branch `phase/13-practice-config`)
-- [ ] CRUD endpoints for `Practice` (admin-only)
-- [ ] CRUD for `PatientProviderAssignment`
-- [ ] Enrollment gate: `User.onboardingStatus` cannot flip to `COMPLETED` without assignment row
-- [ ] Admin endpoint to set business hours, after-hours protocol
-- [ ] Commit
+#### Phase 13 — Practice Config (branch `phase/13-practice-config`) ✅
+- [x] CRUD endpoints for `Practice` (`SUPER_ADMIN, MEDICAL_DIRECTOR, HEALPLACE_OPS`; PROVIDER excluded from write)
+- [x] CRUD for `PatientProviderAssignment` (same role set; validates primary/backup role = PROVIDER|MEDICAL_DIRECTOR, medical-director slot = MEDICAL_DIRECTOR strictly)
+- [x] CRUD for `PatientThreshold` (scope addition; `SUPER_ADMIN, MEDICAL_DIRECTOR` only — threshold is a clinical directive)
+- [x] Enrollment gate: `User.onboardingStatus` cannot flip to `COMPLETED` without assignment row + profile + (threshold if HFrEF/HCM/DCM); HFpEF not gated
+- [x] `POST /admin/patients/:userId/complete-onboarding` — idempotent flip-to-COMPLETED, 409 with `reasons[]` array when gate fails
+- [x] `GET /admin/patients/:userId/enrollment-check` — read the gate without side effects
+- [x] Admin endpoint to set business hours (HH:MM + IANA tz validation), after-hours protocol
+- [x] 27 e2e tests
+- [x] Commit
 
-#### Phase 17 — Crons (branch `phase/17-crons`)
-- [ ] Gap-alert cron: if no `JournalEntry` in 48h → push notification to caregiver/patient
-- [ ] Monthly re-ask cron: "Are you still taking the same medicines?" prompt → opens card UI
-- [ ] Commit
+Post-MVP tech debt noted: `PatientThreshold.userId` is `@unique` — rules out real soft-versioning via `replacedAt`; current impl overwrites in place. Fix when history becomes a regulatory requirement.
 
-#### Phase 19 — Seed Data (branch `phase/19-seed-data`)
-- [ ] Medication catalog: 20 meds across 4 classes + 5 combos (see CLINICAL_SPEC V2-B)
-- [ ] Demo `Practice` row (Cedar Hill)
-- [ ] Demo admin users (primary / backup / medical director)
-- [ ] Demo patients covering: pregnant + ACE/ARB, HFrEF + NDHP-CCB, CAD + DBP<70, AFib, standard HTN
-- [ ] Commit
+#### Phase 17 — Crons (branch `phase/17-crons`) ✅
+- [x] Gap-alert cron: `@Cron('0 13 * * *')` — if no `JournalEntry` in 48h → PUSH + EMAIL notification (patient-only for MVP; no caregiver model shipped yet); 24h idempotency window
+- [x] Monthly re-ask cron: `@Cron('0 14 * * *')` — per-patient anniversary (30d since last `reportedAt`/`verifiedAt` on active meds) → PUSH notification; 28d idempotency window; skips patients with no active meds
+- [x] Both services expose public `runScan(now)` so ops tooling and tests can trigger on demand without waiting for the scheduler
+- [x] 8 e2e tests (gap triage by archetype, both-channel rows, body copy for first-time vs returning, idempotency, no-meds skip, verifiedAt-freshness skip)
+- [x] Commit
+
+#### Phase 19 — Seed Data (branch `phase/19-seed-data`) ✅
+- [x] Medication catalog in `shared/src/medications.ts` — 33 entries (16 Screen 1 core × 4 classes + 12 Screen 2 category-guided + 5 Screen 3 combos); CLINICAL_SPEC V2-B aligned; `registersAs` field maps combos to component drug classes for contraindication checks
+- [x] Demo `Practice` row (Cedar Hill, id `seed-cedar-hill`)
+- [x] Demo non-patient users: primary provider, backup provider, medical director, HealPlace ops (+ back-compat `support@healplace.com`, `manisha.patel@cardioplace.test`)
+- [x] Demo patients covering: pregnant + ACE/ARB, HFrEF + NDHP-CCB (+ PatientThreshold), CAD + DBP<70, AFib + HR>110, standard HTN control
+- [x] **Perma-OTP `666666` seeded for every user** (patients + providers + ops + admins) — any demo account can log in via OTP flow without Resend being touched, same trick previously used for `support@healplace.com` only
+- [x] Per-patient `PatientMedication` rows (2–3 each), `PatientProfile` rows with clinical flags, `PatientProviderAssignment` rows using the new provider trio, 5 `JournalEntry` rows per patient spanning last 14 days with values engineered to trigger each archetype's alert when phase/5 AlertEngine lands
+- [x] Commit
 
 ---
 
