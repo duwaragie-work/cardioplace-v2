@@ -37,7 +37,7 @@ function formatAlertType(type: string): string {
 
 function getLastCheckInText(latestEntry: Record<string, unknown> | null): string {
   if (!latestEntry) return 'No check-ins yet';
-  const d = new Date(latestEntry.entryDate as string);
+  const d = new Date(latestEntry.measuredAt as string);
   const today = new Date();
   const yesterday = new Date();
   yesterday.setDate(today.getDate() - 1);
@@ -49,10 +49,10 @@ function getLastCheckInText(latestEntry: Record<string, unknown> | null): string
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface JournalEntry {
-  entryDate: string;
-  measurementTime?: string | null;
+  measuredAt: string;
   systolicBP?: number;
   diastolicBP?: number;
+  pulse?: number | null;
   medicationTaken?: boolean;
 }
 interface Baseline {
@@ -65,7 +65,7 @@ interface DeviationAlert {
   severity: string;
   status: string;
   createdAt?: string;
-  journalEntry?: { entryDate?: string };
+  journalEntry?: { measuredAt?: string };
 }
 
 // ─── Skeleton bone ───────────────────────────────────────────────────────────
@@ -157,21 +157,25 @@ export default function Dashboard() {
       getJournalStats().catch(() => null),
     ]).then(([entries, baselineData, alertsData, stats]) => {
       const arr: JournalEntry[] = Array.isArray(entries) ? entries : [];
-      const sortedAsc = [...arr].sort((a, b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime());
+      const sortedAsc = [...arr].sort((a, b) => new Date(a.measuredAt).getTime() - new Date(b.measuredAt).getTime());
       const dateCounts = new Map<string, number>();
       setBpChartData(sortedAsc.map((e) => {
-        const label = getDateLabel(e.entryDate);
+        const label = getDateLabel(e.measuredAt);
         const count = (dateCounts.get(label) ?? 0) + 1;
         dateCounts.set(label, count);
+        // measuredAt now carries both date and time — derive a hh:mm label.
+        const dt = new Date(e.measuredAt);
+        const hh = String(dt.getHours()).padStart(2, '0');
+        const mi = String(dt.getMinutes()).padStart(2, '0');
         return {
           day: count > 1 ? `${label} #${count}` : label,
           systolic: e.systolicBP ?? 0,
           diastolic: e.diastolicBP ?? 0,
-          fullDate: e.entryDate,
-          time: e.measurementTime ?? '',
+          fullDate: e.measuredAt,
+          time: `${hh}:${mi}`,
         };
       }));
-      const sortedDesc = [...arr].sort((a, b) => new Date(b.entryDate).getTime() - new Date(a.entryDate).getTime());
+      const sortedDesc = [...arr].sort((a, b) => new Date(b.measuredAt).getTime() - new Date(a.measuredAt).getTime());
       setLatestEntry(sortedDesc[0] ?? null);
       setTotalEntries(stats?.totalEntries ?? arr.length);
       setStreak(stats?.currentStreak ?? 0);
@@ -186,7 +190,7 @@ export default function Dashboard() {
   const userName = user?.name?.split(' ')[0] ?? '';
 
   const todayStr = new Date().toISOString().slice(0, 10);
-  const todayHasEntry = latestEntry?.entryDate?.slice(0, 10) === todayStr;
+  const todayHasEntry = latestEntry?.measuredAt?.slice(0, 10) === todayStr;
 
   const greeting = (() => {
     const h = new Date().getHours();
@@ -334,10 +338,20 @@ export default function Dashboard() {
 
           {/* BP Trend */}
           <div className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                {chartRange === 7 ? t('dashboard.bpThisWeek') : t('dashboard.bpTrend')}
-              </h3>
+            <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+              <div className="flex items-center gap-3 flex-wrap">
+                <h3 className="text-sm font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                  {chartRange === 7 ? t('dashboard.bpThisWeek') : t('dashboard.bpTrend')}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => router.push('/readings')}
+                  className="text-[11px] font-semibold cursor-pointer hover:opacity-75 transition"
+                  style={{ color: 'var(--brand-primary-purple)' }}
+                >
+                  {t('dashboard.fullHistory')}
+                </button>
+              </div>
               <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
                 {([7, 90] as const).map((range) => (
                   <button
@@ -511,7 +525,7 @@ export default function Dashboard() {
                           </span>
                         </div>
                         <p className="text-[10px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
-                          {formatAlertDate(alert.journalEntry?.entryDate ?? alert.createdAt ?? '')} {'· ' + t('dashboard.careTeamNotified')}
+                          {formatAlertDate(alert.journalEntry?.measuredAt ?? alert.createdAt ?? '')} {'· ' + t('dashboard.careTeamNotified')}
                         </p>
                       </div>
                     ))}

@@ -1,557 +1,554 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { motion, AnimatePresence } from 'framer-motion';
+// Daily check-in (Flow B). Multi-step:
+//   B1 pre-measurement checklist (8 items, captured as measurementConditions JSON)
+//   B2 reading: datetime + position + systolic/diastolic/pulse
+//   Weight (optional, retained from v1)
+//   Medication adherence (retained from v1)
+//   B3 structured symptom check (6 booleans + 3 pregnancy-specific + freeform)
+//   B5 confirmation + B4 "add another reading in this session" CTA
+//
+// Session grouping (B4): a client-generated UUID is reused across all readings
+// taken within ~30 minutes so the rule engine averages them. AFib patients see
+// a banner reminding them ≥3 readings per session are required.
+
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Check,
   ArrowLeft,
   ArrowRight,
+  Check,
+  Coffee,
+  Cigarette,
+  Activity,
+  Droplets,
+  Timer,
+  ChevronRight as ChevronRightIcon,
+  MessageSquareOff,
+  Shirt,
+  Armchair,
+  PersonStanding,
+  Bed,
   Heart,
-  Scale,
-  Pill,
+  Eye,
+  Brain,
+  Wind,
+  Zap,
   Stethoscope,
-  CalendarDays,
-  ChevronRight,
+  Baby,
+  Pill,
+  Scale,
+  CalendarClock,
+  Plus,
+  Home,
+  Volume2,
 } from 'lucide-react';
-import { createJournalEntry, getJournalEntries, getLatestBaseline } from '@/lib/services/journal.service';
-import { useLanguage } from '@/contexts/LanguageContext';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+import { useAuth } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { createJournalEntry } from '@/lib/services/journal.service';
+import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
+import AudioButton from '@/components/intake/AudioButton';
+import ChoiceCard from '@/components/intake/ChoiceCard';
+import StepDots from '@/components/intake/StepDots';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+type StepKey = 'B1' | 'B2' | 'WEIGHT' | 'MEDICATION' | 'B3' | 'B5';
+
 interface FormData {
-  date: string;
-  measurementTime: string;
-  systolic: string;
-  diastolic: string;
-  medication: 'yes' | 'no' | null;
-  symptoms: string[];
+  // B1 checklist
+  noCaffeine: boolean;
+  noSmoking: boolean;
+  noExercise: boolean;
+  bladderEmpty: boolean;
+  seatedQuietly: boolean;
+  posturalSupport: boolean;
+  notTalking: boolean;
+  cuffOnBareArm: boolean;
+  // B2 — date and time captured as two separate inputs (cleaner UX than
+  // datetime-local on small screens). Combined into ISO 8601 at submit.
+  measuredDate: string; // YYYY-MM-DD
+  measuredTime: string; // HH:mm
+  position: 'SITTING' | 'STANDING' | 'LYING' | null;
+  systolicBP: string;
+  diastolicBP: string;
+  pulse: string;
+  // Weight
   weight: string;
   weightUnit: 'lbs' | 'kg';
-  notes: string;
+  // Medication
+  medicationTaken: 'yes' | 'no' | null;
+  // B3 structured symptoms
+  severeHeadache: boolean;
+  visualChanges: boolean;
+  alteredMentalStatus: boolean;
+  chestPainOrDyspnea: boolean;
+  focalNeuroDeficit: boolean;
+  severeEpigastricPain: boolean;
+  newOnsetHeadache: boolean;
+  ruqPain: boolean;
+  edema: boolean;
+  otherSymptomsText: string;
 }
 
-interface RecentReading {
-  date: string;
-  sys: number;
-  dia: number;
-  status: string;
-  color: 'amber' | 'green';
+interface SessionReading {
+  measuredAt: string;
+  systolicBP?: number;
+  diastolicBP?: number;
+  pulse?: number;
 }
 
-interface Baseline {
-  baselineSystolic?: number | string;
-  baselineDiastolic?: number | string;
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+function nowDate(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-// ─── Static data ─────────────────────────────────────────────────────────────
-const STEPS = [
-  { label: 'Date', icon: CalendarDays },
-  { label: 'Blood Pressure', icon: Heart },
-  { label: 'Weight', icon: Scale },
-  { label: 'Medication', icon: Pill },
-  { label: 'Symptoms', icon: Stethoscope },
-];
+function nowTime(): string {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-function formatReadingDate(dateStr: string): string {
-  try {
-    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  } catch {
-    return dateStr;
+function emptyForm(): FormData {
+  return {
+    noCaffeine: false,
+    noSmoking: false,
+    noExercise: false,
+    bladderEmpty: false,
+    seatedQuietly: false,
+    posturalSupport: false,
+    notTalking: false,
+    cuffOnBareArm: false,
+    measuredDate: nowDate(),
+    measuredTime: nowTime(),
+    position: null,
+    systolicBP: '',
+    diastolicBP: '',
+    pulse: '',
+    weight: '',
+    weightUnit: 'lbs',
+    medicationTaken: null,
+    severeHeadache: false,
+    visualChanges: false,
+    alteredMentalStatus: false,
+    chestPainOrDyspnea: false,
+    focalNeuroDeficit: false,
+    severeEpigastricPain: false,
+    newOnsetHeadache: false,
+    ruqPain: false,
+    edema: false,
+    otherSymptomsText: '',
+  };
+}
+
+/** RFC4122 v4 UUID — used for sessionId (client-generated). */
+function uuid(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
   }
+  // Fallback for older browsers
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
-function getBpStatus(sys: number, dia: number): { label: string; color: 'amber' | 'green' } {
-  if (sys >= 140 || dia >= 90) return { label: 'Elevated', color: 'amber' };
-  return { label: 'Normal', color: 'green' };
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Step components
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ─── Step Progress Bar (desktop) ─────────────────────────────────────────────
-function StepBar({ current }: { current: number }) {
-  const { t } = useLanguage();
-  const stepLabels = [
-    t('checkin.stepDate'), t('checkin.stepBP'), t('checkin.stepWeight'),
-    t('checkin.stepMedication'), t('checkin.stepSymptoms'),
-  ];
-  return (
-    <div className="flex items-center w-full mb-8">
-      {STEPS.map((step, i) => {
-        const done = i < current;
-        const active = i === current;
-        return (
-          <div key={i} className="flex items-center flex-1 last:flex-none">
-            <div className="flex flex-col items-center gap-1.5">
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 shrink-0"
-                style={{
-                  backgroundColor: done ? 'var(--brand-primary-purple)' : 'transparent',
-                  border: done
-                    ? 'none'
-                    : active
-                    ? '2px solid var(--brand-primary-purple)'
-                    : '2px solid var(--brand-border)',
-                }}
-              >
-                {done ? (
-                  <Check className="w-4 h-4 text-white" />
-                ) : (
-                  <div
-                    className="w-2.5 h-2.5 rounded-full transition-all duration-300"
-                    style={{
-                      backgroundColor: active
-                        ? 'var(--brand-primary-purple)'
-                        : 'var(--brand-border)',
-                    }}
-                  />
-                )}
-              </div>
-              <span
-                className="text-[11px] whitespace-nowrap font-semibold transition-colors duration-300"
-                style={{
-                  color: active
-                    ? 'var(--brand-primary-purple)'
-                    : done
-                    ? 'var(--brand-text-secondary)'
-                    : 'var(--brand-text-muted)',
-                }}
-              >
-                {stepLabels[i]}
-              </span>
-            </div>
-            {i < STEPS.length - 1 && (
-              <div
-                className="flex-1 h-0.5 mx-2 mb-5 transition-all duration-500"
-                style={{
-                  backgroundColor:
-                    i < current
-                      ? 'var(--brand-primary-purple)'
-                      : 'var(--brand-border)',
-                }}
-              />
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─── Dot progress (mobile) ────────────────────────────────────────────────────
-// ─── Slide variants ───────────────────────────────────────────────────────────
-const slideVariants = {
-  enter: (dir: number) => ({ x: dir > 0 ? 60 : -60, opacity: 0 }),
-  center: { x: 0, opacity: 1 },
-  exit: (dir: number) => ({ x: dir > 0 ? -60 : 60, opacity: 0 }),
-};
-const slideTransition = { type: 'spring' as const, stiffness: 340, damping: 30 };
-
-// ─── Reading skeleton row ─────────────────────────────────────────────────────
-function ReadingSkeletonRow({ last }: { last?: boolean }) {
-  return (
-    <div
-      className="grid items-center py-2.5"
-      style={{
-        gridTemplateColumns: '1fr 1fr 1fr 1fr',
-        borderBottom: last ? 'none' : '1px solid var(--brand-border)',
-      }}
-    >
-      {[60, 36, 36, 52].map((w, i) => (
-        <div key={i} className={i > 0 ? 'flex justify-center' : ''}>
-          <div
-            className="animate-pulse rounded-md"
-            style={{ width: w, height: 12, backgroundColor: '#EDE9F6' }}
-          />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── Context Panel (Right side, desktop) ──────────────────────────────────────
-function ContextPanel({
-  recentReadings,
-  baseline,
-  readingsLoading,
-}: {
-  recentReadings: RecentReading[];
-  baseline: Baseline | null;
-  readingsLoading: boolean;
-}) {
-  const baselineStr =
-    baseline?.baselineSystolic && baseline?.baselineDiastolic
-      ? `${Math.round(Number(baseline.baselineSystolic))} / ${Math.round(Number(baseline.baselineDiastolic))}`
-      : '-- / --';
-
-  const { t } = useLanguage();
-  const displayReadings = recentReadings.slice(0, 3);
-
-  return (
-    <div className="bg-white rounded-2xl p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[15px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-          {t('checkin.recentReadings')}
-        </h3>
-        <Link
-          href="/readings"
-          className="flex items-center gap-0.5 text-[12px] font-semibold transition hover:opacity-75"
-          style={{ color: 'var(--brand-primary-purple)' }}
-        >
-          {t('checkin.viewAll')}
-          <ChevronRight className="w-3.5 h-3.5" />
-        </Link>
-      </div>
-
-      <div className="w-full">
-        <div
-          className="grid text-[11px] font-semibold pb-2 mb-1"
-          style={{
-            gridTemplateColumns: '1fr 1fr 1fr 1fr',
-            color: 'var(--brand-text-muted)',
-            borderBottom: '1px solid var(--brand-border)',
-          }}
-        >
-          <span>{t('checkin.date')}</span>
-          <span className="text-center">{t('checkin.systolic')}</span>
-          <span className="text-center">{t('checkin.diastolic')}</span>
-          <span className="text-right">{t('checkin.status')}</span>
-        </div>
-        {readingsLoading ? (
-          <>
-            <ReadingSkeletonRow />
-            <ReadingSkeletonRow />
-            <ReadingSkeletonRow last />
-          </>
-        ) : displayReadings.length === 0 ? (
-          <p className="text-[12px] py-3" style={{ color: 'var(--brand-text-muted)' }}>
-            {t('checkin.noReadingsYet')}
-          </p>
-        ) : (
-          displayReadings.map((r, i) => (
-            <div
-              key={i}
-              className="grid items-center py-2.5 text-[13px]"
-              style={{
-                gridTemplateColumns: '1fr 1fr 1fr 1fr',
-                borderBottom:
-                  i < displayReadings.length - 1
-                    ? '1px solid var(--brand-border)'
-                    : 'none',
-              }}
-            >
-              <span style={{ color: 'var(--brand-text-secondary)' }}>{r.date}</span>
-              <span
-                className="text-center font-semibold"
-                style={{
-                  color:
-                    r.color === 'amber'
-                      ? 'var(--brand-warning-amber)'
-                      : 'var(--brand-success-green)',
-                }}
-              >
-                {r.sys}
-              </span>
-              <span
-                className="text-center font-semibold"
-                style={{
-                  color:
-                    r.color === 'amber'
-                      ? 'var(--brand-warning-amber)'
-                      : 'var(--brand-success-green)',
-                }}
-              >
-                {r.dia}
-              </span>
-              <div className="flex justify-end">
-                <span
-                  className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold"
-                  style={{
-                    backgroundColor:
-                      r.color === 'amber'
-                        ? 'var(--brand-warning-amber-light)'
-                        : 'var(--brand-success-green-light)',
-                    color:
-                      r.color === 'amber'
-                        ? 'var(--brand-warning-amber)'
-                        : 'var(--brand-success-green)',
-                  }}
-                >
-                  {r.status}
-                </span>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      <div className="h-px my-5" style={{ backgroundColor: 'var(--brand-border)' }} />
-
-      {/* Baseline card */}
-      <div className="rounded-xl p-4" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
-        <p className="text-[13px] font-semibold mb-1" style={{ color: 'var(--brand-primary-purple)' }}>
-          {t('checkin.baselineBP')}
-        </p>
-        <p className="text-[26px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-          {baselineStr}{' '}
-          <span className="text-[14px] font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
-            mmHg
-          </span>
-        </p>
-        <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
-          {t('checkin.rollingAvg')}
-        </p>
-      </div>
-
-      {/* Tip */}
-      <div
-        className="mt-4 rounded-xl p-4 flex gap-3"
-        style={{ backgroundColor: 'var(--brand-accent-teal-light)' }}
-      >
-        <div>
-          <p className="text-[12px] font-semibold mb-0.5" style={{ color: 'var(--brand-accent-teal)' }}>
-            {t('checkin.bestTime')}
-          </p>
-          <p className="text-[11px] leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
-            {t('checkin.bestTimeDesc')}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Step 1: Date ─────────────────────────────────────────────────────────────
-function Step1Date({
-  form,
-  onChange,
-}: {
+interface StepProps {
   form: FormData;
-  onChange: (k: keyof FormData, v: string) => void;
+  setField: <K extends keyof FormData>(k: K, v: FormData[K]) => void;
+}
+
+function StepHeader({
+  title,
+  subtitle,
+  audio,
+  step,
+  total,
+}: {
+  title: string;
+  subtitle: string;
+  audio: string;
+  step: number;
+  total: number;
 }) {
-  const { t } = useLanguage();
   return (
-    <div className="space-y-6 overflow-hidden">
-      <div>
-        <p className="text-[13px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>
-          {t('checkin.stepOf').replace('{x}', '1')}
-        </p>
-        <h2 className="text-[22px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-          {t('checkin.confirmDate')}
+    <div>
+      <p className="text-[12px] font-semibold mb-1" style={{ color: 'var(--brand-text-muted)' }}>
+        Step {step} of {total}
+      </p>
+      <div className="flex items-start justify-between gap-3 mb-1">
+        <h2
+          className="text-[20px] sm:text-[24px] font-bold tracking-tight min-w-0 flex-1"
+          style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
+        >
+          {title}
         </h2>
-        <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>
-          {t('checkin.confirmDateHint')}
-        </p>
+        <div className="shrink-0">
+          <AudioButton text={audio} />
+        </div>
       </div>
-      <div>
-        <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          {t('checkin.date')}
-        </label>
-        <input
-          type="date"
-          value={form.date}
-          onChange={(e) => onChange('date', e.target.value)}
-          className="w-full max-w-full h-14 px-4 rounded-xl text-[15px] outline-none transition box-border"
-          style={{
-            border: '2px solid var(--brand-border)',
-            color: 'var(--brand-text-primary)',
-            backgroundColor: 'white',
-          }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
-        />
-      </div>
-      <div>
-        <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          {t('checkin.time')}
-        </label>
-        <input
-          type="time"
-          value={form.measurementTime}
-          onChange={(e) => onChange('measurementTime', e.target.value)}
-          className="w-full max-w-full h-14 px-4 rounded-xl text-[15px] outline-none transition box-border"
-          style={{
-            border: '2px solid var(--brand-border)',
-            color: 'var(--brand-text-primary)',
-            backgroundColor: 'white',
-          }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
-        />
-      </div>
-      <div
-        className="rounded-xl p-4 flex items-start gap-3"
-        style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
-      >
-        <CalendarDays className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />
-        <p className="text-[13px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
-          {t('checkin.dateReason')}
-        </p>
-      </div>
+      <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>{subtitle}</p>
     </div>
   );
 }
 
-// ─── Step 2: Blood Pressure ───────────────────────────────────────────────────
-function Step2BP({
-  form,
-  onChange,
+function ChecklistRow({
+  icon,
+  text,
+  checked,
+  onToggle,
 }: {
-  form: FormData;
-  onChange: (k: keyof FormData, v: string) => void;
+  icon: React.ReactNode;
+  text: string;
+  checked: boolean;
+  onToggle: () => void;
 }) {
-  const { t } = useLanguage();
-  const sys = parseInt(form.systolic || '0');
-  const dia = parseInt(form.diastolic || '0');
+  return (
+    <motion.div
+      role="button"
+      tabIndex={0}
+      onClick={onToggle}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
+      aria-pressed={checked}
+      className="rounded-xl p-3 cursor-pointer transition-all flex items-center gap-3 outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary-purple)]"
+      style={{
+        backgroundColor: checked ? 'var(--brand-success-green-light)' : 'white',
+        border: `1.5px solid ${checked ? 'var(--brand-success-green)' : 'var(--brand-border)'}`,
+      }}
+      whileTap={{ scale: 0.99 }}
+    >
+      <div
+        className="shrink-0 rounded-lg flex items-center justify-center"
+        style={{
+          width: 36,
+          height: 36,
+          backgroundColor: checked ? 'var(--brand-success-green)' : 'var(--brand-primary-purple-light)',
+          color: checked ? 'white' : 'var(--brand-primary-purple)',
+        }}
+      >
+        {icon}
+      </div>
+      <p className="flex-1 text-[13.5px]" style={{ color: 'var(--brand-text-primary)' }}>
+        {text}
+      </p>
+      <div
+        className="shrink-0 rounded-full flex items-center justify-center transition-all"
+        style={{
+          width: 24,
+          height: 24,
+          backgroundColor: checked ? 'var(--brand-success-green)' : 'transparent',
+          border: `2px solid ${checked ? 'var(--brand-success-green)' : 'var(--brand-border)'}`,
+        }}
+      >
+        {checked && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
+      </div>
+    </motion.div>
+  );
+}
+
+function B1Checklist({ form, setField }: StepProps) {
+  const items: { key: keyof FormData; icon: React.ReactNode; text: string }[] = [
+    { key: 'noCaffeine', icon: <Coffee className="w-5 h-5" />, text: 'No caffeine in the last 30 minutes' },
+    { key: 'noSmoking', icon: <Cigarette className="w-5 h-5" />, text: 'No smoking in the last 30 minutes' },
+    { key: 'noExercise', icon: <Activity className="w-5 h-5" />, text: 'No exercise in the last 30 minutes' },
+    { key: 'bladderEmpty', icon: <Droplets className="w-5 h-5" />, text: 'Bladder is empty' },
+    { key: 'seatedQuietly', icon: <Timer className="w-5 h-5" />, text: 'Seated quietly for at least 5 minutes' },
+    { key: 'posturalSupport', icon: <Armchair className="w-5 h-5" />, text: 'Back supported, feet flat, arm at heart level' },
+    { key: 'notTalking', icon: <MessageSquareOff className="w-5 h-5" />, text: 'Not talking during the measurement' },
+    { key: 'cuffOnBareArm', icon: <Shirt className="w-5 h-5" />, text: 'Cuff is on bare upper arm (not over clothing)' },
+  ];
+
+  const checkedCount = items.filter((it) => Boolean(form[it.key])).length;
+
+  return (
+    <div className="space-y-5">
+      <StepHeader
+        title="Before you measure"
+        subtitle="A quick checklist for an accurate reading."
+        audio="Before you measure. A quick checklist for an accurate reading. Tap each item that is true for you right now."
+        step={1}
+        total={5}
+      />
+
+      <div className="flex items-center justify-between rounded-xl p-3"
+        style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
+        <p className="text-[12.5px]" style={{ color: 'var(--brand-text-secondary)' }}>
+          {checkedCount === 8 ? 'All set — your reading will be the most accurate.' : `${checkedCount} of 8 confirmed.`}
+        </p>
+        <span
+          className="text-[11px] font-bold px-2 py-0.5 rounded-full"
+          style={{
+            backgroundColor: checkedCount === 8 ? 'var(--brand-success-green)' : 'white',
+            color: checkedCount === 8 ? 'white' : 'var(--brand-primary-purple)',
+          }}
+        >
+          {checkedCount}/8
+        </span>
+      </div>
+
+      <div className="space-y-2.5">
+        {items.map((it) => (
+          <ChecklistRow
+            key={it.key}
+            icon={it.icon}
+            text={it.text}
+            checked={Boolean(form[it.key])}
+            onToggle={() => setField(it.key, !form[it.key] as FormData[typeof it.key])}
+          />
+        ))}
+      </div>
+
+      <p className="text-[12px] text-center" style={{ color: 'var(--brand-text-muted)' }}>
+        These help your care team trust the reading. You can skip items that don&apos;t apply.
+      </p>
+    </div>
+  );
+}
+
+function B2Reading({ form, setField }: StepProps) {
+  const sys = parseInt(form.systolicBP || '0', 10);
+  const dia = parseInt(form.diastolicBP || '0', 10);
   const isElevated = sys >= 140 || dia >= 90;
   const isCritical = sys >= 180 || dia >= 110;
 
   return (
     <div className="space-y-6">
+      <StepHeader
+        title="Your reading"
+        subtitle="Numbers from the cuff, plus when and how you sat."
+        audio="Your reading. Enter the numbers from the cuff, when you took it, and how you were sitting."
+        step={2}
+        total={5}
+      />
+
+      {/* Date + Time — split into two pickers (cleaner than datetime-local on
+          small screens where the native picker eats horizontal space). */}
       <div>
-        <p className="text-[13px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.stepOf').replace('{x}', '2')}</p>
-        <h2 className="text-[22px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-          {t('checkin.bpTitle')}
-        </h2>
-        <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>
-          {t('checkin.bpSeatHint')}
-        </p>
-      </div>
-
-      <div className="flex items-end gap-3">
-        <div className="flex-1">
-          <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('checkin.systolic')}</label>
+        <label className="flex items-center gap-2 text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+          <CalendarClock className="w-4 h-4" />
+          When was this taken?
+        </label>
+        <div className="grid grid-cols-2 gap-2.5">
           <input
-            type="number"
-            inputMode="numeric"
-            min={60}
-            max={220}
-            value={form.systolic}
-            onChange={(e) => onChange('systolic', e.target.value)}
-            placeholder="120"
-            className="w-full outline-none transition text-center"
+            type="date"
+            aria-label="Date"
+            value={form.measuredDate}
+            onChange={(e) => setField('measuredDate', e.target.value)}
+            className="h-12 px-3 rounded-xl text-[15px] outline-none transition box-border min-w-0 w-full"
             style={{
-              height: 80,
-              borderRadius: 'var(--brand-radius-input)',
-              border: `2px solid ${form.systolic && isCritical ? 'var(--brand-alert-red)' : form.systolic && isElevated ? 'var(--brand-warning-amber)' : 'var(--brand-border)'}`,
-              fontSize: 36,
-              color: form.systolic
-                ? isCritical ? 'var(--brand-alert-red)' : isElevated ? 'var(--brand-warning-amber)' : 'var(--brand-text-primary)'
-                : 'var(--brand-text-muted)',
-              backgroundColor: 'white',
-            }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
-            onBlur={(e) => {
-              e.currentTarget.style.borderColor =
-                form.systolic && isCritical ? 'var(--brand-alert-red)'
-                : form.systolic && isElevated ? 'var(--brand-warning-amber)'
-                : 'var(--brand-border)';
-            }}
-          />
-          <p className="text-[11px] text-center mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.topNumber')}</p>
-        </div>
-
-        <div className="pb-7 text-[36px] font-light" style={{ color: 'var(--brand-text-muted)' }}>/</div>
-
-        <div className="flex-1">
-          <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('checkin.diastolic')}</label>
-          <input
-            type="number"
-            inputMode="numeric"
-            min={40}
-            max={150}
-            value={form.diastolic}
-            onChange={(e) => onChange('diastolic', e.target.value)}
-            placeholder="80"
-            className="w-full outline-none transition text-center"
-            style={{
-              height: 80,
-              borderRadius: 'var(--brand-radius-input)',
               border: '2px solid var(--brand-border)',
-              fontSize: 36,
-              color: form.diastolic ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
+              color: 'var(--brand-text-primary)',
               backgroundColor: 'white',
+              colorScheme: 'light',
             }}
             onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
             onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
           />
-          <p className="text-[11px] text-center mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.bottomNumber')}</p>
+          <input
+            type="time"
+            aria-label="Time"
+            value={form.measuredTime}
+            onChange={(e) => setField('measuredTime', e.target.value)}
+            className="h-12 px-3 rounded-xl text-[15px] outline-none transition box-border min-w-0 w-full"
+            style={{
+              border: '2px solid var(--brand-border)',
+              color: 'var(--brand-text-primary)',
+              backgroundColor: 'white',
+              colorScheme: 'light',
+            }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+          />
         </div>
       </div>
 
-      <p className="text-[14px] text-center -mt-4" style={{ color: 'var(--brand-text-muted)' }}>mmHg</p>
+      {/* Position */}
+      <div>
+        <label className="flex items-center justify-between text-[13px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
+          <span>How were you positioned?</span>
+          <AudioButton text="How were you positioned? Sitting, standing, or lying down." size="sm" />
+        </label>
+        <div className="grid grid-cols-3 gap-3">
+          <ChoiceCard
+            icon={<Armchair className="w-7 h-7" />}
+            title="Sitting"
+            selected={form.position === 'SITTING'}
+            onClick={() => setField('position', 'SITTING')}
+            audioText="Sitting"
+            compact
+          />
+          <ChoiceCard
+            icon={<PersonStanding className="w-7 h-7" />}
+            title="Standing"
+            selected={form.position === 'STANDING'}
+            onClick={() => setField('position', 'STANDING')}
+            audioText="Standing"
+            compact
+          />
+          <ChoiceCard
+            icon={<Bed className="w-7 h-7" />}
+            title="Lying"
+            selected={form.position === 'LYING'}
+            onClick={() => setField('position', 'LYING')}
+            audioText="Lying"
+            compact
+          />
+        </div>
+      </div>
 
-      <AnimatePresence>
-        {form.systolic && form.diastolic && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            className="rounded-xl px-4 py-3 flex items-center gap-3"
-            style={{
-              backgroundColor: isCritical
-                ? 'var(--brand-alert-red-light)'
-                : isElevated
-                ? 'var(--brand-warning-amber-light)'
-                : 'var(--brand-success-green-light)',
-            }}
-          >
-            <div
-              className="w-2.5 h-2.5 rounded-full shrink-0 animate-pulse"
+      {/* BP */}
+      <div>
+        <label className="flex items-center justify-between text-[13px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
+          <span>Blood pressure (mmHg)</span>
+          <AudioButton text="Enter your blood pressure. The top number is systolic, the bottom number is diastolic." size="sm" />
+        </label>
+        <div className="flex items-end gap-3">
+          <div className="flex-1">
+            <input
+              type="number"
+              inputMode="numeric"
+              min={60}
+              max={250}
+              value={form.systolicBP}
+              onChange={(e) => setField('systolicBP', e.target.value)}
+              placeholder="120"
+              className="w-full outline-none transition text-center"
               style={{
-                backgroundColor: isCritical
-                  ? 'var(--brand-alert-red)'
-                  : isElevated
-                  ? 'var(--brand-warning-amber)'
-                  : 'var(--brand-success-green)',
+                height: 76,
+                borderRadius: 'var(--brand-radius-input)',
+                border: `2px solid ${form.systolicBP && isCritical ? 'var(--brand-alert-red)' : form.systolicBP && isElevated ? 'var(--brand-warning-amber)' : 'var(--brand-border)'}`,
+                fontSize: 32,
+                color: form.systolicBP
+                  ? isCritical ? 'var(--brand-alert-red)' : isElevated ? 'var(--brand-warning-amber)' : 'var(--brand-text-primary)'
+                  : 'var(--brand-text-muted)',
+                backgroundColor: 'white',
               }}
             />
-            <p
-              className="text-[13px] font-semibold"
+            <p className="text-[11px] text-center mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>Top (systolic)</p>
+          </div>
+          <div className="pb-7 text-[32px] font-light" style={{ color: 'var(--brand-text-muted)' }}>/</div>
+          <div className="flex-1">
+            <input
+              type="number"
+              inputMode="numeric"
+              min={40}
+              max={150}
+              value={form.diastolicBP}
+              onChange={(e) => setField('diastolicBP', e.target.value)}
+              placeholder="80"
+              className="w-full outline-none transition text-center"
               style={{
-                color: isCritical
-                  ? 'var(--brand-alert-red)'
+                height: 76,
+                borderRadius: 'var(--brand-radius-input)',
+                border: '2px solid var(--brand-border)',
+                fontSize: 32,
+                color: form.diastolicBP ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
+                backgroundColor: 'white',
+              }}
+            />
+            <p className="text-[11px] text-center mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>Bottom (diastolic)</p>
+          </div>
+        </div>
+
+        <AnimatePresence>
+          {form.systolicBP && form.diastolicBP && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="rounded-xl px-4 py-2.5 mt-3 flex items-center gap-3"
+              style={{
+                backgroundColor: isCritical
+                  ? 'var(--brand-alert-red-light)'
                   : isElevated
-                  ? 'var(--brand-warning-amber)'
-                  : 'var(--brand-success-green)',
+                    ? 'var(--brand-warning-amber-light)'
+                    : 'var(--brand-success-green-light)',
               }}
             >
-              {isCritical
-                ? t('checkin.criticalRange')
-                : isElevated
-                ? t('checkin.elevatedRange')
-                : t('checkin.normalRange')}
-            </p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              <span
+                className="w-2 h-2 rounded-full animate-pulse"
+                style={{
+                  backgroundColor: isCritical
+                    ? 'var(--brand-alert-red)'
+                    : isElevated
+                      ? 'var(--brand-warning-amber)'
+                      : 'var(--brand-success-green)',
+                }}
+              />
+              <p
+                className="text-[12.5px] font-semibold"
+                style={{
+                  color: isCritical
+                    ? 'var(--brand-alert-red)'
+                    : isElevated
+                      ? 'var(--brand-warning-amber)'
+                      : 'var(--brand-success-green)',
+                }}
+              >
+                {isCritical ? 'Very high — your care team will be notified' : isElevated ? 'Elevated — above target range' : 'Within normal range'}
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
+      {/* Pulse */}
+      <div>
+        <label className="flex items-center justify-between text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+          <span className="flex items-center gap-2"><Heart className="w-4 h-4" /> Pulse (beats per minute)</span>
+          <AudioButton text="Pulse. Beats per minute, usually shown on the cuff." size="sm" />
+        </label>
+        <input
+          type="number"
+          inputMode="numeric"
+          min={30}
+          max={220}
+          value={form.pulse}
+          onChange={(e) => setField('pulse', e.target.value)}
+          placeholder="72"
+          className="w-full h-12 px-4 rounded-xl text-center outline-none transition box-border"
+          style={{
+            border: '2px solid var(--brand-border)',
+            color: form.pulse ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
+            backgroundColor: 'white',
+            fontSize: 18,
+          }}
+        />
+      </div>
     </div>
   );
 }
 
-// ─── Step 3: Weight ───────────────────────────────────────────────────────────
-function Step3Weight({
-  form,
-  onChange,
-}: {
-  form: FormData;
-  onChange: (k: keyof FormData, v: string) => void;
-}) {
-  const { t } = useLanguage();
+function StepWeight({ form, setField }: StepProps) {
   return (
     <div className="space-y-6">
-      <div>
-        <p className="text-[13px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.stepOf').replace('{x}', '3')}</p>
-        <h2 className="text-[22px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-          {t('checkin.weightTitle')}
-        </h2>
-        <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>
-          {t('checkin.weightMorning')}
-        </p>
-      </div>
+      <StepHeader
+        title="Weight (optional)"
+        subtitle="Skip this if you didn't weigh yourself today."
+        audio="Weight, optional. Skip this if you didn't weigh yourself today."
+        step={3}
+        total={5}
+      />
 
       <div>
-        <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('checkin.unit')}</label>
+        <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>Unit</label>
         <div
           className="inline-flex rounded-full p-1 gap-1"
           style={{ backgroundColor: 'var(--brand-background)', border: '1px solid var(--brand-border)' }}
@@ -559,8 +556,9 @@ function Step3Weight({
           {(['lbs', 'kg'] as const).map((unit) => (
             <button
               key={unit}
-              onClick={() => onChange('weightUnit', unit)}
-              className="px-5 py-1.5 rounded-full text-sm font-semibold transition-all"
+              type="button"
+              onClick={() => setField('weightUnit', unit)}
+              className="px-5 py-1.5 rounded-full text-sm font-semibold transition-all cursor-pointer"
               style={{
                 backgroundColor: form.weightUnit === unit ? 'var(--brand-primary-purple)' : 'transparent',
                 color: form.weightUnit === unit ? 'white' : 'var(--brand-text-secondary)',
@@ -574,679 +572,708 @@ function Step3Weight({
 
       <div>
         <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          {t('checkin.stepWeight')} ({form.weightUnit})
+          Weight ({form.weightUnit})
         </label>
         <div className="relative">
           <input
             type="number"
             inputMode="decimal"
             value={form.weight}
-            onChange={(e) => onChange('weight', e.target.value)}
+            onChange={(e) => setField('weight', e.target.value)}
             placeholder={form.weightUnit === 'lbs' ? '185' : '84'}
             className="w-full outline-none transition text-center"
             style={{
-              height: 80,
+              height: 72,
               borderRadius: 'var(--brand-radius-input)',
               border: '2px solid var(--brand-border)',
-              fontSize: 36,
+              fontSize: 32,
               color: form.weight ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
               backgroundColor: 'white',
             }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
-            onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
           />
-          <span
-            className="absolute right-5 top-1/2 -translate-y-1/2 text-[18px]"
-            style={{ color: 'var(--brand-text-muted)' }}
-          >
+          <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[16px]" style={{ color: 'var(--brand-text-muted)' }}>
             {form.weightUnit}
           </span>
         </div>
       </div>
 
-      <div className="rounded-xl p-4 flex gap-3" style={{ backgroundColor: 'var(--brand-accent-teal-light)' }}>
+      <div className="rounded-xl p-3.5 flex gap-3" style={{ backgroundColor: 'var(--brand-accent-teal-light)' }}>
         <Scale className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-accent-teal)' }} />
-        <div>
-          <p className="text-[13px] font-semibold mb-0.5" style={{ color: 'var(--brand-accent-teal)' }}>
-            {t('checkin.whyWeight')}
-          </p>
-          <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
-            {t('checkin.weightInfo')}
-          </p>
-        </div>
+        <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+          Sudden gain (3+ lbs in 24 hours) can signal fluid retention — your care team watches for this.
+        </p>
       </div>
     </div>
   );
 }
 
-// ─── Step 4: Medication ───────────────────────────────────────────────────────
-function Step4Medication({
-  form,
-  onChange,
-}: {
-  form: FormData;
-  onChange: (k: keyof FormData, v: string) => void;
-}) {
-  const { t } = useLanguage();
-  const meds = [
-    { name: 'Lisinopril', dose: '10mg', time: 'Morning' },
-    { name: 'Amlodipine', dose: '5mg', time: 'Morning' },
-    { name: 'Metformin', dose: '500mg', time: 'With dinner' },
-  ];
-  const [checkedMeds, setCheckedMeds] = useState<boolean[]>([false, false, false]);
-
-  const toggleMed = (index: number) => {
-    setCheckedMeds((prev) => {
-      const next = [...prev];
-      next[index] = !next[index];
-      return next;
-    });
-  };
-
+function StepMedication({ form, setField }: StepProps) {
   return (
     <div className="space-y-6">
-      <div>
-        <p className="text-[13px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.stepOf').replace('{x}', '4')}</p>
-        <h2 className="text-[22px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-          {t('checkin.medAdherence')}
-        </h2>
-        <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>
-          {t('checkin.medAllQuestion')}
-        </p>
-      </div>
+      <StepHeader
+        title="Medication today"
+        subtitle="Did you take all your prescribed medicines?"
+        audio="Medication today. Did you take all your prescribed medicines?"
+        step={4}
+        total={5}
+      />
 
-      <div className="space-y-3">
-        {meds.map((med, i) => {
-          const checked = checkedMeds[i];
+      <div className="grid grid-cols-2 gap-3">
+        {[
+          { value: 'yes' as const, label: 'Yes, all taken', accent: 'var(--brand-success-green)' },
+          { value: 'no' as const, label: 'Missed one or more', accent: 'var(--brand-warning-amber)' },
+        ].map((opt) => {
+          const active = form.medicationTaken === opt.value;
           return (
             <motion.button
-              key={i}
+              key={opt.value}
               type="button"
-              onClick={() => { if (form.medication !== 'no') toggleMed(i); }}
-              className="w-full flex items-center justify-between p-4 rounded-xl transition-all"
+              onClick={() => setField('medicationTaken', opt.value)}
+              className="h-14 rounded-2xl text-sm font-semibold border-2 transition-all flex items-center justify-center gap-2 cursor-pointer"
               style={{
-                border: checked ? '1.5px solid var(--brand-success-green)' : '1.5px solid var(--brand-border)',
-                backgroundColor: checked ? 'var(--brand-success-green-light)' : 'white',
-                opacity: form.medication === 'no' ? 0.45 : 1,
-                pointerEvents: form.medication === 'no' ? 'none' : 'auto',
+                backgroundColor: active ? opt.accent : 'white',
+                borderColor: active ? opt.accent : 'var(--brand-border)',
+                color: active ? 'white' : 'var(--brand-text-secondary)',
+                boxShadow: active ? `0 4px 12px ${opt.accent}40` : 'none',
               }}
-              whileTap={{ scale: 0.98 }}
+              whileTap={{ scale: 0.97 }}
             >
-              <div className="flex items-center gap-3">
-                <div
-                  className="w-9 h-9 rounded-xl flex items-center justify-center"
-                  style={{ backgroundColor: checked ? 'var(--brand-success-green)' : 'var(--brand-primary-purple-light)' }}
-                >
-                  <Pill className="w-4 h-4" style={{ color: checked ? 'white' : 'var(--brand-primary-purple)' }} />
-                </div>
-                <div className="text-left">
-                  <p className="text-[14px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                    {med.name} {med.dose}
-                  </p>
-                  <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>{med.time}</p>
-                </div>
-              </div>
-              <div
-                className="w-6 h-6 rounded-full flex items-center justify-center border-2 transition-all"
-                style={{
-                  borderColor: checked ? 'var(--brand-success-green)' : 'var(--brand-border)',
-                  backgroundColor: checked ? 'var(--brand-success-green)' : 'transparent',
-                }}
-              >
-                {checked && <Check className="w-3.5 h-3.5 text-white" />}
-              </div>
+              <Pill className="w-4 h-4" />
+              {opt.label}
             </motion.button>
           );
         })}
-      </div>
-
-      <div>
-        <p className="text-[15px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
-          {t('checkin.medicationQuestion')}
-        </p>
-        <div className="grid grid-cols-2 gap-3">
-          {[
-            { value: 'yes', label: t('checkin.medicationTaken'), activeColor: 'var(--brand-success-green)' },
-            { value: 'no', label: t('checkin.medicationMissed'), activeColor: 'var(--brand-alert-red)' },
-          ].map((opt) => {
-            const isActive = form.medication === opt.value;
-            return (
-              <motion.button
-                key={opt.value}
-                onClick={() => { onChange('medication', opt.value); if (opt.value === 'no') setCheckedMeds([false, false, false]); }}
-                className="h-12 rounded-full text-sm font-semibold transition-all border-2"
-                style={{
-                  backgroundColor: isActive ? opt.activeColor : 'white',
-                  borderColor: isActive ? opt.activeColor : 'var(--brand-border)',
-                  color: isActive ? 'white' : 'var(--brand-text-secondary)',
-                  boxShadow: isActive ? `0 4px 12px ${opt.activeColor}40` : 'none',
-                }}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.97 }}
-              >
-                {opt.label}
-              </motion.button>
-            );
-          })}
-        </div>
       </div>
     </div>
   );
 }
 
-// ─── Step 5: Symptoms ─────────────────────────────────────────────────────────
-function Step5Symptoms({
-  form,
-  onChange,
-}: {
-  form: FormData;
-  onChange: (k: keyof FormData, v: string) => void;
-}) {
-  const { t } = useLanguage();
-  const allSymptoms = [
-    'Chest Pain', 'Severe Headache', 'Shortness of Breath',
-    'Dizziness', 'Blurred Vision', 'Swollen Ankles',
-    'Fatigue', 'Nausea', 'None of these',
+interface SymptomsStepProps extends StepProps {
+  isPregnant: boolean;
+}
+
+function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
+  const core: { key: keyof FormData; icon: React.ReactNode; text: string }[] = [
+    { key: 'severeHeadache', icon: <Brain className="w-5 h-5" />, text: 'Severe headache' },
+    { key: 'visualChanges', icon: <Eye className="w-5 h-5" />, text: 'Vision changes' },
+    { key: 'alteredMentalStatus', icon: <Brain className="w-5 h-5" />, text: 'Confusion / not feeling like yourself' },
+    { key: 'chestPainOrDyspnea', icon: <Wind className="w-5 h-5" />, text: 'Chest pain or trouble breathing' },
+    { key: 'focalNeuroDeficit', icon: <Zap className="w-5 h-5" />, text: 'Weakness, numbness, or speech problems' },
+    { key: 'severeEpigastricPain', icon: <Stethoscope className="w-5 h-5" />, text: 'Severe stomach or upper-right pain' },
   ];
-  const toggle = (s: string) => {
-    const updated = form.symptoms.includes(s)
-      ? form.symptoms.filter((x) => x !== s)
-      : s === 'None of these'
-      ? ['None of these']
-      : [...form.symptoms.filter((x) => x !== 'None of these'), s];
-    onChange('symptoms', JSON.stringify(updated));
-  };
+  const pregnancy: { key: keyof FormData; icon: React.ReactNode; text: string }[] = [
+    { key: 'newOnsetHeadache', icon: <Brain className="w-5 h-5" />, text: 'New headache (not usual for you)' },
+    { key: 'ruqPain', icon: <Stethoscope className="w-5 h-5" />, text: 'Pain in upper-right belly' },
+    { key: 'edema', icon: <Droplets className="w-5 h-5" />, text: 'New swelling in face, hands, or feet' },
+  ];
 
   return (
-    <div className="space-y-6">
-      <div>
-        <p className="text-[13px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.stepOf').replace('{x}', '5')}</p>
-        <h2 className="text-[22px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-          {t('checkin.symptomsToday')}
-        </h2>
-        <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>
-          {t('checkin.selectAllApply')}
+    <div className="space-y-5">
+      <StepHeader
+        title="How do you feel?"
+        subtitle="Tap anything you're feeling right now. Tap nothing if you feel fine."
+        audio="How do you feel? Tap anything you're feeling right now. Tap nothing if you feel fine."
+        step={5}
+        total={5}
+      />
+
+      <div className="rounded-xl p-3 flex items-start gap-3"
+        style={{ backgroundColor: 'var(--brand-alert-red-light)' }}>
+        <Heart className="w-4 h-4 mt-0.5 shrink-0" style={{ color: 'var(--brand-alert-red)' }} />
+        <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+          If you have these now, your care team is notified right away.
         </p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-        {allSymptoms.map((s) => {
-          const selected = form.symptoms.includes(s);
-          return (
-            <motion.button
-              key={s}
-              onClick={() => toggle(s)}
-              className="h-11 rounded-full text-[13px] font-semibold border-2 px-3 transition-all"
-              style={{
-                backgroundColor: selected ? 'var(--brand-primary-purple)' : 'white',
-                borderColor: selected ? 'var(--brand-primary-purple)' : 'var(--brand-border)',
-                color: selected ? 'white' : 'var(--brand-text-secondary)',
-                boxShadow: selected ? 'var(--brand-shadow-button)' : 'none',
-              }}
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.96 }}
-            >
-              {s}
-            </motion.button>
-          );
-        })}
+      <div className="space-y-2.5">
+        {core.map((s) => (
+          <ChecklistRow
+            key={s.key}
+            icon={s.icon}
+            text={s.text}
+            checked={Boolean(form[s.key])}
+            onToggle={() => setField(s.key, !form[s.key] as FormData[typeof s.key])}
+          />
+        ))}
       </div>
+
+      <AnimatePresence>
+        {isPregnant && (
+          <motion.div
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            className="space-y-2.5"
+          >
+            <div className="flex items-center gap-2 mt-3">
+              <Baby className="w-4 h-4" style={{ color: 'var(--brand-primary-purple)' }} />
+              <p className="text-[12.5px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-primary-purple)' }}>
+                Pregnancy-specific
+              </p>
+            </div>
+            {pregnancy.map((s) => (
+              <ChecklistRow
+                key={s.key}
+                icon={s.icon}
+                text={s.text}
+                checked={Boolean(form[s.key])}
+                onToggle={() => setField(s.key, !form[s.key] as FormData[typeof s.key])}
+              />
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div>
         <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          {t('checkin.additionalNotes')}
+          Anything else? (optional)
         </label>
         <textarea
           rows={3}
-          value={form.notes}
-          onChange={(e) => onChange('notes', e.target.value)}
-          placeholder={t('checkin.anythingElse')}
+          value={form.otherSymptomsText}
+          onChange={(e) => setField('otherSymptomsText', e.target.value)}
+          placeholder="In your own words…"
           className="w-full rounded-xl px-4 py-3 text-[13px] resize-none outline-none transition"
           style={{
             border: '2px solid var(--brand-border)',
             color: 'var(--brand-text-primary)',
             backgroundColor: 'white',
           }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
         />
       </div>
     </div>
   );
 }
 
-// ─── Success screen ───────────────────────────────────────────────────────────
-function SuccessScreen({ onDone }: { onDone: () => void }) {
-  const { t } = useLanguage();
-  const today = new Date();
-  const dateLabel = today.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+// ─────────────────────────────────────────────────────────────────────────────
+// Confirmation (B5) + B4 add-another
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ConfirmationScreen({
+  lastReading,
+  sessionReadings,
+  hasAFib,
+  onAddAnother,
+  onDone,
+}: {
+  lastReading: SessionReading;
+  sessionReadings: SessionReading[];
+  hasAFib: boolean;
+  onAddAnother: () => void;
+  onDone: () => void;
+}) {
+  const total = sessionReadings.length;
+  const aFibSatisfied = !hasAFib || total >= 3;
+
   return (
-    <motion.div
-      className="flex flex-col items-center justify-center min-h-screen px-6 text-center"
-      style={{ backgroundColor: 'var(--brand-background)' }}
-      initial={{ opacity: 0, scale: 0.93 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ type: 'spring', stiffness: 280, damping: 24 }}
-    >
+    // Compacted to fit a typical phone viewport (~700px) without scrolling.
+    // Tighter checkmark, smaller summary card, and the "what happens next"
+    // bullets folded into a single line.
+    <div className="flex flex-col items-center text-center px-4 w-full max-w-sm">
       <motion.div
         initial={{ scale: 0 }}
         animate={{ scale: 1 }}
-        transition={{ type: 'spring', stiffness: 300, damping: 18, delay: 0.15 }}
-        className="w-24 h-24 rounded-full flex items-center justify-center mb-6"
-        style={{ backgroundColor: 'var(--brand-success-green-light)' }}
+        transition={{ type: 'spring', stiffness: 280, damping: 18 }}
+        className="rounded-full flex items-center justify-center mb-3"
+        style={{ width: 64, height: 64, backgroundColor: 'var(--brand-success-green-light)' }}
       >
-        <Check className="w-12 h-12" style={{ color: 'var(--brand-success-green)' }} />
+        <Check className="w-9 h-9" style={{ color: 'var(--brand-success-green)' }} strokeWidth={3} />
       </motion.div>
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-        <h2 className="text-[28px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          {t('checkin.success')}
-        </h2>
-        <p className="text-[15px] mb-2" style={{ color: 'var(--brand-text-muted)' }}>
-          {t('checkin.successMsg')}
-        </p>
-        <p className="text-[13px] mb-8" style={{ color: 'var(--brand-text-muted)' }}>
-          {t('checkin.reviewedByCedar')} &middot; {dateLabel}
-        </p>
-        <div className="flex flex-col sm:flex-row gap-3 justify-center">
-          <motion.button
-            onClick={onDone}
-            className="h-12 px-8 rounded-full text-white font-bold text-sm"
-            style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.97 }}
-          >
-            {t('checkin.goToDashboard')}
-          </motion.button>
+
+      <h2 className="text-[20px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
+        Reading {total > 1 ? `${total} ` : ''}sent
+      </h2>
+      <p className="text-[13px] mt-0.5 mb-4" style={{ color: 'var(--brand-text-muted)' }}>
+        Your care team gets it right away.
+      </p>
+
+      {/* Reading summary card */}
+      <div
+        className="w-full rounded-2xl p-3 mb-3"
+        style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)', boxShadow: 'var(--brand-shadow-card)' }}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
+            This reading
+          </span>
+          <AudioButton
+            text={`Reading ${lastReading.systolicBP ?? 'unknown'} over ${lastReading.diastolicBP ?? 'unknown'}${lastReading.pulse != null ? `, pulse ${lastReading.pulse}` : ''}`}
+            size="sm"
+          />
         </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-// ─── Main component ───────────────────────────────────────────────────────────
-export default function CheckIn() {
-  const { t } = useLanguage();
-  const router = useRouter();
-  const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const dd = String(today.getDate()).padStart(2, '0');
-
-  const [step, setStep] = useState(0);
-  const [direction, setDir] = useState(1);
-  const [submitted, setSubmit] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState('');
-  const [validationError, setValidationError] = useState('');
-  const [recentReadings, setRecentReadings] = useState<RecentReading[]>([]);
-  const [readingsLoading, setReadingsLoading] = useState(true);
-  const [baseline, setBaseline] = useState<Baseline | null>(null);
-  const hh = String(today.getHours()).padStart(2, '0');
-  const min = String(today.getMinutes()).padStart(2, '0');
-
-  const [form, setForm] = useState<FormData>({
-    date: `${yyyy}-${mm}-${dd}`,
-    measurementTime: `${hh}:${min}`,
-    systolic: '',
-    diastolic: '',
-    medication: null,
-    symptoms: [],
-    weight: '',
-    weightUnit: 'lbs',
-    notes: '',
-  });
-
-  // Load recent readings and baseline for context panel
-  useEffect(() => {
-    setReadingsLoading(true);
-    getJournalEntries({ limit: 3 })
-      .then((entries) => {
-        const arr = Array.isArray(entries) ? entries : [];
-        const sorted = [...arr].sort(
-          (a: { entryDate: string }, b: { entryDate: string }) =>
-            new Date(b.entryDate).getTime() - new Date(a.entryDate).getTime(),
-        );
-        const readings: RecentReading[] = sorted
-          .filter((e: { systolicBP?: number; diastolicBP?: number }) => e.systolicBP && e.diastolicBP)
-          .map((e: { entryDate: string; systolicBP: number; diastolicBP: number }) => {
-            const { label, color } = getBpStatus(e.systolicBP, e.diastolicBP);
-            return {
-              date: formatReadingDate(e.entryDate),
-              sys: e.systolicBP,
-              dia: e.diastolicBP,
-              status: label,
-              color,
-            };
-          });
-        setRecentReadings(readings);
-      })
-      .catch(() => {})
-      .finally(() => setReadingsLoading(false));
-
-    getLatestBaseline().then((b) => setBaseline(b ?? null)).catch(() => {});
-  }, []);
-
-  const onChange = (key: keyof FormData, value: string) => {
-    if (validationError) setValidationError('');
-    setForm((prev) => {
-      if (key === 'symptoms') {
-        try { return { ...prev, symptoms: JSON.parse(value) }; } catch { return prev; }
-      }
-      if (key === 'medication') {
-        return { ...prev, medication: value as 'yes' | 'no' };
-      }
-      return { ...prev, [key]: value };
-    });
-  };
-
-  const handleSubmit = async () => {
-    if (isSubmitting) return;
-    setIsSubmitting(true);
-    setSubmitError('');
-    try {
-      const payload: Parameters<typeof createJournalEntry>[0] = {
-        entryDate: form.date,
-        measurementTime: form.measurementTime,
-      };
-      if (form.systolic) payload.systolicBP = parseInt(form.systolic, 10);
-      if (form.diastolic) payload.diastolicBP = parseInt(form.diastolic, 10);
-      if (form.weight) payload.weight = parseFloat(form.weight);
-      if (form.medication !== null) payload.medicationTaken = form.medication === 'yes';
-      const cleanedSymptoms = form.symptoms.filter((s) => s !== 'None of these');
-      if (cleanedSymptoms.length > 0) payload.symptoms = cleanedSymptoms;
-      if (form.notes.trim()) payload.notes = form.notes.trim();
-
-      await createJournalEntry(payload);
-      setSubmit(true);
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Failed to submit. Please try again.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const goNext = () => {
-    setValidationError('');
-
-    // Step 0 (Date): date is required
-    if (step === 0 && !form.date) {
-      setValidationError('Please select a date.');
-      return;
-    }
-
-    // Step 1 (BP): systolic and diastolic are required
-    if (step === 1) {
-      const sys = parseInt(form.systolic || '0', 10);
-      const dia = parseInt(form.diastolic || '0', 10);
-      if (!form.systolic || !form.diastolic) {
-        setValidationError('Please enter both systolic (top) and diastolic (bottom) numbers.');
-        return;
-      }
-      if (sys < 60 || sys > 250) {
-        setValidationError('Systolic should be between 60 and 250.');
-        return;
-      }
-      if (dia < 40 || dia > 150) {
-        setValidationError('Diastolic should be between 40 and 150.');
-        return;
-      }
-    }
-
-    if (step < 4) {
-      setDir(1);
-      setStep((s) => s + 1);
-    } else {
-      void handleSubmit();
-    }
-  };
-
-  const goBack = () => {
-    if (step > 0) {
-      setDir(-1);
-      setStep((s) => s - 1);
-    } else {
-      router.push('/dashboard');
-    }
-  };
-
-  const stepComponents = [
-    <Step1Date key={0} form={form} onChange={onChange} />,
-    <Step2BP key={1} form={form} onChange={onChange} />,
-    <Step3Weight key={2} form={form} onChange={onChange} />,
-    <Step4Medication key={3} form={form} onChange={onChange} />,
-    <Step5Symptoms key={4} form={form} onChange={onChange} />,
-  ];
-
-  const nextLabels = [
-    `${t('common.next')}: ${t('checkin.stepBP')}`,
-    `${t('common.next')}: ${t('checkin.stepWeight')}`,
-    `${t('common.next')}: ${t('checkin.stepMedication')}`,
-    `${t('common.next')}: ${t('checkin.stepSymptoms')}`,
-    isSubmitting ? t('checkin.submitting') : t('checkin.submitCheckin'),
-  ];
-
-  if (submitted) {
-    return <SuccessScreen onDone={() => router.push('/dashboard')} />;
-  }
-
-  return (
-    <div className="min-h-screen flex flex-col overflow-x-hidden" style={{ backgroundColor: 'var(--brand-background)' }}>
-      {/* Body */}
-      <div className="flex-1 w-full max-w-300 mx-auto px-4 md:px-8 pt-5 md:pt-8 pb-24 lg:pb-10">
-        <div className="flex flex-col lg:flex-row gap-5 lg:gap-6 items-stretch">
-          {/* Left: Form column */}
-          <div className="w-full lg:flex-1 flex flex-col min-w-0 max-w-full">
-            <div className="hidden lg:block">
-              <StepBar current={step} />
-            </div>
-
-            {/* Step 0 mobile stats */}
-            {step === 0 && (
-              <div className="lg:hidden mb-4 space-y-3">
-                <div className="bg-white rounded-2xl p-4" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-[13px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                      {t('checkin.recentReadings')}
-                    </h3>
-                    <Link
-                      href="/readings"
-                      className="flex items-center gap-0.5 text-[11px] font-semibold transition hover:opacity-75"
-                      style={{ color: 'var(--brand-primary-purple)' }}
-                    >
-                      {t('checkin.viewAll')}
-                      <ChevronRight className="w-3 h-3" />
-                    </Link>
-                  </div>
-                  <div className="w-full">
-                    <div
-                      className="grid text-[10px] font-semibold pb-2 mb-1"
-                      style={{
-                        gridTemplateColumns: '1fr 1fr 1fr 1fr',
-                        color: 'var(--brand-text-muted)',
-                        borderBottom: '1px solid var(--brand-border)',
-                      }}
-                    >
-                      <span>{t('checkin.date')}</span>
-                      <span className="text-center">{t('checkin.systolic')}</span>
-                      <span className="text-center">{t('checkin.diastolic')}</span>
-                      <span className="text-right">{t('checkin.status')}</span>
-                    </div>
-                    {readingsLoading ? (
-                      <>
-                        <ReadingSkeletonRow />
-                        <ReadingSkeletonRow />
-                        <ReadingSkeletonRow last />
-                      </>
-                    ) : recentReadings.length === 0 ? (
-                      <p className="text-[12px] py-2" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.noReadingsYet')}</p>
-                    ) : (
-                      recentReadings.slice(0, 3).map((r, i) => (
-                        <div
-                          key={i}
-                          className="grid items-center py-1.5 text-[12px]"
-                          style={{
-                            gridTemplateColumns: '1fr 1fr 1fr 1fr',
-                            borderBottom: i < recentReadings.slice(0, 3).length - 1 ? '1px solid var(--brand-border)' : 'none',
-                          }}
-                        >
-                          <span style={{ color: 'var(--brand-text-secondary)' }}>{r.date}</span>
-                          <span className="text-center font-semibold" style={{ color: r.color === 'amber' ? 'var(--brand-warning-amber)' : 'var(--brand-success-green)' }}>
-                            {r.sys}
-                          </span>
-                          <span className="text-center font-semibold" style={{ color: r.color === 'amber' ? 'var(--brand-warning-amber)' : 'var(--brand-success-green)' }}>
-                            {r.dia}
-                          </span>
-                          <div className="flex justify-end">
-                            <span
-                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold"
-                              style={{
-                                backgroundColor: r.color === 'amber' ? 'var(--brand-warning-amber-light)' : 'var(--brand-success-green-light)',
-                                color: r.color === 'amber' ? 'var(--brand-warning-amber)' : 'var(--brand-success-green)',
-                              }}
-                            >
-                              {r.status}
-                            </span>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                <div
-                  className="rounded-2xl p-4 flex items-center justify-between"
-                  style={{ backgroundColor: 'var(--brand-primary-purple-light)', boxShadow: 'var(--brand-shadow-card)' }}
-                >
-                  <div>
-                    <p className="text-[12px] font-semibold mb-0.5" style={{ color: 'var(--brand-primary-purple)' }}>
-                      {t('checkin.baselineBP')}
-                    </p>
-                    <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
-                      {t('checkin.rollingAvg')}
-                    </p>
-                  </div>
-                  <p className="text-[26px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                    {baseline?.baselineSystolic
-                      ? Math.round(Number(baseline.baselineSystolic))
-                      : '--'}
-                    <span className="text-[16px] font-semibold mx-1" style={{ color: 'var(--brand-text-muted)' }}>/</span>
-                    {baseline?.baselineDiastolic
-                      ? Math.round(Number(baseline.baselineDiastolic))
-                      : '--'}
-                    <span className="text-[12px] font-medium ml-1" style={{ color: 'var(--brand-text-muted)' }}>mmHg</span>
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Form card */}
-            <div
-              className="bg-white rounded-2xl overflow-hidden flex flex-col"
-              style={{
-                boxShadow: 'var(--brand-shadow-card)',
-                minHeight: step > 0 ? 'calc(100dvh - 200px)' : 'auto',
-              }}
-            >
-              <div className="flex-1 p-6 md:p-8">
-                <AnimatePresence mode="wait" custom={direction}>
-                  <motion.div
-                    key={step}
-                    custom={direction}
-                    variants={slideVariants}
-                    initial="enter"
-                    animate="center"
-                    exit="exit"
-                    transition={slideTransition}
-                  >
-                    {stepComponents[step]}
-                  </motion.div>
-                </AnimatePresence>
-              </div>
-
-              {/* Submit error */}
-              {(submitError || validationError) && (
-                <div className="px-6 pb-2">
-                  <p className="text-[13px] text-center font-semibold px-3 py-1.5 rounded-lg" style={{ color: 'var(--brand-alert-red)', backgroundColor: 'var(--brand-alert-red-light)' }}>
-                    {validationError || submitError}
-                  </p>
-                </div>
-              )}
-
-              {/* Desktop nav buttons */}
-              <div
-                className="hidden lg:flex shrink-0 items-center justify-between px-8 py-5"
-                style={{ borderTop: '1px solid var(--brand-border)' }}
-              >
-                <motion.button
-                  onClick={goBack}
-                  className="h-11 px-6 rounded-full border-2 text-sm font-semibold flex items-center gap-2 transition cursor-pointer"
-                  style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.97 }}
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  {step === 0 ? t('common.cancel') : t('common.back')}
-                </motion.button>
-
-                <motion.button
-                  onClick={goNext}
-                  disabled={isSubmitting}
-                  className="h-11 px-8 rounded-full text-white font-bold text-sm flex items-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed transition"
-                  style={{
-                    backgroundColor: 'var(--brand-primary-purple)',
-                    boxShadow: 'var(--brand-shadow-button)',
-                    minWidth: 200,
-                    justifyContent: 'center',
-                  }}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.97 }}
-                >
-                  {nextLabels[step]}
-                  {step < 4 && <ArrowRight className="w-4 h-4" />}
-                </motion.button>
-              </div>
-            </div>
-
-            <p className="text-center text-[11px] mt-3" style={{ color: 'var(--brand-text-muted)' }}>
-              {t('checkin.reviewedBy')}
-            </p>
-          </div>
-
-          {/* Right: Context panel — desktop only */}
-          <div className="hidden lg:block w-90 shrink-0">
-            <ContextPanel recentReadings={recentReadings} baseline={baseline} readingsLoading={readingsLoading} />
-          </div>
+        <div className="flex items-baseline gap-2 justify-center">
+          <span className="text-[30px] font-bold leading-none" style={{ color: 'var(--brand-primary-purple)' }}>
+            {lastReading.systolicBP ?? '--'}/{lastReading.diastolicBP ?? '--'}
+          </span>
+          <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>mmHg</span>
+          {lastReading.pulse != null && (
+            <span className="text-[12px] font-semibold ml-2 flex items-center gap-1" style={{ color: 'var(--brand-text-secondary)' }}>
+              <Heart className="w-3.5 h-3.5" /> {lastReading.pulse}
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Mobile sticky bottom nav buttons */}
-      <div
-        className="lg:hidden fixed bottom-0 left-0 right-0 bg-white px-4 py-3 z-30"
-        style={{ borderTop: '1px solid var(--brand-border)', boxShadow: '0 -4px 16px rgba(0,0,0,0.07)' }}
-      >
-        {validationError && (
-          <p className="text-[11px] font-semibold text-center mb-2 px-2 py-1.5 rounded-lg" style={{ color: 'var(--brand-alert-red)', backgroundColor: 'var(--brand-alert-red-light)' }}>
-            {validationError}
-          </p>
-        )}
-        <div className="flex gap-3">
-        <button
-          onClick={goBack}
-          className="h-12 px-5 rounded-full border-2 text-sm font-semibold flex items-center gap-1.5 shrink-0"
-          style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+      {/* AFib reminder + what-happens-next merged into one compact strip */}
+      {hasAFib ? (
+        <div
+          className="w-full rounded-xl px-3 py-2 mb-3 flex items-center gap-2.5 text-left"
+          style={{
+            backgroundColor: aFibSatisfied ? 'var(--brand-success-green-light)' : 'var(--brand-warning-amber-light)',
+          }}
         >
-          <ArrowLeft className="w-4 h-4" />
-          {step === 0 ? t('common.close') : t('common.back')}
-        </button>
+          <Activity
+            className="w-4 h-4 shrink-0"
+            style={{ color: aFibSatisfied ? 'var(--brand-success-green)' : 'var(--brand-warning-amber)' }}
+          />
+          <p
+            className="text-[12px] leading-snug"
+            style={{ color: aFibSatisfied ? 'var(--brand-success-green)' : 'var(--brand-text-primary)' }}
+          >
+            {aFibSatisfied
+              ? `${total} readings — enough to average accurately.`
+              : `AFib needs 3 readings · ${total} of 3 done.`}
+          </p>
+        </div>
+      ) : (
+        <p className="text-[12px] mb-3 leading-snug" style={{ color: 'var(--brand-text-muted)' }}>
+          Your care team will review and reach out only if something looks off.
+        </p>
+      )}
+
+      {/* Actions */}
+      <div className="w-full space-y-2">
         <motion.button
-          onClick={goNext}
-          disabled={isSubmitting}
-          className="flex-1 h-12 rounded-full text-white font-bold text-sm disabled:opacity-60"
-          style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
+          type="button"
+          onClick={onAddAnother}
+          className="w-full h-11 rounded-full font-bold text-white text-[13.5px] flex items-center justify-center gap-2 cursor-pointer"
+          style={{
+            backgroundColor: hasAFib && !aFibSatisfied ? 'var(--brand-warning-amber)' : 'var(--brand-primary-purple)',
+            boxShadow: 'var(--brand-shadow-button)',
+          }}
           whileTap={{ scale: 0.97 }}
         >
-          {step === 4 ? (isSubmitting ? t('checkin.submitting') : t('common.submit')) : t('common.next')}
+          <Plus className="w-4 h-4" />
+          Add another reading
         </motion.button>
+        <motion.button
+          type="button"
+          onClick={onDone}
+          className="w-full h-11 rounded-full font-bold text-[13.5px] flex items-center justify-center gap-2 cursor-pointer"
+          style={{
+            backgroundColor: 'white',
+            border: '1.5px solid var(--brand-border)',
+            color: 'var(--brand-text-secondary)',
+          }}
+          whileTap={{ scale: 0.97 }}
+        >
+          <Home className="w-4 h-4" />
+          Back to dashboard
+        </motion.button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main wizard
+// ─────────────────────────────────────────────────────────────────────────────
+
+const STEP_FLOW: StepKey[] = ['B1', 'B2', 'WEIGHT', 'MEDICATION', 'B3'];
+// First-reading flow includes B1; second+ readings in the same session skip B1.
+const SECOND_READING_FLOW: StepKey[] = ['B2', 'WEIGHT', 'MEDICATION', 'B3'];
+
+export default function CheckIn() {
+  const router = useRouter();
+  const { isLoading, isAuthenticated } = useAuth();
+  const { } = useLanguage(); // reserved for future i18n wiring
+
+  const [profile, setProfile] = useState<PatientProfileDto | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+
+  const [form, setForm] = useState<FormData>(emptyForm);
+  const [step, setStep] = useState<StepKey>('B1');
+  const [direction, setDirection] = useState(1);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  // Session state — sessionId is generated once via lazy init so we don't
+  // need a setState-in-effect to bootstrap it (Next 16 lint).
+  const [sessionId] = useState<string>(() => uuid());
+  const [sessionReadings, setSessionReadings] = useState<SessionReading[]>([]);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [readingNumber, setReadingNumber] = useState(0); // count of submitted readings in session
+
+  // Fetch patient profile to know isPregnant + hasAFib.
+  useEffect(() => {
+    if (isLoading || !isAuthenticated) return;
+    let cancelled = false;
+    (async () => {
+      const p = await getMyPatientProfile().catch(() => null);
+      if (!cancelled) {
+        setProfile(p);
+        setProfileLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isAuthenticated, isLoading]);
+
+  // Snap the page to the top whenever the wizard advances (or goes back) to
+  // a different step — otherwise the user lands wherever the previous step's
+  // scroll position left them, which is disorienting.
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [step, showConfirmation]);
+
+  const isPregnant = profile?.isPregnant === true;
+  const hasAFib = profile?.hasAFib === true;
+
+  const flow = readingNumber === 0 ? STEP_FLOW : SECOND_READING_FLOW;
+  const stepIndex = flow.indexOf(step);
+  const visibleTotal = flow.length;
+  const visibleIndex = stepIndex + 1;
+
+  function setField<K extends keyof FormData>(k: K, v: FormData[K]) {
+    if (error) setError('');
+    setForm((prev) => ({ ...prev, [k]: v }));
+  }
+
+  function validateStep(s: StepKey): string | null {
+    if (s === 'B2') {
+      if (!form.measuredDate || !form.measuredTime) return 'Please pick the date and time.';
+      const measuredDate = new Date(`${form.measuredDate}T${form.measuredTime}`);
+      if (isNaN(measuredDate.getTime())) return 'That date doesn\'t look right.';
+      const now = Date.now();
+      if (measuredDate.getTime() > now + 5 * 60 * 1000) return 'The time is in the future.';
+      if (measuredDate.getTime() < now - 30 * 24 * 60 * 60 * 1000) return 'That\'s more than 30 days ago.';
+      if (!form.position) return 'Pick a position.';
+      if (!form.systolicBP || !form.diastolicBP) return 'Enter both blood pressure numbers.';
+      const sys = parseInt(form.systolicBP, 10);
+      const dia = parseInt(form.diastolicBP, 10);
+      if (sys < 60 || sys > 250) return 'Top number should be between 60 and 250.';
+      if (dia < 40 || dia > 150) return 'Bottom number should be between 40 and 150.';
+      if (form.pulse) {
+        const p = parseInt(form.pulse, 10);
+        if (p < 30 || p > 220) return 'Pulse should be between 30 and 220.';
+      }
+    }
+    return null;
+  }
+
+  async function handleSubmit() {
+    if (submitting) return;
+    setError('');
+
+    // Build payload
+    const measurementConditions = {
+      noCaffeine: form.noCaffeine,
+      noSmoking: form.noSmoking,
+      noExercise: form.noExercise,
+      bladderEmpty: form.bladderEmpty,
+      seatedQuietly: form.seatedQuietly,
+      posturalSupport: form.posturalSupport,
+      notTalking: form.notTalking,
+      cuffOnBareArm: form.cuffOnBareArm,
+    };
+
+    const measuredAtIso = new Date(`${form.measuredDate}T${form.measuredTime}`).toISOString();
+    const sys = form.systolicBP ? parseInt(form.systolicBP, 10) : undefined;
+    const dia = form.diastolicBP ? parseInt(form.diastolicBP, 10) : undefined;
+    const pul = form.pulse ? parseInt(form.pulse, 10) : undefined;
+
+    const weightLbsOrKg = form.weight ? parseFloat(form.weight) : undefined;
+    const weightKg = weightLbsOrKg && form.weightUnit === 'lbs' ? weightLbsOrKg * 0.45359237 : weightLbsOrKg;
+
+    setSubmitting(true);
+    try {
+      await createJournalEntry({
+        measuredAt: measuredAtIso,
+        systolicBP: sys,
+        diastolicBP: dia,
+        pulse: pul,
+        weight: weightKg ? Number(weightKg.toFixed(2)) : undefined,
+        position: form.position ?? undefined,
+        sessionId,
+        measurementConditions,
+        medicationTaken: form.medicationTaken === 'yes' ? true : form.medicationTaken === 'no' ? false : undefined,
+        severeHeadache: form.severeHeadache,
+        visualChanges: form.visualChanges,
+        alteredMentalStatus: form.alteredMentalStatus,
+        chestPainOrDyspnea: form.chestPainOrDyspnea,
+        focalNeuroDeficit: form.focalNeuroDeficit,
+        severeEpigastricPain: form.severeEpigastricPain,
+        newOnsetHeadache: isPregnant ? form.newOnsetHeadache : false,
+        ruqPain: isPregnant ? form.ruqPain : false,
+        edema: isPregnant ? form.edema : false,
+        otherSymptoms: form.otherSymptomsText.trim() ? [form.otherSymptomsText.trim()] : undefined,
+      });
+
+      const reading: SessionReading = {
+        measuredAt: measuredAtIso,
+        systolicBP: sys,
+        diastolicBP: dia,
+        pulse: pul,
+      };
+      setSessionReadings((prev) => [...prev, reading]);
+      setReadingNumber((n) => n + 1);
+      setShowConfirmation(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not send reading. Try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function goNext() {
+    const v = validateStep(step);
+    if (v) { setError(v); return; }
+    setError('');
+    if (stepIndex === flow.length - 1) {
+      void handleSubmit();
+      return;
+    }
+    setDirection(1);
+    setStep(flow[stepIndex + 1]);
+  }
+
+  function goBack() {
+    setError('');
+    if (stepIndex === 0) {
+      router.push('/dashboard');
+      return;
+    }
+    setDirection(-1);
+    setStep(flow[stepIndex - 1]);
+  }
+
+  function startAnotherReading() {
+    // Keep sessionId; reset reading-specific fields; skip B1 next round.
+    setForm((prev) => ({
+      ...emptyForm(),
+      measuredDate: nowDate(),
+      measuredTime: nowTime(),
+      // Carry forward the user's checklist answers — they're still valid for
+      // the same session so we don't make them re-tap 8 things.
+      noCaffeine: prev.noCaffeine,
+      noSmoking: prev.noSmoking,
+      noExercise: prev.noExercise,
+      bladderEmpty: prev.bladderEmpty,
+      seatedQuietly: prev.seatedQuietly,
+      posturalSupport: prev.posturalSupport,
+      notTalking: prev.notTalking,
+      cuffOnBareArm: prev.cuffOnBareArm,
+      weightUnit: prev.weightUnit,
+    }));
+    setShowConfirmation(false);
+    setStep('B2');
+    setDirection(1);
+  }
+
+  // Authed loading state — skeleton mirroring the wizard chrome (top bar +
+  // step header + a few content rows + sticky CTA placeholder) so the page
+  // doesn't flash a generic spinner before the first step renders.
+  if (isLoading || !isAuthenticated || profileLoading) {
+    return <CheckInSkeleton />;
+  }
+
+  // Confirmation overlays the whole flow
+  if (showConfirmation) {
+    const last = sessionReadings[sessionReadings.length - 1];
+    return (
+      <div
+        className="min-h-screen flex flex-col"
+        style={{ backgroundColor: 'var(--brand-background)' }}
+      >
+        <main className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-4">
+          <ConfirmationScreen
+            lastReading={last}
+            sessionReadings={sessionReadings}
+            hasAFib={hasAFib}
+            onAddAnother={startAnotherReading}
+            onDone={() => router.push('/dashboard')}
+          />
+        </main>
+      </div>
+    );
+  }
+
+  const stepProps: StepProps = { form, setField };
+
+  return (
+    <div className="min-h-screen flex flex-col" style={{ backgroundColor: 'var(--brand-background)' }}>
+      {/* Top bar */}
+      <header className="sticky top-0 z-20 bg-white" style={{ borderBottom: '1px solid var(--brand-border)' }}>
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={goBack}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[13px] font-semibold cursor-pointer"
+            style={{ color: 'var(--brand-text-secondary)' }}
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back
+          </button>
+          <StepDots current={visibleIndex} total={visibleTotal} />
+          <div className="w-[60px]" aria-hidden /> {/* spacer to keep dots centered */}
+        </div>
+        {readingNumber > 0 && (
+          <div
+            className="px-4 sm:px-6 py-2 flex items-center justify-center gap-2 text-[12px] font-semibold"
+            style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
+          >
+            <Volume2 className="w-3.5 h-3.5" />
+            Reading {readingNumber + 1} in this session{hasAFib ? ' · AFib needs 3 in a row' : ''}
+          </div>
+        )}
+      </header>
+
+      {/* Main content with safe-area bottom padding sized just enough to clear
+          the sticky CTA (~72px tall) plus the iOS home indicator. */}
+      <main
+        className="flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-5 sm:py-8"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 7rem)' }}
+      >
+        <AnimatePresence mode="wait" custom={direction}>
+          <motion.div
+            key={step}
+            custom={direction}
+            initial={{ x: direction > 0 ? 60 : -60, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: direction > 0 ? -60 : 60, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 340, damping: 30 }}
+          >
+            {step === 'B1' && <B1Checklist {...stepProps} />}
+            {step === 'B2' && <B2Reading {...stepProps} />}
+            {step === 'WEIGHT' && <StepWeight {...stepProps} />}
+            {step === 'MEDICATION' && <StepMedication {...stepProps} />}
+            {step === 'B3' && <B3Symptoms {...stepProps} isPregnant={isPregnant} />}
+          </motion.div>
+        </AnimatePresence>
+
+        {error && (
+          <p
+            className="mt-5 text-[13px] text-center font-semibold px-4 py-2 rounded-lg"
+            style={{ color: 'var(--brand-alert-red)', backgroundColor: 'var(--brand-alert-red-light)' }}
+          >
+            {error}
+          </p>
+        )}
+      </main>
+
+      {/* Sticky bottom CTA */}
+      <div
+        className="fixed bottom-0 left-0 right-0 bg-white px-4 pt-3 z-30"
+        style={{
+          borderTop: '1px solid var(--brand-border)',
+          boxShadow: '0 -4px 16px rgba(0,0,0,0.05)',
+          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)',
+        }}
+      >
+        <div className="max-w-3xl mx-auto">
+          <motion.button
+            type="button"
+            onClick={goNext}
+            disabled={submitting}
+            className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+            style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
+            whileTap={{ scale: 0.98 }}
+          >
+            {submitting
+              ? 'Sending…'
+              : step === 'B3'
+                ? 'Submit reading'
+                : 'Continue'}
+            {!submitting && step !== 'B3' && <ArrowRight className="w-4 h-4" />}
+            {!submitting && step === 'B3' && <Check className="w-4 h-4" />}
+          </motion.button>
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
+// Reserved for a future symptom-row chevron — kept in the import block so
+// the icon set reads top-to-bottom in source review.
+void ChevronRightIcon;
+
+// ─── Skeleton ────────────────────────────────────────────────────────────────
+// Mirrors the wizard layout (top bar with dots, step header, a few content
+// rows, sticky bottom CTA placeholder) so the page doesn't pop in.
+
+function SkelBone({ w, h, rounded = 'rounded-lg' }: { w: number | string; h: number; rounded?: string }) {
+  return (
+    <div
+      className={`animate-pulse ${rounded} shrink-0`}
+      style={{ width: w, height: h, backgroundColor: '#EDE9F6' }}
+    />
+  );
+}
+
+function SkelDots() {
+  return (
+    <div className="flex items-center gap-1.5">
+      {[22, 7, 7, 7, 7].map((w, i) => (
+        <SkelBone key={i} w={w} h={7} rounded="rounded-full" />
+      ))}
+    </div>
+  );
+}
+
+function CheckInSkeleton() {
+  return (
+    <div className="min-h-screen flex flex-col" style={{ backgroundColor: 'var(--brand-background)' }}>
+      {/* Top bar */}
+      <header className="sticky top-0 z-20 bg-white" style={{ borderBottom: '1px solid var(--brand-border)' }}>
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
+          <SkelBone w={56} h={20} rounded="rounded-full" />
+          <SkelDots />
+          <SkelBone w={56} h={20} rounded="rounded-full" />
+        </div>
+      </header>
+
+      {/* Body */}
+      <main
+        className="flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-5 sm:py-8"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 7rem)' }}
+      >
+        {/* Step header */}
+        <div className="space-y-2 mb-6">
+          <SkelBone w={70} h={11} rounded="rounded-md" />
+          <SkelBone w={'70%'} h={26} rounded="rounded-lg" />
+          <SkelBone w={'85%'} h={14} rounded="rounded-md" />
+        </div>
+
+        {/* Content rows — match B1 checklist look */}
+        <div className="space-y-2.5">
+          {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+            <div
+              key={i}
+              className="rounded-xl p-3 flex items-center gap-3"
+              style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)' }}
+            >
+              <SkelBone w={36} h={36} rounded="rounded-lg" />
+              <div className="flex-1 min-w-0">
+                <SkelBone w={`${60 + ((i * 7) % 30)}%`} h={12} rounded="rounded-md" />
+              </div>
+              <SkelBone w={24} h={24} rounded="rounded-full" />
+            </div>
+          ))}
+        </div>
+      </main>
+
+      {/* Sticky bottom CTA */}
+      <div
+        className="fixed bottom-0 left-0 right-0 bg-white px-4 pt-3 z-30"
+        style={{
+          borderTop: '1px solid var(--brand-border)',
+          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)',
+        }}
+      >
+        <div className="max-w-3xl mx-auto">
+          <SkelBone w={'100%'} h={48} rounded="rounded-full" />
         </div>
       </div>
     </div>

@@ -69,6 +69,9 @@ export default function Navbar() {
   const links = [
     { labelKey: 'nav.dashboard' as const, href: '/dashboard' },
     { labelKey: 'nav.checkin' as const, href: '/check-in' },
+    // Reuses the existing 'readings.title' key ("My Readings") so we don't
+    // have to register a new nav.readings key across all 5 locales.
+    { labelKey: 'readings.title' as const, href: '/readings' },
     { labelKey: 'nav.chat' as const, href: '/chat' },
   ];
 
