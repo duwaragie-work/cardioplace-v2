@@ -17,6 +17,6 @@ import { DailyJournalModule } from '../daily_journal/daily_journal.module.js'
     RagService,
     ConversationHistoryService,
   ],
-  exports: [ChatService, ConversationHistoryService],
+  exports: [ChatService, ConversationHistoryService, SystemPromptService],
 })
 export class ChatModule {}
