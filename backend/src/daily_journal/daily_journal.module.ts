@@ -4,6 +4,7 @@ import { DailyJournalService } from './daily_journal.service.js'
 import { DeviationService } from './services/deviation.service.js'
 import { EscalationService } from './services/escalation.service.js'
 import { JournalNotificationService } from './services/notification.service.js'
+import { ProfileResolverService } from './services/profile-resolver.service.js'
 
 @Module({
   controllers: [DailyJournalController],
@@ -12,7 +13,8 @@ import { JournalNotificationService } from './services/notification.service.js'
     DeviationService,
     EscalationService,
     JournalNotificationService,
+    ProfileResolverService,
   ],
-  exports: [DailyJournalService],
+  exports: [DailyJournalService, ProfileResolverService],
 })
 export class DailyJournalModule {}
