@@ -1526,7 +1526,7 @@ export default function ClinicalIntakePage() {
         style={
           isIntro || isComplete
             ? undefined
-            : { paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12rem)' }
+            : { paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 7rem)' }
         }
       >
         <AnimatePresence mode="wait" custom={direction}>
