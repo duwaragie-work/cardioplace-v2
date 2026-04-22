@@ -29,25 +29,29 @@ type AlertType = 'SYSTOLIC_BP' | 'DIASTOLIC_BP' | 'BP_COMBINED' | 'WEIGHT' | 'ME
 type AlertSeverity = 'LOW' | 'MEDIUM' | 'HIGH';
 type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
 
+// Local view-model. `type`/`severity` are nullable + loosened to `string`
+// because v2 DeviationAlertDto allows null on legacy fields (the v2
+// `tier` field replaces them). The TYPE_META + SEVERITY_META lookups
+// fall back gracefully when the field is absent.
 type Alert = {
   id: string;
-  type: AlertType;
-  severity: AlertSeverity;
-  magnitude: number;
-  baselineValue?: number;
-  actualValue?: number;
-  status: AlertStatus;
-  escalated: boolean;
+  type?: AlertType | string | null;
+  severity?: AlertSeverity | string | null;
+  magnitude?: number | null;
+  baselineValue?: number | null;
+  actualValue?: number | null;
+  status?: AlertStatus | string;
+  escalated?: boolean;
   createdAt: string;
-  acknowledgedAt?: string;
+  acknowledgedAt?: string | null;
   journalEntry?: {
     id: string;
-    entryDate: string;
-    measurementTime?: string;
-    systolicBP?: number;
-    diastolicBP?: number;
-    weight?: number;
-  };
+    /** ISO 8601 timestamp (replaces v1 entryDate + measurementTime). */
+    measuredAt: string;
+    systolicBP?: number | null;
+    diastolicBP?: number | null;
+    weight?: number | null;
+  } | null;
 };
 
 type Notif = {
@@ -93,10 +97,9 @@ function timeAgo(dateStr: string): string {
 
 function formatAlertDate(dateStr: string): string {
   try {
-    // entryDate is date-only (no time) — parse as UTC to avoid timezone shift
+    // measuredAt is a full ISO timestamp — render in the patient's local tz.
     const d = new Date(dateStr)
     return d.toLocaleDateString('en-US', {
-      timeZone: 'UTC',
       weekday: 'short',
       month: 'short',
       day: 'numeric',
@@ -183,8 +186,12 @@ function AlertCard({
   acknowledging: string | null;
 }) {
   const { t } = useLanguage();
-  const meta = TYPE_META[alert.type] ?? { label: alert.type, icon: AlertTriangle };
-  const sevMeta = SEVERITY_META[alert.severity] ?? SEVERITY_META.LOW;
+  // Cast back to the strict enum types — alert.type / .severity are loose
+  // strings on the model so legacy/null values can flow through, but the
+  // lookups want the strict enum keys. Both lookups fall back gracefully.
+  const meta =
+    TYPE_META[alert.type as AlertType] ?? { label: alert.type, icon: AlertTriangle };
+  const sevMeta = SEVERITY_META[alert.severity as AlertSeverity] ?? SEVERITY_META.LOW;
   const Icon = meta.icon;
   const isOpen = alert.status === 'OPEN';
   const isAcking = acknowledging === alert.id;
@@ -239,13 +246,13 @@ function AlertCard({
                 className="text-[14px] font-bold"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
-                {alertTypeLabels[alert.type] ?? alert.type}
+                {alert.type ? (alertTypeLabels[alert.type] ?? alert.type) : '—'}
               </span>
               <span
                 className="px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0"
                 style={{ backgroundColor: sevMeta.bg, color: sevMeta.text }}
               >
-                {sevLabels[alert.severity] ?? alert.severity}
+                {alert.severity ? (sevLabels[alert.severity] ?? alert.severity) : '—'}
               </span>
               {alert.escalated && (
                 <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-600 text-white shrink-0 flex items-center gap-1">
@@ -256,7 +263,7 @@ function AlertCard({
             </div>
 
             {/* BP reading for combined/BP alerts */}
-            {alert.journalEntry && (alert.type === 'BP_COMBINED' || alert.type.includes('BP')) && (
+            {alert.journalEntry && (alert.type === 'BP_COMBINED' || (alert.type ?? '').includes('BP')) && (
               <p className="text-[12px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('alert.recorded')}{' '}
                 <span className="font-semibold" style={{ color: sevMeta.text }}>
@@ -274,7 +281,7 @@ function AlertCard({
             )}
 
             {/* Non-BP values (weight, medication) */}
-            {alert.actualValue != null && !alert.type.includes('BP') && alert.type !== 'BP_COMBINED' && (
+            {alert.actualValue != null && !(alert.type ?? '').includes('BP') && alert.type !== 'BP_COMBINED' && (
               <p className="text-[12px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('alert.recorded')}{' '}
                 <span className="font-semibold" style={{ color: sevMeta.text }}>
@@ -284,17 +291,18 @@ function AlertCard({
               </p>
             )}
 
-            {/* Entry date + measurement time */}
-            {alert.journalEntry?.entryDate && (
-              <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
-                {formatAlertDate(alert.journalEntry.entryDate)}
-                {alert.journalEntry.measurementTime && (
-                  <span className="ml-1 font-semibold">
-                    {alert.journalEntry.measurementTime}
-                  </span>
-                )}
-              </p>
-            )}
+            {/* Measured-at — date + time derived from the single timestamp. */}
+            {alert.journalEntry?.measuredAt && (() => {
+              const dt = new Date(alert.journalEntry.measuredAt);
+              const hh = String(dt.getHours()).padStart(2, '0');
+              const mi = String(dt.getMinutes()).padStart(2, '0');
+              return (
+                <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
+                  {formatAlertDate(alert.journalEntry.measuredAt)}
+                  <span className="ml-1 font-semibold">{`${hh}:${mi}`}</span>
+                </p>
+              );
+            })()}
           </div>
 
           {/* Status badge */}
@@ -306,25 +314,43 @@ function AlertCard({
           )}
         </div>
 
-        {/* Acknowledge button */}
-        {isOpen && (
-          <motion.button
-            onClick={() => onAcknowledge(alert.id)}
-            disabled={isAcking}
-            className="mt-3 w-full h-10 rounded-xl text-[13px] font-bold flex items-center justify-center gap-2 transition disabled:opacity-60"
-            style={{ backgroundColor: sevMeta.bg, color: sevMeta.text, border: `1px solid ${sevMeta.border}` }}
-            whileTap={{ scale: 0.98 }}
+        {/* Action row — Acknowledge + deep-link to the Flow C alert detail */}
+        <div className="mt-3 flex items-center gap-2">
+          {isOpen && (
+            <motion.button
+              onClick={() => onAcknowledge(alert.id)}
+              disabled={isAcking}
+              className="flex-1 h-10 rounded-xl text-[13px] font-bold flex items-center justify-center gap-2 transition disabled:opacity-60 cursor-pointer"
+              style={{ backgroundColor: sevMeta.bg, color: sevMeta.text, border: `1px solid ${sevMeta.border}` }}
+              whileTap={{ scale: 0.98 }}
+            >
+              {isAcking ? (
+                <>{t('notifications.acknowledging')}</>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  {t('notifications.acknowledge')}
+                </>
+              )}
+            </motion.button>
+          )}
+          <Link
+            href={`/alerts/${alert.id}`}
+            className={
+              (isOpen ? 'h-10 px-4' : 'flex-1 h-10') +
+              ' rounded-xl text-[13px] font-bold flex items-center justify-center gap-1 transition cursor-pointer'
+            }
+            style={{
+              backgroundColor: 'var(--brand-primary-purple-light)',
+              color: 'var(--brand-primary-purple)',
+              border: '1px solid var(--brand-primary-purple-light)',
+            }}
+            aria-label="View alert details"
           >
-            {isAcking ? (
-              <>{t('notifications.acknowledging')}</>
-            ) : (
-              <>
-                <CheckCircle2 className="w-4 h-4" />
-                {t('notifications.acknowledge')}
-              </>
-            )}
-          </motion.button>
-        )}
+            View details
+            <span aria-hidden>→</span>
+          </Link>
+        </div>
       </div>
     </motion.div>
   );
