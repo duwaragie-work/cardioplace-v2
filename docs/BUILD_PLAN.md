@@ -446,10 +446,10 @@ All work happens on a `phase/N-description` branch (never `main` or `dev`).
 | 1b | `phase/1b-port-provider-pages` | Dev 3 | ✅ | Port `/frontend/provider/*` UI to `/admin`, frontend SUPER_ADMIN redirect, `.env.example` files, port allocation (backend 4000) |
 | 2 | `phase/2-rule-based-schema` | Dev 3 | ✅ | Single Prisma migration for §2 |
 | 3 | `phase/3-patient-intake-api` | Dev 3 | ✅ | Self-report endpoints + `PatientMedication` CRUD |
-| 4 | `phase/4-profile-resolver` | Dev 2 | — | Safety-net logic, unverified handling |
-| 5 | `phase/5-alert-engine` | Dev 2 | — | Rule pipeline standard + personalized |
-| 6 | `phase/6-three-tier-messages` | Dev 2 | — | Message registry + OutputGenerator |
-| 7 | `phase/7-escalation-ladder` | Dev 3 | ⏸ | T+N cron + 15-field audit — ⚠️ blocks on phase/5 + phase/6 |
+| 4 | `phase/4-profile-resolver` | Dev 2 | ✅ | Safety-net logic (HF type UNKNOWN → HFREF, pregnancy + unverified ACE/ARB still fires), `ResolvedContext` DTO in `/shared` |
+| 5 | `phase/5-alert-engine` | Dev 2 | ✅ | Rule pipeline standard + personalized, session averaging, AFib ≥3-reading gate, 65+ lower bound override, 26 rule functions |
+| 6 | `phase/6-three-tier-messages` | Dev 2 | ✅ | `/shared/alert-messages.ts` registry + `OutputGeneratorService` (boot-time completeness check); 57 end-to-end scenarios in `ALERT_SCENARIOS.md` |
+| 7 | `phase/7-escalation-ladder` | Dev 3 | ✅ | Ladder state machine (Tier 1 / Tier 2 / BP Level 2) + `@Cron('*/15 * * * *')` scanner + business-hours queueing + resolution API (acknowledge / resolve / audit) + 15-field audit trail |
 | 8 | `phase/8-admin-shell` | Dev 1 | — | Admin app auth, layout, patient list |
 | 9 | `phase/9-admin-verification` | Dev 1 | — | Profile confirm/correct UI |
 | 10 | `phase/10-admin-thresholds` | Dev 1 | — | Threshold editor |
@@ -458,7 +458,7 @@ All work happens on a `phase/N-description` branch (never `main` or `dev`).
 | 13 | `phase/13-practice-config` | Dev 3 | ✅ | `Practice` + assignment + threshold CRUD; enrollment gate (incl. HFrEF/HCM/DCM threshold check) |
 | 14 | `phase/14-patient-intake-ui` | Dev 1 | — | Card-based medication + condition intake |
 | 15 | `phase/15-patient-check-in-v2` | Dev 1 | — | Pulse, checklist, structured symptoms |
-| 16 | `phase/16-chat-system-prompt-v2` | Dev 2 | — | Chat rewrite for new schema |
+| 16 | `phase/16-chat-system-prompt-v2` | Dev 2 | ✅ | Rewrote `SystemPromptService` to inject `ResolvedContext` + active alerts; tone-tier scaffolding (`PATIENT` / `CAREGIVER` / `PHYSICIAN`); mirrored guardrails in ADK Python prompts |
 | 17 | `phase/17-crons` | Dev 3 | ✅ | Gap alert (48h, PUSH + EMAIL), monthly re-ask (per-patient 30d anniversary, PUSH) |
 | 18 | `phase/18-integration-tests` | all | — | E2E + rule coverage |
 | 19 | `phase/19-seed-data` | Dev 3 | ✅ | Med catalog (33 entries) + 5 demo patient archetypes + perma-OTP `666666` for all seed users |
@@ -575,70 +575,72 @@ Each checklist is organized by the phase branches the dev owns. Phase numbers ma
 
 ### 7B. Dev 2 — Rule engine + chat
 
-#### Phase 4 — ProfileResolver (branch `phase/4-profile-resolver`)
-- [ ] New service: `/backend/src/daily_journal/services/profile-resolver.service.ts`
-- [ ] Loads: `User` clinical fields, active verified `PatientMedication`, `PatientThreshold` (if any), `PatientProviderAssignment`, reading count
-- [ ] Returns `ResolvedContext` DTO (lives in `/shared`)
-- [ ] Safety-net bias logic:
-  - `heartFailureType = UNKNOWN` → apply HFrEF defaults
+#### Phase 4 — ProfileResolver (branch `phase/4-profile-resolver`) ✅
+- [x] New service: `/backend/src/daily_journal/services/profile-resolver.service.ts`
+- [x] Loads: `User` clinical fields, active `PatientMedication` (verified + known-class UNVERIFIED for suppression logic), `PatientThreshold`, `PatientProviderAssignment`, reading count
+- [x] Returns `ResolvedContext` DTO (lives in `/shared`)
+- [x] Safety-net bias logic:
+  - `heartFailureType = UNKNOWN` → `resolvedHFType = HFREF`
+  - DCM alone (no HF flag) → `resolvedHFType = HFREF`
   - `isPregnant = true` + unverified → still activates pregnancy thresholds AND ACE/ARB contraindication check
   - `drugClass = OTHER_UNVERIFIED` or voice/photo meds → excluded from automated alerts
-  - Known-class unverified meds → apply suppression logic (e.g. beta-blocker 50–60 suppression) but NOT Tier 1 contraindications
-- [ ] Age group derivation from `dateOfBirth`: 18–39 / 40–64 / 65+
-- [ ] Pre-Day-3 flag: true if patient has <7 `JournalEntry` rows
-- [ ] Unit tests for each safety-net scenario
-- [ ] Commit
+  - Known-class unverified meds → retained in `contextMeds` for suppression; NDHP Tier 1 gates on `verificationStatus = VERIFIED`
+- [x] Age group derivation from `dateOfBirth`: 18-39 / 40-64 / 65+ (via `getAgeGroup` in `/shared/derivatives.ts`)
+- [x] Pre-Day-3 flag: true if patient has <7 `JournalEntry` rows
+- [x] 426-line unit spec covering every safety-net scenario
+- [x] Commit
 
-#### Phase 5 — Alert Engine (branch `phase/5-alert-engine`)
-- [ ] New service: `/backend/src/daily_journal/services/alert-engine.service.ts`
-- [ ] Session averaging: group readings by `sessionId`, compute mean SBP/DBP/pulse. AFib requires ≥3 readings before evaluating.
-- [ ] Pipeline in evaluation order (short-circuit on highest severity):
+#### Phase 5 — Alert Engine (branch `phase/5-alert-engine`) ✅
+- [x] New service: `/backend/src/daily_journal/services/alert-engine.service.ts` + `SessionAveragerService` + 12 pure rule functions in `engine/`
+- [x] Session averaging: group readings by `sessionId` or 30-min proximity, compute mean SBP/DBP/pulse. AFib gate blocks BP/HR rules when <3 readings (contraindications + symptom overrides still fire).
+- [x] Pipeline matches BUILD_PLAN §3.2 evaluation order with short-circuit:
   1. Pregnancy + ACE/ARB contraindication → Tier 1
-  2. NDHP-CCB + HFrEF contraindication → Tier 1
-  3. Symptom override → BP Level 2 (pregnancy-specific if pregnant)
+  2. NDHP-CCB + HFrEF contraindication → Tier 1 (checks combo components; respects verification status)
+  3. Symptom override (pregnancy-specific + general) → BP Level 2
   4. Absolute emergency SBP ≥180 or DBP ≥120 → BP Level 2
   5. Pregnancy thresholds (≥160/110 L2, ≥140/90 L1) if `isPregnant`
-  6. Condition branches: HFrEF (<85 / ≥160), HFpEF (<110 / ≥160), DCM (<85 / ≥160), HCM (<100 / ≥160), CAD (DBP <70 critical)
-  7. Personalized mode (if `PatientThreshold` AND ≥7 readings): `±20 mmHg` rule
-  8. Standard mode (AHA 2025 table)
-  9. HR branches: AFib >110, tachy >100 × 2, brady <50 symptomatic / <40 asymptomatic, beta-blocker 50–60 suppression
-  10. Pulse pressure `SBP − DBP > 60` → Tier 3 physician-only flag
-- [ ] Suboptimal-measurement flag: evaluate but tag `DeviationAlert.suboptimalMeasurement = true`
-- [ ] Pre-Day-3 mode: force `mode = STANDARD`, tag output
-- [ ] 65+ lower bound override: SBP <100 (not <90)
-- [ ] Integration with existing `deviation.service` event emission — refactor, don't duplicate
-- [ ] Unit tests — **one test per signed-off clinical sub-section in CLINICAL_SPEC.md**
-- [ ] Commit
+  6. Condition branches: HFrEF (<85 / ≥160), HFpEF (<110 / ≥160), DCM (<85 / ≥160), HCM (<100 / ≥160), CAD (DBP <70 critical + SBP ≥160), HCM vasodilator/nitrate Tier 3 flag
+  7. Personalized mode (`PatientThreshold` + ≥7 readings): ±20 mmHg rule
+  8. Standard mode (AHA 2025 ≥160/100 + <90, 65+ override <100)
+  9. HR branches: AFib >110/<50, tachy >100 on ≥2 consecutive readings (true prior-reading check), brady <50 symptomatic / <40 asymptomatic
+  10. Pulse pressure >60 → Tier 3 annotation (rides on primary rule or fires standalone) + loop-diuretic hypotension Tier 3
+- [x] Suboptimal-measurement flag propagates to `DeviationAlert.suboptimalMeasurement`
+- [x] Pre-Day-3 mode: forces `mode = STANDARD`, tags output with disclaimer
+- [x] 65+ lower bound override: SBP <100 (separate `RULE_AGE_65_LOW`)
+- [x] Listens on `JOURNAL_EVENTS.ENTRY_CREATED` + `ENTRY_UPDATED`, emits `ALERT_CREATED` (renamed from v1 `ANOMALY_TRACKED` in phase/7); auto-resolves benign-reading BP L1 alerts on re-eval
+- [x] 912-line rules spec + 1134-line end-to-end scenarios spec covering 57 CLINICAL_SPEC scenarios
+- [x] Commit
 
-#### Phase 6 — Three-Tier Messages (branch `phase/6-three-tier-messages`)
-- [ ] Create `/shared/alert-messages.ts` — registry keyed by `ruleId`
-- [ ] Each `ruleId` entry has `{ patientMessage, caregiverMessage, physicianMessage }` functions that take context and return strings
-- [ ] `OutputGenerator` service in backend consumes this registry
-- [ ] Every rule in Phase 5 has a corresponding `ruleId` entry
-- [ ] Dr. Singal reviews this single file for wording sign-off
-- [ ] Unit tests verify every rule produces all three messages
-- [ ] Commit
+#### Phase 6 — Three-Tier Messages (branch `phase/6-three-tier-messages`) ✅
+- [x] `/shared/alert-messages.ts` — registry keyed by `ruleId`, one entry per `RULE_IDS` value
+- [x] Each entry has `{ patientMessage, caregiverMessage, physicianMessage }` builder functions taking `AlertContext` (session vitals, drug name/class, condition label, threshold value, physician annotations, pre-Day-3 flag, suboptimal flag)
+- [x] `OutputGeneratorService` consumes the registry; `onModuleInit()` refuses to boot if any `RuleId` is missing messages
+- [x] Every rule from `RULE_IDS` has a registry entry (startup-verified)
+- [x] Tier 1 patient messages avoid medication names (defer to provider); BP Level 2 messages include 911 CTA; physician-only rules return empty strings for patient + caregiver
+- [x] Unit tests verify every rule produces all three messages + end-to-end `ALERT_SCENARIOS.md` traceability
+- [x] Post-review cleanup: dead beta-blocker suppression branches removed; preeclampsia wording flagged for Dr. Singal review; `pretest` hook for shared-package rebuild
+- [x] Commit
 
-#### Phase 16 — Chat System Prompt v2 (branch `phase/16-chat-system-prompt-v2`)
-- [ ] Rewrite `/backend/src/chat/services/system-prompt.service.ts` to inject new structured fields:
-  - Conditions (hasHeartFailure, heartFailureType, hasCAD, hasAFib, etc.)
-  - Verified `PatientMedication` list (drug class, frequency, verification status)
-  - Current `PatientThreshold` (if any)
-  - Last N `DeviationAlert` rows with tier + ruleId + resolution state
-  - `profileVerificationStatus`
-  - Pregnancy status
-- [ ] Guardrails:
-  - Chatbot never suggests stopping/changing a medication
-  - Chatbot never contradicts an alert tier
-  - For BP Level 2 / Tier 1 alerts, chatbot defers to provider
-- [ ] Context injection for "why did I get this alert?" — pull last alert's `physicianMessage` and phrase for patient
-- [ ] Tone-tier output:
-  - Patient chat → warm, plain language
-  - If caregiver mode (future) → context + action
-  - Physician mode (future) → clinical shorthand
-- [ ] Integration tests: ensure voice/ADK flow still works with new system prompt
-- [ ] Regression check: existing voice features from v1 still function
-- [ ] Commit
+#### Phase 16 — Chat System Prompt v2 (branch `phase/16-chat-system-prompt-v2`) ✅
+- [x] Rewrote `/backend/src/chat/services/system-prompt.service.ts` to inject structured fields via `buildPatientContext`:
+  - Conditions (all 9, with HF type label: HFrEF / HFpEF / "type unknown — managed as HFrEF")
+  - Active `PatientMedication` list with drug class + frequency + ⚠ unverified marker + combo components
+  - `PatientThreshold` (SBP/DBP/HR lower-upper) with set-date
+  - Last 5 `DeviationAlert` rows with tier + ruleId + patientMessage (verbatim) + non-dismissable flag + physician-only "do NOT surface" markers
+  - `profileVerificationStatus` (UNVERIFIED → disclaimer line; CORRECTED → provider-verified line)
+  - Pregnancy status + due date + history preeclampsia
+  - Pre-Day-3 disclaimer when readingCount < 7
+- [x] Guardrails in system prompt:
+  - "Never suggest starting, stopping, changing, or adjusting any medication"
+  - "Never contradict, downplay, or dismiss an active alert's tier"
+  - Tier 1 → "contact their provider today"; BP Level 2 → "call 911"
+  - Physician-only alerts clearly flagged "do NOT surface to patient"
+- [x] "Why did I get this alert?" — prompt directs AI to use alert's `patientMessage` verbatim or lightly paraphrase; no invented clinical advice
+- [x] Tone-tier scaffolding via `ToneMode = 'PATIENT' | 'CAREGIVER' | 'PHYSICIAN'` + `buildToneBlock()`; phase/16 always sends PATIENT, other modes ready for future portals
+- [x] Voice agent integration: `VoiceService.buildPatientContext` delegates to the shared `SystemPromptService.buildPatientContext` so voice + text see identical clinical block; guardrails mirrored in `adk-service/agent/prompts.py`
+- [x] Regression guard: existing voice features preserved (gRPC session, audio forwarding, tool calls, transcript saving); voice prewarm hardened with `PrewarmStatus` + auto-retry on the frontend hook
+- [x] Coverage: 664-LOC unit spec + 374-LOC scenarios spec + 297-LOC voice spec + 256-LOC chat spec; 10 scenarios in `CHAT_SCENARIOS.md`
+- [x] Commit
 
 #### Phase 18 contribution — Clinical spec coverage tests
 - [ ] Every CLINICAL_SPEC signed-off item has a passing test
@@ -710,18 +712,34 @@ Each checklist is organized by the phase branches the dev owns. Phase numbers ma
 - [x] Shared DTOs in `/shared/src/intake.ts` (string-literal unions for Prisma enums)
 - [x] Commit
 
-#### Phase 7 — Escalation Service (branch `phase/7-escalation-ladder`)
+#### Phase 7 — Escalation Service (branch `phase/7-escalation-ladder`) ✅
 
-⚠️ **Blocks on phase/5 + phase/6.** Dev 2 must ship AlertEngine + OutputGenerator before phase/7 can read populated `DeviationAlert.tier`, `ruleId`, and three-tier messages. Starting phase/7 on stubs forces rework when the event shapes settle.
+- [x] Full rewrite of `EscalationService` as ladder state machine — retired v1 streak heuristic; populates `EscalationEvent.ladderStep`, `recipientIds`, `recipientRoles`, `notificationChannel`, `afterHours`, `scheduledFor`, `triggeredByResolution`
+- [x] Ladder definitions in `escalation/ladder-defs.ts` (pure data): Tier 1 / Tier 2 / BP Level 2 + BP Level 2 symptom-override variants; `ladderForTier()` routes by `AlertTier`
+- [x] `@Cron('*/15 * * * *')` scanner (also exposed as public `runScan(now)` for tests/ops): `firePendingScheduled` for queued / retry events + `advanceOverdueLadders` for ladder walk
+- [x] Anchor correctness: ladder deadlines compute from T+0 primary event's actual dispatch time (`notificationSentAt ?? scheduledFor ?? triggeredAt`), NOT `alert.createdAt` — fixes overnight Tier 1 compression bug
+- [x] Business-hours math via Luxon: `isWithinBusinessHours(now, practice)` + `nextBusinessHoursStart(now, practice)` — Mon–Fri + tz + DST-aware
+- [x] BP Level 2 exception: every step `afterHoursBehavior: FIRE_IMMEDIATELY`
+- [x] Dual-notify at BP Level 2 T+0 (primary + backup + patient in a single EscalationEvent)
+- [x] Tier 1 after-hours safety net: separate BACKUP_PROVIDER EscalationEvent row fires at T+0 when after-hours (gated on `!isWithinBusinessHours`); business hours → only primary fires, backup enters at T+4h
+- [x] Tier 1 T+4h re-sends to primary AND notifies backup (per CLINICAL_SPEC §V2-D)
+- [x] Resolution API: `POST /admin/alerts/:id/acknowledge`, `POST /admin/alerts/:id/resolve` with `{resolutionAction, resolutionRationale?}`, `GET /admin/alerts/:id/audit`
+- [x] Rationale validation: required for all Tier 1 + BP Level 2 actions AND for `TIER2_REVIEWED_NO_ACTION`; optional for other Tier 2 actions
+- [x] BP L2 #6 `BP_L2_UNABLE_TO_REACH_RETRY`: leaves alert OPEN + calls `EscalationService.scheduleRetry` to create fresh T+4h EscalationEvent with `triggeredByResolution=true`
+- [x] HEALPLACE_OPS soft fallback: resolves to all users with `UserRole.HEALPLACE_OPS`; empty set logs warn; on-call rotation deferred to post-MVP (V2-F #35)
+- [x] Fail-loud on missing PRIMARY / BACKUP / MEDICAL_DIRECTOR at dispatch (enrollment-gate integrity bug): error-logged + EscalationEvent row written with DISPATCH ERROR reason + partial dispatch preserved
+- [x] Emits `ESCALATION_DISPATCHED` at every dispatch (payload: `alertId, alertTier, ruleId, ladderStep, recipientIds, recipientRoles, channels, afterHours, dispatchedAt, triggeredByResolution`) for phase/19 analytics + future dashboards
+- [x] 15-field Joint Commission audit trail populated (13 auto from `DeviationAlert` + `EscalationEvent` rows with computed time-to-ack / time-to-resolve; 2 from resolution)
+- [x] Retired `JournalNotificationService` + `ESCALATION_CREATED` event — new EscalationService owns notification dispatch inline (Notification rows per recipient × channel, `@@unique` for cron retry idempotency)
+- [x] Schema migration `20260422160119_phase7_escalation_ladder`: `LadderStep` adds `T2H`; `DeviationAlert` drops legacy `@@unique([journalEntryId, type])` (app-level dedup on `ruleId`); `Notification` adds unique; `EscalationEvent` adds `scheduledFor` + `triggeredByResolution`
+- [x] Renamed v1 event `ANOMALY_TRACKED` → `ALERT_CREATED`, payload enriched with `tier` + `ruleId`
+- [x] Fixed legacy `TODO(phase/5)`: `DailyJournalService.delete` now emits `ENTRY_UPDATED` for session siblings so the rule engine re-evaluates surviving readings after a delete
+- [x] 78 unit tests across 4 new spec files (business-hours, ladder-defs, escalation state machine, alert-resolution) — includes anchor correctness end-to-end (Tier 1 alert at 10pm → T+0 queued 8am, T+4h at 12pm, T+8h at 4pm)
+- [x] Commit
 
-- [ ] Extend existing `EscalationService` to write `EscalationEvent.ladderStep`
-- [ ] `@Cron('*/15 * * * *')` scanner: advance overdue ladders
-- [ ] Business-hours math using `Practice.businessHours*` + Luxon or date-fns-tz
-- [ ] BP Level 2 exception: fires immediately regardless of hours
-- [ ] Dual-notify on BP Level 2 T+0 (primary + backup)
-- [ ] Resolution API: `POST /alerts/:id/resolve` with enum `resolutionAction` + rationale
-- [ ] 15-field audit trail populated (13 auto + 2 from resolution)
-- [ ] Commit
+Post-merge TODOs flagged in code:
+- BP Level 1 high/low + Tier 3 currently pass through without dashboard surfacing; phase/11 Dev 1 owns surfacing these.
+- Patient-facing notifications for BP Level 1 alerts have no consumer after `JournalNotificationService` retirement; phase/11 Dev 1 wires this.
 
 #### Phase 13 — Practice Config (branch `phase/13-practice-config`) ✅
 - [x] CRUD endpoints for `Practice` (`SUPER_ADMIN, MEDICAL_DIRECTOR, HEALPLACE_OPS`; PROVIDER excluded from write)
