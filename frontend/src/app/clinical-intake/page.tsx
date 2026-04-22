@@ -11,8 +11,8 @@
 //
 // A7 dedup is a modal interrupt when transitioning from A6 (combos) to A8.
 
-import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Heart,
@@ -50,9 +50,11 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import {
   getMyPatientProfile,
+  getMyMedications,
   saveIntakeProfile,
   saveIntakeMedications,
 } from '@/lib/services/intake.service';
+import { CORE_MEDS as ALL_CORE_MEDS, CATEGORY_MEDS as ALL_CATEGORY_MEDS, COMBO_MEDS as ALL_COMBO_MEDS } from '@cardioplace/shared';
 import {
   loadDraft,
   saveDraft,
@@ -1243,8 +1245,29 @@ function ExitSaveModal({ onConfirm, onCancel }: { onConfirm: () => void; onCance
 // Main wizard
 // ─────────────────────────────────────────────────────────────────────────────
 
+const VALID_DEEP_LINK_STEPS: IntakeStepKey[] = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A8', 'A9', 'A10'];
+
+// Next 16 requires components that read useSearchParams() to be wrapped in
+// a Suspense boundary so prerendering can bail out cleanly. Default export
+// provides that wrapper around the real wizard component.
 export default function ClinicalIntakePage() {
+  return (
+    <Suspense fallback={
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{ backgroundColor: 'var(--brand-background)' }}
+      >
+        <SpinnerIndicator size={40} className="text-[#7B00E0]" />
+      </div>
+    }>
+      <ClinicalIntakeWizard />
+    </Suspense>
+  );
+}
+
+function ClinicalIntakeWizard() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, isLoading } = useAuth();
 
   const [state, setStateRaw] = useState<IntakeFormState>(EMPTY_INTAKE_STATE);
@@ -1255,21 +1278,89 @@ export default function ClinicalIntakePage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [bootstrapping, setBootstrapping] = useState(true);
+  // True only when we hit the route without ?step= AND the patient already
+  // has a profile saved — in that case we render the "you're all set" page
+  // and the patient must edit via the /profile page (which sends them back
+  // here with ?step=AX). With ?step= we go straight into edit mode.
   const [profileExists, setProfileExists] = useState(false);
 
-  // Hydrate state from localStorage draft + check if profile already exists.
+  // Hydrate state. Three branches:
+  //   1. No profile saved yet → fresh wizard (or resume localStorage draft)
+  //   2. Profile exists + ?step= deep-link → load existing profile + meds
+  //      into the form and start at the requested step (E3 edit flow)
+  //   3. Profile exists + no ?step= → "you're all set" page
   useEffect(() => {
     if (isLoading || !user?.id) return;
     let cancelled = false;
     (async () => {
       try {
-        const profile = await getMyPatientProfile().catch(() => null);
+        const requestedStepRaw = searchParams.get('step') as IntakeStepKey | null;
+        const requestedStep = requestedStepRaw && VALID_DEEP_LINK_STEPS.includes(requestedStepRaw)
+          ? requestedStepRaw
+          : null;
+        const isEdit = !!requestedStep;
+
+        const [profile, meds] = await Promise.all([
+          getMyPatientProfile().catch(() => null),
+          isEdit ? getMyMedications().catch(() => []) : Promise.resolve([]),
+        ]);
         if (cancelled) return;
-        if (profile) {
+
+        if (profile && !isEdit) {
+          // Branch 3 — show the all-set page.
           setProfileExists(true);
           setBootstrapping(false);
           return;
         }
+
+        if (profile && isEdit) {
+          // Branch 2 — populate form with existing data so the patient sees
+          // their current answers and can edit just what changed.
+          const seeded: IntakeFormState = {
+            gender: profile.gender ?? undefined,
+            heightCm: profile.heightCm ?? undefined,
+            isPregnant: profile.isPregnant ?? undefined,
+            pregnancyDueDate: profile.pregnancyDueDate ?? undefined,
+            historyPreeclampsia: profile.historyPreeclampsia ?? false,
+            hasHeartFailure: profile.hasHeartFailure ?? false,
+            hasAFib: profile.hasAFib ?? false,
+            hasCAD: profile.hasCAD ?? false,
+            hasHCM: profile.hasHCM ?? false,
+            hasDCM: profile.hasDCM ?? false,
+            heartFailureType:
+              profile.heartFailureType && profile.heartFailureType !== 'NOT_APPLICABLE'
+                ? profile.heartFailureType
+                : undefined,
+            diagnosedHypertension: profile.diagnosedHypertension ?? false,
+            selectedMedications: (Array.isArray(meds) ? meds : [])
+              .filter((m) => !m.discontinuedAt)
+              .map((m) => {
+                // Resolve the catalog id from drugName so the toggle UI lights up
+                // when the patient revisits.
+                const lower = m.drugName.toLowerCase();
+                const catEntry =
+                  ALL_CORE_MEDS.find((c) => c.brandName.toLowerCase() === lower) ??
+                  ALL_CATEGORY_MEDS.find((c) => c.brandName.toLowerCase() === lower);
+                const comboEntry = ALL_COMBO_MEDS.find((c) => c.brandName.toLowerCase() === lower);
+                return {
+                  catalogId: catEntry?.id ?? comboEntry?.id,
+                  drugName: m.drugName,
+                  drugClass: m.drugClass as IntakeFormState['selectedMedications'][number]['drugClass'],
+                  isCombination: m.isCombination,
+                  combinationComponents: m.combinationComponents as IntakeFormState['selectedMedications'][number]['combinationComponents'],
+                  source: m.source as IntakeFormState['selectedMedications'][number]['source'],
+                  rawInputText: m.rawInputText ?? undefined,
+                  frequency: m.frequency,
+                };
+              }),
+          };
+          setStateRaw(seeded);
+          setStep(requestedStep);
+          setBootstrapping(false);
+          return;
+        }
+
+        // Branch 1 — no profile yet. Resume from draft or start fresh.
         const draft = loadDraft(user.id);
         if (draft) {
           // A draft pointing at the completion screen is stale — submit must
@@ -1281,6 +1372,8 @@ export default function ClinicalIntakePage() {
             if (draft.currentStep) setStep(draft.currentStep);
           }
         }
+        // Honor ?step= even on a fresh wizard so deep-links still work.
+        if (requestedStep) setStep(requestedStep);
       } finally {
         if (!cancelled) setBootstrapping(false);
       }
@@ -1288,7 +1381,7 @@ export default function ClinicalIntakePage() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, isLoading]);
+  }, [user?.id, isLoading, searchParams]);
 
   // Auth gating: send unauthenticated to sign-in; basic onboarding incomplete to /onboarding.
   useEffect(() => {

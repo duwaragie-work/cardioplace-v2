@@ -77,6 +77,38 @@ export class AssignmentService {
     }
   }
 
+  /**
+   * Patient-facing care-team view. Returns the assignment with the three
+   * provider names (primary / backup / medical director) populated, or
+   * `null` when the patient hasn't been assigned to a care team yet (a
+   * legitimate state during enrollment).
+   */
+  async findCareTeamForPatient(patientUserId: string) {
+    const assignment = await this.prisma.patientProviderAssignment.findUnique({
+      where: { userId: patientUserId },
+      include: {
+        practice: { select: { id: true, name: true } },
+        primaryProvider: { select: { id: true, name: true, email: true } },
+        backupProvider: { select: { id: true, name: true, email: true } },
+        medicalDirector: { select: { id: true, name: true, email: true } },
+      },
+    })
+    return {
+      statusCode: 200,
+      message: assignment ? 'Care team retrieved' : 'No care team assigned yet',
+      data: assignment
+        ? {
+            id: assignment.id,
+            practice: assignment.practice,
+            primaryProvider: assignment.primaryProvider,
+            backupProvider: assignment.backupProvider,
+            medicalDirector: assignment.medicalDirector,
+            assignedAt: assignment.assignedAt,
+          }
+        : null,
+    }
+  }
+
   async update(patientUserId: string, dto: UpdateAssignmentDto) {
     const existing = await this.prisma.patientProviderAssignment.findUnique({
       where: { userId: patientUserId },

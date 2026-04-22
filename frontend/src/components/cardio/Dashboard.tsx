@@ -16,10 +16,11 @@ import { Flame, Clock, ArrowRight, Heart, Target, ShieldCheck, AlertTriangle, Pi
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getJournalEntries, getLatestBaseline, getAlerts, getJournalStats, type AlertTier } from '@/lib/services/journal.service';
-import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
+import { getMyPatientProfile, getMyMedications, type PatientProfileDto } from '@/lib/services/intake.service';
 import { getMyThreshold, type PatientThresholdDto } from '@/lib/services/threshold.service';
 import { loadDraft, hasDraft, stepProgress } from '@/lib/intake/draft';
 import ActionRequiredCard from '@/components/intake/ActionRequiredCard';
+import MonthlyMedReask from '@/components/intake/MonthlyMedReask';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function getDateLabel(dateStr: string): string {
@@ -114,6 +115,9 @@ export default function Dashboard() {
   // Flow D state — full profile (for D1 verification badge) + threshold (D2 + D4 colors).
   const [profile, setProfile] = useState<PatientProfileDto | null>(null);
   const [threshold, setThreshold] = useState<PatientThresholdDto | null>(null);
+  // E4 — track whether the patient has any active medications so we don't
+  // pop the monthly re-ask modal for someone who reported zero meds.
+  const [hasMeds, setHasMeds] = useState(false);
 
   // Resolve Flow D state — fetches PatientProfile + PatientThreshold in
   // parallel, falls back to localStorage draft inspection for the intake UI.
@@ -124,13 +128,17 @@ export default function Dashboard() {
     let cancelled = false;
     (async () => {
       try {
-        const [p, t] = await Promise.all([
+        const [p, t, m] = await Promise.all([
           getMyPatientProfile().catch(() => null),
           getMyThreshold().catch(() => null),
+          // Only check meds if profile exists — saves a 404-then-empty round trip
+          // for patients who haven't completed clinical intake yet.
+          getMyMedications().catch(() => []),
         ]);
         if (cancelled) return;
         setProfile(p);
         setThreshold(t);
+        setHasMeds(Array.isArray(m) && m.some((med) => !med.discontinuedAt));
 
         if (p) { setIntakeUi({ kind: 'done' }); return; }
         if (hasDraft(user.id)) {
@@ -839,6 +847,15 @@ export default function Dashboard() {
           </div>
         </div>
       </main>
+
+      {/* E4 — Monthly medication re-check modal. Self-managed (timestamp in
+          localStorage); only fires for patients who have completed intake
+          AND have at least one active medication on file. */}
+      <MonthlyMedReask
+        userId={user?.id ?? null}
+        hasMedications={hasMeds}
+        intakeComplete={intakeUi.kind === 'done'}
+      />
     </div>
   );
 }

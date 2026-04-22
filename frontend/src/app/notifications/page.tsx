@@ -780,24 +780,66 @@ export default function NotificationsPage() {
           </>
         ) : (
           <>
-            {/* ── Action Required ── */}
-            {openAlerts.length > 0 && (
-              <div>
-                <SectionLabel count={openAlerts.length}>{t('notifications.actionNeeded')}</SectionLabel>
-                <div className="space-y-3">
-                  <AnimatePresence mode="popLayout">
-                    {openAlerts.map((alert) => (
-                      <AlertCard
-                        key={alert.id}
-                        alert={alert}
-                        onAcknowledge={handleAcknowledge}
-                        acknowledging={acknowledging}
-                      />
-                    ))}
-                  </AnimatePresence>
-                </div>
-              </div>
-            )}
+            {/* ── Alerts grouped by tier (E1) — emergency first, then Tier 1
+                contraindications, BP Level 1 high, BP Level 1 low, info, then
+                anything that the rule engine hasn't classified. Each section
+                renders only when it has at least one open alert. */}
+            {openAlerts.length > 0 && (() => {
+              type TierBucketKey =
+                | 'emergency'
+                | 'tier1'
+                | 'high'
+                | 'low'
+                | 'info'
+                | 'other';
+              const order: TierBucketKey[] = ['emergency', 'tier1', 'high', 'low', 'info', 'other'];
+              const headings: Record<TierBucketKey, string> = {
+                emergency: 'Emergency — call 911 if symptoms',
+                tier1: 'Important medication alerts',
+                high: 'Elevated blood pressure',
+                low: 'Low blood pressure',
+                info: 'For your information',
+                other: 'Other alerts',
+              };
+              const bucketize = (a: typeof openAlerts[number]): TierBucketKey => {
+                const tier = (a as { tier?: string | null }).tier ?? null;
+                const sbp = a.journalEntry?.systolicBP ?? 0;
+                const dbp = a.journalEntry?.diastolicBP ?? 0;
+                if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'emergency';
+                if (sbp >= 180 || dbp >= 120) return 'emergency';
+                if (tier === 'TIER_1_CONTRAINDICATION') return 'tier1';
+                if (tier === 'BP_LEVEL_1_LOW' || (sbp > 0 && sbp < 90) || (dbp > 0 && dbp < 60)) return 'low';
+                if (tier === 'BP_LEVEL_1_HIGH') return 'high';
+                if (tier === 'TIER_3_INFO') return 'info';
+                if (a.severity === 'HIGH' || (a.type ?? '').includes('BP')) return 'high';
+                return 'other';
+              };
+              const buckets = new Map<TierBucketKey, typeof openAlerts>();
+              for (const a of openAlerts) {
+                const k = bucketize(a);
+                if (!buckets.has(k)) buckets.set(k, []);
+                buckets.get(k)!.push(a);
+              }
+              return order
+                .filter((k) => buckets.has(k))
+                .map((k) => (
+                  <div key={k}>
+                    <SectionLabel count={buckets.get(k)!.length}>{headings[k]}</SectionLabel>
+                    <div className="space-y-3">
+                      <AnimatePresence mode="popLayout">
+                        {buckets.get(k)!.map((alert) => (
+                          <AlertCard
+                            key={alert.id}
+                            alert={alert}
+                            onAcknowledge={handleAcknowledge}
+                            acknowledging={acknowledging}
+                          />
+                        ))}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+                ));
+            })()}
 
             {/* ── Notifications ── */}
             <div>
