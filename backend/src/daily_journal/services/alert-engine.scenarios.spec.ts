@@ -141,13 +141,21 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   beforeEach(async () => {
     prisma = {
       deviationAlert: {
-        upsert: (jest.fn() as jest.Mock<any>).mockImplementation(
-          (args: any) =>
-            Promise.resolve({
-              id: 'alert-fixture-id',
-              escalated: false,
-              ...args.create,
-            }),
+        // Phase/7 — findFirst + create|update pattern replacing upsert.
+        findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
+        create: (jest.fn() as jest.Mock<any>).mockImplementation((args: any) =>
+          Promise.resolve({
+            id: 'alert-fixture-id',
+            escalated: false,
+            ...args.data,
+          }),
+        ),
+        update: (jest.fn() as jest.Mock<any>).mockImplementation((args: any) =>
+          Promise.resolve({
+            id: args.where?.id ?? 'alert-fixture-id',
+            escalated: false,
+            ...args.data,
+          }),
         ),
         updateMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 0 }),
       },
@@ -177,9 +185,11 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     sessionAverager.averageForEntry.mockResolvedValue(session)
     profileResolver.resolve.mockResolvedValue(ctx)
     const result = await service.evaluate(session.entryId)
-    const upsertArgs = prisma.deviationAlert.upsert.mock.calls[0]?.[0]
+    // Phase/7 — upsert replaced with create (new row) or update (existing).
+    // Scenarios all start from an empty DB so create fires.
+    const createArgs = prisma.deviationAlert.create.mock.calls[0]?.[0]
     const eventArgs = eventEmitter.emit.mock.calls[0]
-    return { result, upsertArgs, eventArgs }
+    return { result, createArgs, eventArgs }
   }
 
   // ========================================================================
@@ -187,7 +197,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // ========================================================================
 
   it('Scenario 1 — Pregnant patient on lisinopril → Tier 1 RULE_PREGNANCY_ACE_ARB', async () => {
-    const { result, upsertArgs, eventArgs } = await run(
+    const { result, createArgs, eventArgs } = await run(
       buildSession({ systolicBP: 130, diastolicBP: 82, pulse: 78 }),
       buildCtx({
         isPregnant: true,
@@ -197,23 +207,23 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
-    expect(upsertArgs.create.tier).toBe('TIER_1_CONTRAINDICATION')
-    expect(upsertArgs.create.dismissible).toBe(false)
-    expect(upsertArgs.create.severity).toBe('HIGH')
-    expect(upsertArgs.create.type).toBe('MEDICATION_ADHERENCE')
-    expect(upsertArgs.create.pulsePressure).toBeNull()
-    expect(upsertArgs.create.patientMessage).toContain(
+    expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
+    expect(createArgs.data.dismissible).toBe(false)
+    expect(createArgs.data.severity).toBe('HIGH')
+    expect(createArgs.data.type).toBe('MEDICATION_ADHERENCE')
+    expect(createArgs.data.pulsePressure).toBeNull()
+    expect(createArgs.data.patientMessage).toContain(
       'blood pressure medicine',
     )
-    expect(upsertArgs.create.patientMessage).toContain('pregnant')
-    expect(upsertArgs.create.physicianMessage).toContain('Teratogenic')
-    expect(upsertArgs.create.physicianMessage).toContain('Lisinopril')
+    expect(createArgs.data.patientMessage).toContain('pregnant')
+    expect(createArgs.data.physicianMessage).toContain('Teratogenic')
+    expect(createArgs.data.physicianMessage).toContain('Lisinopril')
     expect(eventArgs[0]).toBe(JOURNAL_EVENTS.ANOMALY_TRACKED)
     expect(eventArgs[1]).toMatchObject({ alertId: 'alert-fixture-id' })
   })
 
   it('Scenario 2 — HFrEF patient on diltiazem → Tier 1 RULE_NDHP_HFREF', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 118, diastolicBP: 74, pulse: 68 }),
       buildCtx({
         profile: {
@@ -240,16 +250,16 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result?.ruleId).toBe('RULE_NDHP_HFREF')
-    expect(upsertArgs.create.tier).toBe('TIER_1_CONTRAINDICATION')
-    expect(upsertArgs.create.dismissible).toBe(false)
-    expect(upsertArgs.create.patientMessage).toContain('heart medicines')
-    expect(upsertArgs.create.physicianMessage).toContain('Nondihydropyridine CCB')
-    expect(upsertArgs.create.physicianMessage).toContain('Diltiazem')
-    expect(upsertArgs.create.physicianMessage).toContain('HFrEF')
+    expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
+    expect(createArgs.data.dismissible).toBe(false)
+    expect(createArgs.data.patientMessage).toContain('heart medicines')
+    expect(createArgs.data.physicianMessage).toContain('Nondihydropyridine CCB')
+    expect(createArgs.data.physicianMessage).toContain('Diltiazem')
+    expect(createArgs.data.physicianMessage).toContain('HFrEF')
   })
 
   it('Scenario 3 — Unverified ACE + pregnant (safety-net) → Tier 1 still fires', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 122, diastolicBP: 78 }),
       buildCtx({
         isPregnant: true,
@@ -259,7 +269,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
-    expect(upsertArgs.create.tier).toBe('TIER_1_CONTRAINDICATION')
+    expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
   })
 
   // ========================================================================
@@ -267,25 +277,25 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // ========================================================================
 
   it('Scenario 4 — Absolute emergency 190/105 → BP Level 2 RULE_ABSOLUTE_EMERGENCY', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 190, diastolicBP: 105, pulse: 88 }),
       buildCtx({ profile: { diagnosedHypertension: true } }),
     )
 
     expect(result?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_2')
-    expect(upsertArgs.create.dismissible).toBe(false)
-    expect(upsertArgs.create.pulsePressure).toBe(85)
-    expect(upsertArgs.create.patientMessage).toContain('190/105')
-    expect(upsertArgs.create.patientMessage).toMatch(/911/)
+    expect(createArgs.data.tier).toBe('BP_LEVEL_2')
+    expect(createArgs.data.dismissible).toBe(false)
+    expect(createArgs.data.pulsePressure).toBe(85)
+    expect(createArgs.data.patientMessage).toContain('190/105')
+    expect(createArgs.data.patientMessage).toMatch(/911/)
     // Wide PP annotation rides on physician msg (>60)
-    expect(upsertArgs.create.physicianMessage.toLowerCase()).toContain(
+    expect(createArgs.data.physicianMessage.toLowerCase()).toContain(
       'pulse pressure',
     )
   })
 
   it('Scenario 5 — severeHeadache at 122/76 → BP Level 2 symptom override', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({
         systolicBP: 122,
         diastolicBP: 76,
@@ -296,24 +306,24 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
-    expect(upsertArgs.create.dismissible).toBe(false)
-    expect(upsertArgs.create.patientMessage).toContain('122/76')
-    expect(upsertArgs.create.patientMessage).toMatch(/911/)
-    expect(upsertArgs.create.physicianMessage).toContain('severe headache')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+    expect(createArgs.data.dismissible).toBe(false)
+    expect(createArgs.data.patientMessage).toContain('122/76')
+    expect(createArgs.data.patientMessage).toMatch(/911/)
+    expect(createArgs.data.physicianMessage).toContain('severe headache')
   })
 
   it('Scenario 6 — Pregnant + 165/112 → BP Level 2 RULE_PREGNANCY_L2', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 165, diastolicBP: 112, pulse: 90 }),
       buildCtx({ isPregnant: true }),
     )
 
     expect(result?.ruleId).toBe('RULE_PREGNANCY_L2')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_2')
-    expect(upsertArgs.create.patientMessage).toContain('165/112')
-    expect(upsertArgs.create.patientMessage).toContain('pregnancy')
-    expect(upsertArgs.create.physicianMessage).toContain('ACOG')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_2')
+    expect(createArgs.data.patientMessage).toContain('165/112')
+    expect(createArgs.data.patientMessage).toContain('pregnancy')
+    expect(createArgs.data.physicianMessage).toContain('ACOG')
   })
 
   // ========================================================================
@@ -321,20 +331,20 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // ========================================================================
 
   it('Scenario 7 — Pregnant + 144/88 → BP L1 High RULE_PREGNANCY_L1_HIGH', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 144, diastolicBP: 88, pulse: 82 }),
       buildCtx({ isPregnant: true }),
     )
 
     expect(result?.ruleId).toBe('RULE_PREGNANCY_L1_HIGH')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
-    expect(upsertArgs.create.dismissible).toBe(true)
-    expect(upsertArgs.create.patientMessage).toContain('144/88')
-    expect(upsertArgs.create.physicianMessage).toContain('preeclampsia')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(createArgs.data.dismissible).toBe(true)
+    expect(createArgs.data.patientMessage).toContain('144/88')
+    expect(createArgs.data.physicianMessage).toContain('preeclampsia')
   })
 
   it('Scenario 8 — CAD + 132/68 → BP L1 Low RULE_CAD_DBP_CRITICAL', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 132, diastolicBP: 68, pulse: 66 }),
       buildCtx({
         profile: { hasCAD: true, diagnosedHypertension: true },
@@ -345,15 +355,15 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result?.ruleId).toBe('RULE_CAD_DBP_CRITICAL')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
-    expect(upsertArgs.create.type).toBe('DIASTOLIC_BP')
-    expect(upsertArgs.create.patientMessage).toContain('132/68')
-    expect(upsertArgs.create.patientMessage).toContain('lower number')
-    expect(upsertArgs.create.physicianMessage).toContain('J-curve')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
+    expect(createArgs.data.type).toBe('DIASTOLIC_BP')
+    expect(createArgs.data.patientMessage).toContain('132/68')
+    expect(createArgs.data.patientMessage).toContain('lower number')
+    expect(createArgs.data.physicianMessage).toContain('J-curve')
   })
 
   it('Scenario 9 — AFib + 3 readings avg HR 115 → BP L1 High RULE_AFIB_HR_HIGH', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({
         systolicBP: 130,
         diastolicBP: 76,
@@ -369,13 +379,13 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result?.ruleId).toBe('RULE_AFIB_HR_HIGH')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
-    expect(upsertArgs.create.patientMessage).toContain('HR 115 bpm')
-    expect(upsertArgs.create.physicianMessage).toContain('AFib')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(createArgs.data.patientMessage).toContain('HR 115 bpm')
+    expect(createArgs.data.physicianMessage).toContain('AFib')
   })
 
   it('Scenario 10 — HFpEF + 106/70 → BP L1 Low RULE_HFPEF_LOW', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 106, diastolicBP: 70, pulse: 76 }),
       buildCtx({
         profile: {
@@ -387,12 +397,12 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result?.ruleId).toBe('RULE_HFPEF_LOW')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
-    expect(upsertArgs.create.physicianMessage).toContain('HFpEF')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
+    expect(createArgs.data.physicianMessage).toContain('HFpEF')
   })
 
   it('Scenario 11 — Age 65+ + 96/58 → BP L1 Low RULE_AGE_65_LOW', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 96, diastolicBP: 58, pulse: 70 }),
       buildCtx({
         ageGroup: '65+',
@@ -401,14 +411,14 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result?.ruleId).toBe('RULE_AGE_65_LOW')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
-    expect(upsertArgs.create.patientMessage).toContain('dizziness')
-    expect(upsertArgs.create.patientMessage).toContain('fall risk')
-    expect(upsertArgs.create.physicianMessage).toContain('age 65+')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
+    expect(createArgs.data.patientMessage).toContain('dizziness')
+    expect(createArgs.data.patientMessage).toContain('fall risk')
+    expect(createArgs.data.physicianMessage).toContain('age 65+')
   })
 
   it('Scenario 12 — Personalized mode + 152/88 → BP L1 High mode=PERSONALIZED', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 152, diastolicBP: 88, pulse: 76 }),
       buildCtx({
         profile: { diagnosedHypertension: true },
@@ -428,14 +438,14 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result?.ruleId).toBe('RULE_PERSONALIZED_HIGH')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
-    expect(upsertArgs.create.mode).toBe('PERSONALIZED')
-    expect(upsertArgs.create.patientMessage).toContain('target')
-    expect(upsertArgs.create.physicianMessage).toContain('target + 20')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(createArgs.data.mode).toBe('PERSONALIZED')
+    expect(createArgs.data.patientMessage).toContain('target')
+    expect(createArgs.data.physicianMessage).toContain('target + 20')
   })
 
   it('Scenario 13 — Pre-Day-3 (readingCount=3) + 165/94 → STANDARD L1 High + disclaimer', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 165, diastolicBP: 94, pulse: 82 }),
       buildCtx({
         profile: { diagnosedHypertension: true },
@@ -455,9 +465,9 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result?.ruleId).toBe('RULE_STANDARD_L1_HIGH')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
-    expect(upsertArgs.create.mode).toBe('STANDARD')
-    expect(upsertArgs.create.patientMessage).toMatch(
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(createArgs.data.mode).toBe('STANDARD')
+    expect(createArgs.data.patientMessage).toMatch(
       /personalization begins after Day 3/i,
     )
   })
@@ -467,7 +477,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // ========================================================================
 
   it('Scenario 14 — HCM + amlodipine → Tier 3 RULE_HCM_VASODILATOR (empty patient msg)', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 128, diastolicBP: 82, pulse: 72 }),
       buildCtx({
         profile: { hasHCM: true },
@@ -478,29 +488,29 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result?.ruleId).toBe('RULE_HCM_VASODILATOR')
-    expect(upsertArgs.create.tier).toBe('TIER_3_INFO')
-    expect(upsertArgs.create.dismissible).toBe(true)
-    expect(upsertArgs.create.patientMessage).toBe('')
-    expect(upsertArgs.create.caregiverMessage).toBe('')
-    expect(upsertArgs.create.physicianMessage).toContain('HCM')
-    expect(upsertArgs.create.physicianMessage).toContain('Amlodipine')
-    expect(upsertArgs.create.physicianMessage).toContain('LVOT')
+    expect(createArgs.data.tier).toBe('TIER_3_INFO')
+    expect(createArgs.data.dismissible).toBe(true)
+    expect(createArgs.data.patientMessage).toBe('')
+    expect(createArgs.data.caregiverMessage).toBe('')
+    expect(createArgs.data.physicianMessage).toContain('HCM')
+    expect(createArgs.data.physicianMessage).toContain('Amlodipine')
+    expect(createArgs.data.physicianMessage).toContain('LVOT')
   })
 
   it('Scenario 15 — Wide PP 172/88 → BP L1 High + PP annotation in physician msg', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 172, diastolicBP: 88, pulse: 78 }),
       buildCtx({ profile: { diagnosedHypertension: true } }),
     )
 
     expect(result?.ruleId).toBe('RULE_STANDARD_L1_HIGH')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
-    expect(upsertArgs.create.pulsePressure).toBe(84)
-    expect(upsertArgs.create.physicianMessage).toContain(
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(createArgs.data.pulsePressure).toBe(84)
+    expect(createArgs.data.physicianMessage).toContain(
       'Wide pulse pressure: 84 mmHg',
     )
     // Patient message stays plain L1 High — no PP talk
-    expect(upsertArgs.create.patientMessage.toLowerCase()).not.toContain(
+    expect(createArgs.data.patientMessage.toLowerCase()).not.toContain(
       'pulse pressure',
     )
   })
@@ -510,7 +520,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // ========================================================================
 
   it('Scenario 16 — Controlled patient benign 124/78 → no alert + BP L1 scope resolve', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 124, diastolicBP: 78, pulse: 70 }),
       buildCtx({
         profile: { diagnosedHypertension: true },
@@ -522,7 +532,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result).toBeNull()
-    expect(upsertArgs).toBeUndefined()
+    expect(createArgs).toBeUndefined()
     expect(prisma.deviationAlert.updateMany).toHaveBeenCalledTimes(1)
     const updateManyCall = prisma.deviationAlert.updateMany.mock.calls[0][0]
     expect(updateManyCall.where.tier).toEqual({
@@ -532,7 +542,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   })
 
   it('Scenario 17 — AFib + 1 reading + pulse 118 → no alert (gate closed)', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({
         systolicBP: 135,
         diastolicBP: 82,
@@ -543,11 +553,11 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result).toBeNull()
-    expect(upsertArgs).toBeUndefined()
+    expect(createArgs).toBeUndefined()
   })
 
   it('Scenario 18 — AFib + 1 reading + pregnant + ACE → Tier 1 fires (gate does NOT block)', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({
         systolicBP: 128,
         diastolicBP: 80,
@@ -562,11 +572,11 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
-    expect(upsertArgs.create.tier).toBe('TIER_1_CONTRAINDICATION')
+    expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
   })
 
   it('Scenario 19 — Beta-blocker + HR 55 → no alert (suppressed 50–60 window)', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 118, diastolicBP: 72, pulse: 55 }),
       buildCtx({
         profile: { hasBradycardia: true },
@@ -577,7 +587,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result).toBeNull()
-    expect(upsertArgs).toBeUndefined()
+    expect(createArgs).toBeUndefined()
   })
 
   // ========================================================================
@@ -585,7 +595,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // ========================================================================
 
   it('Scenario 20 — Suboptimal checklist + 164/96 → L1 High + retake suffix', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({
         systolicBP: 164,
         diastolicBP: 96,
@@ -596,9 +606,9 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result?.ruleId).toBe('RULE_STANDARD_L1_HIGH')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
-    expect(upsertArgs.create.suboptimalMeasurement).toBe(true)
-    expect(upsertArgs.create.patientMessage.toLowerCase()).toContain('retake')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(createArgs.data.suboptimalMeasurement).toBe(true)
+    expect(createArgs.data.patientMessage.toLowerCase()).toContain('retake')
   })
 
   it('Scenario 21 — Session-averaged 175+185 → avg 180/95 → BP Level 2', async () => {
@@ -606,7 +616,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     // orchestrator. In production the averager folds the two raw readings
     // into this shape; here we assert the orchestrator correctly classifies
     // the averaged values.
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({
         systolicBP: 180,
         diastolicBP: 95,
@@ -618,9 +628,9 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
 
     expect(result?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_2')
-    expect(upsertArgs.create.patientMessage).toContain('180/95')
-    expect(upsertArgs.create.patientMessage).toMatch(/911/)
+    expect(createArgs.data.tier).toBe('BP_LEVEL_2')
+    expect(createArgs.data.patientMessage).toContain('180/95')
+    expect(createArgs.data.patientMessage).toMatch(/911/)
   })
 
   // ========================================================================
@@ -628,7 +638,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // ========================================================================
 
   it('Scenario 22 — Pregnant + ruqPain → RULE_SYMPTOM_OVERRIDE_PREGNANCY', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({
         systolicBP: 128,
         diastolicBP: 82,
@@ -637,12 +647,12 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       buildCtx({ isPregnant: true }),
     )
     expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_PREGNANCY')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
-    expect(upsertArgs.create.physicianMessage).toContain('preeclampsia')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+    expect(createArgs.data.physicianMessage).toContain('preeclampsia')
   })
 
   it('Scenario 23 — HFrEF + SBP 82 → RULE_HFREF_LOW', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 82, diastolicBP: 55 }),
       buildCtx({
         profile: {
@@ -653,12 +663,12 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       }),
     )
     expect(result?.ruleId).toBe('RULE_HFREF_LOW')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
-    expect(upsertArgs.create.physicianMessage).toContain('HFrEF')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
+    expect(createArgs.data.physicianMessage).toContain('HFrEF')
   })
 
   it('Scenario 24 — HFrEF + SBP 162 → RULE_HFREF_HIGH', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 162, diastolicBP: 88 }),
       buildCtx({
         profile: {
@@ -669,11 +679,11 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       }),
     )
     expect(result?.ruleId).toBe('RULE_HFREF_HIGH')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
   })
 
   it('Scenario 25 — HFpEF + SBP 162 → RULE_HFPEF_HIGH', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 162, diastolicBP: 88 }),
       buildCtx({
         profile: {
@@ -684,40 +694,40 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       }),
     )
     expect(result?.ruleId).toBe('RULE_HFPEF_HIGH')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
-    expect(upsertArgs.create.physicianMessage).toContain('HFpEF')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(createArgs.data.physicianMessage).toContain('HFpEF')
   })
 
   it('Scenario 26 — CAD + SBP 162 DBP 82 (DBP normal) → RULE_CAD_HIGH', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 162, diastolicBP: 82 }),
       buildCtx({ profile: { hasCAD: true, diagnosedHypertension: true } }),
     )
     expect(result?.ruleId).toBe('RULE_CAD_HIGH')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
   })
 
   it('Scenario 27 — HCM + SBP 98 (no risky med) → RULE_HCM_LOW', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 98, diastolicBP: 64 }),
       buildCtx({ profile: { hasHCM: true } }),
     )
     expect(result?.ruleId).toBe('RULE_HCM_LOW')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
-    expect(upsertArgs.create.physicianMessage).toContain('LVOT')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
+    expect(createArgs.data.physicianMessage).toContain('LVOT')
   })
 
   it('Scenario 28 — HCM + SBP 162 (no risky med) → RULE_HCM_HIGH', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 162, diastolicBP: 88 }),
       buildCtx({ profile: { hasHCM: true } }),
     )
     expect(result?.ruleId).toBe('RULE_HCM_HIGH')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
   })
 
   it('Scenario 29 — DCM only (no HF flag) + SBP 82 → RULE_DCM_LOW', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 82, diastolicBP: 55 }),
       buildCtx({
         profile: {
@@ -729,12 +739,12 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       }),
     )
     expect(result?.ruleId).toBe('RULE_DCM_LOW')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
-    expect(upsertArgs.create.physicianMessage).toContain('DCM')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
+    expect(createArgs.data.physicianMessage).toContain('DCM')
   })
 
   it('Scenario 30 — DCM only + SBP 162 → RULE_DCM_HIGH', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 162, diastolicBP: 88 }),
       buildCtx({
         profile: {
@@ -745,11 +755,11 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       }),
     )
     expect(result?.ruleId).toBe('RULE_DCM_HIGH')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
   })
 
   it('Scenario 31 — Personalized low (threshold lower=110 + SBP 108) → RULE_PERSONALIZED_LOW', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 108, diastolicBP: 70 }),
       buildCtx({
         profile: { diagnosedHypertension: true },
@@ -768,21 +778,21 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       }),
     )
     expect(result?.ruleId).toBe('RULE_PERSONALIZED_LOW')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
-    expect(upsertArgs.create.mode).toBe('PERSONALIZED')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
+    expect(createArgs.data.mode).toBe('PERSONALIZED')
   })
 
   it('Scenario 32 — Age 45 + SBP 88 → RULE_STANDARD_L1_LOW', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 88, diastolicBP: 58 }),
       buildCtx({ ageGroup: '40-64' }),
     )
     expect(result?.ruleId).toBe('RULE_STANDARD_L1_LOW')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
   })
 
   it('Scenario 33 — AFib + 3 readings + pulse 48 → RULE_AFIB_HR_LOW', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({
         systolicBP: 120,
         diastolicBP: 75,
@@ -792,17 +802,17 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       buildCtx({ profile: { hasAFib: true } }),
     )
     expect(result?.ruleId).toBe('RULE_AFIB_HR_LOW')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
   })
 
   it('Scenario 34 — Tachy patient + pulse 105 + prior elevated (102) → RULE_TACHY_HR', async () => {
     prisma.journalEntry.findFirst.mockResolvedValue({ pulse: 102 })
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 128, diastolicBP: 80, pulse: 105 }),
       buildCtx({ profile: { hasTachycardia: true } }),
     )
     expect(result?.ruleId).toBe('RULE_TACHY_HR')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
   })
 
   // Brady + TOD symptom: the L2 symptom override fires first (clinically safer
@@ -811,7 +821,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // structured flags used to detect bradycardic symptomaticity are all TOD
   // triggers that short-circuit to L2. Accepted per clinical-safety design.
   it('Scenario 35 — Brady + pulse 48 + chestPainOrDyspnea → L2 symptom override wins', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({
         systolicBP: 118,
         diastolicBP: 72,
@@ -821,32 +831,32 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       buildCtx({ profile: { hasBradycardia: true } }),
     )
     expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
   })
 
   it('Scenario 36 — Brady + pulse 38 (asymptomatic) → RULE_BRADY_HR_ASYMPTOMATIC', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 115, diastolicBP: 70, pulse: 38 }),
       buildCtx({ profile: { hasBradycardia: true } }),
     )
     expect(result?.ruleId).toBe('RULE_BRADY_HR_ASYMPTOMATIC')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
-    expect(upsertArgs.create.physicianMessage).toContain('asymptomatic bradycardia')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
+    expect(createArgs.data.physicianMessage).toContain('asymptomatic bradycardia')
   })
 
   it('Scenario 37 — Wide PP standalone 145/80 (PP 65) → RULE_PULSE_PRESSURE_WIDE', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 145, diastolicBP: 80, pulse: 74 }),
       buildCtx(),
     )
     expect(result?.ruleId).toBe('RULE_PULSE_PRESSURE_WIDE')
-    expect(upsertArgs.create.tier).toBe('TIER_3_INFO')
-    expect(upsertArgs.create.patientMessage).toBe('')
-    expect(upsertArgs.create.pulsePressure).toBe(65)
+    expect(createArgs.data.tier).toBe('TIER_3_INFO')
+    expect(createArgs.data.patientMessage).toBe('')
+    expect(createArgs.data.pulsePressure).toBe(65)
   })
 
   it('Scenario 38 — Loop diuretic + SBP 92 standalone → RULE_LOOP_DIURETIC_HYPOTENSION', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 92, diastolicBP: 60, pulse: 72 }),
       buildCtx({
         contextMeds: [
@@ -855,8 +865,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       }),
     )
     expect(result?.ruleId).toBe('RULE_LOOP_DIURETIC_HYPOTENSION')
-    expect(upsertArgs.create.tier).toBe('TIER_3_INFO')
-    expect(upsertArgs.create.patientMessage).toBe('')
+    expect(createArgs.data.tier).toBe('TIER_3_INFO')
+    expect(createArgs.data.patientMessage).toBe('')
   })
 
   // ========================================================================
@@ -864,7 +874,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // ========================================================================
 
   it('Scenario 39 — visualChanges at 125/75 → BP Level 2 symptom override', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({
         systolicBP: 125,
         diastolicBP: 75,
@@ -873,8 +883,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       buildCtx(),
     )
     expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
-    expect(upsertArgs.create.physicianMessage).toContain('visual changes')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+    expect(createArgs.data.physicianMessage).toContain('visual changes')
   })
 
   it('Scenario 40 — alteredMentalStatus at 125/75 → BP Level 2 override', async () => {
@@ -888,14 +898,14 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   })
 
   it('Scenario 41 — chestPainOrDyspnea at 125/75 → BP Level 2 override', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({
         symptoms: { ...noSymptoms(), chestPainOrDyspnea: true },
       }),
       buildCtx(),
     )
     expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
-    expect(upsertArgs.create.physicianMessage).toContain(
+    expect(createArgs.data.physicianMessage).toContain(
       'chest pain or dyspnea',
     )
   })
@@ -931,7 +941,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   })
 
   it('Scenario 45 — Pregnant + edema at 110/70 → RULE_SYMPTOM_OVERRIDE_PREGNANCY', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({
         systolicBP: 110,
         diastolicBP: 70,
@@ -940,7 +950,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       buildCtx({ isPregnant: true }),
     )
     expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_PREGNANCY')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
   })
 
   // ========================================================================
@@ -948,7 +958,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // ========================================================================
 
   it('Scenario 46 — Pregnant + Entresto (ARNI+ARB combo) → Tier 1', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 128, diastolicBP: 80 }),
       buildCtx({
         isPregnant: true,
@@ -963,12 +973,12 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       }),
     )
     expect(result?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
-    expect(upsertArgs.create.tier).toBe('TIER_1_CONTRAINDICATION')
-    expect(upsertArgs.create.physicianMessage).toContain('Entresto')
+    expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
+    expect(createArgs.data.physicianMessage).toContain('Entresto')
   })
 
   it('Scenario 47 — Pregnant + Zestoretic (ACE+THIAZIDE combo) → Tier 1', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 128, diastolicBP: 80 }),
       buildCtx({
         isPregnant: true,
@@ -983,8 +993,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       }),
     )
     expect(result?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
-    expect(upsertArgs.create.tier).toBe('TIER_1_CONTRAINDICATION')
-    expect(upsertArgs.create.physicianMessage).toContain('Zestoretic')
+    expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
+    expect(createArgs.data.physicianMessage).toContain('Zestoretic')
   })
 
   // ========================================================================
@@ -992,7 +1002,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // ========================================================================
 
   it('Scenario 48 — HF type UNKNOWN + diltiazem → Tier 1 NDHP (via HFREF bias)', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 120, diastolicBP: 74 }),
       buildCtx({
         profile: {
@@ -1006,7 +1016,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       }),
     )
     expect(result?.ruleId).toBe('RULE_NDHP_HFREF')
-    expect(upsertArgs.create.tier).toBe('TIER_1_CONTRAINDICATION')
+    expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
   })
 
   it('Scenario 49 — DCM only (no HF flag) + diltiazem → Tier 1 NDHP', async () => {
@@ -1031,7 +1041,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // ========================================================================
 
   it('Scenario 50 — Both Tier 1 pairs present → pregnancy+ACE wins (fires first)', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 120, diastolicBP: 76 }),
       buildCtx({
         isPregnant: true,
@@ -1051,8 +1061,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       }),
     )
     expect(result?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
-    expect(upsertArgs.create.physicianMessage).toContain('Lisinopril')
-    expect(prisma.deviationAlert.upsert).toHaveBeenCalledTimes(1)
+    expect(createArgs.data.physicianMessage).toContain('Lisinopril')
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(1)
   })
 
   it('Scenario 51 — Pregnant + ACE + BP 195/130 → Tier 1 (not absolute emergency)', async () => {
@@ -1072,12 +1082,12 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // ========================================================================
 
   it('Scenario 52 — Standard SBP=160 boundary → L1 High fires', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({ systolicBP: 160, diastolicBP: 95 }),
       buildCtx(),
     )
     expect(result?.ruleId).toBe('RULE_STANDARD_L1_HIGH')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
   })
 
   it('Scenario 53 — CAD + DBP=70 boundary → no CAD critical alert', async () => {
@@ -1106,7 +1116,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // ========================================================================
 
   it('Scenario 56 — AFib + 3 readings + SBP 165 + pulse 75 → RULE_STANDARD_L1_HIGH (AFib gets BP alerts)', async () => {
-    const { result, upsertArgs } = await run(
+    const { result, createArgs } = await run(
       buildSession({
         systolicBP: 165,
         diastolicBP: 92,
@@ -1116,7 +1126,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       buildCtx({ profile: { hasAFib: true } }),
     )
     expect(result?.ruleId).toBe('RULE_STANDARD_L1_HIGH')
-    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
   })
 
   it('Scenario 57 — Admin user (no PatientProfile) → skip silently, no alert, no upsert', async () => {
@@ -1128,7 +1138,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
     const r = await service.evaluate('entry-admin')
     expect(r).toBeNull()
-    expect(prisma.deviationAlert.upsert).not.toHaveBeenCalled()
+    expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
+    expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
     expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
   })
 })
