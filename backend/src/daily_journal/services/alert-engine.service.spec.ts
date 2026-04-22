@@ -314,7 +314,7 @@ describe('AlertEngineService (orchestrator)', () => {
   // Persistence + event emission
   // ────────────────────────────────────────────────────────────────────────
   describe('persistence', () => {
-    it('Tier 1 alert persists with dismissible=false and emits ANOMALY_TRACKED', async () => {
+    it('Tier 1 alert persists with dismissible=false and emits ALERT_CREATED', async () => {
       profileResolver.resolve.mockResolvedValue(
         baseCtx({
           profile: { ...baseCtx().profile, isPregnant: true },
@@ -344,7 +344,7 @@ describe('AlertEngineService (orchestrator)', () => {
       expect(call.data.dismissible).toBe(false)
       expect(call.data.patientMessage).toBe('PATIENT:RULE_PREGNANCY_ACE_ARB')
       expect(eventEmitter.emit).toHaveBeenCalledWith(
-        JOURNAL_EVENTS.ANOMALY_TRACKED,
+        JOURNAL_EVENTS.ALERT_CREATED,
         expect.objectContaining({ userId: 'user-1' }),
       )
     })
@@ -406,7 +406,7 @@ describe('AlertEngineService (orchestrator)', () => {
   // ────────────────────────────────────────────────────────────────────────
 
   // Bug 1 — ANOMALY_TRACKED must carry the DeviationAlert.id, not entryId.
-  describe('Bug 1 — ANOMALY_TRACKED alertId', () => {
+  describe('Bug 1 — ALERT_CREATED alertId', () => {
     it('emits the upserted DeviationAlert.id (not entryId)', async () => {
       prisma.deviationAlert.create.mockResolvedValue({
         id: 'deviation-alert-99',
@@ -417,7 +417,7 @@ describe('AlertEngineService (orchestrator)', () => {
       )
       await service.evaluate('entry-xyz')
       expect(eventEmitter.emit).toHaveBeenCalledWith(
-        JOURNAL_EVENTS.ANOMALY_TRACKED,
+        JOURNAL_EVENTS.ALERT_CREATED,
         expect.objectContaining({ alertId: 'deviation-alert-99' }),
       )
       // And specifically NOT entryId
@@ -435,7 +435,7 @@ describe('AlertEngineService (orchestrator)', () => {
       )
       await service.evaluate('entry-1')
       expect(eventEmitter.emit).toHaveBeenCalledWith(
-        JOURNAL_EVENTS.ANOMALY_TRACKED,
+        JOURNAL_EVENTS.ALERT_CREATED,
         expect.objectContaining({ escalated: true }),
       )
     })

@@ -4,7 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter'
 import { EscalationLevel } from '../../generated/prisma/enums.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
-import type { AnomalyTrackedEvent } from '../interfaces/events.interface.js'
+import type { AlertCreatedEvent } from '../interfaces/events.interface.js'
 
 type ClinicalEscalationLevel = 'LEVEL_2' | 'LEVEL_1' | 'LOW'
 
@@ -21,8 +21,8 @@ export class EscalationService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  @OnEvent(JOURNAL_EVENTS.ANOMALY_TRACKED, { async: true })
-  async handleAnomalyTracked(payload: AnomalyTrackedEvent) {
+  @OnEvent(JOURNAL_EVENTS.ALERT_CREATED, { async: true })
+  async handleAnomalyTracked(payload: AlertCreatedEvent) {
     try {
       const existingEscalation = await this.prisma.escalationEvent.findFirst({
         where: { alertId: payload.alertId },

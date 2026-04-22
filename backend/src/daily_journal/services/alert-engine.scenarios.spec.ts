@@ -218,7 +218,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.patientMessage).toContain('pregnant')
     expect(createArgs.data.physicianMessage).toContain('Teratogenic')
     expect(createArgs.data.physicianMessage).toContain('Lisinopril')
-    expect(eventArgs[0]).toBe(JOURNAL_EVENTS.ANOMALY_TRACKED)
+    expect(eventArgs[0]).toBe(JOURNAL_EVENTS.ALERT_CREATED)
     expect(eventArgs[1]).toMatchObject({ alertId: 'alert-fixture-id' })
   })
 

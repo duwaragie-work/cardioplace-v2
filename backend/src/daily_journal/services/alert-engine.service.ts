@@ -322,12 +322,16 @@ export class AlertEngineService {
       `Alert fired: ${result.ruleId} (${result.tier}) for user ${session.userId} — ${result.reason}`,
     )
 
-    this.eventEmitter.emit(JOURNAL_EVENTS.ANOMALY_TRACKED, {
+    // Phase/7 — renamed from ANOMALY_TRACKED and enriched with tier + ruleId so
+    // the escalation service can route by tier without re-fetching the alert.
+    this.eventEmitter.emit(JOURNAL_EVENTS.ALERT_CREATED, {
       userId: session.userId,
       alertId: upserted.id,
       type: legacyType,
       severity: legacySeverity,
       escalated: upserted.escalated,
+      tier: result.tier,
+      ruleId: result.ruleId,
     })
   }
 

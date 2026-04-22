@@ -5,7 +5,7 @@ import { EscalationLevel } from '../../generated/prisma/enums.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import { EscalationService } from './escalation.service.js'
-import type { AnomalyTrackedEvent } from '../interfaces/events.interface.js'
+import type { AlertCreatedEvent } from '../interfaces/events.interface.js'
 
 describe('EscalationService', () => {
   let service: EscalationService
@@ -54,12 +54,14 @@ describe('EscalationService', () => {
     service = module.get<EscalationService>(EscalationService)
   })
 
-  const basePayload: AnomalyTrackedEvent = {
+  const basePayload: AlertCreatedEvent = {
     userId: 'user-1',
     alertId: 'alert-1',
     type: 'SYSTOLIC_BP',
     severity: 'MEDIUM',
     escalated: false,
+    tier: 'BP_LEVEL_1_HIGH',
+    ruleId: 'RULE_STANDARD_L1_HIGH',
   }
 
   // Helper to mock streak of N consecutive days (centered)
