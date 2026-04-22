@@ -16,6 +16,9 @@ import { Flame, Clock, ArrowRight } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getJournalEntries, getLatestBaseline, getAlerts, getJournalStats } from '@/lib/services/journal.service';
+import { getMyPatientProfile } from '@/lib/services/intake.service';
+import { loadDraft, hasDraft, stepProgress } from '@/lib/intake/draft';
+import ActionRequiredCard from '@/components/intake/ActionRequiredCard';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function getDateLabel(dateStr: string): string {
@@ -87,6 +90,62 @@ export default function Dashboard() {
   const [streak, setStreak] = useState(0);
   const [totalEntries, setTotalEntries] = useState(0);
   const [dataLoading, setDataLoading] = useState(true);
+
+  // Clinical Intake (Flow A) state — surfaces the Action Required card when
+  // basic onboarding is COMPLETED but PatientProfile has not been recorded yet.
+  type IntakeUiState =
+    | { kind: 'unknown' }
+    | { kind: 'done' }
+    | { kind: 'fresh' }
+    | { kind: 'resume'; stepIndex: number; total: number; stepLabel: string };
+  const [intakeUi, setIntakeUi] = useState<IntakeUiState>({ kind: 'unknown' });
+
+  // Resolve clinical-intake UI state — fetches PatientProfile, falls back to
+  // localStorage draft inspection. Hidden completely until resolved so the
+  // amber Action Required card doesn't flash and disappear.
+  useEffect(() => {
+    if (isLoading || !isAuthenticated || !user?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const profile = await getMyPatientProfile().catch(() => null);
+        if (cancelled) return;
+        if (profile) { setIntakeUi({ kind: 'done' }); return; }
+        if (hasDraft(user.id)) {
+          const draft = loadDraft(user.id);
+          // A draft pointing at A11 is stale (submit succeeded but the DB
+          // row was later removed). Show the fresh card instead.
+          if (draft?.currentStep === 'A11') {
+            setIntakeUi({ kind: 'fresh' });
+            return;
+          }
+          const { index, total } = stepProgress(draft?.currentStep);
+          const labels: Record<string, string> = {
+            A1: 'About you',
+            A2: 'Pregnancy',
+            A3: 'Conditions',
+            A4: 'Heart failure type',
+            A5: 'Medications',
+            A6: 'Combination pills',
+            A8: 'Other medicines',
+            A9: 'How often',
+            A10: 'Review',
+          };
+          setIntakeUi({
+            kind: 'resume',
+            stepIndex: index,
+            total,
+            stepLabel: labels[draft?.currentStep ?? 'A1'] ?? 'Continuing',
+          });
+        } else {
+          setIntakeUi({ kind: 'fresh' });
+        }
+      } catch {
+        if (!cancelled) setIntakeUi({ kind: 'fresh' });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, isLoading, isAuthenticated]);
 
   useEffect(() => {
     if (isLoading || !isAuthenticated) return;
@@ -176,6 +235,19 @@ export default function Dashboard() {
 
       {/* ── Content ── */}
       <main className="relative h-full flex flex-col px-4 md:px-8 py-4 md:py-5 max-w-7xl mx-auto">
+
+        {/* A0 — Clinical Intake Action Required (above all other content) */}
+        {intakeUi.kind === 'fresh' && <ActionRequiredCard state={{ kind: 'fresh' }} />}
+        {intakeUi.kind === 'resume' && (
+          <ActionRequiredCard
+            state={{
+              kind: 'resume',
+              stepIndex: intakeUi.stepIndex,
+              total: intakeUi.total,
+              stepLabel: intakeUi.stepLabel,
+            }}
+          />
+        )}
 
         {/* ROW 1 — Greeting + Stat cards */}
         <div className="grid grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4 mb-3 md:mb-4">
