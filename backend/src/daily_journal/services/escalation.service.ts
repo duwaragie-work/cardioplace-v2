@@ -247,11 +247,38 @@ export class EscalationService {
       const ladder = ladderForTier(alert.tier)
       if (!ladder) continue
 
+      // Fetch all escalation events for the alert — need both dispatched rows
+      // (for "completed" step set) AND the primary T+0 row (for anchor, whether
+      // dispatched or still queued).
       const events = await this.prisma.escalationEvent.findMany({
-        where: { alertId: alert.id, notificationSentAt: { not: null } },
-        select: { ladderStep: true },
+        where: { alertId: alert.id },
+        orderBy: { triggeredAt: 'asc' },
+        select: {
+          ladderStep: true,
+          recipientRoles: true,
+          triggeredAt: true,
+          scheduledFor: true,
+          notificationSentAt: true,
+        },
       })
-      const completedIds = new Set(events.map((e) => e.ladderStep))
+
+      // Tier 1 T+0 has TWO rows: the ladder row (recipientRoles includes
+      // PRIMARY_PROVIDER) and the courtesy backup row. Only the primary counts
+      // as the ladder anchor; the backup is not on the main ladder. Other
+      // tiers have a single T+0 row.
+      const isCourtesyBackup = (e: {
+        ladderStep: string | null
+        recipientRoles: string[]
+      }) =>
+        ladder.kind === 'TIER_1' &&
+        e.ladderStep === 'T0' &&
+        !e.recipientRoles.includes('PRIMARY_PROVIDER')
+
+      const completedIds = new Set(
+        events
+          .filter((e) => e.notificationSentAt != null && !isCourtesyBackup(e))
+          .map((e) => e.ladderStep),
+      )
 
       // Find the latest completed step's ladder index, or -1 if nothing fired.
       let latestIdx = -1
@@ -265,7 +292,23 @@ export class EscalationService {
       )
       if (!upcoming) continue // ladder finished
 
-      const deadline = new Date(alert.createdAt.getTime() + upcoming.offsetMs)
+      // Deadline anchor per CLINICAL_SPEC §V2-D "After-hours handling" — the
+      // escalation clock starts when T+0 actually dispatched (not when the
+      // alert was created). For BP L2 (immediate fire) and Tier 2 (queued at
+      // T+0), this collapses to alert.createdAt in the happy path; for Tier 1
+      // after-hours it correctly defers the whole ladder to next-business-open.
+      const t0Primary = events.find(
+        (e) =>
+          e.ladderStep === 'T0' &&
+          !isCourtesyBackup(e),
+      )
+      const anchor =
+        t0Primary?.notificationSentAt ??
+        t0Primary?.scheduledFor ??
+        t0Primary?.triggeredAt ??
+        alert.createdAt
+
+      const deadline = new Date(anchor.getTime() + upcoming.offsetMs)
       if (now < deadline) continue
 
       const practice = alert.user.providerAssignmentAsPatient?.practice ?? null
@@ -305,6 +348,21 @@ export class EscalationService {
       step.afterHoursBehavior === 'QUEUE_UNTIL_BUSINESS_HOURS' &&
       practice != null
 
+    const resolved = await this.getRecipientUserIds(
+      assignment,
+      args.recipientRoles,
+      alert.userId,
+    )
+    const dispatchReason = this.buildDispatchReason(
+      step.step,
+      resolved.missingRequiredRoles,
+    )
+    if (resolved.missingRequiredRoles.length > 0) {
+      this.logger.error(
+        `Alert ${alert.id} step ${step.step}: data-integrity bug — missing required roles: ${resolved.missingRequiredRoles.join(',')}. Enrollment gate should have caught this. Continuing with partial dispatch.`,
+      )
+    }
+
     if (shouldQueue && practice) {
       const scheduledFor = nextBusinessHoursStart(now, practice)
       await this.prisma.escalationEvent.create({
@@ -312,10 +370,13 @@ export class EscalationService {
           alertId: alert.id,
           userId: alert.userId,
           escalationLevel: this.legacyLevelFor(args.ladderKind),
-          reason: `Queued for business hours — ${step.step}`,
+          reason: `Queued for business hours — ${step.step}${dispatchReason.suffix}`,
           ladderStep: step.step,
-          recipientIds: this.getRecipientUserIds(assignment, args.recipientRoles, alert.userId),
-          recipientRoles: args.recipientRoles,
+          // Persist what we'd dispatch when the queue fires. The cron will
+          // re-resolve at fire time too (practice staff may change before
+          // then), but we keep the snapshot for audit.
+          recipientIds: resolved.recipientIds,
+          recipientRoles: resolved.recipientRoles,
           notificationChannel: step.channels[0] ?? 'PUSH',
           afterHours: true,
           scheduledFor,
@@ -327,21 +388,15 @@ export class EscalationService {
       return
     }
 
-    const recipientIds = this.getRecipientUserIds(
-      assignment,
-      args.recipientRoles,
-      alert.userId,
-    )
-
     const created = await this.prisma.escalationEvent.create({
       data: {
         alertId: alert.id,
         userId: alert.userId,
         escalationLevel: this.legacyLevelFor(args.ladderKind),
-        reason: `${step.step} dispatched`,
+        reason: `${step.step} dispatched${dispatchReason.suffix}`,
         ladderStep: step.step,
-        recipientIds,
-        recipientRoles: args.recipientRoles,
+        recipientIds: resolved.recipientIds,
+        recipientRoles: resolved.recipientRoles,
         notificationChannel: step.channels[0] ?? 'PUSH',
         afterHours,
         notificationSentAt: now,
@@ -352,8 +407,8 @@ export class EscalationService {
       eventId: created.id,
       alert,
       step,
-      recipientIds,
-      recipientRoles: args.recipientRoles,
+      recipientIds: resolved.recipientIds,
+      recipientRoles: resolved.recipientRoles,
       afterHours,
       now,
       triggeredByResolution: false,
@@ -376,11 +431,20 @@ export class EscalationService {
     now: Date
     triggeredByResolution: boolean
   }): Promise<void> {
-    const recipientIds = this.getRecipientUserIds(
+    const resolved = await this.getRecipientUserIds(
       args.assignment,
       args.recipientRoles,
       args.alert.userId,
     )
+    const dispatchReason = this.buildDispatchReason(
+      args.step.step,
+      resolved.missingRequiredRoles,
+    )
+    if (resolved.missingRequiredRoles.length > 0) {
+      this.logger.error(
+        `Alert ${args.alert.id} step ${args.step.step} (scheduled): data-integrity bug — missing required roles: ${resolved.missingRequiredRoles.join(',')}. Continuing with partial dispatch.`,
+      )
+    }
 
     const afterHours =
       args.practice != null && !isWithinBusinessHours(args.now, args.practice)
@@ -389,8 +453,10 @@ export class EscalationService {
       where: { id: args.eventId },
       data: {
         notificationSentAt: args.now,
-        recipientIds,
+        recipientIds: resolved.recipientIds,
+        recipientRoles: resolved.recipientRoles,
         afterHours,
+        reason: `${args.step.step} dispatched${args.triggeredByResolution ? ' (retry)' : ''}${dispatchReason.suffix}`,
       },
     })
 
@@ -398,12 +464,28 @@ export class EscalationService {
       eventId: args.eventId,
       alert: args.alert,
       step: args.step,
-      recipientIds,
-      recipientRoles: args.recipientRoles,
+      recipientIds: resolved.recipientIds,
+      recipientRoles: resolved.recipientRoles,
       afterHours,
       now: args.now,
       triggeredByResolution: args.triggeredByResolution,
     })
+  }
+
+  /**
+   * Builds the `reason` suffix on EscalationEvent when required roles are
+   * missing. Empty suffix when all required roles resolved. Appears on the
+   * audit trail so ops can identify data-integrity bugs at-a-glance.
+   */
+  private buildDispatchReason(
+    step: LadderStepId,
+    missingRequiredRoles: RecipientRole[],
+  ): { suffix: string } {
+    void step
+    if (missingRequiredRoles.length === 0) return { suffix: '' }
+    return {
+      suffix: ` — DISPATCH ERROR: missing required roles ${missingRequiredRoles.join(',')}`,
+    }
   }
 
   /**
@@ -491,34 +573,93 @@ export class EscalationService {
     }) as Promise<AlertRow | null>
   }
 
-  private getRecipientUserIds(
+  /**
+   * Resolves recipient roles to user IDs. Returns parallel `recipientIds`
+   * and `recipientRoles` arrays (same length) so downstream code can pair
+   * each recipient with the role that put them on the list — important for
+   * HEALPLACE_OPS which can expand to multiple users.
+   *
+   * Integrity rule (user correction):
+   *  - PRIMARY_PROVIDER / BACKUP_PROVIDER / MEDICAL_DIRECTOR are required per
+   *    phase/13 enrollment gate. Missing at dispatch time = data-integrity
+   *    bug; added to `missingRequiredRoles` so the caller can log + flag.
+   *  - HEALPLACE_OPS is soft: empty resolution logs a warning but doesn't
+   *    flag the dispatch as broken (on-call rotation is post-MVP).
+   *  - PATIENT is always resolvable (just alert.userId).
+   */
+  private async getRecipientUserIds(
     assignment: AssignmentRow | null,
     roles: RecipientRole[],
     patientUserId: string,
-  ): string[] {
-    const out: string[] = []
+  ): Promise<{
+    recipientIds: string[]
+    recipientRoles: RecipientRole[]
+    missingRequiredRoles: RecipientRole[]
+  }> {
+    const ids: string[] = []
+    const flatRoles: RecipientRole[] = []
+    const missing: RecipientRole[] = []
+    let healplaceOpsIds: string[] | null = null
+
     for (const role of roles) {
       switch (role) {
         case 'PATIENT':
-          out.push(patientUserId)
+          ids.push(patientUserId)
+          flatRoles.push(role)
           break
         case 'PRIMARY_PROVIDER':
-          if (assignment?.primaryProviderId) out.push(assignment.primaryProviderId)
+          if (assignment?.primaryProviderId) {
+            ids.push(assignment.primaryProviderId)
+            flatRoles.push(role)
+          } else {
+            missing.push(role)
+          }
           break
         case 'BACKUP_PROVIDER':
-          if (assignment?.backupProviderId) out.push(assignment.backupProviderId)
+          if (assignment?.backupProviderId) {
+            ids.push(assignment.backupProviderId)
+            flatRoles.push(role)
+          } else {
+            missing.push(role)
+          }
           break
         case 'MEDICAL_DIRECTOR':
-          if (assignment?.medicalDirectorId) out.push(assignment.medicalDirectorId)
+          if (assignment?.medicalDirectorId) {
+            ids.push(assignment.medicalDirectorId)
+            flatRoles.push(role)
+          } else {
+            missing.push(role)
+          }
           break
         case 'HEALPLACE_OPS':
-          // MVP: notify any SUPER_ADMIN / HEALPLACE_OPS user. Real routing
-          // (on-call rotation) is post-MVP per CLINICAL_SPEC §V2-F #35.
-          // Left empty here; phase/11+ will populate via practice config.
+          // Adjustment 1 — fallback resolver: all users with UserRole.HEALPLACE_OPS.
+          // Lazy + cached per call. On-call rotation is post-MVP (V2-F #35).
+          if (healplaceOpsIds === null) {
+            healplaceOpsIds = await this.findHealplaceOpsUserIds()
+          }
+          if (healplaceOpsIds.length === 0) {
+            this.logger.warn(
+              'No HEALPLACE_OPS users found — step recipients empty for this role',
+            )
+          } else {
+            for (const opsId of healplaceOpsIds) {
+              ids.push(opsId)
+              flatRoles.push(role)
+            }
+          }
           break
       }
     }
-    return out
+
+    return { recipientIds: ids, recipientRoles: flatRoles, missingRequiredRoles: missing }
+  }
+
+  private async findHealplaceOpsUserIds(): Promise<string[]> {
+    const users = await this.prisma.user.findMany({
+      where: { roles: { has: 'HEALPLACE_OPS' } },
+      select: { id: true },
+    })
+    return users.map((u) => u.id)
   }
 
   private pickMessageForRole(alert: AlertRow, role: RecipientRole): string | null {
