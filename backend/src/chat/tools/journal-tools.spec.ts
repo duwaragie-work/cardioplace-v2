@@ -110,7 +110,12 @@ describe('journal-tools', () => {
 
       const parsed = JSON.parse(result)
       expect(parsed.saved).toBe(false)
-      expect(parsed.message).toContain('REJECTED')
+      expect(parsed._internal).toBe(true)
+      // Guard prompts the model to ask about the first missing field —
+      // medication_taken is listed before symptoms in the guard logic.
+      expect(parsed.next_action).toContain('Ask about')
+      expect(parsed.next_action).toContain('medication_taken')
+      expect(mockJournalService.create).not.toHaveBeenCalled()
     })
 
     it('should execute get_recent_readings', async () => {

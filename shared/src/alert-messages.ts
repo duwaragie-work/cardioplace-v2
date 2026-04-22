@@ -128,6 +128,11 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   },
 
   RULE_SYMPTOM_OVERRIDE_PREGNANCY: {
+    // TODO(Dr. Singal): "preeclampsia" in the patient-facing line may be too
+    // clinical for the silent-literacy audience per CLINICAL_SPEC §V2-E.
+    // Suggested plain-language alternative pending her review:
+    //   `You reported a symptom that needs urgent attention during pregnancy at ${bp(ctx)}.${EMERGENCY_CTA}`
+    // Caregiver + physician wording keeps the clinical term intentionally.
     patientMessage: (ctx) =>
       `You reported a symptom that may signal preeclampsia at ${bp(ctx)}.${EMERGENCY_CTA}`,
     caregiverMessage: (ctx) =>
