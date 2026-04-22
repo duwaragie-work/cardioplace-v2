@@ -505,22 +505,107 @@ export class DailyJournalService {
   async delete(userId: string, id: string) {
     const entry = await this.prisma.journalEntry.findFirst({
       where: { id, userId },
+      select: {
+        id: true,
+        userId: true,
+        sessionId: true,
+        measuredAt: true,
+      },
     })
 
     if (!entry) {
       throw new NotFoundException('Journal entry not found')
     }
 
+    // Resolve the session anchor that will trigger a re-evaluation BEFORE the
+    // delete cascades. SessionAveragerService groups by sessionId OR a 30-min
+    // measuredAt window; we mirror that here so the rule engine recomputes the
+    // averaged vitals for what's left of the session.
+    //
+    // DeviationAlert / EscalationEvent rows owned by `entry` cascade-delete
+    // via the FK (phase/2 schema). The re-evaluation below takes care of any
+    // *sibling-owned* alert that should now be resolved or re-classified — if
+    // the average changes such that no rule fires, AlertEngine.resolveOpenAlerts
+    // flips open BP_LEVEL_1 alerts to RESOLVED.
+    const survivingAnchor = await this.findSessionReevalAnchor(entry)
+
     await this.prisma.journalEntry.delete({ where: { id } })
 
-    // TODO(phase/5): once the rule engine is wired, emit ENTRY_UPDATED for any
-    // session-adjacent readings that might need re-evaluation. For phase/2,
-    // deletion is terminal — no baseline recompute because there is no
-    // rolling baseline in v2.
+    if (survivingAnchor) {
+      this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
+        userId: survivingAnchor.userId,
+        entryId: survivingAnchor.id,
+        measuredAt: survivingAnchor.measuredAt,
+        systolicBP: survivingAnchor.systolicBP,
+        diastolicBP: survivingAnchor.diastolicBP,
+        pulse: survivingAnchor.pulse,
+        weight:
+          survivingAnchor.weight != null ? Number(survivingAnchor.weight) : null,
+        sessionId: survivingAnchor.sessionId,
+      })
+    }
+
     return {
       statusCode: 200,
       message: 'Journal entry deleted successfully',
     }
+  }
+
+  /**
+   * Returns the newest remaining session-sibling of `entry`, or null if no
+   * sibling exists. The rule engine will re-average the session from that
+   * anchor after delete cascades.
+   */
+  private async findSessionReevalAnchor(entry: {
+    id: string
+    userId: string
+    sessionId: string | null
+    measuredAt: Date
+  }) {
+    const SESSION_WINDOW_MS = 30 * 60 * 1000
+
+    if (entry.sessionId) {
+      return this.prisma.journalEntry.findFirst({
+        where: {
+          userId: entry.userId,
+          sessionId: entry.sessionId,
+          id: { not: entry.id },
+        },
+        orderBy: { measuredAt: 'desc' },
+        select: {
+          id: true,
+          userId: true,
+          sessionId: true,
+          measuredAt: true,
+          systolicBP: true,
+          diastolicBP: true,
+          pulse: true,
+          weight: true,
+        },
+      })
+    }
+
+    const windowStart = new Date(entry.measuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS)
+    return this.prisma.journalEntry.findFirst({
+      where: {
+        userId: entry.userId,
+        sessionId: null,
+        id: { not: entry.id },
+        measuredAt: { gte: windowStart, lte: windowEnd },
+      },
+      orderBy: { measuredAt: 'desc' },
+      select: {
+        id: true,
+        userId: true,
+        sessionId: true,
+        measuredAt: true,
+        systolicBP: true,
+        diastolicBP: true,
+        pulse: true,
+        weight: true,
+      },
+    })
   }
 
   async getStats(userId: string) {

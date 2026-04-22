@@ -15,4 +15,7 @@ model Notification {
 
   @@index([userId, sentAt(sort: Desc)])
   @@index([userId, readAt])
+  // Phase/7 — cron retry idempotency. Ensures a given (alert, escalation step,
+  // recipient, channel) combo is never double-sent even if the scanner retries.
+  @@unique([alertId, escalationEventId, userId, channel])
 }
