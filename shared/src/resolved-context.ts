@@ -85,6 +85,16 @@ export interface ContextProfile {
   hasBradycardia: boolean
   diagnosedHypertension: boolean
 
+  /**
+   * Profile verification state. NOT consulted by the rule engine itself —
+   * the resolver derives its safety-net flags (pregnancyThresholdsActive,
+   * triggerPregnancyContraindicationCheck) directly from isPregnant so that
+   * rules are source-agnostic. This field is surfaced here for downstream
+   * consumers: the chat system prompt (phase/16) uses it to emit an
+   * "awaiting provider verification" disclaimer, and the admin dashboard
+   * (phase/9) uses it to flag patients pending review. Keep the field even
+   * if the engine never reads it.
+   */
   verificationStatus: ProfileVerificationStatusInput
   verifiedAt: Date | null
   lastEditedAt: Date

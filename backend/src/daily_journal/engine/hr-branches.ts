@@ -1,12 +1,16 @@
-// Phase/5 heart-rate rules — AFib, Tachy, Brady + beta-blocker suppression.
-// Source: CLINICAL_SPEC §4.4–§4.6 + Part 7 (beta-blocker linkage).
+// Phase/5 heart-rate rules — AFib, Tachy, Brady.
+// Source: CLINICAL_SPEC §4.4–§4.6.
 //
 // Tachycardia's "≥2 consecutive readings" rule requires visibility into more
 // than the current session; the orchestrator passes an explicit
 // `tachycardiaConsecutiveCount` to handle this cross-session state.
+//
+// Beta-blocker suppression window (50–60 bpm) from CLINICAL_SPEC Part 7 is a
+// spec-level non-event for this engine: the only HR-alerting thresholds in
+// this file are <50 and >100/>110, so a patient in the 50–60 window simply
+// doesn't trigger any HR rule. No explicit suppression check is required.
 
 import { RULE_IDS, getPulsePressure } from '@cardioplace/shared'
-import type { ContextMedication } from '@cardioplace/shared'
 import type { RuleFunction, RuleResult, SessionAverage } from './types.js'
 
 const AFIB_HR_HIGH = 110
@@ -14,8 +18,6 @@ const AFIB_HR_LOW = 50
 const TACHY_HR = 100
 const BRADY_SYMPTOMATIC = 50
 const BRADY_ASYMPTOMATIC = 40
-const BB_SUPPRESS_LOWER = 50 // beta-blocker HR suppression window [50..60]
-const BB_SUPPRESS_UPPER = 60
 
 export const afibHrRule: RuleFunction = (session, ctx) => {
   if (!ctx.profile.hasAFib) return null
@@ -35,9 +37,9 @@ export const afibHrRule: RuleFunction = (session, ctx) => {
   }
 
   if (session.pulse < AFIB_HR_LOW) {
-    if (hasBetaBlocker(ctx.contextMeds) && isInSuppressionWindow(session.pulse)) {
-      return null
-    }
+    // Beta-blocker suppression (50–60 bpm) is mutually exclusive with this
+    // branch (<50), so no suppression check is needed here. Kept this comment
+    // so reviewers don't add one back.
     return {
       ruleId: RULE_IDS.AFIB_HR_LOW,
       tier: 'BP_LEVEL_1_LOW',
@@ -95,10 +97,11 @@ export const bradyRule: RuleFunction = (session, ctx) => {
   }
 
   // Symptomatic HR <50 — check structured symptoms for brady-relevant ones.
+  // Beta-blocker suppression (50–60 bpm) is mutually exclusive with this
+  // branch (<50), so no suppression check is needed here. The unit test
+  // "beta-blocker + HR=55 → suppressed" passes because the rule already
+  // returns null for pulse in [50, 60) — no branch fires.
   if (session.pulse < BRADY_SYMPTOMATIC) {
-    if (hasBetaBlocker(ctx.contextMeds) && isInSuppressionWindow(session.pulse)) {
-      return null
-    }
     const isSymptomatic =
       session.symptoms.alteredMentalStatus ||
       session.symptoms.chestPainOrDyspnea ||
@@ -117,14 +120,6 @@ export const bradyRule: RuleFunction = (session, ctx) => {
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
-
-function hasBetaBlocker(meds: ContextMedication[]): boolean {
-  return meds.some((m) => m.drugClass === 'BETA_BLOCKER')
-}
-
-function isInSuppressionWindow(pulse: number): boolean {
-  return pulse >= BB_SUPPRESS_LOWER && pulse <= BB_SUPPRESS_UPPER
-}
 
 function bradyResult(
   session: SessionAverage,
