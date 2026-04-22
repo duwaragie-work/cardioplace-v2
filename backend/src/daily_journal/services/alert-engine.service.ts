@@ -58,9 +58,13 @@ import {
  * Phase/5 AlertEngineService — the single owner of rule evaluation.
  *
  * Pipeline (short-circuits on first match):
- *   1. Pregnancy + ACE/ARB (Tier 1)
- *   2. NDHP-CCB + HFrEF (Tier 1)
- *   3. Symptom override (general + pregnancy) → BP Level 2
+ *   1. Pregnancy + ACE/ARB (Tier 1)                ← runs even for AFib <3 readings
+ *   2. NDHP-CCB + HFrEF (Tier 1)                   ← runs even for AFib <3 readings
+ *   3. Symptom override (general + pregnancy)      ← runs even for AFib <3 readings
+ *      → BP Level 2
+ *  ── AFib ≥3-reading gate (CLINICAL_SPEC §4.4) — bails here if AFib patient
+ *     has fewer than 3 readings in the session. Contraindications + symptom
+ *     overrides above are NOT gated (they don't depend on averaged vitals).
  *   4. Absolute emergency (SBP≥180 / DBP≥120) → BP Level 2
  *   5. Pregnancy L2 → L1 High (if isPregnant)
  *   6. Condition branches: HFrEF / HFpEF / CAD / HCM / DCM
@@ -71,8 +75,7 @@ import {
  *
  * Writes at most one DeviationAlert row per call — annotations from pulse-
  * pressure + loop-diuretic ride on the primary result's metadata rather than
- * creating additional rows. Three-tier messages are stubbed to "TODO" until
- * phase/6 wires OutputGeneratorService.
+ * creating additional rows. Three-tier messages come from OutputGenerator.
  */
 @Injectable()
 export class AlertEngineService {
@@ -121,14 +124,6 @@ export class AlertEngineService {
       throw err
     }
 
-    // AFib ≥3-reading gate.
-    if (ctx.profile.hasAFib && session.readingCount < AlertEngineService.AFIB_MIN_READINGS) {
-      this.logger.log(
-        `Skipping entry ${entryId} — AFib patient session has only ${session.readingCount}/${AlertEngineService.AFIB_MIN_READINGS} readings.`,
-      )
-      return null
-    }
-
     const result = await this.runPipeline(session, ctx)
     if (!result) {
       await this.resolveOpenAlerts(session.userId)
@@ -148,16 +143,34 @@ export class AlertEngineService {
     session: SessionAverage,
     ctx: ResolvedContext,
   ): Promise<RuleResult | null> {
-    // For tachycardia we need cross-session state. Compute a simple
-    // "priorElevated" flag — the previous session's averaged pulse > 100.
-    const priorTachyElevated = await this.wasPriorSessionPulseElevated(session, ctx)
-    const tachyRule = buildTachyRule(priorTachyElevated)
-
-    const pipeline: RuleFunction[] = [
+    // Stage A — rules that don't depend on averaged vitals. Must run even for
+    // AFib patients with <3 readings (the gate below blocks BP/HR rules but
+    // must not block med contraindications / symptom overrides).
+    const preGateRules: RuleFunction[] = [
       pregnancyAceArbRule,
       ndhpHfrefRule,
       symptomOverridePregnancyRule,
       symptomOverrideGeneralRule,
+    ]
+    for (const rule of preGateRules) {
+      const r = rule(session, ctx)
+      if (r) return r
+    }
+
+    // AFib ≥3-reading gate — stops BP/HR-dependent rules when session sample
+    // size is too small.
+    if (ctx.profile.hasAFib && session.readingCount < AlertEngineService.AFIB_MIN_READINGS) {
+      this.logger.log(
+        `AFib gate: skipping BP/HR rules for entry ${session.entryId} — session has ${session.readingCount}/${AlertEngineService.AFIB_MIN_READINGS} readings.`,
+      )
+      return null
+    }
+
+    // Stage B — BP/HR pipeline. Tachycardia needs cross-session state.
+    const priorTachyElevated = await this.wasPriorReadingPulseElevated(session, ctx)
+    const tachyRule = buildTachyRule(priorTachyElevated)
+
+    const bpHrRules: RuleFunction[] = [
       absoluteEmergencyRule,
       pregnancyL2Rule,
       pregnancyL1HighRule,
@@ -177,14 +190,21 @@ export class AlertEngineService {
       pulsePressureWideRule,
     ]
 
-    for (const rule of pipeline) {
-      const result = rule(session, ctx)
-      if (result) return result
+    for (const rule of bpHrRules) {
+      const r = rule(session, ctx)
+      if (r) return r
     }
     return null
   }
 
-  private async wasPriorSessionPulseElevated(
+  /**
+   * Bug 4 fix — true "consecutive readings" check. Load only the *immediately
+   * previous* JournalEntry for this user (before the current session's
+   * anchor) and test its pulse. Prior implementation filtered on pulse>100 at
+   * query time, which would match any prior elevated reading — even with
+   * intervening normal readings. Spec §4.5 requires back-to-back elevation.
+   */
+  private async wasPriorReadingPulseElevated(
     session: SessionAverage,
     ctx: ResolvedContext,
   ): Promise<boolean> {
@@ -193,11 +213,12 @@ export class AlertEngineService {
       where: {
         userId: session.userId,
         measuredAt: { lt: session.measuredAt },
-        pulse: { gt: 100 },
       },
       orderBy: { measuredAt: 'desc' },
+      select: { pulse: true },
     })
-    return prior != null
+    if (!prior || prior.pulse == null) return false
+    return prior.pulse > 100
   }
 
   // ─── annotations ───────────────────────────────────────────────────────
@@ -240,7 +261,8 @@ export class AlertEngineService {
     const dismissible = !isNonDismissableTier(result.tier)
     const messages = this.outputGenerator.generate(result, session, ctx.preDay3Mode)
 
-    await this.prisma.deviationAlert.upsert({
+    // Bug 1 fix — capture the upserted row so we can emit its real id.
+    const upserted = await this.prisma.deviationAlert.upsert({
       where: {
         journalEntryId_type: {
           journalEntryId: session.entryId,
@@ -290,18 +312,25 @@ export class AlertEngineService {
 
     this.eventEmitter.emit(JOURNAL_EVENTS.ANOMALY_TRACKED, {
       userId: session.userId,
-      alertId: session.entryId,
+      alertId: upserted.id,
       type: legacyType,
       severity: legacySeverity,
-      escalated: false,
+      escalated: upserted.escalated,
     })
   }
 
+  /**
+   * Bug 2 fix — only auto-resolve BP Level 1 alerts when a benign reading
+   * arrives. Tier 1 contraindications, BP Level 2 emergencies, and Tier 2/3
+   * need explicit admin resolution (phase/7). Historically this cleared
+   * everything and silently wiped unresolved safety-critical alerts.
+   */
   private async resolveOpenAlerts(userId: string) {
     await this.prisma.deviationAlert.updateMany({
       where: {
         userId,
         status: { in: ['OPEN', 'ACKNOWLEDGED'] },
+        tier: { in: ['BP_LEVEL_1_HIGH', 'BP_LEVEL_1_LOW'] },
       },
       data: { status: 'RESOLVED' },
     })

@@ -8,6 +8,7 @@ import {
   type ResolvedContext,
 } from '@cardioplace/shared'
 import {
+  findMedWithDrugClass,
   ndhpHfrefRule,
   pregnancyAceArbRule,
 } from './contraindications.js'
@@ -908,5 +909,172 @@ describe('loopDiureticHypotensionRule (R)', () => {
     expect(
       loopDiureticHypotensionRule(session({ systolicBP: 88 }), lctx),
     ).toBeNull()
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// Part C — Audit coverage gap closures
+// ───────────────────────────────────────────────────────────────────────────
+
+// Zestoretic = Lisinopril (ACE) + HCTZ (THIAZIDE). `registersAs` puts
+// ACE_INHIBITOR in the combo's components → pregnancy+ACE contraindication
+// must fire via the combo-component path.
+describe('pregnancyAceArbRule + Zestoretic combo (D.1 gap)', () => {
+  it('pregnant + Zestoretic → Tier 1 fires via ACE_INHIBITOR combo component', () => {
+    const r = pregnancyAceArbRule(
+      session(),
+      ctx({
+        profile: { isPregnant: true },
+        triggerPregnancyContraindicationCheck: true,
+        contextMeds: [
+          med({
+            drugName: 'Zestoretic',
+            // Combos are typically stored with a single primary drugClass +
+            // combo components; matches how seed.ts builds rows. Primary
+            // class here doesn't matter — combo components carry ACE.
+            drugClass: 'OTHER_UNVERIFIED',
+            isCombination: true,
+            combinationComponents: ['ACE_INHIBITOR', 'THIAZIDE'],
+            verificationStatus: 'VERIFIED',
+          }),
+        ],
+      }),
+    )
+    expect(r?.tier).toBe('TIER_1_CONTRAINDICATION')
+    expect(r?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
+    expect(r?.metadata.drugName).toBe('Zestoretic')
+  })
+})
+
+// Bug 5 fix — the shared helper.
+describe('findMedWithDrugClass helper (Bug 5)', () => {
+  it('matches primary drugClass', () => {
+    expect(
+      findMedWithDrugClass(
+        [med({ drugClass: 'NDHP_CCB', drugName: 'Diltiazem' })],
+        'NDHP_CCB',
+      )?.drugName,
+    ).toBe('Diltiazem')
+  })
+
+  it('matches via combinationComponents for a combo', () => {
+    expect(
+      findMedWithDrugClass(
+        [
+          med({
+            drugName: 'Entresto',
+            drugClass: 'ARNI',
+            isCombination: true,
+            combinationComponents: ['ARNI', 'ARB'],
+          }),
+        ],
+        'ARB',
+      )?.drugName,
+    ).toBe('Entresto')
+  })
+
+  it('returns null when target missing from both primary and components', () => {
+    expect(
+      findMedWithDrugClass(
+        [med({ drugClass: 'STATIN', drugName: 'Atorvastatin' })],
+        'NDHP_CCB',
+      ),
+    ).toBeNull()
+  })
+})
+
+// Pregnancy L1 on DBP axis alone.
+describe('pregnancyL1HighRule DBP-only path (G gap)', () => {
+  it('pregnant + SBP=130 DBP=90 → L1 High via DBP axis', () => {
+    const r = pregnancyL1HighRule(
+      session({ systolicBP: 130, diastolicBP: 90 }),
+      ctx({
+        profile: { isPregnant: true },
+        pregnancyThresholdsActive: true,
+      }),
+    )
+    expect(r?.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(r?.ruleId).toBe('RULE_PREGNANCY_L1_HIGH')
+  })
+})
+
+// Pregnancy symptom override — ruqPain alone.
+describe('symptomOverridePregnancyRule ruqPain (E gap)', () => {
+  it('pregnant + ruqPain only → BP Level 2 override', () => {
+    const r = symptomOverridePregnancyRule(
+      session({
+        symptoms: { ...noSymptoms(), ruqPain: true },
+      }),
+      ctx({
+        profile: { isPregnant: true },
+        pregnancyThresholdsActive: true,
+      }),
+    )
+    expect(r?.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+    expect(r?.metadata.conditionLabel).toContain('RUQ')
+  })
+})
+
+// HCM plain upper bound — no flagged meds.
+describe('hcmRule plain upper bound (K gap)', () => {
+  it('HCM + SBP=160 no flagged meds → L1 High (not vasodilator flag)', () => {
+    const r = hcmRule(
+      session({ systolicBP: 160 }),
+      ctx({ profile: { hasHCM: true } }),
+    )
+    expect(r?.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(r?.ruleId).toBe('RULE_HCM_HIGH')
+  })
+})
+
+// Beta-blocker + AFib — AFib rule wins over beta-blocker suppression.
+// Suppression window is 50–60; AFib threshold is >110.
+describe('afibHrRule + beta-blocker precedence (P gap)', () => {
+  it('BB + AFib + HR=115 → AFib HR High still fires (suppression is 50–60 only)', () => {
+    const r = afibHrRule(
+      session({ pulse: 115 }),
+      ctx({
+        profile: { hasAFib: true },
+        contextMeds: [
+          med({ drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER' }),
+        ],
+      }),
+    )
+    expect(r?.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(r?.ruleId).toBe('RULE_AFIB_HR_HIGH')
+  })
+
+  it('BB + AFib + HR=55 → AFib rule does not fire (HR not <50 or >110)', () => {
+    const r = afibHrRule(
+      session({ pulse: 55 }),
+      ctx({
+        profile: { hasAFib: true },
+        contextMeds: [med({ drugClass: 'BETA_BLOCKER' })],
+      }),
+    )
+    expect(r).toBeNull()
+  })
+})
+
+// Unverified known-class beta-blocker — spec §V2-A keeps suppression active.
+describe('bradyRule unverified beta-blocker suppression (P gap)', () => {
+  it('UNVERIFIED beta-blocker + HR=55 + symptoms → still suppressed', () => {
+    const r = bradyRule(
+      session({
+        pulse: 55,
+        symptoms: { ...noSymptoms(), chestPainOrDyspnea: true },
+      }),
+      ctx({
+        profile: { hasBradycardia: true },
+        contextMeds: [
+          med({
+            drugName: 'Metoprolol',
+            drugClass: 'BETA_BLOCKER',
+            verificationStatus: 'UNVERIFIED',
+          }),
+        ],
+      }),
+    )
+    expect(r).toBeNull()
   })
 })

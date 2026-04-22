@@ -88,7 +88,10 @@ describe('AlertEngineService (orchestrator)', () => {
   beforeEach(async () => {
     prisma = {
       deviationAlert: {
-        upsert: (jest.fn() as jest.Mock<any>).mockResolvedValue({ id: 'alert-1' }),
+        upsert: (jest.fn() as jest.Mock<any>).mockResolvedValue({
+          id: 'alert-1',
+          escalated: false,
+        }),
         updateMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 0 }),
       },
       journalEntry: {
@@ -237,6 +240,67 @@ describe('AlertEngineService (orchestrator)', () => {
       const r = await service.evaluate('entry-1')
       expect(r?.ruleId).toBe('RULE_AFIB_HR_HIGH')
     })
+
+    // Bug 3 fix — contraindications and symptom overrides must run even when
+    // the AFib gate closes.
+    it('AFib + 1 reading + pregnant + ACE → Tier 1 still fires (gate does NOT block contraindications)', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ readingCount: 1 }),
+      )
+      profileResolver.resolve.mockResolvedValue(
+        baseCtx({
+          profile: {
+            ...baseCtx().profile,
+            hasAFib: true,
+            isPregnant: true,
+          },
+          pregnancyThresholdsActive: true,
+          triggerPregnancyContraindicationCheck: true,
+          contextMeds: [
+            {
+              id: 'm1',
+              drugName: 'Lisinopril',
+              drugClass: 'ACE_INHIBITOR',
+              isCombination: false,
+              combinationComponents: [],
+              frequency: 'ONCE_DAILY',
+              source: 'PATIENT_SELF_REPORT',
+              verificationStatus: 'VERIFIED',
+              reportedAt: new Date(),
+            },
+          ],
+        }),
+      )
+      const r = await service.evaluate('entry-1')
+      expect(r?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
+      expect(r?.tier).toBe('TIER_1_CONTRAINDICATION')
+      expect(prisma.deviationAlert.upsert).toHaveBeenCalledTimes(1)
+    })
+
+    it('AFib + 1 reading + severe headache → BP Level 2 symptom override still fires', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({
+          readingCount: 1,
+          symptoms: {
+            severeHeadache: true,
+            visualChanges: false,
+            alteredMentalStatus: false,
+            chestPainOrDyspnea: false,
+            focalNeuroDeficit: false,
+            severeEpigastricPain: false,
+            newOnsetHeadache: false,
+            ruqPain: false,
+            edema: false,
+            otherSymptoms: [],
+          },
+        }),
+      )
+      profileResolver.resolve.mockResolvedValue(
+        baseCtx({ profile: { ...baseCtx().profile, hasAFib: true } }),
+      )
+      const r = await service.evaluate('entry-1')
+      expect(r?.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+    })
   })
 
   // ────────────────────────────────────────────────────────────────────────
@@ -327,6 +391,195 @@ describe('AlertEngineService (orchestrator)', () => {
       expect(call.create.physicianMessage.toLowerCase()).toContain(
         'pulse pressure',
       )
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Part C — Audit fix pass
+  // ────────────────────────────────────────────────────────────────────────
+
+  // Bug 1 — ANOMALY_TRACKED must carry the DeviationAlert.id, not entryId.
+  describe('Bug 1 — ANOMALY_TRACKED alertId', () => {
+    it('emits the upserted DeviationAlert.id (not entryId)', async () => {
+      prisma.deviationAlert.upsert.mockResolvedValue({
+        id: 'deviation-alert-99',
+        escalated: false,
+      })
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ entryId: 'entry-xyz', systolicBP: 165, diastolicBP: 95 }),
+      )
+      await service.evaluate('entry-xyz')
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        JOURNAL_EVENTS.ANOMALY_TRACKED,
+        expect.objectContaining({ alertId: 'deviation-alert-99' }),
+      )
+      // And specifically NOT entryId
+      const payload = eventEmitter.emit.mock.calls[0][1] as { alertId: string }
+      expect(payload.alertId).not.toBe('entry-xyz')
+    })
+
+    it('propagates DeviationAlert.escalated onto the event payload', async () => {
+      prisma.deviationAlert.upsert.mockResolvedValue({
+        id: 'a-1',
+        escalated: true,
+      })
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 165, diastolicBP: 95 }),
+      )
+      await service.evaluate('entry-1')
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        JOURNAL_EVENTS.ANOMALY_TRACKED,
+        expect.objectContaining({ escalated: true }),
+      )
+    })
+  })
+
+  // Bug 2 — resolveOpenAlerts must only clear BP Level 1 rows, not Tier 1 / L2.
+  describe('Bug 2 — resolveOpenAlerts scope', () => {
+    it('benign reading only resolves BP_LEVEL_1_* tiers', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 125, diastolicBP: 78 }),
+      )
+      await service.evaluate('entry-1')
+      expect(prisma.deviationAlert.updateMany).toHaveBeenCalledTimes(1)
+      const call = prisma.deviationAlert.updateMany.mock.calls[0][0]
+      expect(call.where.tier).toEqual({
+        in: ['BP_LEVEL_1_HIGH', 'BP_LEVEL_1_LOW'],
+      })
+      expect(call.data).toEqual({ status: 'RESOLVED' })
+    })
+  })
+
+  // Bug 4 — tachy must check the immediately previous reading, not any prior.
+  describe('Bug 4 — tachycardia consecutive check', () => {
+    it('prior reading pulse 80 (normal) → no tachy alert even at current 105', async () => {
+      prisma.journalEntry.findFirst.mockResolvedValue({ pulse: 80 })
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ pulse: 105 }),
+      )
+      profileResolver.resolve.mockResolvedValue(
+        baseCtx({ profile: { ...baseCtx().profile, hasTachycardia: true } }),
+      )
+      const r = await service.evaluate('entry-1')
+      // pulse=105 + no other conditions → shouldn't fire any rule
+      expect(r).toBeNull()
+    })
+
+    it('prior reading pulse 102 + current 105 → tachy alert fires', async () => {
+      prisma.journalEntry.findFirst.mockResolvedValue({ pulse: 102 })
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ pulse: 105 }),
+      )
+      profileResolver.resolve.mockResolvedValue(
+        baseCtx({ profile: { ...baseCtx().profile, hasTachycardia: true } }),
+      )
+      const r = await service.evaluate('entry-1')
+      expect(r?.ruleId).toBe('RULE_TACHY_HR')
+    })
+
+    it('prior entry with pulse=null → no false positive', async () => {
+      prisma.journalEntry.findFirst.mockResolvedValue({ pulse: null })
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ pulse: 105 }),
+      )
+      profileResolver.resolve.mockResolvedValue(
+        baseCtx({ profile: { ...baseCtx().profile, hasTachycardia: true } }),
+      )
+      const r = await service.evaluate('entry-1')
+      expect(r).toBeNull()
+    })
+
+    it('query omits pulse filter — just fetches latest prior entry', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ pulse: 105 }),
+      )
+      profileResolver.resolve.mockResolvedValue(
+        baseCtx({ profile: { ...baseCtx().profile, hasTachycardia: true } }),
+      )
+      await service.evaluate('entry-1')
+      const findFirstCall = prisma.journalEntry.findFirst.mock.calls[0][0]
+      expect(findFirstCall.where.pulse).toBeUndefined()
+      expect(findFirstCall.orderBy).toEqual({ measuredAt: 'desc' })
+    })
+  })
+
+  // Explicit row-shape assertions (dismissibility, PP cached, legacy cols).
+  describe('DeviationAlert row shape', () => {
+    it('BP Level 2 row: dismissible=false', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 185, diastolicBP: 100 }),
+      )
+      await service.evaluate('entry-1')
+      const call = prisma.deviationAlert.upsert.mock.calls[0][0]
+      expect(call.create.tier).toBe('BP_LEVEL_2')
+      expect(call.create.dismissible).toBe(false)
+    })
+
+    it('Tier 3 (wide PP alone) row: dismissible=true', async () => {
+      // 170/100 → PP=70 (>60) and DBP=100 triggers L1 High. To isolate the
+      // pulse-pressure rule we need no other rule to fire first. Use
+      // 140/70 → PP 70 (no L1 High, no emergency).
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 140, diastolicBP: 70 }),
+      )
+      // Wait — 70 is boundary; rule wants pp>60 strict. Use 145/80 → PP 65.
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 145, diastolicBP: 80 }),
+      )
+      const r = await service.evaluate('entry-1')
+      expect(r?.ruleId).toBe('RULE_PULSE_PRESSURE_WIDE')
+      const call = prisma.deviationAlert.upsert.mock.calls[0][0]
+      expect(call.create.tier).toBe('TIER_3_INFO')
+      expect(call.create.dismissible).toBe(true)
+    })
+
+    it('pulsePressure cached on DeviationAlert row explicitly', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 170, diastolicBP: 85 }), // PP=85
+      )
+      await service.evaluate('entry-1')
+      const call = prisma.deviationAlert.upsert.mock.calls[0][0]
+      expect(call.create.pulsePressure).toBe(85)
+    })
+
+    it('legacy type + severity populated for back-compat', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 165, diastolicBP: 95 }),
+      )
+      await service.evaluate('entry-1')
+      const call = prisma.deviationAlert.upsert.mock.calls[0][0]
+      expect(call.create.type).toBe('SYSTOLIC_BP')
+      expect(call.create.severity).toBe('MEDIUM')
+    })
+
+    it('upsert idempotency: re-evaluating same entry uses the unique where clause', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 165, diastolicBP: 95 }),
+      )
+      await service.evaluate('entry-1')
+      await service.evaluate('entry-1')
+      expect(prisma.deviationAlert.upsert).toHaveBeenCalledTimes(2)
+      for (const [call] of prisma.deviationAlert.upsert.mock.calls) {
+        expect(call.where).toEqual({
+          journalEntryId_type: {
+            journalEntryId: 'entry-1',
+            type: 'SYSTOLIC_BP',
+          },
+        })
+      }
+    })
+
+    it('session-averaged emergency: readingCount=2 + mean SBP 180 → fires BP Level 2', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({
+          readingCount: 2,
+          systolicBP: 180, // pre-averaged by the averager
+          diastolicBP: 95,
+        }),
+      )
+      const r = await service.evaluate('entry-1')
+      expect(r?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+      expect(r?.tier).toBe('BP_LEVEL_2')
     })
   })
 })

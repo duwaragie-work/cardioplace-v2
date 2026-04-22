@@ -1,7 +1,7 @@
 // Phase/5 contraindication rules — Tier 1, non-dismissable.
 // Source: CLINICAL_SPEC Part 7 + §V2-D Tier 1 list.
 
-import { RULE_IDS, type ContextMedication } from '@cardioplace/shared'
+import { RULE_IDS, type ContextMedication, type DrugClassInput } from '@cardioplace/shared'
 import type { RuleFunction } from './types.js'
 
 /**
@@ -12,7 +12,9 @@ import type { RuleFunction } from './types.js'
 export const pregnancyAceArbRule: RuleFunction = (session, ctx) => {
   if (!ctx.triggerPregnancyContraindicationCheck) return null
 
-  const aceOrArbMed = findAceOrArbMedication([...ctx.contextMeds])
+  const aceOrArbMed =
+    findMedWithDrugClass(ctx.contextMeds, 'ACE_INHIBITOR') ??
+    findMedWithDrugClass(ctx.contextMeds, 'ARB')
   if (!aceOrArbMed) return null
 
   return {
@@ -34,11 +36,16 @@ export const pregnancyAceArbRule: RuleFunction = (session, ctx) => {
 /**
  * Rule 2 — Nondihydropyridine CCB + HFrEF (negative inotropic, harmful).
  * Uses resolvedHFType so UNKNOWN + DCM are both treated as HFrEF.
+ *
+ * Checks both primary drugClass and combo components (Bug 5 fix — mirrors the
+ * pregnancy+ACE/ARB path). No combo in the current catalog registers as
+ * NDHP_CCB, so this has no behavioral change today but closes a future
+ * regression path if a combo NDHP med is added.
  */
 export const ndhpHfrefRule: RuleFunction = (session, ctx) => {
   if (ctx.profile.resolvedHFType !== 'HFREF') return null
 
-  const ndhpMed = ctx.contextMeds.find((m) => matchesDrugClass(m, 'NDHP_CCB'))
+  const ndhpMed = findMedWithDrugClass(ctx.contextMeds, 'NDHP_CCB')
   if (!ndhpMed) return null
 
   // Only fire for verified NDHP meds. Safety-net limits Tier 1 on unverified
@@ -63,34 +70,18 @@ export const ndhpHfrefRule: RuleFunction = (session, ctx) => {
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function findAceOrArbMedication(
+/**
+ * Returns the first medication whose primary drugClass matches, OR whose
+ * combinationComponents include the target. Exported so tests can exercise it
+ * directly.
+ */
+export function findMedWithDrugClass(
   meds: ContextMedication[],
+  target: DrugClassInput,
 ): ContextMedication | null {
   for (const med of meds) {
-    if (matchesDrugClass(med, 'ACE_INHIBITOR') || matchesDrugClass(med, 'ARB')) {
-      return med
-    }
-    // Combo pills register via `combinationComponents` (e.g. Entresto → ARB).
-    if (
-      matchesCombinationDrugClass(med, 'ACE_INHIBITOR') ||
-      matchesCombinationDrugClass(med, 'ARB')
-    ) {
-      return med
-    }
+    if (med.drugClass === target) return med
+    if (med.isCombination && med.combinationComponents.includes(target)) return med
   }
   return null
-}
-
-function matchesDrugClass(
-  med: ContextMedication,
-  target: ContextMedication['drugClass'],
-): boolean {
-  return med.drugClass === target
-}
-
-function matchesCombinationDrugClass(
-  med: ContextMedication,
-  target: ContextMedication['drugClass'],
-): boolean {
-  return med.isCombination && med.combinationComponents.includes(target)
 }
