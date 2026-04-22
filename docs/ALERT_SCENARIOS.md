@@ -455,6 +455,90 @@ Messages below are verbatim from [shared/src/alert-messages.ts](../shared/src/al
 
 ---
 
+---
+
+## Expanded scenarios (22–57) — complete rule-ID + symptom + combo + safety-net coverage
+
+Compact quick-reference. Each scenario is also an executable `it()` in [alert-engine.scenarios.spec.ts](../backend/src/daily_journal/services/alert-engine.scenarios.spec.ts).
+
+### Every remaining rule ID
+
+| # | Input | Expected |
+|---|---|---|
+| 22 | Pregnant · `ruqPain=true` · BP 128/82 | `RULE_SYMPTOM_OVERRIDE_PREGNANCY` · BP_LEVEL_2_SYMPTOM_OVERRIDE |
+| 23 | HFrEF · BP 82/55 | `RULE_HFREF_LOW` · BP_LEVEL_1_LOW |
+| 24 | HFrEF · BP 162/88 | `RULE_HFREF_HIGH` · BP_LEVEL_1_HIGH |
+| 25 | HFpEF · BP 162/88 | `RULE_HFPEF_HIGH` · BP_LEVEL_1_HIGH |
+| 26 | CAD · BP 162/82 (DBP normal) | `RULE_CAD_HIGH` · BP_LEVEL_1_HIGH |
+| 27 | HCM · BP 98/64 · no risky med | `RULE_HCM_LOW` · BP_LEVEL_1_LOW |
+| 28 | HCM · BP 162/88 · no risky med | `RULE_HCM_HIGH` · BP_LEVEL_1_HIGH |
+| 29 | DCM only (no HF flag) · BP 82/55 | `RULE_DCM_LOW` · BP_LEVEL_1_LOW |
+| 30 | DCM only · BP 162/88 | `RULE_DCM_HIGH` · BP_LEVEL_1_HIGH |
+| 31 | Diagnosed HTN · threshold lower=110 · 12 readings · BP 108/70 | `RULE_PERSONALIZED_LOW` · mode=PERSONALIZED |
+| 32 | Age 45 · BP 88/58 | `RULE_STANDARD_L1_LOW` · BP_LEVEL_1_LOW |
+| 33 | AFib · 3 readings · pulse 48 | `RULE_AFIB_HR_LOW` · BP_LEVEL_1_LOW |
+| 34 | Tachy patient · pulse 105 · prior reading pulse 102 | `RULE_TACHY_HR` · BP_LEVEL_1_HIGH |
+| 35 | Brady · pulse 48 · `chestPainOrDyspnea=true` | `RULE_SYMPTOM_OVERRIDE_GENERAL` (L2 wins — safer) |
+| 36 | Brady · pulse 38 · asymptomatic | `RULE_BRADY_HR_ASYMPTOMATIC` · BP_LEVEL_1_LOW |
+| 37 | BP 145/80 · PP 65 · no conditions | `RULE_PULSE_PRESSURE_WIDE` · TIER_3_INFO (patient msg empty) |
+| 38 | Loop diuretic (Furosemide) · BP 92/60 | `RULE_LOOP_DIURETIC_HYPOTENSION` · TIER_3_INFO |
+
+### Remaining general symptom triggers (symptom override)
+
+| # | Input | Expected |
+|---|---|---|
+| 39 | BP 125/75 · `visualChanges=true` | `RULE_SYMPTOM_OVERRIDE_GENERAL` |
+| 40 | BP 125/75 · `alteredMentalStatus=true` | `RULE_SYMPTOM_OVERRIDE_GENERAL` |
+| 41 | BP 125/75 · `chestPainOrDyspnea=true` | `RULE_SYMPTOM_OVERRIDE_GENERAL` |
+| 42 | BP 125/75 · `focalNeuroDeficit=true` | `RULE_SYMPTOM_OVERRIDE_GENERAL` |
+| 43 | BP 125/75 · `severeEpigastricPain=true` | `RULE_SYMPTOM_OVERRIDE_GENERAL` |
+| 44 | Pregnant · `newOnsetHeadache=true` · BP 125/75 | `RULE_SYMPTOM_OVERRIDE_PREGNANCY` |
+| 45 | Pregnant · `edema=true` · BP 110/70 | `RULE_SYMPTOM_OVERRIDE_PREGNANCY` |
+
+### Combo drug contraindications (registersAs path)
+
+| # | Input | Expected |
+|---|---|---|
+| 46 | Pregnant · Entresto (ARNI + ARB combo) · BP 128/80 | `RULE_PREGNANCY_ACE_ARB` · TIER_1 · physician msg names Entresto |
+| 47 | Pregnant · Zestoretic (ACE + THIAZIDE combo) · BP 128/80 | `RULE_PREGNANCY_ACE_ARB` · TIER_1 · physician msg names Zestoretic |
+
+### Safety-net HF type biases
+
+| # | Input | Expected |
+|---|---|---|
+| 48 | `hasHeartFailure=true` · `heartFailureType=UNKNOWN` · Diltiazem | `RULE_NDHP_HFREF` (resolver biased to HFREF) |
+| 49 | DCM only (no HF flag) · Diltiazem | `RULE_NDHP_HFREF` |
+
+### Rule precedence
+
+| # | Input | Expected |
+|---|---|---|
+| 50 | Pregnant + HFrEF · Lisinopril + Diltiazem · BP 120/76 | `RULE_PREGNANCY_ACE_ARB` (pregnancy wins; single upsert) |
+| 51 | Pregnant · Lisinopril · BP 195/130 | `RULE_PREGNANCY_ACE_ARB` (Tier 1 beats absolute emergency) |
+
+### Boundary values
+
+| # | Input | Expected |
+|---|---|---|
+| 52 | Standard SBP=160 exactly | `RULE_STANDARD_L1_HIGH` fires |
+| 53 | CAD · DBP=70 exactly · SBP 130 | **no alert** (boundary, <70 is strict) |
+| 54 | Standard SBP=90 exactly | **no alert** (boundary, <90 is strict) |
+| 55 | Age 65+ · SBP=100 exactly | **no alert** (boundary, <100 is strict) |
+
+### System-level edges
+
+| # | Input | Expected |
+|---|---|---|
+| 56 | AFib · 3 readings · SBP 165 · pulse 75 | `RULE_STANDARD_L1_HIGH` (AFib patients get BP alerts after gate opens) |
+| 57 | Admin user (no PatientProfile) | **skip silently** · no upsert · no updateMany |
+
+### Notes on unreachable paths
+
+- `RULE_BRADY_HR_SYMPTOMATIC` is reachable in [rules.spec.ts](../backend/src/daily_journal/engine/rules.spec.ts) unit tests but not end-to-end: the 3 symptom flags used to detect bradycardic symptomaticity (`alteredMentalStatus`, `chestPainOrDyspnea`, `focalNeuroDeficit`) are all TOD triggers that short-circuit to `BP_LEVEL_2_SYMPTOM_OVERRIDE` before the brady rule runs. Clinically correct — an L2 emergency is safer than an L1 brady alert for a patient with chest pain.
+- `dcmRule` must run before `hfrefRule` in the pipeline — both match `resolvedHFType = HFREF` (DCM-only patients are biased to HFREF by the resolver), so dcmRule's early-return on `hasHeartFailure=true` is what keeps HFrEF patients routed correctly.
+
+---
+
 ## Summary — seed archetype coverage
 
 | Seed patient | Expected rule | Phase/7 tier |

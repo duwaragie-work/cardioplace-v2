@@ -83,7 +83,6 @@ function buildCtx(over: {
   const profile: ResolvedContext['profile'] = {
     gender: 'FEMALE',
     heightCm: 165,
-    isPregnant,
     pregnancyDueDate: null,
     historyPreeclampsia: false,
     hasHeartFailure: false,
@@ -100,6 +99,8 @@ function buildCtx(over: {
     verifiedAt: TEN_YEARS_AGO,
     lastEditedAt: TEN_YEARS_AGO,
     ...over.profile,
+    // pin isPregnant last so explicit over.isPregnant (or default false) wins
+    // over a stale value in over.profile.isPregnant
     isPregnant,
   }
   const readingCount = over.readingCount ?? 10
@@ -620,5 +621,514 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(upsertArgs.create.tier).toBe('BP_LEVEL_2')
     expect(upsertArgs.create.patientMessage).toContain('180/95')
     expect(upsertArgs.create.patientMessage).toMatch(/911/)
+  })
+
+  // ========================================================================
+  // Rule-ID coverage: every remaining RULE_* has at least one scenario
+  // ========================================================================
+
+  it('Scenario 22 — Pregnant + ruqPain → RULE_SYMPTOM_OVERRIDE_PREGNANCY', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({
+        systolicBP: 128,
+        diastolicBP: 82,
+        symptoms: { ...noSymptoms(), ruqPain: true },
+      }),
+      buildCtx({ isPregnant: true }),
+    )
+    expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_PREGNANCY')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+    expect(upsertArgs.create.physicianMessage).toContain('preeclampsia')
+  })
+
+  it('Scenario 23 — HFrEF + SBP 82 → RULE_HFREF_LOW', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 82, diastolicBP: 55 }),
+      buildCtx({
+        profile: {
+          hasHeartFailure: true,
+          heartFailureType: 'HFREF',
+          resolvedHFType: 'HFREF',
+        },
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_HFREF_LOW')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
+    expect(upsertArgs.create.physicianMessage).toContain('HFrEF')
+  })
+
+  it('Scenario 24 — HFrEF + SBP 162 → RULE_HFREF_HIGH', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 162, diastolicBP: 88 }),
+      buildCtx({
+        profile: {
+          hasHeartFailure: true,
+          heartFailureType: 'HFREF',
+          resolvedHFType: 'HFREF',
+        },
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_HFREF_HIGH')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
+  })
+
+  it('Scenario 25 — HFpEF + SBP 162 → RULE_HFPEF_HIGH', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 162, diastolicBP: 88 }),
+      buildCtx({
+        profile: {
+          hasHeartFailure: true,
+          heartFailureType: 'HFPEF',
+          resolvedHFType: 'HFPEF',
+        },
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_HFPEF_HIGH')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(upsertArgs.create.physicianMessage).toContain('HFpEF')
+  })
+
+  it('Scenario 26 — CAD + SBP 162 DBP 82 (DBP normal) → RULE_CAD_HIGH', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 162, diastolicBP: 82 }),
+      buildCtx({ profile: { hasCAD: true, diagnosedHypertension: true } }),
+    )
+    expect(result?.ruleId).toBe('RULE_CAD_HIGH')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
+  })
+
+  it('Scenario 27 — HCM + SBP 98 (no risky med) → RULE_HCM_LOW', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 98, diastolicBP: 64 }),
+      buildCtx({ profile: { hasHCM: true } }),
+    )
+    expect(result?.ruleId).toBe('RULE_HCM_LOW')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
+    expect(upsertArgs.create.physicianMessage).toContain('LVOT')
+  })
+
+  it('Scenario 28 — HCM + SBP 162 (no risky med) → RULE_HCM_HIGH', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 162, diastolicBP: 88 }),
+      buildCtx({ profile: { hasHCM: true } }),
+    )
+    expect(result?.ruleId).toBe('RULE_HCM_HIGH')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
+  })
+
+  it('Scenario 29 — DCM only (no HF flag) + SBP 82 → RULE_DCM_LOW', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 82, diastolicBP: 55 }),
+      buildCtx({
+        profile: {
+          hasHeartFailure: false,
+          hasDCM: true,
+          heartFailureType: 'NOT_APPLICABLE',
+          resolvedHFType: 'HFREF',
+        },
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_DCM_LOW')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
+    expect(upsertArgs.create.physicianMessage).toContain('DCM')
+  })
+
+  it('Scenario 30 — DCM only + SBP 162 → RULE_DCM_HIGH', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 162, diastolicBP: 88 }),
+      buildCtx({
+        profile: {
+          hasHeartFailure: false,
+          hasDCM: true,
+          resolvedHFType: 'HFREF',
+        },
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_DCM_HIGH')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
+  })
+
+  it('Scenario 31 — Personalized low (threshold lower=110 + SBP 108) → RULE_PERSONALIZED_LOW', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 108, diastolicBP: 70 }),
+      buildCtx({
+        profile: { diagnosedHypertension: true },
+        readingCount: 12,
+        threshold: {
+          sbpUpperTarget: 130,
+          sbpLowerTarget: 110,
+          dbpUpperTarget: null,
+          dbpLowerTarget: null,
+          hrUpperTarget: null,
+          hrLowerTarget: null,
+          setByProviderId: 'prov-1',
+          setAt: TEN_YEARS_AGO,
+          notes: null,
+        },
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_PERSONALIZED_LOW')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
+    expect(upsertArgs.create.mode).toBe('PERSONALIZED')
+  })
+
+  it('Scenario 32 — Age 45 + SBP 88 → RULE_STANDARD_L1_LOW', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 88, diastolicBP: 58 }),
+      buildCtx({ ageGroup: '40-64' }),
+    )
+    expect(result?.ruleId).toBe('RULE_STANDARD_L1_LOW')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
+  })
+
+  it('Scenario 33 — AFib + 3 readings + pulse 48 → RULE_AFIB_HR_LOW', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({
+        systolicBP: 120,
+        diastolicBP: 75,
+        pulse: 48,
+        readingCount: 3,
+      }),
+      buildCtx({ profile: { hasAFib: true } }),
+    )
+    expect(result?.ruleId).toBe('RULE_AFIB_HR_LOW')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
+  })
+
+  it('Scenario 34 — Tachy patient + pulse 105 + prior elevated (102) → RULE_TACHY_HR', async () => {
+    prisma.journalEntry.findFirst.mockResolvedValue({ pulse: 102 })
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 128, diastolicBP: 80, pulse: 105 }),
+      buildCtx({ profile: { hasTachycardia: true } }),
+    )
+    expect(result?.ruleId).toBe('RULE_TACHY_HR')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
+  })
+
+  // Brady + TOD symptom: the L2 symptom override fires first (clinically safer
+  // — higher-urgency tier takes precedence). RULE_BRADY_HR_SYMPTOMATIC is
+  // reachable in unit tests (rules.spec.ts) but not end-to-end because the 3
+  // structured flags used to detect bradycardic symptomaticity are all TOD
+  // triggers that short-circuit to L2. Accepted per clinical-safety design.
+  it('Scenario 35 — Brady + pulse 48 + chestPainOrDyspnea → L2 symptom override wins', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({
+        systolicBP: 118,
+        diastolicBP: 72,
+        pulse: 48,
+        symptoms: { ...noSymptoms(), chestPainOrDyspnea: true },
+      }),
+      buildCtx({ profile: { hasBradycardia: true } }),
+    )
+    expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+  })
+
+  it('Scenario 36 — Brady + pulse 38 (asymptomatic) → RULE_BRADY_HR_ASYMPTOMATIC', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 115, diastolicBP: 70, pulse: 38 }),
+      buildCtx({ profile: { hasBradycardia: true } }),
+    )
+    expect(result?.ruleId).toBe('RULE_BRADY_HR_ASYMPTOMATIC')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_LOW')
+    expect(upsertArgs.create.physicianMessage).toContain('asymptomatic bradycardia')
+  })
+
+  it('Scenario 37 — Wide PP standalone 145/80 (PP 65) → RULE_PULSE_PRESSURE_WIDE', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 145, diastolicBP: 80, pulse: 74 }),
+      buildCtx(),
+    )
+    expect(result?.ruleId).toBe('RULE_PULSE_PRESSURE_WIDE')
+    expect(upsertArgs.create.tier).toBe('TIER_3_INFO')
+    expect(upsertArgs.create.patientMessage).toBe('')
+    expect(upsertArgs.create.pulsePressure).toBe(65)
+  })
+
+  it('Scenario 38 — Loop diuretic + SBP 92 standalone → RULE_LOOP_DIURETIC_HYPOTENSION', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 92, diastolicBP: 60, pulse: 72 }),
+      buildCtx({
+        contextMeds: [
+          buildMed({ drugName: 'Furosemide', drugClass: 'LOOP_DIURETIC' }),
+        ],
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_LOOP_DIURETIC_HYPOTENSION')
+    expect(upsertArgs.create.tier).toBe('TIER_3_INFO')
+    expect(upsertArgs.create.patientMessage).toBe('')
+  })
+
+  // ========================================================================
+  // All 6 general symptom triggers (scenario 5 covered severeHeadache)
+  // ========================================================================
+
+  it('Scenario 39 — visualChanges at 125/75 → BP Level 2 symptom override', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({
+        systolicBP: 125,
+        diastolicBP: 75,
+        symptoms: { ...noSymptoms(), visualChanges: true },
+      }),
+      buildCtx(),
+    )
+    expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+    expect(upsertArgs.create.physicianMessage).toContain('visual changes')
+  })
+
+  it('Scenario 40 — alteredMentalStatus at 125/75 → BP Level 2 override', async () => {
+    const { result } = await run(
+      buildSession({
+        symptoms: { ...noSymptoms(), alteredMentalStatus: true },
+      }),
+      buildCtx(),
+    )
+    expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
+  })
+
+  it('Scenario 41 — chestPainOrDyspnea at 125/75 → BP Level 2 override', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({
+        symptoms: { ...noSymptoms(), chestPainOrDyspnea: true },
+      }),
+      buildCtx(),
+    )
+    expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
+    expect(upsertArgs.create.physicianMessage).toContain(
+      'chest pain or dyspnea',
+    )
+  })
+
+  it('Scenario 42 — focalNeuroDeficit at 125/75 → BP Level 2 override', async () => {
+    const { result } = await run(
+      buildSession({
+        symptoms: { ...noSymptoms(), focalNeuroDeficit: true },
+      }),
+      buildCtx(),
+    )
+    expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
+  })
+
+  it('Scenario 43 — severeEpigastricPain at 125/75 → BP Level 2 override', async () => {
+    const { result } = await run(
+      buildSession({
+        symptoms: { ...noSymptoms(), severeEpigastricPain: true },
+      }),
+      buildCtx(),
+    )
+    expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
+  })
+
+  it('Scenario 44 — Pregnant + newOnsetHeadache → RULE_SYMPTOM_OVERRIDE_PREGNANCY', async () => {
+    const { result } = await run(
+      buildSession({
+        symptoms: { ...noSymptoms(), newOnsetHeadache: true },
+      }),
+      buildCtx({ isPregnant: true }),
+    )
+    expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_PREGNANCY')
+  })
+
+  it('Scenario 45 — Pregnant + edema at 110/70 → RULE_SYMPTOM_OVERRIDE_PREGNANCY', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({
+        systolicBP: 110,
+        diastolicBP: 70,
+        symptoms: { ...noSymptoms(), edema: true },
+      }),
+      buildCtx({ isPregnant: true }),
+    )
+    expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_PREGNANCY')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+  })
+
+  // ========================================================================
+  // Combo drug contraindications (registersAs path)
+  // ========================================================================
+
+  it('Scenario 46 — Pregnant + Entresto (ARNI+ARB combo) → Tier 1', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 128, diastolicBP: 80 }),
+      buildCtx({
+        isPregnant: true,
+        contextMeds: [
+          buildMed({
+            drugName: 'Entresto',
+            drugClass: 'ARNI',
+            isCombination: true,
+            combinationComponents: ['ARNI', 'ARB'],
+          }),
+        ],
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
+    expect(upsertArgs.create.tier).toBe('TIER_1_CONTRAINDICATION')
+    expect(upsertArgs.create.physicianMessage).toContain('Entresto')
+  })
+
+  it('Scenario 47 — Pregnant + Zestoretic (ACE+THIAZIDE combo) → Tier 1', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 128, diastolicBP: 80 }),
+      buildCtx({
+        isPregnant: true,
+        contextMeds: [
+          buildMed({
+            drugName: 'Zestoretic',
+            drugClass: 'OTHER_UNVERIFIED',
+            isCombination: true,
+            combinationComponents: ['ACE_INHIBITOR', 'THIAZIDE'],
+          }),
+        ],
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
+    expect(upsertArgs.create.tier).toBe('TIER_1_CONTRAINDICATION')
+    expect(upsertArgs.create.physicianMessage).toContain('Zestoretic')
+  })
+
+  // ========================================================================
+  // Safety-net HF type biases
+  // ========================================================================
+
+  it('Scenario 48 — HF type UNKNOWN + diltiazem → Tier 1 NDHP (via HFREF bias)', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 120, diastolicBP: 74 }),
+      buildCtx({
+        profile: {
+          hasHeartFailure: true,
+          heartFailureType: 'UNKNOWN',
+          resolvedHFType: 'HFREF', // biased by ProfileResolver
+        },
+        contextMeds: [
+          buildMed({ drugName: 'Diltiazem', drugClass: 'NDHP_CCB' }),
+        ],
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_NDHP_HFREF')
+    expect(upsertArgs.create.tier).toBe('TIER_1_CONTRAINDICATION')
+  })
+
+  it('Scenario 49 — DCM only (no HF flag) + diltiazem → Tier 1 NDHP', async () => {
+    const { result } = await run(
+      buildSession({ systolicBP: 120, diastolicBP: 74 }),
+      buildCtx({
+        profile: {
+          hasHeartFailure: false,
+          hasDCM: true,
+          resolvedHFType: 'HFREF',
+        },
+        contextMeds: [
+          buildMed({ drugName: 'Diltiazem', drugClass: 'NDHP_CCB' }),
+        ],
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_NDHP_HFREF')
+  })
+
+  // ========================================================================
+  // Rule precedence (short-circuit order)
+  // ========================================================================
+
+  it('Scenario 50 — Both Tier 1 pairs present → pregnancy+ACE wins (fires first)', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 120, diastolicBP: 76 }),
+      buildCtx({
+        isPregnant: true,
+        profile: {
+          hasHeartFailure: true,
+          heartFailureType: 'HFREF',
+          resolvedHFType: 'HFREF',
+        },
+        contextMeds: [
+          buildMed({ drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR' }),
+          buildMed({
+            id: 'med-2',
+            drugName: 'Diltiazem',
+            drugClass: 'NDHP_CCB',
+          }),
+        ],
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
+    expect(upsertArgs.create.physicianMessage).toContain('Lisinopril')
+    expect(prisma.deviationAlert.upsert).toHaveBeenCalledTimes(1)
+  })
+
+  it('Scenario 51 — Pregnant + ACE + BP 195/130 → Tier 1 (not absolute emergency)', async () => {
+    const { result } = await run(
+      buildSession({ systolicBP: 195, diastolicBP: 130 }),
+      buildCtx({
+        isPregnant: true,
+        contextMeds: [buildMed()],
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
+    // Contraindication short-circuits — no BP-tier alert even though BP is emergency-range.
+  })
+
+  // ========================================================================
+  // Boundary values (fires at, does not fire at)
+  // ========================================================================
+
+  it('Scenario 52 — Standard SBP=160 boundary → L1 High fires', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({ systolicBP: 160, diastolicBP: 95 }),
+      buildCtx(),
+    )
+    expect(result?.ruleId).toBe('RULE_STANDARD_L1_HIGH')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
+  })
+
+  it('Scenario 53 — CAD + DBP=70 boundary → no CAD critical alert', async () => {
+    const { result } = await run(
+      buildSession({ systolicBP: 130, diastolicBP: 70 }),
+      buildCtx({ profile: { hasCAD: true } }),
+    )
+    expect(result).toBeNull()
+  })
+
+  it('Scenario 54 — Standard SBP=90 boundary → no low alert', async () => {
+    const { result } = await run(buildSession({ systolicBP: 90 }), buildCtx())
+    expect(result).toBeNull()
+  })
+
+  it('Scenario 55 — Age 65+ + SBP=100 boundary → no alert', async () => {
+    const { result } = await run(
+      buildSession({ systolicBP: 100 }),
+      buildCtx({ ageGroup: '65+', dateOfBirth: new Date('1953-01-01') }),
+    )
+    expect(result).toBeNull()
+  })
+
+  // ========================================================================
+  // System-level edge paths
+  // ========================================================================
+
+  it('Scenario 56 — AFib + 3 readings + SBP 165 + pulse 75 → RULE_STANDARD_L1_HIGH (AFib gets BP alerts)', async () => {
+    const { result, upsertArgs } = await run(
+      buildSession({
+        systolicBP: 165,
+        diastolicBP: 92,
+        pulse: 75,
+        readingCount: 3,
+      }),
+      buildCtx({ profile: { hasAFib: true } }),
+    )
+    expect(result?.ruleId).toBe('RULE_STANDARD_L1_HIGH')
+    expect(upsertArgs.create.tier).toBe('BP_LEVEL_1_HIGH')
+  })
+
+  it('Scenario 57 — Admin user (no PatientProfile) → skip silently, no alert, no upsert', async () => {
+    sessionAverager.averageForEntry.mockResolvedValue(buildSession())
+    profileResolver.resolve.mockRejectedValue(
+      new (await import('@cardioplace/shared')).ProfileNotFoundException(
+        'admin-user-1',
+      ),
+    )
+    const r = await service.evaluate('entry-admin')
+    expect(r).toBeNull()
+    expect(prisma.deviationAlert.upsert).not.toHaveBeenCalled()
+    expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
   })
 })

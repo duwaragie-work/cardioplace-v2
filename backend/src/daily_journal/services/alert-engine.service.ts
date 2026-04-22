@@ -174,11 +174,15 @@ export class AlertEngineService {
       absoluteEmergencyRule,
       pregnancyL2Rule,
       pregnancyL1HighRule,
+      // dcmRule must precede hfrefRule: both apply to `resolvedHFType=HFREF`,
+      // but dcmRule bails when hasHeartFailure=true, so putting it first lets
+      // DCM-only patients (biased to HFREF by the resolver) get the DCM-
+      // specific message wording. HFrEF patients still route to hfrefRule.
+      dcmRule,
       hfrefRule,
       hfpefRule,
       cadRule,
       hcmRule,
-      dcmRule,
       personalizedHighRule,
       personalizedLowRule,
       standardL1HighRule,
