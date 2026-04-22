@@ -3,6 +3,7 @@ import { AssignmentController } from './assignment.controller.js'
 import { AssignmentService } from './assignment.service.js'
 import { EnrollmentController } from './enrollment.controller.js'
 import { EnrollmentService } from './enrollment.service.js'
+import { MeThresholdController } from './me-threshold.controller.js'
 import { PracticeController } from './practice.controller.js'
 import { PracticeService } from './practice.service.js'
 import { ThresholdController } from './threshold.controller.js'
@@ -13,6 +14,7 @@ import { ThresholdService } from './threshold.service.js'
     PracticeController,
     AssignmentController,
     ThresholdController,
+    MeThresholdController,
     EnrollmentController,
   ],
   providers: [
