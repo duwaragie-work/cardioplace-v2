@@ -170,50 +170,73 @@ describe('EscalationService', () => {
   })
 
   // ────────────────────────────────────────────────────────────────────────
-  // Tier 1 T+0 dual-fire (primary + backup, separate rows)
+  // Tier 1 T+0 business-hours → primary only (no courtesy backup fire).
+  // Backup enters properly at T+4h.
   // ────────────────────────────────────────────────────────────────────────
-  describe('Tier 1 T+0 dual-fire', () => {
+  describe('Tier 1 T+0 business hours', () => {
     const duringBusinessHours = buildAlert({
       createdAt: new Date('2026-04-22T14:00:00Z'), // Wed 10:00 NY — open
     })
+    const businessHoursNow = new Date('2026-04-22T14:00:00Z')
 
     beforeEach(() => {
       prisma.deviationAlert.findUnique.mockResolvedValue(duringBusinessHours)
     })
 
-    it('creates two separate EscalationEvent rows at T+0 (primary + backup)', async () => {
-      await service.handleAlertCreated(buildAlertCreatedPayload())
+    it('fires ONLY the primary row (no backup courtesy fire during business hours)', async () => {
+      await service.handleAlertCreated(buildAlertCreatedPayload(), businessHoursNow)
 
-      expect(createdEvents).toHaveLength(2)
-
-      const primary = createdEvents.find((e) =>
-        e.data.recipientRoles.includes('PRIMARY_PROVIDER'),
-      )
-      const backup = createdEvents.find((e) =>
-        e.data.recipientRoles.includes('BACKUP_PROVIDER'),
-      )
-      expect(primary).toBeDefined()
-      expect(backup).toBeDefined()
-      expect(primary!.data.ladderStep).toBe('T0')
-      expect(backup!.data.ladderStep).toBe('T0')
-      expect(primary!.id).not.toBe(backup!.id)
+      expect(createdEvents).toHaveLength(1)
+      const only = createdEvents[0]
+      expect(only.data.ladderStep).toBe('T0')
+      expect(only.data.recipientRoles).toEqual(['PRIMARY_PROVIDER'])
     })
 
-    it('backup row has recipientRoles=[BACKUP_PROVIDER] only (not merged)', async () => {
-      await service.handleAlertCreated(buildAlertCreatedPayload())
-      const backup = createdEvents.find((e) =>
-        e.data.recipientRoles.includes('BACKUP_PROVIDER'),
-      )
-      expect(backup!.data.recipientRoles).toEqual(['BACKUP_PROVIDER'])
-      expect(backup!.data.recipientIds).toEqual(['backup-1'])
-    })
-
-    it('emits ESCALATION_DISPATCHED for both rows', async () => {
-      await service.handleAlertCreated(buildAlertCreatedPayload())
+    it('emits ESCALATION_DISPATCHED once', async () => {
+      await service.handleAlertCreated(buildAlertCreatedPayload(), businessHoursNow)
       const calls = eventEmitter.emit.mock.calls.filter(
         (c) => c[0] === JOURNAL_EVENTS.ESCALATION_DISPATCHED,
       )
-      expect(calls).toHaveLength(2)
+      expect(calls).toHaveLength(1)
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Tier 1 T+4h — primary reminder + backup notification (fix 1).
+  // ────────────────────────────────────────────────────────────────────────
+  describe('Tier 1 T+4h advance', () => {
+    it('dispatches to BOTH PRIMARY_PROVIDER and BACKUP_PROVIDER (spec V2-D T+4h)', async () => {
+      // Alert created 10am NY Mon (business hours); scan at 2:30pm NY Mon
+      // (past 4h deadline) so the cron advances to T+4h.
+      const alertCreatedAt = new Date('2026-04-20T14:00:00Z') // Mon 10:00 NY
+      const scanAt = new Date('2026-04-20T18:30:00Z') // Mon 14:30 NY (> T+4h)
+      const overdueAlert = buildAlert({ createdAt: alertCreatedAt })
+      prisma.deviationAlert.findMany.mockResolvedValue([overdueAlert])
+      prisma.escalationEvent.findMany.mockImplementation((args: any) => {
+        if (args?.where?.alertId === overdueAlert.id) {
+          return Promise.resolve([
+            {
+              ladderStep: 'T0',
+              recipientRoles: ['PRIMARY_PROVIDER'],
+              triggeredAt: alertCreatedAt,
+              scheduledFor: null,
+              notificationSentAt: alertCreatedAt,
+            },
+          ])
+        }
+        return Promise.resolve([])
+      })
+
+      await service.runScan(scanAt)
+
+      const t4 = createdEvents.find((e) => e.data.ladderStep === 'T4H')
+      expect(t4).toBeDefined()
+      expect(t4 && new Set(t4.data.recipientRoles)).toEqual(
+        new Set(['PRIMARY_PROVIDER', 'BACKUP_PROVIDER']),
+      )
+      expect(t4 && new Set(t4.data.recipientIds)).toEqual(
+        new Set(['primary-1', 'backup-1']),
+      )
     })
   })
 
@@ -429,6 +452,69 @@ describe('EscalationService', () => {
       // Fires immediately (notificationSentAt set, no scheduledFor).
       expect(t0[0].data.notificationSentAt).toEqual(expect.any(Date))
       expect(t0[0].data.scheduledFor).toBeUndefined()
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // BP Level 2 T+2h routing — absolute-emergency vs symptom-override variants
+  // ────────────────────────────────────────────────────────────────────────
+  describe('BP Level 2 T+2h recipient routing', () => {
+    // Alert at Mon 10am NY (business hours — doesn't matter for BP L2 since
+    // it's FIRE_IMMEDIATELY, but keeps anchor math simple).
+    const t0Dispatch = new Date('2026-04-20T14:00:00Z')
+    const scanPastT2h = new Date('2026-04-20T16:30:00Z') // Mon 12:30 NY, > T+2h
+
+    function mockAlertAndLatestT0(alert: ReturnType<typeof buildAlert>) {
+      prisma.deviationAlert.findMany.mockResolvedValue([alert])
+      prisma.escalationEvent.findMany.mockImplementation((args: any) => {
+        if (args?.where?.alertId === alert.id) {
+          return Promise.resolve([
+            {
+              ladderStep: 'T0',
+              recipientRoles: ['PRIMARY_PROVIDER', 'BACKUP_PROVIDER', 'PATIENT'],
+              triggeredAt: t0Dispatch,
+              scheduledFor: null,
+              notificationSentAt: t0Dispatch,
+            },
+          ])
+        }
+        return Promise.resolve([])
+      })
+    }
+
+    it('BP_LEVEL_2 (no symptoms) T+2h → ONLY MEDICAL_DIRECTOR (no patient follow-up)', async () => {
+      const alert = buildAlert({
+        tier: 'BP_LEVEL_2',
+        createdAt: t0Dispatch,
+      })
+      mockAlertAndLatestT0(alert)
+
+      await service.runScan(scanPastT2h)
+
+      const t2 = createdEvents.find((e) => e.data.ladderStep === 'T2H')
+      expect(t2).toBeDefined()
+      expect(t2?.data.recipientRoles).toEqual(['MEDICAL_DIRECTOR'])
+      expect(t2?.data.recipientIds).toEqual(['director-1'])
+      expect(t2?.data.recipientRoles).not.toContain('PATIENT')
+    })
+
+    it('BP_LEVEL_2_SYMPTOM_OVERRIDE T+2h → MEDICAL_DIRECTOR + PATIENT ("Have you called 911?")', async () => {
+      const alert = buildAlert({
+        tier: 'BP_LEVEL_2_SYMPTOM_OVERRIDE',
+        createdAt: t0Dispatch,
+      })
+      mockAlertAndLatestT0(alert)
+
+      await service.runScan(scanPastT2h)
+
+      const t2 = createdEvents.find((e) => e.data.ladderStep === 'T2H')
+      expect(t2).toBeDefined()
+      expect(t2 && new Set(t2.data.recipientRoles)).toEqual(
+        new Set(['MEDICAL_DIRECTOR', 'PATIENT']),
+      )
+      expect(t2 && new Set(t2.data.recipientIds)).toEqual(
+        new Set(['director-1', 'patient-1']),
+      )
     })
   })
 

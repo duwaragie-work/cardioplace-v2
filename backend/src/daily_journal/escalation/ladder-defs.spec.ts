@@ -7,6 +7,7 @@ import {
   TIER_1_LADDER,
   TIER_2_LADDER,
   BP_LEVEL_2_LADDER,
+  BP_LEVEL_2_SYMPTOM_OVERRIDE_LADDER,
   TIER_1_BACKUP_ON_T0,
 } from './ladder-defs.js'
 
@@ -29,9 +30,21 @@ describe('ladderForTier', () => {
     expect(l?.steps).toBe(BP_LEVEL_2_LADDER)
   })
 
-  it('BP_LEVEL_2_SYMPTOM_OVERRIDE → BP Level 2 ladder (same treatment)', () => {
+  it('BP_LEVEL_2 → no-symptom ladder (no patient at T+2h)', () => {
+    const l = ladderForTier('BP_LEVEL_2')
+    expect(l?.steps).toBe(BP_LEVEL_2_LADDER)
+    expect(l?.steps[1].step).toBe('T2H')
+    expect(l?.steps[1].recipientRoles).toEqual(['MEDICAL_DIRECTOR'])
+  })
+
+  it('BP_LEVEL_2_SYMPTOM_OVERRIDE → symptom-override ladder (patient follow-up at T+2h)', () => {
     const l = ladderForTier('BP_LEVEL_2_SYMPTOM_OVERRIDE')
     expect(l?.kind).toBe('BP_LEVEL_2')
+    expect(l?.steps).toBe(BP_LEVEL_2_SYMPTOM_OVERRIDE_LADDER)
+    expect(l?.steps[1].step).toBe('T2H')
+    expect(new Set(l?.steps[1].recipientRoles)).toEqual(
+      new Set(['MEDICAL_DIRECTOR', 'PATIENT']),
+    )
   })
 
   it('BP_LEVEL_1_HIGH → null (not escalated)', () => {
@@ -63,11 +76,19 @@ describe('ladder shape invariants', () => {
     ])
   })
 
-  it('Tier 1 T+0 recipientRoles = [PRIMARY_PROVIDER] (backup is separate rule)', () => {
+  it('Tier 1 T+0 recipientRoles = [PRIMARY_PROVIDER] (backup is a separate after-hours rule)', () => {
     expect(TIER_1_LADDER[0].recipientRoles).toEqual(['PRIMARY_PROVIDER'])
   })
 
-  it('Tier 1 backup-on-T0 is a distinct export', () => {
+  it('Tier 1 T+4H re-sends to primary AND notifies backup (spec V2-D T+4h)', () => {
+    const t4 = TIER_1_LADDER[1]
+    expect(t4.step).toBe('T4H')
+    expect(new Set(t4.recipientRoles)).toEqual(
+      new Set(['PRIMARY_PROVIDER', 'BACKUP_PROVIDER']),
+    )
+  })
+
+  it('Tier 1 backup-on-T0 is a distinct export (after-hours safety net)', () => {
     expect(TIER_1_BACKUP_ON_T0).toEqual(['BACKUP_PROVIDER'])
   })
 
@@ -90,8 +111,32 @@ describe('ladder shape invariants', () => {
     )
   })
 
-  it('BP Level 2 fires immediately at every step (no queueing)', () => {
+  it('BP Level 2 T+2H does NOT include PATIENT (no symptoms reported variant)', () => {
+    const t2 = BP_LEVEL_2_LADDER.find((s) => s.step === 'T2H')
+    expect(t2?.recipientRoles).toEqual(['MEDICAL_DIRECTOR'])
+    expect(t2?.recipientRoles).not.toContain('PATIENT')
+  })
+
+  it('BP Level 2 Symptom Override T+2H includes PATIENT ("Have you called 911?")', () => {
+    const t2 = BP_LEVEL_2_SYMPTOM_OVERRIDE_LADDER.find((s) => s.step === 'T2H')
+    expect(t2?.recipientRoles && new Set(t2.recipientRoles)).toEqual(
+      new Set(['MEDICAL_DIRECTOR', 'PATIENT']),
+    )
+  })
+
+  it('BP Level 2 Symptom Override ladder same steps as no-symptom ladder', () => {
+    expect(BP_LEVEL_2_SYMPTOM_OVERRIDE_LADDER.map((s) => s.step)).toEqual([
+      'T0',
+      'T2H',
+      'T4H',
+    ])
+  })
+
+  it('BP Level 2 fires immediately at every step (no queueing) — both variants', () => {
     for (const step of BP_LEVEL_2_LADDER) {
+      expect(step.afterHoursBehavior).toBe('FIRE_IMMEDIATELY')
+    }
+    for (const step of BP_LEVEL_2_SYMPTOM_OVERRIDE_LADDER) {
       expect(step.afterHoursBehavior).toBe('FIRE_IMMEDIATELY')
     }
   })

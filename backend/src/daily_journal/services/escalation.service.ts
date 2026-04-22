@@ -153,21 +153,27 @@ export class EscalationService {
       now,
     })
 
-    // Tier 1 special rule: backup provider always fires immediately at T+0,
-    // even when primary is queued to next business hours.
-    // CLINICAL_SPEC §V2-D Tier 1 T+4h says "Simultaneously notify practice-level
-    // backup" — interpreted + confirmed in phase/7 plan as "backup gets an
-    // immediate push at T+0 too so no one is silent overnight."
-    if (ladder.kind === 'TIER_1') {
-      await this.dispatchStep({
-        alert,
-        step: { ...firstStep, afterHoursBehavior: 'FIRE_IMMEDIATELY' },
-        ladderKind: ladder.kind,
-        recipientRoles: TIER_1_BACKUP_ON_T0,
-        practice,
-        assignment,
-        now,
-      })
+    // Tier 1 after-hours safety net: fire BACKUP immediately so someone is
+    // paged while PRIMARY is queued to next business hours. During business
+    // hours the PRIMARY fires at T+0 anyway, so BACKUP's proper entry point
+    // is the T+4h step — no courtesy fire needed.
+    //
+    // CLINICAL_SPEC §V2-D After-Hours handling: "Tier 1: Queue for first
+    // business day. Immediate push to backup. Escalation clock starts next
+    // business day." The "immediate push to backup" scopes to after-hours.
+    if (ladder.kind === 'TIER_1' && practice != null) {
+      const afterHours = !isWithinBusinessHours(now, practice)
+      if (afterHours) {
+        await this.dispatchStep({
+          alert,
+          step: { ...firstStep, afterHoursBehavior: 'FIRE_IMMEDIATELY' },
+          ladderKind: ladder.kind,
+          recipientRoles: TIER_1_BACKUP_ON_T0,
+          practice,
+          assignment,
+          now,
+        })
+      }
     }
   }
 
