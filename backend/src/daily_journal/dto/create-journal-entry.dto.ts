@@ -94,14 +94,33 @@ export class CreateJournalEntryDto {
   @Max(10)
   missedDoses?: number
 
-  // TODO(phase/15): replace this freeform field with the structured Level-2
-  // symptom booleans (severeHeadache, visualChanges, etc.) once Dev 1 lands
-  // the card-based intake UI. For now, incoming symptom[] values are stored
-  // on JournalEntry.otherSymptoms to keep v1 clients compiling.
+  // Legacy field — v1 clients send freeform symptom strings; we route them
+  // to JournalEntry.otherSymptoms. New v2 clients (Flow B) prefer the
+  // explicit `otherSymptoms` field below plus the structured booleans.
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   symptoms?: string[]
+
+  // ── V2 structured Level-2 symptom triggers (Flow B / phase/15) ─────────
+  @IsOptional() @IsBoolean() severeHeadache?: boolean
+  @IsOptional() @IsBoolean() visualChanges?: boolean
+  @IsOptional() @IsBoolean() alteredMentalStatus?: boolean
+  @IsOptional() @IsBoolean() chestPainOrDyspnea?: boolean
+  @IsOptional() @IsBoolean() focalNeuroDeficit?: boolean
+  @IsOptional() @IsBoolean() severeEpigastricPain?: boolean
+
+  // Pregnancy-specific (only meaningful when PatientProfile.isPregnant)
+  @IsOptional() @IsBoolean() newOnsetHeadache?: boolean
+  @IsOptional() @IsBoolean() ruqPain?: boolean
+  @IsOptional() @IsBoolean() edema?: boolean
+
+  // Patient's freeform "anything else" — sent as String[] so the schema
+  // column can hold multiple notes if a future UI captures more than one.
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  otherSymptoms?: string[]
 
   @IsOptional()
   @IsString()

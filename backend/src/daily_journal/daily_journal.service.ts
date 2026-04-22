@@ -45,10 +45,23 @@ export class DailyJournalService {
           measurementConditions: (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull,
           medicationTaken: dto.medicationTaken ?? null,
           missedDoses: dto.missedDoses ?? null,
-          // TODO(phase/15): replace with structured symptom booleans once
-          // Dev 1 lands the card-based intake UI. v1 clients still send
-          // freeform symptoms[] — we route them to otherSymptoms for now.
-          otherSymptoms: dto.symptoms ?? [],
+          // V2 structured Level-2 symptom triggers (Flow B). Prefer the
+          // explicit booleans, otherSymptoms goes to the same column. The
+          // legacy `symptoms` array (v1 clients) is appended so nothing is
+          // lost during the transition.
+          severeHeadache: dto.severeHeadache ?? false,
+          visualChanges: dto.visualChanges ?? false,
+          alteredMentalStatus: dto.alteredMentalStatus ?? false,
+          chestPainOrDyspnea: dto.chestPainOrDyspnea ?? false,
+          focalNeuroDeficit: dto.focalNeuroDeficit ?? false,
+          severeEpigastricPain: dto.severeEpigastricPain ?? false,
+          newOnsetHeadache: dto.newOnsetHeadache ?? false,
+          ruqPain: dto.ruqPain ?? false,
+          edema: dto.edema ?? false,
+          otherSymptoms: [
+            ...(dto.otherSymptoms ?? []),
+            ...(dto.symptoms ?? []),
+          ],
           teachBackAnswer: dto.teachBackAnswer ?? null,
           teachBackCorrect: dto.teachBackCorrect ?? null,
           notes: dto.notes ?? null,
@@ -118,7 +131,25 @@ export class DailyJournalService {
           (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull
       if (dto.medicationTaken !== undefined) data.medicationTaken = dto.medicationTaken
       if (dto.missedDoses !== undefined) data.missedDoses = dto.missedDoses
-      if (dto.symptoms !== undefined) data.otherSymptoms = dto.symptoms ?? []
+
+      // Structured V2 symptom booleans (Flow B). Each is independently
+      // patchable so a partial update doesn't blow away the others.
+      if (dto.severeHeadache !== undefined) data.severeHeadache = dto.severeHeadache
+      if (dto.visualChanges !== undefined) data.visualChanges = dto.visualChanges
+      if (dto.alteredMentalStatus !== undefined) data.alteredMentalStatus = dto.alteredMentalStatus
+      if (dto.chestPainOrDyspnea !== undefined) data.chestPainOrDyspnea = dto.chestPainOrDyspnea
+      if (dto.focalNeuroDeficit !== undefined) data.focalNeuroDeficit = dto.focalNeuroDeficit
+      if (dto.severeEpigastricPain !== undefined) data.severeEpigastricPain = dto.severeEpigastricPain
+      if (dto.newOnsetHeadache !== undefined) data.newOnsetHeadache = dto.newOnsetHeadache
+      if (dto.ruqPain !== undefined) data.ruqPain = dto.ruqPain
+      if (dto.edema !== undefined) data.edema = dto.edema
+
+      if (dto.otherSymptoms !== undefined || dto.symptoms !== undefined) {
+        data.otherSymptoms = [
+          ...(dto.otherSymptoms ?? []),
+          ...(dto.symptoms ?? []),
+        ]
+      }
       if (dto.teachBackAnswer !== undefined) data.teachBackAnswer = dto.teachBackAnswer
       if (dto.teachBackCorrect !== undefined) data.teachBackCorrect = dto.teachBackCorrect
       if (dto.notes !== undefined) data.notes = dto.notes
@@ -682,6 +713,15 @@ export class DailyJournalService {
     sessionId: string | null
     medicationTaken: boolean | null
     missedDoses: number | null
+    severeHeadache?: boolean
+    visualChanges?: boolean
+    alteredMentalStatus?: boolean
+    chestPainOrDyspnea?: boolean
+    focalNeuroDeficit?: boolean
+    severeEpigastricPain?: boolean
+    newOnsetHeadache?: boolean
+    ruqPain?: boolean
+    edema?: boolean
     otherSymptoms: string[]
     teachBackAnswer: string | null
     teachBackCorrect: boolean | null
@@ -703,6 +743,15 @@ export class DailyJournalService {
       sessionId: entry.sessionId,
       medicationTaken: entry.medicationTaken,
       missedDoses: entry.missedDoses,
+      severeHeadache: entry.severeHeadache ?? false,
+      visualChanges: entry.visualChanges ?? false,
+      alteredMentalStatus: entry.alteredMentalStatus ?? false,
+      chestPainOrDyspnea: entry.chestPainOrDyspnea ?? false,
+      focalNeuroDeficit: entry.focalNeuroDeficit ?? false,
+      severeEpigastricPain: entry.severeEpigastricPain ?? false,
+      newOnsetHeadache: entry.newOnsetHeadache ?? false,
+      ruqPain: entry.ruqPain ?? false,
+      edema: entry.edema ?? false,
       otherSymptoms: entry.otherSymptoms,
       teachBackAnswer: entry.teachBackAnswer,
       teachBackCorrect: entry.teachBackCorrect,

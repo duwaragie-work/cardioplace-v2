@@ -93,41 +93,41 @@ export default function MedicationCard({
         <div className="flex-1 min-w-0">
           <p
             className="text-[15px] font-bold leading-tight"
-            style={{ color: 'var(--brand-text-primary)' }}
+            style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
           >
             {brandName}
           </p>
           {genericName && (
             <p
               className="text-[12px] leading-tight"
-              style={{ color: 'var(--brand-text-muted)' }}
+              style={{ color: 'var(--brand-text-muted)', wordBreak: 'break-word' }}
             >
               {genericName}
             </p>
           )}
           <p
             className="text-[12px] mt-1.5 leading-snug"
-            style={{ color: 'var(--brand-text-secondary)' }}
+            style={{ color: 'var(--brand-text-secondary)', wordBreak: 'break-word' }}
           >
             {purpose}
           </p>
         </div>
 
-        <div className="shrink-0 flex flex-col items-center gap-2">
+        <div className="shrink-0 flex flex-col items-center gap-1.5">
           {audioText && <AudioButton text={audioText} lang={audioLang} size="sm" />}
           <div
             className="rounded-full flex items-center justify-center transition-all"
             style={{
-              width: 32,
-              height: 32,
+              width: 28,
+              height: 28,
               backgroundColor: selected ? 'var(--brand-success-green)' : 'transparent',
               border: `2px solid ${selected ? 'var(--brand-success-green)' : 'var(--brand-border)'}`,
             }}
           >
             {selected ? (
-              <Check className="w-4 h-4 text-white" strokeWidth={3} />
+              <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />
             ) : (
-              <X className="w-3.5 h-3.5" style={{ color: 'var(--brand-text-muted)' }} />
+              <X className="w-3 h-3" style={{ color: 'var(--brand-text-muted)' }} />
             )}
           </div>
         </div>

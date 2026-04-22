@@ -1037,11 +1037,16 @@ function A11Complete({ onDone }: { onDone: () => void }) {
 function StepHeader({ title, subtitle, audio }: { title: string; subtitle: string; audio: string }) {
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
-        <h2 className="text-[22px] sm:text-[24px] font-bold tracking-tight" style={{ color: 'var(--brand-text-primary)' }}>
+      <div className="flex items-start justify-between gap-3 mb-1">
+        <h2
+          className="text-[20px] sm:text-[24px] font-bold tracking-tight min-w-0 flex-1"
+          style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
+        >
           {title}
         </h2>
-        <AudioButton text={audio} />
+        <div className="shrink-0">
+          <AudioButton text={audio} />
+        </div>
       </div>
       <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>{subtitle}</p>
     </div>
@@ -1050,9 +1055,18 @@ function StepHeader({ title, subtitle, audio }: { title: string; subtitle: strin
 
 function SectionLabel({ text, audio }: { text: string; audio?: string }) {
   return (
-    <div className="flex items-center justify-between mb-3">
-      <p className="text-[13px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>{text}</p>
-      {audio && <AudioButton text={audio} size="sm" />}
+    <div className="flex items-start justify-between gap-2 mb-3">
+      <p
+        className="text-[13px] font-semibold min-w-0 flex-1"
+        style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
+      >
+        {text}
+      </p>
+      {audio && (
+        <div className="shrink-0">
+          <AudioButton text={audio} size="sm" />
+        </div>
+      )}
     </div>
   );
 }
@@ -1287,6 +1301,14 @@ export default function ClinicalIntakePage() {
       router.replace('/onboarding');
     }
   }, [user, isLoading, router]);
+
+  // Snap to the top whenever the wizard advances (or jumps via the Edit
+  // links on A10) so the new step is fully in view.
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [step]);
 
   // Wrap setState to persist draft on every change.
   const setState = (updater: (prev: IntakeFormState) => IntakeFormState) => {

@@ -4,13 +4,13 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ArrowLeft,
   Plus,
   Pencil,
   Trash2,
   X,
   Activity,
   AlertTriangle,
+  Check,
 } from 'lucide-react';
 import {
   getJournalEntries,
@@ -22,39 +22,124 @@ import { useLanguage } from '@/contexts/LanguageContext';
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Entry = {
   id: string;
-  entryDate: string;
-  measurementTime?: string | null;
+  /** ISO 8601 UTC timestamp — replaces v1 entryDate + measurementTime. */
+  measuredAt: string;
   systolicBP?: number;
   diastolicBP?: number;
+  pulse?: number | null;
   weight?: number;
+  position?: 'SITTING' | 'STANDING' | 'LYING' | null;
   medicationTaken?: boolean | null;
+  // V2 structured Level-2 symptom booleans (mirror backend serializeEntry).
+  severeHeadache?: boolean;
+  visualChanges?: boolean;
+  alteredMentalStatus?: boolean;
+  chestPainOrDyspnea?: boolean;
+  focalNeuroDeficit?: boolean;
+  severeEpigastricPain?: boolean;
+  newOnsetHeadache?: boolean;
+  ruqPain?: boolean;
+  edema?: boolean;
+  /** Legacy freeform symptoms (v1). v2 uses structured booleans + otherSymptoms. */
   symptoms?: string[];
+  otherSymptoms?: string[];
   notes?: string;
 };
 
+type SymptomKey =
+  | 'severeHeadache'
+  | 'visualChanges'
+  | 'alteredMentalStatus'
+  | 'chestPainOrDyspnea'
+  | 'focalNeuroDeficit'
+  | 'severeEpigastricPain'
+  | 'newOnsetHeadache'
+  | 'ruqPain'
+  | 'edema';
+
 type EditForm = {
-  entryDate: string;
-  measurementTime: string;
+  /** Split date + time so the patient sees two clean pickers (cleaner than
+      datetime-local on small screens). Combined into ISO 8601 at save time. */
+  measuredDate: string; // YYYY-MM-DD
+  measuredTime: string; // HH:mm
+  position: 'SITTING' | 'STANDING' | 'LYING' | '';
   systolic: string;
   diastolic: string;
+  pulse: string;
   weight: string;
   medication: 'yes' | 'no' | '';
-  symptoms: string[];
+  // V2 structured symptoms — checkbox grid in the modal
+  severeHeadache: boolean;
+  visualChanges: boolean;
+  alteredMentalStatus: boolean;
+  chestPainOrDyspnea: boolean;
+  focalNeuroDeficit: boolean;
+  severeEpigastricPain: boolean;
+  newOnsetHeadache: boolean;
+  ruqPain: boolean;
+  edema: boolean;
+  /** Patient's "anything else" freeform note. */
+  otherSymptomsText: string;
   notes: string;
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-const SYMPTOM_OPTIONS = [
-  'Chest Pain',
-  'Severe Headache',
-  'Shortness of Breath',
-  'Dizziness',
-  'Blurred Vision',
-  'Fatigue',
-  'Nausea',
-  'Swelling',
-  'Palpitations',
+const SYMPTOM_KEYS: SymptomKey[] = [
+  'severeHeadache',
+  'visualChanges',
+  'alteredMentalStatus',
+  'chestPainOrDyspnea',
+  'focalNeuroDeficit',
+  'severeEpigastricPain',
+  'newOnsetHeadache',
+  'ruqPain',
+  'edema',
 ];
+
+const SYMPTOM_LABELS: Record<SymptomKey, string> = {
+  severeHeadache: 'Severe headache',
+  visualChanges: 'Vision changes',
+  alteredMentalStatus: 'Confusion / not yourself',
+  chestPainOrDyspnea: 'Chest pain or trouble breathing',
+  focalNeuroDeficit: 'Weakness, numbness, or speech problems',
+  severeEpigastricPain: 'Severe stomach or upper-right pain',
+  newOnsetHeadache: 'New headache (not usual for you)',
+  ruqPain: 'Pain in upper-right belly',
+  edema: 'New swelling in face, hands, or feet',
+};
+
+/** CheckIn-style validation. Returns first error or null when OK. */
+function validateEditForm(f: EditForm): string | null {
+  if (!f.measuredDate || !f.measuredTime) return 'Pick the date and time.';
+  const dt = new Date(`${f.measuredDate}T${f.measuredTime}`);
+  if (isNaN(dt.getTime())) return 'That date doesn\'t look right.';
+  const now = Date.now();
+  if (dt.getTime() > now + 5 * 60 * 1000) return 'The time is in the future.';
+  if (dt.getTime() < now - 30 * 24 * 60 * 60 * 1000) return 'That\'s more than 30 days ago.';
+  // BP — both required if either entered
+  if ((f.systolic && !f.diastolic) || (!f.systolic && f.diastolic)) {
+    return 'Enter both blood pressure numbers (or clear both).';
+  }
+  if (f.systolic && f.diastolic) {
+    const sys = parseInt(f.systolic, 10);
+    const dia = parseInt(f.diastolic, 10);
+    if (sys < 60 || sys > 250) return 'Top number should be between 60 and 250.';
+    if (dia < 40 || dia > 150) return 'Bottom number should be between 40 and 150.';
+  }
+  if (f.pulse) {
+    const p = parseInt(f.pulse, 10);
+    if (p < 30 || p > 220) return 'Pulse should be between 30 and 220.';
+  }
+  if (f.weight) {
+    const w = parseFloat(f.weight);
+    if (w < 20 || w > 600) return 'Weight should be between 20 and 600.';
+  }
+  return null;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+// Legacy v1 freeform symptom list — replaced by SYMPTOM_KEYS structured
+// booleans below. Kept here only as a reference of which strings might appear
+// in the read-only `entry.symptoms` array on legacy rows.
 
 function getBpStatus(sys: number, dia: number) {
   if (sys >= 180 || dia >= 120) return { label: 'Crisis', color: 'red' as const };
@@ -143,25 +228,31 @@ function EntryCard({
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          {/* Date + Time */}
+          {/* Date + Time — derived from single measuredAt timestamp */}
           <div className="flex items-center gap-2 mb-2">
             <p
               className="text-[12px] font-semibold"
               style={{ color: 'var(--brand-text-muted)' }}
             >
-              {formatDate(entry.entryDate)}
+              {formatDate(entry.measuredAt)}
             </p>
-            {entry.measurementTime && (
-              <span
-                className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
-                style={{
-                  backgroundColor: 'var(--brand-primary-purple-light)',
-                  color: 'var(--brand-primary-purple)',
-                }}
-              >
-                {entry.measurementTime}
-              </span>
-            )}
+            {(() => {
+              const dt = new Date(entry.measuredAt);
+              if (isNaN(dt.getTime())) return null;
+              const hh = String(dt.getHours()).padStart(2, '0');
+              const mi = String(dt.getMinutes()).padStart(2, '0');
+              return (
+                <span
+                  className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                  style={{
+                    backgroundColor: 'var(--brand-primary-purple-light)',
+                    color: 'var(--brand-primary-purple)',
+                  }}
+                >
+                  {`${hh}:${mi}`}
+                </span>
+              );
+            })()}
           </div>
 
           {/* BP reading */}
@@ -285,10 +376,14 @@ function EntryCard({
 }
 
 // ─── Edit Modal ───────────────────────────────────────────────────────────────
+// Layout: title is OUTSIDE the scroll area (shrink-0 header), body scrolls
+// with the thin teal scrollbar, footer (Cancel/Save) is OUTSIDE the scroll
+// area (shrink-0 footer). The scroll only appears in the body region.
 function EditModal({
   form,
   saving,
   error,
+  isDirty,
   onChange,
   onSave,
   onClose,
@@ -296,17 +391,13 @@ function EditModal({
   form: EditForm;
   saving: boolean;
   error: string;
-  onChange: (key: keyof EditForm, val: string | string[]) => void;
+  /** True when at least one field differs from the original entry. */
+  isDirty: boolean;
+  onChange: (key: keyof EditForm, val: string | boolean) => void;
   onSave: () => void;
   onClose: () => void;
 }) {
   const { t } = useLanguage();
-  function toggleSymptom(s: string) {
-    const updated = form.symptoms.includes(s)
-      ? form.symptoms.filter((x) => x !== s)
-      : [...form.symptoms, s];
-    onChange('symptoms', updated);
-  }
 
   return (
     <motion.div
@@ -321,9 +412,9 @@ function EditModal({
         onClick={onClose}
       />
 
-      {/* Sheet */}
+      {/* Sheet — flex column so header / scroll body / footer can share height */}
       <motion.div
-        className="relative w-full sm:max-w-lg bg-white sm:rounded-2xl rounded-t-2xl overflow-y-auto"
+        className="relative w-full sm:max-w-lg bg-white sm:rounded-2xl rounded-t-2xl flex flex-col overflow-hidden"
         style={{
           maxHeight: '90dvh',
           boxShadow: '0 8px 48px rgba(0,0,0,0.18)',
@@ -333,9 +424,9 @@ function EditModal({
         exit={{ y: 60, opacity: 0 }}
         transition={{ type: 'spring', stiffness: 340, damping: 30 }}
       >
-        {/* Header */}
+        {/* Header — shrink-0 so it never scrolls */}
         <div
-          className="sticky top-0 z-10 bg-white flex items-center justify-between px-5 py-4"
+          className="shrink-0 bg-white flex items-center justify-between px-5 py-4"
           style={{ borderBottom: '1px solid var(--brand-border)' }}
         >
           <h2 className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
@@ -343,218 +434,323 @@ function EditModal({
           </h2>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-70"
+            className="w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-70 cursor-pointer"
             style={{ backgroundColor: 'var(--brand-background)' }}
+            aria-label={t('common.close')}
           >
             <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
           </button>
         </div>
 
-        <div className="p-5 space-y-5">
-          {/* Date */}
-          <div>
-            <label
-              className="block text-[12px] font-semibold mb-1.5"
-              style={{ color: 'var(--brand-text-secondary)' }}
-            >
-              {t('checkin.date')}
-            </label>
-            <input
-              type="date"
-              value={form.entryDate}
-              onChange={(e) => onChange('entryDate', e.target.value)}
-              className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
-              style={{
-                borderColor: 'var(--brand-border)',
-                color: 'var(--brand-text-primary)',
-              }}
-            />
-          </div>
-
-          {/* Time */}
-          <div>
-            <label
-              className="block text-[12px] font-semibold mb-1.5"
-              style={{ color: 'var(--brand-text-secondary)' }}
-            >
-              {t('checkin.time')}
-            </label>
-            <input
-              type="time"
-              value={form.measurementTime}
-              onChange={(e) => onChange('measurementTime', e.target.value)}
-              className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
-              style={{
-                borderColor: 'var(--brand-border)',
-                color: 'var(--brand-text-primary)',
-              }}
-            />
-          </div>
-
-          {/* BP */}
-          <div>
-            <label
-              className="block text-[12px] font-semibold mb-1.5"
-              style={{ color: 'var(--brand-text-secondary)' }}
-            >
-              {t('readings.bloodPressure')}
-            </label>
-            <div className="flex gap-3 items-center">
-              <input
-                type="number"
-                placeholder={t('checkin.systolic')}
-                value={form.systolic}
-                onChange={(e) => onChange('systolic', e.target.value)}
-                min={60}
-                max={220}
-                className="flex-1 h-11 px-3 rounded-xl border text-[14px] outline-none"
-                style={{
-                  borderColor: 'var(--brand-border)',
-                  color: 'var(--brand-text-primary)',
-                }}
-              />
-              <span className="text-[18px] font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
-                /
-              </span>
-              <input
-                type="number"
-                placeholder={t('checkin.diastolic')}
-                value={form.diastolic}
-                onChange={(e) => onChange('diastolic', e.target.value)}
-                min={40}
-                max={150}
-                className="flex-1 h-11 px-3 rounded-xl border text-[14px] outline-none"
-                style={{
-                  borderColor: 'var(--brand-border)',
-                  color: 'var(--brand-text-primary)',
-                }}
-              />
-            </div>
-          </div>
-
-          {/* Weight */}
-          <div>
-            <label
-              className="block text-[12px] font-semibold mb-1.5"
-              style={{ color: 'var(--brand-text-secondary)' }}
-            >
-              {t('readings.weightLbs')}
-            </label>
-            <input
-              type="number"
-              placeholder="e.g. 165"
-              value={form.weight}
-              onChange={(e) => onChange('weight', e.target.value)}
-              min={50}
-              max={600}
-              className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
-              style={{
-                borderColor: 'var(--brand-border)',
-                color: 'var(--brand-text-primary)',
-              }}
-            />
-          </div>
-
-          {/* Medication */}
-          <div>
-            <label
-              className="block text-[12px] font-semibold mb-2"
-              style={{ color: 'var(--brand-text-secondary)' }}
-            >
-              {t('readings.medicationTaken')}
-            </label>
-            <div className="flex gap-3">
-              {(['yes', 'no', ''] as const).map((val) => (
-                <button
-                  key={val}
-                  onClick={() => onChange('medication', val)}
-                  className="flex-1 h-10 rounded-xl border-2 text-[13px] font-semibold transition"
-                  style={{
-                    borderColor:
-                      form.medication === val
-                        ? 'var(--brand-primary-purple)'
-                        : 'var(--brand-border)',
-                    backgroundColor:
-                      form.medication === val
-                        ? 'var(--brand-primary-purple-light)'
-                        : 'transparent',
-                    color:
-                      form.medication === val
-                        ? 'var(--brand-primary-purple)'
-                        : 'var(--brand-text-muted)',
-                  }}
+        {/* Scrollable body — gets the thin teal scrollbar */}
+        <div className="flex-1 overflow-y-auto thin-scrollbar">
+          <div className="p-5 space-y-5">
+            {/* When — split date and time pickers (cleaner on small screens). */}
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label
+                  className="block text-[12px] font-semibold mb-1.5"
+                  style={{ color: 'var(--brand-text-secondary)' }}
                 >
-                  {val === '' ? t('common.na') : val === 'yes' ? t('common.yes') : t('common.no')}
-                </button>
-              ))}
+                  {t('checkin.date')}
+                </label>
+                <input
+                  type="date"
+                  value={form.measuredDate}
+                  onChange={(e) => onChange('measuredDate', e.target.value)}
+                  className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none min-w-0"
+                  style={{
+                    borderColor: 'var(--brand-border)',
+                    color: 'var(--brand-text-primary)',
+                    colorScheme: 'light',
+                  }}
+                />
+              </div>
+              <div>
+                <label
+                  className="block text-[12px] font-semibold mb-1.5"
+                  style={{ color: 'var(--brand-text-secondary)' }}
+                >
+                  {t('checkin.time')}
+                </label>
+                <input
+                  type="time"
+                  value={form.measuredTime}
+                  onChange={(e) => onChange('measuredTime', e.target.value)}
+                  className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none min-w-0"
+                  style={{
+                    borderColor: 'var(--brand-border)',
+                    color: 'var(--brand-text-primary)',
+                    colorScheme: 'light',
+                  }}
+                />
+              </div>
             </div>
-          </div>
 
-          {/* Symptoms */}
-          <div>
-            <label
-              className="block text-[12px] font-semibold mb-2"
-              style={{ color: 'var(--brand-text-secondary)' }}
-            >
-              {t('readings.symptoms')}
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {SYMPTOM_OPTIONS.map((s) => {
-                const active = form.symptoms.includes(s);
-                return (
+            {/* Position — 3-up picker matching CheckIn */}
+            <div>
+              <label
+                className="block text-[12px] font-semibold mb-2"
+                style={{ color: 'var(--brand-text-secondary)' }}
+              >
+                Position during reading
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {(['SITTING', 'STANDING', 'LYING'] as const).map((p) => {
+                  const active = form.position === p;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => onChange('position', p)}
+                      className="h-11 rounded-xl border-2 text-[12.5px] font-semibold transition cursor-pointer"
+                      style={{
+                        borderColor: active ? 'var(--brand-primary-purple)' : 'var(--brand-border)',
+                        backgroundColor: active
+                          ? 'var(--brand-primary-purple-light)'
+                          : 'transparent',
+                        color: active
+                          ? 'var(--brand-primary-purple)'
+                          : 'var(--brand-text-muted)',
+                      }}
+                    >
+                      {p === 'SITTING' ? 'Sitting' : p === 'STANDING' ? 'Standing' : 'Lying'}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* BP */}
+            <div>
+              <label
+                className="block text-[12px] font-semibold mb-1.5"
+                style={{ color: 'var(--brand-text-secondary)' }}
+              >
+                {t('readings.bloodPressure')}
+              </label>
+              <div className="flex gap-3 items-center">
+                <input
+                  type="number"
+                  placeholder={t('checkin.systolic')}
+                  value={form.systolic}
+                  onChange={(e) => onChange('systolic', e.target.value)}
+                  min={60}
+                  max={250}
+                  className="flex-1 h-11 px-3 rounded-xl border text-[14px] outline-none min-w-0"
+                  style={{
+                    borderColor: 'var(--brand-border)',
+                    color: 'var(--brand-text-primary)',
+                  }}
+                />
+                <span className="text-[18px] font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
+                  /
+                </span>
+                <input
+                  type="number"
+                  placeholder={t('checkin.diastolic')}
+                  value={form.diastolic}
+                  onChange={(e) => onChange('diastolic', e.target.value)}
+                  min={40}
+                  max={150}
+                  className="flex-1 h-11 px-3 rounded-xl border text-[14px] outline-none min-w-0"
+                  style={{
+                    borderColor: 'var(--brand-border)',
+                    color: 'var(--brand-text-primary)',
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Pulse */}
+            <div>
+              <label
+                className="block text-[12px] font-semibold mb-1.5"
+                style={{ color: 'var(--brand-text-secondary)' }}
+              >
+                Pulse (bpm)
+              </label>
+              <input
+                type="number"
+                placeholder="e.g. 72"
+                value={form.pulse}
+                onChange={(e) => onChange('pulse', e.target.value)}
+                min={30}
+                max={220}
+                className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
+                style={{
+                  borderColor: 'var(--brand-border)',
+                  color: 'var(--brand-text-primary)',
+                }}
+              />
+            </div>
+
+            {/* Weight */}
+            <div>
+              <label
+                className="block text-[12px] font-semibold mb-1.5"
+                style={{ color: 'var(--brand-text-secondary)' }}
+              >
+                {t('readings.weightLbs')}
+              </label>
+              <input
+                type="number"
+                placeholder="e.g. 165"
+                value={form.weight}
+                onChange={(e) => onChange('weight', e.target.value)}
+                min={20}
+                max={600}
+                className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
+                style={{
+                  borderColor: 'var(--brand-border)',
+                  color: 'var(--brand-text-primary)',
+                }}
+              />
+            </div>
+
+            {/* Medication */}
+            <div>
+              <label
+                className="block text-[12px] font-semibold mb-2"
+                style={{ color: 'var(--brand-text-secondary)' }}
+              >
+                {t('readings.medicationTaken')}
+              </label>
+              <div className="flex gap-3">
+                {(['yes', 'no', ''] as const).map((val) => (
                   <button
-                    key={s}
-                    onClick={() => toggleSymptom(s)}
-                    className="px-3 py-1.5 rounded-full border text-[12px] font-medium transition"
+                    key={val || 'na'}
+                    type="button"
+                    onClick={() => onChange('medication', val)}
+                    className="flex-1 h-10 rounded-xl border-2 text-[13px] font-semibold transition cursor-pointer"
                     style={{
-                      borderColor: active ? 'var(--brand-primary-purple)' : 'var(--brand-border)',
-                      backgroundColor: active
-                        ? 'var(--brand-primary-purple-light)'
-                        : 'transparent',
-                      color: active
-                        ? 'var(--brand-primary-purple)'
-                        : 'var(--brand-text-muted)',
+                      borderColor:
+                        form.medication === val
+                          ? 'var(--brand-primary-purple)'
+                          : 'var(--brand-border)',
+                      backgroundColor:
+                        form.medication === val
+                          ? 'var(--brand-primary-purple-light)'
+                          : 'transparent',
+                      color:
+                        form.medication === val
+                          ? 'var(--brand-primary-purple)'
+                          : 'var(--brand-text-muted)',
                     }}
                   >
-                    {s}
+                    {val === '' ? t('common.na') : val === 'yes' ? t('common.yes') : t('common.no')}
                   </button>
-                );
-              })}
+                ))}
+              </div>
+            </div>
+
+            {/* Symptoms — V2 structured booleans (matches CheckIn B3) */}
+            <div>
+              <label
+                className="block text-[12px] font-semibold mb-2"
+                style={{ color: 'var(--brand-text-secondary)' }}
+              >
+                {t('readings.symptoms')}
+              </label>
+              <div className="space-y-2">
+                {SYMPTOM_KEYS.map((key) => {
+                  const checked = Boolean(form[key]);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => onChange(key, !checked)}
+                      className="w-full flex items-center gap-3 px-3 py-2 rounded-xl border transition text-left cursor-pointer"
+                      style={{
+                        borderColor: checked ? 'var(--brand-success-green)' : 'var(--brand-border)',
+                        backgroundColor: checked ? 'var(--brand-success-green-light)' : 'white',
+                      }}
+                    >
+                      <div
+                        className="rounded-full flex items-center justify-center shrink-0 transition"
+                        style={{
+                          width: 20,
+                          height: 20,
+                          backgroundColor: checked ? 'var(--brand-success-green)' : 'transparent',
+                          border: `2px solid ${checked ? 'var(--brand-success-green)' : 'var(--brand-border)'}`,
+                        }}
+                      >
+                        {checked && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+                      </div>
+                      <span
+                        className="text-[12.5px] flex-1 min-w-0"
+                        style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
+                      >
+                        {SYMPTOM_LABELS[key]}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Other / freeform symptoms */}
+            <div>
+              <label
+                className="block text-[12px] font-semibold mb-1.5"
+                style={{ color: 'var(--brand-text-secondary)' }}
+              >
+                Anything else?
+              </label>
+              <input
+                type="text"
+                value={form.otherSymptomsText}
+                onChange={(e) => onChange('otherSymptomsText', e.target.value)}
+                placeholder="In your own words…"
+                className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
+                style={{
+                  borderColor: 'var(--brand-border)',
+                  color: 'var(--brand-text-primary)',
+                }}
+              />
+            </div>
+
+            {/* Notes */}
+            <div>
+              <label
+                className="block text-[12px] font-semibold mb-1.5"
+                style={{ color: 'var(--brand-text-secondary)' }}
+              >
+                {t('readings.notes')}
+              </label>
+              <textarea
+                value={form.notes}
+                onChange={(e) => onChange('notes', e.target.value)}
+                placeholder={t('readings.notesPlaceholder')}
+                rows={3}
+                className="w-full px-3 py-2.5 rounded-xl border text-[14px] outline-none resize-none leading-relaxed"
+                style={{
+                  borderColor: 'var(--brand-border)',
+                  color: 'var(--brand-text-primary)',
+                }}
+              />
             </div>
           </div>
+        </div>
 
-          {/* Notes */}
-          <div>
-            <label
-              className="block text-[12px] font-semibold mb-1.5"
-              style={{ color: 'var(--brand-text-secondary)' }}
-            >
-              {t('readings.notes')}
-            </label>
-            <textarea
-              value={form.notes}
-              onChange={(e) => onChange('notes', e.target.value)}
-              placeholder={t('readings.notesPlaceholder')}
-              rows={3}
-              className="w-full px-3 py-2.5 rounded-xl border text-[14px] outline-none resize-none leading-relaxed"
-              style={{
-                borderColor: 'var(--brand-border)',
-                color: 'var(--brand-text-primary)',
-              }}
-            />
-          </div>
-
+        {/* Footer — shrink-0, sticky at bottom of modal */}
+        <div
+          className="shrink-0 bg-white px-5 py-3"
+          style={{ borderTop: '1px solid var(--brand-border)' }}
+        >
           {error && (
-            <p className="text-[13px] text-center" style={{ color: 'var(--brand-alert-red)' }}>
+            <p
+              className="text-[12.5px] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
+              style={{ color: 'var(--brand-alert-red)', backgroundColor: 'var(--brand-alert-red-light)' }}
+            >
               {error}
             </p>
           )}
-
-          {/* Buttons */}
-          <div className="flex gap-3 pb-1">
+          <div className="flex gap-3">
             <button
+              type="button"
               onClick={onClose}
-              className="flex-1 h-11 rounded-full border-2 text-sm font-semibold"
+              className="flex-1 h-11 rounded-full border-2 text-sm font-semibold cursor-pointer"
               style={{
                 borderColor: 'var(--brand-border)',
                 color: 'var(--brand-text-secondary)',
@@ -563,10 +759,12 @@ function EditModal({
               {t('common.cancel')}
             </button>
             <button
+              type="button"
               onClick={onSave}
-              disabled={saving}
-              className="flex-1 h-11 rounded-full text-white text-sm font-bold disabled:opacity-60 transition"
+              disabled={saving || !isDirty}
+              className="flex-1 h-11 rounded-full text-white text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer"
               style={{ backgroundColor: 'var(--brand-primary-purple)' }}
+              aria-label={!isDirty ? 'No changes to save' : undefined}
             >
               {saving ? t('common.saving') : t('readings.saveChanges')}
             </button>
@@ -655,6 +853,10 @@ export default function ReadingsPage() {
   const [loading, setLoading] = useState(true);
   const [editEntry, setEditEntry] = useState<Entry | null>(null);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
+  // Snapshot of the form taken at openEdit time — used to compute isDirty
+  // so the Save button only enables after the patient actually changes
+  // something. Stringified comparison is cheap for an object this small.
+  const [editFormInitial, setEditFormInitial] = useState<EditForm | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -666,9 +868,9 @@ export default function ReadingsPage() {
       .then((data) => {
         const arr = Array.isArray(data) ? data : [];
         const sorted = [...arr].sort(
-          (a: Entry, b: Entry) =>
-            new Date(b.entryDate).getTime() - new Date(a.entryDate).getTime(),
-        );
+          (a, b) =>
+            new Date(b.measuredAt).getTime() - new Date(a.measuredAt).getTime(),
+        ) as Entry[];
         setEntries(sorted);
       })
       .catch(() => {})
@@ -681,11 +883,24 @@ export default function ReadingsPage() {
 
   function openEdit(entry: Entry) {
     setEditEntry(entry);
-    setEditForm({
-      entryDate: entry.entryDate?.split('T')[0] ?? '',
-      measurementTime: entry.measurementTime ?? '',
+    // Format ISO timestamp → separate date + time strings in the user's
+    // local timezone (not UTC) so the pickers show the same wall-clock time
+    // the patient originally entered.
+    const dt = new Date(entry.measuredAt);
+    const isValid = !isNaN(dt.getTime());
+    const yyyy = dt.getFullYear();
+    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getDate()).padStart(2, '0');
+    const hh = String(dt.getHours()).padStart(2, '0');
+    const mi = String(dt.getMinutes()).padStart(2, '0');
+
+    const populated: EditForm = {
+      measuredDate: isValid ? `${yyyy}-${mm}-${dd}` : '',
+      measuredTime: isValid ? `${hh}:${mi}` : '',
+      position: entry.position ?? '',
       systolic: entry.systolicBP?.toString() ?? '',
       diastolic: entry.diastolicBP?.toString() ?? '',
+      pulse: entry.pulse?.toString() ?? '',
       weight: entry.weight?.toString() ?? '',
       medication:
         entry.medicationTaken === true
@@ -693,32 +908,71 @@ export default function ReadingsPage() {
           : entry.medicationTaken === false
             ? 'no'
             : '',
-      symptoms: entry.symptoms ?? [],
+      severeHeadache: entry.severeHeadache ?? false,
+      visualChanges: entry.visualChanges ?? false,
+      alteredMentalStatus: entry.alteredMentalStatus ?? false,
+      chestPainOrDyspnea: entry.chestPainOrDyspnea ?? false,
+      focalNeuroDeficit: entry.focalNeuroDeficit ?? false,
+      severeEpigastricPain: entry.severeEpigastricPain ?? false,
+      newOnsetHeadache: entry.newOnsetHeadache ?? false,
+      ruqPain: entry.ruqPain ?? false,
+      edema: entry.edema ?? false,
+      // Surface the v1 freeform symptoms array (and any v2 otherSymptoms) as
+      // a single editable line so legacy data stays visible and editable.
+      otherSymptomsText: [
+        ...(entry.otherSymptoms ?? []),
+        ...(entry.symptoms ?? []),
+      ].join(', '),
       notes: entry.notes ?? '',
-    });
+    };
+    setEditForm(populated);
+    setEditFormInitial(populated); // baseline for dirty-check
     setEditError('');
   }
 
   function closeEdit() {
     setEditEntry(null);
     setEditForm(null);
+    setEditFormInitial(null);
     setEditError('');
   }
 
   async function saveEdit() {
     if (!editEntry || !editForm) return;
+    const validation = validateEditForm(editForm);
+    if (validation) {
+      setEditError(validation);
+      return;
+    }
     setEditSaving(true);
     setEditError('');
     try {
       const payload: Parameters<typeof updateJournalEntry>[1] = {};
-      if (editForm.entryDate) payload.entryDate = editForm.entryDate;
-      if (editForm.measurementTime) payload.measurementTime = editForm.measurementTime;
+      if (editForm.measuredDate && editForm.measuredTime) {
+        payload.measuredAt = new Date(
+          `${editForm.measuredDate}T${editForm.measuredTime}`,
+        ).toISOString();
+      }
+      if (editForm.position) payload.position = editForm.position;
       if (editForm.systolic) payload.systolicBP = parseInt(editForm.systolic, 10);
       if (editForm.diastolic) payload.diastolicBP = parseInt(editForm.diastolic, 10);
+      if (editForm.pulse) payload.pulse = parseInt(editForm.pulse, 10);
       if (editForm.weight) payload.weight = parseFloat(editForm.weight);
       if (editForm.medication === 'yes') payload.medicationTaken = true;
       else if (editForm.medication === 'no') payload.medicationTaken = false;
-      payload.symptoms = editForm.symptoms.filter((s) => s !== 'None of these');
+      // Structured V2 symptoms — always send so toggling off is persisted.
+      payload.severeHeadache = editForm.severeHeadache;
+      payload.visualChanges = editForm.visualChanges;
+      payload.alteredMentalStatus = editForm.alteredMentalStatus;
+      payload.chestPainOrDyspnea = editForm.chestPainOrDyspnea;
+      payload.focalNeuroDeficit = editForm.focalNeuroDeficit;
+      payload.severeEpigastricPain = editForm.severeEpigastricPain;
+      payload.newOnsetHeadache = editForm.newOnsetHeadache;
+      payload.ruqPain = editForm.ruqPain;
+      payload.edema = editForm.edema;
+      payload.otherSymptoms = editForm.otherSymptomsText.trim()
+        ? [editForm.otherSymptomsText.trim()]
+        : [];
       payload.notes = editForm.notes.trim();
 
       await updateJournalEntry(editEntry.id, payload);
@@ -749,37 +1003,42 @@ export default function ReadingsPage() {
   }
 
   return (
+    // Default browser page scroll — no custom scroll container or fixed
+    // height wrapper. The thin-scrollbar utility is reserved for the edit
+    // modal body where scroll is genuinely contained.
     <div className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
       <div className="max-w-2xl mx-auto px-4 md:px-8 py-6">
         {/* Page header */}
         <div className="flex items-center justify-between gap-3 mb-6">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/check-in"
-              className="w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-75 shrink-0"
-              style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
-            >
-              <ArrowLeft className="w-4 h-4" style={{ color: 'var(--brand-primary-purple)' }} />
-            </Link>
+          <div className="flex items-center gap-3 min-w-0">
             <div
               className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
               style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}
             >
               <Activity className="w-5 h-5 text-white" />
             </div>
-            <div>
-              <h1 className="text-xl font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+            <div className="min-w-0">
+              <h1
+                className="text-xl font-bold truncate"
+                style={{ color: 'var(--brand-text-primary)' }}
+              >
                 {t('readings.title')}
               </h1>
-              <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
-                {loading ? 'Loading...' : `${entries.length} ${entries.length === 1 ? t('readings.totalEntry') : t('readings.totalEntries')}`}
-              </p>
+              {loading ? (
+                <div className="mt-1">
+                  <Bone w={90} h={10} rounded="rounded-md" />
+                </div>
+              ) : (
+                <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
+                  {`${entries.length} ${entries.length === 1 ? t('readings.totalEntry') : t('readings.totalEntries')}`}
+                </p>
+              )}
             </div>
           </div>
 
           <Link
             href="/check-in"
-            className="h-9 px-4 rounded-full flex items-center gap-1.5 text-[13px] font-semibold text-white transition hover:opacity-85"
+            className="h-9 px-4 rounded-full flex items-center gap-1.5 text-[13px] font-semibold text-white transition hover:opacity-85 shrink-0"
             style={{ backgroundColor: 'var(--brand-primary-purple)' }}
           >
             <Plus className="w-4 h-4" />
@@ -787,8 +1046,8 @@ export default function ReadingsPage() {
           </Link>
         </div>
 
-      {/* List — grouped by date */}
-      <div className="max-w-2xl mx-auto px-4 md:px-8 py-6 space-y-3">
+        {/* List — grouped by date */}
+        <div className="space-y-3">
         {loading ? (
           Array.from({ length: 5 }).map((_, i) => <EntrySkeleton key={i} />)
         ) : entries.length === 0 ? (
@@ -826,7 +1085,7 @@ export default function ReadingsPage() {
             const grouped: { date: string; items: Entry[] }[] = [];
             const dateMap = new Map<string, Entry[]>();
             for (const entry of entries) {
-              const dateKey = entry.entryDate?.split('T')[0] ?? entry.entryDate;
+              const dateKey = entry.measuredAt?.split('T')[0] ?? entry.measuredAt;
               if (!dateMap.has(dateKey)) dateMap.set(dateKey, []);
               dateMap.get(dateKey)!.push(entry);
             }
@@ -860,6 +1119,7 @@ export default function ReadingsPage() {
             );
           })()
         )}
+        </div>
       </div>
 
       {/* Edit modal */}
@@ -869,6 +1129,12 @@ export default function ReadingsPage() {
             form={editForm}
             saving={editSaving}
             error={editError}
+            // JSON.stringify is fine here — EditForm is small + flat. Returns
+            // false when the user reopens the modal without touching anything.
+            isDirty={
+              editFormInitial != null &&
+              JSON.stringify(editForm) !== JSON.stringify(editFormInitial)
+            }
             onChange={(key, val) =>
               setEditForm((prev) => (prev ? { ...prev, [key]: val } : prev))
             }
@@ -889,7 +1155,6 @@ export default function ReadingsPage() {
           />
         )}
       </AnimatePresence>
-      </div>
     </div>
   );
 }
