@@ -57,9 +57,9 @@ export class EscalationService {
   // ─── event + cron entry points ──────────────────────────────────────────
 
   @OnEvent(JOURNAL_EVENTS.ALERT_CREATED, { async: true })
-  async handleAlertCreated(payload: AlertCreatedEvent): Promise<void> {
+  async handleAlertCreated(payload: AlertCreatedEvent, now: Date = new Date()): Promise<void> {
     try {
-      await this.fireT0(payload)
+      await this.fireT0(payload, now)
     } catch (err) {
       this.logger.error(
         `T+0 dispatch failed for alert ${payload.alertId}`,
@@ -121,7 +121,7 @@ export class EscalationService {
 
   // ─── T+0 on alert creation ──────────────────────────────────────────────
 
-  private async fireT0(payload: AlertCreatedEvent): Promise<void> {
+  private async fireT0(payload: AlertCreatedEvent, now: Date): Promise<void> {
     const ladder = ladderForTier(payload.tier)
     if (!ladder) {
       this.logger.debug(
@@ -138,7 +138,6 @@ export class EscalationService {
 
     const practice = alert.user.providerAssignmentAsPatient?.practice ?? null
     const assignment = alert.user.providerAssignmentAsPatient ?? null
-    const now = new Date()
 
     const firstStep = ladder.steps[0]
     if (!firstStep) return
