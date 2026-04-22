@@ -127,3 +127,30 @@ export async function updateMyPregnancy(
   });
   return unwrap<PatientProfileDto>(res);
 }
+
+// ── GET /me/care-team ────────────────────────────────────────────────────────
+export interface ProviderRef {
+  id: string;
+  name: string | null;
+  email: string | null;
+}
+
+export interface CareTeamDto {
+  id: string;
+  practice: { id: string; name: string };
+  primaryProvider: ProviderRef;
+  backupProvider: ProviderRef;
+  medicalDirector: ProviderRef;
+  assignedAt: string;
+}
+
+export async function getMyCareTeam(): Promise<CareTeamDto | null> {
+  const res = await fetchWithAuth(`${API}/api/me/care-team`);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `Request failed: ${res.status}`);
+  }
+  const json = await res.json();
+  return (json.data ?? null) as CareTeamDto | null;
+}

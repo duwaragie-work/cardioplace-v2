@@ -11,6 +11,9 @@ import {
   Activity,
   AlertTriangle,
   Check,
+  ChevronDown,
+  ChevronUp,
+  Layers,
 } from 'lucide-react';
 import {
   getJournalEntries,
@@ -24,6 +27,8 @@ type Entry = {
   id: string;
   /** ISO 8601 UTC timestamp — replaces v1 entryDate + measurementTime. */
   measuredAt: string;
+  /** Groups multiple readings (≤30 min apart) for averaging. */
+  sessionId?: string | null;
   systolicBP?: number;
   diastolicBP?: number;
   pulse?: number | null;
@@ -290,8 +295,49 @@ function EntryCard({
             </p>
           )}
 
-          {/* Detail chips */}
+          {/* Detail chips — pulse + pulse pressure first (clinical signal),
+              then weight / med / symptoms / notes. */}
           <div className="flex flex-wrap gap-1.5 mt-1">
+            {entry.pulse != null && (
+              <span
+                className="text-[11px] px-2 py-0.5 rounded-md font-medium flex items-center gap-1"
+                style={{
+                  backgroundColor: 'var(--brand-accent-teal-light)',
+                  color: 'var(--brand-accent-teal)',
+                }}
+              >
+                ♥ {entry.pulse} bpm
+              </span>
+            )}
+            {hasBP && (
+              <span
+                className="text-[11px] px-2 py-0.5 rounded-md font-medium"
+                style={{
+                  backgroundColor:
+                    (entry.systolicBP! - entry.diastolicBP!) > 60
+                      ? 'var(--brand-warning-amber-light)'
+                      : '#F1F5F9',
+                  color:
+                    (entry.systolicBP! - entry.diastolicBP!) > 60
+                      ? 'var(--brand-warning-amber)'
+                      : 'var(--brand-text-secondary)',
+                }}
+                title="Pulse pressure (SBP − DBP)"
+              >
+                PP {entry.systolicBP! - entry.diastolicBP!}
+              </span>
+            )}
+            {entry.position && (
+              <span
+                className="text-[11px] px-2 py-0.5 rounded-md font-medium"
+                style={{
+                  backgroundColor: '#F1F5F9',
+                  color: 'var(--brand-text-secondary)',
+                }}
+              >
+                {entry.position === 'SITTING' ? 'Sitting' : entry.position === 'STANDING' ? 'Standing' : 'Lying'}
+              </span>
+            )}
             {entry.weight != null && (
               <span
                 className="text-[11px] px-2 py-0.5 rounded-md font-medium"
@@ -371,6 +417,118 @@ function EntryCard({
           </button>
         </div>
       </div>
+    </motion.div>
+  );
+}
+
+// ─── Session Card ─────────────────────────────────────────────────────────────
+// Wraps 2+ readings taken within the same session (≤30 min, same sessionId)
+// in a collapsible shell. Header shows the average BP and reading count;
+// expanding renders the individual EntryCards inside. Solo readings render
+// as a plain EntryCard (no shell) so the list doesn't feel over-decorated.
+function SessionCard({
+  entries,
+  onEdit,
+  onDelete,
+}: {
+  entries: Entry[];
+  onEdit: (e: Entry) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Average across readings that have BP. If none have BP, fall back to
+  // showing a count-only header.
+  const withBp = entries.filter((e) => e.systolicBP != null && e.diastolicBP != null);
+  const avgSys = withBp.length
+    ? Math.round(withBp.reduce((s, e) => s + (e.systolicBP ?? 0), 0) / withBp.length)
+    : null;
+  const avgDia = withBp.length
+    ? Math.round(withBp.reduce((s, e) => s + (e.diastolicBP ?? 0), 0) / withBp.length)
+    : null;
+
+  const earliest = entries[entries.length - 1]?.measuredAt;
+  const latest = entries[0]?.measuredAt;
+  const span = (() => {
+    if (!earliest || !latest) return '';
+    const a = new Date(earliest).getTime();
+    const b = new Date(latest).getTime();
+    const min = Math.round(Math.abs(b - a) / 60000);
+    return min > 0 ? `${min} min` : 'same minute';
+  })();
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="rounded-2xl overflow-hidden"
+      style={{
+        backgroundColor: 'var(--brand-primary-purple-light)',
+        border: '1.5px solid rgba(123,0,224,0.2)',
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-3 px-4 py-3 text-left cursor-pointer"
+        aria-expanded={expanded}
+      >
+        <div
+          className="shrink-0 rounded-xl flex items-center justify-center text-white"
+          style={{ width: 36, height: 36, backgroundColor: 'var(--brand-primary-purple)' }}
+        >
+          <Layers className="w-4 h-4" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p
+            className="text-[10px] font-bold uppercase tracking-wider"
+            style={{ color: 'var(--brand-primary-purple)' }}
+          >
+            Session · {entries.length} readings{span ? ` · ${span}` : ''}
+          </p>
+          <p
+            className="text-[14px] font-bold leading-tight"
+            style={{ color: 'var(--brand-text-primary)' }}
+          >
+            {avgSys != null && avgDia != null ? (
+              <>
+                Avg <span>{avgSys}/{avgDia}</span>{' '}
+                <span className="text-[11px] font-medium" style={{ color: 'var(--brand-text-muted)' }}>
+                  mmHg
+                </span>
+              </>
+            ) : (
+              <>{entries.length} readings</>
+            )}
+          </p>
+        </div>
+        <div className="shrink-0" style={{ color: 'var(--brand-primary-purple)' }}>
+          {expanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="p-3 pt-0 space-y-2">
+              {entries.map((e) => (
+                <EntryCard
+                  key={e.id}
+                  entry={e}
+                  onEdit={() => onEdit(e)}
+                  onDelete={() => onDelete(e.id)}
+                />
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
@@ -1095,26 +1253,51 @@ export default function ReadingsPage() {
 
             return (
               <AnimatePresence mode="popLayout">
-                {grouped.map((group) => (
-                  <div key={group.date} className="space-y-2">
-                    {group.items.length > 1 && (
-                      <p
-                        className="text-[11px] font-bold uppercase tracking-wider px-1 pt-2"
-                        style={{ color: 'var(--brand-text-muted)' }}
-                      >
-                        {formatDate(group.date)} — {group.items.length} readings
-                      </p>
-                    )}
-                    {group.items.map((entry) => (
-                      <EntryCard
-                        key={entry.id}
-                        entry={entry}
-                        onEdit={() => openEdit(entry)}
-                        onDelete={() => setDeleteId(entry.id)}
-                      />
-                    ))}
-                  </div>
-                ))}
+                {grouped.map((group) => {
+                  // Within each date, sub-group consecutive entries by
+                  // sessionId. Multi-reading sessions render as a collapsible
+                  // SessionCard; solo readings stay as plain EntryCards.
+                  type Bucket = { sessionId: string | null; items: Entry[] };
+                  const buckets: Bucket[] = [];
+                  for (const e of group.items) {
+                    const sid = e.sessionId ?? null;
+                    const last = buckets[buckets.length - 1];
+                    if (sid && last && last.sessionId === sid) {
+                      last.items.push(e);
+                    } else {
+                      buckets.push({ sessionId: sid, items: [e] });
+                    }
+                  }
+                  return (
+                    <div key={group.date} className="space-y-2">
+                      {group.items.length > 1 && (
+                        <p
+                          className="text-[11px] font-bold uppercase tracking-wider px-1 pt-2"
+                          style={{ color: 'var(--brand-text-muted)' }}
+                        >
+                          {formatDate(group.date)} — {group.items.length} readings
+                        </p>
+                      )}
+                      {buckets.map((bucket, i) =>
+                        bucket.sessionId && bucket.items.length > 1 ? (
+                          <SessionCard
+                            key={bucket.sessionId}
+                            entries={bucket.items}
+                            onEdit={openEdit}
+                            onDelete={(id) => setDeleteId(id)}
+                          />
+                        ) : (
+                          <EntryCard
+                            key={bucket.items[0].id + (bucket.sessionId ?? `solo-${i}`)}
+                            entry={bucket.items[0]}
+                            onEdit={() => openEdit(bucket.items[0])}
+                            onDelete={() => setDeleteId(bucket.items[0].id)}
+                          />
+                        ),
+                      )}
+                    </div>
+                  );
+                })}
               </AnimatePresence>
             );
           })()
