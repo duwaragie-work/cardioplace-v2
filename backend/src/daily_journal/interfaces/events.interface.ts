@@ -74,14 +74,7 @@ export interface EscalationDispatchedEvent {
   triggeredByResolution: boolean
 }
 
-export interface EscalationCreatedEvent {
-  userId: string
-  escalationEventId: string
-  alertId: string
-  escalationLevel: string
-  deviationType: string
-  reason: string
-  symptoms?: string[]
-  patientMessage: string
-  careTeamMessage: string
-}
+// Phase/7 — `EscalationCreatedEvent` removed. The v1 flow
+// (EscalationService.create → JournalNotificationService.handleEscalation) is
+// gone; EscalationService now owns notification dispatch inline and emits the
+// more granular `EscalationDispatchedEvent` above instead.
