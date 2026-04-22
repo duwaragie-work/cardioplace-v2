@@ -26,6 +26,25 @@ export type SessionState =
   | 'checkin_confirm'
   | 'error';
 
+/**
+ * Lifecycle of the background pre-warm socket, independent of sessionState.
+ *
+ * - 'idle'    — never attempted (or fully cleaned up)
+ * - 'warming' — socket open, waiting for session_ready (or reconnecting)
+ * - 'ready'   — session_ready received; first mic click has no setup delay
+ * - 'failed'  — terminal (reconnect_failed fired); socketRef nulled so the
+ *               next start() builds a fresh socket rather than waiting on a
+ *               dead one. One automatic retry is scheduled 5s after entering
+ *               this state IF the failure happened during a passive prewarm.
+ */
+export type PrewarmStatus = 'idle' | 'warming' | 'ready' | 'failed';
+
+// Max auto-retries after terminal failure. Keep low — if prewarm fails twice
+// it's likely the backend is down; user-click will trigger another attempt
+// on demand.
+const PREWARM_AUTO_RETRY_LIMIT = 1;
+const PREWARM_AUTO_RETRY_DELAY_MS = 5000;
+
 export interface TranscriptLine {
   id: number;
   speaker: 'user' | 'agent';
@@ -172,6 +191,20 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
   const transcriptIdRef = useRef(0);
   const onSessionCreatedRef = useRef(onSessionCreated);
 
+  // Prewarm lifecycle tracking — separate from sessionState so the UI can
+  // reflect "voice unavailable" without flipping the main session state.
+  const [prewarmStatus, setPrewarmStatus] = useState<PrewarmStatus>('idle');
+  // Original intent of the in-flight _open call. Consulted by reconnect_failed
+  // to decide whether to auto-retry ('prewarm' → yes; 'start' → no, user will
+  // click again and see the error directly).
+  const prewarmIntentRef = useRef<'prewarm' | 'start' | null>(null);
+  // Last-known credentials for auto-retry after terminal failure.
+  const lastPrewarmOptsRef = useRef<StartOptions | null>(null);
+  // Number of auto-retries attempted so far for the current failure.
+  const prewarmRetryCountRef = useRef(0);
+  // Timer for scheduled auto-retry. Cleared on cleanup/end/successful retry.
+  const prewarmRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -197,6 +230,14 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
     nextStartTimeRef.current = 0;
     prewarmedRef.current = false;
     startMicPendingRef.current = false;
+    // Reset prewarm lifecycle on full cleanup so the next mount starts clean.
+    if (prewarmRetryTimerRef.current) {
+      clearTimeout(prewarmRetryTimerRef.current);
+      prewarmRetryTimerRef.current = null;
+    }
+    prewarmIntentRef.current = null;
+    prewarmRetryCountRef.current = 0;
+    setPrewarmStatus('idle');
   }, []);
 
   const stopMic = useCallback(() => {
@@ -390,6 +431,13 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
+  // Stable indirection to _open so the inner reconnect_failed handler can
+  // schedule an auto-retry without forming a circular useCallback dep. The
+  // ref is rebound after every _open instance (see useEffect below).
+  const _openRef = useRef<
+    ((opts: StartOptions, requestMic: boolean) => Promise<void>) | null
+  >(null);
+
   // Shared entry used by both start() (user clicked mic) and prewarm() (page
   // mounted — open the socket in the background so the first click has no
   // session-setup latency). `requestMic` controls whether we also start the
@@ -397,6 +445,20 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
   const _open = useCallback(
     async ({ token, sessionId }: StartOptions, requestMic: boolean) => {
       debug(requestMic ? 'start' : 'prewarm', `sessionId=${sessionId ?? 'new'} socketOpen=${!!socketRef.current} prewarmed=${prewarmedRef.current}`);
+
+      // Remember creds for potential auto-retry. Prewarm is always safe to
+      // replay; start() saves them too since a subsequent click may recover
+      // from a prior failure.
+      lastPrewarmOptsRef.current = { token, sessionId };
+
+      // If the previous attempt failed terminally, socketRef was already
+      // nulled by the reconnect_failed handler — no cleanup needed. But if
+      // this is a user click while an auto-retry is scheduled, cancel the
+      // timer so we don't fire a stale retry on top of the user's attempt.
+      if (prewarmRetryTimerRef.current) {
+        clearTimeout(prewarmRetryTimerRef.current);
+        prewarmRetryTimerRef.current = null;
+      }
 
       // Fast path: socket already open and session ready — user just clicked.
       if (socketRef.current && prewarmedRef.current && requestMic) {
@@ -422,6 +484,8 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
       // startMic when it fires. If it's another prewarm call, just no-op.
       if (socketRef.current) {
         if (requestMic) {
+          // Promote intent so terminal failure knows a user is actually waiting.
+          prewarmIntentRef.current = 'start';
           startMicPendingRef.current = true;
           setSessionState('connecting', 'start() awaiting ready');
           setTranscript([]);
@@ -433,7 +497,10 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
         return;
       }
 
-      // Fresh setup: build the socket from scratch.
+      // Fresh setup: build the socket from scratch. Record intent so that
+      // reconnect_failed later knows whether to schedule an auto-retry.
+      prewarmIntentRef.current = requestMic ? 'start' : 'prewarm';
+      setPrewarmStatus('warming');
       if (requestMic) {
         setSessionState('connecting', 'start()');
         setTranscript([]);
@@ -463,6 +530,14 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
       socket.on('session_ready', async (data?: { sessionId?: string }) => {
         debug('socket', `session_ready sessionId=${data?.sessionId ?? 'none'} micPending=${startMicPendingRef.current}`);
         prewarmedRef.current = true;
+        // Prewarm succeeded — reset retry counter and surface ready state.
+        prewarmRetryCountRef.current = 0;
+        prewarmIntentRef.current = null;
+        setPrewarmStatus('ready');
+        if (prewarmRetryTimerRef.current) {
+          clearTimeout(prewarmRetryTimerRef.current);
+          prewarmRetryTimerRef.current = null;
+        }
         // Notify consumer of resolved sessionId (may be a newly created one)
         if (data?.sessionId) {
           onSessionCreatedRef.current?.(data.sessionId);
@@ -581,7 +656,61 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
       socket.on('connect_error', (err) => {
         debug('socket', `connect_error ${err.message}`);
         setErrorMessage(`Connection failed: ${err.message}`);
-        setSessionState('error', 'connect_error');
+        // Only surface 'error' sessionState if a user was actively waiting
+        // (clicked mic). Pure background prewarm failures should stay quiet
+        // in the main UI — prewarmStatus carries the signal instead.
+        if (prewarmIntentRef.current === 'start' || startMicPendingRef.current) {
+          setSessionState('error', 'connect_error');
+        }
+        // Per-attempt error — Socket.io may still retry. Don't null socketRef
+        // yet; reconnect_failed below handles terminal failure.
+      });
+
+      // Terminal: Socket.io exhausted reconnectionAttempts. Null the socket
+      // ref so the next start()/prewarm() builds a fresh one. Schedule ONE
+      // auto-retry if this was a passive prewarm (user isn't staring at a
+      // spinner waiting on us).
+      socket.on('reconnect_failed', () => {
+        debug('socket', 'reconnect_failed — terminal');
+        const wasPrewarm = prewarmIntentRef.current === 'prewarm' && !startMicPendingRef.current;
+        // Tear down the dead socket.
+        try {
+          socket.disconnect();
+        } catch {
+          // best-effort
+        }
+        if (socketRef.current === socket) {
+          socketRef.current = null;
+        }
+        prewarmedRef.current = false;
+        setPrewarmStatus('failed');
+
+        if (startMicPendingRef.current) {
+          // User had clicked the mic and was waiting — they need to see the
+          // error, not a silent spinner.
+          startMicPendingRef.current = false;
+          setSessionState('error', 'reconnect_failed while waiting');
+          setErrorMessage(
+            'Voice is temporarily unavailable. Please try again in a moment.',
+          );
+        }
+
+        if (
+          wasPrewarm &&
+          prewarmRetryCountRef.current < PREWARM_AUTO_RETRY_LIMIT &&
+          lastPrewarmOptsRef.current
+        ) {
+          prewarmRetryCountRef.current += 1;
+          const opts = lastPrewarmOptsRef.current;
+          debug('socket', `scheduling prewarm retry ${prewarmRetryCountRef.current}/${PREWARM_AUTO_RETRY_LIMIT} in ${PREWARM_AUTO_RETRY_DELAY_MS}ms`);
+          prewarmRetryTimerRef.current = setTimeout(() => {
+            prewarmRetryTimerRef.current = null;
+            // Guard: if the component unmounted or a user-initiated start()
+            // happened in the meantime, skip the retry.
+            if (socketRef.current || !lastPrewarmOptsRef.current) return;
+            void _openRef.current?.(opts, false);
+          }, PREWARM_AUTO_RETRY_DELAY_MS);
+        }
       });
 
       socket.on('disconnect', (reason) => {
@@ -601,6 +730,12 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
     },
     [startMic, stopMic, playAudio, appendTranscript, setSessionState, setActionType],
   );
+
+  // Keep the _openRef synced to the latest _open instance so the inner
+  // reconnect_failed handler's auto-retry can call the current closure.
+  useEffect(() => {
+    _openRef.current = _open;
+  }, [_open]);
 
   // Public: user clicked the mic.
   const start = useCallback(
@@ -664,6 +799,7 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
 
   return {
     sessionState,
+    prewarmStatus,
     transcript,
     pendingCheckin,
     pendingUpdate,
