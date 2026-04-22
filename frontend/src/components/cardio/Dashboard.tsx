@@ -31,7 +31,8 @@ function formatAlertDate(dateStr: string): string {
   catch { return ''; }
 }
 
-function formatAlertType(type: string): string {
+function formatAlertType(type: string | null | undefined): string {
+  if (!type) return 'Alert';
   return type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
@@ -61,11 +62,12 @@ interface Baseline {
 }
 interface DeviationAlert {
   id: string;
-  type: string;
-  severity: string;
-  status: string;
+  // type/severity are nullable on the v2 DTO (legacy fields, replaced by tier)
+  type?: string | null;
+  severity?: string | null;
+  status?: string;
   createdAt?: string;
-  journalEntry?: { measuredAt?: string };
+  journalEntry?: { measuredAt?: string | null } | null;
 }
 
 // ─── Skeleton bone ───────────────────────────────────────────────────────────
@@ -510,7 +512,11 @@ export default function Dashboard() {
                   <div className="space-y-2">
                     {/* Show max 2 alert items; if streak is shown, only 1 alert */}
                     {openAlerts.slice(0, streak > 0 ? 1 : 2).map((alert) => (
-                      <div key={alert.id} className="p-3 rounded-xl"
+                      <button
+                        type="button"
+                        key={alert.id}
+                        onClick={() => router.push(`/alerts/${alert.id}`)}
+                        className="w-full text-left p-3 rounded-xl cursor-pointer transition hover:scale-[1.01] active:scale-[0.99]"
                         style={{
                           backgroundColor: alert.severity === 'HIGH' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
                           borderLeft: `3px solid ${alert.severity === 'HIGH' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)'}`,
@@ -527,7 +533,7 @@ export default function Dashboard() {
                         <p className="text-[10px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
                           {formatAlertDate(alert.journalEntry?.measuredAt ?? alert.createdAt ?? '')} {'· ' + t('dashboard.careTeamNotified')}
                         </p>
-                      </div>
+                      </button>
                     ))}
 
                     {streak > 0 && (

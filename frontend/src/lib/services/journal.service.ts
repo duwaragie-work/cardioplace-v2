@@ -115,9 +115,57 @@ export async function getLatestBaseline() {
   return unwrap<unknown>(res)
 }
 
-export async function getAlerts() {
+// V2 alert tier — mirrors AlertTier enum on the backend.
+export type AlertTier =
+  | 'TIER_1_CONTRAINDICATION'
+  | 'TIER_2_DISCREPANCY'
+  | 'TIER_3_INFO'
+  | 'BP_LEVEL_1_HIGH'
+  | 'BP_LEVEL_1_LOW'
+  | 'BP_LEVEL_2'
+  | 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
+
+export interface DeviationAlertDto {
+  id: string
+  userId: string
+  journalEntryId: string
+  // V1 legacy
+  type?: string | null
+  severity?: string | null
+  magnitude?: number | null
+  baselineValue?: number | null
+  actualValue?: number | null
+  // V2
+  tier?: AlertTier | null
+  ruleId?: string | null
+  mode?: 'STANDARD' | 'PERSONALIZED' | null
+  pulsePressure?: number | null
+  suboptimalMeasurement?: boolean
+  patientMessage?: string | null
+  caregiverMessage?: string | null
+  physicianMessage?: string | null
+  dismissible?: boolean
+  resolutionAction?: string | null
+  resolutionRationale?: string | null
+  resolvedBy?: string | null
+  escalated?: boolean
+  status?: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
+  createdAt: string
+  acknowledgedAt?: string | null
+  // Joined journalEntry snapshot
+  journalEntry?: {
+    id: string
+    measuredAt: string
+    systolicBP?: number | null
+    diastolicBP?: number | null
+    pulse?: number | null
+    weight?: number | null
+  } | null
+}
+
+export async function getAlerts(): Promise<DeviationAlertDto[]> {
   const res = await fetchWithAuth(`${API}/api/daily-journal/alerts`)
-  return unwrap<unknown>(res)
+  return unwrap<DeviationAlertDto[]>(res)
 }
 
 export async function acknowledgeAlert(alertId: string) {

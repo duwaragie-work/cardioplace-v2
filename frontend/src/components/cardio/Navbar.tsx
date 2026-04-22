@@ -28,9 +28,10 @@ export default function Navbar() {
       const alerts = Array.isArray(alertData) ? alertData : [];
       const notifs = Array.isArray(notifData) ? notifData : [];
 
-      // Consolidate alerts by journal entry (same as notifications page)
+      // Consolidate alerts by journal entry (same as notifications page).
+      // status is now optional on the v2 DTO so we coerce nullable → 'OPEN' check.
       const byEntry = new Map<string, typeof alerts>();
-      for (const a of alerts.filter((a: { status: string }) => a.status === 'OPEN')) {
+      for (const a of alerts.filter((a: { status?: string | null }) => a.status === 'OPEN')) {
         const key = a.journalEntry?.id ?? a.id;
         if (!byEntry.has(key)) byEntry.set(key, []);
         byEntry.get(key)!.push(a);
