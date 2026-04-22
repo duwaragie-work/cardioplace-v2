@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import type { JournalEntryCreatedEvent, JournalEntryUpdatedEvent } from '../interfaces/events.interface.js'
 import type { RuleFunction, RuleResult, SessionAverage } from '../engine/types.js'
+import { OutputGeneratorService } from './output-generator.service.js'
 import { ProfileResolverService } from './profile-resolver.service.js'
 import { SessionAveragerService } from './session-averager.service.js'
 import {
@@ -85,6 +86,7 @@ export class AlertEngineService {
     private readonly eventEmitter: EventEmitter2,
     private readonly profileResolver: ProfileResolverService,
     private readonly sessionAverager: SessionAveragerService,
+    private readonly outputGenerator: OutputGeneratorService,
   ) {}
 
   @OnEvent(JOURNAL_EVENTS.ENTRY_CREATED, { async: true })
@@ -236,6 +238,7 @@ export class AlertEngineService {
     const legacyType = this.legacyTypeFor(result, session)
     const legacySeverity = this.legacySeverityFor(result)
     const dismissible = !isNonDismissableTier(result.tier)
+    const messages = this.outputGenerator.generate(result, session, ctx.preDay3Mode)
 
     await this.prisma.deviationAlert.upsert({
       where: {
@@ -256,10 +259,9 @@ export class AlertEngineService {
           result.actualValue != null
             ? new Prisma.Decimal(result.actualValue.toFixed(2))
             : null,
-        // Three-tier messages filled by phase/6 OutputGenerator. Stubbed here.
-        patientMessage: 'TODO(phase/6)',
-        caregiverMessage: 'TODO(phase/6)',
-        physicianMessage: this.buildPhysicianStub(result),
+        patientMessage: messages.patientMessage,
+        caregiverMessage: messages.caregiverMessage,
+        physicianMessage: messages.physicianMessage,
       },
       create: {
         userId: session.userId,
@@ -276,9 +278,9 @@ export class AlertEngineService {
           result.actualValue != null
             ? new Prisma.Decimal(result.actualValue.toFixed(2))
             : null,
-        patientMessage: 'TODO(phase/6)',
-        caregiverMessage: 'TODO(phase/6)',
-        physicianMessage: this.buildPhysicianStub(result),
+        patientMessage: messages.patientMessage,
+        caregiverMessage: messages.caregiverMessage,
+        physicianMessage: messages.physicianMessage,
       },
     })
 
@@ -303,14 +305,6 @@ export class AlertEngineService {
       },
       data: { status: 'RESOLVED' },
     })
-  }
-
-  private buildPhysicianStub(result: RuleResult): string {
-    const parts = [result.reason]
-    if (result.metadata.physicianAnnotations?.length) {
-      parts.push(...result.metadata.physicianAnnotations)
-    }
-    return parts.join(' | ') + ' [TODO: phase/6 will replace with reviewed wording]'
   }
 
   private legacyTypeFor(result: RuleResult, session: SessionAverage): 'SYSTOLIC_BP' | 'DIASTOLIC_BP' | 'WEIGHT' | 'MEDICATION_ADHERENCE' {

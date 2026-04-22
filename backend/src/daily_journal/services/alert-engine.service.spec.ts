@@ -5,6 +5,7 @@ import { ProfileNotFoundException, type ResolvedContext } from '@cardioplace/sha
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import { AlertEngineService } from './alert-engine.service.js'
+import { OutputGeneratorService } from './output-generator.service.js'
 import { ProfileResolverService } from './profile-resolver.service.js'
 import { SessionAveragerService } from './session-averager.service.js'
 import type { SessionAverage } from '../engine/types.js'
@@ -82,6 +83,7 @@ describe('AlertEngineService (orchestrator)', () => {
   let eventEmitter: { emit: jest.Mock }
   let profileResolver: { resolve: jest.Mock }
   let sessionAverager: { averageForEntry: jest.Mock }
+  let outputGenerator: { generate: jest.Mock }
 
   beforeEach(async () => {
     prisma = {
@@ -100,6 +102,19 @@ describe('AlertEngineService (orchestrator)', () => {
     sessionAverager = {
       averageForEntry: (jest.fn() as jest.Mock<any>).mockResolvedValue(baseSession()),
     }
+    outputGenerator = {
+      generate: (jest.fn() as jest.Mock<any>).mockImplementation(
+        (result: any, _session: any, _preDay3: boolean) => ({
+          patientMessage: `PATIENT:${result.ruleId}`,
+          caregiverMessage: `CAREGIVER:${result.ruleId}`,
+          physicianMessage: `PHYSICIAN:${result.ruleId}${
+            result.metadata?.physicianAnnotations?.length
+              ? ' | ' + result.metadata.physicianAnnotations.join(' | ')
+              : ''
+          }`,
+        }),
+      ),
+    }
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -108,6 +123,7 @@ describe('AlertEngineService (orchestrator)', () => {
         { provide: EventEmitter2, useValue: eventEmitter },
         { provide: ProfileResolverService, useValue: profileResolver },
         { provide: SessionAveragerService, useValue: sessionAverager },
+        { provide: OutputGeneratorService, useValue: outputGenerator },
       ],
     }).compile()
     service = module.get<AlertEngineService>(AlertEngineService)
@@ -255,7 +271,7 @@ describe('AlertEngineService (orchestrator)', () => {
       expect(call.create.tier).toBe('TIER_1_CONTRAINDICATION')
       expect(call.create.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
       expect(call.create.dismissible).toBe(false)
-      expect(call.create.patientMessage).toBe('TODO(phase/6)')
+      expect(call.create.patientMessage).toBe('PATIENT:RULE_PREGNANCY_ACE_ARB')
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         JOURNAL_EVENTS.ANOMALY_TRACKED,
         expect.objectContaining({ userId: 'user-1' }),
@@ -306,7 +322,11 @@ describe('AlertEngineService (orchestrator)', () => {
       await service.evaluate('entry-1')
       const call = prisma.deviationAlert.upsert.mock.calls[0][0]
       expect(call.create.tier).toBe('BP_LEVEL_1_HIGH')
-      expect(call.create.physicianMessage).toMatch(/pulse pressure/i)
+      // OutputGenerator mock echoes physicianAnnotations — real phase/6 wording
+      // is validated in output-generator.service.spec.ts.
+      expect(call.create.physicianMessage.toLowerCase()).toContain(
+        'pulse pressure',
+      )
     })
   })
 })
