@@ -90,12 +90,12 @@ const am: Record<TranslationKey, string> = {
   // English (lang="en") until Dr. Singal signs off per-locale on
   // shared/alert-messages.ts.
   'dashboard.alert': 'ማንቂያ',
-  'dashboard.critical': 'አሳሳቢ',
+  'dashboard.critical': 'ከባድ',
   'dashboard.low': 'ዝቅተኛ',
   'dashboard.activeAlert': 'የነቃ ማንቂያ',
   'dashboard.viewDetails': 'ዝርዝር ይመልከቱ',
   'dashboard.viewDetailsAria': '{title} — ዝርዝር ይመልከቱ',
-  'dashboard.awaitingVerification': 'የአቅራቢ ማረጋገጫ በመጠበቅ ላይ',
+  'dashboard.awaitingVerification': 'የተንከባካቢ ቡድን ማረጋገጫ በመጠበቅ ላይ',
   'dashboard.yourGoal': 'ግብዎ',
   'dashboard.belowTarget': 'ከ{target} mmHg በታች',
   'dashboard.setByCareTeam': '· በተንከባካቢ ቡድንዎ የተዘጋጀ',

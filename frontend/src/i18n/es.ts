@@ -88,7 +88,7 @@ const es: Record<TranslationKey, string> = {
   // fallback cuando patientMessage está vacío) permanece en inglés hasta que
   // Dr. Singal apruebe shared/alert-messages.ts por locale.
   'dashboard.alert': 'Alerta',
-  'dashboard.critical': 'Crítico',
+  'dashboard.critical': 'Crítica',
   'dashboard.low': 'Baja',
   'dashboard.activeAlert': 'Alerta activa',
   'dashboard.viewDetails': 'Ver detalles',
