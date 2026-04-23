@@ -137,15 +137,36 @@ export interface ProfileVerificationLog {
   createdAt: string
 }
 
+export type NotificationChannel = 'PUSH' | 'EMAIL' | 'PHONE' | 'DASHBOARD'
+
+export interface EscalationNotification {
+  id: string
+  userId: string
+  channel: NotificationChannel
+  title: string
+  sentAt: string
+  readAt: string | null
+}
+
 export interface PatientAlertEscalationEvent {
   id: string
   escalationLevel: string
+  /** Phase/7 ladder step (T0, T2H, T4H, T8H, T24H, T48H, TIER2_*). */
+  ladderStep: string | null
   reason: string | null
   triggeredAt: string
-  acknowledgedAt: string | null
-  resolvedAt: string | null
-  triggeredByResolution: boolean
+  scheduledFor: string | null
   notificationSentAt: string | null
+  notificationChannel: NotificationChannel | null
+  recipientIds: string[]
+  recipientRoles: string[]
+  acknowledgedAt: string | null
+  acknowledgedBy: string | null
+  resolvedAt: string | null
+  resolvedBy: string | null
+  afterHours: boolean
+  triggeredByResolution: boolean
+  notifications: EscalationNotification[]
 }
 
 export interface PatientAlert {

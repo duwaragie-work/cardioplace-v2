@@ -26,13 +26,13 @@ import {
   Stethoscope,
 } from 'lucide-react';
 import AlertResolutionModal, { type ResolvableAlert } from '@/components/AlertResolutionModal';
+import EscalationAuditTrail from './EscalationAuditTrail';
 import {
   resolutionTierFor,
   type AlertTier,
 } from '@/lib/services/provider.service';
 import type {
   PatientAlert,
-  PatientAlertEscalationEvent,
 } from '@/lib/services/patient-detail.service';
 
 interface Props {
@@ -76,14 +76,6 @@ function timeAgo(iso: string): string {
   return `${d}d ago`;
 }
 
-const ESCALATION_LADDER: { code: string; label: string }[] = [
-  { code: 'T0', label: 'T+0' },
-  { code: 'T2H', label: 'T+2h' },
-  { code: 'T4H', label: 'T+4h' },
-  { code: 'T8H', label: 'T+8h' },
-  { code: 'T24H', label: 'T+24h' },
-  { code: 'T48H', label: 'T+48h' },
-];
 
 export default function AlertsTab({ alerts, loading, onResolved }: Props) {
   const [tierFilter, setTierFilter] = useState<TierBucket>('ALL');
@@ -351,26 +343,12 @@ export default function AlertsTab({ alerts, loading, onResolved }: Props) {
                       />
                     </div>
 
-                    {/* Escalation ladder */}
-                    <EscalationLadder events={a.escalationEvents} />
-
-                    {/* Resolution receipt (if resolved) */}
-                    {a.status === 'RESOLVED' && (
-                      <div
-                        className="rounded-lg p-3 text-[12px]"
-                        style={{ backgroundColor: 'var(--brand-success-green-light)', color: 'var(--brand-text-primary)' }}
-                      >
-                        <p className="text-[10px] font-bold uppercase tracking-wider mb-0.5" style={{ color: 'var(--brand-success-green)' }}>
-                          Resolution
-                        </p>
-                        <p className="font-semibold">
-                          {a.resolutionAction ?? '—'}
-                        </p>
-                        {a.resolutionRationale && (
-                          <p className="mt-1 leading-relaxed">{a.resolutionRationale}</p>
-                        )}
-                      </div>
-                    )}
+                    {/* Flow I — vertical escalation audit trail (T+0 → T+48h)
+                        with per-step recipients, channels, ack timestamps,
+                        and the 15-field resolution audit footer. Replaces
+                        the prior horizontal pill ladder + standalone
+                        resolution receipt. */}
+                    <EscalationAuditTrail alert={a} />
                   </div>
                 )}
               </div>
@@ -437,72 +415,3 @@ function ThreeTierMessageCard({
   );
 }
 
-function EscalationLadder({ events }: { events: PatientAlertEscalationEvent[] }) {
-  // Map events by escalationLevel for fast lookup.
-  const byLevel = new Map<string, PatientAlertEscalationEvent>();
-  for (const e of events) byLevel.set(e.escalationLevel, e);
-
-  const knownCodes = new Set(ESCALATION_LADDER.map((s) => s.code));
-  const extra = events.filter((e) => !knownCodes.has(e.escalationLevel));
-
-  return (
-    <div className="rounded-lg p-3 bg-white" style={{ border: '1px solid var(--brand-border)' }}>
-      <p className="text-[10.5px] font-bold uppercase tracking-wider mb-2.5" style={{ color: 'var(--brand-text-muted)' }}>
-        Escalation ladder
-      </p>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {ESCALATION_LADDER.map((step, i) => {
-          const event = byLevel.get(step.code);
-          const fired = !!event;
-          const resolved = !!event?.resolvedAt;
-          const ack = !!event?.acknowledgedAt;
-          const color = resolved
-            ? 'var(--brand-success-green)'
-            : ack
-              ? 'var(--brand-warning-amber)'
-              : fired
-                ? 'var(--brand-alert-red)'
-                : 'var(--brand-text-muted)';
-          return (
-            <div key={step.code} className="flex items-center gap-1">
-              <div
-                className="px-2 h-6 rounded-md inline-flex items-center gap-1 text-[10.5px] font-bold"
-                style={{
-                  backgroundColor: fired ? color : 'transparent',
-                  color: fired ? 'white' : color,
-                  border: `1px solid ${color}`,
-                  opacity: fired ? 1 : 0.65,
-                }}
-                title={
-                  fired
-                    ? `Triggered ${new Date(event!.triggeredAt).toLocaleString()}${
-                        event!.resolvedAt ? ` · resolved ${new Date(event!.resolvedAt).toLocaleString()}` : ''
-                      }`
-                    : 'Not yet triggered'
-                }
-              >
-                {step.label}
-              </div>
-              {i < ESCALATION_LADDER.length - 1 && (
-                <span className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>›</span>
-              )}
-            </div>
-          );
-        })}
-        {extra.map((e) => (
-          <div
-            key={e.id}
-            className="px-2 h-6 rounded-md inline-flex items-center text-[10.5px] font-bold"
-            style={{
-              backgroundColor: 'var(--brand-warning-amber)',
-              color: 'white',
-            }}
-            title={`Triggered ${new Date(e.triggeredAt).toLocaleString()}`}
-          >
-            {e.escalationLevel}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
