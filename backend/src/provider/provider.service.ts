@@ -642,6 +642,15 @@ export class ProviderService {
           actualValue: a.actualValue ? Number(a.actualValue) : null,
           escalated: a.escalated,
           status: a.status,
+          // V2 tier fields — needed by the admin Flow F dashboard for the
+          // 3-layer architecture (Layer 1 banners, Layer 2 queue filter,
+          // Layer 3 tier-based stats) and the tier-aware resolution modals.
+          tier: a.tier,
+          ruleId: a.ruleId,
+          mode: a.mode,
+          pulsePressure: a.pulsePressure,
+          patientMessage: a.patientMessage,
+          dismissible: a.dismissible,
           createdAt: a.createdAt,
           acknowledgedAt: a.acknowledgedAt,
           followUpScheduledAt: followUp?.createdAt ?? null,

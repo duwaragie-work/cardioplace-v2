@@ -1,7 +1,7 @@
 'use client';
 
-import ProviderDashboard from '@/components/ProviderDashboard';
+import AdminDashboard from '@/components/AdminDashboard';
 
 export default function ProviderDashboardPage() {
-  return <ProviderDashboard />;
+  return <AdminDashboard />;
 }
