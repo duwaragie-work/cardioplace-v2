@@ -17,16 +17,24 @@ model EscalationEvent {
   notificationChannel NotificationChannel?
   afterHours          Boolean              @default(false)
 
+  // Phase/7 — BP L2 resolution action #6 (Unable to reach patient — will retry)
+  // writes a new EscalationEvent with scheduledFor=now+4h + triggeredByResolution=true.
+  // The cron scanner dispatches at scheduledFor instead of computing from ladder offset.
+  scheduledFor           DateTime?
+  triggeredByResolution  Boolean   @default(false)
+
   alert         DeviationAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   notifications Notification[]
 
   @@index([alertId, triggeredAt(sort: Desc)])
   @@index([userId, triggeredAt(sort: Desc)])
+  @@index([scheduledFor])
 }
 
 enum LadderStep {
   T0
+  T2H
   T4H
   T8H
   T24H

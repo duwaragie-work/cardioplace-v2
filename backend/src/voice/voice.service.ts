@@ -4,8 +4,11 @@ import * as grpc from '@grpc/grpc-js'
 import * as protoLoader from '@grpc/proto-loader'
 import * as path from 'path'
 import { randomUUID } from 'crypto'
+import { ProfileNotFoundException, type ResolvedContext } from '@cardioplace/shared'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { ConversationHistoryService } from '../chat/services/conversation-history.service.js'
+import { SystemPromptService } from '../chat/services/system-prompt.service.js'
+import { ProfileResolverService } from '../daily_journal/services/profile-resolver.service.js'
 import { GeminiService } from '../gemini/gemini.service.js'
 
 export interface VoiceSessionCallbacks {
@@ -103,6 +106,8 @@ export class VoiceService implements OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly conversationHistory: ConversationHistoryService,
     private readonly geminiService: GeminiService,
+    private readonly systemPromptService: SystemPromptService,
+    private readonly profileResolver: ProfileResolverService,
   ) {
     this.initGrpcClient()
   }
@@ -631,12 +636,16 @@ export class VoiceService implements OnModuleDestroy {
 
   private async buildPatientContext(userId: string, sessionId?: string): Promise<string> {
     try {
-      // TODO(phase/16): rewrite patient-context injection to pull structured
-      // PatientProfile (conditions, heartFailureType, isPregnant, etc.) plus
-      // verified PatientMedication rows. v1 primaryCondition/riskTier are gone;
-      // baseline was a rolling snapshot that v2 replaces with an on-the-fly
-      // 7-day mean computed by getLatestBaseline() in DailyJournalService.
-      const [user, entries, alerts, sessionData] = await Promise.all([
+      // Phase/16 — voice now uses the same clinical-context renderer as the
+      // text chat. ProfileResolverService + v2 DeviationAlert columns +
+      // SystemPromptService.buildPatientContext() give voice the same
+      // conditions / meds / threshold / active-alert block (including the
+      // three-tier patientMessage bodies) that the text chatbot sees.
+      //
+      // The guardrails themselves live in adk-service/agent/prompts.py since
+      // they're the voice agent's static directives; this method only builds
+      // the per-session patient context payload.
+      const [user, entries, activeAlerts, sessionData, resolvedContext] = await Promise.all([
         this.prisma.user.findUnique({
           where: { id: userId },
           select: {
@@ -654,12 +663,24 @@ export class VoiceService implements OnModuleDestroy {
             measuredAt: true,
             systolicBP: true,
             diastolicBP: true,
+            weight: true,
+            medicationTaken: true,
+            otherSymptoms: true,
           },
         }),
         this.prisma.deviationAlert.findMany({
-          where: { userId, acknowledgedAt: null },
-          select: { type: true, severity: true },
+          where: { userId, status: { in: ['OPEN', 'ACKNOWLEDGED'] } },
+          orderBy: { createdAt: 'desc' },
           take: 5,
+          select: {
+            tier: true,
+            ruleId: true,
+            mode: true,
+            patientMessage: true,
+            physicianMessage: true,
+            dismissible: true,
+            createdAt: true,
+          },
         }),
         sessionId
           ? this.prisma.session.findUnique({
@@ -667,77 +688,68 @@ export class VoiceService implements OnModuleDestroy {
               select: { summary: true },
             })
           : Promise.resolve(null),
+        this.profileResolver.resolve(userId).catch((err: unknown) => {
+          if (err instanceof ProfileNotFoundException) return null
+          throw err
+        }) as Promise<ResolvedContext | null>,
       ])
 
-      // ── Profile ────────────────────────────────────────────────────────────
-      const profileLines: string[] = []
-      if (user?.name) profileLines.push(`Patient name: ${user.name}`)
-      if (user?.dateOfBirth) {
-        const age = Math.floor(
-          (Date.now() - new Date(user.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000),
-        )
-        profileLines.push(`Age: ${age}`)
-      }
-      if (user?.preferredLanguage) profileLines.push(`Preferred language: ${user.preferredLanguage}`)
-      const profileSummary = profileLines.length > 0
-        ? profileLines.join('. ') + '.'
-        : 'Patient profile not available.'
-
-      // ── BP readings summary (count + distinct-day count only) ─────────────
-      const completeEntries = entries.filter((e) => e.systolicBP != null && e.diastolicBP != null)
-      const entryCount = completeEntries.length
-      const distinctDays = new Set(
-        completeEntries.map((e) => new Date(e.measuredAt).toISOString().slice(0, 10)),
-      ).size
-
-      const lines: string[] = ['--- PATIENT HEALTH DATA ---']
-      if (entryCount === 0) {
-        lines.push('BP readings: none recorded yet.')
-      } else {
-        lines.push(
-          `BP readings: ${entryCount} recorded across ${distinctDays} distinct day(s). ` +
-          `Call get_recent_readings to list them or look up entry_ids.`,
-        )
-      }
-
-      // ── Trailing 7-day average (computed from JournalEntry, not stored) ──
-      lines.push('')
+      // Trailing 7-day mean computed on-the-fly (v2: derived, not stored).
+      const completeEntries = entries.filter(
+        (e) => e.systolicBP != null && e.diastolicBP != null,
+      )
       const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
-      const recent = completeEntries.filter(
+      const recentForBaseline = completeEntries.filter(
         (e) => new Date(e.measuredAt).getTime() >= sevenDaysAgo,
       )
-      if (recent.length > 0) {
-        const avgSys = Math.round(
-          recent.reduce((a, e) => a + (e.systolicBP as number), 0) / recent.length,
-        )
-        const avgDia = Math.round(
-          recent.reduce((a, e) => a + (e.diastolicBP as number), 0) / recent.length,
-        )
-        lines.push(`7-day average: ${avgSys}/${avgDia} mmHg (${recent.length} reading(s))`)
-      } else {
-        lines.push('7-day average: Not yet established — no complete BP readings in the last 7 days.')
-      }
+      const baseline = recentForBaseline.length > 0
+        ? {
+            baselineSystolic: Math.round(
+              recentForBaseline.reduce((a, e) => a + (e.systolicBP as number), 0) /
+                recentForBaseline.length,
+            ),
+            baselineDiastolic: Math.round(
+              recentForBaseline.reduce((a, e) => a + (e.diastolicBP as number), 0) /
+                recentForBaseline.length,
+            ),
+          }
+        : null
 
-      // ── Alerts (aligned filter: acknowledgedAt: null) ─────────────────────
-      lines.push('')
-      if (alerts.length === 0) {
-        lines.push('Active alerts: None')
-      } else {
-        lines.push('Active alerts:')
-        for (const alert of alerts) {
-          lines.push(`- ${alert.type} (${alert.severity})`)
-        }
-      }
+      // Delegate rendering to the chat SystemPromptService so the voice agent
+      // and text chatbot see an identical clinical-context block.
+      const patientContext = this.systemPromptService.buildPatientContext({
+        recentEntries: entries.map((e) => ({
+          measuredAt: e.measuredAt,
+          systolicBP: e.systolicBP != null ? Number(e.systolicBP) : null,
+          diastolicBP: e.diastolicBP != null ? Number(e.diastolicBP) : null,
+          weight: e.weight != null ? Number(e.weight) : null,
+          medicationTaken: e.medicationTaken,
+          otherSymptoms: e.otherSymptoms,
+        })),
+        baseline,
+        activeAlerts: activeAlerts.map((a) => ({
+          tier: a.tier ?? 'UNKNOWN',
+          ruleId: a.ruleId ?? 'UNKNOWN',
+          mode: a.mode ?? 'STANDARD',
+          patientMessage: a.patientMessage,
+          physicianMessage: a.physicianMessage,
+          dismissible: a.dismissible,
+          createdAt: a.createdAt,
+        })),
+        communicationPreference: user?.communicationPreference ?? null,
+        preferredLanguage: user?.preferredLanguage ?? null,
+        patientName: user?.name ?? null,
+        dateOfBirth: user?.dateOfBirth ?? null,
+        resolvedContext,
+        toneMode: 'PATIENT',
+      })
 
-      // ── Communication preference ──────────────────────────────────────────
-      lines.push('')
-      lines.push(`Communication preference: ${user?.communicationPreference || 'Not set'}`)
-
-      lines.push('--- END PATIENT DATA ---')
-
-      // ── Current date/time in patient timezone ─────────────────────────────
+      // Current date/time in patient timezone — voice-specific, kept here
+      // because the Python prompt references "CURRENT DATE AND TIME".
       const tz = user?.timezone ?? 'America/New_York'
-      this.logger.log(`[TIMEZONE] user=${userId} stored=${user?.timezone ?? 'null'} using=${tz} now=${new Date().toISOString()}`)
+      this.logger.log(
+        `[TIMEZONE] user=${userId} stored=${user?.timezone ?? 'null'} using=${tz} now=${new Date().toISOString()}`,
+      )
       const now = new Date()
       const formatter = new Intl.DateTimeFormat('en-US', {
         timeZone: tz,
@@ -753,13 +765,11 @@ export class VoiceService implements OnModuleDestroy {
       const currentDate = `${y}-${mo}-${d}`
       const currentTime = `${h}:${mi}`
 
-      // historySummary (sessionData?.summary) intentionally NOT injected.
-      // Gemini Live already accumulates conversation context turn-by-turn;
-      // appending our rolling summary duplicates tokens and inflates per-turn
-      // prefill. Kept fetched above only so downstream code can still read it.
+      // historySummary intentionally NOT injected — Gemini Live accumulates
+      // conversation context turn-by-turn, duplicating adds no value.
       void sessionData
 
-      return `${profileSummary}\n\n${lines.join('\n')}\n\nCURRENT DATE AND TIME (patient timezone ${tz}): ${currentDate} at ${currentTime}. When the patient says "now", "today", or "right now", use EXACTLY this date and time. NEVER guess a different date or time.`
+      return `${patientContext}\n\nCURRENT DATE AND TIME (patient timezone ${tz}): ${currentDate} at ${currentTime}. When the patient says "now", "today", or "right now", use EXACTLY this date and time. NEVER guess a different date or time.`
     } catch {
       return 'Patient context unavailable.'
     }
