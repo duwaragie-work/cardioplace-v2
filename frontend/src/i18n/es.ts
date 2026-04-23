@@ -775,9 +775,9 @@ const es: Record<TranslationKey, string> = {
   'intake.a4.hfpefTitle': 'HFpEF',
   'intake.a4.hfpefDesc': 'Fracción de eyección preservada — el corazón está rígido pero aún bombea',
   'intake.a4.hfpefAudio': 'HFpEF. Fracción de eyección preservada. El corazón está rígido pero aún bombea.',
-  'intake.a4.unknownTitle': 'No estoy seguro',
+  'intake.a4.unknownTitle': 'No sé',
   'intake.a4.unknownDesc': 'Su equipo de atención verificará en su próxima visita',
-  'intake.a4.unknownAudio': 'No estoy seguro. Su equipo de atención verificará en su próxima visita.',
+  'intake.a4.unknownAudio': 'No sé. Su equipo de atención verificará en su próxima visita.',
 
   // A5 — core medications
   'intake.a5.title': 'Sus medicamentos',
@@ -808,7 +808,7 @@ const es: Record<TranslationKey, string> = {
   'intake.a8.title': '¿Algo más?',
   'intake.a8.subtitle': 'Toque una categoría si toma algo no listado antes.',
   'intake.a8.audio': '¿Algo más? Toque una categoría si toma algo no listado antes.',
-  'intake.a8.categoryWaterPill': 'Diurético',
+  'intake.a8.categoryWaterPill': 'Pastilla de agua (diurético)',
   'intake.a8.categoryBloodThinner': 'Anticoagulante',
   'intake.a8.categoryCholesterol': 'Medicamento para el colesterol',
   'intake.a8.categoryHeartRhythm': 'Medicamento para el ritmo cardíaco',
@@ -851,7 +851,7 @@ const es: Record<TranslationKey, string> = {
   'intake.a10.rowHeight': 'Altura',
   'intake.a10.rowPregnancy': 'Embarazo',
   'intake.a10.pregnancyYes': 'Sí',
-  'intake.a10.pregnancyYesDate': 'Sí · fecha {date}',
+  'intake.a10.pregnancyYesDate': 'Sí · fecha prevista {date}',
   'intake.a10.pregnancyNo': 'No',
   'intake.a10.pregnancyNotSpec': 'No especificado',
   'intake.a10.noneReported': 'Ninguno reportado',
@@ -893,7 +893,7 @@ const es: Record<TranslationKey, string> = {
   'intake.nav.continue': 'Continuar',
   'intake.nav.errorGender': 'Por favor seleccione un género.',
   'intake.nav.errorHeight': 'Por favor ingrese una altura entre 100 y 250 cm.',
-  'intake.nav.errorHfType': 'Por favor elija una — No estoy seguro está bien.',
+  'intake.nav.errorHfType': 'Por favor elija una — No sé está bien.',
   'intake.nav.errorFreq': 'Elija con qué frecuencia toma {name}.',
   'intake.nav.errorSubmit': 'Algo salió mal al enviar su perfil.',
 
