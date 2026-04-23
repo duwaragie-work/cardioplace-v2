@@ -348,16 +348,23 @@ export class ChatService {
   }
 
   /**
-   * Stream response token-by-token (SSE).
+   * Stream response token-by-token (SSE) with live Gemini streaming.
    *
    * Tier 1 (parallel, no Gemini calls): DB queries + local embeddings
-   * Tier 2 (single Gemini call): generateContentWithTools (+ emergency via flag_emergency tool)
+   * Tier 2 (streaming Gemini call): streamContentWithTools driving the
+   *        function-calling loop — text parts yield to the client as they
+   *        arrive; function calls at end-of-iteration run tools, then the
+   *        next iteration streams through again.
    * Tier 3 (fire-and-forget): saveConversation + title
    */
   async *getStreamingResponse(
     request: ChatRequestDto,
     userId: string,
-  ): AsyncIterable<string | { type: 'emergency'; emergencySituation: string | null }> {
+  ): AsyncIterable<
+    | string
+    | { type: 'emergency'; emergencySituation: string | null }
+    | { type: 'toolResult'; tool: string; result: any }
+  > {
     const { prompt } = request
     const sessionId = request.sessionId as string
 
@@ -375,23 +382,157 @@ export class ChatService {
       const systemPrompt = this.assembleSystemPrompt(basePrompt, sessionSummary, ragDocs)
       const contents = this.buildGeminiContents(chatHistory, prompt)
 
-      // ── Tier 2: Single Gemini call — LLM response + emergency detection via tool ──
-      const { text: fullResponse, emergency } = await this.runToolLoop(systemPrompt, contents, userId, prompt)
+      // ── Tier 2: Streaming Gemini + function-calling loop ────────────────
+      const toolDeclarations = getJournalToolDeclarations()
+      let fullResponse = ''
+      const toolResultsCollected: Array<{ tool: string; result: any }> = []
+      let emergency: EmergencyDetectionResult = { isEmergency: false, emergencySituation: null }
+      let emergencyYielded = false
 
-      if (emergency.isEmergency) {
-        yield { type: 'emergency', emergencySituation: emergency.emergencySituation }
-        this.recordEmergencyEvent(sessionId, userId, prompt, emergency.emergencySituation!)
-      }
+      for (let iteration = 0; iteration < 5; iteration++) {
+        const stream = this.geminiService.streamContentWithTools({
+          contents,
+          systemInstruction: systemPrompt,
+          tools: toolDeclarations,
+        })
 
-      if (fullResponse) {
-        const words = fullResponse.split(' ')
-        for (let i = 0; i < words.length; i++) {
-          yield (i > 0 ? ' ' : '') + words[i]
+        let iterationText = ''
+        const iterationParts: any[] = []
+        const iterationFunctionCalls: any[] = []
+
+        for await (const chunk of stream) {
+          const parts = chunk.candidates?.[0]?.content?.parts ?? []
+          for (const part of parts) {
+            iterationParts.push(part)
+            if (part.text) {
+              iterationText += part.text
+              // Stream raw text fragments to the client the moment they arrive.
+              // Guard-pattern stripping runs only on the persisted record —
+              // if guards leak to the UI briefly it's a known tradeoff.
+              yield part.text
+            }
+            if (part.functionCall) {
+              iterationFunctionCalls.push(part)
+            }
+          }
         }
 
-        // ── Tier 3: Save conversation ──────────────────────────────────────
+        fullResponse += iterationText
+
+        if (iterationFunctionCalls.length === 0) {
+          // Final iteration — no more tool calls.
+          break
+        }
+
+        // Tool calls present: feed the model's response back + execute tools.
+        contents.push({ role: 'model', parts: iterationParts })
+
+        const functionResponseParts: any[] = []
+        for (const part of iterationFunctionCalls) {
+          const fc = part.functionCall
+          const toolName = fc.name
+          const toolArgs = (fc.args ?? {}) as Record<string, any>
+
+          console.log(`Executing tool: ${toolName}`, JSON.stringify(toolArgs))
+
+          let resultStr: string
+          if (toolName === 'submit_checkin') {
+            const gate = ChatService.checkSubmitCheckinDiscussion(contents, toolArgs)
+            if (gate.block) {
+              console.log(`[submit_checkin BLOCKED] Missing: ${gate.missing.join(', ')}`)
+              resultStr = JSON.stringify({
+                saved: false,
+                _internal: true,
+                next_action: `Continue asking. Missing: ${gate.missing[0]}`,
+              })
+            } else {
+              resultStr = await executeJournalTool(toolName, toolArgs, this.dailyJournalService, userId)
+            }
+          } else {
+            resultStr = await executeJournalTool(toolName, toolArgs, this.dailyJournalService, userId)
+          }
+
+          console.log(`Tool result [${toolName}]:`, resultStr.slice(0, 200))
+
+          if (toolName === 'flag_emergency') {
+            emergency = {
+              isEmergency: true,
+              emergencySituation: toolArgs.emergency_situation ?? 'Emergency detected',
+            }
+            if (!emergencyYielded) {
+              emergencyYielded = true
+              yield { type: 'emergency', emergencySituation: emergency.emergencySituation }
+              this.recordEmergencyEvent(sessionId, userId, prompt, emergency.emergencySituation!)
+            }
+          }
+
+          functionResponseParts.push({
+            functionResponse: {
+              name: toolName,
+              response: JSON.parse(resultStr),
+            },
+          })
+
+          if (toolName !== 'flag_emergency') {
+            try {
+              const parsed = JSON.parse(resultStr)
+              const wasBlocked = (toolName === 'submit_checkin' && parsed.saved === false) ||
+                                 (toolName === 'update_checkin' && parsed.updated === false)
+              if (!wasBlocked) {
+                toolResultsCollected.push({ tool: toolName, result: parsed })
+                yield { type: 'toolResult', tool: toolName, result: parsed }
+              }
+            } catch {
+              const fallbackResult = { message: resultStr }
+              toolResultsCollected.push({ tool: toolName, result: fallbackResult })
+              yield { type: 'toolResult', tool: toolName, result: fallbackResult }
+            }
+          }
+        }
+
+        contents.push({ role: 'user', parts: functionResponseParts })
+      }
+
+      // Fallback: if a tool succeeded but the model produced no user-facing
+      // text, stream a synthesized acknowledgement (mirrors runToolLoop's
+      // fallback so the UX matches the structured endpoint).
+      if (!fullResponse.trim() && toolResultsCollected.length > 0) {
+        let fallback = ''
+        for (const tr of toolResultsCollected) {
+          if (tr.tool === 'submit_checkin' && tr.result.saved) {
+            fallback = `Your check-in has been saved successfully! ${tr.result.message || ''}`
+          } else if (tr.tool === 'update_checkin' && tr.result.updated) {
+            fallback = `Your reading has been updated successfully! ${tr.result.message || ''}`
+          } else if (tr.tool === 'delete_checkin') {
+            fallback = tr.result.deleted
+              ? `Your reading has been deleted. ${tr.result.message || ''}`
+              : `I wasn't able to delete your reading. ${tr.result.message || 'Please try again.'}`
+          }
+        }
+        if (fallback) {
+          fullResponse = fallback
+          yield fallback
+        }
+      }
+
+      // Strip any leaked internal guard messages from the persisted record
+      // (the live stream may have shown them; the saved version is clean).
+      const guardPatterns = [
+        /You still need to ask the patient about:.*?(?:Ask the next|Do NOT call)/gs,
+        /REJECTED:.*?(?:Only call submit_checkin|before saving)/gs,
+        /You still need to ask.*?answered\./gs,
+        /Ask the next missing question ONE AT A TIME.*?\./g,
+        /Do NOT call submit_checkin again until all questions are answered\./g,
+      ]
+      let cleanedResponse = fullResponse
+      for (const pattern of guardPatterns) {
+        cleanedResponse = cleanedResponse.replace(pattern, '').trim()
+      }
+
+      // ── Tier 3: Save conversation (fire-and-forget after stream closes) ──
+      if (cleanedResponse) {
         try {
-          await this.conversationHistoryService.saveConversation(sessionId, prompt, fullResponse)
+          await this.conversationHistoryService.saveConversation(sessionId, prompt, cleanedResponse)
         } catch (err) {
           console.error('Error saving conversation:', err)
         }

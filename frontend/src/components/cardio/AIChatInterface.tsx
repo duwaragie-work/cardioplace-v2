@@ -20,7 +20,7 @@ import ReactMarkdown from 'react-markdown';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import {
-  sendMessage as sendChatMessage,
+  streamChatMessage,
   getChatSessions,
   getSession as getSessionApi,
   getSessionHistory,
@@ -35,6 +35,13 @@ import {
   type UpdateSummary,
   type DeleteSummary,
 } from '@/hooks/useVoiceSession';
+
+// Shape of the delete_checkin tool result from the backend (see journal-tools.ts).
+// Narrower than the voice-side DeleteSummary (text delete is always single-entry).
+interface DeleteToolResult {
+  deleted?: boolean;
+  message?: string;
+}
 
 // ── Debug logging (mirrors useVoiceSession helper) ───────────────────────────
 const VOICE_DEBUG =
@@ -303,6 +310,48 @@ function CheckinCard({ summary, onDismiss }: { summary: CheckinSummary; onDismis
 }
 
 // ─── Update result card ────────────────────────────────────────────────────────
+function DeleteCard({ summary, onDismiss }: { summary: DeleteSummary; onDismiss: () => void }) {
+  const successLabel = summary.deletedCount === 1
+    ? 'Reading deleted'
+    : `${summary.deletedCount} readings deleted`;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      className="mx-auto w-full max-w-sm rounded-2xl p-5 my-2"
+      style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)', boxShadow: '0 4px 20px rgba(0,0,0,0.09)' }}
+    >
+      <div className="flex items-center gap-2 mb-4">
+        {summary.success
+          ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-alert-red)' }} />
+          : <AlertCircle className="w-5 h-5 text-red-500" />}
+        <p className="font-bold text-[15px]" style={{ color: 'var(--brand-text-primary)' }}>
+          {summary.success ? successLabel : 'Could not delete reading'}
+        </p>
+      </div>
+      <div className="rounded-xl p-3 text-center mb-4" style={{ backgroundColor: 'var(--brand-alert-red-light)' }}>
+        <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Removed</p>
+        <p className="text-[16px] font-bold" style={{ color: 'var(--brand-alert-red)' }}>
+          {summary.deletedCount} entry{summary.deletedCount === 1 ? '' : 'ies'}
+          {summary.failedCount > 0 ? ` (${summary.failedCount} failed)` : ''}
+        </p>
+      </div>
+      {summary.message && (
+        <p className="text-[12px] mb-4 text-center" style={{ color: 'var(--brand-text-muted)' }}>
+          {summary.message}
+        </p>
+      )}
+      <button
+        onClick={onDismiss}
+        className="w-full py-2.5 rounded-xl text-[14px] font-semibold transition hover:opacity-90 active:scale-[0.98]"
+        style={{ background: 'linear-gradient(135deg, #DC2626, #EF4444)', color: 'white', boxShadow: '0 4px 14px rgba(220,38,38,0.28)' }}
+      >
+        Done
+      </button>
+    </motion.div>
+  );
+}
+
 function UpdateCard({ summary, onDismiss }: { summary: UpdateSummary; onDismiss: () => void }) {
   return (
     <motion.div
@@ -1140,6 +1189,7 @@ export default function AIChatInterface() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [pendingCheckin, setPendingCheckin] = useState<CheckinSummary | null>(null);
   const [pendingUpdateCard, setPendingUpdateCard] = useState<UpdateSummary | null>(null);
+  const [pendingDeleteCard, setPendingDeleteCard] = useState<DeleteSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -1170,7 +1220,6 @@ export default function AIChatInterface() {
     actionType: voiceActionType,
     prewarmStatus,
     start: startVoice,
-    prewarm: prewarmVoice,
     end: endVoice,
     dismissCheckin,
     dismissUpdate,
@@ -1180,24 +1229,9 @@ export default function AIChatInterface() {
     pendingDelete: voicePendingDelete,
   } = useVoiceSession(handleVoiceSessionCreated);
 
-  // Pre-warm the voice session in the background as soon as we have a token.
-  // Opens the WebSocket, builds patient context, and establishes the Gemini
-  // Live connection while the user is still reading the UI — so the first mic
-  // click has no setup delay. Only runs once per AIChatInterface mount per token.
-  const prewarmedOnceRef = useRef(false);
-  useEffect(() => {
-    if (!token || prewarmedOnceRef.current) return;
-    prewarmedOnceRef.current = true;
-    // Fire-and-forget, but catch so an unhandled rejection doesn't surface
-    // as a console warning. The hook tracks state via prewarmStatus; this
-    // .catch() just silences the promise, not the error signal.
-    Promise.resolve(prewarmVoice({ token, sessionId: activeSessionId ?? undefined }))
-      .catch((err) => {
-        // eslint-disable-next-line no-console
-        console.warn('[voice prewarm] fire-and-forget rejected:', err);
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  // Voice session is opened lazily on the first mic click — see handleMicClick
+  // → startVoice(). The hook's prewarm() entry is intentionally unused so the
+  // Gemini Live + gRPC stream don't spin up for users who never use voice.
 
   const isVoiceActive = voiceState !== 'idle' && voiceState !== 'error' && voiceState !== 'checkin_confirm';
   const isVoiceConnecting = voiceState === 'connecting';
@@ -1244,6 +1278,7 @@ export default function AIChatInterface() {
       setMessages([]);
       setPendingCheckin(null);
       setPendingUpdateCard(null);
+      setPendingDeleteCard(null);
       setVoiceSummaryLoading(true);
 
       const sessionId = activeSessionId;
@@ -1398,40 +1433,110 @@ export default function AIChatInterface() {
     if (!text || isSending) return;
 
     const userMsg: Message = { id: Date.now(), type: 'patient', source: 'text', text, time: nowTimeStr() };
+    const aiId = Date.now() + 1;
     setMessages((prev) => [...prev, userMsg]);
     setInputValue('');
     setIsTyping(true);
     setIsSending(true);
 
-    try {
-      const response = await sendChatMessage(text, activeSessionId ?? undefined);
-      setIsTyping(false);
+    // Defer inserting the AI bubble until the first chunk/error lands — otherwise
+    // the typing indicator and an empty bubble render at the same time.
+    let aiInserted = false;
+    let aiType: 'ai' | 'teachback' = 'ai';
 
-      if (!activeSessionId && response.sessionId) {
-        justCreatedSessionRef.current = true;
-        setActiveSessionId(response.sessionId);
-        getChatSessions()
-          .then((data) => {
-            const arr = Array.isArray(data) ? data : [];
-            setSessions(mapSessions(arr));
-          })
-          .catch(() => {});
-      }
-
-      // Only add AI message if there's actual text content
-      if (response.data && response.data.trim()) {
-        setMessages((prev) => [
-          ...prev,
-          { id: Date.now() + 1, type: response.isEmergency ? 'teachback' : 'ai', source: 'text', text: response.data, time: nowTimeStr() },
-        ]);
-      }
-    } catch {
+    const insertAiBubble = (initialText: string) => {
+      aiInserted = true;
       setIsTyping(false);
       setMessages((prev) => [
         ...prev,
-        { id: Date.now() + 1, type: 'ai', source: 'text', text: t('chat.errorConnect'), time: nowTimeStr() },
+        { id: aiId, type: aiType, source: 'text', text: initialText, time: nowTimeStr() },
       ]);
+    };
+
+    const appendToAiBubble = (fragment: string) => {
+      setMessages((prev) => prev.map((m) => (m.id === aiId ? { ...m, text: m.text + fragment } : m)));
+    };
+
+    const replaceAiBubbleText = (newText: string) => {
+      setMessages((prev) => prev.map((m) => (m.id === aiId ? { ...m, text: newText } : m)));
+    };
+
+    try {
+      await streamChatMessage(text, activeSessionId ?? undefined, {
+        onSession: (id) => {
+          if (!activeSessionId) {
+            justCreatedSessionRef.current = true;
+            setActiveSessionId(id);
+            getChatSessions()
+              .then((data) => {
+                const arr = Array.isArray(data) ? data : [];
+                setSessions(mapSessions(arr));
+              })
+              .catch(() => {});
+          }
+        },
+        onEmergency: () => {
+          aiType = 'teachback';
+          // If text already started streaming, upgrade the existing bubble's type.
+          if (aiInserted) {
+            setMessages((prev) => prev.map((m) => (m.id === aiId ? { ...m, type: 'teachback' } : m)));
+          }
+        },
+        onToolResult: (tool, result) => {
+          // Mirror the structured-endpoint card behavior (see git ec6deaf) —
+          // popup cards for submit_checkin / update_checkin, driven by the tool
+          // result payload. Blocked/failed results are filtered server-side.
+          if (tool === 'submit_checkin' && (result as { saved?: boolean }).saved) {
+            const d = (result as { data?: Record<string, unknown> }).data ?? {};
+            setPendingCheckin({
+              systolicBP: d.systolicBP as number | undefined,
+              diastolicBP: d.diastolicBP as number | undefined,
+              weight: d.weight as number | undefined,
+              medicationTaken: d.medicationTaken as boolean | undefined,
+              symptoms: (d.symptoms as string[] | undefined) ?? [],
+              saved: true,
+            });
+          } else if (tool === 'update_checkin' && (result as { updated?: boolean }).updated) {
+            const d = (result as { data?: Record<string, unknown> }).data ?? {};
+            setPendingUpdateCard({
+              entryId: (d.id as string | undefined) ?? '',
+              entryDate: d.entryDate as string | undefined,
+              systolicBP: d.systolicBP as number | undefined,
+              diastolicBP: d.diastolicBP as number | undefined,
+              weight: d.weight as number | undefined,
+              medicationTaken: d.medicationTaken as boolean | undefined,
+              symptoms: (d.symptoms as string[] | undefined) ?? [],
+              updated: true,
+            });
+          } else if (tool === 'delete_checkin') {
+            const r = result as DeleteToolResult;
+            // delete_checkin tool returns a simple { deleted, message } shape;
+            // widen it to DeleteSummary so the same DeleteCard works for voice + text.
+            setPendingDeleteCard({
+              entryIds: [],
+              deletedCount: r.deleted ? 1 : 0,
+              failedCount: r.deleted ? 0 : 1,
+              success: !!r.deleted,
+              message: r.message ?? '',
+            });
+          }
+        },
+        onChunk: (fragment) => {
+          if (!aiInserted) insertAiBubble(fragment);
+          else appendToAiBubble(fragment);
+        },
+        onError: (msg) => {
+          const errText = msg || t('chat.errorConnect');
+          if (!aiInserted) insertAiBubble(errText);
+          else replaceAiBubbleText(errText);
+        },
+      });
+    } catch {
+      const errText = t('chat.errorConnect');
+      if (!aiInserted) insertAiBubble(errText);
+      else replaceAiBubbleText(errText);
     } finally {
+      setIsTyping(false);
       setIsSending(false);
     }
   };
@@ -1449,6 +1554,7 @@ export default function AIChatInterface() {
     setShowSessions(false);
     setPendingCheckin(null);
     setPendingUpdateCard(null);
+    setPendingDeleteCard(null);
   };
 
   const handleRequestDelete = (sessionId: string) => {
@@ -1479,6 +1585,7 @@ export default function AIChatInterface() {
     setShowSessions(false);
     setPendingCheckin(null);
     setPendingUpdateCard(null);
+    setPendingDeleteCard(null);
   };
 
   const handleMicClick = async () => {
@@ -1661,6 +1768,14 @@ export default function AIChatInterface() {
                 {pendingUpdateCard && (
                   <motion.div key="update" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                     <UpdateCard summary={pendingUpdateCard} onDismiss={() => { setPendingUpdateCard(null); dismissUpdate(); }} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <AnimatePresence>
+                {pendingDeleteCard && (
+                  <motion.div key="delete" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                    <DeleteCard summary={pendingDeleteCard} onDismiss={() => { setPendingDeleteCard(null); dismissDelete(); }} />
                   </motion.div>
                 )}
               </AnimatePresence>

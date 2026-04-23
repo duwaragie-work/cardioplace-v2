@@ -162,4 +162,47 @@ export class GeminiService implements OnModuleInit {
       return response
     })
   }
+
+  /**
+   * Streaming variant of generateContentWithTools. Yields raw chunks from
+   * Gemini's generateContentStream so the caller can emit text as it arrives
+   * and still inspect functionCall parts at end-of-stream.
+   *
+   * Retry wraps the initial handshake only — once the stream begins, mid-stream
+   * failures bubble up to the caller (retrying a partial stream doesn't make
+   * sense; tokens already emitted can't be undone).
+   */
+  async *streamContentWithTools(opts: {
+    contents: Content[]
+    systemInstruction?: string
+    tools?: FunctionDeclaration[]
+  }): AsyncIterable<GenerateContentResponse> {
+    const stream = await this.withRetry('streamContentWithTools', () =>
+      this.client.models.generateContentStream({
+        model: this.chatModel,
+        contents: opts.contents,
+        config: {
+          systemInstruction: opts.systemInstruction || undefined,
+          tools: opts.tools?.length
+            ? [{ functionDeclarations: opts.tools }]
+            : undefined,
+        },
+      }),
+    )
+
+    let lastUsage: GenerateContentResponse['usageMetadata'] | undefined
+    for await (const chunk of stream) {
+      if (chunk.usageMetadata) lastUsage = chunk.usageMetadata
+      yield chunk
+    }
+
+    this.langsmith?.traceRun('streamContentWithTools', {
+      model: this.chatModel,
+      inputTokens: lastUsage?.promptTokenCount,
+      outputTokens: lastUsage?.candidatesTokenCount,
+      totalTokens: lastUsage?.totalTokenCount,
+      latencyMs: 0,
+      source: 'text',
+    })
+  }
 }
