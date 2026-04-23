@@ -148,6 +148,10 @@ export class ProviderService {
     diagnosedHypertension: true,
     isPregnant: true,
     historyPreeclampsia: true,
+    // Phase/8 — Flow K patient list shows the verification status pill in
+    // its own column. Including it here keeps downstream callers happy too
+    // (they can just ignore the field).
+    profileVerificationStatus: true,
   } as const
 
   // ─── GET /provider/stats ──────────────────────────────────────────────────────
@@ -254,7 +258,9 @@ export class ProviderService {
         },
         deviationAlerts: {
           where: { status: 'OPEN' },
-          select: { id: true },
+          // Tier is needed for the Flow K row badge so the highest-severity
+          // open alert can paint the count chip the right color.
+          select: { id: true, tier: true },
         },
         escalationEvents: {
           orderBy: { triggeredAt: 'desc' },
@@ -270,6 +276,15 @@ export class ProviderService {
       const escalationLevel = u.escalationEvents[0]?.escalationLevel ?? null
       const profile = (u.patientProfile ?? null) as PatientProfileShape | null
 
+      // Per-tier breakdown used by the Flow K patient list. The frontend
+      // colors the alert-count badge by the highest-severity tier present
+      // (BP_LEVEL_2 / TIER_1 → red, TIER_2 / BP_LEVEL_1 → amber, TIER_3 → teal).
+      const alertsByTier: Record<string, number> = {}
+      for (const a of u.deviationAlerts) {
+        const key = a.tier ?? 'UNTIERED'
+        alertsByTier[key] = (alertsByTier[key] ?? 0) + 1
+      }
+
       return {
         id: u.id,
         name: u.name,
@@ -278,10 +293,17 @@ export class ProviderService {
         communicationPreference: u.communicationPreference ?? null,
         primaryCondition: this.derivePrimaryCondition(profile),
         onboardingStatus: u.onboardingStatus,
+        // Flow K — surface the patient's profile verification state so the
+        // list can render a status pill + power the "Awaiting Verification"
+        // quick filter chip without a second round-trip.
+        profileVerificationStatus:
+          (profile as { profileVerificationStatus?: string } | null)
+            ?.profileVerificationStatus ?? null,
         // latestBaseline (rolling snapshot) is gone in v2. Frontend should
         // request the BP trend endpoint when it needs averages.
         latestBaseline: null,
         activeAlertsCount,
+        alertsByTier,
         lastEntryDate: latestEntry?.measuredAt ?? null,
         latestBP: latestEntry
           ? {

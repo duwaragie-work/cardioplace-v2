@@ -163,6 +163,65 @@ export async function updatePatientAssignment(
   return jsonOrThrow<PatientAssignment>(res, 'Could not update assignment')
 }
 
+// ─── Enrollment gate (Flow K3) ──────────────────────────────────────────────
+
+export type EnrollmentGateReason =
+  | 'no-assignment'
+  | 'practice-missing-business-hours'
+  | 'patient-profile-missing'
+  | 'threshold-required-for-condition'
+
+export type EnrollmentGateResult =
+  | { ok: true }
+  | { ok: false; reasons: EnrollmentGateReason[] }
+
+/** Friendly per-reason copy used by the K3 tooltip + CTA disabled state. */
+export const ENROLLMENT_REASON_LABELS: Record<EnrollmentGateReason, string> = {
+  'no-assignment': 'Care team not assigned (Practice + Primary / Backup / Medical director).',
+  'practice-missing-business-hours':
+    'Assigned practice is missing business hours or timezone.',
+  'patient-profile-missing':
+    'Patient has not completed intake (no clinical profile on file).',
+  'threshold-required-for-condition':
+    'HFrEF / HCM / DCM patient — personalized BP threshold is mandatory before enrollment.',
+}
+
+/** Check whether a patient is ready to flip onboardingStatus → COMPLETED. */
+export async function getEnrollmentCheck(patientUserId: string): Promise<EnrollmentGateResult> {
+  const res = await fetchWithAuth(
+    `${API}/api/admin/patients/${patientUserId}/enrollment-check`,
+  )
+  return jsonOrThrow<EnrollmentGateResult>(res, 'Could not check enrollment')
+}
+
+/**
+ * Flip onboardingStatus → COMPLETED. The endpoint is idempotent — returns
+ * 200 if already completed; throws a 409 with `reasons` when the gate fails.
+ * The ConflictException body shape is `{ message, reasons: EnrollmentGateReason[] }`.
+ */
+export async function completePatientOnboarding(
+  patientUserId: string,
+): Promise<{ userId: string; onboardingStatus: string; completedBy?: string }> {
+  const res = await fetchWithAuth(
+    `${API}/api/admin/patients/${patientUserId}/complete-onboarding`,
+    { method: 'POST' },
+  )
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    // Preserve the `reasons` array when present so the UI can show specifics.
+    if (res.status === 409 && Array.isArray(err.reasons)) {
+      const e = new Error(err.message || 'Enrollment prerequisites missing') as Error & {
+        reasons?: EnrollmentGateReason[]
+      }
+      e.reasons = err.reasons as EnrollmentGateReason[]
+      throw e
+    }
+    throw new Error(err.message || `Could not complete onboarding: ${res.status}`)
+  }
+  const json = await res.json()
+  return (json.data ?? json) as { userId: string; onboardingStatus: string }
+}
+
 // ─── Constants for the J2 timezone picker ───────────────────────────────────
 
 /** Common IANA timezones for the US healthcare market. The full IANA list is
