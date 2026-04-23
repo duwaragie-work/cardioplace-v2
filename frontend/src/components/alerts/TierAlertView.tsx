@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import type { DeviationAlertDto, AlertTier } from '@/lib/services/journal.service';
 import AudioButton from '@/components/intake/AudioButton';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 interface Props {
   alert: DeviationAlertDto;
@@ -161,6 +162,7 @@ function formatTime(iso: string): string {
 
 export default function TierAlertView({ alert, acknowledging, onAcknowledge }: Props) {
   const router = useRouter();
+  const { t } = useLanguage();
   // Use the rule engine's tier when present; otherwise derive one from the
   // legacy fields so v1 alerts still render meaningfully.
   const effectiveTier = alert.tier ?? deriveTier(alert);
@@ -183,7 +185,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
           className="inline-flex items-center gap-1.5 text-[13px] font-semibold cursor-pointer"
           style={{ color: 'var(--brand-text-secondary)' }}
         >
-          <ArrowLeft className="w-4 h-4" /> Dashboard
+          <ArrowLeft className="w-4 h-4" /> {t('alerts.tier.back')}
         </button>
 
         {/* Banner */}
@@ -213,14 +215,19 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-3">
+                  {/* lang="en" + AudioButton lang="en-US": tier title/body/footer/followUp
+                      are the English clinical fallbacks that mirror shared/alert-messages.ts.
+                      Until Dr. Singal signs off per-locale, they stay English so screen
+                      readers and TTS don't try to pronounce English as the page locale. */}
                   <h1
+                    lang="en"
                     className="text-[20px] sm:text-[22px] font-bold leading-tight"
                     style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
                   >
                     {v.title}
                   </h1>
                   <div className="shrink-0">
-                    <AudioButton text={audioText} />
+                    <AudioButton text={audioText} lang="en-US" />
                   </div>
                 </div>
 
@@ -235,6 +242,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
                 )}
 
                 <p
+                  lang="en"
                   className="text-[14.5px] sm:text-[15px] mt-3 leading-relaxed"
                   style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
                 >
@@ -246,6 +254,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
 
           {/* Footer message inside banner */}
           <div
+            lang="en"
             className="px-5 sm:px-6 py-4 text-[13px] sm:text-[13.5px] leading-relaxed"
             style={{
               backgroundColor: 'rgba(255,255,255,0.6)',
@@ -266,9 +275,10 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
             className="text-[12px] font-bold uppercase tracking-wider mb-1.5"
             style={{ color: 'var(--brand-primary-purple)' }}
           >
-            What happens next
+            {t('alerts.tier.whatNext')}
           </p>
           <p
+            lang="en"
             className="text-[13.5px] leading-relaxed"
             style={{ color: 'var(--brand-text-secondary)', wordBreak: 'break-word' }}
           >
@@ -287,7 +297,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
               style={{ color: 'var(--brand-success-green)' }}
             />
             <p className="text-[13px]" style={{ color: 'var(--brand-success-green)' }}>
-              You&apos;ve seen this. Care team has been notified.
+              {t('alerts.tier.seenResolved')}
             </p>
           </div>
         ) : (
@@ -302,7 +312,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
             }}
             whileTap={{ scale: 0.98 }}
           >
-            {acknowledging ? 'Saving…' : 'I’ve seen this'}
+            {acknowledging ? t('alerts.tier.saving') : t('alerts.tier.ackButton')}
           </motion.button>
         )}
       </div>

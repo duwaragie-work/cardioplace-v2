@@ -17,19 +17,21 @@ import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, Phone, Check, X } from 'lucide-react';
 import type { DeviationAlertDto } from '@/lib/services/journal.service';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 interface Props {
   alert: DeviationAlertDto;
   onAcknowledge: () => Promise<void> | void;
 }
 
+// Clinical patient copy for BP Level 2 — intentionally NOT i18n'd. This
+// wording is the same content as shared/alert-messages.ts and needs
+// Dr. Singal sign-off per locale before translation.
 const MESSAGE_TITLE = 'Your blood pressure is very high.';
 const MESSAGE_BODY =
   'If you have chest pain, severe headache, difficulty breathing, or vision changes, call 911 now.';
 const REASSURANCE = 'Your care team has been notified.';
 const FULL_AUDIO = `${MESSAGE_TITLE} ${MESSAGE_BODY} ${REASSURANCE}`;
-
-const FOLLOWUP_TITLE = 'Have you called 911?';
 const FOLLOWUP_AUDIO =
   "Have you called 911 yet? Tap Yes if you have, or Not yet if you haven't.";
 
@@ -82,6 +84,7 @@ function clearUnderstood(alertId: string) {
 
 export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
   const router = useRouter();
+  const { t } = useLanguage();
   type Mode = 'urgent' | 'followup' | 'closed';
   const [mode, setMode] = useState<Mode>('urgent');
   const [audioBlocked, setAudioBlocked] = useState(false);
@@ -167,7 +170,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
       style={{ backgroundColor: 'var(--brand-alert-red)' }}
       role="alertdialog"
       aria-modal="true"
-      aria-label="Emergency alert"
+      aria-label={t('alerts.emergency.ariaLabel')}
     >
       {/* Top safe-area padding for notched phones */}
       <div style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }} />
@@ -184,7 +187,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
             className="mx-4 mt-3 sm:mx-auto sm:mt-4 sm:max-w-md py-2 rounded-full text-[12.5px] font-bold cursor-pointer"
             style={{ backgroundColor: 'rgba(0,0,0,0.18)', color: 'white' }}
           >
-            🔊 Tap to hear this message
+            {t('alerts.emergency.audioHint')}
           </motion.button>
         )}
       </AnimatePresence>
@@ -208,17 +211,22 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
         </motion.div>
 
         {mode === 'urgent' ? (
+          // lang="en" on clinical copy: MESSAGE_TITLE/body/REASSURANCE stay in
+          // English until Dr. Singal signs off per-locale (matches alert-messages.ts).
+          // Without this, screen readers + TTS try to pronounce English as the
+          // page locale on es/fr/de/am.
           <>
             <h1
+              lang="en"
               className="text-[26px] sm:text-[32px] font-extrabold leading-tight mb-4"
               style={{ wordBreak: 'break-word' }}
             >
               {MESSAGE_TITLE}
             </h1>
-            <p className="text-[16px] sm:text-[18px] leading-relaxed mb-3 opacity-95">
+            <p lang="en" className="text-[16px] sm:text-[18px] leading-relaxed mb-3 opacity-95">
               If you have <b>chest pain</b>, <b>severe headache</b>, <b>difficulty breathing</b>, or <b>vision changes</b>, call 911 now.
             </p>
-            <p className="text-[13px] sm:text-[14px] opacity-90">{REASSURANCE}</p>
+            <p lang="en" className="text-[13px] sm:text-[14px] opacity-90">{REASSURANCE}</p>
           </>
         ) : (
           <>
@@ -226,10 +234,10 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
               className="text-[26px] sm:text-[32px] font-extrabold leading-tight mb-3"
               style={{ wordBreak: 'break-word' }}
             >
-              {FOLLOWUP_TITLE}
+              {t('alerts.emergency.followupTitle')}
             </h1>
             <p className="text-[14px] sm:text-[15px] opacity-95">
-              Two hours have passed. We want to make sure you&apos;re safe.
+              {t('alerts.emergency.followupBody')}
             </p>
           </>
         )}
@@ -250,11 +258,11 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
                 color: 'var(--brand-alert-red)',
                 boxShadow: '0 8px 24px rgba(0,0,0,0.22)',
               }}
-              aria-label="Call 911 now"
+              aria-label={t('alerts.emergency.callAria')}
             >
               <span className="inline-flex items-center justify-center gap-3">
                 <Phone className="w-6 h-6" strokeWidth={2.5} />
-                CALL 911
+                {t('alerts.emergency.callLabel')}
               </span>
             </a>
             <button
@@ -266,7 +274,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
                 color: 'white',
               }}
             >
-              I understand
+              {t('alerts.emergency.understand')}
             </button>
           </div>
         ) : (
@@ -281,7 +289,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
                 boxShadow: '0 8px 24px rgba(0,0,0,0.22)',
               }}
             >
-              <Check className="w-5 h-5" strokeWidth={3} /> Yes
+              <Check className="w-5 h-5" strokeWidth={3} /> {t('alerts.emergency.followupYes')}
             </button>
             <button
               type="button"
@@ -292,7 +300,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
                 color: 'white',
               }}
             >
-              <X className="w-5 h-5" strokeWidth={3} /> Not yet
+              <X className="w-5 h-5" strokeWidth={3} /> {t('alerts.emergency.followupNotYet')}
             </button>
           </div>
         )}
