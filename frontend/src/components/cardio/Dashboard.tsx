@@ -15,6 +15,7 @@ import {
 import { Flame, Clock, ArrowRight, Heart, Target, ShieldCheck, AlertTriangle, Pill, ArrowUp, ArrowDown } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
+import type { TranslationKey } from '@/i18n';
 import { getJournalEntries, getLatestBaseline, getAlerts, getJournalStats, type AlertTier } from '@/lib/services/journal.service';
 import { getMyPatientProfile, getMyMedications, type PatientProfileDto } from '@/lib/services/intake.service';
 import { getMyThreshold, type PatientThresholdDto } from '@/lib/services/threshold.service';
@@ -33,19 +34,22 @@ function formatAlertDate(dateStr: string): string {
   catch { return ''; }
 }
 
-function formatAlertType(type: string | null | undefined): string {
-  if (!type) return 'Alert';
+function formatAlertType(type: string | null | undefined, t: (key: TranslationKey) => string): string {
+  if (!type) return t('dashboard.alert');
   return type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function getLastCheckInText(latestEntry: Record<string, unknown> | null): string {
-  if (!latestEntry) return 'No check-ins yet';
+function getLastCheckInText(
+  latestEntry: Record<string, unknown> | null,
+  t: (key: TranslationKey) => string,
+): string {
+  if (!latestEntry) return t('dashboard.noCheckinsYet');
   const d = new Date(latestEntry.measuredAt as string);
   const today = new Date();
   const yesterday = new Date();
   yesterday.setDate(today.getDate() - 1);
-  if (d.toDateString() === today.toDateString()) return 'Today';
-  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  if (d.toDateString() === today.toDateString()) return t('dashboard.today');
+  if (d.toDateString() === yesterday.toDateString()) return t('dashboard.yesterday');
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
@@ -293,6 +297,10 @@ export default function Dashboard() {
       tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE' ||
       sbp >= 180 ||
       dbp >= 120;
+    // D3 variant title/body are English clinical fallbacks — same policy as
+    // TierAlertView.variantFor (Flow C). They mirror shared/alert-messages.ts
+    // and stay English (rendered with lang="en") until Dr. Singal per-locale
+    // sign-off lands. `patientMessage` from the backend takes precedence.
     if (isEmergency) {
       return {
         key: 'emergency',
@@ -358,7 +366,7 @@ export default function Dashboard() {
         return {
           bg: 'var(--brand-alert-red-light)',
           fg: 'var(--brand-alert-red)',
-          label: 'Critical',
+          label: t('dashboard.critical'),
         };
       case 'high':
         return {
@@ -367,7 +375,7 @@ export default function Dashboard() {
           label: t('dashboard.elevated'),
         };
       case 'low':
-        return { bg: '#DBEAFE', fg: '#3B82F6', label: 'Low' };
+        return { bg: '#DBEAFE', fg: '#3B82F6', label: t('dashboard.low') };
       case 'within':
         return {
           bg: 'var(--brand-success-green-light)',
@@ -423,7 +431,7 @@ export default function Dashboard() {
               border: `1.5px solid ${topAlertVariant.accent}`,
               boxShadow: `0 4px 14px ${topAlertVariant.accent}22`,
             }}
-            aria-label={`${topAlertVariant.title} — view details`}
+            aria-label={t('dashboard.viewDetailsAria').replace('{title}', topAlertVariant.title)}
           >
             <div
               className="shrink-0 rounded-xl flex items-center justify-center text-white"
@@ -436,15 +444,18 @@ export default function Dashboard() {
                 className="text-[10px] font-bold uppercase tracking-wider mb-0.5"
                 style={{ color: topAlertVariant.accent }}
               >
-                Active alert
+                {t('dashboard.activeAlert')}
               </p>
+              {/* lang="en": variant title/body are English clinical fallbacks. */}
               <p
+                lang="en"
                 className="text-[14px] font-bold leading-tight"
                 style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
               >
                 {topAlertVariant.title}
               </p>
               <p
+                lang="en"
                 className="text-[12px] mt-0.5 leading-snug"
                 style={{ color: 'var(--brand-text-secondary)', wordBreak: 'break-word' }}
               >
@@ -455,7 +466,7 @@ export default function Dashboard() {
               className="shrink-0 hidden sm:flex items-center gap-1 px-3 h-9 rounded-full font-bold text-[12px] text-white"
               style={{ backgroundColor: topAlertVariant.accent }}
             >
-              View details
+              {t('dashboard.viewDetails')}
               <ArrowRight className="w-3.5 h-3.5" />
             </div>
             <ArrowRight
@@ -516,7 +527,7 @@ export default function Dashboard() {
                   }}
                 >
                   <ShieldCheck className="w-3 h-3" />
-                  Awaiting provider verification
+                  {t('dashboard.awaitingVerification')}
                 </div>
               )}
             </div>
@@ -604,15 +615,15 @@ export default function Dashboard() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-accent-teal)' }}>
-                Your goal
+                {t('dashboard.yourGoal')}
               </p>
               <p
                 className="text-[13px] font-semibold leading-tight"
                 style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
               >
-                Below {thresholdTargetText} mmHg
+                {t('dashboard.belowTarget').replace('{target}', thresholdTargetText ?? '—/—')}
                 <span className="ml-2 font-medium" style={{ color: 'var(--brand-text-muted)' }}>
-                  · set by your care team
+                  {` ${t('dashboard.setByCareTeam')}`}
                   {thresholdSetAt ? ` · ${thresholdSetAt}` : ''}
                 </span>
               </p>
@@ -684,7 +695,7 @@ export default function Dashboard() {
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F1EEFF" vertical={false} />
                     <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} interval={Math.max(0, Math.floor(visibleChartData.length / 8) - 1)} tickFormatter={(v: string) => v.replace(/ #\d+$/, '')}>
-                      <Label value="Date" position="insideBottom" offset={-2} style={{ fill: '#1d1d1d', fontSize: 10, fontWeight: 600 }} />
+                      <Label value={t('dashboard.chartDateAxis')} position="insideBottom" offset={-2} style={{ fill: '#1d1d1d', fontSize: 10, fontWeight: 600 }} />
                     </XAxis>
                     <YAxis domain={bpDomain} axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} width={38}>
                       <Label value="mmHg" angle={-90} position="insideLeft" offset={4} style={{ fill: '#1d1d1d', fontSize: 10 ,fontWeight: 600}} />
@@ -698,7 +709,7 @@ export default function Dashboard() {
                           return (
                             <div className="bg-white px-3 py-2 rounded-xl text-xs" style={{ boxShadow: '0 4px 16px rgba(123,0,224,0.1)', border: '1px solid #E9D5FF' }}>
                               <p className="font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{d.systolic}/{d.diastolic} mmHg</p>
-                              <p style={{ color: '#94A3B8' }}>{dateStr}{d.time ? ` at ${d.time}` : ''}</p>
+                              <p style={{ color: '#94A3B8' }}>{dateStr}{d.time ? ` ${t('dashboard.chartAt')} ${d.time}` : ''}</p>
                             </div>
                           );
                         }
@@ -765,7 +776,7 @@ export default function Dashboard() {
                   {loading ? (
                     <span className="flex justify-center"><Bone w={90} h={8} r={5} /></span>
                   ) : (
-                    `${t('dashboard.last')}: ${getLastCheckInText(latestEntry as Record<string, unknown> | null)}`
+                    `${t('dashboard.last')}: ${getLastCheckInText(latestEntry as Record<string, unknown> | null, t)}`
                   )}
                 </span>
               </div>
@@ -808,7 +819,7 @@ export default function Dashboard() {
                         }}>
                         <div className="flex items-start justify-between">
                           <p className="text-[11px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                            {formatAlertType(alert.type)}
+                            {formatAlertType(alert.type, t)}
                           </p>
                           <span className="text-[10px] font-semibold"
                             style={{ color: alert.severity === 'HIGH' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}>
@@ -838,7 +849,7 @@ export default function Dashboard() {
                       className="mt-2 w-full flex items-center justify-center gap-1 py-1.5 rounded-full text-[11px] font-semibold transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                       style={{ color: 'var(--brand-primary-purple)', backgroundColor: 'var(--brand-primary-purple-light)' }}
                     >
-                      View all alerts <ArrowRight className="w-3 h-3" />
+                      {t('dashboard.viewAllAlerts')} <ArrowRight className="w-3 h-3" />
                     </button>
                   ) : null}
                 </>
