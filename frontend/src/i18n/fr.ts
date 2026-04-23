@@ -285,6 +285,23 @@ const fr: Record<TranslationKey, string> = {
   'notifications.escalated': 'Escaladé',
   'notifications.pastAlerts': 'Alertes Passées',
 
+  // ─── Notifications (audit sweep additions) ─────────────────────────────────
+  // ⚠️ MT. Les en-têtes de bucket sont organisationnels, pas cliniques —
+  // les cartes d'alerte affichent le patientMessage du moteur clinique.
+  'notifications.done': 'Terminé',
+  'notifications.viewDetails': 'Voir les détails',
+  'notifications.viewDetailsAria': "Voir les détails de l'alerte",
+  'notifications.time.justNow': "À l'instant",
+  'notifications.time.minsAgo': 'il y a {mins} min',
+  'notifications.time.hrsAgo': 'il y a {hrs} h',
+  'notifications.time.daysAgo': 'il y a {days} j',
+  'notifications.bucket.emergency': 'Urgence — appelez le 911 en cas de symptômes',
+  'notifications.bucket.tier1': 'Alertes médicamenteuses importantes',
+  'notifications.bucket.high': 'Tension artérielle élevée',
+  'notifications.bucket.low': 'Tension artérielle basse',
+  'notifications.bucket.info': 'Pour votre information',
+  'notifications.bucket.other': 'Autres alertes',
+
   // ─── Alert Types ───────────────────────────────────────────────────────────
   'alert.systolicBP': 'TA Systolique Élevée',
   'alert.diastolicBP': 'TA Diastolique Élevée',
@@ -416,6 +433,20 @@ const fr: Record<TranslationKey, string> = {
   'readings.missed': 'Manquée',
   'readings.note': 'Note',
   'readings.crisis': 'Crise',
+
+  // ─── Readings (audit sweep additions) ──────────────────────────────────────
+  'readings.validate.bpBoth': 'Entrez les deux chiffres de tension artérielle (ou effacez les deux).',
+  'readings.validate.weightRange': 'Le poids doit être entre 20 et 600.',
+  'readings.sameMinute': 'même minute',
+  'readings.sessionReadings': 'Session · {count} lectures',
+  'readings.readingsCount': '{count} lectures',
+  'readings.avg': 'Moy.',
+  'readings.mmHg': 'mmHg',
+  'readings.bpm': 'bpm',
+  'readings.lbs': 'lbs',
+  'readings.positionLabel': 'Position pendant la lecture',
+  'readings.pulseLabel': 'Pouls (bpm)',
+  'readings.pulsePlaceholder': 'p. ex. 72',
 
   // ─── Provider ──────────────────────────────────────────────────────────────
   'provider.dashboard': 'Tableau de Bord Soignant',

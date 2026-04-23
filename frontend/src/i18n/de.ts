@@ -285,6 +285,23 @@ const de: Record<TranslationKey, string> = {
   'notifications.escalated': 'Eskaliert',
   'notifications.pastAlerts': 'Vergangene Warnungen',
 
+  // ─── Notifications (audit sweep additions) ─────────────────────────────────
+  // ⚠️ MT. Bucket-Überschriften sind Organisationslabels, kein klinischer Text —
+  // die Alarmkarten zeigen patientMessage von der Regel-Engine.
+  'notifications.done': 'Erledigt',
+  'notifications.viewDetails': 'Details anzeigen',
+  'notifications.viewDetailsAria': 'Warnungsdetails anzeigen',
+  'notifications.time.justNow': 'Gerade eben',
+  'notifications.time.minsAgo': 'vor {mins} Min.',
+  'notifications.time.hrsAgo': 'vor {hrs} Std.',
+  'notifications.time.daysAgo': 'vor {days} Tagen',
+  'notifications.bucket.emergency': 'Notfall — bei Symptomen 911 anrufen',
+  'notifications.bucket.tier1': 'Wichtige Medikamentenwarnungen',
+  'notifications.bucket.high': 'Erhöhter Blutdruck',
+  'notifications.bucket.low': 'Niedriger Blutdruck',
+  'notifications.bucket.info': 'Zu Ihrer Information',
+  'notifications.bucket.other': 'Andere Warnungen',
+
   // ─── Alert Types ───────────────────────────────────────────────────────────
   'alert.systolicBP': 'Erhöhter Systolischer BD',
   'alert.diastolicBP': 'Erhöhter Diastolischer BD',
@@ -416,6 +433,20 @@ const de: Record<TranslationKey, string> = {
   'readings.missed': 'Versäumt',
   'readings.note': 'Notiz',
   'readings.crisis': 'Krise',
+
+  // ─── Readings (audit sweep additions) ──────────────────────────────────────
+  'readings.validate.bpBoth': 'Geben Sie beide Blutdruckwerte ein (oder löschen Sie beide).',
+  'readings.validate.weightRange': 'Das Gewicht muss zwischen 20 und 600 liegen.',
+  'readings.sameMinute': 'gleiche Minute',
+  'readings.sessionReadings': 'Sitzung · {count} Messungen',
+  'readings.readingsCount': '{count} Messungen',
+  'readings.avg': 'Ø',
+  'readings.mmHg': 'mmHg',
+  'readings.bpm': 'bpm',
+  'readings.lbs': 'lbs',
+  'readings.positionLabel': 'Position während der Messung',
+  'readings.pulseLabel': 'Puls (bpm)',
+  'readings.pulsePlaceholder': 'z. B. 72',
 
   // ─── Provider ──────────────────────────────────────────────────────────────
   'provider.dashboard': 'Pflegeteam-Dashboard',
