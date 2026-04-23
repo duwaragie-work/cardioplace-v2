@@ -954,6 +954,32 @@ const en = {
   'intake.reask.yes': 'Yes, same medicines',
   'intake.reask.update': 'Update my medicines',
 
+  // ─── Alerts (Flow C) ───────────────────────────────────────────────────────
+  // UI chrome only. The clinical patient messages (BP_LEVEL_2 emergency copy,
+  // per-tier defaults in TierAlertView, alert-messages.ts output) are NOT
+  // translated here — they need Dr. Singal sign-off per locale.
+  'alerts.notFound.title': 'Alert not found',
+  'alerts.notFound.body': "We couldn't find that alert. It may have been resolved or removed.",
+  'alerts.notFound.backToDashboard': 'Back to dashboard',
+  'alerts.notFound.tier2': 'This alert is reviewed by your care team only — no action is needed from you.',
+  'alerts.notFound.unavailable': 'This alert is no longer available.',
+  'alerts.notFound.loadError': 'Could not load this alert.',
+  'alerts.notFound.ackError': 'Could not save your acknowledgment.',
+  'alerts.emergency.ariaLabel': 'Emergency alert',
+  'alerts.emergency.audioHint': '🔊 Tap to hear this message',
+  'alerts.emergency.callLabel': 'CALL 911',
+  'alerts.emergency.callAria': 'Call 911 now',
+  'alerts.emergency.understand': 'I understand',
+  'alerts.emergency.followupTitle': 'Have you called 911?',
+  'alerts.emergency.followupBody': "Two hours have passed. We want to make sure you're safe.",
+  'alerts.emergency.followupYes': 'Yes',
+  'alerts.emergency.followupNotYet': 'Not yet',
+  'alerts.tier.back': 'Dashboard',
+  'alerts.tier.whatNext': 'What happens next',
+  'alerts.tier.seenResolved': "You've seen this. Care team has been notified.",
+  'alerts.tier.saving': 'Saving…',
+  'alerts.tier.ackButton': "I've seen this",
+
   // ─── Language Names ────────────────────────────────────────────────────────
   'lang.en': 'English',
   'lang.es': 'Español',

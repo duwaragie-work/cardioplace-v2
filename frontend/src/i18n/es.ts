@@ -960,6 +960,32 @@ const es: Record<TranslationKey, string> = {
   'intake.reask.yes': 'Sí, los mismos medicamentos',
   'intake.reask.update': 'Actualizar mis medicamentos',
 
+  // ─── Alerts (Flow C) ───────────────────────────────────────────────────────
+  // ⚠️ MT — UI chrome only. Clinical alert content stays in English (in
+  // EmergencyAlertScreen.tsx + TierAlertView.tsx variantFor) until Dr. Singal
+  // signs off per-locale per shared/alert-messages.ts.
+  'alerts.notFound.title': 'Alerta no encontrada',
+  'alerts.notFound.body': 'No pudimos encontrar esa alerta. Es posible que se haya resuelto o eliminado.',
+  'alerts.notFound.backToDashboard': 'Volver al panel',
+  'alerts.notFound.tier2': 'Esta alerta la revisa solo su equipo de atención — no necesita hacer nada.',
+  'alerts.notFound.unavailable': 'Esta alerta ya no está disponible.',
+  'alerts.notFound.loadError': 'No se pudo cargar esta alerta.',
+  'alerts.notFound.ackError': 'No se pudo guardar su confirmación.',
+  'alerts.emergency.ariaLabel': 'Alerta de emergencia',
+  'alerts.emergency.audioHint': '🔊 Toque para escuchar este mensaje',
+  'alerts.emergency.callLabel': 'LLAMAR AL 911',
+  'alerts.emergency.callAria': 'Llamar al 911 ahora',
+  'alerts.emergency.understand': 'Entendido',
+  'alerts.emergency.followupTitle': '¿Ha llamado al 911?',
+  'alerts.emergency.followupBody': 'Han pasado dos horas. Queremos asegurarnos de que está bien.',
+  'alerts.emergency.followupYes': 'Sí',
+  'alerts.emergency.followupNotYet': 'Todavía no',
+  'alerts.tier.back': 'Panel',
+  'alerts.tier.whatNext': 'Qué sigue',
+  'alerts.tier.seenResolved': 'Ya lo ha visto. Su equipo de atención ha sido notificado.',
+  'alerts.tier.saving': 'Guardando…',
+  'alerts.tier.ackButton': 'Ya lo vi',
+
   // ─── Language Names ────────────────────────────────────────────────────────
   'lang.en': 'English',
   'lang.es': 'Español',

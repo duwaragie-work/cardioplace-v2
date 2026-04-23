@@ -961,6 +961,33 @@ const am: Record<TranslationKey, string> = {
   'intake.reask.yes': 'አዎ፣ ተመሳሳይ መድሃኒቶች',
   'intake.reask.update': 'መድሃኒቶቼን አዘምን',
 
+  // ─── Alerts (Flow C) ───────────────────────────────────────────────────────
+  // 🚨 MT AMHARIC — REQUIRES NATIVE SPEAKER REVIEW BEFORE COHORT LAUNCH.
+  // UI chrome only. Clinical alert copy (EmergencyAlertScreen.tsx constants +
+  // TierAlertView.tsx variantFor defaults) stays English until Dr. Singal
+  // signs off per-locale per shared/alert-messages.ts.
+  'alerts.notFound.title': 'ማንቂያ አልተገኘም',
+  'alerts.notFound.body': 'ያንን ማንቂያ ማግኘት አልቻልንም። ምናልባት ተፈትቷል ወይም ተወግዷል።',
+  'alerts.notFound.backToDashboard': 'ወደ ዳሽቦርድ ተመለስ',
+  'alerts.notFound.tier2': 'ይህ ማንቂያ በተንከባካቢ ቡድንዎ ብቻ ይገመገማል — ከእርስዎ ምንም እርምጃ አያስፈልግም።',
+  'alerts.notFound.unavailable': 'ይህ ማንቂያ ከአሁን በኋላ አይገኝም።',
+  'alerts.notFound.loadError': 'ይህን ማንቂያ መጫን አልተቻለም።',
+  'alerts.notFound.ackError': 'ማረጋገጫዎን ማስቀመጥ አልተቻለም።',
+  'alerts.emergency.ariaLabel': 'የአደጋ ጊዜ ማንቂያ',
+  'alerts.emergency.audioHint': '🔊 ይህን መልዕክት ለመስማት ይንኩ',
+  'alerts.emergency.callLabel': '911 ይደውሉ',
+  'alerts.emergency.callAria': 'አሁን 911 ይደውሉ',
+  'alerts.emergency.understand': 'ገባኝ',
+  'alerts.emergency.followupTitle': '911 ደውለዋል?',
+  'alerts.emergency.followupBody': 'ሁለት ሰዓት አልፏል። ደህና መሆንዎን ማረጋገጥ እንፈልጋለን።',
+  'alerts.emergency.followupYes': 'አዎ',
+  'alerts.emergency.followupNotYet': 'ገና',
+  'alerts.tier.back': 'ዳሽቦርድ',
+  'alerts.tier.whatNext': 'ቀጥሎ የሚሆነው',
+  'alerts.tier.seenResolved': 'አይተውታል። የተንከባካቢ ቡድንዎ ተነግሮታል።',
+  'alerts.tier.saving': 'በማስቀመጥ…',
+  'alerts.tier.ackButton': 'አይቻለሁ',
+
   // ─── Language Names ────────────────────────────────────────────────────────
   'lang.en': 'English',
   'lang.es': 'Español',
