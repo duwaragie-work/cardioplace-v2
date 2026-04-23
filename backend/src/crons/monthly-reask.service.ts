@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
-import { NotificationChannel, OnboardingStatus, AccountStatus } from '../generated/prisma/client.js'
+import { NotificationChannel, EnrollmentStatus, AccountStatus } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 
 const REASK_TITLE = 'Confirm your medications'
@@ -32,12 +32,14 @@ export class MonthlyReaskService {
       now.getTime() - IDEMPOTENCY_DAYS * 24 * 60 * 60 * 1000,
     )
 
-    // Find patients with at least one active med whose most-recent touch
-    // (verifiedAt ?? reportedAt) is older than the 30-day cutoff.
+    // Find enrolled patients with at least one active med whose most-recent
+    // touch (verifiedAt ?? reportedAt) is older than the 30-day cutoff.
+    // Enrollment gate filter — not identity onboardingStatus — see gap-alert
+    // for rationale.
     const patients = await this.prisma.user.findMany({
       where: {
         accountStatus: AccountStatus.ACTIVE,
-        onboardingStatus: OnboardingStatus.COMPLETED,
+        enrollmentStatus: EnrollmentStatus.ENROLLED,
         roles: { has: 'PATIENT' },
         patientMedications: {
           some: { discontinuedAt: null },

@@ -162,8 +162,10 @@ export class ProviderService {
 
     const [totalActivePatients, monthlyInteractions, activeAlertsCount, readingsThisMonth, recentAlertPatients] =
       await Promise.all([
+        // "Enrolled patients" = admin has passed the 4-piece clinical gate,
+        // not just that the patient filled their identity onboarding form.
         this.prisma.user.count({
-          where: { onboardingStatus: 'COMPLETED' },
+          where: { enrollmentStatus: 'ENROLLED' },
         }),
         this.prisma.journalEntry.count({
           where: { createdAt: { gte: startOfMonth } },
@@ -189,7 +191,7 @@ export class ProviderService {
 
     const usersWithEntries = await this.prisma.user.findMany({
       where: {
-        onboardingStatus: 'COMPLETED',
+        enrollmentStatus: 'ENROLLED',
         journalEntries: { some: {} },
       },
       include: {
@@ -292,6 +294,7 @@ export class ProviderService {
         communicationPreference: u.communicationPreference ?? null,
         primaryCondition: this.derivePrimaryCondition(profile),
         onboardingStatus: u.onboardingStatus,
+        enrollmentStatus: u.enrollmentStatus,
         // Flow K — surface the patient's profile verification state so the
         // list can render a status pill + power the "Awaiting Verification"
         // quick filter chip without a second round-trip.
@@ -463,6 +466,7 @@ export class ProviderService {
       communicationPreference: user.communicationPreference ?? null,
       primaryCondition: this.derivePrimaryCondition(profile),
       onboardingStatus: user.onboardingStatus,
+      enrollmentStatus: user.enrollmentStatus,
       latestBaseline: baseline,
       activeAlertsCount: user.deviationAlerts.length,
       lastEntryDate: latestEntry?.measuredAt ?? null,

@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -31,6 +32,28 @@ export class DailyJournalService {
   ) {}
 
   async create(userId: string, dto: CreateJournalEntryDto) {
+    // Layer A journaling gate — patient must have a PatientProfile row
+    // (completed clinical intake) before their readings get persisted. The
+    // rule engine relies on PatientProfile for every safety-net bias; without
+    // it, any alert generation is silently skipped, so taking a reading would
+    // be clinically meaningless. 403 here drives the frontend to route the
+    // patient into /clinical-intake.
+    //
+    // Admin users (who aren't patients) hit this same gate — they have no
+    // PatientProfile by design, so they can't accidentally pollute the
+    // journal. See TESTING_FLOW_GUIDE.md §6.1 for rationale.
+    const profile = await this.prisma.patientProfile.findUnique({
+      where: { userId },
+      select: { userId: true },
+    })
+    if (!profile) {
+      throw new ForbiddenException({
+        message: 'clinical-intake-required',
+        reason:
+          'Complete your clinical intake before logging readings so your care team has the context to interpret them.',
+      })
+    }
+
     try {
       const entry = await this.prisma.journalEntry.create({
         data: {

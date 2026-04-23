@@ -47,7 +47,7 @@ import {
 
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { createJournalEntry } from '@/lib/services/journal.service';
+import { ClinicalIntakeRequiredError, createJournalEntry } from '@/lib/services/journal.service';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
 import AudioButton from '@/components/intake/AudioButton';
 import ChoiceCard from '@/components/intake/ChoiceCard';
@@ -1034,6 +1034,12 @@ export default function CheckIn() {
       setReadingNumber((n) => n + 1);
       setShowConfirmation(true);
     } catch (e) {
+      // Layer A journaling gate: patient hasn't completed clinical intake yet.
+      // Route them into the intake flow instead of surfacing the raw 403.
+      if (e instanceof ClinicalIntakeRequiredError) {
+        router.push('/clinical-intake?reason=check-in');
+        return;
+      }
       setError(e instanceof Error ? e.message : t('checkin.err.submit'));
     } finally {
       setSubmitting(false);

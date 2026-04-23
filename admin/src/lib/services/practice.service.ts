@@ -186,7 +186,7 @@ export const ENROLLMENT_REASON_LABELS: Record<EnrollmentGateReason, string> = {
     'HFrEF / HCM / DCM patient — personalized BP threshold is mandatory before enrollment.',
 }
 
-/** Check whether a patient is ready to flip onboardingStatus → COMPLETED. */
+/** Check whether a patient is ready to flip enrollmentStatus → ENROLLED. */
 export async function getEnrollmentCheck(patientUserId: string): Promise<EnrollmentGateResult> {
   const res = await fetchWithAuth(
     `${API}/api/admin/patients/${patientUserId}/enrollment-check`,
@@ -195,13 +195,17 @@ export async function getEnrollmentCheck(patientUserId: string): Promise<Enrollm
 }
 
 /**
- * Flip onboardingStatus → COMPLETED. The endpoint is idempotent — returns
- * 200 if already completed; throws a 409 with `reasons` when the gate fails.
+ * Flip enrollmentStatus → ENROLLED. The endpoint is idempotent — returns
+ * 200 if already enrolled; throws a 409 with `reasons` when the gate fails.
  * The ConflictException body shape is `{ message, reasons: EnrollmentGateReason[] }`.
+ *
+ * `enrollmentStatus` is orthogonal to `User.onboardingStatus` (identity
+ * onboarding — name/DOB, owned by the patient-side /v2/auth/profile). See
+ * docs/TESTING_FLOW_GUIDE.md §4.1 / §6.2 for the two-layer model.
  */
 export async function completePatientOnboarding(
   patientUserId: string,
-): Promise<{ userId: string; onboardingStatus: string; completedBy?: string }> {
+): Promise<{ userId: string; enrollmentStatus: string; completedBy?: string }> {
   const res = await fetchWithAuth(
     `${API}/api/admin/patients/${patientUserId}/complete-onboarding`,
     { method: 'POST' },
@@ -216,10 +220,10 @@ export async function completePatientOnboarding(
       e.reasons = err.reasons as EnrollmentGateReason[]
       throw e
     }
-    throw new Error(err.message || `Could not complete onboarding: ${res.status}`)
+    throw new Error(err.message || `Could not enroll patient: ${res.status}`)
   }
   const json = await res.json()
-  return (json.data ?? json) as { userId: string; onboardingStatus: string }
+  return (json.data ?? json) as { userId: string; enrollmentStatus: string; completedBy?: string }
 }
 
 // ─── Constants for the J2 timezone picker ───────────────────────────────────

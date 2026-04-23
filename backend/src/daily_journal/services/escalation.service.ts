@@ -136,6 +136,19 @@ export class EscalationService {
       return
     }
 
+    // Layer B dispatch gate — the DeviationAlert row is preserved (admin can
+    // see it on the dashboard once the patient is enrolled), but we do not
+    // notify anyone until the 4-piece enrollment gate has been passed.
+    // Without assignment we'd have no PRIMARY/BACKUP/MD to resolve, and the
+    // fail-loud path would just write DISPATCH ERROR rows. See
+    // TESTING_FLOW_GUIDE.md §6.2–§6.3.
+    if (alert.user.enrollmentStatus !== 'ENROLLED') {
+      this.logger.log(
+        `Alert ${payload.alertId}: patient ${alert.userId} not enrolled — deferring dispatch`,
+      )
+      return
+    }
+
     const practice = alert.user.providerAssignmentAsPatient?.practice ?? null
     const assignment = alert.user.providerAssignmentAsPatient ?? null
 
@@ -189,6 +202,16 @@ export class EscalationService {
     for (const row of rows) {
       const alert = await this.loadAlert(row.alertId)
       if (!alert) continue
+
+      // Layer B gate — patient un-enrolled between queue time and dispatch
+      // time (e.g. admin revoked enrollment). Leave the row in place;
+      // re-enrollment will pick it up on the next cron pass.
+      if (alert.user.enrollmentStatus !== 'ENROLLED') {
+        this.logger.debug(
+          `Pending event ${row.id}: patient ${alert.userId} not enrolled — deferring`,
+        )
+        continue
+      }
 
       // Check alert still open + not acknowledged; if it's been resolved /
       // acknowledged since, skip and mark the event as sent (so we don't
@@ -251,6 +274,16 @@ export class EscalationService {
     for (const alert of candidates) {
       const ladder = ladderForTier(alert.tier)
       if (!ladder) continue
+
+      // Layer B gate — skip advancing for un-enrolled patients. This also
+      // catches alerts created pre-enrollment-split (when fireT0 didn't gate)
+      // so their ladders don't keep walking once the filter kicks in.
+      if (alert.user.enrollmentStatus !== 'ENROLLED') {
+        this.logger.debug(
+          `Alert ${alert.id}: patient ${alert.userId} not enrolled — ladder paused`,
+        )
+        continue
+      }
 
       // Fetch all escalation events for the alert — need both dispatched rows
       // (for "completed" step set) AND the primary T+0 row (for anchor, whether
@@ -736,6 +769,11 @@ interface AlertRow {
   physicianMessage: string | null
   user: {
     id: string
+    // Layer B dispatch gate — escalation only fires for patients the admin
+    // has passed through the 4-piece enrollment gate (assignment + practice
+    // business hours + profile + threshold-if-HFREF/HCM/DCM). See
+    // TESTING_FLOW_GUIDE.md §6.2.
+    enrollmentStatus: 'NOT_ENROLLED' | 'ENROLLED'
     providerAssignmentAsPatient: AssignmentRow | null
   }
 }

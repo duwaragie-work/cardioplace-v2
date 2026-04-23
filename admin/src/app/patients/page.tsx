@@ -63,6 +63,9 @@ interface Patient {
   communicationPreference: string | null;
   primaryCondition: string | null;
   onboardingStatus: string;
+  // Clinical enrollment state (admin-owned). `onboardingStatus` above is
+  // identity onboarding only (name/DOB/timezone). See TESTING_FLOW_GUIDE §4.1.
+  enrollmentStatus: string;
   // Flow K — verification + per-tier alert breakdown drive the new
   // verification status column and the tier-color-coded count badge.
   profileVerificationStatus: 'UNVERIFIED' | 'VERIFIED' | 'CORRECTED' | null;
@@ -368,14 +371,14 @@ function OnboardingCell({
 }) {
   const [showTip, setShowTip] = useState(false);
 
-  if (patient.onboardingStatus === 'COMPLETED') {
+  if (patient.enrollmentStatus === 'ENROLLED') {
     return (
       <span
         className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full"
         style={{ backgroundColor: 'var(--brand-success-green-light)', color: 'var(--brand-success-green)' }}
       >
         <CheckCircle2 className="w-2.5 h-2.5" />
-        Onboarded
+        Enrolled
       </span>
     );
   }
@@ -1059,7 +1062,7 @@ export default function PatientsPage() {
                             });
                             setPatients((prev) =>
                               prev.map((x) =>
-                                x.id === p.id ? { ...x, onboardingStatus: 'COMPLETED' } : x,
+                                x.id === p.id ? { ...x, enrollmentStatus: 'ENROLLED' } : x,
                               ),
                             );
                           } catch (err) {
