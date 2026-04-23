@@ -369,7 +369,7 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
       const remaining = Math.max(0, 3 - count)
       if (count >= 3) {
         lines.push(
-          `Baseline: Not yet computed (${count} readings recorded — baseline should be available shortly, may need readings on 3 different days)`,
+          `Baseline: Not yet established (${count} readings recorded, but not spread across 3 different days within the last 7 — baseline needs readings on 3 DIFFERENT DAYS to compute)`,
         )
       } else if (count > 0) {
         lines.push(

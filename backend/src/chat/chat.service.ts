@@ -1,7 +1,11 @@
 import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { Content } from '@google/genai'
-import { ProfileNotFoundException, type ResolvedContext } from '@cardioplace/shared'
+import {
+  getTrailing7DayBaseline,
+  ProfileNotFoundException,
+  type ResolvedContext,
+} from '@cardioplace/shared'
 import { ChatRequestDto } from './dto/chat-request.dto.js'
 import { SystemPromptService } from './services/system-prompt.service.js'
 import { RagService } from './services/rag.service.js'
@@ -65,6 +69,9 @@ export class ChatService {
       this.prisma.journalEntry.findMany({
         where: { userId },
         orderBy: { measuredAt: 'desc' },
+        // Cap at 30 most-recent readings — more than covers the 7-day baseline
+        // window while keeping prompt size bounded for long-enrolled patients.
+        take: 30,
         select: {
           measuredAt: true, systolicBP: true, diastolicBP: true,
           weight: true, medicationTaken: true,
@@ -99,26 +106,10 @@ export class ChatService {
       }) as Promise<ResolvedContext | null>,
     ])
 
-    // Compute trailing 7-day mean inline (v2: derived, never stored).
-    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
-    const recentComplete = recentEntries.filter(
-      (e) =>
-        e.systolicBP != null &&
-        e.diastolicBP != null &&
-        new Date(e.measuredAt).getTime() >= sevenDaysAgo,
-    )
-    const baseline = recentComplete.length > 0
-      ? {
-          baselineSystolic: Math.round(
-            recentComplete.reduce((a, e) => a + (e.systolicBP as number), 0) /
-              recentComplete.length,
-          ),
-          baselineDiastolic: Math.round(
-            recentComplete.reduce((a, e) => a + (e.diastolicBP as number), 0) /
-              recentComplete.length,
-          ),
-        }
-      : null
+    // Trailing 7-day mean — single source of truth lives in
+    // @cardioplace/shared/derivatives. Voice uses the same helper so the
+    // chat and voice agents render identical baselines.
+    const baseline = getTrailing7DayBaseline(recentEntries)
 
     const patientContext = this.systemPromptService.buildPatientContext({
       recentEntries: recentEntries.map((e) => ({
@@ -265,32 +256,19 @@ export class ChatService {
 
         let resultStr: string
 
-        // Guard submit_checkin: ensure medication and symptoms were discussed.
-        // If the patient provided the values (tool args have them), allow it.
-        // If not, check if the model asked about them in the conversation.
+        // Two-layer submit_checkin safety net (see checkSubmitCheckinDiscussion
+        // below for the rationale). This call is the outer layer — catches
+        // the case where Gemini fabricated values without a prior Q/A exchange.
+        // The inner layer in journal-tools.ts:168–184 still enforces that
+        // required args are present on the call.
         if (toolName === 'submit_checkin') {
-          const allText = contents
-            .flatMap((c) => (c.parts as any[])?.filter((p: any) => p.text).map((p: any) => p.text) ?? [])
-            .join(' ')
-
-          // The patient provided medication_taken explicitly OR the model discussed it
-          const hasMedication = toolArgs.medication_taken != null || /medication|meds|medicine|pills/.test(allText)
-          // The patient provided symptoms explicitly OR the model discussed it
-          const hasSymptoms = Array.isArray(toolArgs.symptoms) || /symptom|headache|dizziness|chest|no symptom|none|nothing|fine/.test(allText)
-          // Weight was discussed or provided
-          const hasWeight = toolArgs.weight != null || /weight|weigh|lbs|pounds|skip/.test(allText)
-
-          const missing: string[] = []
-          if (!hasMedication) missing.push('medication (ask: "Did you take your medication today?")')
-          if (!hasSymptoms) missing.push('symptoms (ask: "Any symptoms like headache, dizziness, or chest tightness?")')
-          if (!hasWeight) missing.push('weight (ask: "Do you know your weight today? Totally fine to skip.")')
-
-          if (missing.length > 0) {
-            console.log(`[submit_checkin BLOCKED] Missing: ${missing.join(', ')}`)
+          const gate = ChatService.checkSubmitCheckinDiscussion(contents, toolArgs)
+          if (gate.block) {
+            console.log(`[submit_checkin BLOCKED] Missing: ${gate.missing.join(', ')}`)
             resultStr = JSON.stringify({
               saved: false,
               _internal: true,
-              next_action: `Continue asking. Missing: ${missing[0]}`,
+              next_action: `Continue asking. Missing: ${gate.missing[0]}`,
             })
           } else {
             resultStr = await executeJournalTool(toolName, toolArgs, this.dailyJournalService, userId)
@@ -607,5 +585,70 @@ export class ChatService {
     } catch (error) {
       console.error('Error generating session title:', error)
     }
+  }
+
+  /**
+   * Pre-tool-call gate for submit_checkin.
+   *
+   * Why this exists on top of the journal-tools.ts arg-shape guard:
+   * the tool-layer guard (journal-tools.ts:168–184) checks that required
+   * args are PRESENT on the function call. This guard checks that the
+   * topics were DISCUSSED in the conversation before the save fires. The
+   * two catch different model failure modes:
+   *   - arg-shape guard catches "model forgot a required arg"
+   *   - this discussion guard catches "model fabricated plausible values
+   *     without a prior Q/A turn" (Gemini is prone to this if the patient's
+   *     first message already contains enough info)
+   *
+   * Both gates are intentionally layered. Don't remove this without the
+   * other layer; don't collapse them without a regression plan.
+   *
+   * Pure / stateless so it can be unit-tested without constructing the
+   * full ChatService.
+   */
+  static checkSubmitCheckinDiscussion(
+    contents: readonly Content[],
+    toolArgs: Record<string, unknown>,
+  ): { block: boolean; missing: string[] } {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const allText = contents
+      .flatMap(
+        (c) =>
+          (c.parts as any[])
+            ?.filter((p: any) => p.text)
+            .map((p: any) => p.text) ?? [],
+      )
+      .join(' ')
+
+    const hasMedication =
+      toolArgs.medication_taken != null ||
+      /medication|meds|medicine|pills/.test(allText)
+    const hasSymptoms =
+      Array.isArray(toolArgs.symptoms) ||
+      /symptom|headache|dizziness|chest|no symptom|none|nothing|fine/.test(
+        allText,
+      )
+    const hasWeight =
+      toolArgs.weight != null ||
+      /weight|weigh|lbs|pounds|skip/.test(allText)
+
+    const missing: string[] = []
+    if (!hasMedication) {
+      missing.push(
+        'medication (ask: "Did you take your medication today?")',
+      )
+    }
+    if (!hasSymptoms) {
+      missing.push(
+        'symptoms (ask: "Any symptoms like headache, dizziness, or chest tightness?")',
+      )
+    }
+    if (!hasWeight) {
+      missing.push(
+        'weight (ask: "Do you know your weight today? Totally fine to skip.")',
+      )
+    }
+
+    return { block: missing.length > 0, missing }
   }
 }
