@@ -39,15 +39,7 @@ export default function LandingFooter() {
       id="contact"
       style={{ backgroundImage: 'linear-gradient(159deg, #5c00a9 0%, #a04cee 46%, #c79afd 93%)' }}
     >
-      <div className="max-w-[1280px] mx-auto px-4 sm:px-6 md:px-8 lg:px-12 pt-10 md:pt-16 pb-2">
-        <a
-          href="/sign-in"
-          className="block w-full md:w-auto md:inline-flex items-center justify-center bg-white text-[#5c00a9] font-bold text-base px-8 py-3 rounded-full hover:bg-white/90 transition-colors text-center"
-        >
-          {t('home.startCheckin')}
-        </a>
-      </div>
-      <div className="max-w-[1280px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-10 px-4 sm:px-6 md:px-8 lg:px-12 py-8 md:py-12">
+      <div className="max-w-[1280px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-10 px-4 sm:px-6 md:px-8 lg:px-12 pt-10 md:pt-16 pb-8 md:pb-12">
         {/* Col 1 - Brand */}
         <div className="flex flex-col gap-6">
           <div className="flex items-center gap-1">

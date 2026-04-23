@@ -147,6 +147,10 @@ export class ProviderService {
     diagnosedHypertension: true,
     isPregnant: true,
     historyPreeclampsia: true,
+    // Phase/8 — Flow K patient list shows the verification status pill in
+    // its own column. Including it here keeps downstream callers happy too
+    // (they can just ignore the field).
+    profileVerificationStatus: true,
   } as const
 
   // ─── GET /provider/stats ──────────────────────────────────────────────────────
@@ -253,7 +257,9 @@ export class ProviderService {
         },
         deviationAlerts: {
           where: { status: 'OPEN' },
-          select: { id: true },
+          // Tier is needed for the Flow K row badge so the highest-severity
+          // open alert can paint the count chip the right color.
+          select: { id: true, tier: true },
         },
         escalationEvents: {
           orderBy: { triggeredAt: 'desc' },
@@ -269,6 +275,15 @@ export class ProviderService {
       const escalationLevel = u.escalationEvents[0]?.escalationLevel ?? null
       const profile = (u.patientProfile ?? null) as PatientProfileShape | null
 
+      // Per-tier breakdown used by the Flow K patient list. The frontend
+      // colors the alert-count badge by the highest-severity tier present
+      // (BP_LEVEL_2 / TIER_1 → red, TIER_2 / BP_LEVEL_1 → amber, TIER_3 → teal).
+      const alertsByTier: Record<string, number> = {}
+      for (const a of u.deviationAlerts) {
+        const key = a.tier ?? 'UNTIERED'
+        alertsByTier[key] = (alertsByTier[key] ?? 0) + 1
+      }
+
       return {
         id: u.id,
         name: u.name,
@@ -277,10 +292,17 @@ export class ProviderService {
         communicationPreference: u.communicationPreference ?? null,
         primaryCondition: this.derivePrimaryCondition(profile),
         onboardingStatus: u.onboardingStatus,
+        // Flow K — surface the patient's profile verification state so the
+        // list can render a status pill + power the "Awaiting Verification"
+        // quick filter chip without a second round-trip.
+        profileVerificationStatus:
+          (profile as { profileVerificationStatus?: string } | null)
+            ?.profileVerificationStatus ?? null,
         // latestBaseline (rolling snapshot) is gone in v2. Frontend should
         // request the BP trend endpoint when it needs averages.
         latestBaseline: null,
         activeAlertsCount,
+        alertsByTier,
         lastEntryDate: latestEntry?.measuredAt ?? null,
         latestBP: latestEntry
           ? {
@@ -303,6 +325,98 @@ export class ProviderService {
     }
 
     return { statusCode: 200, data: patients }
+  }
+
+  // ─── GET /provider/patients/:userId/alerts ───────────────────────────────────
+  // Per-patient alerts feed with three-tier messages and linked escalation
+  // events — used by the Flow H "Alerts" tab. Supports tier + status filters
+  // so the UI can flip between OPEN / RESOLVED / All.
+  async getPatientAlerts(
+    userId: string,
+    filters: { status?: string; tier?: string } = {},
+  ) {
+    const where: Record<string, unknown> = { userId }
+    if (filters.status) where.status = filters.status
+    if (filters.tier) where.tier = filters.tier
+
+    const alerts = await this.prisma.deviationAlert.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        journalEntry: {
+          select: {
+            measuredAt: true,
+            systolicBP: true,
+            diastolicBP: true,
+          },
+        },
+        escalationEvents: {
+          orderBy: { triggeredAt: 'asc' },
+          // Flow I — vertical audit-trail timeline needs the recipient list,
+          // role list, channel, after-hours flag and per-step Notification
+          // children (one per channel/recipient combo).
+          select: {
+            id: true,
+            escalationLevel: true,
+            ladderStep: true,
+            reason: true,
+            triggeredAt: true,
+            scheduledFor: true,
+            notificationSentAt: true,
+            notificationChannel: true,
+            recipientIds: true,
+            recipientRoles: true,
+            acknowledgedAt: true,
+            acknowledgedBy: true,
+            resolvedAt: true,
+            resolvedBy: true,
+            afterHours: true,
+            triggeredByResolution: true,
+            notifications: {
+              orderBy: { sentAt: 'asc' },
+              select: {
+                id: true,
+                userId: true,
+                channel: true,
+                title: true,
+                sentAt: true,
+                readAt: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
+    return {
+      statusCode: 200,
+      data: alerts.map((a) => ({
+        id: a.id,
+        type: a.type,
+        severity: a.severity,
+        tier: a.tier,
+        ruleId: a.ruleId,
+        mode: a.mode,
+        pulsePressure: a.pulsePressure,
+        suboptimalMeasurement: a.suboptimalMeasurement,
+        magnitude: a.magnitude != null ? Number(a.magnitude) : null,
+        baselineValue: a.baselineValue ? Number(a.baselineValue) : null,
+        actualValue: a.actualValue ? Number(a.actualValue) : null,
+        patientMessage: a.patientMessage,
+        caregiverMessage: a.caregiverMessage,
+        physicianMessage: a.physicianMessage,
+        dismissible: a.dismissible,
+        escalated: a.escalated,
+        status: a.status,
+        resolutionAction: a.resolutionAction,
+        resolutionRationale: a.resolutionRationale,
+        resolvedBy: a.resolvedBy,
+        createdAt: a.createdAt,
+        acknowledgedAt: a.acknowledgedAt,
+        journalEntry: a.journalEntry,
+        escalationEvents: a.escalationEvents,
+      })),
+    }
   }
 
   // ─── GET /provider/patients/:userId/summary ───────────────────────────────────
@@ -641,6 +755,15 @@ export class ProviderService {
           actualValue: a.actualValue ? Number(a.actualValue) : null,
           escalated: a.escalated,
           status: a.status,
+          // V2 tier fields — needed by the admin Flow F dashboard for the
+          // 3-layer architecture (Layer 1 banners, Layer 2 queue filter,
+          // Layer 3 tier-based stats) and the tier-aware resolution modals.
+          tier: a.tier,
+          ruleId: a.ruleId,
+          mode: a.mode,
+          pulsePressure: a.pulsePressure,
+          patientMessage: a.patientMessage,
+          dismissible: a.dismissible,
           createdAt: a.createdAt,
           acknowledgedAt: a.acknowledgedAt,
           followUpScheduledAt: followUp?.createdAt ?? null,

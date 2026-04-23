@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 /* Custom scrollbar styles for patient modal */
 const modalScrollStyles = `
@@ -36,12 +37,22 @@ import {
   Calendar,
   Heart,
   Shield,
+  ShieldCheck,
+  ShieldAlert,
   ChevronDown,
   ChevronRight,
+  CheckCircle2,
+  Loader2,
+  Info,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getPatients, getPatientSummary } from '@/lib/services/provider.service';
+import {
+  completePatientOnboarding,
+  ENROLLMENT_REASON_LABELS,
+  type EnrollmentGateReason,
+} from '@/lib/services/practice.service';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Patient {
@@ -52,8 +63,12 @@ interface Patient {
   communicationPreference: string | null;
   primaryCondition: string | null;
   onboardingStatus: string;
+  // Flow K — verification + per-tier alert breakdown drive the new
+  // verification status column and the tier-color-coded count badge.
+  profileVerificationStatus: 'UNVERIFIED' | 'VERIFIED' | 'CORRECTED' | null;
   latestBaseline: { baselineSystolic: number; baselineDiastolic: number } | null;
   activeAlertsCount: number;
+  alertsByTier: Record<string, number>;
   lastEntryDate: string | null;
   latestBP: { systolicBP: number; diastolicBP: number; entryDate: string } | null;
   escalationLevel: string | null;
@@ -197,6 +212,245 @@ function RiskBadge({ tier }: { tier: string }) {
     >
       {tier}
     </span>
+  );
+}
+
+// ─── Flow K1 — Verification status pill ─────────────────────────────────────
+
+function VerificationBadge({
+  status,
+  compact = false,
+}: {
+  status: 'UNVERIFIED' | 'VERIFIED' | 'CORRECTED' | null;
+  compact?: boolean;
+}) {
+  let label: string;
+  let bg: string;
+  let color: string;
+  let icon: React.ReactNode;
+  switch (status) {
+    case 'VERIFIED':
+      label = 'Verified';
+      bg = 'var(--brand-success-green-light)';
+      color = 'var(--brand-success-green)';
+      icon = <ShieldCheck className="w-2.5 h-2.5" />;
+      break;
+    case 'CORRECTED':
+      label = 'Corrected';
+      bg = 'var(--brand-warning-amber-light)';
+      color = 'var(--brand-warning-amber)';
+      icon = <ShieldAlert className="w-2.5 h-2.5" />;
+      break;
+    case 'UNVERIFIED':
+      label = 'Unverified';
+      bg = 'var(--brand-alert-red-light)';
+      color = 'var(--brand-alert-red)';
+      icon = <ShieldAlert className="w-2.5 h-2.5" />;
+      break;
+    default:
+      // No profile yet — patient hasn't completed intake.
+      label = 'No profile';
+      bg = 'var(--brand-background)';
+      color = 'var(--brand-text-muted)';
+      icon = <Shield className="w-2.5 h-2.5" />;
+  }
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide"
+      style={{ backgroundColor: bg, color }}
+      title={label}
+    >
+      {icon}
+      {!compact && label}
+    </span>
+  );
+}
+
+// ─── Flow K2 — Open-alert count badge with tier color coding ────────────────
+
+/** Highest-severity tier among the patient's open alerts. */
+function highestTier(alertsByTier: Record<string, number> | undefined): string | null {
+  if (!alertsByTier) return null;
+  const order = [
+    'BP_LEVEL_2',
+    'BP_LEVEL_2_SYMPTOM_OVERRIDE',
+    'TIER_1_CONTRAINDICATION',
+    'TIER_2_DISCREPANCY',
+    'BP_LEVEL_1_HIGH',
+    'BP_LEVEL_1_LOW',
+    'TIER_3_INFO',
+  ];
+  for (const t of order) {
+    if ((alertsByTier[t] ?? 0) > 0) return t;
+  }
+  // Fall back to any non-zero key (catches `UNTIERED` legacy alerts).
+  const fallback = Object.entries(alertsByTier).find(([, n]) => n > 0);
+  return fallback ? fallback[0] : null;
+}
+
+function tierChrome(tier: string | null): { bg: string; color: string; label: string } {
+  switch (tier) {
+    case 'BP_LEVEL_2':
+    case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
+      return { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)', label: 'BP L2' };
+    case 'TIER_1_CONTRAINDICATION':
+      return { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)', label: 'Tier 1' };
+    case 'TIER_2_DISCREPANCY':
+      return { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)', label: 'Tier 2' };
+    case 'BP_LEVEL_1_HIGH':
+    case 'BP_LEVEL_1_LOW':
+      return { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)', label: 'BP L1' };
+    case 'TIER_3_INFO':
+      return { bg: 'var(--brand-accent-teal-light)', color: 'var(--brand-accent-teal)', label: 'Tier 3' };
+    default:
+      return { bg: 'var(--brand-background)', color: 'var(--brand-text-muted)', label: 'Open' };
+  }
+}
+
+function AlertsCell({
+  alertsByTier,
+  count,
+  compact = false,
+}: {
+  alertsByTier: Record<string, number> | undefined;
+  count: number;
+  compact?: boolean;
+}) {
+  if (count === 0) {
+    if (compact) return null;
+    return <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>None</span>;
+  }
+  const top = highestTier(alertsByTier);
+  const chrome = tierChrome(top);
+  // Build a hover title with the per-tier breakdown so the admin sees the
+  // mix at a glance even when the badge can only show the worst offender.
+  const breakdown = alertsByTier
+    ? Object.entries(alertsByTier)
+        .filter(([, n]) => n > 0)
+        .map(([t, n]) => `${tierChrome(t).label}: ${n}`)
+        .join(' · ')
+    : '';
+  if (compact) {
+    return (
+      <span
+        className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
+        style={{ backgroundColor: chrome.color }}
+        title={breakdown}
+      >
+        {count}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide"
+      style={{ backgroundColor: chrome.bg, color: chrome.color }}
+      title={breakdown}
+    >
+      <AlertTriangle className="w-3 h-3" />
+      {count} {chrome.label}
+    </span>
+  );
+}
+
+// ─── Flow K3 — Complete onboarding CTA + 409-tooltip ────────────────────────
+
+function OnboardingCell({
+  patient,
+  completing,
+  cachedReasons,
+  onComplete,
+}: {
+  patient: Patient;
+  completing: boolean;
+  cachedReasons?: EnrollmentGateReason[];
+  onComplete: () => void | Promise<void>;
+}) {
+  const [showTip, setShowTip] = useState(false);
+
+  if (patient.onboardingStatus === 'COMPLETED') {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full"
+        style={{ backgroundColor: 'var(--brand-success-green-light)', color: 'var(--brand-success-green)' }}
+      >
+        <CheckCircle2 className="w-2.5 h-2.5" />
+        Onboarded
+      </span>
+    );
+  }
+
+  // We optimistically render the button "enabled" — the gate is enforced
+  // server-side, so on click we attempt completion and surface the 409
+  // reasons in a tooltip if the gate rejects. Once we have cached reasons
+  // for this row, the button stays disabled until something changes.
+  const blocked = !!cachedReasons && cachedReasons.length > 0;
+
+  return (
+    <div className="relative inline-flex items-center gap-1.5">
+      <button
+        type="button"
+        disabled={blocked || completing}
+        onClick={(e) => {
+          e.stopPropagation();
+          onComplete();
+        }}
+        className="h-7 px-2.5 rounded-lg text-[11px] font-semibold inline-flex items-center gap-1 transition-all hover:brightness-95 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+        style={{
+          backgroundColor: blocked ? 'white' : 'var(--brand-primary-purple)',
+          color: blocked ? 'var(--brand-text-muted)' : 'white',
+          border: blocked ? '1px solid var(--brand-border)' : 'none',
+        }}
+      >
+        {completing ? (
+          <Loader2 className="w-2.5 h-2.5 animate-spin" />
+        ) : blocked ? (
+          <ShieldAlert className="w-2.5 h-2.5" />
+        ) : (
+          <CheckCircle2 className="w-2.5 h-2.5" />
+        )}
+        {blocked ? 'Blocked' : 'Complete'}
+      </button>
+      {blocked && (
+        <button
+          type="button"
+          aria-label="Show reasons"
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowTip((v) => !v);
+          }}
+          onMouseEnter={() => setShowTip(true)}
+          onMouseLeave={() => setShowTip(false)}
+          className="w-5 h-5 rounded-full flex items-center justify-center cursor-help"
+          style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }}
+        >
+          <Info className="w-3 h-3" />
+        </button>
+      )}
+      {blocked && showTip && (
+        <div
+          className="absolute right-0 top-full mt-1.5 z-20 w-64 rounded-lg p-3 text-left"
+          style={{
+            backgroundColor: '#0F172A',
+            color: 'white',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{ color: '#FCD34D' }}>
+            Cannot complete · prerequisites missing
+          </p>
+          <ul className="space-y-1.5">
+            {cachedReasons!.map((r) => (
+              <li key={r} className="text-[11px] leading-relaxed flex gap-1.5">
+                <span style={{ color: '#FCD34D' }}>•</span>
+                <span>{ENROLLMENT_REASON_LABELS[r] ?? r}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -469,12 +723,26 @@ function PatientModal({
 export default function PatientsPage() {
   const { user, isAuthenticated, isLoading } = useAuth();
   const { t } = useLanguage();
+  const router = useRouter();
 
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [riskFilter, setRiskFilter] = useState<string>('ALL');
+  // Flow K1 — quick-toggle for "show only patients with an unverified profile".
+  const [awaitingVerificationOnly, setAwaitingVerificationOnly] = useState(false);
 
+  // Flow K3 — per-row enrollment state. Loading state for the in-flight CTA
+  // and a per-patient cache of 409 reasons returned by the backend gate.
+  const [completingId, setCompletingId] = useState<string | null>(null);
+  const [enrollmentReasons, setEnrollmentReasons] = useState<
+    Record<string, EnrollmentGateReason[]>
+  >({});
+
+  // Flow H: row click navigates to /patients/[id] for the new tabbed detail
+  // view. The legacy modal state is kept temporarily so the existing detail
+  // modal can still mount in an empty state — but with selectedPatient
+  // permanently null since nothing sets it anymore.
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [summary, setSummary] = useState<PatientSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -505,6 +773,12 @@ export default function PatientsPage() {
   // Filter + search
   const filtered = patients.filter((p) => {
     if (riskFilter !== 'ALL' && p.riskTier !== riskFilter) return false;
+    if (
+      awaitingVerificationOnly &&
+      p.profileVerificationStatus === 'VERIFIED'
+    ) {
+      return false;
+    }
     if (search) {
       const q = search.toLowerCase();
       return (
@@ -520,7 +794,7 @@ export default function PatientsPage() {
 
   if (user?.email !== 'support@healplace.com') {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
+      <div className="h-full flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
         <div className="text-center p-8 rounded-2xl bg-white" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
           <div
             className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
@@ -547,7 +821,7 @@ export default function PatientsPage() {
   }
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
+    <div className="h-full" style={{ backgroundColor: '#FAFBFF' }}>
       <div className="max-w-6xl mx-auto px-4 md:px-8 py-6">
         {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
@@ -612,6 +886,48 @@ export default function PatientsPage() {
                 style={{ color: 'var(--brand-text-muted)' }}
               />
             </div>
+
+            {/* Flow K1 — Awaiting verification quick-toggle chip */}
+            {(() => {
+              const count = patients.filter((p) => p.profileVerificationStatus !== 'VERIFIED').length;
+              const active = awaitingVerificationOnly;
+              return (
+                <button
+                  type="button"
+                  onClick={() => setAwaitingVerificationOnly((v) => !v)}
+                  aria-pressed={active}
+                  className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer"
+                  style={{
+                    backgroundColor: active ? 'var(--brand-warning-amber)' : 'var(--brand-warning-amber-light)',
+                    color: active ? 'white' : 'var(--brand-warning-amber)',
+                    border: `1.5px solid ${active ? 'var(--brand-warning-amber)' : 'transparent'}`,
+                  }}
+                >
+                  <ShieldAlert className="w-3 h-3" />
+                  Awaiting verification
+                  <span
+                    className="text-[10px] font-bold px-1.5 rounded-full"
+                    style={{
+                      backgroundColor: active ? 'rgba(255,255,255,0.25)' : 'white',
+                      color: active ? 'white' : 'var(--brand-warning-amber)',
+                      minWidth: 18,
+                      textAlign: 'center',
+                    }}
+                  >
+                    {count}
+                  </span>
+                  {active && (
+                    <X
+                      className="w-3 h-3"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAwaitingVerificationOnly(false);
+                      }}
+                    />
+                  )}
+                </button>
+              );
+            })()}
           </div>
         </div>
 
@@ -622,18 +938,20 @@ export default function PatientsPage() {
         >
           {/* Table header */}
           <div
-            className="hidden md:grid items-center px-5 py-3 text-[10px] font-bold uppercase tracking-wider"
+            className="hidden md:grid items-center px-5 py-3 text-[10px] font-bold uppercase tracking-wider gap-3"
             style={{
               color: 'var(--brand-text-muted)',
-              gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 32px',
+              gridTemplateColumns: '1.8fr 0.9fr 0.9fr 1fr 1fr 1fr 1.2fr 32px',
               borderBottom: '1px solid var(--brand-border)',
             }}
           >
             <span>{t('provider.patientList')}</span>
             <span>{t('provider.lastBP')}</span>
             <span>{t('provider.allTiers')}</span>
+            <span>Verification</span>
             <span>{t('provider.alerts')}</span>
             <span>{t('provider.lastCheckin')}</span>
+            <span>Onboarding</span>
             <span></span>
           </div>
 
@@ -656,12 +974,20 @@ export default function PatientsPage() {
                   : 'P';
 
                 return (
-                  <button
+                  <div
                     key={p.id}
-                    onClick={() => setSelectedPatient(p)}
-                    className="w-full text-left px-5 py-3.5 flex items-center gap-4 md:grid transition-colors hover:bg-[#F8F4FF] cursor-pointer group"
+                    onClick={() => router.push(`/patients/${p.id}`)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        router.push(`/patients/${p.id}`);
+                      }
+                    }}
+                    className="w-full text-left px-5 py-3.5 flex items-center gap-4 md:grid md:gap-3 transition-colors hover:bg-[#F8F4FF] cursor-pointer group"
                     style={{
-                      gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 32px',
+                      gridTemplateColumns: '1.8fr 0.9fr 0.9fr 1fr 1fr 1fr 1.2fr 32px',
                       borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none',
                     }}
                   >
@@ -687,7 +1013,7 @@ export default function PatientsPage() {
                     </div>
 
                     {/* BP */}
-                    <div className="hidden md:block">
+                    <div className="hidden md:block min-w-0">
                       <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
                         {p.latestBP ? `${p.latestBP.systolicBP}/${p.latestBP.diastolicBP}` : '--/--'}
                       </p>
@@ -695,30 +1021,57 @@ export default function PatientsPage() {
                     </div>
 
                     {/* Risk */}
-                    <div className="hidden md:block">
+                    <div className="hidden md:block min-w-0">
                       <RiskBadge tier={p.riskTier} />
                     </div>
 
-                    {/* Alerts */}
-                    <div className="hidden md:block">
-                      {p.activeAlertsCount > 0 ? (
-                        <span
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
-                          style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)' }}
-                        >
-                          <AlertTriangle className="w-3 h-3" />
-                          {p.activeAlertsCount}
-                        </span>
-                      ) : (
-                        <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>None</span>
-                      )}
+                    {/* Verification (K1) */}
+                    <div className="hidden md:block min-w-0">
+                      <VerificationBadge status={p.profileVerificationStatus} />
+                    </div>
+
+                    {/* Alerts (K2 — tier-color-coded) */}
+                    <div className="hidden md:block min-w-0">
+                      <AlertsCell alertsByTier={p.alertsByTier} count={p.activeAlertsCount} />
                     </div>
 
                     {/* Last check-in */}
-                    <div className="hidden md:block">
+                    <div className="hidden md:block min-w-0">
                       <p className="text-[12px]" style={{ color: 'var(--brand-text-secondary)' }}>
                         {p.lastEntryDate ? timeAgo(p.lastEntryDate) : 'Never'}
                       </p>
+                    </div>
+
+                    {/* Onboarding (K3) */}
+                    <div className="hidden md:block min-w-0">
+                      <OnboardingCell
+                        patient={p}
+                        completing={completingId === p.id}
+                        cachedReasons={enrollmentReasons[p.id]}
+                        onComplete={async () => {
+                          setCompletingId(p.id);
+                          try {
+                            await completePatientOnboarding(p.id);
+                            setEnrollmentReasons((prev) => {
+                              const { [p.id]: _drop, ...rest } = prev;
+                              void _drop;
+                              return rest;
+                            });
+                            setPatients((prev) =>
+                              prev.map((x) =>
+                                x.id === p.id ? { ...x, onboardingStatus: 'COMPLETED' } : x,
+                              ),
+                            );
+                          } catch (err) {
+                            const reasons = (err as { reasons?: EnrollmentGateReason[] }).reasons;
+                            if (reasons) {
+                              setEnrollmentReasons((prev) => ({ ...prev, [p.id]: reasons }));
+                            }
+                          } finally {
+                            setCompletingId(null);
+                          }
+                        }}
+                      />
                     </div>
 
                     {/* Arrow indicator */}
@@ -731,21 +1084,15 @@ export default function PatientsPage() {
 
                     {/* Mobile: compact info */}
                     <div className="flex items-center gap-2 md:hidden ml-auto shrink-0">
+                      <VerificationBadge status={p.profileVerificationStatus} compact />
                       <RiskBadge tier={p.riskTier} />
-                      {p.activeAlertsCount > 0 && (
-                        <span
-                          className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
-                          style={{ backgroundColor: 'var(--brand-alert-red)' }}
-                        >
-                          {p.activeAlertsCount}
-                        </span>
-                      )}
+                      <AlertsCell alertsByTier={p.alertsByTier} count={p.activeAlertsCount} compact />
                       <ChevronRight
                         className="w-4 h-4 transition-transform group-hover:translate-x-0.5"
                         style={{ color: 'var(--brand-text-muted)' }}
                       />
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
