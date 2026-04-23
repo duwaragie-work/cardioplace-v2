@@ -16,6 +16,7 @@ import {
   Bell,
   Settings,
   X,
+  Building2,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 
@@ -30,6 +31,7 @@ interface NavItem {
 const PRIMARY_NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/patients', label: 'Patients', icon: Users, matchPrefix: true },
+  { href: '/practices', label: 'Practices', icon: Building2, matchPrefix: true },
   { href: '/scheduled-calls', label: 'Calls', icon: Phone },
 ];
 

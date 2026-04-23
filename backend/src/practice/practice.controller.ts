@@ -35,6 +35,11 @@ export class PracticeController {
     return this.service.findOne(id)
   }
 
+  @Get(':id/staff')
+  listStaff(@Param('id') id: string) {
+    return this.service.listStaff(id)
+  }
+
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdatePracticeDto) {
     return this.service.update(id, dto)

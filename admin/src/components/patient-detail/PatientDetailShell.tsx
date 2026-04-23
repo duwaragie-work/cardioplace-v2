@@ -19,6 +19,7 @@ import {
   ShieldAlert,
   Mail,
   Calendar,
+  Users as UsersIcon,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getPatientSummary } from '@/lib/services/provider.service';
@@ -39,8 +40,9 @@ import MedicationsTab from './MedicationsTab';
 import AlertsTab from './AlertsTab';
 import ThresholdsTab from './ThresholdsTab';
 import TimelineTab from './TimelineTab';
+import CareTeamTab from './CareTeamTab';
 
-type TabKey = 'profile' | 'medications' | 'alerts' | 'thresholds' | 'timeline';
+type TabKey = 'profile' | 'medications' | 'alerts' | 'thresholds' | 'careteam' | 'timeline';
 
 interface PatientHeader {
   id: string;
@@ -252,6 +254,7 @@ export default function PatientDetailShell({ patientId }: Props) {
     { key: 'medications', label: 'Medications', icon: <Pill className="w-3.5 h-3.5" />, count: medications.length || undefined },
     { key: 'alerts', label: 'Alerts', icon: <Bell className="w-3.5 h-3.5" />, count: header?.activeAlertsCount },
     { key: 'thresholds', label: 'Thresholds', icon: <Sliders className="w-3.5 h-3.5" /> },
+    { key: 'careteam', label: 'Care team', icon: <UsersIcon className="w-3.5 h-3.5" /> },
     { key: 'timeline', label: 'Timeline', icon: <Clock className="w-3.5 h-3.5" /> },
   ];
 
@@ -442,6 +445,7 @@ export default function PatientDetailShell({ patientId }: Props) {
                 onChanged={onThresholdChanged}
               />
             )}
+            {tab === 'careteam' && <CareTeamTab patientId={patientId} />}
             {tab === 'timeline' && (
               <TimelineTab
                 logs={logs}
