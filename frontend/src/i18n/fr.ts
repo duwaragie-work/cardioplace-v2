@@ -1016,6 +1016,12 @@ const fr: Record<TranslationKey, string> = {
   'intake.exitSave.body': 'Vous pouvez continuer à tout moment depuis votre tableau de bord.',
   'intake.exitSave.cta': 'Retour au tableau de bord',
   'intake.exitSave.keepGoing': 'Continuer',
+  'intake.exitSave.editTitle': 'Enregistrer vos modifications ?',
+  'intake.exitSave.editBody': 'Nous mettrons à jour votre profil avec les modifications de cette page, puis vous ramènerons au tableau de bord.',
+  'intake.exitSave.editCta': 'Enregistrer et quitter',
+  'intake.exitSave.editMedsWarning': 'Les modifications de médicaments de cette étape ne seront pas enregistrées ici. Appuyez sur Continuer pour examiner et envoyer les modifications de médicaments.',
+  'intake.exitSave.saving': 'Enregistrement…',
+  'intake.exitSave.errorFallback': "Nous n'avons pas pu enregistrer vos modifications. Veuillez réessayer.",
 
   // "Already on file" page
   'intake.profileExists.title': 'Tout est prêt',

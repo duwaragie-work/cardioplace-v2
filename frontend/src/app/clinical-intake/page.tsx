@@ -1230,8 +1230,25 @@ function DedupModal({
   );
 }
 
-function ExitSaveModal({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+function ExitSaveModal({
+  editMode,
+  onMedStep,
+  saving,
+  error,
+  onConfirm,
+  onCancel,
+}: {
+  editMode: boolean;
+  onMedStep: boolean;
+  saving: boolean;
+  error: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
   const { t } = useLanguage();
+  const title = editMode ? t('intake.exitSave.editTitle') : t('intake.exitSave.title');
+  const body = editMode ? t('intake.exitSave.editBody') : t('intake.exitSave.body');
+  const cta = editMode ? t('intake.exitSave.editCta') : t('intake.exitSave.cta');
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -1255,23 +1272,47 @@ function ExitSaveModal({ onConfirm, onCancel }: { onConfirm: () => void; onCance
           <Save className="w-7 h-7" style={{ color: 'var(--brand-primary-purple)' }} />
         </div>
         <h3 className="text-[18px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          {t('intake.exitSave.title')}
+          {title}
         </h3>
-        <p className="text-[13px] mb-6 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
-          {t('intake.exitSave.body')}
+        <p className="text-[13px] mb-4 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+          {body}
         </p>
+        {editMode && onMedStep && (
+          <p
+            className="text-[12px] mb-4 px-3 py-2 rounded-lg leading-relaxed text-left"
+            style={{
+              color: 'var(--brand-warning-amber)',
+              backgroundColor: 'var(--brand-warning-amber-light)',
+            }}
+          >
+            {t('intake.exitSave.editMedsWarning')}
+          </p>
+        )}
+        {error && (
+          <p
+            className="text-[12px] mb-4 px-3 py-2 rounded-lg"
+            style={{
+              color: 'var(--brand-alert-red)',
+              backgroundColor: 'var(--brand-alert-red-light)',
+            }}
+          >
+            {error}
+          </p>
+        )}
         <button
           type="button"
           onClick={onConfirm}
-          className="w-full h-11 rounded-full text-white font-bold text-[14px] cursor-pointer"
+          disabled={saving}
+          className="w-full h-11 rounded-full text-white font-bold text-[14px] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
         >
-          {t('intake.exitSave.cta')}
+          {saving ? t('intake.exitSave.saving') : cta}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="w-full mt-2 text-[12px] font-semibold cursor-pointer"
+          disabled={saving}
+          className="w-full mt-2 text-[12px] font-semibold cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           style={{ color: 'var(--brand-text-muted)' }}
         >
           {t('intake.exitSave.keepGoing')}
@@ -1324,6 +1365,13 @@ function ClinicalIntakeWizard() {
   // and the patient must edit via the /profile page (which sends them back
   // here with ?step=AX). With ?step= we go straight into edit mode.
   const [profileExists, setProfileExists] = useState(false);
+  // True when hydration seeded from an existing PatientProfile via ?step=
+  // deep-link. In this mode the Save-and-exit flow upserts the profile to
+  // the backend instead of only writing a local draft (which is ignored on
+  // re-entry because Branch 2 reseeds from the server).
+  const [editMode, setEditMode] = useState(false);
+  const [exitSaving, setExitSaving] = useState(false);
+  const [exitError, setExitError] = useState('');
 
   // Hydrate state. Three branches:
   //   1. No profile saved yet → fresh wizard (or resume localStorage draft)
@@ -1397,6 +1445,7 @@ function ClinicalIntakeWizard() {
           };
           setStateRaw(seeded);
           setStep(requestedStep);
+          setEditMode(true);
           setBootstrapping(false);
           return;
         }
@@ -1549,6 +1598,37 @@ function ClinicalIntakeWizard() {
       setSubmitError(e instanceof Error ? e.message : t('intake.nav.errorSubmit'));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Exit-and-save from the top-bar Save button. In edit mode this upserts the
+  // profile (A1–A4 changes) to the backend and clears the local draft before
+  // navigating. In fresh-intake mode the draft is already persisted to
+  // localStorage on every setState, so we just navigate.
+  //
+  // Medication edits are NOT persisted here: the backend /intake/medications
+  // endpoint is pure-append (see intake.service.ts createMedications), so
+  // calling it again in edit mode would duplicate rows. Patients editing meds
+  // must go through Review → Submit, or use the per-medication PATCH path.
+  const handleExitSave = async () => {
+    if (exitSaving) return;
+    setExitError('');
+    if (!editMode) {
+      // Fresh intake: the draft was already persisted to localStorage on every
+      // setState (see saveDraft wrapper above). Keep it so the patient can
+      // resume from the dashboard's Action Required card.
+      router.push('/dashboard');
+      return;
+    }
+    setExitSaving(true);
+    try {
+      await saveIntakeProfile(buildProfilePayload(state));
+      // Edit mode: the profile is now the source of truth — no resume needed.
+      if (user?.id) clearDraft(user.id);
+      router.push('/dashboard');
+    } catch (e) {
+      setExitError(e instanceof Error ? e.message : t('intake.exitSave.errorFallback'));
+      setExitSaving(false);
     }
   };
 
@@ -1734,8 +1814,16 @@ function ClinicalIntakeWizard() {
         )}
         {showExitSave && (
           <ExitSaveModal
-            onConfirm={() => router.push('/dashboard')}
-            onCancel={() => setShowExitSave(false)}
+            editMode={editMode}
+            onMedStep={['A5', 'A6', 'A8', 'A9'].includes(step)}
+            saving={exitSaving}
+            error={exitError}
+            onConfirm={handleExitSave}
+            onCancel={() => {
+              if (exitSaving) return;
+              setExitError('');
+              setShowExitSave(false);
+            }}
           />
         )}
       </AnimatePresence>

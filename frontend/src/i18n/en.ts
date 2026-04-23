@@ -1014,6 +1014,12 @@ const en = {
   'intake.exitSave.body': 'You can continue anytime from your dashboard.',
   'intake.exitSave.cta': 'Back to dashboard',
   'intake.exitSave.keepGoing': 'Keep going',
+  'intake.exitSave.editTitle': 'Save your changes?',
+  'intake.exitSave.editBody': "We'll update your profile with the changes on this page, then take you back to the dashboard.",
+  'intake.exitSave.editCta': 'Save and exit',
+  'intake.exitSave.editMedsWarning': "Medication changes on this step won't be saved here. Tap Continue to review and submit any medication edits.",
+  'intake.exitSave.saving': 'Saving…',
+  'intake.exitSave.errorFallback': "We couldn't save your changes. Please try again.",
 
   // "Already on file" page
   'intake.profileExists.title': "You're all set",

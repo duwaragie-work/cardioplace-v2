@@ -1016,6 +1016,12 @@ const es: Record<TranslationKey, string> = {
   'intake.exitSave.body': 'Puede continuar en cualquier momento desde su panel.',
   'intake.exitSave.cta': 'Volver al panel',
   'intake.exitSave.keepGoing': 'Seguir',
+  'intake.exitSave.editTitle': '¿Guardar sus cambios?',
+  'intake.exitSave.editBody': 'Actualizaremos su perfil con los cambios de esta página y lo llevaremos de vuelta al panel.',
+  'intake.exitSave.editCta': 'Guardar y salir',
+  'intake.exitSave.editMedsWarning': 'Los cambios de medicamentos en este paso no se guardarán aquí. Toque Continuar para revisar y enviar cualquier cambio de medicamentos.',
+  'intake.exitSave.saving': 'Guardando…',
+  'intake.exitSave.errorFallback': 'No pudimos guardar sus cambios. Inténtelo de nuevo.',
 
   // "Already on file" page
   'intake.profileExists.title': 'Todo está listo',

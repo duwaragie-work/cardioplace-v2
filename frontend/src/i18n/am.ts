@@ -1019,6 +1019,12 @@ const am: Record<TranslationKey, string> = {
   'intake.exitSave.body': 'በማንኛውም ጊዜ ከዳሽቦርድዎ መቀጠል ይችላሉ።',
   'intake.exitSave.cta': 'ወደ ዳሽቦርድ ተመለስ',
   'intake.exitSave.keepGoing': 'ቀጥል',
+  'intake.exitSave.editTitle': 'ለውጦችዎን ያስቀምጡ?',
+  'intake.exitSave.editBody': 'በዚህ ገጽ ላይ ያሉትን ለውጦች በፕሮፋይልዎ ላይ እናዘምናለን፣ ከዚያም ወደ ዳሽቦርድ እንመልስዎታለን።',
+  'intake.exitSave.editCta': 'አስቀምጥ እና ውጣ',
+  'intake.exitSave.editMedsWarning': 'በዚህ ደረጃ ላይ ያሉ የመድኃኒት ለውጦች እዚህ አይቀመጡም። የመድኃኒት ለውጦችን ለመገምገም እና ለማስገባት ቀጥል የሚለውን ይጫኑ።',
+  'intake.exitSave.saving': 'በማስቀመጥ ላይ…',
+  'intake.exitSave.errorFallback': 'ለውጦችዎን ማስቀመጥ አልተቻለም። እባክዎ እንደገና ይሞክሩ።',
 
   // "Already on file" page
   'intake.profileExists.title': 'ሁሉም ተዘጋጅቷል',
