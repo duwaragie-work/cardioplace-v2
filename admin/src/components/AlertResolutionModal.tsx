@@ -13,7 +13,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertTriangle, Pill, ArrowUp, Loader2, CheckCircle2 } from 'lucide-react';
+import { X, AlertTriangle, Pill, ArrowUp, Loader2, CheckCircle2, Lock } from 'lucide-react';
 import {
   RESOLUTION_CATALOG,
   actionsForTier,
@@ -109,10 +109,29 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
   const rationaleRequired = actionDef?.requiresRationale ?? false;
   const willTriggerRetry = actionDef?.triggersBpL2Retry ?? false;
 
+  // Tier 1 is non-dismissable per Flow G spec: backdrop click, Escape key, and
+  // X button are all disabled. The provider must explicitly choose Cancel or
+  // submit a resolution. (Cancel is still allowed so providers don't get locked
+  // out if they opened the wrong alert by mistake.)
+  const tierGroup = resolutionTierFor(alert?.tier ?? null);
+  const isNonDismissable = tierGroup === 'TIER_1';
+
   const canSubmit =
     !!action &&
     !submitting &&
     (!rationaleRequired || rationale.trim().length > 0);
+
+  // Escape key closes the modal — except for Tier 1 (non-dismissable).
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !isNonDismissable && !submitting) {
+        onClose();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, isNonDismissable, submitting, onClose]);
 
   async function handleSubmit() {
     if (!alert || !action || !canSubmit) return;
@@ -139,7 +158,12 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
           className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4"
           style={{ backgroundColor: 'rgba(15,23,42,0.5)' }}
         >
-          <div className="absolute inset-0" onClick={onClose} />
+          <div
+            className="absolute inset-0"
+            onClick={isNonDismissable ? undefined : onClose}
+            style={{ cursor: isNonDismissable ? 'not-allowed' : 'pointer' }}
+            aria-hidden
+          />
           <motion.div
             initial={{ y: 60, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -165,9 +189,23 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                   {variant.icon}
                 </div>
                 <div className="min-w-0">
-                  <h2 className="text-[15px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
-                    {variant.title}
-                  </h2>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <h2 className="text-[15px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
+                      {variant.title}
+                    </h2>
+                    {isNonDismissable && (
+                      <span
+                        className="inline-flex items-center gap-1 text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                        style={{
+                          backgroundColor: variant.accent,
+                          color: 'white',
+                        }}
+                      >
+                        <Lock className="w-2.5 h-2.5" />
+                        Action required
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[12px] mt-0.5 truncate" style={{ color: 'var(--brand-text-muted)' }}>
                     {alert.patient?.name ?? 'Unknown patient'}
                     {alert.journalEntry?.systolicBP != null && alert.journalEntry?.diastolicBP != null && (
@@ -178,14 +216,16 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={onClose}
-                className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100 cursor-pointer"
-                aria-label="Close"
-              >
-                <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
-              </button>
+              {!isNonDismissable && (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100 cursor-pointer"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
+                </button>
+              )}
             </div>
 
             {/* Body — scroll inside */}
