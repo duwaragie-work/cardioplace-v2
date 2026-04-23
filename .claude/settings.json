@@ -3,7 +3,19 @@
     "allow": [
       "Bash(python -c \"import ast; ast.parse\\(open\\('server/grpc_server.py'\\).read\\(\\)\\); ast.parse\\(open\\('main.py'\\).read\\(\\)\\); print\\('python ok'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('server/grpc_server.py'\\).read\\(\\)\\); print\\('grpc_server.py ok'\\)\")",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(git add *)",
+      "Bash(NODE_ENV=test node --experimental-vm-modules ../node_modules/jest/bin/jest.js \"profile-resolver|engine|alert-engine|session-averager|output-generator\")",
+      "Bash(NODE_ENV=test node --experimental-vm-modules ../node_modules/jest/bin/jest.js alert-engine.scenarios --verbose)",
+      "Bash(NODE_ENV=test node --experimental-vm-modules ../node_modules/jest/bin/jest.js alert-engine.scenarios)",
+      "Bash(gh pr create --base main --title 'Phases 4, 5, 6 -- rule-based BP alert engine' --body ' *)",
+      "Bash(grep -E \"\\\\.ts$|^d\")",
+      "Bash(NODE_ENV=test node --experimental-vm-modules ../node_modules/jest/bin/jest.js system-prompt.service --verbose)",
+      "Bash(NODE_ENV=test node --experimental-vm-modules ../node_modules/jest/bin/jest.js system-prompt-scenarios)",
+      "Bash(NODE_ENV=test node --experimental-vm-modules ../node_modules/jest/bin/jest.js chat.service)",
+      "Bash(NODE_ENV=test node --experimental-vm-modules ../node_modules/jest/bin/jest.js chat)",
+      "Bash(grep -E \"\\\\.\\(proto|yaml|json|toml|txt\\)$|Dockerfile\")",
+      "Bash(NODE_ENV=test node --experimental-vm-modules ../node_modules/jest/bin/jest.js voice.service)"
     ]
   }
 }
