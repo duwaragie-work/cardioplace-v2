@@ -718,42 +718,98 @@ From [backend/src/daily_journal/escalation/resolution-actions.ts](../backend/src
 
 ## 15. Test environment setup
 
-Copy from `backend/.env.example`, `frontend/.env.example`, `admin/.env.example`. Use a **fresh DB** — do not point at v1 prod.
+**Every tester runs against their own database.** Do not share a DB across testers — the gap-alert + monthly-reask crons, seed archetypes, and escalation ladder rows will conflict across concurrent sessions.
+
+### 15.1 Provision your own DB
+
+Easiest option is a managed Prisma Postgres (free tier works fine) — log in at [prisma.io](https://www.prisma.io), create a new project, copy the connection string. Alternatively, any Postgres 15+ instance with a dedicated database works.
+
+Paste your connection string into `backend/.env` as `DATABASE_URL`:
 
 ```bash
-# One-time
-npm install                                  # root, hoists workspace deps
-createdb cardioplace_v2_test
-
-# Per test run
-cd backend
-npx prisma migrate reset --force             # clean slate
-npx prisma db seed                           # 5 demo patients + providers + practice
-npm run start:dev                            # :4000
-
-cd ../frontend  && npm run dev               # :3000
-cd ../admin     && npm run dev               # :3001
+cp backend/.env.example backend/.env
+# edit backend/.env:
+#   DATABASE_URL="postgres://.../your-fresh-db"
+#   JWT_SECRET="<your-own-secret>"    # do NOT reuse v1 prod
+#   PORT=4000
+#   WEB_APP_URL=http://localhost:3000
+#   ADMIN_APP_URL=http://localhost:3001
 ```
 
-### Seed accounts (post `prisma db seed`)
+### 15.2 First-time bring-up
 
-All users accept OTP `666666` — no real emails are sent. See [backend/prisma/seed.ts](../backend/prisma/seed.ts).
+```bash
+# From repo root
+npm install                                  # hoists workspace deps
 
-| Email | Role(s) | Archetype / Purpose |
+cd backend
+npx prisma migrate deploy                    # applies all committed migrations
+npx prisma generate                          # regenerates the client
+npx prisma db seed                           # loads 5 patients + 4 providers + 1 practice
+npm run start:dev                            # :4000
+
+# In new terminals
+cd ../frontend && npm run dev                # :3000
+cd ../admin   && npm run dev                 # :3001
+```
+
+### 15.3 Seed accounts — use these for every admin-side flow
+
+**Every seed account accepts OTP `666666`.** No real emails are sent; the OTP is a perma-code rooted in seed. See [backend/prisma/seed.ts](../backend/prisma/seed.ts).
+
+#### Admin-side logins (use the real emails below)
+
+| Email | Role(s) | When to use |
 |---|---|---|
-| `priya.menon@cardioplace.test` | PATIENT | Pregnant + on Lisinopril (ACE) → fires `RULE_PREGNANCY_ACE_ARB` |
-| `james.okafor@cardioplace.test` | PATIENT | HFrEF + Diltiazem (NDHP) → fires `RULE_NDHP_HFREF` |
-| `rita.washington@cardioplace.test` | PATIENT | CAD + DBP 68 → fires `RULE_CAD_DBP_CRITICAL` |
-| `charles.brown@cardioplace.test` | PATIENT | AFib + HR 115 (needs ≥3 readings) → fires `RULE_AFIB_HR_HIGH` |
-| `aisha.johnson@cardioplace.test` | PATIENT | Controlled HTN — normal readings, no alerts |
-| `dr.primary@cardioplace.test` | PROVIDER | Primary provider for all patients above |
-| `dr.backup@cardioplace.test` | PROVIDER | Backup provider |
-| `dr.director@cardioplace.test` | MEDICAL_DIRECTOR | Medical director |
-| `ops@cardioplace.test` | HEALPLACE_OPS | Ops escalation recipient |
-| `manisha.patel@cardioplace.test` | SUPER_ADMIN | Full admin access |
-| `support@healplace.com` | SUPER_ADMIN | Back-compat admin from v1 |
+| `manisha.patel@cardioplace.test` | `PROVIDER` + `SUPER_ADMIN` | General admin — can do everything |
+| `support@healplace.com` | `SUPER_ADMIN` + `PROVIDER` + `MEDICAL_DIRECTOR` | Back-compat admin; testing MD-gated flows (threshold editor, practice CRUD) |
+| `primary-provider@cardioplace.test` | `PROVIDER` | Receives Tier 1 T+0 push + email; tests PROVIDER-only UI restrictions (cannot write practice / threshold / assignment) |
+| `backup-provider@cardioplace.test` | `PROVIDER` | Receives Tier 1 T+4h push + backup escalations |
+| `medical-director@cardioplace.test` | `MEDICAL_DIRECTOR` | Receives Tier 1 T+8h push; can write thresholds + practices |
+| `ops@healplace.com` | `HEALPLACE_OPS` | Receives Tier 1 T+24h + BP Level 2 T+4h (phone); cannot verify patient profiles |
 
-Practice: `Cedar Hill Community Clinic` (id `seed-cedar-hill`), Mon–Fri 08:00–18:00 America/New_York.
+Login flow for any of them:
+
+```
+1. Go to  http://localhost:3001/sign-in   (admin app)
+2. Enter email from table above
+3. Click "Send code"
+4. Enter OTP: 666666
+5. Lands on /dashboard
+```
+
+#### Patient-side: **create your own account, don't reuse the seeded patients**
+
+The seeded patients (Priya, James, Rita, Charles, Aisha) are calibrated archetypes for **verifying rule-engine outputs** — they each trigger a specific CLINICAL_SPEC rule. If multiple testers log readings against the same seed patient, their sessions will interleave and break each other's alert assertions.
+
+For patient-flow testing:
+
+```
+1. Go to  http://localhost:3000/sign-in   (patient app)
+2. Enter your own email (e.g. your-name+patient1@healplace.com)
+3. Click "Send code"
+4. Grab the OTP from the backend console log (look for "OTP for <email>: NNNNNN")
+   — real emails only go out if EMAIL_PROVIDER env is set.
+5. Complete basic onboarding (name, DOB, timezone)
+6. Hit "Start" on the Action Required card → complete clinical intake
+7. Log readings via /check-in
+```
+
+When you need to see the admin side of your own patient, sign in to `localhost:3001` as `manisha.patel@cardioplace.test`.
+
+#### Seeded patients (read-only reference — for rule-engine spot-checks)
+
+| Email | Archetype | Expected alert |
+|---|---|---|
+| `priya.menon@cardioplace.test` | Pregnant + Lisinopril (ACE) | `RULE_PREGNANCY_ACE_ARB` Tier 1 |
+| `james.okafor@cardioplace.test` | HFrEF + Diltiazem (NDHP) | `RULE_NDHP_HFREF` Tier 1 |
+| `rita.washington@cardioplace.test` | CAD + DBP 68 | `RULE_CAD_DBP_CRITICAL` |
+| `charles.brown@cardioplace.test` | AFib + HR 115 (needs ≥3 readings per session) | `RULE_AFIB_HR_HIGH` |
+| `aisha.johnson@cardioplace.test` | Controlled HTN | No alert (control case) |
+
+All five are already `enrollmentStatus: ENROLLED` — their alerts dispatch through the full ladder.
+
+Practice: `Cedar Hill Internal Medicine` (id `seed-cedar-hill`), Mon–Fri 08:00–18:00 America/New_York.
 
 ---
 
