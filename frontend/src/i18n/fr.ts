@@ -775,9 +775,9 @@ const fr: Record<TranslationKey, string> = {
   'intake.a4.hfpefTitle': 'HFpEF',
   'intake.a4.hfpefDesc': 'Fraction d\'éjection préservée — cœur raide mais pompe encore',
   'intake.a4.hfpefAudio': 'HFpEF. Fraction d\'éjection préservée. Cœur raide mais pompe encore.',
-  'intake.a4.unknownTitle': 'Pas sûr',
+  'intake.a4.unknownTitle': 'Je ne sais pas',
   'intake.a4.unknownDesc': 'Votre équipe soignante vérifiera à votre prochaine visite',
-  'intake.a4.unknownAudio': 'Pas sûr. Votre équipe soignante vérifiera à votre prochaine visite.',
+  'intake.a4.unknownAudio': 'Je ne sais pas. Votre équipe soignante vérifiera à votre prochaine visite.',
 
   // A5 — core medications
   'intake.a5.title': 'Vos médicaments',
@@ -808,7 +808,7 @@ const fr: Record<TranslationKey, string> = {
   'intake.a8.title': 'Autre chose ?',
   'intake.a8.subtitle': 'Touchez une catégorie si vous prenez quelque chose non listé.',
   'intake.a8.audio': 'Autre chose ? Touchez une catégorie si vous prenez quelque chose non listé.',
-  'intake.a8.categoryWaterPill': 'Diurétique',
+  'intake.a8.categoryWaterPill': 'Pilule d\'eau (diurétique)',
   'intake.a8.categoryBloodThinner': 'Anticoagulant',
   'intake.a8.categoryCholesterol': 'Médicament pour le cholestérol',
   'intake.a8.categoryHeartRhythm': 'Médicament pour le rythme cardiaque',
@@ -832,11 +832,11 @@ const fr: Record<TranslationKey, string> = {
   'intake.a9.emptyBody': 'Vous n\'avez ajouté aucun médicament. Touchez Retour si vous en avez oublié, ou Continuer pour revoir.',
   'intake.a9.title': 'Combien de fois par jour ?',
   'intake.a9.subtitle': 'Juste le nombre — votre équipe soignante remplira la dose.',
-  'intake.a9.audio': 'Combien de fois par jour prenez-vous chaque un ? Juste le nombre — votre équipe soignante remplira la dose.',
+  'intake.a9.audio': 'Combien de fois par jour prenez-vous chaque médicament ? Juste le nombre — votre équipe soignante remplira la dose.',
   'intake.a9.freqOnce': 'Une',
   'intake.a9.freqTwice': 'Deux',
   'intake.a9.freqThree': 'Trois',
-  'intake.a9.freqUnsure': 'Pas sûr',
+  'intake.a9.freqUnsure': 'Je ne sais pas',
   'intake.a9.medAudio': 'Combien de fois par jour prenez-vous {name} ?',
 
   // A10 — review
@@ -851,7 +851,7 @@ const fr: Record<TranslationKey, string> = {
   'intake.a10.rowHeight': 'Taille',
   'intake.a10.rowPregnancy': 'Grossesse',
   'intake.a10.pregnancyYes': 'Oui',
-  'intake.a10.pregnancyYesDate': 'Oui · date {date}',
+  'intake.a10.pregnancyYesDate': 'Oui · date prévue {date}',
   'intake.a10.pregnancyNo': 'Non',
   'intake.a10.pregnancyNotSpec': 'Non spécifié',
   'intake.a10.noneReported': 'Aucune signalée',
@@ -893,7 +893,7 @@ const fr: Record<TranslationKey, string> = {
   'intake.nav.continue': 'Continuer',
   'intake.nav.errorGender': 'Veuillez sélectionner un genre.',
   'intake.nav.errorHeight': 'Veuillez entrer une taille entre 100 et 250 cm.',
-  'intake.nav.errorHfType': 'Veuillez en choisir une — Pas sûr convient.',
+  'intake.nav.errorHfType': 'Veuillez en choisir une — Je ne sais pas convient.',
   'intake.nav.errorFreq': 'Choisissez à quelle fréquence vous prenez {name}.',
   'intake.nav.errorSubmit': 'Une erreur est survenue lors de l\'envoi de votre profil.',
 
@@ -901,7 +901,7 @@ const fr: Record<TranslationKey, string> = {
   'intake.freq.once': 'Une fois par jour',
   'intake.freq.twice': 'Deux fois par jour',
   'intake.freq.three': '3 fois par jour',
-  'intake.freq.unsure': 'Pas sûr',
+  'intake.freq.unsure': 'Je ne sais pas',
   'intake.freq.unset': 'Définir la fréquence',
 
   // MedicationCard chrome
