@@ -205,7 +205,7 @@ const de: Record<TranslationKey, string> = {
   'checkin.weight.audio': 'Gewicht, optional. Überspringen Sie dies, wenn Sie sich heute nicht gewogen haben.',
   'checkin.weight.unitLabel': 'Einheit',
   'checkin.weight.weightLabel': 'Gewicht ({unit})',
-  'checkin.weight.fluidHint': 'Plötzliche Zunahme (mehr als 3 lbs in 24 Stunden) kann Flüssigkeitsansammlung anzeigen — Ihr Behandlungsteam achtet darauf.',
+  'checkin.weight.fluidHint': 'Plötzliche Zunahme (mehr als 1,4 kg / 3 lbs in 24 Stunden) kann Flüssigkeitsansammlung anzeigen — Ihr Behandlungsteam achtet darauf.',
 
   // Medication
   'checkin.med.title': 'Medikamente heute',
@@ -221,9 +221,9 @@ const de: Record<TranslationKey, string> = {
   'checkin.b3.alertBanner': 'Wenn Sie diese jetzt haben, wird Ihr Behandlungsteam sofort benachrichtigt.',
   'checkin.b3.symptomSevereHeadache': 'Starke Kopfschmerzen',
   'checkin.b3.symptomVision': 'Sehveränderungen',
-  'checkin.b3.symptomConfusion': 'Verwirrung / sich nicht wie man selbst fühlen',
+  'checkin.b3.symptomConfusion': 'Verwirrung / sich anders fühlen als gewohnt',
   'checkin.b3.symptomChestPain': 'Brustschmerzen oder Atemprobleme',
-  'checkin.b3.symptomNeuro': 'Schwäche, Taubheit oder Sprachprobleme',
+  'checkin.b3.symptomNeuro': 'Schwäche, Taubheitsgefühl oder Sprachprobleme',
   'checkin.b3.symptomStomach': 'Starke Bauch- oder rechte Oberbauchschmerzen',
   'checkin.b3.pregnancyHeader': 'Schwangerschaftsspezifisch',
   'checkin.b3.symptomNewHeadache': 'Neue Kopfschmerzen (für Sie ungewöhnlich)',
