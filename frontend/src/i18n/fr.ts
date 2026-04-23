@@ -93,7 +93,7 @@ const fr: Record<TranslationKey, string> = {
   'dashboard.activeAlert': 'Alerte active',
   'dashboard.viewDetails': 'Voir les détails',
   'dashboard.viewDetailsAria': '{title} — voir les détails',
-  'dashboard.awaitingVerification': "En attente de validation par le prestataire",
+  'dashboard.awaitingVerification': 'En attente de validation par un professionnel de santé',
   'dashboard.yourGoal': 'Votre objectif',
   'dashboard.belowTarget': 'En dessous de {target} mmHg',
   'dashboard.setByCareTeam': '· défini par votre équipe soignante',
