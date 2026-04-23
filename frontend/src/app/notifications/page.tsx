@@ -23,6 +23,9 @@ import {
   markNotificationRead,
 } from '@/lib/services/journal.service';
 import { useLanguage } from '@/contexts/LanguageContext';
+import type { TranslationKey } from '@/i18n';
+
+type TFn = (key: TranslationKey) => string;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type AlertType = 'SYSTOLIC_BP' | 'DIASTOLIC_BP' | 'BP_COMBINED' | 'WEIGHT' | 'MEDICATION_ADHERENCE';
@@ -79,16 +82,16 @@ const SEVERITY_META = {
   LOW: { label: 'Low', bg: '#F0FDF4', text: '#16A34A', border: '#BBF7D0' },
 };
 
-function timeAgo(dateStr: string): string {
+function timeAgo(dateStr: string, t: TFn): string {
   try {
     const diff = Date.now() - new Date(dateStr).getTime();
     const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'Just now';
-    if (mins < 60) return `${mins}m ago`;
+    if (mins < 1) return t('notifications.time.justNow');
+    if (mins < 60) return t('notifications.time.minsAgo').replace('{mins}', String(mins));
     const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
+    if (hrs < 24) return t('notifications.time.hrsAgo').replace('{hrs}', String(hrs));
     const days = Math.floor(hrs / 24);
-    if (days < 7) return `${days}d ago`;
+    if (days < 7) return t('notifications.time.daysAgo').replace('{days}', String(days));
     return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   } catch {
     return '';
@@ -309,7 +312,7 @@ function AlertCard({
           {!isOpen && (
             <div className="shrink-0 flex items-center gap-1" style={{ color: '#16A34A' }}>
               <CheckCircle2 className="w-4 h-4" />
-              <span className="text-[11px] font-semibold">Done</span>
+              <span className="text-[11px] font-semibold">{t('notifications.done')}</span>
             </div>
           )}
         </div>
@@ -345,9 +348,9 @@ function AlertCard({
               color: 'var(--brand-primary-purple)',
               border: '1px solid var(--brand-primary-purple-light)',
             }}
-            aria-label="View alert details"
+            aria-label={t('notifications.viewDetailsAria')}
           >
-            View details
+            {t('notifications.viewDetails')}
             <span aria-hidden>→</span>
           </Link>
         </div>
@@ -433,7 +436,7 @@ function NotifCard({
                 className="text-[11px] shrink-0 mt-0.5"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
-                {timeAgo(notif.sentAt)}
+                {timeAgo(notif.sentAt, t)}
               </span>
             </div>
             <p
@@ -794,12 +797,12 @@ export default function NotificationsPage() {
                 | 'other';
               const order: TierBucketKey[] = ['emergency', 'tier1', 'high', 'low', 'info', 'other'];
               const headings: Record<TierBucketKey, string> = {
-                emergency: 'Emergency — call 911 if symptoms',
-                tier1: 'Important medication alerts',
-                high: 'Elevated blood pressure',
-                low: 'Low blood pressure',
-                info: 'For your information',
-                other: 'Other alerts',
+                emergency: t('notifications.bucket.emergency'),
+                tier1: t('notifications.bucket.tier1'),
+                high: t('notifications.bucket.high'),
+                low: t('notifications.bucket.low'),
+                info: t('notifications.bucket.info'),
+                other: t('notifications.bucket.other'),
               };
               const bucketize = (a: typeof openAlerts[number]): TierBucketKey => {
                 const tier = (a as { tier?: string | null }).tier ?? null;

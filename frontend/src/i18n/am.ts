@@ -287,6 +287,24 @@ const am: Record<TranslationKey, string> = {
   'notifications.escalated': 'ተላልፏል',
   'notifications.pastAlerts': 'ያለፉ ማንቂያዎች',
 
+  // ─── Notifications (audit sweep additions) ─────────────────────────────────
+  // 🚨 MT AMHARIC — REQUIRES NATIVE SPEAKER REVIEW BEFORE COHORT LAUNCH.
+  // Bucket headings are organisational labels; clinical patient copy is in
+  // alert cards (from shared/alert-messages.ts, pending per-locale sign-off).
+  'notifications.done': 'ተጠናቋል',
+  'notifications.viewDetails': 'ዝርዝር ይመልከቱ',
+  'notifications.viewDetailsAria': 'የማንቂያ ዝርዝር ይመልከቱ',
+  'notifications.time.justNow': 'ከጥቂት ጊዜ በፊት',
+  'notifications.time.minsAgo': 'ከ{mins} ደቂቃ በፊት',
+  'notifications.time.hrsAgo': 'ከ{hrs} ሰዓት በፊት',
+  'notifications.time.daysAgo': 'ከ{days} ቀን በፊት',
+  'notifications.bucket.emergency': 'የአደጋ ጊዜ — ምልክቶች ካሉ 911 ይደውሉ',
+  'notifications.bucket.tier1': 'ጠቃሚ የመድሃኒት ማንቂያዎች',
+  'notifications.bucket.high': 'ከፍ ያለ የደም ግፊት',
+  'notifications.bucket.low': 'ዝቅተኛ የደም ግፊት',
+  'notifications.bucket.info': 'ለመረጃዎ',
+  'notifications.bucket.other': 'ሌሎች ማንቂያዎች',
+
   // ─── Alert Types ───────────────────────────────────────────────────────────
   'alert.systolicBP': 'ከፍ ያለ ሲስቶሊክ ደም ግፊት',
   'alert.diastolicBP': 'ከፍ ያለ ዲያስቶሊክ ደም ግፊት',
@@ -418,6 +436,20 @@ const am: Record<TranslationKey, string> = {
   'readings.missed': 'ተዘልሏል',
   'readings.note': 'ማስታወሻ',
   'readings.crisis': 'ቀውስ',
+
+  // ─── Readings (audit sweep additions) ──────────────────────────────────────
+  'readings.validate.bpBoth': 'የደም ግፊት ሁለቱንም ቁጥር ያስገቡ (ወይም ሁለቱንም ያጥፉ)።',
+  'readings.validate.weightRange': 'ክብደቱ ከ20 እስከ 600 መሆን አለበት።',
+  'readings.sameMinute': 'ተመሳሳይ ደቂቃ',
+  'readings.sessionReadings': 'ክፍለ-ጊዜ · {count} ንባቦች',
+  'readings.readingsCount': '{count} ንባቦች',
+  'readings.avg': 'አማካይ',
+  'readings.mmHg': 'mmHg',
+  'readings.bpm': 'bpm',
+  'readings.lbs': 'lbs',
+  'readings.positionLabel': 'በንባብ ወቅት አቀማመጥ',
+  'readings.pulseLabel': 'የልብ ምት (bpm)',
+  'readings.pulsePlaceholder': 'ለምሳሌ 72',
 
   // ─── Provider ──────────────────────────────────────────────────────────────
   'provider.dashboard': 'የእንክብካቤ ቡድን ዳሽቦርድ',

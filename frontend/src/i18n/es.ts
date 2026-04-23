@@ -285,6 +285,23 @@ const es: Record<TranslationKey, string> = {
   'notifications.escalated': 'Escalado',
   'notifications.pastAlerts': 'Alertas Pasadas',
 
+  // ─── Notifications (audit sweep additions) ─────────────────────────────────
+  // ⚠️ MT. Los encabezados de bucket D-E son etiquetas organizativas, no copy
+  // clínico — las tarjetas de alerta dentro muestran patientMessage del motor.
+  'notifications.done': 'Hecho',
+  'notifications.viewDetails': 'Ver detalles',
+  'notifications.viewDetailsAria': 'Ver detalles de la alerta',
+  'notifications.time.justNow': 'Ahora mismo',
+  'notifications.time.minsAgo': 'hace {mins} min',
+  'notifications.time.hrsAgo': 'hace {hrs} h',
+  'notifications.time.daysAgo': 'hace {days} d',
+  'notifications.bucket.emergency': 'Emergencia — llame al 911 si hay síntomas',
+  'notifications.bucket.tier1': 'Alertas importantes de medicación',
+  'notifications.bucket.high': 'Presión arterial elevada',
+  'notifications.bucket.low': 'Presión arterial baja',
+  'notifications.bucket.info': 'Para su información',
+  'notifications.bucket.other': 'Otras alertas',
+
   // ─── Alert Types ───────────────────────────────────────────────────────────
   'alert.systolicBP': 'PA Sistólica Elevada',
   'alert.diastolicBP': 'PA Diastólica Elevada',
@@ -416,6 +433,20 @@ const es: Record<TranslationKey, string> = {
   'readings.missed': 'Omitida',
   'readings.note': 'Nota',
   'readings.crisis': 'Crisis',
+
+  // ─── Readings (audit sweep additions) ──────────────────────────────────────
+  'readings.validate.bpBoth': 'Ingrese ambos números de presión arterial (o borre los dos).',
+  'readings.validate.weightRange': 'El peso debe estar entre 20 y 600.',
+  'readings.sameMinute': 'mismo minuto',
+  'readings.sessionReadings': 'Sesión · {count} lecturas',
+  'readings.readingsCount': '{count} lecturas',
+  'readings.avg': 'Prom.',
+  'readings.mmHg': 'mmHg',
+  'readings.bpm': 'ppm',
+  'readings.lbs': 'lbs',
+  'readings.positionLabel': 'Posición durante la lectura',
+  'readings.pulseLabel': 'Pulso (ppm)',
+  'readings.pulsePlaceholder': 'p. ej. 72',
 
   // ─── Provider ──────────────────────────────────────────────────────────────
   'provider.dashboard': 'Panel del Equipo de Atención',

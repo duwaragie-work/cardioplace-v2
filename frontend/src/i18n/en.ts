@@ -280,6 +280,21 @@ const en = {
   'notifications.escalated': 'Escalated',
   'notifications.pastAlerts': 'Past Alerts',
 
+  // ─── Notifications (audit sweep additions) ─────────────────────────────────
+  'notifications.done': 'Done',
+  'notifications.viewDetails': 'View details',
+  'notifications.viewDetailsAria': 'View alert details',
+  'notifications.time.justNow': 'Just now',
+  'notifications.time.minsAgo': '{mins}m ago',
+  'notifications.time.hrsAgo': '{hrs}h ago',
+  'notifications.time.daysAgo': '{days}d ago',
+  'notifications.bucket.emergency': 'Emergency — call 911 if symptoms',
+  'notifications.bucket.tier1': 'Important medication alerts',
+  'notifications.bucket.high': 'Elevated blood pressure',
+  'notifications.bucket.low': 'Low blood pressure',
+  'notifications.bucket.info': 'For your information',
+  'notifications.bucket.other': 'Other alerts',
+
   // ─── Alert Types ───────────────────────────────────────────────────────────
   'alert.systolicBP': 'Elevated Systolic BP',
   'alert.diastolicBP': 'Elevated Diastolic BP',
@@ -413,6 +428,23 @@ const en = {
   'readings.missed': 'Missed',
   'readings.note': 'Note',
   'readings.crisis': 'Crisis',
+
+  // ─── Readings (audit sweep additions) ──────────────────────────────────────
+  // Validation errors that overlap with check-in reuse checkin.err.* keys
+  // directly (one source of truth per locale). bpBoth's "(or clear both)"
+  // variant and weightRange are edit-only and stay here.
+  'readings.validate.bpBoth': 'Enter both blood pressure numbers (or clear both).',
+  'readings.validate.weightRange': 'Weight should be between 20 and 600.',
+  'readings.sameMinute': 'same minute',
+  'readings.sessionReadings': 'Session · {count} readings',
+  'readings.readingsCount': '{count} readings',
+  'readings.avg': 'Avg',
+  'readings.mmHg': 'mmHg',
+  'readings.bpm': 'bpm',
+  'readings.lbs': 'lbs',
+  'readings.positionLabel': 'Position during reading',
+  'readings.pulseLabel': 'Pulse (bpm)',
+  'readings.pulsePlaceholder': 'e.g. 72',
 
   // ─── Provider ──────────────────────────────────────────────────────────────
   'provider.dashboard': 'Provider Dashboard',
