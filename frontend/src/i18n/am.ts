@@ -84,6 +84,25 @@ const am: Record<TranslationKey, string> = {
   'dashboard.noReadingsYet': 'እስካሁን ንባብ የለም — ቼክ-ኢን ያጠናቅቁ',
   'dashboard.medStreak': 'ቀን የመድሃኒት ቅደም ተከተል',
 
+  // ─── Dashboard v2 (Flow D) ─────────────────────────────────────────────────
+  // 🚨 MT AMHARIC — REQUIRES NATIVE SPEAKER REVIEW BEFORE COHORT LAUNCH.
+  // UI chrome only. D3 clinical fallback titles/bodies in Dashboard.tsx stay
+  // English (lang="en") until Dr. Singal signs off per-locale on
+  // shared/alert-messages.ts.
+  'dashboard.alert': 'ማንቂያ',
+  'dashboard.critical': 'አሳሳቢ',
+  'dashboard.low': 'ዝቅተኛ',
+  'dashboard.activeAlert': 'የነቃ ማንቂያ',
+  'dashboard.viewDetails': 'ዝርዝር ይመልከቱ',
+  'dashboard.viewDetailsAria': '{title} — ዝርዝር ይመልከቱ',
+  'dashboard.awaitingVerification': 'የአቅራቢ ማረጋገጫ በመጠበቅ ላይ',
+  'dashboard.yourGoal': 'ግብዎ',
+  'dashboard.belowTarget': 'ከ{target} mmHg በታች',
+  'dashboard.setByCareTeam': '· በተንከባካቢ ቡድንዎ የተዘጋጀ',
+  'dashboard.chartDateAxis': 'ቀን',
+  'dashboard.chartAt': 'በ',
+  'dashboard.viewAllAlerts': 'ሁሉንም ማንቂያዎች ይመልከቱ',
+
   // ─── Check-In (legacy — kept for surfaces not yet migrated to v2) ─────────
   'checkin.systolic': 'ሲስቶሊክ',
   'checkin.diastolic': 'ዲያስቶሊክ',

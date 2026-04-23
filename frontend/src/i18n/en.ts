@@ -77,6 +77,25 @@ const en = {
   'dashboard.noReadingsYet': 'No readings yet — complete a check-in',
   'dashboard.medStreak': 'day medication streak',
 
+  // ─── Dashboard v2 (Flow D) ─────────────────────────────────────────────────
+  // Threshold-aware dashboard chrome. Clinical defaults on the D3 top-alert
+  // card (tier titles/bodies when patientMessage is empty) stay English with
+  // lang="en" — same policy as TierAlertView's variantFor, pending Dr. Singal
+  // per-locale sign-off on shared/alert-messages.ts.
+  'dashboard.alert': 'Alert',
+  'dashboard.critical': 'Critical',
+  'dashboard.low': 'Low',
+  'dashboard.activeAlert': 'Active alert',
+  'dashboard.viewDetails': 'View details',
+  'dashboard.viewDetailsAria': '{title} — view details',
+  'dashboard.awaitingVerification': 'Awaiting provider verification',
+  'dashboard.yourGoal': 'Your goal',
+  'dashboard.belowTarget': 'Below {target} mmHg',
+  'dashboard.setByCareTeam': '· set by your care team',
+  'dashboard.chartDateAxis': 'Date',
+  'dashboard.chartAt': 'at',
+  'dashboard.viewAllAlerts': 'View all alerts',
+
   // ─── Check-In (legacy — kept for surfaces not yet migrated to v2) ─────────
   'checkin.systolic': 'Systolic',
   'checkin.diastolic': 'Diastolic',

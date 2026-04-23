@@ -83,6 +83,24 @@ const es: Record<TranslationKey, string> = {
   'dashboard.noReadingsYet': 'Aún no hay lecturas — completa un control',
   'dashboard.medStreak': 'días de racha de medicación',
 
+  // ─── Dashboard v2 (Flow D) ─────────────────────────────────────────────────
+  // ⚠️ MT — UI chrome only. El contenido clínico del D3 (títulos/cuerpos de
+  // fallback cuando patientMessage está vacío) permanece en inglés hasta que
+  // Dr. Singal apruebe shared/alert-messages.ts por locale.
+  'dashboard.alert': 'Alerta',
+  'dashboard.critical': 'Crítico',
+  'dashboard.low': 'Baja',
+  'dashboard.activeAlert': 'Alerta activa',
+  'dashboard.viewDetails': 'Ver detalles',
+  'dashboard.viewDetailsAria': '{title} — ver detalles',
+  'dashboard.awaitingVerification': 'Esperando verificación del proveedor',
+  'dashboard.yourGoal': 'Su objetivo',
+  'dashboard.belowTarget': 'Por debajo de {target} mmHg',
+  'dashboard.setByCareTeam': '· establecido por su equipo de atención',
+  'dashboard.chartDateAxis': 'Fecha',
+  'dashboard.chartAt': 'a las',
+  'dashboard.viewAllAlerts': 'Ver todas las alertas',
+
   // ─── Check-In (legacy — kept for surfaces not yet migrated to v2) ─────────
   'checkin.systolic': 'Sistólica',
   'checkin.diastolic': 'Diastólica',
