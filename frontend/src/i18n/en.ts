@@ -218,7 +218,7 @@ const en = {
   'checkin.b3.symptomConfusion': 'Confusion / not feeling like yourself',
   'checkin.b3.symptomChestPain': 'Chest pain or trouble breathing',
   'checkin.b3.symptomNeuro': 'Weakness, numbness, or speech problems',
-  'checkin.b3.symptomStomach': 'Severe stomach or upper-right pain',
+  'checkin.b3.symptomStomach': 'Severe stomach or upper-right belly pain',
   'checkin.b3.pregnancyHeader': 'Pregnancy-specific',
   'checkin.b3.symptomNewHeadache': 'New headache (not usual for you)',
   'checkin.b3.symptomRuq': 'Pain in upper-right belly',
