@@ -67,6 +67,15 @@ export class ProviderController {
     return this.providerService.getPatientBpTrend(userId, startDate, endDate)
   }
 
+  @Get('patients/:userId/alerts')
+  getPatientAlerts(
+    @Param('userId') userId: string,
+    @Query('status') status?: string,
+    @Query('tier') tier?: string,
+  ) {
+    return this.providerService.getPatientAlerts(userId, { status, tier })
+  }
+
   @Get('alerts')
   getAlerts(
     @Query('severity') severity?: string,

@@ -329,6 +329,75 @@ export class IntakeService {
     }
   }
 
+  // ─── Admin: POST /admin/users/:id/reject-profile-field ───────────────────
+  // Flips the whole profile back to UNVERIFIED and writes an ADMIN_REJECT
+  // audit row pinned to the field the admin flagged. Used by the Flow H
+  // Profile tab when an admin rejects a single field after a prior verify.
+  async rejectProfileField(
+    adminId: string,
+    patientUserId: string,
+    dto: { field: string; rationale?: string },
+  ) {
+    const profile = await this.prisma.patientProfile.findUnique({
+      where: { userId: patientUserId },
+    })
+    if (!profile) {
+      throw new NotFoundException('Patient profile not found')
+    }
+    if (!dto.field || typeof dto.field !== 'string') {
+      throw new BadRequestException('field is required')
+    }
+
+    const previousStatus = profile.profileVerificationStatus
+    const fieldKey = dto.field as keyof typeof profile
+    const previousValue = profile[fieldKey] ?? null
+
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.patientProfile.update({
+        where: { userId: patientUserId },
+        data: {
+          profileVerificationStatus: ProfileVerificationStatus.UNVERIFIED,
+          profileVerifiedAt: null,
+          profileVerifiedBy: null,
+          profileLastEditedAt: new Date(),
+        },
+      }),
+      this.prisma.profileVerificationLog.create({
+        data: {
+          userId: patientUserId,
+          fieldPath: `profile.${dto.field}`,
+          previousValue: previousValue as Prisma.InputJsonValue,
+          newValue: Prisma.JsonNull,
+          changedBy: adminId,
+          changedByRole: VerifierRole.ADMIN,
+          changeType: VerificationChangeType.ADMIN_REJECT,
+          rationale: dto.rationale,
+          discrepancyFlag: true,
+        },
+      }),
+      // Also write a status-flip log so the timeline shows why the profile
+      // dropped back to UNVERIFIED.
+      this.prisma.profileVerificationLog.create({
+        data: {
+          userId: patientUserId,
+          fieldPath: 'profile.verificationStatus',
+          previousValue: previousStatus,
+          newValue: ProfileVerificationStatus.UNVERIFIED,
+          changedBy: adminId,
+          changedByRole: VerifierRole.ADMIN,
+          changeType: VerificationChangeType.ADMIN_REJECT,
+          rationale: `Reverted to unverified — ${dto.field} rejected`,
+        },
+      }),
+    ])
+
+    return {
+      statusCode: 200,
+      message: 'Field rejected; profile returned to unverified',
+      data: this.serializeProfile(updated),
+    }
+  }
+
   // ─── Admin: POST /admin/users/:id/correct-profile ────────────────────────
 
   async correctProfile(

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 /* Custom scrollbar styles for patient modal */
 const modalScrollStyles = `
@@ -469,12 +470,17 @@ function PatientModal({
 export default function PatientsPage() {
   const { user, isAuthenticated, isLoading } = useAuth();
   const { t } = useLanguage();
+  const router = useRouter();
 
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [riskFilter, setRiskFilter] = useState<string>('ALL');
 
+  // Flow H: row click navigates to /patients/[id] for the new tabbed detail
+  // view. The legacy modal state is kept temporarily so the existing detail
+  // modal can still mount in an empty state — but with selectedPatient
+  // permanently null since nothing sets it anymore.
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [summary, setSummary] = useState<PatientSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -658,7 +664,7 @@ export default function PatientsPage() {
                 return (
                   <button
                     key={p.id}
-                    onClick={() => setSelectedPatient(p)}
+                    onClick={() => router.push(`/patients/${p.id}`)}
                     className="w-full text-left px-5 py-3.5 flex items-center gap-4 md:grid transition-colors hover:bg-[#F8F4FF] cursor-pointer group"
                     style={{
                       gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 32px',

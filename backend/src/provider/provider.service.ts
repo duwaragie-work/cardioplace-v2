@@ -306,6 +306,76 @@ export class ProviderService {
     return { statusCode: 200, data: patients }
   }
 
+  // ─── GET /provider/patients/:userId/alerts ───────────────────────────────────
+  // Per-patient alerts feed with three-tier messages and linked escalation
+  // events — used by the Flow H "Alerts" tab. Supports tier + status filters
+  // so the UI can flip between OPEN / RESOLVED / All.
+  async getPatientAlerts(
+    userId: string,
+    filters: { status?: string; tier?: string } = {},
+  ) {
+    const where: Record<string, unknown> = { userId }
+    if (filters.status) where.status = filters.status
+    if (filters.tier) where.tier = filters.tier
+
+    const alerts = await this.prisma.deviationAlert.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        journalEntry: {
+          select: {
+            measuredAt: true,
+            systolicBP: true,
+            diastolicBP: true,
+          },
+        },
+        escalationEvents: {
+          orderBy: { triggeredAt: 'asc' },
+          select: {
+            id: true,
+            escalationLevel: true,
+            reason: true,
+            triggeredAt: true,
+            acknowledgedAt: true,
+            resolvedAt: true,
+            triggeredByResolution: true,
+            notificationSentAt: true,
+          },
+        },
+      },
+    })
+
+    return {
+      statusCode: 200,
+      data: alerts.map((a) => ({
+        id: a.id,
+        type: a.type,
+        severity: a.severity,
+        tier: a.tier,
+        ruleId: a.ruleId,
+        mode: a.mode,
+        pulsePressure: a.pulsePressure,
+        suboptimalMeasurement: a.suboptimalMeasurement,
+        magnitude: a.magnitude != null ? Number(a.magnitude) : null,
+        baselineValue: a.baselineValue ? Number(a.baselineValue) : null,
+        actualValue: a.actualValue ? Number(a.actualValue) : null,
+        patientMessage: a.patientMessage,
+        caregiverMessage: a.caregiverMessage,
+        physicianMessage: a.physicianMessage,
+        dismissible: a.dismissible,
+        escalated: a.escalated,
+        status: a.status,
+        resolutionAction: a.resolutionAction,
+        resolutionRationale: a.resolutionRationale,
+        resolvedBy: a.resolvedBy,
+        createdAt: a.createdAt,
+        acknowledgedAt: a.acknowledgedAt,
+        journalEntry: a.journalEntry,
+        escalationEvents: a.escalationEvents,
+      })),
+    }
+  }
+
   // ─── GET /provider/patients/:userId/summary ───────────────────────────────────
 
   async getPatientSummary(userId: string) {
