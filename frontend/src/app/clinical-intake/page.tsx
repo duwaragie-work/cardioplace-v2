@@ -54,6 +54,7 @@ import {
   getMyMedications,
   saveIntakeProfile,
   saveIntakeMedications,
+  replaceIntakeMedications,
 } from '@/lib/services/intake.service';
 import { CORE_MEDS as ALL_CORE_MEDS, CATEGORY_MEDS as ALL_CATEGORY_MEDS, COMBO_MEDS as ALL_COMBO_MEDS } from '@cardioplace/shared';
 import {
@@ -1232,14 +1233,12 @@ function DedupModal({
 
 function ExitSaveModal({
   editMode,
-  onMedStep,
   saving,
   error,
   onConfirm,
   onCancel,
 }: {
   editMode: boolean;
-  onMedStep: boolean;
   saving: boolean;
   error: string;
   onConfirm: () => void;
@@ -1277,17 +1276,6 @@ function ExitSaveModal({
         <p className="text-[13px] mb-4 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
           {body}
         </p>
-        {editMode && onMedStep && (
-          <p
-            className="text-[12px] mb-4 px-3 py-2 rounded-lg leading-relaxed text-left"
-            style={{
-              color: 'var(--brand-warning-amber)',
-              backgroundColor: 'var(--brand-warning-amber-light)',
-            }}
-          >
-            {t('intake.exitSave.editMedsWarning')}
-          </p>
-        )}
         {error && (
           <p
             className="text-[12px] mb-4 px-3 py-2 rounded-lg"
@@ -1372,6 +1360,10 @@ function ClinicalIntakeWizard() {
   const [editMode, setEditMode] = useState(false);
   const [exitSaving, setExitSaving] = useState(false);
   const [exitError, setExitError] = useState('');
+  // True when hydration found a VERIFIED profile — render the re-verify
+  // banner above the step content so the patient knows edits will reset
+  // their verified status until the care team confirms.
+  const [showReverifyBanner, setShowReverifyBanner] = useState(false);
 
   // Hydrate state. Three branches:
   //   1. No profile saved yet → fresh wizard (or resume localStorage draft)
@@ -1446,6 +1438,9 @@ function ClinicalIntakeWizard() {
           setStateRaw(seeded);
           setStep(requestedStep);
           setEditMode(true);
+          if (profile.profileVerificationStatus === 'VERIFIED') {
+            setShowReverifyBanner(true);
+          }
           setBootstrapping(false);
           return;
         }
@@ -1602,14 +1597,10 @@ function ClinicalIntakeWizard() {
   };
 
   // Exit-and-save from the top-bar Save button. In edit mode this upserts the
-  // profile (A1–A4 changes) to the backend and clears the local draft before
-  // navigating. In fresh-intake mode the draft is already persisted to
-  // localStorage on every setState, so we just navigate.
-  //
-  // Medication edits are NOT persisted here: the backend /intake/medications
-  // endpoint is pure-append (see intake.service.ts createMedications), so
-  // calling it again in edit mode would duplicate rows. Patients editing meds
-  // must go through Review → Submit, or use the per-medication PATCH path.
+  // profile AND replaces the medication list via PUT /me/medications, then
+  // clears the local draft before navigating. In fresh-intake mode the draft
+  // is already persisted to localStorage on every setState, so we just
+  // navigate.
   const handleExitSave = async () => {
     if (exitSaving) return;
     setExitError('');
@@ -1622,7 +1613,10 @@ function ClinicalIntakeWizard() {
     }
     setExitSaving(true);
     try {
-      await saveIntakeProfile(buildProfilePayload(state));
+      await Promise.all([
+        saveIntakeProfile(buildProfilePayload(state)),
+        replaceIntakeMedications(buildMedsPayload(state)),
+      ]);
       // Edit mode: the profile is now the source of truth — no resume needed.
       if (user?.id) clearDraft(user.id);
       router.push('/dashboard');
@@ -1725,6 +1719,34 @@ function ClinicalIntakeWizard() {
         </header>
       )}
 
+      {/* Re-verify banner — rendered above the first step content whenever a
+          VERIFIED patient enters edit mode, regardless of the ?step= anchor.
+          Tells the patient that saving will reset their verified status
+          until the care team reconfirms. */}
+      {showNav && showReverifyBanner && (
+        <div
+          className="w-full"
+          style={{
+            backgroundColor: 'var(--brand-warning-amber-light)',
+            borderBottom: '1px solid rgba(245,158,11,0.3)',
+          }}
+        >
+          <div className="max-w-3xl mx-auto px-4 sm:px-6 py-3 flex items-start gap-3">
+            <Shield
+              className="w-4 h-4 shrink-0 mt-0.5"
+              style={{ color: 'var(--brand-warning-amber)' }}
+              aria-hidden
+            />
+            <p
+              className="text-[12.5px] leading-snug"
+              style={{ color: 'var(--brand-text-primary)' }}
+            >
+              {t('intake.edit.reverifyBanner')}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Main content — A0b/A11 are full-screen-centered (no chrome); other
           steps scroll with extra bottom padding so the last form item never
           tucks under the sticky Continue button (or the iOS home indicator).
@@ -1815,7 +1837,6 @@ function ClinicalIntakeWizard() {
         {showExitSave && (
           <ExitSaveModal
             editMode={editMode}
-            onMedStep={['A5', 'A6', 'A8', 'A9'].includes(step)}
             saving={exitSaving}
             error={exitError}
             onConfirm={handleExitSave}

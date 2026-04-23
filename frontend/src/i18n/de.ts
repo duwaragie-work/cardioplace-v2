@@ -1017,11 +1017,11 @@ const de: Record<TranslationKey, string> = {
   'intake.exitSave.cta': 'Zurück zum Dashboard',
   'intake.exitSave.keepGoing': 'Weitermachen',
   'intake.exitSave.editTitle': 'Änderungen speichern?',
-  'intake.exitSave.editBody': 'Wir aktualisieren Ihr Profil mit den Änderungen auf dieser Seite und bringen Sie dann zurück zum Dashboard.',
+  'intake.exitSave.editBody': 'Wir aktualisieren Ihr Profil und Ihre Medikamente mit den Änderungen auf dieser Seite und bringen Sie dann zurück zum Dashboard.',
   'intake.exitSave.editCta': 'Speichern und beenden',
-  'intake.exitSave.editMedsWarning': 'Medikamentenänderungen auf diesem Schritt werden hier nicht gespeichert. Tippen Sie auf Weiter, um Medikamentenänderungen zu überprüfen und zu senden.',
   'intake.exitSave.saving': 'Speichern…',
   'intake.exitSave.errorFallback': 'Ihre Änderungen konnten nicht gespeichert werden. Bitte versuchen Sie es erneut.',
+  'intake.edit.reverifyBanner': 'Das Bearbeiten dieser Informationen erfordert, dass Ihr Behandlungsteam erneut verifiziert. Ihr Verifizierungsstatus wird zurückgesetzt, bis die Änderungen bestätigt werden.',
 
   // "Already on file" page
   'intake.profileExists.title': 'Alles bereit',

@@ -1017,11 +1017,11 @@ const es: Record<TranslationKey, string> = {
   'intake.exitSave.cta': 'Volver al panel',
   'intake.exitSave.keepGoing': 'Seguir',
   'intake.exitSave.editTitle': '¿Guardar sus cambios?',
-  'intake.exitSave.editBody': 'Actualizaremos su perfil con los cambios de esta página y lo llevaremos de vuelta al panel.',
+  'intake.exitSave.editBody': 'Actualizaremos su perfil y medicamentos con los cambios de esta página y lo llevaremos de vuelta al panel.',
   'intake.exitSave.editCta': 'Guardar y salir',
-  'intake.exitSave.editMedsWarning': 'Los cambios de medicamentos en este paso no se guardarán aquí. Toque Continuar para revisar y enviar cualquier cambio de medicamentos.',
   'intake.exitSave.saving': 'Guardando…',
   'intake.exitSave.errorFallback': 'No pudimos guardar sus cambios. Inténtelo de nuevo.',
+  'intake.edit.reverifyBanner': 'Editar esta información requerirá que su equipo de atención vuelva a verificar. Su estado verificado se restablecerá hasta que confirmen los cambios.',
 
   // "Already on file" page
   'intake.profileExists.title': 'Todo está listo',
