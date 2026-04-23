@@ -357,8 +357,8 @@ const es: Record<TranslationKey, string> = {
   'profile.emailCannotChange': '· no se puede cambiar',
   'profile.dobLabel': 'Fecha de nacimiento',
   'profile.commPrefLabel': 'Preferencia de comunicación',
-  'profile.commPrefText': 'Texto primero',
-  'profile.commPrefAudio': 'Audio primero',
+  'profile.commPrefText': 'Preferir texto',
+  'profile.commPrefAudio': 'Preferir audio',
   'profile.saving': 'Guardando…',
   'profile.saveError': 'No se pudieron guardar los cambios.',
   'profile.saveChangesBtn': 'Guardar cambios',
@@ -389,7 +389,7 @@ const es: Record<TranslationKey, string> = {
   'profile.noCareTeam': 'Aún no se le ha asignado un equipo de atención. Su equipo aparecerá aquí cuando se asigne un proveedor.',
   'profile.noConditions': 'No se reportaron condiciones.',
   'profile.noMedications': 'No se reportaron medicamentos.',
-  'profile.combinationPill': '2 en 1',
+  'profile.combinationPill': '2-en-1',
   'profile.reviewingChanges': 'Su equipo de atención está revisando sus últimos cambios. Esto suele tardar de 48 a 72 horas.',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
