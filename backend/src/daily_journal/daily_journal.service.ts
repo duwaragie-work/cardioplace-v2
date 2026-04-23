@@ -45,10 +45,23 @@ export class DailyJournalService {
           measurementConditions: (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull,
           medicationTaken: dto.medicationTaken ?? null,
           missedDoses: dto.missedDoses ?? null,
-          // TODO(phase/15): replace with structured symptom booleans once
-          // Dev 1 lands the card-based intake UI. v1 clients still send
-          // freeform symptoms[] — we route them to otherSymptoms for now.
-          otherSymptoms: dto.symptoms ?? [],
+          // V2 structured Level-2 symptom triggers (Flow B). Prefer the
+          // explicit booleans, otherSymptoms goes to the same column. The
+          // legacy `symptoms` array (v1 clients) is appended so nothing is
+          // lost during the transition.
+          severeHeadache: dto.severeHeadache ?? false,
+          visualChanges: dto.visualChanges ?? false,
+          alteredMentalStatus: dto.alteredMentalStatus ?? false,
+          chestPainOrDyspnea: dto.chestPainOrDyspnea ?? false,
+          focalNeuroDeficit: dto.focalNeuroDeficit ?? false,
+          severeEpigastricPain: dto.severeEpigastricPain ?? false,
+          newOnsetHeadache: dto.newOnsetHeadache ?? false,
+          ruqPain: dto.ruqPain ?? false,
+          edema: dto.edema ?? false,
+          otherSymptoms: [
+            ...(dto.otherSymptoms ?? []),
+            ...(dto.symptoms ?? []),
+          ],
           teachBackAnswer: dto.teachBackAnswer ?? null,
           teachBackCorrect: dto.teachBackCorrect ?? null,
           notes: dto.notes ?? null,
@@ -118,7 +131,25 @@ export class DailyJournalService {
           (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull
       if (dto.medicationTaken !== undefined) data.medicationTaken = dto.medicationTaken
       if (dto.missedDoses !== undefined) data.missedDoses = dto.missedDoses
-      if (dto.symptoms !== undefined) data.otherSymptoms = dto.symptoms ?? []
+
+      // Structured V2 symptom booleans (Flow B). Each is independently
+      // patchable so a partial update doesn't blow away the others.
+      if (dto.severeHeadache !== undefined) data.severeHeadache = dto.severeHeadache
+      if (dto.visualChanges !== undefined) data.visualChanges = dto.visualChanges
+      if (dto.alteredMentalStatus !== undefined) data.alteredMentalStatus = dto.alteredMentalStatus
+      if (dto.chestPainOrDyspnea !== undefined) data.chestPainOrDyspnea = dto.chestPainOrDyspnea
+      if (dto.focalNeuroDeficit !== undefined) data.focalNeuroDeficit = dto.focalNeuroDeficit
+      if (dto.severeEpigastricPain !== undefined) data.severeEpigastricPain = dto.severeEpigastricPain
+      if (dto.newOnsetHeadache !== undefined) data.newOnsetHeadache = dto.newOnsetHeadache
+      if (dto.ruqPain !== undefined) data.ruqPain = dto.ruqPain
+      if (dto.edema !== undefined) data.edema = dto.edema
+
+      if (dto.otherSymptoms !== undefined || dto.symptoms !== undefined) {
+        data.otherSymptoms = [
+          ...(dto.otherSymptoms ?? []),
+          ...(dto.symptoms ?? []),
+        ]
+      }
       if (dto.teachBackAnswer !== undefined) data.teachBackAnswer = dto.teachBackAnswer
       if (dto.teachBackCorrect !== undefined) data.teachBackCorrect = dto.teachBackCorrect
       if (dto.notes !== undefined) data.notes = dto.notes
@@ -505,22 +536,107 @@ export class DailyJournalService {
   async delete(userId: string, id: string) {
     const entry = await this.prisma.journalEntry.findFirst({
       where: { id, userId },
+      select: {
+        id: true,
+        userId: true,
+        sessionId: true,
+        measuredAt: true,
+      },
     })
 
     if (!entry) {
       throw new NotFoundException('Journal entry not found')
     }
 
+    // Resolve the session anchor that will trigger a re-evaluation BEFORE the
+    // delete cascades. SessionAveragerService groups by sessionId OR a 30-min
+    // measuredAt window; we mirror that here so the rule engine recomputes the
+    // averaged vitals for what's left of the session.
+    //
+    // DeviationAlert / EscalationEvent rows owned by `entry` cascade-delete
+    // via the FK (phase/2 schema). The re-evaluation below takes care of any
+    // *sibling-owned* alert that should now be resolved or re-classified — if
+    // the average changes such that no rule fires, AlertEngine.resolveOpenAlerts
+    // flips open BP_LEVEL_1 alerts to RESOLVED.
+    const survivingAnchor = await this.findSessionReevalAnchor(entry)
+
     await this.prisma.journalEntry.delete({ where: { id } })
 
-    // TODO(phase/5): once the rule engine is wired, emit ENTRY_UPDATED for any
-    // session-adjacent readings that might need re-evaluation. For phase/2,
-    // deletion is terminal — no baseline recompute because there is no
-    // rolling baseline in v2.
+    if (survivingAnchor) {
+      this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
+        userId: survivingAnchor.userId,
+        entryId: survivingAnchor.id,
+        measuredAt: survivingAnchor.measuredAt,
+        systolicBP: survivingAnchor.systolicBP,
+        diastolicBP: survivingAnchor.diastolicBP,
+        pulse: survivingAnchor.pulse,
+        weight:
+          survivingAnchor.weight != null ? Number(survivingAnchor.weight) : null,
+        sessionId: survivingAnchor.sessionId,
+      })
+    }
+
     return {
       statusCode: 200,
       message: 'Journal entry deleted successfully',
     }
+  }
+
+  /**
+   * Returns the newest remaining session-sibling of `entry`, or null if no
+   * sibling exists. The rule engine will re-average the session from that
+   * anchor after delete cascades.
+   */
+  private async findSessionReevalAnchor(entry: {
+    id: string
+    userId: string
+    sessionId: string | null
+    measuredAt: Date
+  }) {
+    const SESSION_WINDOW_MS = 30 * 60 * 1000
+
+    if (entry.sessionId) {
+      return this.prisma.journalEntry.findFirst({
+        where: {
+          userId: entry.userId,
+          sessionId: entry.sessionId,
+          id: { not: entry.id },
+        },
+        orderBy: { measuredAt: 'desc' },
+        select: {
+          id: true,
+          userId: true,
+          sessionId: true,
+          measuredAt: true,
+          systolicBP: true,
+          diastolicBP: true,
+          pulse: true,
+          weight: true,
+        },
+      })
+    }
+
+    const windowStart = new Date(entry.measuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS)
+    return this.prisma.journalEntry.findFirst({
+      where: {
+        userId: entry.userId,
+        sessionId: null,
+        id: { not: entry.id },
+        measuredAt: { gte: windowStart, lte: windowEnd },
+      },
+      orderBy: { measuredAt: 'desc' },
+      select: {
+        id: true,
+        userId: true,
+        sessionId: true,
+        measuredAt: true,
+        systolicBP: true,
+        diastolicBP: true,
+        pulse: true,
+        weight: true,
+      },
+    })
   }
 
   async getStats(userId: string) {
@@ -682,6 +798,15 @@ export class DailyJournalService {
     sessionId: string | null
     medicationTaken: boolean | null
     missedDoses: number | null
+    severeHeadache?: boolean
+    visualChanges?: boolean
+    alteredMentalStatus?: boolean
+    chestPainOrDyspnea?: boolean
+    focalNeuroDeficit?: boolean
+    severeEpigastricPain?: boolean
+    newOnsetHeadache?: boolean
+    ruqPain?: boolean
+    edema?: boolean
     otherSymptoms: string[]
     teachBackAnswer: string | null
     teachBackCorrect: boolean | null
@@ -703,6 +828,15 @@ export class DailyJournalService {
       sessionId: entry.sessionId,
       medicationTaken: entry.medicationTaken,
       missedDoses: entry.missedDoses,
+      severeHeadache: entry.severeHeadache ?? false,
+      visualChanges: entry.visualChanges ?? false,
+      alteredMentalStatus: entry.alteredMentalStatus ?? false,
+      chestPainOrDyspnea: entry.chestPainOrDyspnea ?? false,
+      focalNeuroDeficit: entry.focalNeuroDeficit ?? false,
+      severeEpigastricPain: entry.severeEpigastricPain ?? false,
+      newOnsetHeadache: entry.newOnsetHeadache ?? false,
+      ruqPain: entry.ruqPain ?? false,
+      edema: entry.edema ?? false,
       otherSymptoms: entry.otherSymptoms,
       teachBackAnswer: entry.teachBackAnswer,
       teachBackCorrect: entry.teachBackCorrect,

@@ -1,6 +1,31 @@
 import { Injectable } from '@nestjs/common'
+import type { ResolvedContext } from '@cardioplace/shared'
 
-interface PatientContext {
+/**
+ * Scaffolding for future chat routing — phase/16 always sends PATIENT. The
+ * buildSystemPrompt() emits different style directives per mode, so the
+ * downstream wiring just needs to flip the value when caregiver / physician
+ * portals land.
+ */
+export type ToneMode = 'PATIENT' | 'CAREGIVER' | 'PHYSICIAN'
+
+/**
+ * v2 active-alert shape passed to the system prompt. Sourced from
+ * `DeviationAlert` rows with `status IN ('OPEN','ACKNOWLEDGED')`. The full
+ * patientMessage is injected so the chatbot can reference the alert's
+ * reviewed wording verbatim when asked "why did I get this alert?".
+ */
+export interface ChatAlertContext {
+  tier: string
+  ruleId: string
+  mode: string
+  patientMessage: string | null
+  physicianMessage: string | null
+  dismissible: boolean
+  createdAt: Date
+}
+
+export interface PatientContext {
   recentEntries: Array<{
     measuredAt: Date
     systolicBP: number | null
@@ -13,19 +38,25 @@ interface PatientContext {
     baselineSystolic: number | null
     baselineDiastolic: number | null
   } | null
-  activeAlerts: Array<{
-    type: string | null
-    severity: string | null
-  }>
+  activeAlerts: ChatAlertContext[]
   communicationPreference: string | null
   preferredLanguage: string | null
   patientName?: string | null
   dateOfBirth?: Date | null
+  /**
+   * Output of ProfileResolverService.resolve(). Null for users without a
+   * PatientProfile (e.g. admin accounts — shouldn't normally hit chat, but
+   * the prompt renders a minimal variant defensively).
+   */
+  resolvedContext: ResolvedContext | null
+  /** Phase/16 always sends 'PATIENT'. Scaffolding for future tones. */
+  toneMode: ToneMode
 }
 
 @Injectable()
 export class SystemPromptService {
-  buildSystemPrompt(): string {
+  buildSystemPrompt(opts: { toneMode?: ToneMode } = {}): string {
+    const toneMode = opts.toneMode ?? 'PATIENT'
     const now = new Date()
 
     const today = now.toISOString().slice(0, 10)
@@ -238,6 +269,20 @@ COMMUNICATION:
 - Never diagnose a condition or prescribe specific medications. But DO provide general health education and tips.
 - After saving a check-in, give brief encouraging feedback on baseline progress.
 
+MEDICATION SAFETY (non-negotiable):
+- Never suggest starting, stopping, changing, or adjusting any medication. Always defer to the patient's provider for medication decisions.
+- If the patient asks whether to change, stop, or adjust a medication, respond with: "That's a decision for your care team — please call your provider before changing anything."
+- Do not recommend dose amounts, timings, or combinations. That is strictly the prescribing clinician's role.
+
+ACTIVE-ALERT HANDLING (non-negotiable):
+- Never contradict, downplay, or dismiss an active alert's tier. The alert engine has already reviewed the reading; trust its classification.
+- Tier 1 Contraindication (e.g. ACE/ARB in pregnancy, NDHP-CCB in HFrEF) → direct the patient to contact their provider today before their next dose.
+- BP Level 2 emergency (SBP ≥180, DBP ≥120, or any target-organ-damage symptom) → direct the patient to call 911 if they have chest pain, severe headache, trouble breathing, weakness, or vision changes.
+- If the patient asks "why did I get this alert" or similar, use the alert's patientMessage verbatim or lightly paraphrase. Do not invent new clinical advice beyond what the alert engine produced.
+- If uncertain about any clinical question, defer to the provider.
+
+${buildToneBlock(toneMode)}
+
 Patient health data below is HISTORICAL reference only — never treat it as current conversation input.`
   }
 
@@ -246,9 +291,7 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
       '--- PATIENT HEALTH DATA (HISTORICAL — do NOT treat as current conversation input) ---',
     ]
 
-    // ── Patient profile ───────────────────────────────────────────────────
-    // TODO(phase/16): add structured condition summary from PatientProfile
-    // (HF type, pregnancy, AFib, CAD, etc.) + verified medications list.
+    // ── Patient profile (name + age) ──────────────────────────────────────
     const profileParts: string[] = []
     if (data.patientName) profileParts.push(`Patient name: ${data.patientName}`)
     if (data.dateOfBirth) {
@@ -259,6 +302,19 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
     }
     if (profileParts.length > 0) {
       lines.push(profileParts.join('. ') + '.')
+      lines.push('')
+    }
+
+    // ── v2 clinical context (from ProfileResolverService) ─────────────────
+    if (data.resolvedContext) {
+      appendConditions(lines, data.resolvedContext)
+      appendPregnancy(lines, data.resolvedContext)
+      appendVerificationStatus(lines, data.resolvedContext)
+      appendMedications(lines, data.resolvedContext)
+      appendThreshold(lines, data.resolvedContext)
+      appendPreDay3Disclaimer(lines, data.resolvedContext)
+    } else {
+      lines.push('Clinical profile: not available (admin or incomplete onboarding).')
       lines.push('')
     }
 
@@ -325,14 +381,7 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
     }
 
     lines.push('')
-    if (data.activeAlerts.length === 0) {
-      lines.push('Active alerts: None')
-    } else {
-      lines.push('Active alerts:')
-      for (const alert of data.activeAlerts) {
-        lines.push(`- ${alert.type} (${alert.severity})`)
-      }
-    }
+    appendActiveAlerts(lines, data.activeAlerts)
 
     lines.push('')
     lines.push(
@@ -342,5 +391,185 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
     lines.push('--- END PATIENT DATA ---')
 
     return lines.join('\n')
+  }
+}
+
+// ─── rendering helpers ──────────────────────────────────────────────────────
+// Split out so each section can be unit-tested independently.
+
+function buildToneBlock(tone: ToneMode): string {
+  switch (tone) {
+    case 'CAREGIVER':
+      return `TONE — caregiver mode:
+Give the caregiver clinical context plus a clear next action. Use plain language but include medical terms where the caregiver needs them (e.g. "the patient's systolic pressure"). Focus on what the caregiver should do right now.`
+    case 'PHYSICIAN':
+      return `TONE — physician mode:
+Respond in clinical shorthand. Use standard abbreviations (SBP, DBP, HR, HFrEF, HFpEF, CAD). Reference the physicianMessage rather than the patientMessage when an alert is present. Skip reassurance language.`
+    case 'PATIENT':
+    default:
+      return `TONE — patient mode:
+Use warm, plain language. Address the patient in the second person ("you", "your"). Avoid clinical jargon; when medical terms are unavoidable, explain them briefly. Keep responses supportive, encouraging, and short.`
+  }
+}
+
+function appendConditions(lines: string[], ctx: ResolvedContext): void {
+  const parts: string[] = []
+  const p = ctx.profile
+
+  // Heart failure — use resolvedHFType so UNKNOWN / DCM-only map to HFrEF
+  // display, matching the engine's behaviour.
+  if (p.hasHeartFailure) {
+    if (p.heartFailureType === 'UNKNOWN') {
+      parts.push('Heart failure (type unknown — managed as HFrEF)')
+    } else if (p.heartFailureType === 'HFREF') {
+      parts.push('Heart failure (HFrEF)')
+    } else if (p.heartFailureType === 'HFPEF') {
+      parts.push('Heart failure (HFpEF)')
+    } else {
+      parts.push('Heart failure')
+    }
+  } else if (p.hasDCM) {
+    parts.push('Dilated cardiomyopathy (managed as HFrEF)')
+  }
+
+  if (p.hasCAD) parts.push('Coronary artery disease (CAD)')
+  if (p.hasAFib) parts.push('Atrial fibrillation (AFib)')
+  if (p.hasHCM) parts.push('Hypertrophic cardiomyopathy (HCM)')
+  if (p.hasTachycardia) parts.push('Tachycardia')
+  if (p.hasBradycardia) parts.push('Bradycardia')
+  if (p.diagnosedHypertension) parts.push('Hypertension (on treatment)')
+
+  if (parts.length === 0) {
+    lines.push('Cardiac conditions: No known cardiac conditions.')
+  } else {
+    lines.push(`Cardiac conditions: ${parts.join('; ')}.`)
+  }
+  lines.push('')
+}
+
+function appendPregnancy(lines: string[], ctx: ResolvedContext): void {
+  const p = ctx.profile
+  if (p.isPregnant) {
+    if (p.pregnancyDueDate) {
+      const due = new Date(p.pregnancyDueDate).toISOString().slice(0, 10)
+      lines.push(`Pregnancy: Currently pregnant. Due date: ${due}.`)
+    } else {
+      lines.push('Pregnancy: Currently pregnant.')
+    }
+    if (p.historyPreeclampsia) {
+      lines.push('History of preeclampsia.')
+    }
+    lines.push('')
+  } else if (p.historyPreeclampsia) {
+    lines.push('History of preeclampsia (not currently pregnant).')
+    lines.push('')
+  }
+}
+
+function appendVerificationStatus(lines: string[], ctx: ResolvedContext): void {
+  const status = ctx.profile.verificationStatus
+  if (status === 'UNVERIFIED') {
+    lines.push('Clinical profile awaiting provider verification — some fields may change.')
+    lines.push('')
+  } else if (status === 'CORRECTED') {
+    lines.push('Clinical profile verified by provider (corrections applied).')
+    lines.push('')
+  }
+  // VERIFIED → no disclaimer
+}
+
+function appendMedications(lines: string[], ctx: ResolvedContext): void {
+  const meds = ctx.contextMeds
+  if (meds.length === 0) {
+    lines.push('Medications: No medications recorded.')
+    lines.push('')
+    return
+  }
+  lines.push('Medications:')
+  for (const med of meds) {
+    const unverifiedFlag =
+      med.verificationStatus === 'UNVERIFIED' ? ' ⚠ unverified' : ''
+    let line = `- ${med.drugName} (${med.drugClass}), ${formatFrequency(med.frequency)}${unverifiedFlag}`
+    if (med.isCombination && med.combinationComponents.length > 0) {
+      line += ` [combo: ${med.combinationComponents.join(' + ')}]`
+    }
+    lines.push(line)
+  }
+  lines.push('')
+}
+
+function formatFrequency(freq: string): string {
+  switch (freq) {
+    case 'ONCE_DAILY':
+      return 'once daily'
+    case 'TWICE_DAILY':
+      return 'twice daily'
+    case 'THREE_TIMES_DAILY':
+      return 'three times daily'
+    case 'UNSURE':
+    default:
+      return 'frequency unsure'
+  }
+}
+
+function appendThreshold(lines: string[], ctx: ResolvedContext): void {
+  const t = ctx.threshold
+  if (!t) {
+    lines.push('Provider-set BP goal: Provider has not yet set a personal BP goal.')
+    lines.push('')
+    return
+  }
+  const parts: string[] = []
+  if (t.sbpUpperTarget != null || t.sbpLowerTarget != null) {
+    parts.push(
+      `SBP ${t.sbpLowerTarget ?? '?'}–${t.sbpUpperTarget ?? '?'} mmHg`,
+    )
+  }
+  if (t.dbpUpperTarget != null || t.dbpLowerTarget != null) {
+    parts.push(
+      `DBP ${t.dbpLowerTarget ?? '?'}–${t.dbpUpperTarget ?? '?'} mmHg`,
+    )
+  }
+  if (t.hrUpperTarget != null || t.hrLowerTarget != null) {
+    parts.push(
+      `HR ${t.hrLowerTarget ?? '?'}–${t.hrUpperTarget ?? '?'} bpm`,
+    )
+  }
+  const setOn = new Date(t.setAt).toISOString().slice(0, 10)
+  lines.push(`Provider-set goals: ${parts.join(', ')}, set ${setOn}.`)
+  lines.push('')
+}
+
+function appendPreDay3Disclaimer(lines: string[], ctx: ResolvedContext): void {
+  if (ctx.preDay3Mode) {
+    lines.push(
+      `Patient has fewer than 7 readings (${ctx.readingCount} total); alerts use standard thresholds until personalization begins after Day 3.`,
+    )
+    lines.push('')
+  }
+}
+
+function appendActiveAlerts(
+  lines: string[],
+  alerts: ChatAlertContext[],
+): void {
+  if (alerts.length === 0) {
+    lines.push('Active alerts: None.')
+    return
+  }
+  lines.push(`Active alerts (${alerts.length}, most recent first):`)
+  for (const alert of alerts) {
+    const when = new Date(alert.createdAt).toISOString().slice(0, 10)
+    const heading = `⚠ ${alert.tier} · ${alert.ruleId} · fired ${when}${alert.dismissible ? '' : ' · NON-DISMISSABLE'}`
+    lines.push(`- ${heading}`)
+    if (alert.patientMessage && alert.patientMessage.trim().length > 0) {
+      lines.push(`  Patient-facing message: "${alert.patientMessage}"`)
+    } else if (alert.physicianMessage && alert.physicianMessage.trim().length > 0) {
+      // Physician-only alerts (e.g. RULE_PULSE_PRESSURE_WIDE) — flag clearly so
+      // the chatbot knows not to surface this to the patient.
+      lines.push(
+        `  Physician-level note (do NOT surface to patient): "${alert.physicianMessage}"`,
+      )
+    }
   }
 }

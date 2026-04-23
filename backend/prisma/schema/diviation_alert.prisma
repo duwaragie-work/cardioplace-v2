@@ -38,9 +38,13 @@ model DeviationAlert {
   notifications    Notification[]
   scheduledCalls   ScheduledCall[]
 
-  @@unique([journalEntryId, type])
+  // Phase/7 — dropped @@unique([journalEntryId, type]). v2 allows multiple
+  // alerts per entry (e.g. Tier 3 pulse-pressure annotation alongside a Tier 1
+  // contraindication). Engine enforces app-level dedup by (journalEntryId, ruleId)
+  // in the upsert logic.
   @@index([userId, createdAt(sort: Desc)])
   @@index([userId, status, createdAt(sort: Desc)])
+  @@index([journalEntryId, ruleId])
 }
 
 enum AlertTier {

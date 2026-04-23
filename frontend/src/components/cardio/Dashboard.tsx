@@ -12,10 +12,15 @@ import {
   CartesianGrid,
   ResponsiveContainer,
 } from 'recharts';
-import { Flame, Clock, ArrowRight } from 'lucide-react';
+import { Flame, Clock, ArrowRight, Heart, Target, ShieldCheck, AlertTriangle, Pill, ArrowUp, ArrowDown } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { getJournalEntries, getLatestBaseline, getAlerts, getJournalStats } from '@/lib/services/journal.service';
+import { getJournalEntries, getLatestBaseline, getAlerts, getJournalStats, type AlertTier } from '@/lib/services/journal.service';
+import { getMyPatientProfile, getMyMedications, type PatientProfileDto } from '@/lib/services/intake.service';
+import { getMyThreshold, type PatientThresholdDto } from '@/lib/services/threshold.service';
+import { loadDraft, hasDraft, stepProgress } from '@/lib/intake/draft';
+import ActionRequiredCard from '@/components/intake/ActionRequiredCard';
+import MonthlyMedReask from '@/components/intake/MonthlyMedReask';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function getDateLabel(dateStr: string): string {
@@ -28,13 +33,14 @@ function formatAlertDate(dateStr: string): string {
   catch { return ''; }
 }
 
-function formatAlertType(type: string): string {
+function formatAlertType(type: string | null | undefined): string {
+  if (!type) return 'Alert';
   return type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function getLastCheckInText(latestEntry: Record<string, unknown> | null): string {
   if (!latestEntry) return 'No check-ins yet';
-  const d = new Date(latestEntry.entryDate as string);
+  const d = new Date(latestEntry.measuredAt as string);
   const today = new Date();
   const yesterday = new Date();
   yesterday.setDate(today.getDate() - 1);
@@ -46,10 +52,10 @@ function getLastCheckInText(latestEntry: Record<string, unknown> | null): string
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface JournalEntry {
-  entryDate: string;
-  measurementTime?: string | null;
+  measuredAt: string;
   systolicBP?: number;
   diastolicBP?: number;
+  pulse?: number | null;
   medicationTaken?: boolean;
 }
 interface Baseline {
@@ -58,11 +64,20 @@ interface Baseline {
 }
 interface DeviationAlert {
   id: string;
-  type: string;
-  severity: string;
-  status: string;
+  // type/severity are nullable on the v2 DTO (legacy fields, replaced by tier)
+  type?: string | null;
+  severity?: string | null;
+  status?: string;
   createdAt?: string;
-  journalEntry?: { entryDate?: string };
+  // V2 fields used by D3 prioritization + Flow C dispatch
+  tier?: import('@/lib/services/journal.service').AlertTier | null;
+  patientMessage?: string | null;
+  journalEntry?: {
+    measuredAt?: string | null;
+    systolicBP?: number | null;
+    diastolicBP?: number | null;
+    pulse?: number | null;
+  } | null;
 }
 
 // ─── Skeleton bone ───────────────────────────────────────────────────────────
@@ -88,6 +103,80 @@ export default function Dashboard() {
   const [totalEntries, setTotalEntries] = useState(0);
   const [dataLoading, setDataLoading] = useState(true);
 
+  // Clinical Intake (Flow A) state — surfaces the Action Required card when
+  // basic onboarding is COMPLETED but PatientProfile has not been recorded yet.
+  type IntakeUiState =
+    | { kind: 'unknown' }
+    | { kind: 'done' }
+    | { kind: 'fresh' }
+    | { kind: 'resume'; stepIndex: number; total: number; stepLabel: string };
+  const [intakeUi, setIntakeUi] = useState<IntakeUiState>({ kind: 'unknown' });
+
+  // Flow D state — full profile (for D1 verification badge) + threshold (D2 + D4 colors).
+  const [profile, setProfile] = useState<PatientProfileDto | null>(null);
+  const [threshold, setThreshold] = useState<PatientThresholdDto | null>(null);
+  // E4 — track whether the patient has any active medications so we don't
+  // pop the monthly re-ask modal for someone who reported zero meds.
+  const [hasMeds, setHasMeds] = useState(false);
+
+  // Resolve Flow D state — fetches PatientProfile + PatientThreshold in
+  // parallel, falls back to localStorage draft inspection for the intake UI.
+  // Hidden completely until resolved so the amber Action Required card
+  // doesn't flash and disappear.
+  useEffect(() => {
+    if (isLoading || !isAuthenticated || !user?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [p, t, m] = await Promise.all([
+          getMyPatientProfile().catch(() => null),
+          getMyThreshold().catch(() => null),
+          // Only check meds if profile exists — saves a 404-then-empty round trip
+          // for patients who haven't completed clinical intake yet.
+          getMyMedications().catch(() => []),
+        ]);
+        if (cancelled) return;
+        setProfile(p);
+        setThreshold(t);
+        setHasMeds(Array.isArray(m) && m.some((med) => !med.discontinuedAt));
+
+        if (p) { setIntakeUi({ kind: 'done' }); return; }
+        if (hasDraft(user.id)) {
+          const draft = loadDraft(user.id);
+          // A draft pointing at A11 is stale (submit succeeded but the DB
+          // row was later removed). Show the fresh card instead.
+          if (draft?.currentStep === 'A11') {
+            setIntakeUi({ kind: 'fresh' });
+            return;
+          }
+          const { index, total } = stepProgress(draft?.currentStep);
+          const labels: Record<string, string> = {
+            A1: 'About you',
+            A2: 'Pregnancy',
+            A3: 'Conditions',
+            A4: 'Heart failure type',
+            A5: 'Medications',
+            A6: 'Combination pills',
+            A8: 'Other medicines',
+            A9: 'How often',
+            A10: 'Review',
+          };
+          setIntakeUi({
+            kind: 'resume',
+            stepIndex: index,
+            total,
+            stepLabel: labels[draft?.currentStep ?? 'A1'] ?? 'Continuing',
+          });
+        } else {
+          setIntakeUi({ kind: 'fresh' });
+        }
+      } catch {
+        if (!cancelled) setIntakeUi({ kind: 'fresh' });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, isLoading, isAuthenticated]);
+
   useEffect(() => {
     if (isLoading || !isAuthenticated) return;
     setDataLoading(true);
@@ -98,21 +187,25 @@ export default function Dashboard() {
       getJournalStats().catch(() => null),
     ]).then(([entries, baselineData, alertsData, stats]) => {
       const arr: JournalEntry[] = Array.isArray(entries) ? entries : [];
-      const sortedAsc = [...arr].sort((a, b) => new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime());
+      const sortedAsc = [...arr].sort((a, b) => new Date(a.measuredAt).getTime() - new Date(b.measuredAt).getTime());
       const dateCounts = new Map<string, number>();
       setBpChartData(sortedAsc.map((e) => {
-        const label = getDateLabel(e.entryDate);
+        const label = getDateLabel(e.measuredAt);
         const count = (dateCounts.get(label) ?? 0) + 1;
         dateCounts.set(label, count);
+        // measuredAt now carries both date and time — derive a hh:mm label.
+        const dt = new Date(e.measuredAt);
+        const hh = String(dt.getHours()).padStart(2, '0');
+        const mi = String(dt.getMinutes()).padStart(2, '0');
         return {
           day: count > 1 ? `${label} #${count}` : label,
           systolic: e.systolicBP ?? 0,
           diastolic: e.diastolicBP ?? 0,
-          fullDate: e.entryDate,
-          time: e.measurementTime ?? '',
+          fullDate: e.measuredAt,
+          time: `${hh}:${mi}`,
         };
       }));
-      const sortedDesc = [...arr].sort((a, b) => new Date(b.entryDate).getTime() - new Date(a.entryDate).getTime());
+      const sortedDesc = [...arr].sort((a, b) => new Date(b.measuredAt).getTime() - new Date(a.measuredAt).getTime());
       setLatestEntry(sortedDesc[0] ?? null);
       setTotalEntries(stats?.totalEntries ?? arr.length);
       setStreak(stats?.currentStreak ?? 0);
@@ -127,7 +220,7 @@ export default function Dashboard() {
   const userName = user?.name?.split(' ')[0] ?? '';
 
   const todayStr = new Date().toISOString().slice(0, 10);
-  const todayHasEntry = latestEntry?.entryDate?.slice(0, 10) === todayStr;
+  const todayHasEntry = latestEntry?.measuredAt?.slice(0, 10) === todayStr;
 
   const greeting = (() => {
     const h = new Date().getHours();
@@ -154,6 +247,147 @@ export default function Dashboard() {
 
   const openAlerts = alerts.filter((a) => a.status === 'OPEN');
 
+  // ── Flow D helpers ────────────────────────────────────────────────────────
+  // D1 verification badge: shown only when the patient has submitted intake
+  // (profile exists) AND the care team hasn't yet confirmed it.
+  const showVerificationBadge =
+    intakeUi.kind === 'done' && profile?.profileVerificationStatus === 'UNVERIFIED';
+
+  // D3 top alert: pick the single most-urgent open alert. We try the v2 tier
+  // first, then derive from the legacy severity + the actual reading so v1
+  // alerts still slot in correctly.
+  function alertPriority(a: typeof openAlerts[number]): number {
+    const sbp = a.journalEntry?.systolicBP ?? 0;
+    const dbp = a.journalEntry?.diastolicBP ?? 0;
+    const tier = (a as { tier?: AlertTier | null }).tier;
+    if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 100;
+    if (sbp >= 180 || dbp >= 120) return 100; // tier-null but clinically critical
+    if (tier === 'TIER_1_CONTRAINDICATION') return 80;
+    if (tier === 'BP_LEVEL_1_HIGH') return 60;
+    if (tier === 'BP_LEVEL_1_LOW') return 60;
+    if (a.severity === 'HIGH') return 60;
+    if (tier === 'TIER_3_INFO') return 20;
+    return 40;
+  }
+  const topAlert = openAlerts.length > 0
+    ? [...openAlerts].sort((x, y) => alertPriority(y) - alertPriority(x))[0]
+    : null;
+
+  // Visual variant for the D3 card — mirrors TierAlertView.
+  type AlertVariantKey = 'emergency' | 'tier1' | 'high' | 'low' | 'info';
+  function variantForTopAlert(a: typeof topAlert): {
+    key: AlertVariantKey;
+    accent: string;
+    accentLight: string;
+    icon: React.ReactNode;
+    title: string;
+    body: string;
+  } | null {
+    if (!a) return null;
+    const sbp = a.journalEntry?.systolicBP ?? 0;
+    const dbp = a.journalEntry?.diastolicBP ?? 0;
+    const tier = (a as { tier?: AlertTier | null; patientMessage?: string | null }).tier;
+    const patientMessage = (a as { patientMessage?: string | null }).patientMessage ?? '';
+    const isEmergency =
+      tier === 'BP_LEVEL_2' ||
+      tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE' ||
+      sbp >= 180 ||
+      dbp >= 120;
+    if (isEmergency) {
+      return {
+        key: 'emergency',
+        accent: 'var(--brand-alert-red)',
+        accentLight: 'var(--brand-alert-red-light)',
+        icon: <AlertTriangle className="w-5 h-5" />,
+        title: 'Critical blood pressure reading',
+        body: patientMessage || 'Tap to see what to do next.',
+      };
+    }
+    if (tier === 'TIER_1_CONTRAINDICATION') {
+      return {
+        key: 'tier1',
+        accent: 'var(--brand-alert-red)',
+        accentLight: 'var(--brand-alert-red-light)',
+        icon: <Pill className="w-5 h-5" />,
+        title: 'Important medication alert',
+        body: patientMessage || 'Your care team has flagged a medication concern.',
+      };
+    }
+    if (tier === 'BP_LEVEL_1_LOW' || (sbp > 0 && sbp < 90) || (dbp > 0 && dbp < 60)) {
+      return {
+        key: 'low',
+        accent: '#3B82F6',
+        accentLight: '#DBEAFE',
+        icon: <ArrowDown className="w-5 h-5" />,
+        title: 'Your blood pressure is low',
+        body: patientMessage || 'If you feel dizzy, sit or lie down right away.',
+      };
+    }
+    // Default to "high" — covers BP_LEVEL_1_HIGH, legacy HIGH severity BP, etc.
+    return {
+      key: 'high',
+      accent: 'var(--brand-warning-amber)',
+      accentLight: 'var(--brand-warning-amber-light)',
+      icon: <ArrowUp className="w-5 h-5" />,
+      title: 'Your blood pressure is elevated',
+      body: patientMessage || 'Sit quietly for 5 minutes and check again.',
+    };
+  }
+  const topAlertVariant = variantForTopAlert(topAlert);
+
+  // D4 BP-vs-target color coding. Prefer the patient's PatientThreshold; fall
+  // back to AHA defaults (140/90 high, 90/60 low) when no threshold is set.
+  const sbpUpper = threshold?.sbpUpperTarget ?? 140;
+  const dbpUpper = threshold?.dbpUpperTarget ?? 90;
+  const sbpLower = threshold?.sbpLowerTarget ?? 90;
+  const dbpLower = threshold?.dbpLowerTarget ?? 60;
+
+  const bpStatusVsTarget: 'within' | 'high' | 'low' | 'critical' | 'none' = (() => {
+    const s = latestEntry?.systolicBP;
+    const d = latestEntry?.diastolicBP;
+    if (s == null || d == null) return 'none';
+    if (s >= 180 || d >= 120) return 'critical';
+    if (s > sbpUpper || d > dbpUpper) return 'high';
+    if (s < sbpLower || d < dbpLower) return 'low';
+    return 'within';
+  })();
+
+  const bpVsTargetStyle: { bg: string; fg: string; label: string } = (() => {
+    switch (bpStatusVsTarget) {
+      case 'critical':
+        return {
+          bg: 'var(--brand-alert-red-light)',
+          fg: 'var(--brand-alert-red)',
+          label: 'Critical',
+        };
+      case 'high':
+        return {
+          bg: 'var(--brand-warning-amber-light)',
+          fg: 'var(--brand-warning-amber)',
+          label: t('dashboard.elevated'),
+        };
+      case 'low':
+        return { bg: '#DBEAFE', fg: '#3B82F6', label: 'Low' };
+      case 'within':
+        return {
+          bg: 'var(--brand-success-green-light)',
+          fg: 'var(--brand-success-green)',
+          label: t('dashboard.withinTarget'),
+        };
+      default:
+        return { bg: '#F1F5F9', fg: 'var(--brand-text-muted)', label: t('dashboard.noData') };
+    }
+  })();
+
+  // D2 threshold display helpers
+  const hasBpThreshold = !!(threshold && (threshold.sbpUpperTarget || threshold.dbpUpperTarget));
+  const thresholdTargetText = threshold
+    ? `${threshold.sbpUpperTarget ?? '—'}/${threshold.dbpUpperTarget ?? '—'}`
+    : null;
+  const thresholdSetAt = threshold?.setAt
+    ? new Date(threshold.setAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : null;
+
   const bpDomain: [number | string, number | string] = visibleChartData.length > 0
     ? [Math.max(0, Math.min(...visibleChartData.map((d) => d.systolic)) - 15), Math.max(...visibleChartData.map((d) => d.systolic)) + 15]
     : [100, 180];
@@ -176,6 +410,73 @@ export default function Dashboard() {
 
       {/* ── Content ── */}
       <main className="relative h-full flex flex-col px-4 md:px-8 py-4 md:py-5 max-w-7xl mx-auto">
+
+        {/* D3 — Active alert card (top priority; tier-colored). Tap to open
+            the Flow C alert detail. Hidden when no open alerts. */}
+        {topAlert && topAlertVariant && (
+          <button
+            type="button"
+            onClick={() => router.push(`/alerts/${topAlert.id}`)}
+            className="w-full text-left rounded-2xl p-4 mb-3 md:mb-4 cursor-pointer transition-all flex items-center gap-3 active:scale-[0.99]"
+            style={{
+              backgroundColor: topAlertVariant.accentLight,
+              border: `1.5px solid ${topAlertVariant.accent}`,
+              boxShadow: `0 4px 14px ${topAlertVariant.accent}22`,
+            }}
+            aria-label={`${topAlertVariant.title} — view details`}
+          >
+            <div
+              className="shrink-0 rounded-xl flex items-center justify-center text-white"
+              style={{ width: 40, height: 40, backgroundColor: topAlertVariant.accent }}
+            >
+              {topAlertVariant.icon}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p
+                className="text-[10px] font-bold uppercase tracking-wider mb-0.5"
+                style={{ color: topAlertVariant.accent }}
+              >
+                Active alert
+              </p>
+              <p
+                className="text-[14px] font-bold leading-tight"
+                style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
+              >
+                {topAlertVariant.title}
+              </p>
+              <p
+                className="text-[12px] mt-0.5 leading-snug"
+                style={{ color: 'var(--brand-text-secondary)', wordBreak: 'break-word' }}
+              >
+                {topAlertVariant.body}
+              </p>
+            </div>
+            <div
+              className="shrink-0 hidden sm:flex items-center gap-1 px-3 h-9 rounded-full font-bold text-[12px] text-white"
+              style={{ backgroundColor: topAlertVariant.accent }}
+            >
+              View details
+              <ArrowRight className="w-3.5 h-3.5" />
+            </div>
+            <ArrowRight
+              className="w-4 h-4 shrink-0 sm:hidden"
+              style={{ color: topAlertVariant.accent }}
+            />
+          </button>
+        )}
+
+        {/* D0 — Clinical Intake Action Required (above stats, below D3) */}
+        {intakeUi.kind === 'fresh' && <ActionRequiredCard state={{ kind: 'fresh' }} />}
+        {intakeUi.kind === 'resume' && (
+          <ActionRequiredCard
+            state={{
+              kind: 'resume',
+              stepIndex: intakeUi.stepIndex,
+              total: intakeUi.total,
+              stepLabel: intakeUi.stepLabel,
+            }}
+          />
+        )}
 
         {/* ROW 1 — Greeting + Stat cards */}
         <div className="grid grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4 mb-3 md:mb-4">
@@ -200,13 +501,30 @@ export default function Dashboard() {
             <p className="text-white/70 text-xs mt-1 mb-3">
               {t('dashboard.careTeamMonitoring')}
             </p>
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/20 rounded-full text-xs font-semibold text-white">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-300 inline-block" />
-              {t('dashboard.cedarHillConnected')}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/20 rounded-full text-xs font-semibold text-white">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-300 inline-block" />
+                {t('dashboard.cedarHillConnected')}
+              </div>
+              {/* D1 — Awaiting Provider Verification (intake done, profile UNVERIFIED) */}
+              {showVerificationBadge && (
+                <div
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
+                  style={{
+                    backgroundColor: 'var(--brand-warning-amber-light)',
+                    color: 'var(--brand-warning-amber)',
+                  }}
+                >
+                  <ShieldCheck className="w-3 h-3" />
+                  Awaiting provider verification
+                </div>
+              )}
             </div>
           </div>
 
-          {/* BP Stat Card */}
+          {/* D4 — BP stat card. Status pill is colored vs the patient's
+              PatientThreshold (or AHA defaults if no threshold set). Pulse
+              renders below the BP when present on the latest entry. */}
           <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
             <span className="block text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--brand-text-muted)' }}>
               {loading ? <Bone w={60} h={9} r={5} /> : (todayHasEntry ? t('dashboard.todaysBp') : t('dashboard.latestBp'))}
@@ -216,12 +534,22 @@ export default function Dashboard() {
             ) : (
               <div className="text-2xl font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{latestBP}</div>
             )}
-            <p className="text-[10px] mt-0.5 mb-2" style={{ color: 'var(--brand-text-muted)' }}>mmHg</p>
+            <p className="text-[10px] mt-0.5 mb-2 flex items-center gap-2" style={{ color: 'var(--brand-text-muted)' }}>
+              <span>mmHg</span>
+              {!loading && latestEntry?.pulse != null && (
+                <span className="inline-flex items-center gap-0.5 font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
+                  <Heart className="w-3 h-3" /> {latestEntry.pulse}
+                </span>
+              )}
+            </p>
             {loading ? (
               <Bone w={72} h={18} r={99} />
             ) : (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold" style={bpStatusStyle}>
-                {bpStatusLabel}
+              <span
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                style={{ backgroundColor: bpVsTargetStyle.bg, color: bpVsTargetStyle.fg }}
+              >
+                {bpVsTargetStyle.label}
               </span>
             )}
           </div>
@@ -257,15 +585,60 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* D2 — Personal threshold card. Hidden when no threshold has been
+            set by the care team (provider-authored row in PatientThreshold). */}
+        {hasBpThreshold && (
+          <div
+            className="rounded-2xl px-4 py-2.5 mb-3 md:mb-4 flex items-center gap-3 flex-wrap"
+            style={{
+              backgroundColor: 'var(--brand-accent-teal-light)',
+              border: '1px solid rgba(13,148,136,0.25)',
+            }}
+          >
+            <div
+              className="shrink-0 rounded-xl flex items-center justify-center text-white"
+              style={{ width: 36, height: 36, backgroundColor: 'var(--brand-accent-teal)' }}
+              aria-hidden
+            >
+              <Target className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-accent-teal)' }}>
+                Your goal
+              </p>
+              <p
+                className="text-[13px] font-semibold leading-tight"
+                style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
+              >
+                Below {thresholdTargetText} mmHg
+                <span className="ml-2 font-medium" style={{ color: 'var(--brand-text-muted)' }}>
+                  · set by your care team
+                  {thresholdSetAt ? ` · ${thresholdSetAt}` : ''}
+                </span>
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* ROW 2 — BP Chart · Check-In CTA · Alerts */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 flex-1 h-[300px]">
 
           {/* BP Trend */}
           <div className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                {chartRange === 7 ? t('dashboard.bpThisWeek') : t('dashboard.bpTrend')}
-              </h3>
+            <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+              <div className="flex items-center gap-3 flex-wrap">
+                <h3 className="text-sm font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                  {chartRange === 7 ? t('dashboard.bpThisWeek') : t('dashboard.bpTrend')}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => router.push('/readings')}
+                  className="text-[11px] font-semibold cursor-pointer hover:opacity-75 transition"
+                  style={{ color: 'var(--brand-primary-purple)' }}
+                >
+                  {t('dashboard.fullHistory')}
+                </button>
+              </div>
               <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
                 {([7, 90] as const).map((range) => (
                   <button
@@ -424,7 +797,11 @@ export default function Dashboard() {
                   <div className="space-y-2">
                     {/* Show max 2 alert items; if streak is shown, only 1 alert */}
                     {openAlerts.slice(0, streak > 0 ? 1 : 2).map((alert) => (
-                      <div key={alert.id} className="p-3 rounded-xl"
+                      <button
+                        type="button"
+                        key={alert.id}
+                        onClick={() => router.push(`/alerts/${alert.id}`)}
+                        className="w-full text-left p-3 rounded-xl cursor-pointer transition hover:scale-[1.01] active:scale-[0.99]"
                         style={{
                           backgroundColor: alert.severity === 'HIGH' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
                           borderLeft: `3px solid ${alert.severity === 'HIGH' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)'}`,
@@ -439,9 +816,9 @@ export default function Dashboard() {
                           </span>
                         </div>
                         <p className="text-[10px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
-                          {formatAlertDate(alert.journalEntry?.entryDate ?? alert.createdAt ?? '')} {'· ' + t('dashboard.careTeamNotified')}
+                          {formatAlertDate(alert.journalEntry?.measuredAt ?? alert.createdAt ?? '')} {'· ' + t('dashboard.careTeamNotified')}
                         </p>
-                      </div>
+                      </button>
                     ))}
 
                     {streak > 0 && (
@@ -470,6 +847,15 @@ export default function Dashboard() {
           </div>
         </div>
       </main>
+
+      {/* E4 — Monthly medication re-check modal. Self-managed (timestamp in
+          localStorage); only fires for patients who have completed intake
+          AND have at least one active medication on file. */}
+      <MonthlyMedReask
+        userId={user?.id ?? null}
+        hasMedications={hasMeds}
+        intakeComplete={intakeUi.kind === 'done'}
+      />
     </div>
   );
 }

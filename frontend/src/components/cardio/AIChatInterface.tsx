@@ -1168,6 +1168,7 @@ export default function AIChatInterface() {
     pendingCheckin: voicePendingCheckin,
     errorMessage: voiceError,
     actionType: voiceActionType,
+    prewarmStatus,
     start: startVoice,
     prewarm: prewarmVoice,
     end: endVoice,
@@ -1187,7 +1188,14 @@ export default function AIChatInterface() {
   useEffect(() => {
     if (!token || prewarmedOnceRef.current) return;
     prewarmedOnceRef.current = true;
-    prewarmVoice({ token, sessionId: activeSessionId ?? undefined });
+    // Fire-and-forget, but catch so an unhandled rejection doesn't surface
+    // as a console warning. The hook tracks state via prewarmStatus; this
+    // .catch() just silences the promise, not the error signal.
+    Promise.resolve(prewarmVoice({ token, sessionId: activeSessionId ?? undefined }))
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[voice prewarm] fire-and-forget rejected:', err);
+      });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
@@ -1694,7 +1702,11 @@ export default function AIChatInterface() {
               disabled={isSending || isVoiceActive || isVoiceConnecting}
             />
 
-            {/* Mic button — disabled while text is sending */}
+            {/* Mic button — disabled while text is sending. Color encodes:
+                - red: active call
+                - amber: connecting (in flight)
+                - amber-outline + warning title: prewarm failed, click to retry
+                - purple: idle / ready */}
             <motion.button
               onClick={() => void handleMicClick()}
               disabled={!token || isSending}
@@ -1704,15 +1716,34 @@ export default function AIChatInterface() {
                   ? 'linear-gradient(135deg, #ef4444, #dc2626)'
                   : isVoiceConnecting
                   ? '#f59e0b'
+                  : prewarmStatus === 'failed'
+                  ? '#fef3c7'
                   : 'var(--brand-primary-purple-light)',
+                outline: prewarmStatus === 'failed' ? '1px solid #d97706' : 'none',
+                outlineOffset: prewarmStatus === 'failed' ? '-1px' : undefined,
               }}
               whileHover={{ scale: 1.08 }}
               whileTap={{ scale: 0.92 }}
-              title={isVoiceActive ? t('chat.endVoice') : t('chat.startVoice')}
+              title={
+                isVoiceActive
+                  ? t('chat.endVoice')
+                  : prewarmStatus === 'failed'
+                  ? 'Voice is temporarily unavailable — click to retry'
+                  : t('chat.startVoice')
+              }
             >
               {isVoiceActive
                 ? <MicOff className="w-3.5 h-3.5 text-white" />
-                : <Mic className="w-3.5 h-3.5" style={{ color: isVoiceConnecting ? 'white' : 'var(--brand-primary-purple)' }} />
+                : <Mic
+                    className="w-3.5 h-3.5"
+                    style={{
+                      color: isVoiceConnecting
+                        ? 'white'
+                        : prewarmStatus === 'failed'
+                        ? '#d97706'
+                        : 'var(--brand-primary-purple)',
+                    }}
+                  />
               }
             </motion.button>
 

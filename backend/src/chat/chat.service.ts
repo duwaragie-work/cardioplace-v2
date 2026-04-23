@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { Content } from '@google/genai'
+import { ProfileNotFoundException, type ResolvedContext } from '@cardioplace/shared'
 import { ChatRequestDto } from './dto/chat-request.dto.js'
 import { SystemPromptService } from './services/system-prompt.service.js'
 import { RagService } from './services/rag.service.js'
@@ -8,6 +9,7 @@ import { ConversationHistoryService } from './services/conversation-history.serv
 import type { EmergencyDetectionResult } from './services/emergency-detection.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { DailyJournalService } from '../daily_journal/daily_journal.service.js'
+import { ProfileResolverService } from '../daily_journal/services/profile-resolver.service.js'
 import { GeminiService } from '../gemini/gemini.service.js'
 import { getJournalToolDeclarations, executeJournalTool } from './tools/journal-tools.js'
 
@@ -21,6 +23,7 @@ export class ChatService {
     private readonly prisma: PrismaService,
     private readonly dailyJournalService: DailyJournalService,
     private readonly geminiService: GeminiService,
+    private readonly profileResolver: ProfileResolverService,
   ) {}
 
   /**
@@ -51,16 +54,14 @@ export class ChatService {
    * Build patient context part of system prompt (DB queries only, no LLM calls).
    */
   private async buildPatientSystemPrompt(userId: string): Promise<string> {
-    let systemPrompt = this.systemPromptService.buildSystemPrompt()
+    let systemPrompt = this.systemPromptService.buildSystemPrompt({ toneMode: 'PATIENT' })
 
     if (!userId) return systemPrompt
 
-    // TODO(phase/16): pull structured PatientProfile (conditions, pregnancy,
-    // heart-failure type) + verified PatientMedication rows for the context
-    // injection. For phase/2 we keep a slim version — no primaryCondition /
-    // riskTier (gone in v2) and no BaselineSnapshot (deleted; trend averages
-    // now derive on-the-fly from JournalEntry).
-    const [recentEntries, activeAlerts, user] = await Promise.all([
+    // Phase/16 — pull full ResolvedContext from ProfileResolverService (single
+    // source of truth, shared with the alert engine) and v2-shape DeviationAlert
+    // rows with tier/ruleId/patientMessage/physicianMessage for chat context.
+    const [recentEntries, activeAlerts, user, resolvedContext] = await Promise.all([
       this.prisma.journalEntry.findMany({
         where: { userId },
         orderBy: { measuredAt: 'desc' },
@@ -71,8 +72,18 @@ export class ChatService {
         },
       }),
       this.prisma.deviationAlert.findMany({
-        where: { userId, acknowledgedAt: null },
-        select: { type: true, severity: true },
+        where: { userId, status: { in: ['OPEN', 'ACKNOWLEDGED'] } },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        select: {
+          tier: true,
+          ruleId: true,
+          mode: true,
+          patientMessage: true,
+          physicianMessage: true,
+          dismissible: true,
+          createdAt: true,
+        },
       }),
       this.prisma.user.findUnique({
         where: { id: userId },
@@ -82,6 +93,10 @@ export class ChatService {
           dateOfBirth: true,
         },
       }),
+      this.profileResolver.resolve(userId).catch((err: unknown) => {
+        if (err instanceof ProfileNotFoundException) return null
+        throw err
+      }) as Promise<ResolvedContext | null>,
     ])
 
     // Compute trailing 7-day mean inline (v2: derived, never stored).
@@ -113,11 +128,21 @@ export class ChatService {
         weight: e.weight != null ? Number(e.weight) : null,
       })),
       baseline,
-      activeAlerts,
+      activeAlerts: activeAlerts.map((a) => ({
+        tier: a.tier ?? 'UNKNOWN',
+        ruleId: a.ruleId ?? 'UNKNOWN',
+        mode: a.mode ?? 'STANDARD',
+        patientMessage: a.patientMessage,
+        physicianMessage: a.physicianMessage,
+        dismissible: a.dismissible,
+        createdAt: a.createdAt,
+      })),
       communicationPreference: user?.communicationPreference ?? null,
       preferredLanguage: user?.preferredLanguage ?? null,
       patientName: user?.name ?? null,
       dateOfBirth: user?.dateOfBirth ?? null,
+      resolvedContext,
+      toneMode: 'PATIENT',
     })
 
     systemPrompt = systemPrompt + '\n\n' + patientContext

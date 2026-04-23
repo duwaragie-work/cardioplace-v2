@@ -265,61 +265,73 @@ export class AlertEngineService {
     const dismissible = !isNonDismissableTier(result.tier)
     const messages = this.outputGenerator.generate(result, session, ctx.preDay3Mode)
 
-    // Bug 1 fix — capture the upserted row so we can emit its real id.
-    const upserted = await this.prisma.deviationAlert.upsert({
+    // Phase/7 — app-level dedup by (journalEntryId, ruleId). The legacy
+    // @@unique([journalEntryId, type]) was dropped so v2 can persist multiple
+    // alerts per entry (e.g. Tier 3 pulse-pressure riding alongside a Tier 1
+    // contraindication). Upsert is replaced with findFirst → update|create.
+    const existing = await this.prisma.deviationAlert.findFirst({
       where: {
-        journalEntryId_type: {
-          journalEntryId: session.entryId,
-          type: legacyType,
-        },
-      },
-      update: {
-        severity: legacySeverity,
-        tier: result.tier,
-        ruleId: result.ruleId,
-        mode: result.mode,
-        pulsePressure: result.pulsePressure,
-        suboptimalMeasurement: result.suboptimalMeasurement,
-        dismissible,
-        actualValue:
-          result.actualValue != null
-            ? new Prisma.Decimal(result.actualValue.toFixed(2))
-            : null,
-        patientMessage: messages.patientMessage,
-        caregiverMessage: messages.caregiverMessage,
-        physicianMessage: messages.physicianMessage,
-      },
-      create: {
-        userId: session.userId,
         journalEntryId: session.entryId,
-        type: legacyType,
-        severity: legacySeverity,
-        tier: result.tier,
         ruleId: result.ruleId,
-        mode: result.mode,
-        pulsePressure: result.pulsePressure,
-        suboptimalMeasurement: result.suboptimalMeasurement,
-        dismissible,
-        actualValue:
-          result.actualValue != null
-            ? new Prisma.Decimal(result.actualValue.toFixed(2))
-            : null,
-        patientMessage: messages.patientMessage,
-        caregiverMessage: messages.caregiverMessage,
-        physicianMessage: messages.physicianMessage,
       },
+      select: { id: true },
     })
+
+    const actualValue =
+      result.actualValue != null
+        ? new Prisma.Decimal(result.actualValue.toFixed(2))
+        : null
+
+    const upserted = existing
+      ? await this.prisma.deviationAlert.update({
+          where: { id: existing.id },
+          data: {
+            severity: legacySeverity,
+            tier: result.tier,
+            ruleId: result.ruleId,
+            mode: result.mode,
+            pulsePressure: result.pulsePressure,
+            suboptimalMeasurement: result.suboptimalMeasurement,
+            dismissible,
+            actualValue,
+            patientMessage: messages.patientMessage,
+            caregiverMessage: messages.caregiverMessage,
+            physicianMessage: messages.physicianMessage,
+          },
+        })
+      : await this.prisma.deviationAlert.create({
+          data: {
+            userId: session.userId,
+            journalEntryId: session.entryId,
+            type: legacyType,
+            severity: legacySeverity,
+            tier: result.tier,
+            ruleId: result.ruleId,
+            mode: result.mode,
+            pulsePressure: result.pulsePressure,
+            suboptimalMeasurement: result.suboptimalMeasurement,
+            dismissible,
+            actualValue,
+            patientMessage: messages.patientMessage,
+            caregiverMessage: messages.caregiverMessage,
+            physicianMessage: messages.physicianMessage,
+          },
+        })
 
     this.logger.log(
       `Alert fired: ${result.ruleId} (${result.tier}) for user ${session.userId} — ${result.reason}`,
     )
 
-    this.eventEmitter.emit(JOURNAL_EVENTS.ANOMALY_TRACKED, {
+    // Phase/7 — renamed from ANOMALY_TRACKED and enriched with tier + ruleId so
+    // the escalation service can route by tier without re-fetching the alert.
+    this.eventEmitter.emit(JOURNAL_EVENTS.ALERT_CREATED, {
       userId: session.userId,
       alertId: upserted.id,
       type: legacyType,
       severity: legacySeverity,
       escalated: upserted.escalated,
+      tier: result.tier,
+      ruleId: result.ruleId,
     })
   }
 
