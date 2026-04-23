@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
 } from '@nestjs/common'
@@ -14,6 +15,7 @@ import type { Request } from 'express'
 import { IntakeService } from './intake.service.js'
 import { IntakeProfileDto } from './dto/intake-profile.dto.js'
 import { IntakeMedicationsDto } from './dto/intake-medications.dto.js'
+import { ReplaceMedicationsDto } from './dto/replace-medications.dto.js'
 import { UpdateMedicationDto } from './dto/update-medication.dto.js'
 import { PregnancyDto } from './dto/pregnancy.dto.js'
 
@@ -61,6 +63,15 @@ export class IntakeController {
     @Body() dto: UpdateMedicationDto,
   ) {
     return this.intake.updateMedication(req.user.id, id, dto)
+  }
+
+  @Put('me/medications')
+  @HttpCode(HttpStatus.OK)
+  replaceMedications(
+    @Req() req: AuthedReq,
+    @Body() dto: ReplaceMedicationsDto,
+  ) {
+    return this.intake.replaceMedications(req.user.id, dto)
   }
 
   @Post('me/pregnancy')
