@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Pill, Check, ArrowRight, X } from 'lucide-react';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 const STORAGE_PREFIX = 'cardioplace_med_reask_at:';
 const REASK_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -50,6 +51,7 @@ interface Props {
 
 export default function MonthlyMedReask({ userId, hasMedications, intakeComplete }: Props) {
   const router = useRouter();
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -93,7 +95,7 @@ export default function MonthlyMedReask({ userId, hasMedications, intakeComplete
           style={{ backgroundColor: 'rgba(15,23,42,0.55)' }}
           role="dialog"
           aria-modal="true"
-          aria-label="Monthly medication check"
+          aria-label={t('intake.reask.ariaLabel')}
         >
           <motion.div
             initial={{ scale: 0.92, y: 16 }}
@@ -110,7 +112,7 @@ export default function MonthlyMedReask({ userId, hasMedications, intakeComplete
             <button
               type="button"
               onClick={handleClose}
-              aria-label="Ask me later"
+              aria-label={t('intake.reask.closeAria')}
               className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition hover:opacity-70"
               style={{ backgroundColor: 'var(--brand-background)' }}
             >
@@ -130,19 +132,19 @@ export default function MonthlyMedReask({ userId, hasMedications, intakeComplete
               className="text-[11px] font-bold uppercase tracking-wider mb-1"
               style={{ color: 'var(--brand-primary-purple)' }}
             >
-              Monthly check-in
+              {t('intake.reask.kicker')}
             </p>
             <h2
               className="text-[20px] font-bold leading-tight mb-2"
               style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
             >
-              Are you still taking the same medicines?
+              {t('intake.reask.title')}
             </h2>
             <p
               className="text-[13px] mb-6 leading-relaxed"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
-              We ask once a month so your care team always sees what you&apos;re actually taking right now.
+              {t('intake.reask.body')}
             </p>
 
             <div className="space-y-2.5">
@@ -156,7 +158,7 @@ export default function MonthlyMedReask({ userId, hasMedications, intakeComplete
                 }}
               >
                 <Check className="w-4 h-4" strokeWidth={3} />
-                Yes, same medicines
+                {t('intake.reask.yes')}
               </button>
               <button
                 type="button"
@@ -168,7 +170,7 @@ export default function MonthlyMedReask({ userId, hasMedications, intakeComplete
                   border: '1.5px solid var(--brand-warning-amber)',
                 }}
               >
-                Update my medicines
+                {t('intake.reask.update')}
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>

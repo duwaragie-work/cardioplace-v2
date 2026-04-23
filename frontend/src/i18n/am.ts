@@ -1,3 +1,8 @@
+// 🚨 MT AMHARIC — REQUIRES NATIVE SPEAKER REVIEW BEFORE COHORT LAUNCH
+// Amharic uses Ge'ez script (ፊደል) and has significant regional/medical
+// terminology variation. Machine translation is materially less reliable
+// than es/fr/de. Do NOT deploy to Ethiopian-community patients without a
+// native speaker audit AND clinical vocabulary review.
 import type { TranslationKey } from './en';
 
 const am: Record<TranslationKey, string> = {
@@ -687,6 +692,236 @@ const am: Record<TranslationKey, string> = {
   'about.closingDesc': 'በልብና የደም ቧንቧ እንክብካቤ ውስጥ በጣም አደገኛው ጊዜ ድንገተኛ ሁኔታው አይደለም ብለን እናምናለን። ማንም ያልተከታተለበት ከዚያ በፊት ያለው ዝምታ ነው።\n\nያን ዝምታ ለማቆም Cardioplace ን ገነባን — በ Ward 7፣ በ Ward 8 እና በመጨረሻ ይህ ክፍተት ባለበት ቦታ ሁሉ።',
   'about.closingButton': 'ስለ ፕሮግራሙ የበለጠ ይወቁ',
   'about.closingFooter': 'Cardioplace · ከ DC Hospital Association ጋር በመተባበር · ኤፕሪል 2026',
+
+  // ─── Clinical Intake (Flow A) ──────────────────────────────────────────────
+  // A0 — dashboard action card
+  'intake.a0.actionRequired': 'እርምጃ ያስፈልጋል',
+  'intake.a0.headingFresh': 'የጤና መረጃዎን ያሟሉ',
+  'intake.a0.headingResume': 'የጤና መረጃዎን ይቀጥሉ',
+  'intake.a0.subFresh': 'የተንከባካቢ ቡድንዎ ደህንነትዎን ለመጠበቅ ይህንን ይፈልጋል። 5 ደቂቃ ያህል ይወስዳል።',
+  'intake.a0.subResume': 'ደረጃ {current} ከ {total} · {label}',
+  'intake.a0.ctaFresh': 'ጀምር',
+  'intake.a0.ctaResume': 'ቀጥል',
+
+  // A0b — intro screen
+  'intake.a0b.title': 'የጤና መረጃዎን እንገንባ',
+  'intake.a0b.desc': 'ይህ የተንከባካቢ ቡድንዎ ትክክለኛውን ድጋፍ እንዲሰጥዎ ይረዳል። መልሶችዎ የግል ናቸው።',
+  'intake.a0b.audio': 'የጤና መረጃዎን እንገንባ። ይህ የተንከባካቢ ቡድንዎ ትክክለኛውን ድጋፍ እንዲሰጥዎ ይረዳል። መልሶችዎ የግል ናቸው።',
+  'intake.a0b.begin': 'ጀምር',
+  'intake.a0b.saveForLater': 'ለኋላ አስቀምጥ',
+
+  // A1 — demographics
+  'intake.a1.title': 'ስለ እርስዎ ትንሽ',
+  'intake.a1.subtitle': 'የደህንነት ገደቦችዎን ለማስተካከል ይረዳናል።',
+  'intake.a1.audio': 'ስለ እርስዎ ትንሽ። ይህ የደህንነት ገደቦችዎን ለማስተካከል ይረዳናል።',
+  'intake.a1.genderQuestion': 'ፆታዎ ምንድን ነው?',
+  'intake.a1.genderAudio': 'ፆታዎ ምንድን ነው?',
+  'intake.a1.genderMale': 'ወንድ',
+  'intake.a1.genderFemale': 'ሴት',
+  'intake.a1.genderOther': 'ሌላ',
+  'intake.a1.heightQuestion': 'ቁመትዎ ምን ያህል ነው? (ሴንቲሜትር)',
+  'intake.a1.heightAudio': 'ቁመትዎ ምን ያህል ነው፣ በሴንቲሜትር?',
+  'intake.a1.heightHint': 'በግምት 5 ft = 152 cm · 5 ft 5 in = 165 cm · 6 ft = 183 cm',
+
+  // A2 — pregnancy
+  'intake.a2.title': 'የእርግዝና ሁኔታ',
+  'intake.a2.subtitle': 'አንዳንድ መድሃኒቶች በእርግዝና ወቅት የተለየ የደህንነት ደንብ ያስፈልጋቸዋል።',
+  'intake.a2.audio': 'የእርግዝና ሁኔታ። አንዳንድ መድሃኒቶች በእርግዝና ወቅት የተለየ የደህንነት ደንብ ያስፈልጋቸዋል።',
+  'intake.a2.yesTitle': 'አዎ',
+  'intake.a2.yesDesc': 'አሁን እርጉዝ ነኝ',
+  'intake.a2.yesAudio': 'አዎ፣ አሁን እርጉዝ ነኝ',
+  'intake.a2.noTitle': 'አይደለሁም',
+  'intake.a2.noDesc': 'እርጉዝ አይደለሁም',
+  'intake.a2.noAudio': 'አይ፣ እርጉዝ አይደለሁም',
+  'intake.a2.naTitle': 'አይተገበርም',
+  'intake.a2.naDesc': 'ላልገልጽ እፈልጋለሁ',
+  'intake.a2.naAudio': 'አይተገበርም',
+  'intake.a2.dueDateLabel': 'ሕፃኑ መቼ ይወለዳል? (አማራጭ)',
+  'intake.a2.dueDateAudio': 'ሕፃኑ መቼ ይወለዳል? ይህ አማራጭ ነው።',
+  'intake.a2.preeclampsiaTitle': 'ቀደምት የፕሪኤክላምፕሲያ ታሪክ',
+  'intake.a2.preeclampsiaDesc': 'በቀድሞ እርግዝና',
+  'intake.a2.preeclampsiaAudio': 'በቀድሞ እርግዝና የፕሪኤክላምፕሲያ ታሪክ',
+
+  // A3 — heart conditions
+  'intake.a3.title': 'የልብ ሁኔታዎች',
+  'intake.a3.subtitle': 'የተነገሩዎትን ማንኛውም ሁኔታ ይንኩ።',
+  'intake.a3.audio': 'የልብ ሁኔታዎች። የተነገሩዎትን ማንኛውም ሁኔታ ይንኩ።',
+  'intake.a3.hfTitle': 'የልብ ድካም',
+  'intake.a3.hfDesc': 'ሐኪሙ ልብዎ በደካማነት እንደሚመታ ተናግሯል',
+  'intake.a3.hfAudio': 'የልብ ድካም። ሐኪሙ ልብዎ በደካማነት እንደሚመታ ተናግሯል።',
+  'intake.a3.afTitle': 'አትሪያል ፊብሪሌሽን',
+  'intake.a3.afDesc': 'መደበኛ ያልሆነ የልብ ምት',
+  'intake.a3.afAudio': 'አትሪያል ፊብሪሌሽን። መደበኛ ያልሆነ የልብ ምት።',
+  'intake.a3.cadTitle': 'የልብ የደም ሥር በሽታ',
+  'intake.a3.cadDesc': 'የተዘጉ ወይም የጠበቡ የልብ የደም ሥሮች',
+  'intake.a3.cadAudio': 'የልብ የደም ሥር በሽታ። የተዘጉ ወይም የጠበቡ የልብ የደም ሥሮች።',
+  'intake.a3.hcmTitle': 'ሃይፐርትሮፊክ ካርዲዮማዮፓቲ',
+  'intake.a3.hcmDesc': 'HCM — ወፍራም የልብ ጡንቻ',
+  'intake.a3.hcmAudio': 'ሃይፐርትሮፊክ ካርዲዮማዮፓቲ። ወፍራም የልብ ጡንቻ።',
+  'intake.a3.dcmTitle': 'ዲሌትድ ካርዲዮማዮፓቲ',
+  'intake.a3.dcmDesc': 'DCM — የሰፋ ልብ',
+  'intake.a3.dcmAudio': 'ዲሌትድ ካርዲዮማዮፓቲ። የሰፋ ልብ።',
+  'intake.a3.noneTitle': 'ከእነዚህ ምንም',
+  'intake.a3.noneDesc': 'የልብ ሁኔታዎች የሉም',
+  'intake.a3.noneAudio': 'ከእነዚህ ምንም። የልብ ሁኔታዎች የሉም።',
+  'intake.a3.htnLabel': 'ሐኪሜ ከፍተኛ የደም ግፊት ተመርምሮብኛል',
+
+  // A4 — heart failure subtype
+  'intake.a4.title': 'የልብ ድካም አይነት',
+  'intake.a4.subtitle': 'ሐኪምዎ ከእነዚህ ቃላት አንዱን ተጠቅሞ ይሆናል።',
+  'intake.a4.audio': 'የልብ ድካም አይነት። ሐኪምዎ ከእነዚህ ቃላት አንዱን ተጠቅሞ ይሆናል።',
+  'intake.a4.hfrefTitle': 'HFrEF',
+  'intake.a4.hfrefDesc': "የተቀነሰ የጭቅጭቅ ክፍል — አንዳንዴ 'ደካማ ልብ' ይባላል",
+  'intake.a4.hfrefAudio': 'HFrEF። የተቀነሰ የጭቅጭቅ ክፍል። አንዳንዴ ደካማ ልብ ይባላል።',
+  'intake.a4.hfpefTitle': 'HFpEF',
+  'intake.a4.hfpefDesc': 'የተጠበቀ የጭቅጭቅ ክፍል — ልብ ጠንካራ ነው ግን አሁንም ይመታል',
+  'intake.a4.hfpefAudio': 'HFpEF። የተጠበቀ የጭቅጭቅ ክፍል። ልብ ጠንካራ ነው ግን አሁንም ይመታል።',
+  'intake.a4.unknownTitle': 'እርግጠኛ አይደለሁም',
+  'intake.a4.unknownDesc': 'የተንከባካቢ ቡድንዎ በሚቀጥለው ጉብኝት ያረጋግጣል',
+  'intake.a4.unknownAudio': 'እርግጠኛ አይደለሁም። የተንከባካቢ ቡድንዎ በሚቀጥለው ጉብኝት ያረጋግጣል።',
+
+  // A5 — core medications
+  'intake.a5.title': 'መድሃኒቶችዎ',
+  'intake.a5.subtitle': 'የሚወስዱትን እያንዳንዱን ኪኒን ይንኩ። ስለ መጠኑ አይጨነቁ — ይወስዱት እንደሆነ ብቻ።',
+  'intake.a5.audio': 'መድሃኒቶችዎ። የሚወስዱትን እያንዳንዱን ኪኒን ይንኩ። ስለ መጠኑ አይጨነቁ፣ ይወስዱት እንደሆነ ብቻ።',
+  'intake.a5.groupAce': 'የደም ግፊት ኪኒኖች (ACE ኢንሂቢተሮች)',
+  'intake.a5.groupArb': 'የደም ግፊት ኪኒኖች (ARBs)',
+  'intake.a5.groupBeta': 'ቤታ-ብሎከሮች',
+  'intake.a5.groupCcb': 'የካልሲየም ቻናል ብሎከሮች',
+  'intake.a5.audioAlsoKnown': 'ደግሞ በሚባል',
+
+  // A6 — combination pills
+  'intake.a6.title': 'የተቀላቀሉ ኪኒኖች',
+  'intake.a6.subtitle': 'ሁለት መድሃኒቶችን የያዘ አንድ ኪኒን። የሚወስዱትን ይንኩ።',
+  'intake.a6.audio': 'የተቀላቀሉ ኪኒኖች። ሁለት መድሃኒቶችን የያዘ አንድ ኪኒን። የሚወስዱትን ይንኩ።',
+  'intake.a6.audioContains': 'የያዘ',
+  'intake.a6.audioAnd': 'እና',
+
+  // A7 — dedup modal
+  'intake.a7.title': 'እነዚህ ተመሳሳይ ኪኒን ናቸው?',
+  'intake.a7.body': '{component} እና {combo} መርጠዋል — እሱም {componentLower} ይዟል።',
+  'intake.a7.keepCombo': 'ተመሳሳይ ናቸው — {combo} ብቻ አቆይ',
+  'intake.a7.keepSingle': 'ተመሳሳይ ናቸው — {component} ብቻ አቆይ',
+  'intake.a7.keepBoth': 'ሁለቱንም እወስዳለሁ',
+  'intake.a7.goBack': 'ተመለስ እና እንደገና ያረጋግጡ',
+
+  // A8 — category picker + "not listed" flow
+  'intake.a8.title': 'ሌላ ነገር አለ?',
+  'intake.a8.subtitle': 'ከዚህ በፊት ያልተዘረዘረ ነገር የሚወስዱ ከሆነ ምድብ ይንኩ።',
+  'intake.a8.audio': 'ሌላ ነገር አለ? ከዚህ በፊት ያልተዘረዘረ ነገር የሚወስዱ ከሆነ ምድብ ይንኩ።',
+  'intake.a8.categoryWaterPill': 'የውሃ ኪኒን',
+  'intake.a8.categoryBloodThinner': 'የደም ማቅጣት መድሃኒት',
+  'intake.a8.categoryCholesterol': 'የኮሌስትሮል መድሃኒት',
+  'intake.a8.categoryHeartRhythm': 'የልብ ምት መድሃኒት',
+  'intake.a8.categorySGLT2': 'ለልብ የሚረዳ የስኳር በሽታ መድሃኒት',
+  'intake.a8.categoryOther': 'ያልተዘረዘረ ሌላ መድሃኒት',
+  'intake.a8.audioSGLT2': 'ለልብ ደግሞ የሚረዳ የስኳር በሽታ መድሃኒት',
+  'intake.a8.otherBlurb': 'የመድሃኒቱን ስም ንገሩን። ተናገሩት (ስልክዎ ለእርስዎ ይጽፋል) ወይም የስያሜውን ፎቶ ይንሱ።',
+  'intake.a8.otherSpeakLabel': 'የመድሃኒቱን ስም ይናገሩ',
+  'intake.a8.otherSpeakPlaceholder': 'ለምሳሌ Hydralazine',
+  'intake.a8.otherAdd': 'አክል',
+  'intake.a8.otherPhotoLabel': 'ወይም ጠርሙሱ ላይ ያለውን ይግለጹ',
+  'intake.a8.otherPhotoPlaceholder': 'በስያሜው ላይ የታተመው ምንድን ነው?',
+  'intake.a8.otherCountSingle': '{n} ሌላ መድሃኒት ተጨምሯል — የተንከባካቢ ቡድንዎ ዝርዝሮችን ያረጋግጣል።',
+  'intake.a8.otherCountPlural': '{n} ሌሎች መድሃኒቶች ተጨምረዋል — የተንከባካቢ ቡድንዎ ዝርዝሮችን ያረጋግጣል።',
+  'intake.a8.skipHint': 'ምንም የማይመለከት ከሆነ ይህንን መዝለል ይችላሉ። የተንከባካቢ ቡድንዎ መረጃዎን ሲገመግም የሚወስዱትን ያረጋግጣል።',
+
+  // A9 — frequency
+  'intake.a9.emptyTitle': 'ስንት ጊዜ?',
+  'intake.a9.emptySubtitle': 'እስካሁን መድሃኒት አልተጨመረም — ወደፊት መዝለል ይችላሉ።',
+  'intake.a9.emptyAudio': 'እስካሁን መድሃኒት አልተጨመረም። ወደፊት መዝለል ይችላሉ።',
+  'intake.a9.emptyBody': 'ምንም መድሃኒት አልጨመሩም። አንዳች የረሳችሁ ከሆነ ወደኋላን ይንኩ፣ ወይም ለመገምገም ቀጥልን።',
+  'intake.a9.title': 'በቀን ስንት ጊዜ?',
+  'intake.a9.subtitle': 'ቁጥሩ ብቻ — የተንከባካቢ ቡድንዎ መጠኑን ይሞላል።',
+  'intake.a9.audio': 'እያንዳንዱን በቀን ስንት ጊዜ ይወስዳሉ? ቁጥሩ ብቻ — የተንከባካቢ ቡድንዎ መጠኑን ይሞላል።',
+  'intake.a9.freqOnce': 'አንዴ',
+  'intake.a9.freqTwice': 'ሁለቴ',
+  'intake.a9.freqThree': 'ሶስቴ',
+  'intake.a9.freqUnsure': 'እርግጠኛ አይደለሁም',
+  'intake.a9.medAudio': '{name} በቀን ስንት ጊዜ ይወስዳሉ?',
+
+  // A10 — review
+  'intake.a10.title': 'ፈጣን ግምገማ',
+  'intake.a10.subtitle': 'ይህ ትክክል መሆኑን ያረጋግጡ። ለመለወጥ አርምን ይንኩ።',
+  'intake.a10.audio': 'ፈጣን ግምገማ። ይህ ትክክል መሆኑን ያረጋግጡ። ለመለወጥ አርምን ይንኩ።',
+  'intake.a10.reviewBanner': 'የተንከባካቢ ቡድንዎ ከ48 እስከ 72 ሰዓታት ውስጥ ሁሉንም ይገመግማል እና ከእርስዎ ጋር ያረጋግጣል ወይም ያስተካክላል።',
+  'intake.a10.sectionAbout': 'ስለ እርስዎ',
+  'intake.a10.sectionConditions': 'ሁኔታዎች',
+  'intake.a10.sectionMedications': 'መድሃኒቶች',
+  'intake.a10.rowGender': 'ፆታ',
+  'intake.a10.rowHeight': 'ቁመት',
+  'intake.a10.rowPregnancy': 'እርግዝና',
+  'intake.a10.pregnancyYes': 'አዎ',
+  'intake.a10.pregnancyYesDate': 'አዎ · የትውልድ ቀን {date}',
+  'intake.a10.pregnancyNo': 'አይ',
+  'intake.a10.pregnancyNotSpec': 'አልተገለጸም',
+  'intake.a10.noneReported': 'ምንም አልተዘገበም',
+  'intake.a10.htnReported': 'ከፍተኛ የደም ግፊት ተመርምሯል',
+  'intake.a10.conditionHf': 'የልብ ድካም',
+  'intake.a10.conditionHfWithType': 'የልብ ድካም ({type})',
+  'intake.a10.conditionAf': 'አትሪያል ፊብሪሌሽን',
+  'intake.a10.conditionCad': 'የልብ የደም ሥር በሽታ',
+  'intake.a10.conditionHcm': 'HCM',
+  'intake.a10.conditionDcm': 'DCM',
+  'intake.a10.comboBadge': '(2-በ-1)',
+  'intake.a10.genderMale': 'ወንድ',
+  'intake.a10.genderFemale': 'ሴት',
+  'intake.a10.genderOther': 'ሌላ',
+  'intake.a10.edit': 'አርም',
+
+  // A11 — complete
+  'intake.a11.title': 'አመሰግናለሁ — ደርሶናል',
+  'intake.a11.body': 'የተንከባካቢ ቡድንዎ መረጃዎን ከ48 እስከ 72 ሰዓታት ውስጥ ይገመግማል። በዚያ ጊዜ መተግበሪያውን እንደተለመደው መጠቀም ይችላሉ — ግምገማው ሲጠናቀቅ እናሳውቃለን።',
+  'intake.a11.cta': 'ወደ ዳሽቦርድ',
+
+  // Exit save modal
+  'intake.exitSave.title': 'እድገትዎን አስቀምጠናል',
+  'intake.exitSave.body': 'በማንኛውም ጊዜ ከዳሽቦርድዎ መቀጠል ይችላሉ።',
+  'intake.exitSave.cta': 'ወደ ዳሽቦርድ ተመለስ',
+  'intake.exitSave.keepGoing': 'ቀጥል',
+
+  // "Already on file" page
+  'intake.profileExists.title': 'ሁሉም ተዘጋጅቷል',
+  'intake.profileExists.body': 'የጤና መረጃዎ በፋይል ላይ ነው። ለመለወጥ ወደ የመረጃ ገጽዎ ይሂዱ።',
+  'intake.profileExists.cta': 'ወደ ዳሽቦርድ',
+
+  // Wizard chrome + validation
+  'intake.nav.back': 'ተመለስ',
+  'intake.nav.save': 'አስቀምጥ',
+  'intake.nav.saveAria': 'አስቀምጥ እና ውጣ',
+  'intake.nav.saving': 'በማስቀመጥ…',
+  'intake.nav.submit': 'መረጃ ላክ',
+  'intake.nav.continue': 'ቀጥል',
+  'intake.nav.errorGender': 'እባክዎ ፆታ ይምረጡ።',
+  'intake.nav.errorHeight': 'እባክዎ በ100 እና 250 ሴ.ሜ መካከል ቁመት ያስገቡ።',
+  'intake.nav.errorHfType': 'እባክዎ አንዱን ይምረጡ — እርግጠኛ አይደለሁም መልካም ነው።',
+  'intake.nav.errorFreq': '{name} ምን ያህል ጊዜ እንደሚወስዱ ይምረጡ።',
+  'intake.nav.errorSubmit': 'መረጃዎን በማስገባት ላይ የሆነ ችግር ተፈጥሯል።',
+
+  // Frequency labels (used in review)
+  'intake.freq.once': 'በቀን አንዴ',
+  'intake.freq.twice': 'በቀን ሁለቴ',
+  'intake.freq.three': 'በቀን 3 ጊዜ',
+  'intake.freq.unsure': 'እርግጠኛ አይደለሁም',
+  'intake.freq.unset': 'የድግግሞሽ ማዋቀር',
+
+  // MedicationCard chrome
+  'intake.medCard.takeThis': 'ይህን እወስዳለሁ',
+  'intake.medCard.tapIfTake': 'ይህን የሚወስዱ ከሆነ ይንኩ',
+  'intake.medCard.combo': '2-በ-1',
+
+  // AudioButton aria labels
+  'intake.audio.listen': 'አዳምጥ',
+  'intake.audio.stop': 'አቁም',
+
+  // MonthlyMedReask modal (E4)
+  'intake.reask.ariaLabel': 'ወርሃዊ የመድሃኒት ምርመራ',
+  'intake.reask.closeAria': 'በኋላ ጠይቀኝ',
+  'intake.reask.kicker': 'ወርሃዊ ምርመራ',
+  'intake.reask.title': 'ተመሳሳይ መድሃኒቶችን አሁንም እየወሰዱ ነው?',
+  'intake.reask.body': 'እርስዎ አሁን እየወሰዱ ያሉትን የተንከባካቢ ቡድንዎ ሁልጊዜ እንዲያይ በወር አንዴ እንጠይቃለን።',
+  'intake.reask.yes': 'አዎ፣ ተመሳሳይ መድሃኒቶች',
+  'intake.reask.update': 'መድሃኒቶቼን አዘምን',
 
   // ─── Language Names ────────────────────────────────────────────────────────
   'lang.en': 'English',

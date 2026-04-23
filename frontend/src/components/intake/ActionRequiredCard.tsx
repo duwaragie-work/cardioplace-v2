@@ -11,6 +11,7 @@
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { ClipboardList, ArrowRight } from 'lucide-react';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 interface Props {
   state:
@@ -21,13 +22,19 @@ interface Props {
 
 export default function ActionRequiredCard({ state, ctaHref = '/clinical-intake' }: Props) {
   const router = useRouter();
+  const { t } = useLanguage();
   const isResume = state.kind === 'resume';
 
-  const heading = isResume ? 'Continue your health profile' : 'Complete your health profile';
+  const heading = isResume
+    ? t('intake.a0.headingResume')
+    : t('intake.a0.headingFresh');
   const sub = isResume
-    ? `Step ${state.stepIndex} of ${state.total} · ${state.stepLabel}`
-    : 'Your care team needs this to keep you safe. Takes about 5 minutes.';
-  const cta = isResume ? 'Resume' : 'Start';
+    ? t('intake.a0.subResume')
+        .replace('{current}', String(state.stepIndex))
+        .replace('{total}', String(state.total))
+        .replace('{label}', state.stepLabel)
+    : t('intake.a0.subFresh');
+  const cta = isResume ? t('intake.a0.ctaResume') : t('intake.a0.ctaFresh');
 
   const progressPct =
     isResume && state.total > 0
@@ -68,7 +75,7 @@ export default function ActionRequiredCard({ state, ctaHref = '/clinical-intake'
             className="text-[10px] font-bold uppercase tracking-wider mb-0.5"
             style={{ color: 'var(--brand-warning-amber)' }}
           >
-            Action required
+            {t('intake.a0.actionRequired')}
           </p>
           <p
             className="text-[15px] md:text-[16px] font-bold leading-tight"
