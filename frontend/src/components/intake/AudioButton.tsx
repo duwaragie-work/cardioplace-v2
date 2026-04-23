@@ -8,25 +8,41 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Volume2, VolumeX } from 'lucide-react';
+import { useLanguage } from '@/contexts/LanguageContext';
+
+// Maps our app locale codes to BCP-47 tags the browser's SpeechSynthesis
+// engine recognises. Values picked to match the voices most commonly
+// pre-installed on Chrome, Safari, and Edge.
+const LOCALE_TO_BCP47: Record<string, string> = {
+  en: 'en-US',
+  es: 'es-ES',
+  fr: 'fr-FR',
+  de: 'de-DE',
+  am: 'am-ET',
+};
 
 interface Props {
   text: string;
-  /** BCP-47 language tag, e.g. "en-US", "es-ES". Defaults to en-US. */
+  /** BCP-47 language tag override. Defaults to the current app locale. */
   lang?: string;
   /** Visual size — sm for inline-with-text, md for card corners. */
   size?: 'sm' | 'md';
-  /** aria-label override; defaults to "Listen". */
+  /** aria-label override; defaults to the translated "Listen". */
   label?: string;
   className?: string;
 }
 
 export default function AudioButton({
   text,
-  lang = 'en-US',
+  lang,
   size = 'md',
-  label = 'Listen',
+  label,
   className,
 }: Props) {
+  const { locale, t } = useLanguage();
+  const effectiveLang = lang ?? LOCALE_TO_BCP47[locale] ?? 'en-US';
+  const effectiveLabel = label ?? t('intake.audio.listen');
+  const stopLabel = t('intake.audio.stop');
   const [speaking, setSpeaking] = useState(false);
   // `mounted` starts false on both server and first client paint so the markup
   // matches and React doesn't flag a hydration mismatch. After hydration we
@@ -57,7 +73,7 @@ export default function AudioButton({
     }
     synth.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang;
+    utterance.lang = effectiveLang;
     utterance.rate = 0.95;
     utterance.onend = () => setSpeaking(false);
     utterance.onerror = () => setSpeaking(false);
@@ -75,7 +91,7 @@ export default function AudioButton({
     <motion.button
       type="button"
       onClick={handleClick}
-      aria-label={speaking ? 'Stop' : label}
+      aria-label={speaking ? stopLabel : effectiveLabel}
       aria-pressed={speaking}
       className={`flex items-center justify-center rounded-full transition-colors cursor-pointer ${className ?? ''}`}
       style={{

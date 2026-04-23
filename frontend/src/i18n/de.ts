@@ -1,3 +1,7 @@
+// ⚠️ MT — MACHINE TRANSLATED, NEEDS NATIVE SPEAKER REVIEW BEFORE PATIENT USE
+// intake.* strings were machine-translated. A native German speaker
+// must audit these before cohort launch — clinical terminology and tone
+// may need adjustment.
 import type { TranslationKey } from './en';
 
 const de: Record<TranslationKey, string> = {
@@ -687,6 +691,236 @@ const de: Record<TranslationKey, string> = {
   'about.closingDesc': 'Wir glauben, dass der gefährlichste Moment in der kardiovaskulären Versorgung nicht der Notfall ist. Es ist die Stille davor, als niemand aufgepasst hat.\n\nWir haben Cardioplace entwickelt, um diese Stille zu beenden — in Ward 7, in Ward 8 und letztendlich überall sonst, wo diese Lücke besteht.',
   'about.closingButton': 'Mehr über das Programm erfahren',
   'about.closingFooter': 'Cardioplace · In Partnerschaft mit der DC Hospital Association · April 2026',
+
+  // ─── Clinical Intake (Flow A) ──────────────────────────────────────────────
+  // A0 — dashboard action card
+  'intake.a0.actionRequired': 'Aktion erforderlich',
+  'intake.a0.headingFresh': 'Vervollständigen Sie Ihr Gesundheitsprofil',
+  'intake.a0.headingResume': 'Setzen Sie Ihr Gesundheitsprofil fort',
+  'intake.a0.subFresh': 'Ihr Behandlungsteam braucht dies, um Sie sicher zu halten. Dauert etwa 5 Minuten.',
+  'intake.a0.subResume': 'Schritt {current} von {total} · {label}',
+  'intake.a0.ctaFresh': 'Starten',
+  'intake.a0.ctaResume': 'Fortsetzen',
+
+  // A0b — intro screen
+  'intake.a0b.title': 'Erstellen wir Ihr Gesundheitsprofil',
+  'intake.a0b.desc': 'Dies hilft Ihrem Behandlungsteam, Sie richtig zu unterstützen. Ihre Antworten bleiben privat.',
+  'intake.a0b.audio': 'Erstellen wir Ihr Gesundheitsprofil. Dies hilft Ihrem Behandlungsteam, Sie richtig zu unterstützen. Ihre Antworten bleiben privat.',
+  'intake.a0b.begin': 'Beginnen',
+  'intake.a0b.saveForLater': 'Für später speichern',
+
+  // A1 — demographics
+  'intake.a1.title': 'Etwas über Sie',
+  'intake.a1.subtitle': 'Hilft uns, Ihre Sicherheitsgrenzen zu personalisieren.',
+  'intake.a1.audio': 'Etwas über Sie. Das hilft uns, Ihre Sicherheitsgrenzen zu personalisieren.',
+  'intake.a1.genderQuestion': 'Was ist Ihr Geschlecht?',
+  'intake.a1.genderAudio': 'Was ist Ihr Geschlecht?',
+  'intake.a1.genderMale': 'Männlich',
+  'intake.a1.genderFemale': 'Weiblich',
+  'intake.a1.genderOther': 'Anderes',
+  'intake.a1.heightQuestion': 'Wie groß sind Sie? (Zentimeter)',
+  'intake.a1.heightAudio': 'Wie groß sind Sie, in Zentimetern?',
+  'intake.a1.heightHint': 'Ungefähr 5 ft = 152 cm · 5 ft 5 in = 165 cm · 6 ft = 183 cm',
+
+  // A2 — pregnancy
+  'intake.a2.title': 'Schwangerschaftsstatus',
+  'intake.a2.subtitle': 'Manche Medikamente brauchen während der Schwangerschaft andere Sicherheitsregeln.',
+  'intake.a2.audio': 'Schwangerschaftsstatus. Manche Medikamente brauchen während der Schwangerschaft andere Sicherheitsregeln.',
+  'intake.a2.yesTitle': 'Ja',
+  'intake.a2.yesDesc': 'Ich bin jetzt schwanger',
+  'intake.a2.yesAudio': 'Ja, ich bin jetzt schwanger',
+  'intake.a2.noTitle': 'Nein',
+  'intake.a2.noDesc': 'Nicht schwanger',
+  'intake.a2.noAudio': 'Nein, nicht schwanger',
+  'intake.a2.naTitle': 'Nicht zutreffend',
+  'intake.a2.naDesc': 'Lieber nicht sagen',
+  'intake.a2.naAudio': 'Nicht zutreffend',
+  'intake.a2.dueDateLabel': 'Wann ist der Geburtstermin? (optional)',
+  'intake.a2.dueDateAudio': 'Wann ist der Geburtstermin? Dies ist optional.',
+  'intake.a2.preeclampsiaTitle': 'Präeklampsie in der Vorgeschichte',
+  'intake.a2.preeclampsiaDesc': 'In einer früheren Schwangerschaft',
+  'intake.a2.preeclampsiaAudio': 'Präeklampsie in der Vorgeschichte in einer früheren Schwangerschaft',
+
+  // A3 — heart conditions
+  'intake.a3.title': 'Herzerkrankungen',
+  'intake.a3.subtitle': 'Tippen Sie auf alle Erkrankungen, von denen Sie erfahren haben.',
+  'intake.a3.audio': 'Herzerkrankungen. Tippen Sie auf alle Erkrankungen, von denen Sie erfahren haben.',
+  'intake.a3.hfTitle': 'Herzinsuffizienz',
+  'intake.a3.hfDesc': 'Der Arzt sagte, Ihr Herz pumpt schwächer',
+  'intake.a3.hfAudio': 'Herzinsuffizienz. Der Arzt sagte, Ihr Herz pumpt schwächer.',
+  'intake.a3.afTitle': 'Vorhofflimmern',
+  'intake.a3.afDesc': 'Unregelmäßiger Herzschlag',
+  'intake.a3.afAudio': 'Vorhofflimmern. Unregelmäßiger Herzschlag.',
+  'intake.a3.cadTitle': 'Koronare Herzkrankheit',
+  'intake.a3.cadDesc': 'Blockierte oder enge Herzarterien',
+  'intake.a3.cadAudio': 'Koronare Herzkrankheit. Blockierte oder enge Herzarterien.',
+  'intake.a3.hcmTitle': 'Hypertrophe Kardiomyopathie',
+  'intake.a3.hcmDesc': 'HCM — verdickter Herzmuskel',
+  'intake.a3.hcmAudio': 'Hypertrophe Kardiomyopathie. Verdickter Herzmuskel.',
+  'intake.a3.dcmTitle': 'Dilatative Kardiomyopathie',
+  'intake.a3.dcmDesc': 'DCM — vergrößertes Herz',
+  'intake.a3.dcmAudio': 'Dilatative Kardiomyopathie. Vergrößertes Herz.',
+  'intake.a3.noneTitle': 'Keine davon',
+  'intake.a3.noneDesc': 'Keine Herzerkrankungen',
+  'intake.a3.noneAudio': 'Keine davon. Keine Herzerkrankungen.',
+  'intake.a3.htnLabel': 'Mein Arzt hat Bluthochdruck diagnostiziert',
+
+  // A4 — heart failure subtype
+  'intake.a4.title': 'Art der Herzinsuffizienz',
+  'intake.a4.subtitle': 'Ihr Arzt hat möglicherweise einen dieser Begriffe verwendet.',
+  'intake.a4.audio': 'Art der Herzinsuffizienz. Ihr Arzt hat möglicherweise einen dieser Begriffe verwendet.',
+  'intake.a4.hfrefTitle': 'HFrEF',
+  'intake.a4.hfrefDesc': "Reduzierte Ejektionsfraktion — manchmal 'schwaches Herz' genannt",
+  'intake.a4.hfrefAudio': 'HFrEF. Reduzierte Ejektionsfraktion. Manchmal schwaches Herz genannt.',
+  'intake.a4.hfpefTitle': 'HFpEF',
+  'intake.a4.hfpefDesc': 'Erhaltene Ejektionsfraktion — Herz ist steif, pumpt aber noch',
+  'intake.a4.hfpefAudio': 'HFpEF. Erhaltene Ejektionsfraktion. Herz ist steif, pumpt aber noch.',
+  'intake.a4.unknownTitle': 'Unsicher',
+  'intake.a4.unknownDesc': 'Ihr Behandlungsteam prüft dies beim nächsten Besuch',
+  'intake.a4.unknownAudio': 'Unsicher. Ihr Behandlungsteam prüft dies beim nächsten Besuch.',
+
+  // A5 — core medications
+  'intake.a5.title': 'Ihre Medikamente',
+  'intake.a5.subtitle': 'Tippen Sie auf jede Pille, die Sie einnehmen. Keine Sorge um die Dosis — nur ob Sie sie nehmen.',
+  'intake.a5.audio': 'Ihre Medikamente. Tippen Sie auf jede Pille, die Sie einnehmen. Keine Sorge um die Dosis, nur ob Sie sie nehmen.',
+  'intake.a5.groupAce': 'Blutdruckpillen (ACE-Hemmer)',
+  'intake.a5.groupArb': 'Blutdruckpillen (ARB)',
+  'intake.a5.groupBeta': 'Betablocker',
+  'intake.a5.groupCcb': 'Kalziumkanalblocker',
+  'intake.a5.audioAlsoKnown': 'auch bekannt als',
+
+  // A6 — combination pills
+  'intake.a6.title': 'Kombinationspillen',
+  'intake.a6.subtitle': 'Eine Pille mit zwei Wirkstoffen. Tippen Sie auf die, die Sie nehmen.',
+  'intake.a6.audio': 'Kombinationspillen. Eine Pille mit zwei Wirkstoffen. Tippen Sie auf die, die Sie nehmen.',
+  'intake.a6.audioContains': 'Enthält',
+  'intake.a6.audioAnd': 'und',
+
+  // A7 — dedup modal
+  'intake.a7.title': 'Ist das die gleiche Pille?',
+  'intake.a7.body': 'Sie haben {component} und auch {combo} ausgewählt — das {componentLower} enthält.',
+  'intake.a7.keepCombo': 'Sie sind gleich — nur {combo} behalten',
+  'intake.a7.keepSingle': 'Sie sind gleich — nur {component} behalten',
+  'intake.a7.keepBoth': 'Ich nehme beide',
+  'intake.a7.goBack': 'Zurück und überprüfen',
+
+  // A8 — category picker + "not listed" flow
+  'intake.a8.title': 'Noch etwas?',
+  'intake.a8.subtitle': 'Tippen Sie auf eine Kategorie, wenn Sie etwas nicht Aufgeführtes nehmen.',
+  'intake.a8.audio': 'Noch etwas? Tippen Sie auf eine Kategorie, wenn Sie etwas nicht Aufgeführtes nehmen.',
+  'intake.a8.categoryWaterPill': 'Entwässerungstablette',
+  'intake.a8.categoryBloodThinner': 'Blutverdünner',
+  'intake.a8.categoryCholesterol': 'Cholesterinmedikament',
+  'intake.a8.categoryHeartRhythm': 'Herzrhythmusmedikament',
+  'intake.a8.categorySGLT2': 'Diabetesmedikament, das dem Herzen hilft',
+  'intake.a8.categoryOther': 'Anderes Medikament nicht aufgelistet',
+  'intake.a8.audioSGLT2': 'Diabetesmedikament, das auch dem Herzen hilft',
+  'intake.a8.otherBlurb': 'Nennen Sie uns den Namen des Medikaments. Sprechen Sie ihn (Ihr Telefon schreibt es für Sie) oder machen Sie ein Foto des Etiketts.',
+  'intake.a8.otherSpeakLabel': 'Sprechen Sie den Medikamentennamen',
+  'intake.a8.otherSpeakPlaceholder': 'z. B. Hydralazin',
+  'intake.a8.otherAdd': 'Hinzufügen',
+  'intake.a8.otherPhotoLabel': 'Oder beschreiben Sie, was auf der Flasche steht',
+  'intake.a8.otherPhotoPlaceholder': 'Was ist auf dem Etikett gedruckt?',
+  'intake.a8.otherCountSingle': '{n} anderes Medikament hinzugefügt — Ihr Behandlungsteam bestätigt die Details.',
+  'intake.a8.otherCountPlural': '{n} andere Medikamente hinzugefügt — Ihr Behandlungsteam bestätigt die Details.',
+  'intake.a8.skipHint': 'Sie können dies überspringen, wenn nichts zutrifft. Ihr Behandlungsteam prüft, was Sie nehmen, bei der Durchsicht Ihres Profils.',
+
+  // A9 — frequency
+  'intake.a9.emptyTitle': 'Wie oft?',
+  'intake.a9.emptySubtitle': 'Noch keine Medikamente hinzugefügt — Sie können überspringen.',
+  'intake.a9.emptyAudio': 'Noch keine Medikamente hinzugefügt. Sie können überspringen.',
+  'intake.a9.emptyBody': 'Sie haben keine Medikamente hinzugefügt. Tippen Sie auf Zurück, falls Sie welche vergessen haben, oder auf Weiter zur Überprüfung.',
+  'intake.a9.title': 'Wie oft pro Tag?',
+  'intake.a9.subtitle': 'Nur die Anzahl — Ihr Behandlungsteam trägt die Dosis ein.',
+  'intake.a9.audio': 'Wie oft nehmen Sie jedes pro Tag? Nur die Anzahl — Ihr Behandlungsteam trägt die Dosis ein.',
+  'intake.a9.freqOnce': 'Einmal',
+  'intake.a9.freqTwice': 'Zweimal',
+  'intake.a9.freqThree': 'Dreimal',
+  'intake.a9.freqUnsure': 'Unsicher',
+  'intake.a9.medAudio': 'Wie oft pro Tag nehmen Sie {name}?',
+
+  // A10 — review
+  'intake.a10.title': 'Schnelle Überprüfung',
+  'intake.a10.subtitle': 'Stellen Sie sicher, dass dies richtig aussieht. Tippen Sie auf Bearbeiten, um zu ändern.',
+  'intake.a10.audio': 'Schnelle Überprüfung. Stellen Sie sicher, dass dies richtig aussieht. Tippen Sie auf Bearbeiten, um zu ändern.',
+  'intake.a10.reviewBanner': 'Ihr Behandlungsteam überprüft alles innerhalb von 48 bis 72 Stunden und bestätigt oder korrigiert es mit Ihnen.',
+  'intake.a10.sectionAbout': 'Über Sie',
+  'intake.a10.sectionConditions': 'Erkrankungen',
+  'intake.a10.sectionMedications': 'Medikamente',
+  'intake.a10.rowGender': 'Geschlecht',
+  'intake.a10.rowHeight': 'Größe',
+  'intake.a10.rowPregnancy': 'Schwangerschaft',
+  'intake.a10.pregnancyYes': 'Ja',
+  'intake.a10.pregnancyYesDate': 'Ja · Termin {date}',
+  'intake.a10.pregnancyNo': 'Nein',
+  'intake.a10.pregnancyNotSpec': 'Nicht angegeben',
+  'intake.a10.noneReported': 'Keine gemeldet',
+  'intake.a10.htnReported': 'Bluthochdruck diagnostiziert',
+  'intake.a10.conditionHf': 'Herzinsuffizienz',
+  'intake.a10.conditionHfWithType': 'Herzinsuffizienz ({type})',
+  'intake.a10.conditionAf': 'Vorhofflimmern',
+  'intake.a10.conditionCad': 'Koronare Herzkrankheit',
+  'intake.a10.conditionHcm': 'HCM',
+  'intake.a10.conditionDcm': 'DCM',
+  'intake.a10.comboBadge': '(2-in-1)',
+  'intake.a10.genderMale': 'Männlich',
+  'intake.a10.genderFemale': 'Weiblich',
+  'intake.a10.genderOther': 'Anderes',
+  'intake.a10.edit': 'Bearbeiten',
+
+  // A11 — complete
+  'intake.a11.title': 'Danke — wir haben es',
+  'intake.a11.body': 'Ihr Behandlungsteam überprüft Ihr Profil innerhalb von 48 bis 72 Stunden. Sie können die App in der Zwischenzeit normal nutzen — wir teilen Ihnen mit, wenn die Überprüfung abgeschlossen ist.',
+  'intake.a11.cta': 'Zum Dashboard',
+
+  // Exit save modal
+  'intake.exitSave.title': 'Wir haben Ihren Fortschritt gespeichert',
+  'intake.exitSave.body': 'Sie können jederzeit von Ihrem Dashboard aus fortfahren.',
+  'intake.exitSave.cta': 'Zurück zum Dashboard',
+  'intake.exitSave.keepGoing': 'Weitermachen',
+
+  // "Already on file" page
+  'intake.profileExists.title': 'Alles bereit',
+  'intake.profileExists.body': 'Ihr Gesundheitsprofil ist gespeichert. Um Änderungen vorzunehmen, gehen Sie zu Ihrer Profilseite.',
+  'intake.profileExists.cta': 'Zum Dashboard',
+
+  // Wizard chrome + validation
+  'intake.nav.back': 'Zurück',
+  'intake.nav.save': 'Speichern',
+  'intake.nav.saveAria': 'Speichern und beenden',
+  'intake.nav.saving': 'Speichern…',
+  'intake.nav.submit': 'Profil senden',
+  'intake.nav.continue': 'Weiter',
+  'intake.nav.errorGender': 'Bitte wählen Sie ein Geschlecht.',
+  'intake.nav.errorHeight': 'Bitte geben Sie eine Größe zwischen 100 und 250 cm ein.',
+  'intake.nav.errorHfType': 'Bitte wählen Sie eines — Unsicher ist okay.',
+  'intake.nav.errorFreq': 'Wählen Sie, wie oft Sie {name} nehmen.',
+  'intake.nav.errorSubmit': 'Beim Senden Ihres Profils ist etwas schiefgegangen.',
+
+  // Frequency labels (used in review)
+  'intake.freq.once': 'Einmal täglich',
+  'intake.freq.twice': 'Zweimal täglich',
+  'intake.freq.three': '3-mal täglich',
+  'intake.freq.unsure': 'Unsicher',
+  'intake.freq.unset': 'Häufigkeit festlegen',
+
+  // MedicationCard chrome
+  'intake.medCard.takeThis': 'Ich nehme das',
+  'intake.medCard.tapIfTake': 'Tippen, wenn Sie das nehmen',
+  'intake.medCard.combo': '2-in-1',
+
+  // AudioButton aria labels
+  'intake.audio.listen': 'Anhören',
+  'intake.audio.stop': 'Stopp',
+
+  // MonthlyMedReask modal (E4)
+  'intake.reask.ariaLabel': 'Monatliche Medikamentenprüfung',
+  'intake.reask.closeAria': 'Später fragen',
+  'intake.reask.kicker': 'Monatliche Überprüfung',
+  'intake.reask.title': 'Nehmen Sie immer noch die gleichen Medikamente?',
+  'intake.reask.body': 'Wir fragen einmal im Monat, damit Ihr Behandlungsteam immer sieht, was Sie gerade wirklich nehmen.',
+  'intake.reask.yes': 'Ja, die gleichen Medikamente',
+  'intake.reask.update': 'Meine Medikamente aktualisieren',
 
   // ─── Language Names ────────────────────────────────────────────────────────
   'lang.en': 'English',
