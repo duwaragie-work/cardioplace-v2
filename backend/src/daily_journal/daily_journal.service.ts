@@ -729,7 +729,15 @@ export class DailyJournalService {
             id: true,
             type: true,
             severity: true,
+            tier: true,
+            ruleId: true,
             actualValue: true,
+            // Three-tier messages populated by OutputGenerator (phase/6).
+            // Reviewed wording signed off by Dr. Singal; prefer these over
+            // any hand-rolled strings in this endpoint.
+            patientMessage: true,
+            caregiverMessage: true,
+            physicianMessage: true,
             journalEntry: {
               select: {
                 measuredAt: true,
@@ -749,18 +757,29 @@ export class DailyJournalService {
         const systolicBP = e.alert.journalEntry?.systolicBP ?? 0
         const diastolicBP = e.alert.journalEntry?.diastolicBP ?? 0
 
-        // TODO(phase/6): replace this v1 fallback copy with the three-tier
-        // messages persisted on DeviationAlert (patientMessage / caregiverMessage
-        // / physicianMessage) once the message registry lands.
+        // Prefer the three-tier messages persisted on DeviationAlert
+        // (populated by OutputGenerator in phase/6). The v1 fallback copy
+        // below only fires when a legacy escalation has all three message
+        // columns null — shouldn't happen for phase/5+ alerts but kept as
+        // a defensive last resort so the endpoint never returns an empty
+        // string to the dashboard.
         const patientMessage =
-          e.escalationLevel === EscalationLevel.LEVEL_2
+          e.alert.patientMessage ??
+          (e.escalationLevel === EscalationLevel.LEVEL_2
             ? 'URGENT: Your blood pressure reading indicates a medical emergency. Call 911 immediately or go to your nearest emergency room.'
-            : 'Your recent blood pressure reading has been flagged. Your care team has been notified and will follow up with you within 24 hours.'
+            : 'Your recent blood pressure reading has been flagged. Your care team has been notified and will follow up with you within 24 hours.')
 
+        // Provider dashboard consumes this as the clinical-side message.
+        // `physicianMessage` is the reviewed clinician wording; fall back
+        // to `caregiverMessage` if for some reason physician is null
+        // (Tier 3 physician-only rules DO populate physicianMessage, so
+        // this fallback is belt-and-suspenders).
         const careTeamMessage =
-          e.escalationLevel === EscalationLevel.LEVEL_2
+          e.alert.physicianMessage ??
+          e.alert.caregiverMessage ??
+          (e.escalationLevel === EscalationLevel.LEVEL_2
             ? `IMMEDIATE ACTION REQUIRED: Patient ${e.userId} has critical BP readings (${systolicBP}/${diastolicBP} mmHg). Emergency escalation triggered.`
-            : `FOLLOW-UP WITHIN 24H: Patient ${e.userId} has elevated BP readings (${systolicBP}/${diastolicBP} mmHg). Review recommended.`
+            : `FOLLOW-UP WITHIN 24H: Patient ${e.userId} has elevated BP readings (${systolicBP}/${diastolicBP} mmHg). Review recommended.`)
 
         return {
           id: e.id,
@@ -772,6 +791,8 @@ export class DailyJournalService {
             id: e.alert.id,
             type: e.alert.type,
             severity: e.alert.severity,
+            tier: e.alert.tier,
+            ruleId: e.alert.ruleId,
             actualValue: e.alert.actualValue ? Number(e.alert.actualValue) : null,
             journalEntry: e.alert.journalEntry
               ? {

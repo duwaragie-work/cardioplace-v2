@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { getAgeGroup } from '@cardioplace/shared'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { EmailService } from '../email/email.service.js'
 import { scheduleCallEmailHtml } from '../email/email-templates.js'
@@ -31,9 +32,12 @@ export class ProviderService {
     private readonly emailService: EmailService,
   ) {}
 
-  // TODO(phase/4): replace these inline helpers with imports from
-  // /shared/src/derivatives.ts when Dev 2 lands it. Same mapping, single
-  // source of truth for rule engine + dashboards + chat prompt.
+  // Age bucketing now delegated to shared/derivatives.ts::getAgeGroup (phase/4).
+  // The v1 `derivePrimaryCondition` / `deriveRiskTier` helpers below stay
+  // inline — v2 alert rules read structured booleans directly and don't need
+  // a "primary condition" string, but the v1 provider dashboard still
+  // consumes these. They collapse when Dev 1 rebuilds that surface in
+  // phase/11.
   private derivePrimaryCondition(
     profile: PatientProfileShape | null,
   ): string | null {
@@ -61,8 +65,12 @@ export class ProviderService {
     profile: PatientProfileShape | null,
     dob: Date | null,
   ): DerivedRiskTier {
+    // Preserve v1 default: missing DOB falls through as 40-64 (no
+    // age-based escalation). getAgeGroup returns null for null/invalid/
+    // under-18 DOBs; `??` keeps that defaulted to the middle bucket.
+    const ageGroup = getAgeGroup(dob) ?? '40-64'
     if (!profile) {
-      return this.ageBucket(dob) === '65+' ? 'ELEVATED' : 'STANDARD'
+      return ageGroup === '65+' ? 'ELEVATED' : 'STANDARD'
     }
     if (
       profile.isPregnant ||
@@ -77,20 +85,11 @@ export class ProviderService {
       profile.hasCAD ||
       profile.hasAFib ||
       profile.diagnosedHypertension ||
-      this.ageBucket(dob) === '65+'
+      ageGroup === '65+'
     ) {
       return 'ELEVATED'
     }
     return 'STANDARD'
-  }
-
-  private ageBucket(dob: Date | null | undefined): '18-39' | '40-64' | '65+' {
-    if (!dob) return '40-64'
-    const years =
-      (Date.now() - new Date(dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000)
-    if (years >= 65) return '65+'
-    if (years >= 40) return '40-64'
-    return '18-39'
   }
 
   // Translate an incoming `riskTier` filter (string) into a PatientProfile
