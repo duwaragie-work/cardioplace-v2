@@ -453,10 +453,15 @@ export class IntakeService {
   }
 
   async listMedications(userId: string, includeDiscontinued = false) {
+    // Exclude REJECTED meds so a provider's "this isn't the patient's med" call
+    // doesn't get re-asked on the patient's daily check-in. UNVERIFIED stays
+    // visible — patient's word is still actionable pending provider review.
     const meds = await this.prisma.patientMedication.findMany({
-      where: includeDiscontinued
-        ? { userId }
-        : { userId, discontinuedAt: null },
+      where: {
+        userId,
+        ...(includeDiscontinued ? {} : { discontinuedAt: null }),
+        verificationStatus: { not: 'REJECTED' },
+      },
       orderBy: { reportedAt: 'desc' },
     })
     return {

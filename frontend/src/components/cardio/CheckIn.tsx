@@ -12,7 +12,7 @@
 // taken within ~30 minutes so the rule engine averages them. AFib patients see
 // a banner reminding them ≥3 readings per session are required.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -85,21 +85,25 @@ interface FormData {
   // Weight
   weight: string;
   weightUnit: 'lbs' | 'kg';
-  // Medication
-  medicationTaken: 'yes' | 'no' | null;
-  /**
-   * Per-medication miss detail. Each entry is one medication the patient
-   * ticked as missed, with a structured reason + dose count. The array stays
-   * empty until `medicationTaken === 'no'` and the patient interacts with the
-   * per-med checkbox list.
-   */
-  missedMedications: Array<{
-    medicationId: string;
-    drugName: string;
-    drugClass: string;
-    reason: 'FORGOT' | 'SIDE_EFFECTS' | 'RAN_OUT' | 'COST' | 'INTENTIONAL' | 'OTHER' | null;
-    missedDoses: number;
-  }>;
+  // Medication — per-medication status, keyed by medicationId. Answered
+  // lazily as the patient taps toggles; unanswered meds simply stay absent
+  // from the map. The combined `medicationTaken` bool + `missedMedications`
+  // array the backend expects are derived at submit time from this map.
+  medicationStatus: Record<
+    string, // medicationId
+    {
+      taken: 'yes' | 'no' | null;
+      reason:
+        | 'FORGOT'
+        | 'SIDE_EFFECTS'
+        | 'RAN_OUT'
+        | 'COST'
+        | 'INTENTIONAL'
+        | 'OTHER'
+        | null;
+      missedDoses: number; // 1 unless the patient adjusts the counter
+    }
+  >;
   // B3 structured symptoms
   severeHeadache: boolean;
   visualChanges: boolean;
@@ -152,8 +156,7 @@ function emptyForm(): FormData {
     pulse: '',
     weight: '',
     weightUnit: 'lbs',
-    medicationTaken: null,
-    missedMedications: [],
+    medicationStatus: {},
     severeHeadache: false,
     visualChanges: false,
     alteredMentalStatus: false,
@@ -643,228 +646,238 @@ const MISSED_REASONS: Array<{
   { value: 'OTHER', label: 'Other' },
 ];
 
+type MedicationEntry = FormData['medicationStatus'][string];
+
+const DEFAULT_MED_ENTRY: MedicationEntry = {
+  taken: null,
+  reason: null,
+  missedDoses: 1,
+};
+
 function StepMedication({ form, setField, medications, medsLoading }: MedicationStepProps) {
-  const toggleMed = (med: { id: string; drugName: string; drugClass: string }) => {
-    const existing = form.missedMedications.find((m) => m.medicationId === med.id);
-    if (existing) {
-      setField(
-        'missedMedications',
-        form.missedMedications.filter((m) => m.medicationId !== med.id),
-      );
-    } else {
-      setField('missedMedications', [
-        ...form.missedMedications,
-        {
-          medicationId: med.id,
-          drugName: med.drugName,
-          drugClass: med.drugClass,
-          reason: null,
-          missedDoses: 1,
-        },
-      ]);
-    }
+  const getEntry = (medId: string): MedicationEntry =>
+    form.medicationStatus[medId] ?? DEFAULT_MED_ENTRY;
+
+  const patchEntry = (medId: string, patch: Partial<MedicationEntry>) => {
+    const current = getEntry(medId);
+    setField('medicationStatus', {
+      ...form.medicationStatus,
+      [medId]: { ...current, ...patch },
+    });
   };
 
-  const updateEntry = (
-    medicationId: string,
-    patch: Partial<FormData['missedMedications'][number]>,
-  ) => {
-    setField(
-      'missedMedications',
-      form.missedMedications.map((m) =>
-        m.medicationId === medicationId ? { ...m, ...patch } : m,
-      ),
-    );
+  const setTaken = (medId: string, value: 'yes' | 'no') => {
+    const current = getEntry(medId);
+    // Flipping back to "yes" clears any captured miss detail so a stale
+    // reason doesn't leak into the submit payload.
+    const next: MedicationEntry =
+      value === 'yes'
+        ? { taken: 'yes', reason: null, missedDoses: 1 }
+        : { ...current, taken: 'no' };
+    setField('medicationStatus', {
+      ...form.medicationStatus,
+      [medId]: next,
+    });
   };
-
-  const showMedList = form.medicationTaken === 'no' && medications.length > 0;
 
   return (
     <div className="space-y-6">
       <StepHeader
-        title="Medication today"
-        subtitle="Did you take all your prescribed medicines?"
-        audio="Medication today. Did you take all your prescribed medicines?"
+        title="Medications today"
+        subtitle="Tap each one to tell us if you took it."
+        audio="Medications today. Tap each one to tell us if you took it."
         step={4}
         total={5}
       />
 
-      <div className="grid grid-cols-2 gap-3">
-        {[
-          { value: 'yes' as const, label: 'Yes, all taken', accent: 'var(--brand-success-green)' },
-          { value: 'no' as const, label: 'Missed one or more', accent: 'var(--brand-warning-amber)' },
-        ].map((opt) => {
-          const active = form.medicationTaken === opt.value;
-          return (
-            <motion.button
-              key={opt.value}
-              type="button"
-              onClick={() => {
-                setField('medicationTaken', opt.value);
-                // Flipping back to "yes" clears any captured miss detail so
-                // the user doesn't accidentally submit a stale list.
-                if (opt.value === 'yes') setField('missedMedications', []);
-              }}
-              className="h-14 rounded-2xl text-sm font-semibold border-2 transition-all flex items-center justify-center gap-2 cursor-pointer"
-              style={{
-                backgroundColor: active ? opt.accent : 'white',
-                borderColor: active ? opt.accent : 'var(--brand-border)',
-                color: active ? 'white' : 'var(--brand-text-secondary)',
-                boxShadow: active ? `0 4px 12px ${opt.accent}40` : 'none',
-              }}
-              whileTap={{ scale: 0.97 }}
+      {medsLoading && (
+        <div className="space-y-3 animate-pulse">
+          {[0, 1].map((i) => (
+            <div
+              key={i}
+              className="rounded-xl p-4"
+              style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)' }}
             >
-              <Pill className="w-4 h-4" />
-              {opt.label}
-            </motion.button>
-          );
-        })}
-      </div>
-
-      {form.medicationTaken === 'no' && medsLoading && (
-        <p className="text-[13px] text-center" style={{ color: 'var(--brand-text-muted)' }}>
-          Loading your medications…
-        </p>
+              <div className="h-3 rounded-full mb-2" style={{ backgroundColor: '#EDE9F6', width: '40%' }} />
+              <div className="h-2 rounded-full" style={{ backgroundColor: '#EDE9F6', width: '25%' }} />
+            </div>
+          ))}
+        </div>
       )}
 
-      {form.medicationTaken === 'no' && !medsLoading && medications.length === 0 && (
+      {!medsLoading && medications.length === 0 && (
+        // Defensive fallback — parent flow should have skipped this step when
+        // the patient has no meds on file. Kept so a stale render doesn't
+        // crash the wizard.
         <div
           className="rounded-xl p-3 text-[13px] leading-relaxed"
           style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-text-primary)' }}
         >
-          We don&apos;t have any medications on file for you yet. You can still submit; add your medications in settings later for better follow-up.
+          We don&apos;t have any medications on file for you yet. Add your medications in settings for better follow-up.
         </div>
       )}
 
-      {showMedList && (
-        <div className="space-y-3">
-          <div>
-            <p className="text-[14px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-              Which medication(s) did you miss?
-            </p>
-            <p className="text-[12px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
-              Help us understand so your care team can support you.
-            </p>
-          </div>
-
-          {medications.map((med) => {
-            const entry = form.missedMedications.find((m) => m.medicationId === med.id);
-            const selected = !!entry;
-            return (
-              <div
-                key={med.id}
-                className="rounded-xl border-2 transition-all"
-                style={{
-                  borderColor: selected ? 'var(--brand-warning-amber)' : 'var(--brand-border)',
-                  backgroundColor: selected ? 'var(--brand-warning-amber-light)' : 'white',
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => toggleMed(med)}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-left cursor-pointer"
-                >
-                  <span
-                    className="w-5 h-5 rounded-[5px] border-2 flex items-center justify-center shrink-0"
-                    style={{
-                      borderColor: selected
-                        ? 'var(--brand-warning-amber)'
-                        : 'var(--brand-border)',
-                      backgroundColor: selected ? 'var(--brand-warning-amber)' : 'white',
-                    }}
-                  >
-                    {selected && <CheckCircle className="w-3 h-3 text-white" />}
-                  </span>
-                  <span className="flex-1">
-                    <span className="block text-[14px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+      {!medsLoading &&
+        medications.map((med) => {
+          const entry = getEntry(med.id);
+          const missed = entry.taken === 'no';
+          const took = entry.taken === 'yes';
+          return (
+            <div
+              key={med.id}
+              className="rounded-xl border-2 transition-all"
+              style={{
+                borderColor: missed
+                  ? 'var(--brand-warning-amber)'
+                  : took
+                    ? 'var(--brand-success-green)'
+                    : 'var(--brand-border)',
+                backgroundColor: missed
+                  ? 'var(--brand-warning-amber-light)'
+                  : took
+                    ? 'var(--brand-success-green-light)'
+                    : 'white',
+              }}
+            >
+              <div className="px-4 py-3">
+                <div className="flex items-center gap-3 mb-3">
+                  <Pill className="w-4 h-4 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />
+                  <div className="flex-1 min-w-0">
+                    <p
+                      className="text-[14px] font-semibold truncate"
+                      style={{ color: 'var(--brand-text-primary)' }}
+                    >
                       {med.drugName}
-                    </span>
-                    <span className="block text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
+                    </p>
+                    <p
+                      className="text-[11px]"
+                      style={{ color: 'var(--brand-text-muted)' }}
+                    >
                       {med.drugClass.replace(/_/g, ' ').toLowerCase()}
-                    </span>
-                  </span>
-                </button>
+                    </p>
+                  </div>
+                </div>
 
-                {selected && entry && (
-                  <div className="px-4 pb-3 space-y-3 border-t" style={{ borderColor: 'var(--brand-border)' }}>
-                    <div className="pt-3">
-                      <label
-                        htmlFor={`reason-${med.id}`}
-                        className="text-[11px] font-semibold uppercase tracking-wide"
-                        style={{ color: 'var(--brand-text-muted)' }}
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    {
+                      value: 'yes' as const,
+                      label: 'Took',
+                      accent: 'var(--brand-success-green)',
+                    },
+                    {
+                      value: 'no' as const,
+                      label: 'Missed',
+                      accent: 'var(--brand-warning-amber)',
+                    },
+                  ].map((opt) => {
+                    const active = entry.taken === opt.value;
+                    return (
+                      <motion.button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setTaken(med.id, opt.value)}
+                        className="h-11 rounded-xl text-[13px] font-semibold border-2 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        style={{
+                          backgroundColor: active ? opt.accent : 'white',
+                          borderColor: active ? opt.accent : 'var(--brand-border)',
+                          color: active ? 'white' : 'var(--brand-text-secondary)',
+                          boxShadow: active ? `0 4px 12px ${opt.accent}40` : 'none',
+                        }}
+                        whileTap={{ scale: 0.97 }}
                       >
-                        Why did you miss it?
-                      </label>
-                      <select
-                        id={`reason-${med.id}`}
-                        value={entry.reason ?? ''}
-                        onChange={(e) =>
-                          updateEntry(med.id, {
-                            reason: (e.target.value || null) as typeof entry.reason,
+                        {active && <CheckCircle className="w-3.5 h-3.5" />}
+                        {opt.label}
+                      </motion.button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {missed && (
+                <div className="px-4 pb-3 space-y-3 border-t" style={{ borderColor: 'var(--brand-border)' }}>
+                  <div className="pt-3">
+                    <label
+                      htmlFor={`reason-${med.id}`}
+                      className="text-[11px] font-semibold uppercase tracking-wide"
+                      style={{ color: 'var(--brand-text-muted)' }}
+                    >
+                      Why did you miss it?
+                    </label>
+                    <select
+                      id={`reason-${med.id}`}
+                      value={entry.reason ?? ''}
+                      onChange={(e) =>
+                        patchEntry(med.id, {
+                          reason: (e.target.value || null) as MedicationEntry['reason'],
+                        })
+                      }
+                      className="mt-1 w-full px-3 py-2 rounded-lg border text-[14px] bg-white"
+                      style={{
+                        borderColor: 'var(--brand-border)',
+                        color: 'var(--brand-text-primary)',
+                      }}
+                    >
+                      <option value="">Select a reason…</option>
+                      {MISSED_REASONS.map((r) => (
+                        <option key={r.value} value={r.value}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <fieldset className="border-0 p-0 m-0">
+                    <legend
+                      className="text-[11px] font-semibold uppercase tracking-wide"
+                      style={{ color: 'var(--brand-text-muted)' }}
+                    >
+                      How many doses?
+                    </legend>
+                    <div className="mt-1 flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          patchEntry(med.id, {
+                            missedDoses: Math.max(1, entry.missedDoses - 1),
                           })
                         }
-                        className="mt-1 w-full px-3 py-2 rounded-lg border text-[14px] bg-white"
-                        style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+                        className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer"
+                        style={{
+                          borderColor: 'var(--brand-border)',
+                          color: 'var(--brand-text-secondary)',
+                        }}
                       >
-                        <option value="">Select a reason…</option>
-                        {MISSED_REASONS.map((r) => (
-                          <option key={r.value} value={r.value}>
-                            {r.label}
-                          </option>
-                        ))}
-                      </select>
+                        −
+                      </button>
+                      <span
+                        className="text-[16px] font-bold w-6 text-center"
+                        style={{ color: 'var(--brand-text-primary)' }}
+                      >
+                        {entry.missedDoses}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          patchEntry(med.id, {
+                            missedDoses: Math.min(10, entry.missedDoses + 1),
+                          })
+                        }
+                        className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer"
+                        style={{
+                          borderColor: 'var(--brand-border)',
+                          color: 'var(--brand-text-secondary)',
+                        }}
+                      >
+                        +
+                      </button>
                     </div>
-
-                    <fieldset className="border-0 p-0 m-0">
-                      <legend
-                        className="text-[11px] font-semibold uppercase tracking-wide"
-                        style={{ color: 'var(--brand-text-muted)' }}
-                      >
-                        How many doses?
-                      </legend>
-                      <div className="mt-1 flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateEntry(med.id, {
-                              missedDoses: Math.max(1, entry.missedDoses - 1),
-                            })
-                          }
-                          className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer"
-                          style={{
-                            borderColor: 'var(--brand-border)',
-                            color: 'var(--brand-text-secondary)',
-                          }}
-                        >
-                          −
-                        </button>
-                        <span className="text-[16px] font-bold w-6 text-center" style={{ color: 'var(--brand-text-primary)' }}>
-                          {entry.missedDoses}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateEntry(med.id, {
-                              missedDoses: Math.min(10, entry.missedDoses + 1),
-                            })
-                          }
-                          className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer"
-                          style={{
-                            borderColor: 'var(--brand-border)',
-                            color: 'var(--brand-text-secondary)',
-                          }}
-                        >
-                          +
-                        </button>
-                      </div>
-                    </fieldset>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+                  </fieldset>
+                </div>
+              )}
+            </div>
+          );
+        })}
     </div>
   );
 }
@@ -1187,7 +1200,15 @@ export default function CheckIn() {
   const isPregnant = profile?.isPregnant === true;
   const hasAFib = profile?.hasAFib === true;
 
-  const flow = readingNumber === 0 ? STEP_FLOW : SECOND_READING_FLOW;
+  // When the patient has no active medications on file, skip the MEDICATION
+  // step entirely — asking "did you take your meds?" for zero meds makes no
+  // sense. Still keep the step while meds are loading so a slow API call
+  // doesn't accidentally shortcut the flow.
+  const flow = useMemo(() => {
+    const base = readingNumber === 0 ? STEP_FLOW : SECOND_READING_FLOW;
+    if (medsLoading || medications.length > 0) return base;
+    return base.filter((s) => s !== 'MEDICATION');
+  }, [readingNumber, medications.length, medsLoading]);
   const stepIndex = flow.indexOf(step);
   const visibleTotal = flow.length;
   const visibleIndex = stepIndex + 1;
@@ -1217,15 +1238,16 @@ export default function CheckIn() {
       }
     }
     if (s === 'MEDICATION') {
-      // Require "why" when patient checks off a medication. If the medication
-      // list is empty (e.g. new user), we allow submitting without details.
-      if (form.medicationTaken === 'no' && medications.length > 0) {
-        if (form.missedMedications.length === 0) {
-          return 'Please tell us which medication you missed, or choose "Yes, all taken" if you took them.';
+      // Per-medication: every med needs a Took/Missed answer; every Missed
+      // needs a reason. Validation points to the first offending med by name
+      // so the patient knows exactly what row to fix.
+      for (const med of medications) {
+        const entry = form.medicationStatus[med.id];
+        if (!entry || entry.taken === null) {
+          return `Please tell us if you took ${med.drugName} today.`;
         }
-        const missingReason = form.missedMedications.find((m) => !m.reason);
-        if (missingReason) {
-          return `Please pick a reason for ${missingReason.drugName}.`;
+        if (entry.taken === 'no' && entry.reason === null) {
+          return `Please pick a reason for ${med.drugName}.`;
         }
       }
     }
@@ -1256,6 +1278,31 @@ export default function CheckIn() {
     const weightLbsOrKg = form.weight ? parseFloat(form.weight) : undefined;
     const weightKg = weightLbsOrKg && form.weightUnit === 'lbs' ? weightLbsOrKg * 0.45359237 : weightLbsOrKg;
 
+    // Derive rollup from the per-medication map. The backend wants a single
+    // `medicationTaken` bool + an optional `missedMedications` array; we
+    // compute them here instead of tracking both in FormData.
+    const medEntries = medications.map((m) => ({
+      med: m,
+      state: form.medicationStatus[m.id] ?? { taken: null, reason: null, missedDoses: 1 },
+    }));
+    const allAnswered = medEntries.every((e) => e.state.taken !== null);
+    const anyMissed = medEntries.some((e) => e.state.taken === 'no');
+    const medicationTaken =
+      medications.length === 0
+        ? undefined
+        : allAnswered
+          ? !anyMissed
+          : undefined;
+    const missedMedications = medEntries
+      .filter((e) => e.state.taken === 'no' && e.state.reason !== null)
+      .map((e) => ({
+        medicationId: e.med.id,
+        drugName: e.med.drugName,
+        drugClass: e.med.drugClass,
+        reason: e.state.reason as NonNullable<MedicationEntry['reason']>,
+        missedDoses: e.state.missedDoses,
+      }));
+
     setSubmitting(true);
     try {
       await createJournalEntry({
@@ -1267,19 +1314,8 @@ export default function CheckIn() {
         position: form.position ?? undefined,
         sessionId,
         measurementConditions,
-        medicationTaken: form.medicationTaken === 'yes' ? true : form.medicationTaken === 'no' ? false : undefined,
-        missedMedications:
-          form.missedMedications.length > 0
-            ? form.missedMedications
-                .filter((m) => m.reason !== null)
-                .map((m) => ({
-                  medicationId: m.medicationId,
-                  drugName: m.drugName,
-                  drugClass: m.drugClass,
-                  reason: m.reason!,
-                  missedDoses: m.missedDoses,
-                }))
-            : undefined,
+        medicationTaken,
+        missedMedications: missedMedications.length > 0 ? missedMedications : undefined,
         severeHeadache: form.severeHeadache,
         visualChanges: form.visualChanges,
         alteredMentalStatus: form.alteredMentalStatus,
@@ -1373,7 +1409,9 @@ export default function CheckIn() {
             lastReading={last}
             sessionReadings={sessionReadings}
             hasAFib={hasAFib}
-            missedMedNames={form.missedMedications.map((m) => m.drugName)}
+            missedMedNames={medications
+              .filter((m) => form.medicationStatus[m.id]?.taken === 'no')
+              .map((m) => m.drugName)}
             onAddAnother={startAnotherReading}
             onDone={() => router.push('/dashboard')}
           />

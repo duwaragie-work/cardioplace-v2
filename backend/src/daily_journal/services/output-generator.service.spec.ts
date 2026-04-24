@@ -30,6 +30,8 @@ const baseSession: SessionAverage = {
   },
   suboptimalMeasurement: false,
   sessionId: null,
+  medicationTaken: null,
+  missedMedications: [],
 }
 
 function baseResult(over: Partial<RuleResult> = {}): RuleResult {

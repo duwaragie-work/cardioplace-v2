@@ -116,6 +116,11 @@ const am: Record<TranslationKey, string> = {
   'checkin.medicationMissedEmpty': 'We don’t have any medications on file for you yet. You can still submit; add your medications in settings later for better follow-up.',
   'checkin.medicationMissedValidation': 'Please tell us which medication you missed, or choose "Yes, I took it" if you took them.',
   'checkin.medicationMissedAck': 'We noted this — your care team will see it.',
+  // TODO(translator): Amharic placeholder strings for the per-medication
+  // upgrade. Native-speaker review needed before Ward 7/8 rollout.
+  'checkin.medicationPerMedTitle': 'Medications today',
+  'checkin.medicationPerMedSubtitle': 'Tap each one to tell us if you took it.',
+  'checkin.medicationPerMedTookTodayValidation': 'Please tell us if you took {drugName} today.',
   'checkin.symptomsQuestion': 'ሊያሳውቁ የሚፈልጉት ምልክቶች አሉ?',
   'checkin.symptomsHint': 'ያጋጠሙዎትን ማንኛውንም ምልክቶች ይምረጡ። ጥሩ ከተሰማዎ "ከእነዚህ ውስጥ ምንም" ይምረጡ።',
   'checkin.noneOfThese': 'ከእነዚህ ውስጥ ምንም',
