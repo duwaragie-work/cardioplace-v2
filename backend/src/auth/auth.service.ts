@@ -627,6 +627,7 @@ export class AuthService {
       deviceId?: string
       ipAddress?: string
       userAgent?: string
+      appContext?: 'admin' | 'patient'
     },
   ): Promise<{ message: string }> {
     if (!email?.trim()) {
@@ -634,6 +635,12 @@ export class AuthService {
     }
 
     const normalizedEmail = email.trim().toLowerCase()
+
+    // Admin-app gate: reject unknown emails AND patient-only accounts BEFORE
+    // sending an OTP. The admin app must never auto-create a PATIENT user.
+    if (context?.appContext === 'admin') {
+      await this.assertAdminAccessAllowed(normalizedEmail)
+    }
 
     // Demo accounts use pre-seeded, non-expiring OTPs — skip generation and email
     const preSeeded = await this.prisma.otpCode.findFirst({
@@ -712,6 +719,7 @@ export class AuthService {
       ipAddress?: string
       userAgent?: string
       timezone?: string
+      appContext?: 'admin' | 'patient'
     },
   ): Promise<AuthResponse> {
     if (!email?.trim()) {
@@ -719,6 +727,13 @@ export class AuthService {
     }
 
     const normalizedEmail = email.trim().toLowerCase()
+
+    // Admin-app gate: same role check as sendOtp. Defense-in-depth — the
+    // OTP could still verify even if a malicious caller skipped the send
+    // step (or if the seed perma-OTP shortcut was used).
+    if (context?.appContext === 'admin') {
+      await this.assertAdminAccessAllowed(normalizedEmail)
+    }
 
     // Find the most recent unexpired OTP
     const otpRecord = await this.prisma.otpCode.findFirst({
@@ -1180,6 +1195,37 @@ export class AuthService {
 
     const tokens = await this.issueTokenPair(user, context?.userAgent)
     return this.buildAuthResponse(tokens, user, 'magic_link')
+  }
+
+  // ─── Admin-app role gate ────────────────────────────────────────────────────
+  // Used by sendOtp + verifyOtp when called from the admin app. The admin
+  // app must NEVER auto-create a PATIENT user — only existing users with at
+  // least one admin role may sign in.
+  private static readonly ADMIN_ALLOWED_ROLES: UserRole[] = [
+    UserRole.PROVIDER,
+    UserRole.MEDICAL_DIRECTOR,
+    UserRole.HEALPLACE_OPS,
+    UserRole.SUPER_ADMIN,
+  ]
+
+  private async assertAdminAccessAllowed(normalizedEmail: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: { roles: true, accountStatus: true },
+    })
+    if (!user) {
+      throw new ForbiddenException(
+        'No admin account exists for this email. Please contact your administrator.',
+      )
+    }
+    const allowed = user.roles.some((r) =>
+      AuthService.ADMIN_ALLOWED_ROLES.includes(r),
+    )
+    if (!allowed) {
+      throw new ForbiddenException(
+        'This account is not authorized to access the admin app.',
+      )
+    }
   }
 
   // ─── Email Helpers ──────────────────────────────────────────────────────────
