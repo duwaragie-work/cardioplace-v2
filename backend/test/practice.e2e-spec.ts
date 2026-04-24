@@ -454,7 +454,7 @@ describe('Practice / Assignment / Threshold / Enrollment (e2e)', () => {
         .post(`/admin/patients/${plainPatientId}/complete-onboarding`)
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200)
-      expect(res.body.data.onboardingStatus).toBe('COMPLETED')
+      expect(res.body.data.enrollmentStatus).toBe('ENROLLED')
     })
 
     it('does NOT gate on HFpEF (recommended but not mandatory)', async () => {
@@ -491,7 +491,7 @@ describe('Practice / Assignment / Threshold / Enrollment (e2e)', () => {
         .post(`/admin/patients/${scratch.id}/complete-onboarding`)
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200)
-      expect(res.body.data.onboardingStatus).toBe('COMPLETED')
+      expect(res.body.data.enrollmentStatus).toBe('ENROLLED')
     })
 
     it('re-completion is idempotent (200 no-op)', async () => {
@@ -499,7 +499,7 @@ describe('Practice / Assignment / Threshold / Enrollment (e2e)', () => {
         .post(`/admin/patients/${plainPatientId}/complete-onboarding`)
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200)
-      expect(res.body.message).toMatch(/already completed/i)
+      expect(res.body.message).toMatch(/already enrolled/i)
     })
 
     it('enrollment-check returns ok=true for a fully-enrolled patient', async () => {

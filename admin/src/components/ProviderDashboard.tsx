@@ -233,7 +233,7 @@ export default function ProviderDashboard() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
+      <div className="h-full flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
         <div className="flex flex-col items-center gap-3">
           <div
             className="w-10 h-10 border-4 rounded-full animate-spin"
@@ -348,7 +348,7 @@ export default function ProviderDashboard() {
 
   return (
     <div
-      className="min-h-screen"
+      className="h-full"
       style={{ backgroundColor: 'var(--brand-background)' }}
     >
       {/* Main Content */}

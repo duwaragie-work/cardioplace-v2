@@ -338,7 +338,14 @@ async function main() {
         name: p.name,
         roles: ['PATIENT'],
         isVerified: true,
+        // Identity onboarding done (name/DOB captured here) + clinical
+        // enrollment pre-passed: every demo patient below gets assignment +
+        // profile + (threshold if HFREF/HCM/DCM) so the 4-piece enrollment
+        // gate is satisfied. We mark them ENROLLED directly so escalation
+        // dispatch + gap-alert / monthly-reask crons pick them up without
+        // first having to POST /admin/patients/:id/complete-onboarding.
         onboardingStatus: 'COMPLETED',
+        enrollmentStatus: 'ENROLLED',
         dateOfBirth: p.dateOfBirth,
         timezone: 'America/New_York',
         preferredLanguage: 'en',

@@ -94,6 +94,21 @@ export async function saveIntakeMedications(
   return unwrap<PatientMedicationDto[]>(res);
 }
 
+// ── PUT /me/medications (replace list) ──────────────────────────────────────
+// Used by the top-bar Save in edit mode. Soft-closes rows no longer in the
+// list, creates new rows, and flips PatientProfile back to UNVERIFIED if
+// anything actually changed.
+export async function replaceIntakeMedications(
+  payload: IntakeMedicationsPayload,
+): Promise<PatientMedicationDto[]> {
+  const res = await fetchWithAuth(`${API}/api/me/medications`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return unwrap<PatientMedicationDto[]>(res);
+}
+
 // ── GET /me/medications ─────────────────────────────────────────────────────
 export async function getMyMedications(
   includeDiscontinued = false,

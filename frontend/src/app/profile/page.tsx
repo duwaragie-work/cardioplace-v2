@@ -37,6 +37,8 @@ import {
   User as UserIcon,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
+import type { TranslationKey } from '@/i18n';
 import {
   getMyPatientProfile,
   getMyMedications,
@@ -63,26 +65,31 @@ function formatDate(iso?: string | null): string {
   }
 }
 
-function frequencyLabel(f: PatientMedicationDto['frequency']): string {
+type TFn = (key: TranslationKey) => string;
+
+function frequencyLabel(f: PatientMedicationDto['frequency'], t: TFn): string {
   switch (f) {
-    case 'ONCE_DAILY': return 'Once a day';
-    case 'TWICE_DAILY': return 'Twice a day';
-    case 'THREE_TIMES_DAILY': return '3 times a day';
-    case 'UNSURE': return 'Frequency unknown';
+    case 'ONCE_DAILY': return t('profile.freqOnceDaily');
+    case 'TWICE_DAILY': return t('profile.freqTwiceDaily');
+    case 'THREE_TIMES_DAILY': return t('profile.freqThreeTimesDaily');
+    case 'UNSURE': return t('profile.freqUnknown');
     default: return '—';
   }
 }
 
-function genderLabel(g?: string | null): string {
-  if (!g) return 'Not set';
+function genderLabel(g: string | null | undefined, t: TFn): string {
+  if (!g) return t('profile.notSet');
+  if (g === 'MALE') return t('intake.a1.genderMale');
+  if (g === 'FEMALE') return t('intake.a1.genderFemale');
+  if (g === 'OTHER') return t('intake.a1.genderOther');
   return g.charAt(0) + g.slice(1).toLowerCase();
 }
 
-function hfTypeLabel(t?: string | null): string {
-  switch (t) {
-    case 'HFREF': return 'HFrEF (reduced ejection fraction)';
-    case 'HFPEF': return 'HFpEF (preserved ejection fraction)';
-    case 'UNKNOWN': return 'Type to be confirmed';
+function hfTypeLabel(hfType: string | null | undefined, t: TFn): string {
+  switch (hfType) {
+    case 'HFREF': return t('profile.hfHfrEf');
+    case 'HFPEF': return t('profile.hfHfpEf');
+    case 'UNKNOWN': return t('profile.hfToConfirm');
     case 'NOT_APPLICABLE': return '';
     default: return '';
   }
@@ -147,10 +154,14 @@ async function patchAuthProfile(payload: {
   return fresh;
 }
 
-function commPrefLabel(p: CommPref): string {
-  if (p === 'TEXT_FIRST') return 'Text first';
-  if (p === 'AUDIO_FIRST') return 'Audio first';
-  return 'Not set';
+// Note: HTTP-level error messages from patchAuthProfile flow through
+// untranslated — matches the pre-existing pattern across the app where backend
+// errors bubble up in their original language (backlog item flagged in Flow C).
+
+function commPrefLabel(p: CommPref, t: TFn): string {
+  if (p === 'TEXT_FIRST') return t('profile.commPrefText');
+  if (p === 'AUDIO_FIRST') return t('profile.commPrefAudio');
+  return t('profile.notSet');
 }
 
 /** Track whether a CSS media query matches; updates on resize. */
@@ -193,6 +204,7 @@ function SectionCard({
   scrollable?: boolean;
   children: React.ReactNode;
 }) {
+  const { t } = useLanguage();
   return (
     <div
       className={
@@ -237,7 +249,7 @@ function SectionCard({
             }}
           >
             <Pencil className="w-3.5 h-3.5" />
-            Edit
+            {t('common.edit')}
           </Link>
         )}
         {onEdit && !editHref && (
@@ -251,7 +263,7 @@ function SectionCard({
             }}
           >
             <Pencil className="w-3.5 h-3.5" />
-            Edit
+            {t('common.edit')}
           </button>
         )}
       </div>
@@ -268,6 +280,7 @@ function SectionCard({
 }
 
 function VerifiedBadge({ status }: { status?: string | null }) {
+  const { t } = useLanguage();
   if (status === 'VERIFIED') {
     return (
       <span
@@ -278,7 +291,7 @@ function VerifiedBadge({ status }: { status?: string | null }) {
         }}
       >
         <CheckCircle2 className="w-3 h-3" />
-        Verified
+        {t('profile.verified')}
       </span>
     );
   }
@@ -292,7 +305,7 @@ function VerifiedBadge({ status }: { status?: string | null }) {
         }}
       >
         <ShieldCheck className="w-3 h-3" />
-        Corrected by your team
+        {t('profile.correctedByTeam')}
       </span>
     );
   }
@@ -305,12 +318,13 @@ function VerifiedBadge({ status }: { status?: string | null }) {
       }}
     >
       <Clock className="w-3 h-3" />
-      Awaiting verification
+      {t('profile.awaitingVerification')}
     </span>
   );
 }
 
 function MedVerifiedBadge({ status }: { status: PatientMedicationDto['verificationStatus'] }) {
+  const { t } = useLanguage();
   if (status === 'VERIFIED') return <VerifiedBadge status="VERIFIED" />;
   if (status === 'REJECTED') {
     return (
@@ -319,7 +333,7 @@ function MedVerifiedBadge({ status }: { status: PatientMedicationDto['verificati
         style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)' }}
       >
         <ShieldAlert className="w-3 h-3" />
-        Rejected by team
+        {t('profile.rejectedByTeam')}
       </span>
     );
   }
@@ -369,6 +383,7 @@ function PersonalInfoModal({
   onClose: () => void;
   onSaved: (next: AuthProfileDto) => void;
 }) {
+  const { t } = useLanguage();
   const [name, setName] = useState(current.name ?? '');
   const [dateOfBirth, setDateOfBirth] = useState(
     current.dateOfBirth ? current.dateOfBirth.slice(0, 10) : '',
@@ -395,7 +410,7 @@ function PersonalInfoModal({
       onSaved(next);
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save changes.');
+      setError(e instanceof Error ? e.message : t('profile.saveError'));
     } finally {
       setSaving(false);
     }
@@ -426,14 +441,14 @@ function PersonalInfoModal({
           style={{ borderBottom: '1px solid var(--brand-border)' }}
         >
           <h2 className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-            Edit personal info
+            {t('profile.editPersonalInfo')}
           </h2>
           <button
             type="button"
             onClick={onClose}
             className="w-8 h-8 rounded-full flex items-center justify-center cursor-pointer"
             style={{ backgroundColor: 'var(--brand-background)' }}
-            aria-label="Close"
+            aria-label={t('common.close')}
           >
             <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
           </button>
@@ -442,13 +457,13 @@ function PersonalInfoModal({
         <div className="flex-1 overflow-y-auto thin-scrollbar p-5 space-y-4">
           <div>
             <label className="block text-[12px] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
-              Name
+              {t('profile.nameLabel')}
             </label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Your name"
+              placeholder={t('profile.namePlaceholder')}
               className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
               style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
             />
@@ -456,7 +471,7 @@ function PersonalInfoModal({
 
           <div>
             <label className="block text-[12px] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
-              Email <span className="font-normal" style={{ color: 'var(--brand-text-muted)' }}>· can&apos;t be changed</span>
+              {t('profile.email')} <span className="font-normal" style={{ color: 'var(--brand-text-muted)' }}>{t('profile.emailCannotChange')}</span>
             </label>
             <input
               type="email"
@@ -473,7 +488,7 @@ function PersonalInfoModal({
 
           <div>
             <label className="block text-[12px] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
-              Date of birth
+              {t('profile.dobLabel')}
             </label>
             <input
               type="date"
@@ -490,13 +505,13 @@ function PersonalInfoModal({
 
           <div>
             <label className="block text-[12px] font-semibold mb-2" style={{ color: 'var(--brand-text-secondary)' }}>
-              Communication preference
+              {t('profile.commPrefLabel')}
             </label>
             <div className="grid grid-cols-3 gap-2">
               {([
-                { value: null, label: 'Not set' },
-                { value: 'TEXT_FIRST' as const, label: 'Text first' },
-                { value: 'AUDIO_FIRST' as const, label: 'Audio first' },
+                { value: null, label: t('profile.notSet') },
+                { value: 'TEXT_FIRST' as const, label: t('profile.commPrefText') },
+                { value: 'AUDIO_FIRST' as const, label: t('profile.commPrefAudio') },
               ]).map((opt) => {
                 const active = commPref === opt.value;
                 return (
@@ -538,7 +553,7 @@ function PersonalInfoModal({
               className="flex-1 h-11 rounded-full border-2 text-sm font-semibold cursor-pointer"
               style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="button"
@@ -547,7 +562,7 @@ function PersonalInfoModal({
               className="flex-1 h-11 rounded-full text-white text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer"
               style={{ backgroundColor: 'var(--brand-primary-purple)' }}
             >
-              {saving ? 'Saving…' : 'Save changes'}
+              {saving ? t('profile.saving') : t('profile.saveChangesBtn')}
             </button>
           </div>
         </div>
@@ -587,6 +602,7 @@ function ProfileSkeleton() {
 export default function ProfilePage() {
   const router = useRouter();
   const { user, isLoading, isAuthenticated, logout } = useAuth();
+  const { t } = useLanguage();
 
   const [profile, setProfile] = useState<PatientProfileDto | null>(null);
   const [meds, setMeds] = useState<PatientMedicationDto[]>([]);
@@ -644,12 +660,16 @@ export default function ProfilePage() {
   const verificationStatus = profile?.profileVerificationStatus ?? 'UNVERIFIED';
   const showPregnancy = profile?.gender === 'FEMALE';
   const activeMeds = meds.filter((m) => !m.discontinuedAt);
-  const conditions: { label: string; on: boolean }[] = [
-    { label: 'Heart failure', on: !!profile?.hasHeartFailure },
-    { label: 'Atrial fibrillation', on: !!profile?.hasAFib },
-    { label: 'Coronary artery disease', on: !!profile?.hasCAD },
-    { label: 'Hypertrophic cardiomyopathy (HCM)', on: !!profile?.hasHCM },
-    { label: 'Dilated cardiomyopathy (DCM)', on: !!profile?.hasDCM },
+  // Condition labels reuse Flow A intake keys — they're the same strings the
+  // patient saw on A3 selection. HCM/DCM drop the parenthetical abbreviation
+  // (not present in Flow A); the dedicated HF type row below covers the case
+  // where subtype disambiguation matters.
+  const conditions: { label: string; on: boolean; kind: 'hf' | 'af' | 'cad' | 'hcm' | 'dcm' }[] = [
+    { kind: 'hf', label: t('intake.a3.hfTitle'), on: !!profile?.hasHeartFailure },
+    { kind: 'af', label: t('intake.a3.afTitle'), on: !!profile?.hasAFib },
+    { kind: 'cad', label: t('intake.a3.cadTitle'), on: !!profile?.hasCAD },
+    { kind: 'hcm', label: t('intake.a3.hcmTitle'), on: !!profile?.hasHCM },
+    { kind: 'dcm', label: t('intake.a3.dcmTitle'), on: !!profile?.hasDCM },
   ];
   const onConditions = conditions.filter((c) => c.on);
 
@@ -681,7 +701,7 @@ export default function ProfilePage() {
                 className="text-[20px] sm:text-[22px] font-bold leading-tight truncate"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
-                {user?.name ?? 'Your profile'}
+                {user?.name ?? t('profile.yourProfile')}
               </h1>
               <p className="text-[12.5px] truncate" style={{ color: 'var(--brand-text-muted)' }}>
                 {user?.email ?? '—'}
@@ -697,7 +717,7 @@ export default function ProfilePage() {
                     }}
                   >
                     <Info className="w-3 h-3" />
-                    Health profile not started
+                    {t('profile.notStarted')}
                   </span>
                 )}
               </div>
@@ -713,10 +733,10 @@ export default function ProfilePage() {
               color: 'var(--brand-alert-red)',
               border: '1px solid var(--brand-alert-red-light)',
             }}
-            aria-label="Sign out"
+            aria-label={t('profile.signOut')}
           >
             <LogOut className="w-4 h-4" />
-            <span className="hidden sm:inline">Sign out</span>
+            <span className="hidden sm:inline">{t('profile.signOut')}</span>
           </button>
         </div>
 
@@ -730,33 +750,33 @@ export default function ProfilePage() {
               boxShadow: 'var(--brand-shadow-button)',
             }}
           >
-            Complete your health profile →
+            {t('profile.completeHealthProfile')}
           </Link>
         )}
 
         {/* Care team — outside the flexible grid so it always takes its
             natural height, then the grid below fills the remaining viewport
             on md+ (and stacks naturally on mobile). */}
-        <SectionCard title="Your care team" icon={<Users className="w-4 h-4" />}>
+        <SectionCard title={t('profile.careTeam')} icon={<Users className="w-4 h-4" />}>
           {careTeam ? (
             <div className="space-y-2">
-              <Row label="Practice" value={careTeam.practice?.name ?? '—'} />
+              <Row label={t('profile.practice')} value={careTeam.practice?.name ?? '—'} />
               <Row
-                label="Primary provider"
+                label={t('profile.primaryProvider')}
                 value={careTeam.primaryProvider?.name ?? careTeam.primaryProvider?.email ?? '—'}
               />
               <Row
-                label="Backup provider"
+                label={t('profile.backupProvider')}
                 value={careTeam.backupProvider?.name ?? careTeam.backupProvider?.email ?? '—'}
               />
               <Row
-                label="Medical director"
+                label={t('profile.medicalDirector')}
                 value={careTeam.medicalDirector?.name ?? careTeam.medicalDirector?.email ?? '—'}
               />
             </div>
           ) : (
             <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
-              You haven&apos;t been assigned a care team yet. Your care team will appear here once a provider is assigned.
+              {t('profile.noCareTeam')}
             </p>
           )}
         </SectionCard>
@@ -775,69 +795,69 @@ export default function ProfilePage() {
               medications card always matches this column on desktop. */}
           <div ref={leftColumnRef} className="space-y-4">
             <SectionCard
-              title="Personal info"
+              title={t('profile.personalInfoSection')}
               icon={<UserIcon className="w-4 h-4" />}
               onEdit={authProfile ? () => setShowPersonalEdit(true) : undefined}
             >
-              <Row label="Name" value={authProfile?.name || 'Not set'} />
-              <Row label="Email" value={authProfile?.email ?? '—'} />
+              <Row label={t('profile.nameLabel')} value={authProfile?.name || t('profile.notSet')} />
+              <Row label={t('profile.email')} value={authProfile?.email ?? '—'} />
               <Row
-                label="Date of birth"
-                value={authProfile?.dateOfBirth ? formatDate(authProfile.dateOfBirth) : 'Not set'}
+                label={t('profile.dobLabel')}
+                value={authProfile?.dateOfBirth ? formatDate(authProfile.dateOfBirth) : t('profile.notSet')}
               />
               <Row
-                label="Communication preference"
-                value={commPrefLabel(authProfile?.communicationPreference ?? null)}
+                label={t('profile.commPrefLabel')}
+                value={commPrefLabel(authProfile?.communicationPreference ?? null, t)}
               />
             </SectionCard>
             <SectionCard
-              title="About you"
+              title={t('profile.aboutYou')}
               icon={<Info className="w-4 h-4" />}
               editHref={profile ? '/clinical-intake?step=A1' : undefined}
             >
-              <Row label="Gender" value={genderLabel(profile?.gender)} />
+              <Row label={t('profile.gender')} value={genderLabel(profile?.gender, t)} />
               <Row
-                label="Height"
-                value={profile?.heightCm ? `${profile.heightCm} cm` : 'Not set'}
+                label={t('profile.heightLabel')}
+                value={profile?.heightCm ? `${profile.heightCm} cm` : t('profile.notSet')}
               />
             </SectionCard>
 
             {showPregnancy && (
               <SectionCard
-                title="Pregnancy"
+                title={t('profile.pregnancySection')}
                 icon={<Baby className="w-4 h-4" />}
                 editHref="/clinical-intake?step=A2"
               >
                 <Row
-                  label="Currently pregnant"
+                  label={t('profile.currentlyPregnant')}
                   value={
                     profile?.isPregnant === true
-                      ? 'Yes'
+                      ? t('common.yes')
                       : profile?.isPregnant === false
-                        ? 'No'
-                        : 'Not specified'
+                        ? t('common.no')
+                        : t('profile.notSpecified')
                   }
                 />
                 {profile?.isPregnant && (
                   <Row
-                    label="Due date"
-                    value={profile?.pregnancyDueDate ? formatDate(profile.pregnancyDueDate) : 'Not set'}
+                    label={t('profile.dueDate')}
+                    value={profile?.pregnancyDueDate ? formatDate(profile.pregnancyDueDate) : t('profile.notSet')}
                   />
                 )}
                 {profile?.historyPreeclampsia && (
-                  <Row label="History of preeclampsia" value="Yes" />
+                  <Row label={t('intake.a2.preeclampsiaTitle')} value={t('common.yes')} />
                 )}
               </SectionCard>
             )}
 
             <SectionCard
-              title="Conditions"
+              title={t('profile.conditionsSection')}
               icon={<Heart className="w-4 h-4" />}
               editHref={profile ? '/clinical-intake?step=A3' : undefined}
             >
               {onConditions.length === 0 && !profile?.diagnosedHypertension ? (
                 <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
-                  No conditions reported.
+                  {t('profile.noConditions')}
                 </p>
               ) : (
                 <div className="space-y-2">
@@ -846,12 +866,12 @@ export default function ProfilePage() {
                     // line when the column is narrow (e.g. tablets where the
                     // 2-col grid leaves the right column ~340px wide), but
                     // sits inline with the label when there's room.
-                    <div key={c.label} className="flex items-center justify-between gap-2 flex-wrap">
+                    <div key={c.kind} className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2 min-w-0">
-                        {c.label.startsWith('Heart failure') && <Heart className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />}
-                        {c.label.startsWith('Atrial') && <Activity className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />}
-                        {c.label.startsWith('Coronary') && <Stethoscope className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />}
-                        {(c.label.startsWith('Hypertrophic') || c.label.startsWith('Dilated')) && <Sparkles className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />}
+                        {c.kind === 'hf' && <Heart className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />}
+                        {c.kind === 'af' && <Activity className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />}
+                        {c.kind === 'cad' && <Stethoscope className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />}
+                        {(c.kind === 'hcm' || c.kind === 'dcm') && <Sparkles className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />}
                         <span className="text-[13px] font-semibold" style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}>
                           {c.label}
                         </span>
@@ -862,12 +882,12 @@ export default function ProfilePage() {
                     </div>
                   ))}
                   {profile?.hasHeartFailure && profile?.heartFailureType && profile.heartFailureType !== 'NOT_APPLICABLE' && (
-                    <Row label="Heart failure type" value={hfTypeLabel(profile.heartFailureType)} />
+                    <Row label={t('profile.hfTypeLabel')} value={hfTypeLabel(profile.heartFailureType, t)} />
                   )}
                   {profile?.diagnosedHypertension && (
                     <div className="flex items-center justify-between gap-2 flex-wrap pt-2" style={{ borderTop: '1px solid var(--brand-border)' }}>
                       <span className="text-[13px] font-semibold min-w-0" style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}>
-                        Diagnosed high blood pressure
+                        {t('profile.diagnosedHtn')}
                       </span>
                       <div className="shrink-0">
                         <VerifiedBadge status={verificationStatus} />
@@ -894,14 +914,14 @@ export default function ProfilePage() {
             }
           >
           <SectionCard
-            title="Medications"
+            title={t('profile.medicationsSection')}
             icon={<Pill className="w-4 h-4" />}
             editHref={profile ? '/clinical-intake?step=A5' : undefined}
             scrollable
           >
             {activeMeds.length === 0 ? (
               <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
-                No medications reported.
+                {t('profile.noMedications')}
               </p>
             ) : (
               <div className="space-y-2">
@@ -931,14 +951,14 @@ export default function ProfilePage() {
                           className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider"
                           style={{ backgroundColor: 'var(--brand-accent-teal)', color: 'white' }}
                         >
-                          2-in-1
+                          {t('profile.combinationPill')}
                         </span>
                       )}
                       <p
                         className="text-[12px]"
                         style={{ color: 'var(--brand-text-muted)' }}
                       >
-                        {frequencyLabel(m.frequency)}
+                        {frequencyLabel(m.frequency, t)}
                       </p>
                     </div>
                   </div>
@@ -961,7 +981,7 @@ export default function ProfilePage() {
           >
             <Clock className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-warning-amber)' }} />
             <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
-              Your care team is reviewing your latest changes. This usually takes 48 to 72 hours.
+              {t('profile.reviewingChanges')}
             </p>
           </div>
         )}

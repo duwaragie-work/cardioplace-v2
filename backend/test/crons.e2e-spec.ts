@@ -89,6 +89,7 @@ describe('Crons (e2e)', () => {
           roles: ['PATIENT'],
           accountStatus: 'ACTIVE',
           onboardingStatus: 'COMPLETED',
+          enrollmentStatus: 'ENROLLED',
           createdAt: tenDaysAgo,
         },
       })
@@ -99,6 +100,7 @@ describe('Crons (e2e)', () => {
           roles: ['PATIENT'],
           accountStatus: 'ACTIVE',
           onboardingStatus: 'COMPLETED',
+          enrollmentStatus: 'ENROLLED',
           createdAt: tenDaysAgo,
         },
       })
@@ -109,16 +111,21 @@ describe('Crons (e2e)', () => {
           roles: ['PATIENT'],
           accountStatus: 'ACTIVE',
           onboardingStatus: 'COMPLETED',
+          enrollmentStatus: 'ENROLLED',
           createdAt: tenDaysAgo,
         },
       })
+      // Unenrolled — identity-onboarded patients still pending admin's
+      // 4-piece gate. Gap-alert cron filters on enrollmentStatus now, so
+      // these should NOT be nudged.
       const unenrolled = await prisma.user.create({
         data: {
           email: emails.unenrolled,
           name: 'Unenrolled Patient',
           roles: ['PATIENT'],
           accountStatus: 'ACTIVE',
-          onboardingStatus: 'NOT_COMPLETED',
+          onboardingStatus: 'COMPLETED',
+          enrollmentStatus: 'NOT_ENROLLED',
           createdAt: tenDaysAgo,
         },
       })
@@ -233,6 +240,7 @@ describe('Crons (e2e)', () => {
           roles: ['PATIENT'],
           accountStatus: 'ACTIVE',
           onboardingStatus: 'COMPLETED',
+          enrollmentStatus: 'ENROLLED',
         },
       })
       const fresh = await prisma.user.create({
@@ -242,6 +250,7 @@ describe('Crons (e2e)', () => {
           roles: ['PATIENT'],
           accountStatus: 'ACTIVE',
           onboardingStatus: 'COMPLETED',
+          enrollmentStatus: 'ENROLLED',
         },
       })
       dueId = due.id
@@ -303,6 +312,7 @@ describe('Crons (e2e)', () => {
           roles: ['PATIENT'],
           accountStatus: 'ACTIVE',
           onboardingStatus: 'COMPLETED',
+          enrollmentStatus: 'ENROLLED',
         },
       })
       try {
@@ -326,6 +336,7 @@ describe('Crons (e2e)', () => {
           roles: ['PATIENT'],
           accountStatus: 'ACTIVE',
           onboardingStatus: 'COMPLETED',
+          enrollmentStatus: 'ENROLLED',
         },
       })
       const fortyFiveDaysAgo = new Date(now.getTime() - 45 * 24 * 3600 * 1000)

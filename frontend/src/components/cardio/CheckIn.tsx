@@ -48,7 +48,7 @@ import {
 
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { createJournalEntry } from '@/lib/services/journal.service';
+import { ClinicalIntakeRequiredError, createJournalEntry } from '@/lib/services/journal.service';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
 import {
   listMyMedications,
@@ -205,10 +205,11 @@ function StepHeader({
   step: number;
   total: number;
 }) {
+  const { t } = useLanguage();
   return (
     <div>
       <p className="text-[12px] font-semibold mb-1" style={{ color: 'var(--brand-text-muted)' }}>
-        Step {step} of {total}
+        {t('checkin.nav.stepOf').replace('{current}', String(step)).replace('{total}', String(total))}
       </p>
       <div className="flex items-start justify-between gap-3 mb-1">
         <h2
@@ -286,15 +287,16 @@ function ChecklistRow({
 }
 
 function B1Checklist({ form, setField }: StepProps) {
+  const { t } = useLanguage();
   const items: { key: keyof FormData; icon: React.ReactNode; text: string }[] = [
-    { key: 'noCaffeine', icon: <Coffee className="w-5 h-5" />, text: 'No caffeine in the last 30 minutes' },
-    { key: 'noSmoking', icon: <Cigarette className="w-5 h-5" />, text: 'No smoking in the last 30 minutes' },
-    { key: 'noExercise', icon: <Activity className="w-5 h-5" />, text: 'No exercise in the last 30 minutes' },
-    { key: 'bladderEmpty', icon: <Droplets className="w-5 h-5" />, text: 'Bladder is empty' },
-    { key: 'seatedQuietly', icon: <Timer className="w-5 h-5" />, text: 'Seated quietly for at least 5 minutes' },
-    { key: 'posturalSupport', icon: <Armchair className="w-5 h-5" />, text: 'Back supported, feet flat, arm at heart level' },
-    { key: 'notTalking', icon: <MessageSquareOff className="w-5 h-5" />, text: 'Not talking during the measurement' },
-    { key: 'cuffOnBareArm', icon: <Shirt className="w-5 h-5" />, text: 'Cuff is on bare upper arm (not over clothing)' },
+    { key: 'noCaffeine', icon: <Coffee className="w-5 h-5" />, text: t('checkin.b1.itemNoCaffeine') },
+    { key: 'noSmoking', icon: <Cigarette className="w-5 h-5" />, text: t('checkin.b1.itemNoSmoking') },
+    { key: 'noExercise', icon: <Activity className="w-5 h-5" />, text: t('checkin.b1.itemNoExercise') },
+    { key: 'bladderEmpty', icon: <Droplets className="w-5 h-5" />, text: t('checkin.b1.itemBladder') },
+    { key: 'seatedQuietly', icon: <Timer className="w-5 h-5" />, text: t('checkin.b1.itemSeated') },
+    { key: 'posturalSupport', icon: <Armchair className="w-5 h-5" />, text: t('checkin.b1.itemPosture') },
+    { key: 'notTalking', icon: <MessageSquareOff className="w-5 h-5" />, text: t('checkin.b1.itemNotTalking') },
+    { key: 'cuffOnBareArm', icon: <Shirt className="w-5 h-5" />, text: t('checkin.b1.itemCuff') },
   ];
 
   const checkedCount = items.filter((it) => Boolean(form[it.key])).length;
@@ -302,9 +304,9 @@ function B1Checklist({ form, setField }: StepProps) {
   return (
     <div className="space-y-5">
       <StepHeader
-        title="Before you measure"
-        subtitle="A quick checklist for an accurate reading."
-        audio="Before you measure. A quick checklist for an accurate reading. Tap each item that is true for you right now."
+        title={t('checkin.b1.title')}
+        subtitle={t('checkin.b1.subtitle')}
+        audio={t('checkin.b1.audio')}
         step={1}
         total={5}
       />
@@ -312,7 +314,9 @@ function B1Checklist({ form, setField }: StepProps) {
       <div className="flex items-center justify-between rounded-xl p-3"
         style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
         <p className="text-[12.5px]" style={{ color: 'var(--brand-text-secondary)' }}>
-          {checkedCount === 8 ? 'All set — your reading will be the most accurate.' : `${checkedCount} of 8 confirmed.`}
+          {checkedCount === 8
+            ? t('checkin.b1.allSet')
+            : t('checkin.b1.progress').replace('{n}', String(checkedCount))}
         </p>
         <span
           className="text-[11px] font-bold px-2 py-0.5 rounded-full"
@@ -338,13 +342,14 @@ function B1Checklist({ form, setField }: StepProps) {
       </div>
 
       <p className="text-[12px] text-center" style={{ color: 'var(--brand-text-muted)' }}>
-        These help your care team trust the reading. You can skip items that don&apos;t apply.
+        {t('checkin.b1.footer')}
       </p>
     </div>
   );
 }
 
 function B2Reading({ form, setField }: StepProps) {
+  const { t } = useLanguage();
   const sys = parseInt(form.systolicBP || '0', 10);
   const dia = parseInt(form.diastolicBP || '0', 10);
   const isElevated = sys >= 140 || dia >= 90;
@@ -353,9 +358,9 @@ function B2Reading({ form, setField }: StepProps) {
   return (
     <div className="space-y-6">
       <StepHeader
-        title="Your reading"
-        subtitle="Numbers from the cuff, plus when and how you sat."
-        audio="Your reading. Enter the numbers from the cuff, when you took it, and how you were sitting."
+        title={t('checkin.b2.title')}
+        subtitle={t('checkin.b2.subtitle')}
+        audio={t('checkin.b2.audio')}
         step={2}
         total={5}
       />
@@ -365,12 +370,12 @@ function B2Reading({ form, setField }: StepProps) {
       <div>
         <label className="flex items-center gap-2 text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
           <CalendarClock className="w-4 h-4" />
-          When was this taken?
+          {t('checkin.b2.whenLabel')}
         </label>
         <div className="grid grid-cols-2 gap-2.5">
           <input
             type="date"
-            aria-label="Date"
+            aria-label={t('checkin.b2.dateAria')}
             value={form.measuredDate}
             onChange={(e) => setField('measuredDate', e.target.value)}
             className="h-12 px-3 rounded-xl text-[15px] outline-none transition box-border min-w-0 w-full"
@@ -385,7 +390,7 @@ function B2Reading({ form, setField }: StepProps) {
           />
           <input
             type="time"
-            aria-label="Time"
+            aria-label={t('checkin.b2.timeAria')}
             value={form.measuredTime}
             onChange={(e) => setField('measuredTime', e.target.value)}
             className="h-12 px-3 rounded-xl text-[15px] outline-none transition box-border min-w-0 w-full"
@@ -404,32 +409,32 @@ function B2Reading({ form, setField }: StepProps) {
       {/* Position */}
       <div>
         <label className="flex items-center justify-between text-[13px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
-          <span>How were you positioned?</span>
-          <AudioButton text="How were you positioned? Sitting, standing, or lying down." size="sm" />
+          <span>{t('checkin.b2.positionLabel')}</span>
+          <AudioButton text={t('checkin.b2.positionAudio')} size="sm" />
         </label>
         <div className="grid grid-cols-3 gap-3">
           <ChoiceCard
             icon={<Armchair className="w-7 h-7" />}
-            title="Sitting"
+            title={t('checkin.b2.positionSitting')}
             selected={form.position === 'SITTING'}
             onClick={() => setField('position', 'SITTING')}
-            audioText="Sitting"
+            audioText={t('checkin.b2.positionSitting')}
             compact
           />
           <ChoiceCard
             icon={<PersonStanding className="w-7 h-7" />}
-            title="Standing"
+            title={t('checkin.b2.positionStanding')}
             selected={form.position === 'STANDING'}
             onClick={() => setField('position', 'STANDING')}
-            audioText="Standing"
+            audioText={t('checkin.b2.positionStanding')}
             compact
           />
           <ChoiceCard
             icon={<Bed className="w-7 h-7" />}
-            title="Lying"
+            title={t('checkin.b2.positionLying')}
             selected={form.position === 'LYING'}
             onClick={() => setField('position', 'LYING')}
-            audioText="Lying"
+            audioText={t('checkin.b2.positionLying')}
             compact
           />
         </div>
@@ -438,8 +443,8 @@ function B2Reading({ form, setField }: StepProps) {
       {/* BP */}
       <div>
         <label className="flex items-center justify-between text-[13px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
-          <span>Blood pressure (mmHg)</span>
-          <AudioButton text="Enter your blood pressure. The top number is systolic, the bottom number is diastolic." size="sm" />
+          <span>{t('checkin.b2.bpLabel')}</span>
+          <AudioButton text={t('checkin.b2.bpAudio')} size="sm" />
         </label>
         <div className="flex items-end gap-3">
           <div className="flex-1">
@@ -463,7 +468,7 @@ function B2Reading({ form, setField }: StepProps) {
                 backgroundColor: 'white',
               }}
             />
-            <p className="text-[11px] text-center mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>Top (systolic)</p>
+            <p className="text-[11px] text-center mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpTopLabel')}</p>
           </div>
           <div className="pb-7 text-[32px] font-light" style={{ color: 'var(--brand-text-muted)' }}>/</div>
           <div className="flex-1">
@@ -485,7 +490,7 @@ function B2Reading({ form, setField }: StepProps) {
                 backgroundColor: 'white',
               }}
             />
-            <p className="text-[11px] text-center mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>Bottom (diastolic)</p>
+            <p className="text-[11px] text-center mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpBottomLabel')}</p>
           </div>
         </div>
 
@@ -524,7 +529,7 @@ function B2Reading({ form, setField }: StepProps) {
                       : 'var(--brand-success-green)',
                 }}
               >
-                {isCritical ? 'Very high — your care team will be notified' : isElevated ? 'Elevated — above target range' : 'Within normal range'}
+                {isCritical ? t('checkin.b2.bpStatusCritical') : isElevated ? t('checkin.b2.bpStatusElevated') : t('checkin.b2.bpStatusNormal')}
               </p>
             </motion.div>
           )}
@@ -534,8 +539,8 @@ function B2Reading({ form, setField }: StepProps) {
       {/* Pulse */}
       <div>
         <label className="flex items-center justify-between text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          <span className="flex items-center gap-2"><Heart className="w-4 h-4" /> Pulse (beats per minute)</span>
-          <AudioButton text="Pulse. Beats per minute, usually shown on the cuff." size="sm" />
+          <span className="flex items-center gap-2"><Heart className="w-4 h-4" /> {t('checkin.b2.pulseLabel')}</span>
+          <AudioButton text={t('checkin.b2.pulseAudio')} size="sm" />
         </label>
         <input
           type="number"
@@ -559,18 +564,19 @@ function B2Reading({ form, setField }: StepProps) {
 }
 
 function StepWeight({ form, setField }: StepProps) {
+  const { t } = useLanguage();
   return (
     <div className="space-y-6">
       <StepHeader
-        title="Weight (optional)"
-        subtitle="Skip this if you didn't weigh yourself today."
-        audio="Weight, optional. Skip this if you didn't weigh yourself today."
+        title={t('checkin.weight.title')}
+        subtitle={t('checkin.weight.subtitle')}
+        audio={t('checkin.weight.audio')}
         step={3}
         total={5}
       />
 
       <div>
-        <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>Unit</label>
+        <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('checkin.weight.unitLabel')}</label>
         <div
           className="inline-flex rounded-full p-1 gap-1"
           style={{ backgroundColor: 'var(--brand-background)', border: '1px solid var(--brand-border)' }}
@@ -594,7 +600,7 @@ function StepWeight({ form, setField }: StepProps) {
 
       <div>
         <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          Weight ({form.weightUnit})
+          {t('checkin.weight.weightLabel').replace('{unit}', form.weightUnit)}
         </label>
         <div className="relative">
           <input
@@ -622,7 +628,7 @@ function StepWeight({ form, setField }: StepProps) {
       <div className="rounded-xl p-3.5 flex gap-3" style={{ backgroundColor: 'var(--brand-accent-teal-light)' }}>
         <Scale className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-accent-teal)' }} />
         <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
-          Sudden gain (3+ lbs in 24 hours) can signal fluid retention — your care team watches for this.
+          {t('checkin.weight.fluidHint')}
         </p>
       </div>
     </div>
@@ -887,26 +893,27 @@ interface SymptomsStepProps extends StepProps {
 }
 
 function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
+  const { t } = useLanguage();
   const core: { key: keyof FormData; icon: React.ReactNode; text: string }[] = [
-    { key: 'severeHeadache', icon: <Brain className="w-5 h-5" />, text: 'Severe headache' },
-    { key: 'visualChanges', icon: <Eye className="w-5 h-5" />, text: 'Vision changes' },
-    { key: 'alteredMentalStatus', icon: <Brain className="w-5 h-5" />, text: 'Confusion / not feeling like yourself' },
-    { key: 'chestPainOrDyspnea', icon: <Wind className="w-5 h-5" />, text: 'Chest pain or trouble breathing' },
-    { key: 'focalNeuroDeficit', icon: <Zap className="w-5 h-5" />, text: 'Weakness, numbness, or speech problems' },
-    { key: 'severeEpigastricPain', icon: <Stethoscope className="w-5 h-5" />, text: 'Severe stomach or upper-right pain' },
+    { key: 'severeHeadache', icon: <Brain className="w-5 h-5" />, text: t('checkin.b3.symptomSevereHeadache') },
+    { key: 'visualChanges', icon: <Eye className="w-5 h-5" />, text: t('checkin.b3.symptomVision') },
+    { key: 'alteredMentalStatus', icon: <Brain className="w-5 h-5" />, text: t('checkin.b3.symptomConfusion') },
+    { key: 'chestPainOrDyspnea', icon: <Wind className="w-5 h-5" />, text: t('checkin.b3.symptomChestPain') },
+    { key: 'focalNeuroDeficit', icon: <Zap className="w-5 h-5" />, text: t('checkin.b3.symptomNeuro') },
+    { key: 'severeEpigastricPain', icon: <Stethoscope className="w-5 h-5" />, text: t('checkin.b3.symptomStomach') },
   ];
   const pregnancy: { key: keyof FormData; icon: React.ReactNode; text: string }[] = [
-    { key: 'newOnsetHeadache', icon: <Brain className="w-5 h-5" />, text: 'New headache (not usual for you)' },
-    { key: 'ruqPain', icon: <Stethoscope className="w-5 h-5" />, text: 'Pain in upper-right belly' },
-    { key: 'edema', icon: <Droplets className="w-5 h-5" />, text: 'New swelling in face, hands, or feet' },
+    { key: 'newOnsetHeadache', icon: <Brain className="w-5 h-5" />, text: t('checkin.b3.symptomNewHeadache') },
+    { key: 'ruqPain', icon: <Stethoscope className="w-5 h-5" />, text: t('checkin.b3.symptomRuq') },
+    { key: 'edema', icon: <Droplets className="w-5 h-5" />, text: t('checkin.b3.symptomEdema') },
   ];
 
   return (
     <div className="space-y-5">
       <StepHeader
-        title="How do you feel?"
-        subtitle="Tap anything you're feeling right now. Tap nothing if you feel fine."
-        audio="How do you feel? Tap anything you're feeling right now. Tap nothing if you feel fine."
+        title={t('checkin.b3.title')}
+        subtitle={t('checkin.b3.subtitle')}
+        audio={t('checkin.b3.audio')}
         step={5}
         total={5}
       />
@@ -915,7 +922,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
         style={{ backgroundColor: 'var(--brand-alert-red-light)' }}>
         <Heart className="w-4 h-4 mt-0.5 shrink-0" style={{ color: 'var(--brand-alert-red)' }} />
         <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
-          If you have these now, your care team is notified right away.
+          {t('checkin.b3.alertBanner')}
         </p>
       </div>
 
@@ -942,7 +949,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
             <div className="flex items-center gap-2 mt-3">
               <Baby className="w-4 h-4" style={{ color: 'var(--brand-primary-purple)' }} />
               <p className="text-[12.5px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-primary-purple)' }}>
-                Pregnancy-specific
+                {t('checkin.b3.pregnancyHeader')}
               </p>
             </div>
             {pregnancy.map((s) => (
@@ -960,13 +967,13 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
 
       <div>
         <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          Anything else? (optional)
+          {t('checkin.b3.otherLabel')}
         </label>
         <textarea
           rows={3}
           value={form.otherSymptomsText}
           onChange={(e) => setField('otherSymptomsText', e.target.value)}
-          placeholder="In your own words…"
+          placeholder={t('checkin.b3.otherPlaceholder')}
           className="w-full rounded-xl px-4 py-3 text-[13px] resize-none outline-none transition"
           style={{
             border: '2px solid var(--brand-border)',
@@ -998,6 +1005,7 @@ function ConfirmationScreen({
   onAddAnother: () => void;
   onDone: () => void;
 }) {
+  const { t } = useLanguage();
   const total = sessionReadings.length;
   const aFibSatisfied = !hasAFib || total >= 3;
 
@@ -1017,10 +1025,10 @@ function ConfirmationScreen({
       </motion.div>
 
       <h2 className="text-[20px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
-        Reading {total > 1 ? `${total} ` : ''}sent
+        {total > 1 ? t('checkin.confirm.titleMulti').replace('{n}', String(total)) : t('checkin.confirm.title')}
       </h2>
       <p className="text-[13px] mt-0.5 mb-4" style={{ color: 'var(--brand-text-muted)' }}>
-        Your care team gets it right away.
+        {t('checkin.confirm.subtitle')}
       </p>
 
       {/* Reading summary card */}
@@ -1030,10 +1038,15 @@ function ConfirmationScreen({
       >
         <div className="flex items-center justify-between mb-1">
           <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
-            This reading
+            {t('checkin.confirm.thisReading')}
           </span>
           <AudioButton
-            text={`Reading ${lastReading.systolicBP ?? 'unknown'} over ${lastReading.diastolicBP ?? 'unknown'}${lastReading.pulse != null ? `, pulse ${lastReading.pulse}` : ''}`}
+            text={(lastReading.pulse != null
+              ? t('checkin.confirm.readingAudioPulse').replace('{pulse}', String(lastReading.pulse))
+              : t('checkin.confirm.readingAudio')
+            )
+              .replace('{sys}', String(lastReading.systolicBP ?? ''))
+              .replace('{dia}', String(lastReading.diastolicBP ?? ''))}
             size="sm"
           />
         </div>
@@ -1041,7 +1054,7 @@ function ConfirmationScreen({
           <span className="text-[30px] font-bold leading-none" style={{ color: 'var(--brand-primary-purple)' }}>
             {lastReading.systolicBP ?? '--'}/{lastReading.diastolicBP ?? '--'}
           </span>
-          <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>mmHg</span>
+          <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.confirm.unit')}</span>
           {lastReading.pulse != null && (
             <span className="text-[12px] font-semibold ml-2 flex items-center gap-1" style={{ color: 'var(--brand-text-secondary)' }}>
               <Heart className="w-3.5 h-3.5" /> {lastReading.pulse}
@@ -1083,13 +1096,13 @@ function ConfirmationScreen({
             style={{ color: aFibSatisfied ? 'var(--brand-success-green)' : 'var(--brand-text-primary)' }}
           >
             {aFibSatisfied
-              ? `${total} readings — enough to average accurately.`
-              : `AFib needs 3 readings · ${total} of 3 done.`}
+              ? t('checkin.confirm.afibSatisfied').replace('{n}', String(total))
+              : t('checkin.confirm.afibNeeded').replace('{n}', String(total))}
           </p>
         </div>
       ) : (
         <p className="text-[12px] mb-3 leading-snug" style={{ color: 'var(--brand-text-muted)' }}>
-          Your care team will review and reach out only if something looks off.
+          {t('checkin.confirm.nonAfib')}
         </p>
       )}
 
@@ -1106,7 +1119,7 @@ function ConfirmationScreen({
           whileTap={{ scale: 0.97 }}
         >
           <Plus className="w-4 h-4" />
-          Add another reading
+          {t('checkin.confirm.addAnother')}
         </motion.button>
         <motion.button
           type="button"
@@ -1120,7 +1133,7 @@ function ConfirmationScreen({
           whileTap={{ scale: 0.97 }}
         >
           <Home className="w-4 h-4" />
-          Back to dashboard
+          {t('checkin.confirm.backToDashboard')}
         </motion.button>
       </div>
     </div>
@@ -1138,7 +1151,7 @@ const SECOND_READING_FLOW: StepKey[] = ['B2', 'WEIGHT', 'MEDICATION', 'B3'];
 export default function CheckIn() {
   const router = useRouter();
   const { isLoading, isAuthenticated } = useAuth();
-  const { } = useLanguage(); // reserved for future i18n wiring
+  const { t } = useLanguage();
 
   const [profile, setProfile] = useState<PatientProfileDto | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -1220,21 +1233,21 @@ export default function CheckIn() {
 
   function validateStep(s: StepKey): string | null {
     if (s === 'B2') {
-      if (!form.measuredDate || !form.measuredTime) return 'Please pick the date and time.';
+      if (!form.measuredDate || !form.measuredTime) return t('checkin.err.dateTime');
       const measuredDate = new Date(`${form.measuredDate}T${form.measuredTime}`);
-      if (isNaN(measuredDate.getTime())) return 'That date doesn\'t look right.';
+      if (isNaN(measuredDate.getTime())) return t('checkin.err.dateInvalid');
       const now = Date.now();
-      if (measuredDate.getTime() > now + 5 * 60 * 1000) return 'The time is in the future.';
-      if (measuredDate.getTime() < now - 30 * 24 * 60 * 60 * 1000) return 'That\'s more than 30 days ago.';
-      if (!form.position) return 'Pick a position.';
-      if (!form.systolicBP || !form.diastolicBP) return 'Enter both blood pressure numbers.';
+      if (measuredDate.getTime() > now + 5 * 60 * 1000) return t('checkin.err.timeFuture');
+      if (measuredDate.getTime() < now - 30 * 24 * 60 * 60 * 1000) return t('checkin.err.timeOld');
+      if (!form.position) return t('checkin.err.position');
+      if (!form.systolicBP || !form.diastolicBP) return t('checkin.err.bpMissing');
       const sys = parseInt(form.systolicBP, 10);
       const dia = parseInt(form.diastolicBP, 10);
-      if (sys < 60 || sys > 250) return 'Top number should be between 60 and 250.';
-      if (dia < 40 || dia > 150) return 'Bottom number should be between 40 and 150.';
+      if (sys < 60 || sys > 250) return t('checkin.err.systolic');
+      if (dia < 40 || dia > 150) return t('checkin.err.diastolic');
       if (form.pulse) {
         const p = parseInt(form.pulse, 10);
-        if (p < 30 || p > 220) return 'Pulse should be between 30 and 220.';
+        if (p < 30 || p > 220) return t('checkin.err.pulse');
       }
     }
     if (s === 'MEDICATION') {
@@ -1338,7 +1351,13 @@ export default function CheckIn() {
       setReadingNumber((n) => n + 1);
       setShowConfirmation(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not send reading. Try again.');
+      // Layer A journaling gate: patient hasn't completed clinical intake yet.
+      // Route them into the intake flow instead of surfacing the raw 403.
+      if (e instanceof ClinicalIntakeRequiredError) {
+        router.push('/clinical-intake?reason=check-in');
+        return;
+      }
+      setError(e instanceof Error ? e.message : t('checkin.err.submit'));
     } finally {
       setSubmitting(false);
     }
@@ -1434,7 +1453,7 @@ export default function CheckIn() {
             style={{ color: 'var(--brand-text-secondary)' }}
           >
             <ArrowLeft className="w-4 h-4" />
-            Back
+            {t('checkin.nav.back')}
           </button>
           <StepDots current={visibleIndex} total={visibleTotal} />
           <div className="w-[60px]" aria-hidden /> {/* spacer to keep dots centered */}
@@ -1445,7 +1464,7 @@ export default function CheckIn() {
             style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
           >
             <Volume2 className="w-3.5 h-3.5" />
-            Reading {readingNumber + 1} in this session{hasAFib ? ' · AFib needs 3 in a row' : ''}
+            {(hasAFib ? t('checkin.nav.sessionBannerAfib') : t('checkin.nav.sessionBanner')).replace('{n}', String(readingNumber + 1))}
           </div>
         )}
       </header>
@@ -1508,10 +1527,10 @@ export default function CheckIn() {
             whileTap={{ scale: 0.98 }}
           >
             {submitting
-              ? 'Sending…'
+              ? t('checkin.nav.sending')
               : step === 'B3'
-                ? 'Submit reading'
-                : 'Continue'}
+                ? t('checkin.nav.submitReading')
+                : t('checkin.nav.continue')}
             {!submitting && step !== 'B3' && <ArrowRight className="w-4 h-4" />}
             {!submitting && step === 'B3' && <Check className="w-4 h-4" />}
           </motion.button>

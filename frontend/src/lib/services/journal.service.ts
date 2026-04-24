@@ -64,9 +64,26 @@ export interface JournalEntryDto extends JournalEntryPayload {
   updatedAt: string
 }
 
+/**
+ * Thrown when POST /daily-journal returns 403 `clinical-intake-required` —
+ * Layer A journaling gate. Callers should route the patient to
+ * `/clinical-intake` rather than surfacing the raw error. See
+ * docs/TESTING_FLOW_GUIDE.md §6.1.
+ */
+export class ClinicalIntakeRequiredError extends Error {
+  readonly code = 'clinical-intake-required' as const
+  constructor(reason?: string) {
+    super(reason || 'Complete your clinical intake before logging readings.')
+    this.name = 'ClinicalIntakeRequiredError'
+  }
+}
+
 async function unwrap<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
+    if (res.status === 403 && err?.message === 'clinical-intake-required') {
+      throw new ClinicalIntakeRequiredError(err.reason)
+    }
     throw new Error(err.message || `Request failed: ${res.status}`)
   }
   const json = await res.json()

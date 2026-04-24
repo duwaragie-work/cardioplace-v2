@@ -45,6 +45,16 @@ export class AdminIntakeController {
     return this.intake.correctProfile(req.user.id, patientUserId, dto)
   }
 
+  @Post('users/:id/reject-profile-field')
+  @HttpCode(HttpStatus.OK)
+  rejectProfileField(
+    @Req() req: AuthedReq,
+    @Param('id') patientUserId: string,
+    @Body() dto: { field: string; rationale?: string },
+  ) {
+    return this.intake.rejectProfileField(req.user.id, patientUserId, dto)
+  }
+
   @Post('medications/:id/verify')
   @HttpCode(HttpStatus.OK)
   verifyMedication(
@@ -58,5 +68,21 @@ export class AdminIntakeController {
   @Get('users/:id/verification-logs')
   listVerificationLogs(@Param('id') patientUserId: string) {
     return this.intake.listVerificationLogs(patientUserId)
+  }
+
+  // Admin-scoped reads for the Flow H patient detail screen. These delegate
+  // to the same intake service the patient self-serves; the admin guard on
+  // the controller is what enforces who is allowed to view another patient's
+  // profile / medications.
+  @Get('users/:id/profile')
+  getProfile(@Param('id') patientUserId: string) {
+    return this.intake.getProfile(patientUserId)
+  }
+
+  @Get('users/:id/medications')
+  listMedications(@Param('id') patientUserId: string) {
+    // includeDiscontinued = true so the medications tab can show the full
+    // history (discontinued meds are rendered with a strike-through).
+    return this.intake.listMedications(patientUserId, true)
   }
 }

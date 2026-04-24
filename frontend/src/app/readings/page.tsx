@@ -21,6 +21,9 @@ import {
   deleteJournalEntry,
 } from '@/lib/services/journal.service';
 import { useLanguage } from '@/contexts/LanguageContext';
+import type { TranslationKey } from '@/i18n';
+
+type TFn = (key: TranslationKey) => string;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Entry = {
@@ -100,43 +103,49 @@ const SYMPTOM_KEYS: SymptomKey[] = [
   'edema',
 ];
 
-const SYMPTOM_LABELS: Record<SymptomKey, string> = {
-  severeHeadache: 'Severe headache',
-  visualChanges: 'Vision changes',
-  alteredMentalStatus: 'Confusion / not yourself',
-  chestPainOrDyspnea: 'Chest pain or trouble breathing',
-  focalNeuroDeficit: 'Weakness, numbness, or speech problems',
-  severeEpigastricPain: 'Severe stomach or upper-right pain',
-  newOnsetHeadache: 'New headache (not usual for you)',
-  ruqPain: 'Pain in upper-right belly',
-  edema: 'New swelling in face, hands, or feet',
+// Symptom labels reuse Flow B's reviewer-approved copy (checkin.b3.symptom*)
+// so intake and readings present identical wording in every locale.
+const SYMPTOM_LABEL_KEYS: Record<SymptomKey, TranslationKey> = {
+  severeHeadache: 'checkin.b3.symptomSevereHeadache',
+  visualChanges: 'checkin.b3.symptomVision',
+  alteredMentalStatus: 'checkin.b3.symptomConfusion',
+  chestPainOrDyspnea: 'checkin.b3.symptomChestPain',
+  focalNeuroDeficit: 'checkin.b3.symptomNeuro',
+  severeEpigastricPain: 'checkin.b3.symptomStomach',
+  newOnsetHeadache: 'checkin.b3.symptomNewHeadache',
+  ruqPain: 'checkin.b3.symptomRuq',
+  edema: 'checkin.b3.symptomEdema',
 };
 
-/** CheckIn-style validation. Returns first error or null when OK. */
-function validateEditForm(f: EditForm): string | null {
-  if (!f.measuredDate || !f.measuredTime) return 'Pick the date and time.';
+/** CheckIn-style validation. Returns first error or null when OK.
+ *  Reuses checkin.err.* keys from Flow B for the 7 shared concepts so that
+ *  intake and readings-edit share identical phrasing per locale — Flow B's
+ *  strings went through native-speaker review. bpBoth (edit-only affordance)
+ *  and weightRange (not collected on Flow B) stay under readings.validate.*. */
+function validateEditForm(f: EditForm, t: TFn): string | null {
+  if (!f.measuredDate || !f.measuredTime) return t('checkin.err.dateTime');
   const dt = new Date(`${f.measuredDate}T${f.measuredTime}`);
-  if (isNaN(dt.getTime())) return 'That date doesn\'t look right.';
+  if (isNaN(dt.getTime())) return t('checkin.err.dateInvalid');
   const now = Date.now();
-  if (dt.getTime() > now + 5 * 60 * 1000) return 'The time is in the future.';
-  if (dt.getTime() < now - 30 * 24 * 60 * 60 * 1000) return 'That\'s more than 30 days ago.';
+  if (dt.getTime() > now + 5 * 60 * 1000) return t('checkin.err.timeFuture');
+  if (dt.getTime() < now - 30 * 24 * 60 * 60 * 1000) return t('checkin.err.timeOld');
   // BP — both required if either entered
   if ((f.systolic && !f.diastolic) || (!f.systolic && f.diastolic)) {
-    return 'Enter both blood pressure numbers (or clear both).';
+    return t('readings.validate.bpBoth');
   }
   if (f.systolic && f.diastolic) {
     const sys = parseInt(f.systolic, 10);
     const dia = parseInt(f.diastolic, 10);
-    if (sys < 60 || sys > 250) return 'Top number should be between 60 and 250.';
-    if (dia < 40 || dia > 150) return 'Bottom number should be between 40 and 150.';
+    if (sys < 60 || sys > 250) return t('checkin.err.systolic');
+    if (dia < 40 || dia > 150) return t('checkin.err.diastolic');
   }
   if (f.pulse) {
     const p = parseInt(f.pulse, 10);
-    if (p < 30 || p > 220) return 'Pulse should be between 30 and 220.';
+    if (p < 30 || p > 220) return t('checkin.err.pulse');
   }
   if (f.weight) {
     const w = parseFloat(f.weight);
-    if (w < 20 || w > 600) return 'Weight should be between 20 and 600.';
+    if (w < 20 || w > 600) return t('readings.validate.weightRange');
   }
   return null;
 }
@@ -274,7 +283,7 @@ function EntryCard({
                   {entry.diastolicBP}
                 </span>
                 <span className="text-[12px] ml-1.5" style={{ color: 'var(--brand-text-muted)' }}>
-                  mmHg
+                  {t('readings.mmHg')}
                 </span>
               </div>
               {bpStatus && (
@@ -306,7 +315,7 @@ function EntryCard({
                   color: 'var(--brand-accent-teal)',
                 }}
               >
-                ♥ {entry.pulse} bpm
+                ♥ {entry.pulse} {t('readings.bpm')}
               </span>
             )}
             {hasBP && (
@@ -335,7 +344,7 @@ function EntryCard({
                   color: 'var(--brand-text-secondary)',
                 }}
               >
-                {entry.position === 'SITTING' ? 'Sitting' : entry.position === 'STANDING' ? 'Standing' : 'Lying'}
+                {entry.position === 'SITTING' ? t('checkin.b2.positionSitting') : entry.position === 'STANDING' ? t('checkin.b2.positionStanding') : t('checkin.b2.positionLying')}
               </span>
             )}
             {entry.weight != null && (
@@ -346,7 +355,7 @@ function EntryCard({
                   color: 'var(--brand-primary-purple)',
                 }}
               >
-                {entry.weight} lbs
+                {entry.weight} {t('readings.lbs')}
               </span>
             )}
             {entry.medicationTaken != null && (
@@ -435,6 +444,7 @@ function SessionCard({
   onEdit: (e: Entry) => void;
   onDelete: (id: string) => void;
 }) {
+  const { t } = useLanguage();
   const [expanded, setExpanded] = useState(false);
 
   // Average across readings that have BP. If none have BP, fall back to
@@ -454,7 +464,7 @@ function SessionCard({
     const a = new Date(earliest).getTime();
     const b = new Date(latest).getTime();
     const min = Math.round(Math.abs(b - a) / 60000);
-    return min > 0 ? `${min} min` : 'same minute';
+    return min > 0 ? `${min} min` : t('readings.sameMinute');
   })();
 
   return (
@@ -485,7 +495,7 @@ function SessionCard({
             className="text-[10px] font-bold uppercase tracking-wider"
             style={{ color: 'var(--brand-primary-purple)' }}
           >
-            Session · {entries.length} readings{span ? ` · ${span}` : ''}
+            {t('readings.sessionReadings').replace('{count}', String(entries.length))}{span ? ` · ${span}` : ''}
           </p>
           <p
             className="text-[14px] font-bold leading-tight"
@@ -493,13 +503,13 @@ function SessionCard({
           >
             {avgSys != null && avgDia != null ? (
               <>
-                Avg <span>{avgSys}/{avgDia}</span>{' '}
+                {t('readings.avg')} <span>{avgSys}/{avgDia}</span>{' '}
                 <span className="text-[11px] font-medium" style={{ color: 'var(--brand-text-muted)' }}>
-                  mmHg
+                  {t('readings.mmHg')}
                 </span>
               </>
             ) : (
-              <>{entries.length} readings</>
+              <>{t('readings.readingsCount').replace('{count}', String(entries.length))}</>
             )}
           </p>
         </div>
@@ -651,7 +661,7 @@ function EditModal({
                 className="block text-[12px] font-semibold mb-2"
                 style={{ color: 'var(--brand-text-secondary)' }}
               >
-                Position during reading
+                {t('readings.positionLabel')}
               </label>
               <div className="grid grid-cols-3 gap-2">
                 {(['SITTING', 'STANDING', 'LYING'] as const).map((p) => {
@@ -726,11 +736,11 @@ function EditModal({
                 className="block text-[12px] font-semibold mb-1.5"
                 style={{ color: 'var(--brand-text-secondary)' }}
               >
-                Pulse (bpm)
+                {t('readings.pulseLabel')}
               </label>
               <input
                 type="number"
-                placeholder="e.g. 72"
+                placeholder={t('readings.pulsePlaceholder')}
                 value={form.pulse}
                 onChange={(e) => onChange('pulse', e.target.value)}
                 min={30}
@@ -839,7 +849,7 @@ function EditModal({
                         className="text-[12.5px] flex-1 min-w-0"
                         style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
                       >
-                        {SYMPTOM_LABELS[key]}
+                        {t(SYMPTOM_LABEL_KEYS[key])}
                       </span>
                     </button>
                   );
@@ -853,13 +863,13 @@ function EditModal({
                 className="block text-[12px] font-semibold mb-1.5"
                 style={{ color: 'var(--brand-text-secondary)' }}
               >
-                Anything else?
+                {t('checkin.b3.otherLabel')}
               </label>
               <input
                 type="text"
                 value={form.otherSymptomsText}
                 onChange={(e) => onChange('otherSymptomsText', e.target.value)}
-                placeholder="In your own words…"
+                placeholder={t('checkin.b3.otherPlaceholder')}
                 className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
                 style={{
                   borderColor: 'var(--brand-border)',
@@ -1097,7 +1107,7 @@ export default function ReadingsPage() {
 
   async function saveEdit() {
     if (!editEntry || !editForm) return;
-    const validation = validateEditForm(editForm);
+    const validation = validateEditForm(editForm, t);
     if (validation) {
       setEditError(validation);
       return;

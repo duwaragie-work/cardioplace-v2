@@ -17,8 +17,10 @@ import type {
   VerifyProfileDto,
 } from './dto/correct-profile.dto.js'
 import type { IntakeMedicationsDto } from './dto/intake-medications.dto.js'
+import type { IntakeMedicationItemDto } from './dto/intake-medications.dto.js'
 import type { IntakeProfileDto } from './dto/intake-profile.dto.js'
 import type { PregnancyDto } from './dto/pregnancy.dto.js'
+import type { ReplaceMedicationsDto } from './dto/replace-medications.dto.js'
 import type { UpdateMedicationDto } from './dto/update-medication.dto.js'
 import type { VerifyMedicationDto } from './dto/verify-medication.dto.js'
 
@@ -285,6 +287,108 @@ export class IntakeService {
     }, TX_OPTIONS)
   }
 
+  // ─── Patient: PUT /me/medications ────────────────────────────────────────
+  //
+  // Replace semantics. Soft-closes rows no longer in the list (sets
+  // `discontinuedAt = now()`) and creates fresh rows for additions. Rows that
+  // match by canonical key are left untouched to preserve provider
+  // verification timestamps. We soft-close rather than hard-delete because
+  // `discontinuedAt` is already the project's convention for "no longer
+  // current" (see profile-resolver and monthly-reask) and keeps drug-exposure
+  // history intact for Joint Commission audit. If any row was closed or
+  // created, flip the profile back to UNVERIFIED.
+
+  async replaceMedications(userId: string, dto: ReplaceMedicationsDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.patientMedication.findMany({
+        where: { userId, discontinuedAt: null },
+      })
+
+      const { toClose, toCreate } = this.diffMedications(
+        current,
+        dto.medications,
+      )
+
+      if (!toClose.length && !toCreate.length) {
+        return {
+          statusCode: 200,
+          message: 'No changes applied',
+          data: current.map((m) => this.serializeMedication(m)),
+        }
+      }
+
+      const now = new Date()
+
+      if (toClose.length) {
+        await tx.patientMedication.updateMany({
+          where: { id: { in: toClose.map((m) => m.id) } },
+          data: { discontinuedAt: now },
+        })
+      }
+
+      const created: PatientMedication[] = []
+      for (const item of toCreate) {
+        const row = await tx.patientMedication.create({
+          data: {
+            userId,
+            drugName: item.drugName,
+            drugClass: item.drugClass,
+            frequency: item.frequency,
+            isCombination: item.isCombination ?? false,
+            combinationComponents: item.combinationComponents ?? [],
+            source: item.source ?? 'PATIENT_SELF_REPORT',
+            rawInputText: item.rawInputText,
+            notes: item.notes,
+            verificationStatus:
+              item.source === 'PATIENT_VOICE' || item.source === 'PATIENT_PHOTO'
+                ? MedicationVerificationStatus.AWAITING_PROVIDER
+                : MedicationVerificationStatus.UNVERIFIED,
+          },
+        })
+        created.push(row)
+      }
+
+      const logRows: Prisma.ProfileVerificationLogCreateManyInput[] = [
+        ...toClose.map((med) => ({
+          userId,
+          fieldPath: `medication:${med.id}.discontinuedAt`,
+          previousValue: Prisma.JsonNull,
+          newValue: now.toISOString() as Prisma.InputJsonValue,
+          changedBy: userId,
+          changedByRole: VerifierRole.PATIENT,
+          changeType: VerificationChangeType.PATIENT_REPORT,
+          rationale: 'patient self-edit post-verification',
+        })),
+        ...created.map((med) => ({
+          userId,
+          fieldPath: `medication:${med.id}`,
+          previousValue: Prisma.JsonNull,
+          newValue: this.serializeMedication(med) as Prisma.InputJsonValue,
+          changedBy: userId,
+          changedByRole: VerifierRole.PATIENT,
+          changeType: VerificationChangeType.PATIENT_REPORT,
+          rationale: 'patient self-edit post-verification',
+        })),
+      ]
+      if (logRows.length) {
+        await tx.profileVerificationLog.createMany({ data: logRows })
+      }
+
+      await this.flipProfileToUnverified(tx, userId)
+
+      const active = await tx.patientMedication.findMany({
+        where: { userId, discontinuedAt: null },
+        orderBy: { reportedAt: 'desc' },
+      })
+
+      return {
+        statusCode: 200,
+        message: `Medication list replaced (${toClose.length} closed, ${toCreate.length} added)`,
+        data: active.map((m) => this.serializeMedication(m)),
+      }
+    }, TX_OPTIONS)
+  }
+
   // ─── Admin: POST /admin/users/:id/verify-profile ─────────────────────────
 
   async verifyProfile(
@@ -325,6 +429,75 @@ export class IntakeService {
     return {
       statusCode: 200,
       message: 'Profile verified',
+      data: this.serializeProfile(updated),
+    }
+  }
+
+  // ─── Admin: POST /admin/users/:id/reject-profile-field ───────────────────
+  // Flips the whole profile back to UNVERIFIED and writes an ADMIN_REJECT
+  // audit row pinned to the field the admin flagged. Used by the Flow H
+  // Profile tab when an admin rejects a single field after a prior verify.
+  async rejectProfileField(
+    adminId: string,
+    patientUserId: string,
+    dto: { field: string; rationale?: string },
+  ) {
+    const profile = await this.prisma.patientProfile.findUnique({
+      where: { userId: patientUserId },
+    })
+    if (!profile) {
+      throw new NotFoundException('Patient profile not found')
+    }
+    if (!dto.field || typeof dto.field !== 'string') {
+      throw new BadRequestException('field is required')
+    }
+
+    const previousStatus = profile.profileVerificationStatus
+    const fieldKey = dto.field as keyof typeof profile
+    const previousValue = profile[fieldKey] ?? null
+
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.patientProfile.update({
+        where: { userId: patientUserId },
+        data: {
+          profileVerificationStatus: ProfileVerificationStatus.UNVERIFIED,
+          profileVerifiedAt: null,
+          profileVerifiedBy: null,
+          profileLastEditedAt: new Date(),
+        },
+      }),
+      this.prisma.profileVerificationLog.create({
+        data: {
+          userId: patientUserId,
+          fieldPath: `profile.${dto.field}`,
+          previousValue: previousValue as Prisma.InputJsonValue,
+          newValue: Prisma.JsonNull,
+          changedBy: adminId,
+          changedByRole: VerifierRole.ADMIN,
+          changeType: VerificationChangeType.ADMIN_REJECT,
+          rationale: dto.rationale,
+          discrepancyFlag: true,
+        },
+      }),
+      // Also write a status-flip log so the timeline shows why the profile
+      // dropped back to UNVERIFIED.
+      this.prisma.profileVerificationLog.create({
+        data: {
+          userId: patientUserId,
+          fieldPath: 'profile.verificationStatus',
+          previousValue: previousStatus,
+          newValue: ProfileVerificationStatus.UNVERIFIED,
+          changedBy: adminId,
+          changedByRole: VerifierRole.ADMIN,
+          changeType: VerificationChangeType.ADMIN_REJECT,
+          rationale: `Reverted to unverified — ${dto.field} rejected`,
+        },
+      }),
+    ])
+
+    return {
+      statusCode: 200,
+      message: 'Field rejected; profile returned to unverified',
       data: this.serializeProfile(updated),
     }
   }
@@ -543,6 +716,59 @@ export class IntakeService {
       })
     }
     return changes
+  }
+
+  // Canonical key for medication identity. Two rows match if they share
+  // drugName (case-insensitive), drugClass, isCombination, frequency and
+  // the sorted set of combinationComponents. Matching rows survive a replace
+  // unchanged so provider-verified timestamps aren't reset needlessly.
+  private medicationKey(m: {
+    drugName: string
+    drugClass: string
+    isCombination: boolean
+    frequency: string
+    combinationComponents: string[]
+  }): string {
+    const sortedComponents = [...(m.combinationComponents ?? [])].sort().join(',')
+    return [
+      m.drugName.trim().toLowerCase(),
+      m.drugClass,
+      String(m.isCombination),
+      m.frequency,
+      sortedComponents,
+    ].join('|')
+  }
+
+  private diffMedications(
+    current: PatientMedication[],
+    incoming: IntakeMedicationItemDto[],
+  ): {
+    toClose: PatientMedication[]
+    toCreate: IntakeMedicationItemDto[]
+  } {
+    const currentByKey = new Map(current.map((m) => [this.medicationKey(m), m]))
+    const incomingByKey = new Map(
+      incoming.map((m) => [
+        this.medicationKey({
+          drugName: m.drugName,
+          drugClass: m.drugClass,
+          isCombination: m.isCombination ?? false,
+          frequency: m.frequency,
+          combinationComponents: m.combinationComponents ?? [],
+        }),
+        m,
+      ]),
+    )
+
+    const toClose: PatientMedication[] = []
+    for (const [key, row] of currentByKey) {
+      if (!incomingByKey.has(key)) toClose.push(row)
+    }
+    const toCreate: IntakeMedicationItemDto[] = []
+    for (const [key, item] of incomingByKey) {
+      if (!currentByKey.has(key)) toCreate.push(item)
+    }
+    return { toClose, toCreate }
   }
 
   private async writeProfileLogs(

@@ -472,7 +472,7 @@ export default function ScheduledCallsPage() {
 
   if (user?.email !== 'support@healplace.com') {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
+      <div className="h-full flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
         <div className="text-center p-8 rounded-2xl bg-white" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
           <div
             className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
@@ -621,7 +621,7 @@ export default function ScheduledCallsPage() {
   }
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
+    <div className="h-full" style={{ backgroundColor: '#FAFBFF' }}>
       <div className="max-w-6xl mx-auto px-4 md:px-8 py-6">
         {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">

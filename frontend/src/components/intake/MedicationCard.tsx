@@ -10,6 +10,7 @@
 import { motion } from 'framer-motion';
 import { Check, X } from 'lucide-react';
 import type { DrugClassInput } from '@cardioplace/shared';
+import { useLanguage } from '@/contexts/LanguageContext';
 import AudioButton from './AudioButton';
 import PillIcon from './PillIcon';
 
@@ -39,6 +40,7 @@ export default function MedicationCard({
   audioText,
   audioLang,
 }: Props) {
+  const { t } = useLanguage();
   const accent = 'var(--brand-primary-purple)';
 
   // Border priority: selected > NDHP-CCB hint > default
@@ -81,7 +83,7 @@ export default function MedicationCard({
             color: 'white',
           }}
         >
-          2-in-1
+          {t('intake.medCard.combo')}
         </span>
       )}
 
@@ -138,7 +140,7 @@ export default function MedicationCard({
           className="text-[11px] font-semibold uppercase tracking-wider"
           style={{ color: selected ? 'var(--brand-success-green)' : 'var(--brand-text-muted)' }}
         >
-          {selected ? '✓ I take this' : "Tap if you take this"}
+          {selected ? `✓ ${t('intake.medCard.takeThis')}` : t('intake.medCard.tapIfTake')}
         </span>
       </div>
     </motion.div>

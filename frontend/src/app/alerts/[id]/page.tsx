@@ -16,6 +16,7 @@ import { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
 import {
   getAlerts,
   acknowledgeAlert,
@@ -76,6 +77,7 @@ function AlertSkeleton() {
 
 function NotFound({ reason }: { reason: string }) {
   const router = useRouter();
+  const { t } = useLanguage();
   return (
     <div
       className="min-h-screen flex items-center justify-center px-4"
@@ -95,7 +97,7 @@ function NotFound({ reason }: { reason: string }) {
           className="text-[20px] font-bold mb-2"
           style={{ color: 'var(--brand-text-primary)' }}
         >
-          Alert not found
+          {t('alerts.notFound.title')}
         </h1>
         <p
           className="text-[13.5px] mb-6 leading-relaxed"
@@ -113,7 +115,7 @@ function NotFound({ reason }: { reason: string }) {
           }}
         >
           <ArrowLeft className="w-4 h-4" />
-          Back to dashboard
+          {t('alerts.notFound.backToDashboard')}
         </button>
       </div>
     </div>
@@ -125,6 +127,7 @@ export default function AlertDetailPage({ params }: PageProps) {
   const { id } = use(params);
   const router = useRouter();
   const { isLoading, isAuthenticated } = useAuth();
+  const { t } = useLanguage();
 
   const [alert, setAlert] = useState<DeviationAlertDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -150,13 +153,13 @@ export default function AlertDetailPage({ params }: PageProps) {
         if (cancelled) return;
         const found = Array.isArray(list) ? list.find((a) => a.id === id) : null;
         if (!found) {
-          setError("We couldn't find that alert. It may have been resolved or removed.");
+          setError(t('alerts.notFound.body'));
         } else {
           setAlert(found);
         }
       } catch (e) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Could not load this alert.');
+          setError(e instanceof Error ? e.message : t('alerts.notFound.loadError'));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -165,7 +168,7 @@ export default function AlertDetailPage({ params }: PageProps) {
     return () => {
       cancelled = true;
     };
-  }, [id, isAuthenticated, isLoading]);
+  }, [id, isAuthenticated, isLoading, t]);
 
   async function handleAcknowledge() {
     if (!alert || ackLoading) return;
@@ -180,7 +183,7 @@ export default function AlertDetailPage({ params }: PageProps) {
           : prev,
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save your acknowledgment.');
+      setError(e instanceof Error ? e.message : t('alerts.notFound.ackError'));
     } finally {
       setAckLoading(false);
     }
@@ -191,7 +194,7 @@ export default function AlertDetailPage({ params }: PageProps) {
   }
 
   if (error || !alert) {
-    return <NotFound reason={error || 'This alert is no longer available.'} />;
+    return <NotFound reason={error || t('alerts.notFound.unavailable')} />;
   }
 
   // Dispatch by tier — and fall back to BP-reading thresholds when the
@@ -208,9 +211,7 @@ export default function AlertDetailPage({ params }: PageProps) {
 
   if (tier === 'TIER_2_DISCREPANCY') {
     // Tier 2 is admin-only per V2-C. Patients shouldn't land here.
-    return (
-      <NotFound reason="This alert is reviewed by your care team only — no action is needed from you." />
-    );
+    return <NotFound reason={t('alerts.notFound.tier2')} />;
   }
 
   // Only show the full-screen red takeover for OPEN emergencies. Once the

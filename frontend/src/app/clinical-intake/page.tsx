@@ -48,11 +48,13 @@ import {
 } from '@cardioplace/shared';
 
 import { useAuth } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
 import {
   getMyPatientProfile,
   getMyMedications,
   saveIntakeProfile,
   saveIntakeMedications,
+  replaceIntakeMedications,
 } from '@/lib/services/intake.service';
 import { CORE_MEDS as ALL_CORE_MEDS, CATEGORY_MEDS as ALL_CATEGORY_MEDS, COMBO_MEDS as ALL_COMBO_MEDS } from '@cardioplace/shared';
 import {
@@ -159,6 +161,7 @@ interface StepProps {
 }
 
 function A0bIntro({ onBegin, onSaveLater }: { onBegin: () => void; onSaveLater: () => void }) {
+  const { t } = useLanguage();
   return (
     <div className="flex flex-col items-center text-center px-6 py-10">
       <motion.div
@@ -177,13 +180,13 @@ function A0bIntro({ onBegin, onSaveLater }: { onBegin: () => void; onSaveLater: 
 
       <div className="flex items-center gap-2 mb-2">
         <h1 className="text-[26px] sm:text-[28px] font-bold tracking-tight" style={{ color: 'var(--brand-text-primary)' }}>
-          Let&apos;s build your health profile
+          {t('intake.a0b.title')}
         </h1>
-        <AudioButton text="Let's build your health profile. This helps your care team give you the right support. Your answers stay private." />
+        <AudioButton text={t('intake.a0b.audio')} />
       </div>
 
       <p className="text-[15px] max-w-md leading-relaxed mb-8" style={{ color: 'var(--brand-text-secondary)' }}>
-        This helps your care team give you the right support. Your answers stay private.
+        {t('intake.a0b.desc')}
       </p>
 
       <motion.button
@@ -197,7 +200,7 @@ function A0bIntro({ onBegin, onSaveLater }: { onBegin: () => void; onSaveLater: 
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.97 }}
       >
-        Begin
+        {t('intake.a0b.begin')}
       </motion.button>
       <button
         type="button"
@@ -205,53 +208,54 @@ function A0bIntro({ onBegin, onSaveLater }: { onBegin: () => void; onSaveLater: 
         className="text-[13px] font-semibold cursor-pointer"
         style={{ color: 'var(--brand-text-muted)' }}
       >
-        Save for later
+        {t('intake.a0b.saveForLater')}
       </button>
     </div>
   );
 }
 
 function A1Demographics({ state, setState }: StepProps) {
+  const { t } = useLanguage();
   return (
     <div className="space-y-7">
       <StepHeader
-        title="A bit about you"
-        subtitle="Helps us personalise your safety thresholds."
-        audio="A bit about you. This helps us personalise your safety thresholds."
+        title={t('intake.a1.title')}
+        subtitle={t('intake.a1.subtitle')}
+        audio={t('intake.a1.audio')}
       />
 
       <div>
-        <SectionLabel text="What is your gender?" audio="What is your gender?" />
+        <SectionLabel text={t('intake.a1.genderQuestion')} audio={t('intake.a1.genderAudio')} />
         <div className="grid grid-cols-3 gap-3">
           <ChoiceCard
             icon={<Mars className="w-6 h-6" />}
-            title="Male"
+            title={t('intake.a1.genderMale')}
             selected={state.gender === 'MALE'}
             onClick={() => setState((p) => ({ ...p, gender: 'MALE', isPregnant: false }))}
-            audioText="Male"
+            audioText={t('intake.a1.genderMale')}
             compact
           />
           <ChoiceCard
             icon={<Venus className="w-6 h-6" />}
-            title="Female"
+            title={t('intake.a1.genderFemale')}
             selected={state.gender === 'FEMALE'}
             onClick={() => setState((p) => ({ ...p, gender: 'FEMALE' }))}
-            audioText="Female"
+            audioText={t('intake.a1.genderFemale')}
             compact
           />
           <ChoiceCard
             icon={<Asterisk className="w-6 h-6" />}
-            title="Other"
+            title={t('intake.a1.genderOther')}
             selected={state.gender === 'OTHER'}
             onClick={() => setState((p) => ({ ...p, gender: 'OTHER', isPregnant: false }))}
-            audioText="Other"
+            audioText={t('intake.a1.genderOther')}
             compact
           />
         </div>
       </div>
 
       <div>
-        <SectionLabel text="How tall are you? (centimeters)" audio="How tall are you, in centimeters?" />
+        <SectionLabel text={t('intake.a1.heightQuestion')} audio={t('intake.a1.heightAudio')} />
         <input
           type="number"
           inputMode="numeric"
@@ -273,7 +277,7 @@ function A1Demographics({ state, setState }: StepProps) {
           onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
         />
         <p className="text-[12px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
-          Roughly 5 ft = 152 cm · 5 ft 5 in = 165 cm · 6 ft = 183 cm
+          {t('intake.a1.heightHint')}
         </p>
       </div>
     </div>
@@ -281,39 +285,40 @@ function A1Demographics({ state, setState }: StepProps) {
 }
 
 function A2Pregnancy({ state, setState }: StepProps) {
+  const { t } = useLanguage();
   const isPregnant = state.isPregnant === true;
   return (
     <div className="space-y-7">
       <StepHeader
-        title="Pregnancy status"
-        subtitle="Some medicines need different safety rules during pregnancy."
-        audio="Pregnancy status. Some medicines need different safety rules during pregnancy."
+        title={t('intake.a2.title')}
+        subtitle={t('intake.a2.subtitle')}
+        audio={t('intake.a2.audio')}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <ChoiceCard
           icon={<Baby className="w-6 h-6" />}
-          title="Yes"
-          description="I am pregnant now"
+          title={t('intake.a2.yesTitle')}
+          description={t('intake.a2.yesDesc')}
           selected={state.isPregnant === true}
           onClick={() => setState((p) => ({ ...p, isPregnant: true }))}
-          audioText="Yes, I am pregnant now"
+          audioText={t('intake.a2.yesAudio')}
         />
         <ChoiceCard
           icon={<Heart className="w-6 h-6" />}
-          title="No"
-          description="Not pregnant"
+          title={t('intake.a2.noTitle')}
+          description={t('intake.a2.noDesc')}
           selected={state.isPregnant === false}
           onClick={() => setState((p) => ({ ...p, isPregnant: false, pregnancyDueDate: undefined }))}
-          audioText="No, not pregnant"
+          audioText={t('intake.a2.noAudio')}
         />
         <ChoiceCard
           icon={<Asterisk className="w-6 h-6" />}
-          title="Not applicable"
-          description="Prefer not to say"
+          title={t('intake.a2.naTitle')}
+          description={t('intake.a2.naDesc')}
           selected={state.isPregnant === undefined}
           onClick={() => setState((p) => ({ ...p, isPregnant: undefined, pregnancyDueDate: undefined }))}
-          audioText="Not applicable"
+          audioText={t('intake.a2.naAudio')}
         />
       </div>
 
@@ -326,7 +331,7 @@ function A2Pregnancy({ state, setState }: StepProps) {
             className="space-y-5"
           >
             <div>
-              <SectionLabel text="When is the baby due? (optional)" audio="When is the baby due? This is optional." />
+              <SectionLabel text={t('intake.a2.dueDateLabel')} audio={t('intake.a2.dueDateAudio')} />
               <input
                 type="date"
                 value={state.pregnancyDueDate ?? ''}
@@ -343,11 +348,11 @@ function A2Pregnancy({ state, setState }: StepProps) {
 
             <ChoiceCard
               icon={<Shield className="w-5 h-5" />}
-              title="History of preeclampsia"
-              description="In a previous pregnancy"
+              title={t('intake.a2.preeclampsiaTitle')}
+              description={t('intake.a2.preeclampsiaDesc')}
               selected={state.historyPreeclampsia === true}
               onClick={() => setState((p) => ({ ...p, historyPreeclampsia: !p.historyPreeclampsia }))}
-              audioText="History of preeclampsia in a previous pregnancy"
+              audioText={t('intake.a2.preeclampsiaAudio')}
               compact
             />
           </motion.div>
@@ -358,6 +363,7 @@ function A2Pregnancy({ state, setState }: StepProps) {
 }
 
 function A3Conditions({ state, setState }: StepProps) {
+  const { t } = useLanguage();
   const has = (k: keyof IntakeFormState): boolean => Boolean(state[k]);
   const set = (k: keyof IntakeFormState, v: boolean) =>
     setState((p) => ({ ...p, [k]: v }));
@@ -368,56 +374,56 @@ function A3Conditions({ state, setState }: StepProps) {
   return (
     <div className="space-y-6">
       <StepHeader
-        title="Heart conditions"
-        subtitle="Tap any conditions you have been told about."
-        audio="Heart conditions. Tap any conditions you have been told about."
+        title={t('intake.a3.title')}
+        subtitle={t('intake.a3.subtitle')}
+        audio={t('intake.a3.audio')}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <ChoiceCard
           icon={<Heart className="w-6 h-6" />}
-          title="Heart failure"
-          description="Doctor said your heart pumps weaker"
+          title={t('intake.a3.hfTitle')}
+          description={t('intake.a3.hfDesc')}
           selected={has('hasHeartFailure')}
           onClick={() => set('hasHeartFailure', !state.hasHeartFailure)}
-          audioText="Heart failure. The doctor said your heart pumps weaker."
+          audioText={t('intake.a3.hfAudio')}
         />
         <ChoiceCard
           icon={<Activity className="w-6 h-6" />}
-          title="Atrial fibrillation"
-          description="Irregular heartbeat"
+          title={t('intake.a3.afTitle')}
+          description={t('intake.a3.afDesc')}
           selected={has('hasAFib')}
           onClick={() => set('hasAFib', !state.hasAFib)}
-          audioText="Atrial fibrillation. Irregular heartbeat."
+          audioText={t('intake.a3.afAudio')}
         />
         <ChoiceCard
           icon={<Stethoscope className="w-6 h-6" />}
-          title="Coronary artery disease"
-          description="Blocked or narrow heart arteries"
+          title={t('intake.a3.cadTitle')}
+          description={t('intake.a3.cadDesc')}
           selected={has('hasCAD')}
           onClick={() => set('hasCAD', !state.hasCAD)}
-          audioText="Coronary artery disease. Blocked or narrow heart arteries."
+          audioText={t('intake.a3.cadAudio')}
         />
         <ChoiceCard
           icon={<Sparkles className="w-6 h-6" />}
-          title="Hypertrophic cardiomyopathy"
-          description="HCM — thick heart muscle"
+          title={t('intake.a3.hcmTitle')}
+          description={t('intake.a3.hcmDesc')}
           selected={has('hasHCM')}
           onClick={() => set('hasHCM', !state.hasHCM)}
-          audioText="Hypertrophic cardiomyopathy. Thick heart muscle."
+          audioText={t('intake.a3.hcmAudio')}
         />
         <ChoiceCard
           icon={<Sparkles className="w-6 h-6" />}
-          title="Dilated cardiomyopathy"
-          description="DCM — enlarged heart"
+          title={t('intake.a3.dcmTitle')}
+          description={t('intake.a3.dcmDesc')}
           selected={has('hasDCM')}
           onClick={() => set('hasDCM', !state.hasDCM)}
-          audioText="Dilated cardiomyopathy. Enlarged heart."
+          audioText={t('intake.a3.dcmAudio')}
         />
         <ChoiceCard
           icon={<X className="w-6 h-6" />}
-          title="None of these"
-          description="No heart conditions"
+          title={t('intake.a3.noneTitle')}
+          description={t('intake.a3.noneDesc')}
           selected={noneSelected}
           destructiveSelected={false}
           onClick={() => setState((p) => ({
@@ -429,16 +435,16 @@ function A3Conditions({ state, setState }: StepProps) {
             hasDCM: false,
             heartFailureType: undefined,
           }))}
-          audioText="None of these. No heart conditions."
+          audioText={t('intake.a3.noneAudio')}
         />
       </div>
 
       <ChoiceCard
         icon={<Shield className="w-5 h-5" />}
-        title="My doctor diagnosed high blood pressure"
+        title={t('intake.a3.htnLabel')}
         selected={state.diagnosedHypertension === true}
         onClick={() => setState((p) => ({ ...p, diagnosedHypertension: !p.diagnosedHypertension }))}
-        audioText="My doctor diagnosed high blood pressure"
+        audioText={t('intake.a3.htnLabel')}
         compact
       />
     </div>
@@ -446,37 +452,38 @@ function A3Conditions({ state, setState }: StepProps) {
 }
 
 function A4HFType({ state, setState }: StepProps) {
+  const { t } = useLanguage();
   return (
     <div className="space-y-6">
       <StepHeader
-        title="Type of heart failure"
-        subtitle="Your doctor may have used one of these terms."
-        audio="Type of heart failure. Your doctor may have used one of these terms."
+        title={t('intake.a4.title')}
+        subtitle={t('intake.a4.subtitle')}
+        audio={t('intake.a4.audio')}
       />
       <div className="grid grid-cols-1 gap-3">
         <ChoiceCard
           icon={<Heart className="w-6 h-6" />}
-          title="HFrEF"
-          description="Reduced ejection fraction — sometimes called 'weak heart'"
+          title={t('intake.a4.hfrefTitle')}
+          description={t('intake.a4.hfrefDesc')}
           selected={state.heartFailureType === 'HFREF'}
           onClick={() => setState((p) => ({ ...p, heartFailureType: 'HFREF' }))}
-          audioText="HFrEF. Reduced ejection fraction. Sometimes called weak heart."
+          audioText={t('intake.a4.hfrefAudio')}
         />
         <ChoiceCard
           icon={<Heart className="w-6 h-6" />}
-          title="HFpEF"
-          description="Preserved ejection fraction — heart is stiff but still pumps"
+          title={t('intake.a4.hfpefTitle')}
+          description={t('intake.a4.hfpefDesc')}
           selected={state.heartFailureType === 'HFPEF'}
           onClick={() => setState((p) => ({ ...p, heartFailureType: 'HFPEF' }))}
-          audioText="HFpEF. Preserved ejection fraction. Heart is stiff but still pumps."
+          audioText={t('intake.a4.hfpefAudio')}
         />
         <ChoiceCard
           icon={<Asterisk className="w-6 h-6" />}
-          title="Not sure"
-          description="Your care team will check during your next visit"
+          title={t('intake.a4.unknownTitle')}
+          description={t('intake.a4.unknownDesc')}
           selected={state.heartFailureType === 'UNKNOWN' || state.heartFailureType === undefined}
           onClick={() => setState((p) => ({ ...p, heartFailureType: 'UNKNOWN' }))}
-          audioText="Not sure. Your care team will check during your next visit."
+          audioText={t('intake.a4.unknownAudio')}
         />
       </div>
     </div>
@@ -494,6 +501,8 @@ function MedicationGroup({
   selectedIds: Set<string>;
   toggle: (medId: string) => void;
 }) {
+  const { t } = useLanguage();
+  const alsoKnown = t('intake.a5.audioAlsoKnown');
   return (
     <div>
       <h3 className="text-[13px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--brand-text-muted)' }}>
@@ -510,7 +519,7 @@ function MedicationGroup({
             isNdhpCcb={m.isNdhpCcb}
             selected={selectedIds.has(m.id)}
             onToggle={() => toggle(m.id)}
-            audioText={`${m.brandName}, also known as ${m.genericName}. ${m.purpose}`}
+            audioText={`${m.brandName}, ${alsoKnown} ${m.genericName}. ${m.purpose}`}
           />
         ))}
       </div>
@@ -545,34 +554,35 @@ function A5CoreMeds({ state, setState }: StepProps) {
     });
   };
 
+  const { t } = useLanguage();
   return (
     <div className="space-y-7">
       <StepHeader
-        title="Your medications"
-        subtitle="Tap each pill you take. Don't worry about dose — just whether you take it."
-        audio="Your medications. Tap each pill you take. Do not worry about dose, just whether you take it."
+        title={t('intake.a5.title')}
+        subtitle={t('intake.a5.subtitle')}
+        audio={t('intake.a5.audio')}
       />
 
       <MedicationGroup
-        title="Blood pressure pills (ACE inhibitors)"
+        title={t('intake.a5.groupAce')}
         meds={CORE_MEDS.filter((m) => m.drugClass === 'ACE_INHIBITOR')}
         selectedIds={selectedIds}
         toggle={toggle}
       />
       <MedicationGroup
-        title="Blood pressure pills (ARBs)"
+        title={t('intake.a5.groupArb')}
         meds={CORE_MEDS.filter((m) => m.drugClass === 'ARB')}
         selectedIds={selectedIds}
         toggle={toggle}
       />
       <MedicationGroup
-        title="Beta-blockers"
+        title={t('intake.a5.groupBeta')}
         meds={CORE_MEDS.filter((m) => m.drugClass === 'BETA_BLOCKER')}
         selectedIds={selectedIds}
         toggle={toggle}
       />
       <MedicationGroup
-        title="Calcium channel blockers"
+        title={t('intake.a5.groupCcb')}
         meds={CORE_MEDS.filter((m) => m.drugClass === 'DHP_CCB' || m.drugClass === 'NDHP_CCB')}
         selectedIds={selectedIds}
         toggle={toggle}
@@ -610,12 +620,15 @@ function A6Combos({ state, setState }: StepProps) {
     });
   };
 
+  const { t } = useLanguage();
+  const contains = t('intake.a6.audioContains');
+  const andWord = t('intake.a6.audioAnd');
   return (
     <div className="space-y-6">
       <StepHeader
-        title="Combination pills"
-        subtitle="One pill containing two medicines. Tap any you take."
-        audio="Combination pills. One pill containing two medicines. Tap any you take."
+        title={t('intake.a6.title')}
+        subtitle={t('intake.a6.subtitle')}
+        audio={t('intake.a6.audio')}
       />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3">
         {COMBO_MEDS.map((c) => (
@@ -628,7 +641,7 @@ function A6Combos({ state, setState }: StepProps) {
             isCombination
             selected={selectedIds.has(c.id)}
             onToggle={() => toggle(c.id)}
-            audioText={`${c.brandName}. Contains ${c.components.map((x) => x.name).join(' and ')}. ${c.purpose}`}
+            audioText={`${c.brandName}. ${contains} ${c.components.map((x) => x.name).join(` ${andWord} `)}. ${c.purpose}`}
           />
         ))}
       </div>
@@ -637,6 +650,7 @@ function A6Combos({ state, setState }: StepProps) {
 }
 
 function A8Categories({ state, setState }: StepProps) {
+  const { t } = useLanguage();
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [otherText, setOtherText] = useState(state.otherDraft?.text ?? '');
   const [photoNote, setPhotoNote] = useState(state.otherDraft?.photoNote ?? '');
@@ -691,20 +705,21 @@ function A8Categories({ state, setState }: StepProps) {
   const otherCount = state.selectedMedications.filter((m) => m.drugClass === 'OTHER_UNVERIFIED').length;
 
   const categories: { key: string; label: string; icon: React.ReactNode; audio: string }[] = [
-    { key: 'WATER_PILL', label: 'Water pill', icon: <Droplet className="w-6 h-6" />, audio: 'Water pill' },
-    { key: 'BLOOD_THINNER', label: 'Blood thinner', icon: <Pill className="w-6 h-6" />, audio: 'Blood thinner' },
-    { key: 'CHOLESTEROL', label: 'Cholesterol medicine', icon: <Pill className="w-6 h-6" />, audio: 'Cholesterol medicine' },
-    { key: 'HEART_RHYTHM', label: 'Heart rhythm medicine', icon: <Activity className="w-6 h-6" />, audio: 'Heart rhythm medicine' },
-    { key: 'SGLT2', label: 'Diabetes medicine that helps the heart', icon: <Heart className="w-6 h-6" />, audio: 'Diabetes medicine that also helps the heart' },
-    { key: 'OTHER', label: 'Other medicine not listed', icon: <Sparkles className="w-6 h-6" />, audio: 'Other medicine not listed' },
+    { key: 'WATER_PILL', label: t('intake.a8.categoryWaterPill'), icon: <Droplet className="w-6 h-6" />, audio: t('intake.a8.categoryWaterPill') },
+    { key: 'BLOOD_THINNER', label: t('intake.a8.categoryBloodThinner'), icon: <Pill className="w-6 h-6" />, audio: t('intake.a8.categoryBloodThinner') },
+    { key: 'CHOLESTEROL', label: t('intake.a8.categoryCholesterol'), icon: <Pill className="w-6 h-6" />, audio: t('intake.a8.categoryCholesterol') },
+    { key: 'HEART_RHYTHM', label: t('intake.a8.categoryHeartRhythm'), icon: <Activity className="w-6 h-6" />, audio: t('intake.a8.categoryHeartRhythm') },
+    { key: 'SGLT2', label: t('intake.a8.categorySGLT2'), icon: <Heart className="w-6 h-6" />, audio: t('intake.a8.audioSGLT2') },
+    { key: 'OTHER', label: t('intake.a8.categoryOther'), icon: <Sparkles className="w-6 h-6" />, audio: t('intake.a8.categoryOther') },
   ];
+  const alsoKnown = t('intake.a5.audioAlsoKnown');
 
   return (
     <div className="space-y-6">
       <StepHeader
-        title="Anything else?"
-        subtitle="Tap a category if you take something not listed before."
-        audio="Anything else? Tap a category if you take something not listed before."
+        title={t('intake.a8.title')}
+        subtitle={t('intake.a8.subtitle')}
+        audio={t('intake.a8.audio')}
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -739,7 +754,7 @@ function A8Categories({ state, setState }: StepProps) {
                 drugClass={m.drugClass}
                 selected={selectedIds.has(m.id)}
                 onToggle={() => toggleCategoryMed(m.id)}
-                audioText={`${m.brandName}, also known as ${m.genericName}. ${m.purpose}`}
+                audioText={`${m.brandName}, ${alsoKnown} ${m.genericName}. ${m.purpose}`}
               />
             ))}
           </motion.div>
@@ -755,7 +770,7 @@ function A8Categories({ state, setState }: StepProps) {
           >
             <div className="rounded-2xl p-4" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
               <p className="text-[12px] mb-3" style={{ color: 'var(--brand-text-secondary)' }}>
-                Tell us the name of the medicine. Speak it (your phone will type it for you) or take a photo of the label.
+                {t('intake.a8.otherBlurb')}
               </p>
 
               <div className="flex items-start gap-3 mb-4">
@@ -767,13 +782,13 @@ function A8Categories({ state, setState }: StepProps) {
                 </div>
                 <div className="flex-1">
                   <label className="block text-[12px] font-semibold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-                    Speak the medicine name
+                    {t('intake.a8.otherSpeakLabel')}
                   </label>
                   <input
                     type="text"
                     value={otherText}
                     onChange={(e) => setOtherText(e.target.value)}
-                    placeholder="e.g. Hydralazine"
+                    placeholder={t('intake.a8.otherSpeakPlaceholder')}
                     className="w-full h-11 px-4 rounded-lg text-[14px] outline-none transition box-border bg-white"
                     style={{ border: '2px solid var(--brand-border)', color: 'var(--brand-text-primary)' }}
                   />
@@ -784,7 +799,7 @@ function A8Categories({ state, setState }: StepProps) {
                     className="mt-2 px-4 py-1.5 rounded-full text-white text-[12px] font-bold disabled:opacity-50 cursor-pointer"
                     style={{ backgroundColor: 'var(--brand-primary-purple)' }}
                   >
-                    Add
+                    {t('intake.a8.otherAdd')}
                   </button>
                 </div>
               </div>
@@ -798,13 +813,13 @@ function A8Categories({ state, setState }: StepProps) {
                 </div>
                 <div className="flex-1">
                   <label className="block text-[12px] font-semibold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-                    Or describe what the bottle says
+                    {t('intake.a8.otherPhotoLabel')}
                   </label>
                   <input
                     type="text"
                     value={photoNote}
                     onChange={(e) => setPhotoNote(e.target.value)}
-                    placeholder="What is printed on the label?"
+                    placeholder={t('intake.a8.otherPhotoPlaceholder')}
                     className="w-full h-11 px-4 rounded-lg text-[14px] outline-none transition box-border bg-white"
                     style={{ border: '2px solid var(--brand-border)', color: 'var(--brand-text-primary)' }}
                   />
@@ -815,7 +830,7 @@ function A8Categories({ state, setState }: StepProps) {
                     className="mt-2 px-4 py-1.5 rounded-full text-white text-[12px] font-bold disabled:opacity-50 cursor-pointer"
                     style={{ backgroundColor: 'var(--brand-accent-teal)' }}
                   >
-                    Add
+                    {t('intake.a8.otherAdd')}
                   </button>
                 </div>
               </div>
@@ -823,7 +838,7 @@ function A8Categories({ state, setState }: StepProps) {
 
             {otherCount > 0 && (
               <p className="text-[12px] text-center" style={{ color: 'var(--brand-text-muted)' }}>
-                {otherCount} other medicine{otherCount === 1 ? '' : 's'} added — your care team will confirm the details.
+                {(otherCount === 1 ? t('intake.a8.otherCountSingle') : t('intake.a8.otherCountPlural')).replace('{n}', String(otherCount))}
               </p>
             )}
           </motion.div>
@@ -836,7 +851,7 @@ function A8Categories({ state, setState }: StepProps) {
       >
         <Shield className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />
         <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
-          You can skip this if nothing applies. Your care team will check what you take when they review your profile.
+          {t('intake.a8.skipHint')}
         </p>
       </div>
     </div>
@@ -844,18 +859,19 @@ function A8Categories({ state, setState }: StepProps) {
 }
 
 function A9Frequency({ state, setState }: StepProps) {
+  const { t } = useLanguage();
   if (state.selectedMedications.length === 0) {
     return (
       <div className="space-y-6">
         <StepHeader
-          title="How often?"
-          subtitle="No medicines added yet — you can skip ahead."
-          audio="No medicines added yet. You can skip ahead."
+          title={t('intake.a9.emptyTitle')}
+          subtitle={t('intake.a9.emptySubtitle')}
+          audio={t('intake.a9.emptyAudio')}
         />
         <div className="rounded-2xl p-6 text-center" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
           <Pill className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--brand-primary-purple)' }} />
           <p className="text-[14px]" style={{ color: 'var(--brand-text-secondary)' }}>
-            You haven&apos;t added any medications. Tap Back if you missed any, or Continue to review.
+            {t('intake.a9.emptyBody')}
           </p>
         </div>
       </div>
@@ -871,18 +887,18 @@ function A9Frequency({ state, setState }: StepProps) {
   };
 
   const options: { value: MedicationFrequencyInput; label: string }[] = [
-    { value: 'ONCE_DAILY', label: 'Once' },
-    { value: 'TWICE_DAILY', label: 'Twice' },
-    { value: 'THREE_TIMES_DAILY', label: 'Three' },
-    { value: 'UNSURE', label: 'Not sure' },
+    { value: 'ONCE_DAILY', label: t('intake.a9.freqOnce') },
+    { value: 'TWICE_DAILY', label: t('intake.a9.freqTwice') },
+    { value: 'THREE_TIMES_DAILY', label: t('intake.a9.freqThree') },
+    { value: 'UNSURE', label: t('intake.a9.freqUnsure') },
   ];
 
   return (
     <div className="space-y-5">
       <StepHeader
-        title="How often each day?"
-        subtitle="Just the count — your care team will fill in the dose."
-        audio="How often do you take each one each day? Just the count — your care team will fill in the dose."
+        title={t('intake.a9.title')}
+        subtitle={t('intake.a9.subtitle')}
+        audio={t('intake.a9.audio')}
       />
 
       <div className="space-y-3">
@@ -897,11 +913,11 @@ function A9Frequency({ state, setState }: StepProps) {
                 <p className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>{m.drugName}</p>
                 {m.isCombination && (
                   <span className="text-[10px] font-bold" style={{ color: 'var(--brand-accent-teal)' }}>
-                    2-IN-1
+                    {t('intake.medCard.combo').toUpperCase()}
                   </span>
                 )}
               </div>
-              <AudioButton text={`How many times a day do you take ${m.drugName}?`} size="sm" />
+              <AudioButton text={t('intake.a9.medAudio').replace('{name}', m.drugName)} size="sm" />
             </div>
             <div className="grid grid-cols-4 gap-2">
               {options.map((o) => {
@@ -932,19 +948,41 @@ function A9Frequency({ state, setState }: StepProps) {
 }
 
 function A10Review({ state, goTo }: StepProps) {
+  const { t } = useLanguage();
+
+  const genderLabel = (g?: string) => {
+    if (g === 'MALE') return t('intake.a10.genderMale');
+    if (g === 'FEMALE') return t('intake.a10.genderFemale');
+    if (g === 'OTHER') return t('intake.a10.genderOther');
+    return '—';
+  };
+
   const conditionList: string[] = [];
-  if (state.hasHeartFailure) conditionList.push(`Heart failure${state.heartFailureType && state.heartFailureType !== 'NOT_APPLICABLE' && state.heartFailureType !== 'UNKNOWN' ? ` (${state.heartFailureType})` : ''}`);
-  if (state.hasAFib) conditionList.push('Atrial fibrillation');
-  if (state.hasCAD) conditionList.push('Coronary artery disease');
-  if (state.hasHCM) conditionList.push('HCM');
-  if (state.hasDCM) conditionList.push('DCM');
+  if (state.hasHeartFailure) {
+    const hasTypedHF = state.heartFailureType && state.heartFailureType !== 'NOT_APPLICABLE' && state.heartFailureType !== 'UNKNOWN';
+    conditionList.push(hasTypedHF
+      ? t('intake.a10.conditionHfWithType').replace('{type}', state.heartFailureType as string)
+      : t('intake.a10.conditionHf'));
+  }
+  if (state.hasAFib) conditionList.push(t('intake.a10.conditionAf'));
+  if (state.hasCAD) conditionList.push(t('intake.a10.conditionCad'));
+  if (state.hasHCM) conditionList.push(t('intake.a10.conditionHcm'));
+  if (state.hasDCM) conditionList.push(t('intake.a10.conditionDcm'));
+
+  const pregnancyValue = state.isPregnant === true
+    ? (state.pregnancyDueDate
+        ? t('intake.a10.pregnancyYesDate').replace('{date}', state.pregnancyDueDate)
+        : t('intake.a10.pregnancyYes'))
+    : state.isPregnant === false
+      ? t('intake.a10.pregnancyNo')
+      : t('intake.a10.pregnancyNotSpec');
 
   return (
     <div className="space-y-5">
       <StepHeader
-        title="Quick review"
-        subtitle="Make sure this looks right. Tap Edit to change anything."
-        audio="Quick review. Make sure this looks right. Tap Edit to change anything."
+        title={t('intake.a10.title')}
+        subtitle={t('intake.a10.subtitle')}
+        audio={t('intake.a10.audio')}
       />
 
       <div
@@ -953,45 +991,39 @@ function A10Review({ state, goTo }: StepProps) {
       >
         <Shield className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-warning-amber)' }} />
         <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
-          Your care team will review everything within 48 to 72 hours and confirm or correct it with you.
+          {t('intake.a10.reviewBanner')}
         </p>
       </div>
 
-      <ReviewSection title="About you" onEdit={() => goTo?.('A1')}>
-        <ReviewRow label="Gender" value={state.gender ? sentenceCase(state.gender) : '—'} />
-        <ReviewRow label="Height" value={state.heightCm ? `${state.heightCm} cm` : '—'} />
+      <ReviewSection title={t('intake.a10.sectionAbout')} onEdit={() => goTo?.('A1')}>
+        <ReviewRow label={t('intake.a10.rowGender')} value={genderLabel(state.gender)} />
+        <ReviewRow label={t('intake.a10.rowHeight')} value={state.heightCm ? `${state.heightCm} cm` : '—'} />
         {state.gender === 'FEMALE' && (
           <ReviewRow
-            label="Pregnancy"
-            value={
-              state.isPregnant === true
-                ? `Yes${state.pregnancyDueDate ? ` · due ${state.pregnancyDueDate}` : ''}`
-                : state.isPregnant === false
-                  ? 'No'
-                  : 'Not specified'
-            }
+            label={t('intake.a10.rowPregnancy')}
+            value={pregnancyValue}
           />
         )}
       </ReviewSection>
 
-      <ReviewSection title="Conditions" onEdit={() => goTo?.('A3')}>
+      <ReviewSection title={t('intake.a10.sectionConditions')} onEdit={() => goTo?.('A3')}>
         {conditionList.length === 0 ? (
-          <ReviewRow label="" value="None reported" />
+          <ReviewRow label="" value={t('intake.a10.noneReported')} />
         ) : (
           conditionList.map((c) => <ReviewRow key={c} label="" value={c} />)
         )}
-        {state.diagnosedHypertension && <ReviewRow label="" value="Diagnosed high blood pressure" />}
+        {state.diagnosedHypertension && <ReviewRow label="" value={t('intake.a10.htnReported')} />}
       </ReviewSection>
 
-      <ReviewSection title="Medications" onEdit={() => goTo?.('A5')}>
+      <ReviewSection title={t('intake.a10.sectionMedications')} onEdit={() => goTo?.('A5')}>
         {state.selectedMedications.length === 0 ? (
-          <ReviewRow label="" value="None reported" />
+          <ReviewRow label="" value={t('intake.a10.noneReported')} />
         ) : (
           state.selectedMedications.map((m, i) => (
             <ReviewRow
               key={`${m.catalogId ?? 'other'}-${i}`}
-              label={m.drugName + (m.isCombination ? ' (2-in-1)' : '')}
-              value={frequencyLabel(m.frequency)}
+              label={m.drugName + (m.isCombination ? ` ${t('intake.a10.comboBadge')}` : '')}
+              value={frequencyLabel(m.frequency, t)}
             />
           ))
         )}
@@ -1001,6 +1033,7 @@ function A10Review({ state, goTo }: StepProps) {
 }
 
 function A11Complete({ onDone }: { onDone: () => void }) {
+  const { t } = useLanguage();
   return (
     <div className="flex flex-col items-center text-center px-4 py-10">
       <motion.div
@@ -1013,10 +1046,10 @@ function A11Complete({ onDone }: { onDone: () => void }) {
         <Check className="w-14 h-14" style={{ color: 'var(--brand-success-green)' }} strokeWidth={3} />
       </motion.div>
       <h2 className="text-[28px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-        Thank you — we got it
+        {t('intake.a11.title')}
       </h2>
       <p className="text-[15px] max-w-md mb-8 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
-        Your care team will review your profile within 48 to 72 hours. You can use the app normally in the meantime — we&apos;ll let you know when review is complete.
+        {t('intake.a11.body')}
       </p>
       <motion.button
         type="button"
@@ -1026,7 +1059,7 @@ function A11Complete({ onDone }: { onDone: () => void }) {
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.97 }}
       >
-        Go to dashboard
+        {t('intake.a11.cta')}
       </motion.button>
     </div>
   );
@@ -1105,13 +1138,15 @@ function sentenceCase(v: string) {
   return v.charAt(0) + v.slice(1).toLowerCase();
 }
 
-function frequencyLabel(f?: MedicationFrequencyInput): string {
+type TranslateFn = (key: Parameters<ReturnType<typeof useLanguage>['t']>[0]) => string;
+
+function frequencyLabel(f: MedicationFrequencyInput | undefined, t: TranslateFn): string {
   switch (f) {
-    case 'ONCE_DAILY': return 'Once a day';
-    case 'TWICE_DAILY': return 'Twice a day';
-    case 'THREE_TIMES_DAILY': return '3 times a day';
-    case 'UNSURE': return 'Not sure';
-    default: return 'Set frequency';
+    case 'ONCE_DAILY': return t('intake.freq.once');
+    case 'TWICE_DAILY': return t('intake.freq.twice');
+    case 'THREE_TIMES_DAILY': return t('intake.freq.three');
+    case 'UNSURE': return t('intake.freq.unsure');
+    default: return t('intake.freq.unset');
   }
 }
 
@@ -1128,8 +1163,10 @@ function DedupModal({
   onResolve: (mode: 'KEEP_BOTH' | 'KEEP_COMBO' | 'KEEP_SINGLE', conflict: DedupConflict) => void;
   onCancel: () => void;
 }) {
+  const { t } = useLanguage();
   const conflict = conflicts[0];
   if (!conflict) return null;
+  const componentSentenceCased = sentenceCase(conflict.componentName);
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -1147,10 +1184,13 @@ function DedupModal({
         style={{ boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}
       >
         <h3 className="text-[18px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          Are these the same pill?
+          {t('intake.a7.title')}
         </h3>
         <p className="text-[13px] mb-5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
-          You picked <b>{sentenceCase(conflict.componentName)}</b> and also <b>{conflict.comboBrand}</b> — which contains {conflict.componentName}.
+          {t('intake.a7.body')
+            .replace('{component}', componentSentenceCased)
+            .replace('{combo}', conflict.comboBrand)
+            .replace('{componentLower}', conflict.componentName)}
         </p>
         <div className="space-y-2.5">
           <button
@@ -1159,7 +1199,7 @@ function DedupModal({
             className="w-full h-11 rounded-xl text-[13.5px] font-bold cursor-pointer"
             style={{ backgroundColor: 'var(--brand-primary-purple)', color: 'white' }}
           >
-            They&apos;re the same — keep {conflict.comboBrand} only
+            {t('intake.a7.keepCombo').replace('{combo}', conflict.comboBrand)}
           </button>
           <button
             type="button"
@@ -1167,7 +1207,7 @@ function DedupModal({
             className="w-full h-11 rounded-xl text-[13.5px] font-bold cursor-pointer"
             style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
           >
-            They&apos;re the same — keep {sentenceCase(conflict.componentName)} only
+            {t('intake.a7.keepSingle').replace('{component}', componentSentenceCased)}
           </button>
           <button
             type="button"
@@ -1175,7 +1215,7 @@ function DedupModal({
             className="w-full h-11 rounded-xl text-[13.5px] font-bold cursor-pointer"
             style={{ backgroundColor: 'white', color: 'var(--brand-text-secondary)', border: '1.5px solid var(--brand-border)' }}
           >
-            I take both
+            {t('intake.a7.keepBoth')}
           </button>
         </div>
         <button
@@ -1184,14 +1224,30 @@ function DedupModal({
           className="w-full mt-3 text-[12px] font-semibold cursor-pointer"
           style={{ color: 'var(--brand-text-muted)' }}
         >
-          Go back and re-check
+          {t('intake.a7.goBack')}
         </button>
       </motion.div>
     </motion.div>
   );
 }
 
-function ExitSaveModal({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+function ExitSaveModal({
+  editMode,
+  saving,
+  error,
+  onConfirm,
+  onCancel,
+}: {
+  editMode: boolean;
+  saving: boolean;
+  error: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useLanguage();
+  const title = editMode ? t('intake.exitSave.editTitle') : t('intake.exitSave.title');
+  const body = editMode ? t('intake.exitSave.editBody') : t('intake.exitSave.body');
+  const cta = editMode ? t('intake.exitSave.editCta') : t('intake.exitSave.cta');
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -1215,26 +1271,39 @@ function ExitSaveModal({ onConfirm, onCancel }: { onConfirm: () => void; onCance
           <Save className="w-7 h-7" style={{ color: 'var(--brand-primary-purple)' }} />
         </div>
         <h3 className="text-[18px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          We saved your progress
+          {title}
         </h3>
-        <p className="text-[13px] mb-6 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
-          You can continue anytime from your dashboard.
+        <p className="text-[13px] mb-4 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+          {body}
         </p>
+        {error && (
+          <p
+            className="text-[12px] mb-4 px-3 py-2 rounded-lg"
+            style={{
+              color: 'var(--brand-alert-red)',
+              backgroundColor: 'var(--brand-alert-red-light)',
+            }}
+          >
+            {error}
+          </p>
+        )}
         <button
           type="button"
           onClick={onConfirm}
-          className="w-full h-11 rounded-full text-white font-bold text-[14px] cursor-pointer"
+          disabled={saving}
+          className="w-full h-11 rounded-full text-white font-bold text-[14px] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
         >
-          Back to dashboard
+          {saving ? t('intake.exitSave.saving') : cta}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="w-full mt-2 text-[12px] font-semibold cursor-pointer"
+          disabled={saving}
+          className="w-full mt-2 text-[12px] font-semibold cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           style={{ color: 'var(--brand-text-muted)' }}
         >
-          Keep going
+          {t('intake.exitSave.keepGoing')}
         </button>
       </motion.div>
     </motion.div>
@@ -1269,6 +1338,7 @@ function ClinicalIntakeWizard() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, isLoading } = useAuth();
+  const { t } = useLanguage();
 
   const [state, setStateRaw] = useState<IntakeFormState>(EMPTY_INTAKE_STATE);
   const [step, setStep] = useState<IntakeStepKey>('A0b');
@@ -1283,6 +1353,17 @@ function ClinicalIntakeWizard() {
   // and the patient must edit via the /profile page (which sends them back
   // here with ?step=AX). With ?step= we go straight into edit mode.
   const [profileExists, setProfileExists] = useState(false);
+  // True when hydration seeded from an existing PatientProfile via ?step=
+  // deep-link. In this mode the Save-and-exit flow upserts the profile to
+  // the backend instead of only writing a local draft (which is ignored on
+  // re-entry because Branch 2 reseeds from the server).
+  const [editMode, setEditMode] = useState(false);
+  const [exitSaving, setExitSaving] = useState(false);
+  const [exitError, setExitError] = useState('');
+  // True when hydration found a VERIFIED profile — render the re-verify
+  // banner above the step content so the patient knows edits will reset
+  // their verified status until the care team confirms.
+  const [showReverifyBanner, setShowReverifyBanner] = useState(false);
 
   // Hydrate state. Three branches:
   //   1. No profile saved yet → fresh wizard (or resume localStorage draft)
@@ -1356,6 +1437,10 @@ function ClinicalIntakeWizard() {
           };
           setStateRaw(seeded);
           setStep(requestedStep);
+          setEditMode(true);
+          if (profile.profileVerificationStatus === 'VERIFIED') {
+            setShowReverifyBanner(true);
+          }
           setBootstrapping(false);
           return;
         }
@@ -1430,20 +1515,20 @@ function ClinicalIntakeWizard() {
   const goNext = async () => {
     // Validation gates.
     if (step === 'A1') {
-      if (!state.gender) { setSubmitError('Please select a gender.'); return; }
+      if (!state.gender) { setSubmitError(t('intake.nav.errorGender')); return; }
       if (!state.heightCm || state.heightCm < 100 || state.heightCm > 250) {
-        setSubmitError('Please enter a height between 100 and 250 cm.');
+        setSubmitError(t('intake.nav.errorHeight'));
         return;
       }
     }
     if (step === 'A4' && !state.heartFailureType) {
-      setSubmitError('Please pick one — Not sure is OK.');
+      setSubmitError(t('intake.nav.errorHfType'));
       return;
     }
     if (step === 'A9') {
       const missingFreq = state.selectedMedications.find((m) => !m.frequency);
       if (missingFreq) {
-        setSubmitError(`Pick how often you take ${missingFreq.drugName}.`);
+        setSubmitError(t('intake.nav.errorFreq').replace('{name}', missingFreq.drugName));
         return;
       }
     }
@@ -1505,9 +1590,39 @@ function ClinicalIntakeWizard() {
       setStep('A11');
       if (user?.id) clearDraft(user.id);
     } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : 'Something went wrong submitting your profile.');
+      setSubmitError(e instanceof Error ? e.message : t('intake.nav.errorSubmit'));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Exit-and-save from the top-bar Save button. In edit mode this upserts the
+  // profile AND replaces the medication list via PUT /me/medications, then
+  // clears the local draft before navigating. In fresh-intake mode the draft
+  // is already persisted to localStorage on every setState, so we just
+  // navigate.
+  const handleExitSave = async () => {
+    if (exitSaving) return;
+    setExitError('');
+    if (!editMode) {
+      // Fresh intake: the draft was already persisted to localStorage on every
+      // setState (see saveDraft wrapper above). Keep it so the patient can
+      // resume from the dashboard's Action Required card.
+      router.push('/dashboard');
+      return;
+    }
+    setExitSaving(true);
+    try {
+      await Promise.all([
+        saveIntakeProfile(buildProfilePayload(state)),
+        replaceIntakeMedications(buildMedsPayload(state)),
+      ]);
+      // Edit mode: the profile is now the source of truth — no resume needed.
+      if (user?.id) clearDraft(user.id);
+      router.push('/dashboard');
+    } catch (e) {
+      setExitError(e instanceof Error ? e.message : t('intake.exitSave.errorFallback'));
+      setExitSaving(false);
     }
   };
 
@@ -1541,9 +1656,9 @@ function ClinicalIntakeWizard() {
         <div className="rounded-full flex items-center justify-center mb-5" style={{ width: 80, height: 80, backgroundColor: 'var(--brand-success-green-light)' }}>
           <Check className="w-10 h-10" style={{ color: 'var(--brand-success-green)' }} strokeWidth={3} />
         </div>
-        <h1 className="text-[22px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>You&apos;re all set</h1>
+        <h1 className="text-[22px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('intake.profileExists.title')}</h1>
         <p className="text-[14px] mb-6 max-w-sm" style={{ color: 'var(--brand-text-secondary)' }}>
-          Your health profile is on file. To make changes, head to your profile page.
+          {t('intake.profileExists.body')}
         </p>
         <button
           type="button"
@@ -1551,7 +1666,7 @@ function ClinicalIntakeWizard() {
           className="h-11 px-6 rounded-full text-white font-bold text-[14px] cursor-pointer"
           style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
         >
-          Go to dashboard
+          {t('intake.profileExists.cta')}
         </button>
       </div>
     );
@@ -1587,7 +1702,7 @@ function ClinicalIntakeWizard() {
               style={{ color: 'var(--brand-text-secondary)' }}
             >
               <ArrowLeft className="w-4 h-4" />
-              Back
+              {t('intake.nav.back')}
             </button>
             <StepDots current={visibleIndex} total={visibleTotal} />
             <button
@@ -1595,13 +1710,41 @@ function ClinicalIntakeWizard() {
               onClick={() => setShowExitSave(true)}
               className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[13px] font-semibold cursor-pointer"
               style={{ color: 'var(--brand-text-muted)' }}
-              aria-label="Save and exit"
+              aria-label={t('intake.nav.saveAria')}
             >
               <Save className="w-4 h-4" />
-              <span className="hidden sm:inline">Save</span>
+              <span className="hidden sm:inline">{t('intake.nav.save')}</span>
             </button>
           </div>
         </header>
+      )}
+
+      {/* Re-verify banner — rendered above the first step content whenever a
+          VERIFIED patient enters edit mode, regardless of the ?step= anchor.
+          Tells the patient that saving will reset their verified status
+          until the care team reconfirms. */}
+      {showNav && showReverifyBanner && (
+        <div
+          className="w-full"
+          style={{
+            backgroundColor: 'var(--brand-warning-amber-light)',
+            borderBottom: '1px solid rgba(245,158,11,0.3)',
+          }}
+        >
+          <div className="max-w-3xl mx-auto px-4 sm:px-6 py-3 flex items-start gap-3">
+            <Shield
+              className="w-4 h-4 shrink-0 mt-0.5"
+              style={{ color: 'var(--brand-warning-amber)' }}
+              aria-hidden
+            />
+            <p
+              className="text-[12.5px] leading-snug"
+              style={{ color: 'var(--brand-text-primary)' }}
+            >
+              {t('intake.edit.reverifyBanner')}
+            </p>
+          </div>
+        </div>
       )}
 
       {/* Main content — A0b/A11 are full-screen-centered (no chrome); other
@@ -1675,7 +1818,7 @@ function ClinicalIntakeWizard() {
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.98 }}
             >
-              {submitting ? 'Saving…' : step === 'A10' ? 'Submit profile' : 'Continue'}
+              {submitting ? t('intake.nav.saving') : step === 'A10' ? t('intake.nav.submit') : t('intake.nav.continue')}
               {!submitting && step !== 'A10' && <ArrowRight className="w-4 h-4" />}
               {!submitting && step === 'A10' && <Check className="w-4 h-4" />}
             </motion.button>
@@ -1693,8 +1836,15 @@ function ClinicalIntakeWizard() {
         )}
         {showExitSave && (
           <ExitSaveModal
-            onConfirm={() => router.push('/dashboard')}
-            onCancel={() => setShowExitSave(false)}
+            editMode={editMode}
+            saving={exitSaving}
+            error={exitError}
+            onConfirm={handleExitSave}
+            onCancel={() => {
+              if (exitSaving) return;
+              setExitError('');
+              setShowExitSave(false);
+            }}
           />
         )}
       </AnimatePresence>
