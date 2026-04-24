@@ -58,8 +58,15 @@ export default function RegisterPage() {
   // Admin app is OTP-only — magic-link mode was removed.
 
   const [mounted, setMounted] = useState(false);
-  const emailIsValid = useMemo(() => isEmailValid(email.trim()), [email]);
+  const emailTrimmed = email.trim();
+  const emailIsValid = useMemo(() => isEmailValid(emailTrimmed), [emailTrimmed]);
+  // Inline-validation hint: only show "invalid email" once the user has
+  // typed something — empty input shouldn't yell at them on first paint.
+  const showEmailError = emailTrimmed.length > 0 && !emailIsValid;
   const canVerifyOtp = otp.length === OTP_LENGTH;
+  // OTP-length hint: shown while the user is mid-typing (1–5 digits) and
+  // hidden as soon as they hit the full 6 — quiet UI when nothing's wrong.
+  const showOtpLengthHint = otp.length > 0 && otp.length < OTP_LENGTH;
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -217,14 +224,23 @@ export default function RegisterPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder={t('register.emailPlaceholder')}
                   autoComplete="email"
-                  className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                  aria-invalid={showEmailError}
+                  className={`w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] rounded-lg text-sm lg:text-base text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all border ${
+                    showEmailError ? 'border-red-400' : 'border-[#e5d9f2]'
+                  }`}
                 />
+                {/* Inline email format error — quiet until user has typed */}
+                {showEmailError && (
+                  <p className="mt-1.5 text-[11px] lg:text-xs text-red-500">
+                    Please enter a valid email address.
+                  </p>
+                )}
 
                 {/* OTP-only flow (admin app) */}
                 <button
                   onClick={handleSendOtp}
                   disabled={!emailIsValid || isRequestingOtp}
-                  className="w-full cursor-pointer h-12 lg:h-14 rounded-lg flex items-center justify-center border border-[#6B00D1] mt-3 mb-7 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full h-12 lg:h-14 rounded-lg flex items-center justify-center border border-[#6B00D1] mt-3 mb-7 transition-opacity enabled:cursor-pointer enabled:hover:bg-[#7B00E0]/5 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <span className="font-semibold text-[#6B00D1] text-base lg:text-medium">{isRequestingOtp ? t('register.sendingOtp') : t('register.sendOtp')}</span>
                 </button>
@@ -250,12 +266,19 @@ export default function RegisterPage() {
                     </div>
                     <input
                       type="text"
+                      inputMode="numeric"
                       value={otp}
                       onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH))}
                       placeholder="••••••"
                       maxLength={OTP_LENGTH}
-                      className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-base lg:text-lg text-center tracking-[8px] text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all mb-3"
+                      className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-base lg:text-lg text-center tracking-[8px] text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all mb-1"
                     />
+                    {/* OTP-length hint: only while user is mid-typing */}
+                    {showOtpLengthHint && (
+                      <p className="text-[11px] lg:text-xs text-[#a16207] mb-2">
+                        Enter all 6 digits ({otp.length}/6)
+                      </p>
+                    )}
                   </>
                 )}
 
@@ -268,7 +291,8 @@ export default function RegisterPage() {
                     {errorMessage || statusMessage}
                   </p>
                 )}
-                {otpSent && !statusMessage && !errorMessage && (
+                {/* "Enter code" prompt — shown when OTP just sent and field empty */}
+                {otpSent && otp.length === 0 && !statusMessage && !errorMessage && (
                   <p className="mt-2 text-[#737373] text-xs lg:text-sm">
                     {t('register.enterCode')}
                   </p>
