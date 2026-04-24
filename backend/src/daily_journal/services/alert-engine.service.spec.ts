@@ -33,6 +33,8 @@ function baseSession(over: Partial<SessionAverage> = {}): SessionAverage {
     },
     suboptimalMeasurement: false,
     sessionId: null,
+    medicationTaken: null,
+    missedMedications: [],
     ...over,
   }
 }

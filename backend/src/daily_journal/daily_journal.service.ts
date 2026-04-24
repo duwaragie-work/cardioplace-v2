@@ -45,6 +45,7 @@ export class DailyJournalService {
           measurementConditions: (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull,
           medicationTaken: dto.medicationTaken ?? null,
           missedDoses: dto.missedDoses ?? null,
+          missedMedications: (dto.missedMedications as unknown as JsonValue) ?? Prisma.JsonNull,
           // V2 structured Level-2 symptom triggers (Flow B). Prefer the
           // explicit booleans, otherSymptoms goes to the same column. The
           // legacy `symptoms` array (v1 clients) is appended so nothing is
@@ -131,6 +132,10 @@ export class DailyJournalService {
           (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull
       if (dto.medicationTaken !== undefined) data.medicationTaken = dto.medicationTaken
       if (dto.missedDoses !== undefined) data.missedDoses = dto.missedDoses
+      if (dto.missedMedications !== undefined) {
+        data.missedMedications =
+          (dto.missedMedications as unknown as JsonValue) ?? Prisma.JsonNull
+      }
 
       // Structured V2 symptom booleans (Flow B). Each is independently
       // patchable so a partial update doesn't blow away the others.

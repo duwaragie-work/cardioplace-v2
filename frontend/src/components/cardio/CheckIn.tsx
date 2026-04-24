@@ -19,6 +19,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  CheckCircle,
   Coffee,
   Cigarette,
   Activity,
@@ -49,6 +50,10 @@ import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { createJournalEntry } from '@/lib/services/journal.service';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
+import {
+  listMyMedications,
+  type PatientMedication,
+} from '@/lib/services/patient-medications.service';
 import AudioButton from '@/components/intake/AudioButton';
 import ChoiceCard from '@/components/intake/ChoiceCard';
 import StepDots from '@/components/intake/StepDots';
@@ -82,6 +87,19 @@ interface FormData {
   weightUnit: 'lbs' | 'kg';
   // Medication
   medicationTaken: 'yes' | 'no' | null;
+  /**
+   * Per-medication miss detail. Each entry is one medication the patient
+   * ticked as missed, with a structured reason + dose count. The array stays
+   * empty until `medicationTaken === 'no'` and the patient interacts with the
+   * per-med checkbox list.
+   */
+  missedMedications: Array<{
+    medicationId: string;
+    drugName: string;
+    drugClass: string;
+    reason: 'FORGOT' | 'SIDE_EFFECTS' | 'RAN_OUT' | 'COST' | 'INTENTIONAL' | 'OTHER' | null;
+    missedDoses: number;
+  }>;
   // B3 structured symptoms
   severeHeadache: boolean;
   visualChanges: boolean;
@@ -135,6 +153,7 @@ function emptyForm(): FormData {
     weight: '',
     weightUnit: 'lbs',
     medicationTaken: null,
+    missedMedications: [],
     severeHeadache: false,
     visualChanges: false,
     alteredMentalStatus: false,
@@ -607,7 +626,59 @@ function StepWeight({ form, setField }: StepProps) {
   );
 }
 
-function StepMedication({ form, setField }: StepProps) {
+interface MedicationStepProps extends StepProps {
+  medications: Array<{ id: string; drugName: string; drugClass: string }>;
+  medsLoading: boolean;
+}
+
+const MISSED_REASONS: Array<{
+  value: 'FORGOT' | 'SIDE_EFFECTS' | 'RAN_OUT' | 'COST' | 'INTENTIONAL' | 'OTHER';
+  label: string;
+}> = [
+  { value: 'FORGOT', label: 'Forgot' },
+  { value: 'SIDE_EFFECTS', label: 'Side effects' },
+  { value: 'RAN_OUT', label: 'Ran out' },
+  { value: 'COST', label: 'Cost' },
+  { value: 'INTENTIONAL', label: 'Chose to skip' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+function StepMedication({ form, setField, medications, medsLoading }: MedicationStepProps) {
+  const toggleMed = (med: { id: string; drugName: string; drugClass: string }) => {
+    const existing = form.missedMedications.find((m) => m.medicationId === med.id);
+    if (existing) {
+      setField(
+        'missedMedications',
+        form.missedMedications.filter((m) => m.medicationId !== med.id),
+      );
+    } else {
+      setField('missedMedications', [
+        ...form.missedMedications,
+        {
+          medicationId: med.id,
+          drugName: med.drugName,
+          drugClass: med.drugClass,
+          reason: null,
+          missedDoses: 1,
+        },
+      ]);
+    }
+  };
+
+  const updateEntry = (
+    medicationId: string,
+    patch: Partial<FormData['missedMedications'][number]>,
+  ) => {
+    setField(
+      'missedMedications',
+      form.missedMedications.map((m) =>
+        m.medicationId === medicationId ? { ...m, ...patch } : m,
+      ),
+    );
+  };
+
+  const showMedList = form.medicationTaken === 'no' && medications.length > 0;
+
   return (
     <div className="space-y-6">
       <StepHeader
@@ -628,7 +699,12 @@ function StepMedication({ form, setField }: StepProps) {
             <motion.button
               key={opt.value}
               type="button"
-              onClick={() => setField('medicationTaken', opt.value)}
+              onClick={() => {
+                setField('medicationTaken', opt.value);
+                // Flipping back to "yes" clears any captured miss detail so
+                // the user doesn't accidentally submit a stale list.
+                if (opt.value === 'yes') setField('missedMedications', []);
+              }}
               className="h-14 rounded-2xl text-sm font-semibold border-2 transition-all flex items-center justify-center gap-2 cursor-pointer"
               style={{
                 backgroundColor: active ? opt.accent : 'white',
@@ -644,6 +720,151 @@ function StepMedication({ form, setField }: StepProps) {
           );
         })}
       </div>
+
+      {form.medicationTaken === 'no' && medsLoading && (
+        <p className="text-[13px] text-center" style={{ color: 'var(--brand-text-muted)' }}>
+          Loading your medications…
+        </p>
+      )}
+
+      {form.medicationTaken === 'no' && !medsLoading && medications.length === 0 && (
+        <div
+          className="rounded-xl p-3 text-[13px] leading-relaxed"
+          style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-text-primary)' }}
+        >
+          We don&apos;t have any medications on file for you yet. You can still submit; add your medications in settings later for better follow-up.
+        </div>
+      )}
+
+      {showMedList && (
+        <div className="space-y-3">
+          <div>
+            <p className="text-[14px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+              Which medication(s) did you miss?
+            </p>
+            <p className="text-[12px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+              Help us understand so your care team can support you.
+            </p>
+          </div>
+
+          {medications.map((med) => {
+            const entry = form.missedMedications.find((m) => m.medicationId === med.id);
+            const selected = !!entry;
+            return (
+              <div
+                key={med.id}
+                className="rounded-xl border-2 transition-all"
+                style={{
+                  borderColor: selected ? 'var(--brand-warning-amber)' : 'var(--brand-border)',
+                  backgroundColor: selected ? 'var(--brand-warning-amber-light)' : 'white',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleMed(med)}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left cursor-pointer"
+                >
+                  <span
+                    className="w-5 h-5 rounded-[5px] border-2 flex items-center justify-center shrink-0"
+                    style={{
+                      borderColor: selected
+                        ? 'var(--brand-warning-amber)'
+                        : 'var(--brand-border)',
+                      backgroundColor: selected ? 'var(--brand-warning-amber)' : 'white',
+                    }}
+                  >
+                    {selected && <CheckCircle className="w-3 h-3 text-white" />}
+                  </span>
+                  <span className="flex-1">
+                    <span className="block text-[14px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                      {med.drugName}
+                    </span>
+                    <span className="block text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
+                      {med.drugClass.replace(/_/g, ' ').toLowerCase()}
+                    </span>
+                  </span>
+                </button>
+
+                {selected && entry && (
+                  <div className="px-4 pb-3 space-y-3 border-t" style={{ borderColor: 'var(--brand-border)' }}>
+                    <div className="pt-3">
+                      <label
+                        htmlFor={`reason-${med.id}`}
+                        className="text-[11px] font-semibold uppercase tracking-wide"
+                        style={{ color: 'var(--brand-text-muted)' }}
+                      >
+                        Why did you miss it?
+                      </label>
+                      <select
+                        id={`reason-${med.id}`}
+                        value={entry.reason ?? ''}
+                        onChange={(e) =>
+                          updateEntry(med.id, {
+                            reason: (e.target.value || null) as typeof entry.reason,
+                          })
+                        }
+                        className="mt-1 w-full px-3 py-2 rounded-lg border text-[14px] bg-white"
+                        style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+                      >
+                        <option value="">Select a reason…</option>
+                        {MISSED_REASONS.map((r) => (
+                          <option key={r.value} value={r.value}>
+                            {r.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <fieldset className="border-0 p-0 m-0">
+                      <legend
+                        className="text-[11px] font-semibold uppercase tracking-wide"
+                        style={{ color: 'var(--brand-text-muted)' }}
+                      >
+                        How many doses?
+                      </legend>
+                      <div className="mt-1 flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateEntry(med.id, {
+                              missedDoses: Math.max(1, entry.missedDoses - 1),
+                            })
+                          }
+                          className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer"
+                          style={{
+                            borderColor: 'var(--brand-border)',
+                            color: 'var(--brand-text-secondary)',
+                          }}
+                        >
+                          −
+                        </button>
+                        <span className="text-[16px] font-bold w-6 text-center" style={{ color: 'var(--brand-text-primary)' }}>
+                          {entry.missedDoses}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateEntry(med.id, {
+                              missedDoses: Math.min(10, entry.missedDoses + 1),
+                            })
+                          }
+                          className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer"
+                          style={{
+                            borderColor: 'var(--brand-border)',
+                            color: 'var(--brand-text-secondary)',
+                          }}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </fieldset>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -753,12 +974,14 @@ function ConfirmationScreen({
   lastReading,
   sessionReadings,
   hasAFib,
+  missedMedNames,
   onAddAnother,
   onDone,
 }: {
   lastReading: SessionReading;
   sessionReadings: SessionReading[];
   hasAFib: boolean;
+  missedMedNames: string[];
   onAddAnother: () => void;
   onDone: () => void;
 }) {
@@ -813,6 +1036,22 @@ function ConfirmationScreen({
           )}
         </div>
       </div>
+
+      {/* Missed-medication acknowledgement — visible confirmation so the
+          patient knows their answer was captured and will reach the care team. */}
+      {missedMedNames.length > 0 && (
+        <div
+          className="w-full rounded-xl px-3 py-2 mb-3 flex items-start gap-2.5 text-left"
+          style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}
+        >
+          <Pill className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--brand-warning-amber)' }} />
+          <p className="text-[12px] leading-snug" style={{ color: 'var(--brand-text-primary)' }}>
+            We noted you missed{' '}
+            <span className="font-bold">{missedMedNames.join(', ')}</span>
+            {' '}today — your care team will see this.
+          </p>
+        </div>
+      )}
 
       {/* AFib reminder + what-happens-next merged into one compact strip */}
       {hasAFib ? (
@@ -890,6 +1129,8 @@ export default function CheckIn() {
 
   const [profile, setProfile] = useState<PatientProfileDto | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [medications, setMedications] = useState<PatientMedication[]>([]);
+  const [medsLoading, setMedsLoading] = useState(true);
 
   const [form, setForm] = useState<FormData>(emptyForm);
   const [step, setStep] = useState<StepKey>('B1');
@@ -913,6 +1154,22 @@ export default function CheckIn() {
       if (!cancelled) {
         setProfile(p);
         setProfileLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isAuthenticated, isLoading]);
+
+  // Fetch active medications — rendered as checkbox list in MEDICATION step.
+  // Cheap call; fire on mount so the list is ready before the user reaches
+  // step 4.
+  useEffect(() => {
+    if (isLoading || !isAuthenticated) return;
+    let cancelled = false;
+    (async () => {
+      const meds = await listMyMedications().catch(() => [] as PatientMedication[]);
+      if (!cancelled) {
+        setMedications(meds);
+        setMedsLoading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -959,6 +1216,19 @@ export default function CheckIn() {
         if (p < 30 || p > 220) return 'Pulse should be between 30 and 220.';
       }
     }
+    if (s === 'MEDICATION') {
+      // Require "why" when patient checks off a medication. If the medication
+      // list is empty (e.g. new user), we allow submitting without details.
+      if (form.medicationTaken === 'no' && medications.length > 0) {
+        if (form.missedMedications.length === 0) {
+          return 'Please tell us which medication you missed, or choose "Yes, all taken" if you took them.';
+        }
+        const missingReason = form.missedMedications.find((m) => !m.reason);
+        if (missingReason) {
+          return `Please pick a reason for ${missingReason.drugName}.`;
+        }
+      }
+    }
     return null;
   }
 
@@ -998,6 +1268,18 @@ export default function CheckIn() {
         sessionId,
         measurementConditions,
         medicationTaken: form.medicationTaken === 'yes' ? true : form.medicationTaken === 'no' ? false : undefined,
+        missedMedications:
+          form.missedMedications.length > 0
+            ? form.missedMedications
+                .filter((m) => m.reason !== null)
+                .map((m) => ({
+                  medicationId: m.medicationId,
+                  drugName: m.drugName,
+                  drugClass: m.drugClass,
+                  reason: m.reason!,
+                  missedDoses: m.missedDoses,
+                }))
+            : undefined,
         severeHeadache: form.severeHeadache,
         visualChanges: form.visualChanges,
         alteredMentalStatus: form.alteredMentalStatus,
@@ -1091,6 +1373,7 @@ export default function CheckIn() {
             lastReading={last}
             sessionReadings={sessionReadings}
             hasAFib={hasAFib}
+            missedMedNames={form.missedMedications.map((m) => m.drugName)}
             onAddAnother={startAnotherReading}
             onDone={() => router.push('/dashboard')}
           />
@@ -1147,7 +1430,13 @@ export default function CheckIn() {
             {step === 'B1' && <B1Checklist {...stepProps} />}
             {step === 'B2' && <B2Reading {...stepProps} />}
             {step === 'WEIGHT' && <StepWeight {...stepProps} />}
-            {step === 'MEDICATION' && <StepMedication {...stepProps} />}
+            {step === 'MEDICATION' && (
+              <StepMedication
+                {...stepProps}
+                medications={medications}
+                medsLoading={medsLoading}
+              />
+            )}
             {step === 'B3' && <B3Symptoms {...stepProps} isPregnant={isPregnant} />}
           </motion.div>
         </AnimatePresence>

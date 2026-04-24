@@ -40,6 +40,29 @@ export interface SessionAverage {
 
   /** Shared `sessionId` if the entries were explicitly grouped. */
   sessionId: string | null
+
+  /**
+   * Adherence signal: did the patient take their medications for this entry?
+   * true = yes, false = self-reported miss, null = not asked / skipped.
+   * OR-reduced across session entries: any `false` wins.
+   */
+  medicationTaken: boolean | null
+
+  /**
+   * Per-medication miss detail supplied by the patient. Empty array when the
+   * patient either answered "yes" or answered "missed" generically without
+   * specifying which medications. OR-unioned across session entries (dedup
+   * by medicationId — latest entry's reason/missedDoses wins).
+   */
+  missedMedications: SessionMissedMedication[]
+}
+
+export interface SessionMissedMedication {
+  medicationId: string
+  drugName: string
+  drugClass: string
+  reason: 'FORGOT' | 'SIDE_EFFECTS' | 'RAN_OUT' | 'COST' | 'INTENTIONAL' | 'OTHER'
+  missedDoses: number
 }
 
 export interface SessionSymptoms {
@@ -83,6 +106,12 @@ export interface RuleResultMetadata {
   thresholdValue?: number
   /** Used for physician-only pulse-pressure annotations riding on another rule. */
   physicianAnnotations?: string[]
+  /**
+   * Per-medication miss detail — populated only by RULE_MEDICATION_MISSED.
+   * Flows through OutputGenerator → AlertContext.missedMedications so the
+   * three-tier message builders can render drug names + reasons.
+   */
+  missedMedications?: SessionMissedMedication[]
 }
 
 /**

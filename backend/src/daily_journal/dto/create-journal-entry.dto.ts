@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsBoolean,
+  IsEnum,
   IsIn,
   IsInt,
   IsISO8601,
@@ -13,8 +14,10 @@ import {
   Max,
   Min,
   registerDecorator,
+  ValidateNested,
   ValidationOptions,
 } from 'class-validator'
+import { Type } from 'class-transformer'
 
 function IsMeasuredAtReasonable(validationOptions?: ValidationOptions) {
   return (object: object, propertyName: string) => {
@@ -40,6 +43,43 @@ function IsMeasuredAtReasonable(validationOptions?: ValidationOptions) {
       },
     })
   }
+}
+
+export enum MissedMedicationReason {
+  FORGOT = 'FORGOT',
+  SIDE_EFFECTS = 'SIDE_EFFECTS',
+  RAN_OUT = 'RAN_OUT',
+  COST = 'COST',
+  INTENTIONAL = 'INTENTIONAL',
+  OTHER = 'OTHER',
+}
+
+/**
+ * Per-medication miss detail — submitted when the patient taps "Missed" in
+ * the MEDICATION step of CheckIn.tsx and then checks off which medications
+ * they skipped. Shape persisted as-is into JournalEntry.missedMedications
+ * (JSON column) so the snapshot survives PatientMedication renames.
+ */
+export class MissedMedicationDto {
+  @IsString()
+  @IsNotEmpty()
+  medicationId!: string
+
+  @IsString()
+  @IsNotEmpty()
+  drugName!: string
+
+  @IsString()
+  @IsNotEmpty()
+  drugClass!: string
+
+  @IsEnum(MissedMedicationReason)
+  reason!: MissedMedicationReason
+
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  missedDoses!: number
 }
 
 export class CreateJournalEntryDto {
@@ -93,6 +133,15 @@ export class CreateJournalEntryDto {
   @Min(0)
   @Max(10)
   missedDoses?: number
+
+  // Per-medication miss detail. Optional — form may submit an empty array /
+  // undefined if patient either took all meds or tapped "Missed" without
+  // specifying which drug.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => MissedMedicationDto)
+  missedMedications?: MissedMedicationDto[]
 
   // Legacy field — v1 clients send freeform symptom strings; we route them
   // to JournalEntry.otherSymptoms. New v2 clients (Flow B) prefer the

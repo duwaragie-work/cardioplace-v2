@@ -81,6 +81,15 @@ export class OutputGeneratorService implements OnModuleInit {
       physicianAnnotations: result.metadata.physicianAnnotations ?? [],
       preDay3,
       suboptimalMeasurement: result.suboptimalMeasurement,
+      // Surface per-medication miss detail for RULE_MEDICATION_MISSED messages.
+      // Strip medicationId (internal) and narrow reason to the union the
+      // message registry expects.
+      missedMedications: result.metadata.missedMedications?.map((m) => ({
+        drugName: m.drugName,
+        drugClass: m.drugClass,
+        reason: m.reason,
+        missedDoses: m.missedDoses,
+      })),
     }
   }
 }

@@ -11,6 +11,10 @@ model JournalEntry {
   measurementConditions Json?
   medicationTaken       Boolean?
   missedDoses           Int?        @default(0)
+  // Per-medication miss detail, snapshot at time of entry so audit trail is
+  // stable even if PatientMedication rows are later discontinued or renamed.
+  // Shape: Array<{ medicationId, drugName, drugClass, reason, missedDoses }>.
+  missedMedications     Json?
 
   severeHeadache       Boolean @default(false)
   visualChanges        Boolean @default(false)

@@ -72,6 +72,8 @@ function session(over: Partial<SessionAverage> = {}): SessionAverage {
     symptoms: noSymptoms(),
     suboptimalMeasurement: false,
     sessionId: null,
+    medicationTaken: null,
+    missedMedications: [],
     ...over,
   }
 }

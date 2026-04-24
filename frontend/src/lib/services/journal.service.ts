@@ -7,6 +7,22 @@ import { fetchWithAuth } from './token'
 
 const API = process.env.NEXT_PUBLIC_API_URL
 
+export type MissedMedicationReason =
+  | 'FORGOT'
+  | 'SIDE_EFFECTS'
+  | 'RAN_OUT'
+  | 'COST'
+  | 'INTENTIONAL'
+  | 'OTHER'
+
+export interface MissedMedicationPayload {
+  medicationId: string
+  drugName: string
+  drugClass: string
+  reason: MissedMedicationReason
+  missedDoses: number
+}
+
 export interface JournalEntryPayload {
   /** ISO 8601 UTC timestamp. Required by the backend. */
   measuredAt: string
@@ -21,6 +37,9 @@ export interface JournalEntryPayload {
   measurementConditions?: Record<string, unknown>
   medicationTaken?: boolean
   missedDoses?: number
+  /** Per-medication miss detail. Submitted when the patient taps "Missed"
+   * and checks off specific drugs in CheckIn.tsx. */
+  missedMedications?: MissedMedicationPayload[]
   // Structured V2 Level-2 symptom triggers
   severeHeadache?: boolean
   visualChanges?: boolean

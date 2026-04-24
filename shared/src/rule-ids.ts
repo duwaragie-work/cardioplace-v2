@@ -54,6 +54,11 @@ export const RULE_IDS = {
   // Physician-only
   PULSE_PRESSURE_WIDE: 'RULE_PULSE_PRESSURE_WIDE',
   LOOP_DIURETIC_HYPOTENSION: 'RULE_LOOP_DIURETIC_HYPOTENSION',
+
+  // Medication adherence (Tier 2 discrepancy, dismissable) — fires on any
+  // self-reported missed dose. Runs in an independent pipeline pass alongside
+  // the BP/HR rules so both can coexist on one journal entry.
+  MEDICATION_MISSED: 'RULE_MEDICATION_MISSED',
 } as const
 
 export type RuleId = (typeof RULE_IDS)[keyof typeof RULE_IDS]
