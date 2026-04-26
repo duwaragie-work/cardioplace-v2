@@ -70,7 +70,7 @@ export class AuthController {
   @Public()
   @Post('otp/send')
   sendOtp(@Body() dto: SendOtpDto, @Req() req: Request) {
-    const context = this.buildAuthContext(req)
+    const context = { ...this.buildAuthContext(req), appContext: dto.appContext }
     return this.authService.sendOtp(dto.email, context)
   }
 
@@ -89,7 +89,7 @@ export class AuthController {
         'Device ID is required. Send via header x-device-id or body deviceId.',
       )
     }
-    const context = { ...baseContext, deviceId }
+    const context = { ...baseContext, deviceId, appContext: dto.appContext }
     const result = await this.authService.verifyOtp(
       dto.email,
       dto.otp,

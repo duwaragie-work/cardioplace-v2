@@ -2,9 +2,13 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import * as grpc from '@grpc/grpc-js'
 import * as protoLoader from '@grpc/proto-loader'
-import * as path from 'path'
-import { randomUUID } from 'crypto'
-import { ProfileNotFoundException, type ResolvedContext } from '@cardioplace/shared'
+import { randomUUID } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
+import {
+  getTrailing7DayBaseline,
+  ProfileNotFoundException,
+  type ResolvedContext,
+} from '@cardioplace/shared'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { ConversationHistoryService } from '../chat/services/conversation-history.service.js'
 import { SystemPromptService } from '../chat/services/system-prompt.service.js'
@@ -133,7 +137,13 @@ export class VoiceService implements OnModuleDestroy {
   }
 
   private initGrpcClient(): void {
-    const protoPath = path.resolve(process.cwd(), 'proto', 'voice.proto')
+    // Resolve relative to this file, not process.cwd(). Hardens against
+    // tooling (jest, tsx, nest-cli) launched from a different directory —
+    // and works identically for `src/` (dev) and `dist/` (prod) because
+    // the compiled layout preserves the `../../proto/voice.proto` depth.
+    const protoPath = fileURLToPath(
+      new URL('../../proto/voice.proto', import.meta.url),
+    )
 
     const packageDef = protoLoader.loadSync(protoPath, {
       keepCase: false,
@@ -659,6 +669,10 @@ export class VoiceService implements OnModuleDestroy {
         this.prisma.journalEntry.findMany({
           where: { userId },
           orderBy: { measuredAt: 'desc' },
+          // Cap at 30 most-recent readings — matches chat.service.ts so the
+          // voice agent sees the same history. Covers the 7-day baseline
+          // window with room to spare, keeps prompt size bounded.
+          take: 30,
           select: {
             measuredAt: true,
             systolicBP: true,
@@ -694,26 +708,9 @@ export class VoiceService implements OnModuleDestroy {
         }) as Promise<ResolvedContext | null>,
       ])
 
-      // Trailing 7-day mean computed on-the-fly (v2: derived, not stored).
-      const completeEntries = entries.filter(
-        (e) => e.systolicBP != null && e.diastolicBP != null,
-      )
-      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
-      const recentForBaseline = completeEntries.filter(
-        (e) => new Date(e.measuredAt).getTime() >= sevenDaysAgo,
-      )
-      const baseline = recentForBaseline.length > 0
-        ? {
-            baselineSystolic: Math.round(
-              recentForBaseline.reduce((a, e) => a + (e.systolicBP as number), 0) /
-                recentForBaseline.length,
-            ),
-            baselineDiastolic: Math.round(
-              recentForBaseline.reduce((a, e) => a + (e.diastolicBP as number), 0) /
-                recentForBaseline.length,
-            ),
-          }
-        : null
+      // Trailing 7-day mean — shared helper in @cardioplace/shared/derivatives
+      // ensures chat + voice render identical baselines.
+      const baseline = getTrailing7DayBaseline(entries)
 
       // Delegate rendering to the chat SystemPromptService so the voice agent
       // and text chatbot see an identical clinical-context block.

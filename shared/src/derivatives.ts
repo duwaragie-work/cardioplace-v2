@@ -9,6 +9,54 @@ export type AgeGroup = '18-39' | '40-64' | '65+'
 
 export type ReadingContext = 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NOCTURNAL'
 
+export interface TrailingBaseline {
+  baselineSystolic: number
+  baselineDiastolic: number
+  /** Number of complete readings (SBP + DBP non-null) inside the window. */
+  readingCount: number
+}
+
+export interface BaselineEntry {
+  measuredAt: Date | string
+  systolicBP: number | null
+  diastolicBP: number | null
+}
+
+/**
+ * Trailing N-day mean SBP/DBP computed on-the-fly from JournalEntry rows.
+ * v2 replaces the v1 rolling BaselineSnapshot table — baseline is *derived*,
+ * never stored. Both the chat system prompt and the voice system prompt
+ * inject this so the agent can reference the patient's recent average.
+ *
+ * Returns null when no complete readings fall inside the window. Entries
+ * with either BP value null are skipped (partial readings don't contribute).
+ *
+ * @param entries JournalEntry-shaped rows (anything with measuredAt + BP)
+ * @param windowDays default 7 per CLINICAL_SPEC Part 5 averaged-reading
+ * @param now default Date.now(); injectable for tests
+ */
+export function getTrailing7DayBaseline(
+  entries: readonly BaselineEntry[],
+  windowDays = 7,
+  now: number = Date.now(),
+): TrailingBaseline | null {
+  const windowStart = now - windowDays * 24 * 60 * 60 * 1000
+  const inside = entries.filter(
+    (e) =>
+      e.systolicBP != null &&
+      e.diastolicBP != null &&
+      new Date(e.measuredAt).getTime() >= windowStart,
+  )
+  if (inside.length === 0) return null
+  const baselineSystolic = Math.round(
+    inside.reduce((a, e) => a + (e.systolicBP as number), 0) / inside.length,
+  )
+  const baselineDiastolic = Math.round(
+    inside.reduce((a, e) => a + (e.diastolicBP as number), 0) / inside.length,
+  )
+  return { baselineSystolic, baselineDiastolic, readingCount: inside.length }
+}
+
 /**
  * Pulse pressure = SBP − DBP. Returns null if either input is null/undefined
  * or if the result is non-physiological (SBP < DBP implies sensor error).

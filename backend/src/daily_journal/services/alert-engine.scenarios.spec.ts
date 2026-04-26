@@ -47,6 +47,10 @@ function buildSession(over: Partial<SessionAverage> = {}): SessionAverage {
     symptoms: noSymptoms(),
     suboptimalMeasurement: false,
     sessionId: null,
+    // Adherence defaults — null = not asked, empty array = no per-med detail.
+    // Keeps all 57 pre-existing scenarios unaffected by the adherence pass.
+    medicationTaken: null,
+    missedMedications: [],
     ...over,
   }
 }
@@ -1141,5 +1145,173 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
     expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
     expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
+  })
+
+  // ========================================================================
+  // Drug-class coverage gaps (not covered by earlier scenarios)
+  // ========================================================================
+
+  it('Scenario 58 — Pregnant + Losartan (ARB standalone) → Tier 1 RULE_PREGNANCY_ACE_ARB', async () => {
+    // Guards the ARB branch of the pregnancy rule. Scenario 1 covers ACE
+    // (Lisinopril). Scenario 46 covers an ARB inside a combination (Entresto
+    // ARNI+ARB). This adds standalone ARB — the common Losartan prescription.
+    const { result, createArgs } = await run(
+      buildSession({ systolicBP: 128, diastolicBP: 80, pulse: 78 }),
+      buildCtx({
+        isPregnant: true,
+        contextMeds: [buildMed({ drugName: 'Losartan', drugClass: 'ARB' })],
+      }),
+    )
+
+    expect(result?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
+    expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
+    expect(createArgs.data.dismissible).toBe(false)
+    expect(createArgs.data.physicianMessage).toContain('Losartan')
+  })
+
+  // ========================================================================
+  // BB suppression boundary (<50 fires regardless of BB)
+  // ========================================================================
+
+  // ========================================================================
+  // Tier 2 — Medication adherence (dismissable, independent pipeline pass)
+  // ========================================================================
+
+  it('Scenario 60 — medicationTaken=false (no per-med data) → RULE_MEDICATION_MISSED Tier 2', async () => {
+    // Legacy-form path: patient tapped "Missed" without specifying which
+    // medication. Fires the generic Tier 2 adherence alert with a warm,
+    // non-medication-specific reminder.
+    const { result, createArgs, eventArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        medicationTaken: false,
+      }),
+      buildCtx({ profile: { diagnosedHypertension: true } }),
+    )
+
+    expect(result?.ruleId).toBe('RULE_MEDICATION_MISSED')
+    expect(createArgs.data.tier).toBe('TIER_2_DISCREPANCY')
+    expect(createArgs.data.type).toBe('MEDICATION_ADHERENCE')
+    expect(createArgs.data.dismissible).toBe(true)
+    expect(createArgs.data.severity).toBe('MEDIUM')
+    expect(createArgs.data.patientMessage.toLowerCase()).toContain(
+      "didn't take your medication",
+    )
+    expect(createArgs.data.physicianMessage).toContain('Tier 2')
+    expect(createArgs.data.physicianMessage.toLowerCase()).toContain(
+      'no medication specified',
+    )
+    expect(eventArgs[0]).toBe(JOURNAL_EVENTS.ALERT_CREATED)
+    expect(eventArgs[1]).toMatchObject({
+      ruleId: 'RULE_MEDICATION_MISSED',
+      tier: 'TIER_2_DISCREPANCY',
+    })
+  })
+
+  it('Scenario 61 — per-medication miss (Lisinopril FORGOT) → physician msg names drug + reason', async () => {
+    // New-form path: patient tapped "Missed" AND checked specific meds.
+    // Per-med detail flows through metadata.missedMedications → AlertContext
+    // → physicianMessage.
+    const { result, createArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        medicationTaken: true, // generic toggle doesn't matter when array populated
+        missedMedications: [
+          {
+            medicationId: 'med-lisino',
+            drugName: 'Lisinopril',
+            drugClass: 'ACE_INHIBITOR',
+            reason: 'FORGOT',
+            missedDoses: 1,
+          },
+        ],
+      }),
+      buildCtx({ profile: { diagnosedHypertension: true } }),
+    )
+
+    expect(result?.ruleId).toBe('RULE_MEDICATION_MISSED')
+    expect(createArgs.data.tier).toBe('TIER_2_DISCREPANCY')
+    expect(createArgs.data.patientMessage).toContain('Lisinopril')
+    expect(createArgs.data.physicianMessage).toContain('Lisinopril')
+    expect(createArgs.data.physicianMessage).toContain('ACE_INHIBITOR')
+    expect(createArgs.data.physicianMessage).toContain('FORGOT')
+    expect(createArgs.data.physicianMessage).toContain('doses missed: 1')
+  })
+
+  it('Scenario 62 — BP L1 High + medicationTaken=false → TWO DeviationAlert rows created', async () => {
+    // Co-occurrence path: independent BP pipeline fires first (row 1), then
+    // adherence pass fires (row 2). Both creates are asserted; event emission
+    // happens twice.
+    await run(
+      buildSession({
+        systolicBP: 165,
+        diastolicBP: 94,
+        pulse: 78,
+        medicationTaken: false,
+      }),
+      buildCtx({ profile: { diagnosedHypertension: true } }),
+    )
+
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(2)
+
+    const firstCall = prisma.deviationAlert.create.mock.calls[0][0]
+    expect(firstCall.data.ruleId).toBe('RULE_STANDARD_L1_HIGH')
+    expect(firstCall.data.type).toBe('SYSTOLIC_BP')
+    expect(firstCall.data.tier).toBe('BP_LEVEL_1_HIGH')
+
+    const secondCall = prisma.deviationAlert.create.mock.calls[1][0]
+    expect(secondCall.data.ruleId).toBe('RULE_MEDICATION_MISSED')
+    expect(secondCall.data.type).toBe('MEDICATION_ADHERENCE')
+    expect(secondCall.data.tier).toBe('TIER_2_DISCREPANCY')
+
+    // Resolve-sweep MUST NOT run when any alert fires — would incorrectly
+    // auto-resolve the BP L1 row we just created.
+    expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
+  })
+
+  it('Scenario 63 — medicationTaken=true + missedMedications=[] → no adherence alert (resolve-sweep only)', async () => {
+    // Happy path: patient took all meds, no BP rule fires either.
+    // Resolve-sweep runs and is scoped to BP L1 only (Bug 2 invariant).
+    const { result } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        medicationTaken: true,
+      }),
+      buildCtx({ profile: { diagnosedHypertension: true } }),
+    )
+
+    expect(result).toBeNull()
+    expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
+    expect(prisma.deviationAlert.updateMany).toHaveBeenCalledTimes(1)
+    const updateManyCall = prisma.deviationAlert.updateMany.mock.calls[0][0]
+    expect(updateManyCall.where.tier).toEqual({
+      in: ['BP_LEVEL_1_HIGH', 'BP_LEVEL_1_LOW'],
+    })
+  })
+
+  it('Scenario 59 — Brady + Beta-blocker + pulse 38 → RULE_BRADY_HR_ASYMPTOMATIC (BB suppression is 50–60 only)', async () => {
+    // Scenario 19 shows BB + pulse 55 suppresses the alert. Scenario 36 shows
+    // pulse 38 without BB fires asymptomatic brady. This pair confirms the
+    // suppression window is 50–60 exclusive — below 50, brady fires even when
+    // a beta-blocker is on board (clinically: <50 bpm on BB needs provider
+    // review regardless).
+    const { result, createArgs } = await run(
+      buildSession({ systolicBP: 118, diastolicBP: 72, pulse: 38 }),
+      buildCtx({
+        profile: { hasBradycardia: true },
+        contextMeds: [
+          buildMed({ drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER' }),
+        ],
+      }),
+    )
+
+    expect(result?.ruleId).toBe('RULE_BRADY_HR_ASYMPTOMATIC')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
+    expect(createArgs.data.physicianMessage).toContain('asymptomatic bradycardia')
   })
 })

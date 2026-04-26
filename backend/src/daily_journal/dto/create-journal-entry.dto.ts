@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsBoolean,
+  IsEnum,
   IsIn,
   IsInt,
   IsISO8601,
@@ -13,8 +14,10 @@ import {
   Max,
   Min,
   registerDecorator,
+  ValidateNested,
   ValidationOptions,
 } from 'class-validator'
+import { Type } from 'class-transformer'
 
 function IsMeasuredAtReasonable(validationOptions?: ValidationOptions) {
   return (object: object, propertyName: string) => {
@@ -40,6 +43,43 @@ function IsMeasuredAtReasonable(validationOptions?: ValidationOptions) {
       },
     })
   }
+}
+
+export enum MissedMedicationReason {
+  FORGOT = 'FORGOT',
+  SIDE_EFFECTS = 'SIDE_EFFECTS',
+  RAN_OUT = 'RAN_OUT',
+  COST = 'COST',
+  INTENTIONAL = 'INTENTIONAL',
+  OTHER = 'OTHER',
+}
+
+/**
+ * Per-medication miss detail — submitted when the patient taps "Missed" in
+ * the MEDICATION step of CheckIn.tsx and then checks off which medications
+ * they skipped. Shape persisted as-is into JournalEntry.missedMedications
+ * (JSON column) so the snapshot survives PatientMedication renames.
+ */
+export class MissedMedicationDto {
+  @IsString()
+  @IsNotEmpty()
+  medicationId!: string
+
+  @IsString()
+  @IsNotEmpty()
+  drugName!: string
+
+  @IsString()
+  @IsNotEmpty()
+  drugClass!: string
+
+  @IsEnum(MissedMedicationReason)
+  reason!: MissedMedicationReason
+
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  missedDoses!: number
 }
 
 export class CreateJournalEntryDto {
@@ -94,14 +134,42 @@ export class CreateJournalEntryDto {
   @Max(10)
   missedDoses?: number
 
-  // TODO(phase/15): replace this freeform field with the structured Level-2
-  // symptom booleans (severeHeadache, visualChanges, etc.) once Dev 1 lands
-  // the card-based intake UI. For now, incoming symptom[] values are stored
-  // on JournalEntry.otherSymptoms to keep v1 clients compiling.
+  // Per-medication miss detail. Optional — form may submit an empty array /
+  // undefined if patient either took all meds or tapped "Missed" without
+  // specifying which drug.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => MissedMedicationDto)
+  missedMedications?: MissedMedicationDto[]
+
+  // Legacy field — v1 clients send freeform symptom strings; we route them
+  // to JournalEntry.otherSymptoms. New v2 clients (Flow B) prefer the
+  // explicit `otherSymptoms` field below plus the structured booleans.
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   symptoms?: string[]
+
+  // ── V2 structured Level-2 symptom triggers (Flow B / phase/15) ─────────
+  @IsOptional() @IsBoolean() severeHeadache?: boolean
+  @IsOptional() @IsBoolean() visualChanges?: boolean
+  @IsOptional() @IsBoolean() alteredMentalStatus?: boolean
+  @IsOptional() @IsBoolean() chestPainOrDyspnea?: boolean
+  @IsOptional() @IsBoolean() focalNeuroDeficit?: boolean
+  @IsOptional() @IsBoolean() severeEpigastricPain?: boolean
+
+  // Pregnancy-specific (only meaningful when PatientProfile.isPregnant)
+  @IsOptional() @IsBoolean() newOnsetHeadache?: boolean
+  @IsOptional() @IsBoolean() ruqPain?: boolean
+  @IsOptional() @IsBoolean() edema?: boolean
+
+  // Patient's freeform "anything else" — sent as String[] so the schema
+  // column can hold multiple notes if a future UI captures more than one.
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  otherSymptoms?: string[]
 
   @IsOptional()
   @IsString()

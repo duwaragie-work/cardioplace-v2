@@ -50,3 +50,115 @@ body {
   color: var(--foreground);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
+
+/* ── Thin brand scrollbar utility ─────────────────────────────────────────
+   Apply via `className="thin-scrollbar"` on any element that owns its own
+   overflow (sidebar nav, modal body, etc.). Uses brand primary purple to
+   match the patient app. */
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--brand-primary-purple) transparent;
+}
+.thin-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background-color: var(--brand-primary-purple);
+  border-radius: 9999px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: var(--brand-primary-purple-hover);
+}
+.thin-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── Admin button conventions ─────────────────────────────────────────────
+   Compact, lower-radius, no patient-style pill shadow. Use these utility
+   classes instead of inline styles to keep the admin app visually distinct
+   from the patient app while still using the same brand tokens. */
+.btn-admin-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 8px;
+  background-color: var(--brand-primary-purple);
+  color: white;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.btn-admin-primary:hover {
+  background-color: var(--brand-primary-purple-hover);
+}
+.btn-admin-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-admin-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 8px;
+  background-color: white;
+  color: var(--brand-text-secondary);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid var(--brand-border);
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.btn-admin-secondary:hover {
+  background-color: var(--brand-background);
+  border-color: var(--brand-text-muted);
+}
+
+.btn-admin-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background-color: transparent;
+  color: var(--brand-text-secondary);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.btn-admin-ghost:hover {
+  background-color: var(--brand-background);
+}
+
+.btn-admin-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 8px;
+  background-color: var(--brand-alert-red);
+  color: white;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.btn-admin-danger:hover {
+  filter: brightness(0.92);
+}

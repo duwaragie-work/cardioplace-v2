@@ -50,6 +50,10 @@ function buildAlert(over: Record<string, any> = {}) {
     physicianMessage: 'Tier 1 — ACE/ARB in pregnancy.',
     user: {
       id: 'patient-1',
+      // Layer B gate — default fixture is ENROLLED so every existing test
+      // case exercises the happy path. Override to 'NOT_ENROLLED' to verify
+      // the dispatch gate.
+      enrollmentStatus: 'ENROLLED',
       providerAssignmentAsPatient: ASSIGNMENT_FULL,
     },
     ...over,
@@ -164,6 +168,51 @@ describe('EscalationService', () => {
       )
       await service.handleAlertCreated(
         buildAlertCreatedPayload({ tier: 'BP_LEVEL_1_LOW' }),
+      )
+      expect(prisma.escalationEvent.create).not.toHaveBeenCalled()
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Layer B — escalation dispatch gate
+  //   The DeviationAlert row is already persisted by the rule engine; this
+  //   gate only controls whether EscalationEvent rows + Notifications get
+  //   written. Un-enrolled patients' alerts sit in the DB visible to admin
+  //   but no provider is paged until the 4-piece enrollment gate is passed.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('Layer B enrollment dispatch gate', () => {
+    it('un-enrolled patient + escalatable tier → no EscalationEvent, no notifications', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildAlert({
+          tier: 'TIER_1_CONTRAINDICATION',
+          user: {
+            id: 'patient-1',
+            enrollmentStatus: 'NOT_ENROLLED',
+            providerAssignmentAsPatient: ASSIGNMENT_FULL,
+          },
+        }),
+      )
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({ tier: 'TIER_1_CONTRAINDICATION' }),
+      )
+      expect(prisma.escalationEvent.create).not.toHaveBeenCalled()
+      expect(prisma.notification.create).not.toHaveBeenCalled()
+      expect(eventEmitter.emit).not.toHaveBeenCalled()
+    })
+
+    it('un-enrolled patient + BP Level 2 emergency → still gated (patient 911 CTA is rendered client-side via GET /daily-journal/alerts)', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildAlert({
+          tier: 'BP_LEVEL_2',
+          user: {
+            id: 'patient-1',
+            enrollmentStatus: 'NOT_ENROLLED',
+            providerAssignmentAsPatient: ASSIGNMENT_FULL,
+          },
+        }),
+      )
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({ tier: 'BP_LEVEL_2' }),
       )
       expect(prisma.escalationEvent.create).not.toHaveBeenCalled()
     })
@@ -630,6 +679,7 @@ describe('EscalationService', () => {
           createdAt: new Date('2026-04-22T14:00:00Z'), // business hours
           user: {
             id: 'patient-1',
+            enrollmentStatus: 'ENROLLED',
             providerAssignmentAsPatient: brokenAssignment,
           },
         }),

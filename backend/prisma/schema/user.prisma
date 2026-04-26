@@ -10,6 +10,7 @@ model User {
   isVerified              Boolean                  @default(false)
   roles                   UserRole[]               @default([PATIENT])
   onboardingStatus        OnboardingStatus         @default(NOT_COMPLETED)
+  enrollmentStatus        EnrollmentStatus         @default(NOT_ENROLLED)
   accountStatus           AccountStatus            @default(ACTIVE)
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
@@ -49,6 +50,11 @@ enum UserRole {
 enum OnboardingStatus {
   NOT_COMPLETED
   COMPLETED
+}
+
+enum EnrollmentStatus {
+  NOT_ENROLLED
+  ENROLLED
 }
 
 enum AccountStatus {

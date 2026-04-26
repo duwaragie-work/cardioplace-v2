@@ -84,7 +84,7 @@ export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProp
                 href="/sign-in"
                 className="hidden md:inline-flex whitespace-nowrap bg-[#6b00d1] text-white font-semibold text-sm lg:text-base px-4 lg:px-6 py-2 rounded-full hover:bg-[#5a00b0] transition-colors"
               >
-                {t('landing.getStarted')}
+                Sign in to admin
               </Link>
             )
           )}
@@ -141,7 +141,7 @@ export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProp
                 onClick={() => setMenuOpen(false)}
                 className="flex items-center justify-center bg-[#6b00d1] text-white font-semibold text-base px-6 py-3 rounded-full"
               >
-                {t('landing.getStarted')}
+                Sign in to admin
               </Link>
             )
           )}

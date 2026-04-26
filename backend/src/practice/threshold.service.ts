@@ -54,6 +54,22 @@ export class ThresholdService {
     }
   }
 
+  /**
+   * Patient-facing read — returns `null` when no threshold has been set,
+   * rather than 404'ing. Used by the dashboard to decide whether to render
+   * the "Your goal" card.
+   */
+  async findByPatientOrNull(patientUserId: string) {
+    const threshold = await this.prisma.patientThreshold.findUnique({
+      where: { userId: patientUserId },
+    })
+    return {
+      statusCode: 200,
+      message: threshold ? 'Threshold retrieved' : 'No threshold set yet',
+      data: threshold,
+    }
+  }
+
   async update(adminId: string, patientUserId: string, dto: UpsertThresholdDto) {
     const existing = await this.prisma.patientThreshold.findUnique({
       where: { userId: patientUserId },

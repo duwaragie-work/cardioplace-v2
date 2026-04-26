@@ -51,6 +51,20 @@ export interface AlertContext {
   preDay3: boolean
   /** Pre-measurement-checklist flagged at least one item false. */
   suboptimalMeasurement: boolean
+
+  /**
+   * Per-medication miss detail supplied by the patient at check-in. Populated
+   * only for RULE_MEDICATION_MISSED. Order matches the user's selection order.
+   * Empty/undefined when the patient answered "missed" generically without
+   * specifying which medications — the messages fall back to a non-specific
+   * warm reminder in that case.
+   */
+  missedMedications?: Array<{
+    drugName: string
+    drugClass: string
+    reason: 'FORGOT' | 'SIDE_EFFECTS' | 'RAN_OUT' | 'COST' | 'INTENTIONAL' | 'OTHER'
+    missedDoses: number
+  }>
 }
 
 export type MessageBuilder = (ctx: AlertContext) => string
@@ -366,5 +380,35 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     caregiverMessage: () => '',
     physicianMessage: (ctx) =>
       `Tier 3 — Loop diuretic + SBP ${ctx.systolicBP ?? '?'} — increased hypotension sensitivity.${physSuffix(ctx)}`,
+  },
+
+  // ── Tier 2 medication adherence ───────────────────────────────────────
+  // TODO(Dr. Singal): review all three tones + confirm that single-miss is
+  // the right threshold. Wording is a first-pass placeholder.
+  RULE_MEDICATION_MISSED: {
+    patientMessage: (ctx) => {
+      const meds = ctx.missedMedications ?? []
+      if (meds.length === 0) {
+        return "We noticed you didn't take your medication today. Try to take your next dose on time, and talk to your care team if you're having trouble staying on schedule."
+      }
+      const list = meds.map((m) => m.drugName).join(', ')
+      return `We noticed you missed ${list} today. Try to take your next dose on time, and let your care team know if there's anything making it hard to stay on schedule.`
+    },
+    caregiverMessage: (ctx) => {
+      const meds = (ctx.missedMedications ?? []).map((m) => m.drugName).join(', ')
+      return meds
+        ? `The patient reported missing ${meds} today. A gentle reminder may help them stay on track.`
+        : 'The patient reported missing a medication dose today. A gentle reminder may help.'
+    },
+    physicianMessage: (ctx) => {
+      const meds = ctx.missedMedications ?? []
+      if (meds.length === 0) {
+        return `Tier 2 — Patient self-reported missed dose (no medication specified). Consider reconciliation at next visit.${physSuffix(ctx)}`
+      }
+      const detail = meds
+        .map((m) => `${m.drugName} (${m.drugClass}) — reason: ${m.reason}, doses missed: ${m.missedDoses}`)
+        .join('; ')
+      return `Tier 2 — Non-adherence self-reported: ${detail}.${physSuffix(ctx)}`
+    },
   },
 }

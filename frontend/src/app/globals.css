@@ -26,3 +26,29 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ── Thin brand scrollbar utility ─────────────────────────────────────────
+   Apply via `className="thin-scrollbar"` to any element that owns its own
+   overflow (e.g. modal body, scrollable list). Uses the brand primary
+   purple so it visually matches the rest of the app. */
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--brand-primary-purple) transparent;
+}
+.thin-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background-color: var(--brand-primary-purple);
+  border-radius: 9999px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: var(--brand-primary-purple-hover);
+}
+.thin-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}

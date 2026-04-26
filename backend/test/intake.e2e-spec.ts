@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals'
 import { INestApplication, ValidationPipe } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { Test, TestingModule } from '@nestjs/testing'
@@ -12,6 +13,11 @@ import { PrismaService } from '../src/prisma/prisma.service.js'
 // project hasn't yet split a test DB. Every user/profile/medication row is
 // scoped to a unique per-run email prefix so we can delete exactly what we
 // created, and nothing else.
+
+// Managed Prisma Postgres has a multi-second handshake on cold connections
+// and 100–300 ms per query even warm, which blows past Jest's 5 s default on
+// the first test in the suite. Bump to 30 s so real DB round-trips have room.
+jest.setTimeout(30_000)
 
 describe('Intake API (e2e)', () => {
   let app: INestApplication<App>
@@ -305,6 +311,216 @@ describe('Intake API (e2e)', () => {
           ],
         })
         .expect(400)
+    })
+  })
+
+  // ─── Medication replace (PUT /me/medications) ──────────────────────────────
+
+  describe('PUT /me/medications', () => {
+    // Use a separate patient so state from earlier blocks doesn't leak in.
+    const replaceEmail = `${runTag}-replace-patient@example.com`
+    let replaceId: string
+    let replaceToken: string
+
+    async function activeMeds() {
+      return prisma.patientMedication.findMany({
+        where: { userId: replaceId, discontinuedAt: null },
+        orderBy: { reportedAt: 'asc' },
+      })
+    }
+    async function reverify() {
+      await prisma.patientProfile.update({
+        where: { userId: replaceId },
+        data: {
+          profileVerificationStatus: 'VERIFIED',
+          profileVerifiedAt: new Date(),
+          profileVerifiedBy: adminId,
+        },
+      })
+    }
+
+    beforeAll(async () => {
+      const patient = await prisma.user.create({
+        data: {
+          email: replaceEmail,
+          name: 'Replace Patient',
+          roles: ['PATIENT'],
+          isVerified: true,
+          onboardingStatus: 'COMPLETED',
+        },
+      })
+      replaceId = patient.id
+      replaceToken = jwt.sign({
+        sub: patient.id,
+        email: patient.email,
+        roles: patient.roles,
+      })
+      await prisma.patientProfile.create({
+        data: {
+          userId: replaceId,
+          gender: 'FEMALE',
+          heightCm: 165,
+          profileVerificationStatus: 'UNVERIFIED',
+        },
+      })
+      // Seed two meds so replace has something to diff against.
+      await prisma.patientMedication.createMany({
+        data: [
+          {
+            userId: replaceId,
+            drugName: 'Lisinopril',
+            drugClass: 'ACE_INHIBITOR',
+            frequency: 'ONCE_DAILY',
+            source: 'PATIENT_SELF_REPORT',
+            verificationStatus: 'UNVERIFIED',
+          },
+          {
+            userId: replaceId,
+            drugName: 'Carvedilol',
+            drugClass: 'BETA_BLOCKER',
+            frequency: 'TWICE_DAILY',
+            source: 'PATIENT_SELF_REPORT',
+            verificationStatus: 'UNVERIFIED',
+          },
+        ],
+      })
+    })
+
+    afterAll(async () => {
+      await prisma.profileVerificationLog.deleteMany({
+        where: { userId: replaceId },
+      })
+      await prisma.patientMedication.deleteMany({ where: { userId: replaceId } })
+      await prisma.patientProfile.deleteMany({ where: { userId: replaceId } })
+      await prisma.user.deleteMany({ where: { id: replaceId } })
+    })
+
+    it('leaves matching rows untouched and flips nothing when the list is identical', async () => {
+      await reverify()
+      const before = await activeMeds()
+
+      await request(app.getHttpServer())
+        .put('/me/medications')
+        .set('Authorization', `Bearer ${replaceToken}`)
+        .send({
+          medications: before.map((m) => ({
+            drugName: m.drugName,
+            drugClass: m.drugClass,
+            frequency: m.frequency,
+            isCombination: m.isCombination,
+            combinationComponents: m.combinationComponents,
+          })),
+        })
+        .expect(200)
+
+      const after = await activeMeds()
+      expect(after.map((m) => m.id).sort()).toEqual(
+        before.map((m) => m.id).sort(),
+      )
+      const profile = await prisma.patientProfile.findUnique({
+        where: { userId: replaceId },
+      })
+      expect(profile?.profileVerificationStatus).toBe('VERIFIED')
+    })
+
+    it('soft-closes removed rows, creates added rows, and flips VERIFIED → UNVERIFIED', async () => {
+      await reverify()
+      const before = await activeMeds()
+
+      // Keep Lisinopril, drop Carvedilol, add Amlodipine.
+      const res = await request(app.getHttpServer())
+        .put('/me/medications')
+        .set('Authorization', `Bearer ${replaceToken}`)
+        .send({
+          medications: [
+            {
+              drugName: 'Lisinopril',
+              drugClass: 'ACE_INHIBITOR',
+              frequency: 'ONCE_DAILY',
+            },
+            {
+              drugName: 'Norvasc',
+              drugClass: 'DHP_CCB',
+              frequency: 'ONCE_DAILY',
+            },
+          ],
+        })
+        .expect(200)
+
+      expect(res.body.data).toHaveLength(2)
+      const names = res.body.data.map((m: { drugName: string }) => m.drugName).sort()
+      expect(names).toEqual(['Lisinopril', 'Norvasc'])
+
+      const carvedilol = before.find((m) => m.drugName === 'Carvedilol')
+      if (!carvedilol) throw new Error('Carvedilol missing from seed')
+      const after = await prisma.patientMedication.findUnique({
+        where: { id: carvedilol.id },
+      })
+      expect(after?.discontinuedAt).not.toBeNull()
+
+      const profile = await prisma.patientProfile.findUnique({
+        where: { userId: replaceId },
+      })
+      expect(profile?.profileVerificationStatus).toBe('UNVERIFIED')
+      expect(profile?.profileVerifiedAt).toBeNull()
+
+      const logs = await prisma.profileVerificationLog.findMany({
+        where: {
+          userId: replaceId,
+          fieldPath: { startsWith: 'medication:' },
+          rationale: 'patient self-edit post-verification',
+        },
+      })
+      expect(logs.length).toBeGreaterThanOrEqual(2)
+    })
+
+    it('treats frequency change as remove + add (since key includes frequency)', async () => {
+      await reverify()
+      const before = await activeMeds()
+      const lisi = before.find((m) => m.drugName === 'Lisinopril')
+      if (!lisi) throw new Error('Lisinopril missing from seed')
+
+      await request(app.getHttpServer())
+        .put('/me/medications')
+        .set('Authorization', `Bearer ${replaceToken}`)
+        .send({
+          medications: before.map((m) => ({
+            drugName: m.drugName,
+            drugClass: m.drugClass,
+            frequency: m.id === lisi.id ? 'TWICE_DAILY' : m.frequency,
+            isCombination: m.isCombination,
+            combinationComponents: m.combinationComponents,
+          })),
+        })
+        .expect(200)
+
+      const oldLisi = await prisma.patientMedication.findUnique({
+        where: { id: lisi.id },
+      })
+      expect(oldLisi?.discontinuedAt).not.toBeNull()
+
+      const active = await activeMeds()
+      const newLisi = active.find(
+        (m) => m.drugName === 'Lisinopril' && m.frequency === 'TWICE_DAILY',
+      )
+      expect(newLisi).toBeDefined()
+      expect(newLisi?.verificationStatus).toBe('UNVERIFIED')
+
+      const profile = await prisma.patientProfile.findUnique({
+        where: { userId: replaceId },
+      })
+      expect(profile?.profileVerificationStatus).toBe('UNVERIFIED')
+    })
+
+    it('accepts an empty list and soft-closes everything', async () => {
+      await request(app.getHttpServer())
+        .put('/me/medications')
+        .set('Authorization', `Bearer ${replaceToken}`)
+        .send({ medications: [] })
+        .expect(200)
+
+      const active = await activeMeds()
+      expect(active).toHaveLength(0)
     })
   })
 

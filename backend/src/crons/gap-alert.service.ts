@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
 import { EmailService } from '../email/email.service.js'
-import { NotificationChannel, OnboardingStatus, AccountStatus } from '../generated/prisma/client.js'
+import { NotificationChannel, EnrollmentStatus, AccountStatus } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 
 // Title is load-bearing: the idempotency check filters Notifications by this
@@ -27,7 +27,12 @@ export class GapAlertService {
 
   /**
    * Finds enrolled patients whose last reading was > 48h ago (or who've never
-   * logged since onboarding completed 48h+ ago) and nudges them.
+   * logged since enrollment completed 48h+ ago) and nudges them.
+   *
+   * Enrollment (admin-passed 4-piece gate) is the correct filter here — not
+   * identity onboardingStatus, which flips the moment the patient fills
+   * /onboarding and would nudge patients who haven't even completed clinical
+   * intake or been assigned a care team.
    *
    * Public so tests and ops tooling can trigger on demand without waiting
    * for the cron.
@@ -41,9 +46,9 @@ export class GapAlertService {
     const candidates = await this.prisma.user.findMany({
       where: {
         accountStatus: AccountStatus.ACTIVE,
-        onboardingStatus: OnboardingStatus.COMPLETED,
+        enrollmentStatus: EnrollmentStatus.ENROLLED,
         roles: { has: 'PATIENT' },
-        updatedAt: { lte: gapCutoff }, // onboarding completed ≥ 48h ago (proxy)
+        updatedAt: { lte: gapCutoff }, // enrollment completed ≥ 48h ago (proxy)
       },
       select: {
         id: true,

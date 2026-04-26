@@ -1,7 +1,13 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 const ADMIN_COOKIE_NAME = 'cardioplace_admin_token';
-const REQUIRED_ROLE = 'SUPER_ADMIN';
+
+// Any role on this list can reach the admin app. The backend `@Roles()`
+// decorators on individual endpoints are the real authorization — per-tab
+// restrictions (e.g. threshold editor gated to MEDICAL_DIRECTOR/SUPER_ADMIN)
+// are enforced there. This proxy only decides "can you see /admin at all".
+// See TESTING_FLOW_GUIDE.md §2 for the full role matrix.
+const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER', 'HEALPLACE_OPS']);
 
 const PUBLIC_PATHS = new Set<string>([
   '/',
@@ -31,12 +37,12 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   }
 }
 
-function hasSuperAdminRole(token: string): boolean {
+function hasAdminRole(token: string): boolean {
   const payload = decodeJwtPayload(token);
   if (!payload) return false;
   const roles = payload.roles;
   if (!Array.isArray(roles)) return false;
-  return roles.includes(REQUIRED_ROLE);
+  return roles.some((role) => typeof role === 'string' && ADMIN_ROLES.has(role));
 }
 
 export function proxy(request: NextRequest) {
@@ -54,7 +60,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(signInUrl);
   }
 
-  if (!hasSuperAdminRole(token)) {
+  if (!hasAdminRole(token)) {
     const signInUrl = new URL('/sign-in', request.url);
     signInUrl.searchParams.set('reason', 'forbidden');
     return NextResponse.redirect(signInUrl);

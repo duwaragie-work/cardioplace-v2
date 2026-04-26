@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { LanguageProvider } from "@/contexts/LanguageContext";
-import AdminNavbar from "@/components/AdminNavbar";
+import AdminShell from "@/components/AdminShell";
 
 export const metadata: Metadata = {
   title: "Cardioplace Admin",
@@ -16,11 +16,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-screen">
         <AuthProvider>
           <LanguageProvider>
-            <AdminNavbar />
-            {children}
+            {/* AdminShell wraps authed pages with sidebar + top bar; landing
+                / auth routes pass through unchanged so they keep their own
+                marketing chrome. */}
+            <AdminShell>{children}</AdminShell>
           </LanguageProvider>
         </AuthProvider>
       </body>

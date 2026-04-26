@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -31,6 +32,28 @@ export class DailyJournalService {
   ) {}
 
   async create(userId: string, dto: CreateJournalEntryDto) {
+    // Layer A journaling gate — patient must have a PatientProfile row
+    // (completed clinical intake) before their readings get persisted. The
+    // rule engine relies on PatientProfile for every safety-net bias; without
+    // it, any alert generation is silently skipped, so taking a reading would
+    // be clinically meaningless. 403 here drives the frontend to route the
+    // patient into /clinical-intake.
+    //
+    // Admin users (who aren't patients) hit this same gate — they have no
+    // PatientProfile by design, so they can't accidentally pollute the
+    // journal. See TESTING_FLOW_GUIDE.md §6.1 for rationale.
+    const profile = await this.prisma.patientProfile.findUnique({
+      where: { userId },
+      select: { userId: true },
+    })
+    if (!profile) {
+      throw new ForbiddenException({
+        message: 'clinical-intake-required',
+        reason:
+          'Complete your clinical intake before logging readings so your care team has the context to interpret them.',
+      })
+    }
+
     try {
       const entry = await this.prisma.journalEntry.create({
         data: {
@@ -45,10 +68,24 @@ export class DailyJournalService {
           measurementConditions: (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull,
           medicationTaken: dto.medicationTaken ?? null,
           missedDoses: dto.missedDoses ?? null,
-          // TODO(phase/15): replace with structured symptom booleans once
-          // Dev 1 lands the card-based intake UI. v1 clients still send
-          // freeform symptoms[] — we route them to otherSymptoms for now.
-          otherSymptoms: dto.symptoms ?? [],
+          missedMedications: (dto.missedMedications as unknown as JsonValue) ?? Prisma.JsonNull,
+          // V2 structured Level-2 symptom triggers (Flow B). Prefer the
+          // explicit booleans, otherSymptoms goes to the same column. The
+          // legacy `symptoms` array (v1 clients) is appended so nothing is
+          // lost during the transition.
+          severeHeadache: dto.severeHeadache ?? false,
+          visualChanges: dto.visualChanges ?? false,
+          alteredMentalStatus: dto.alteredMentalStatus ?? false,
+          chestPainOrDyspnea: dto.chestPainOrDyspnea ?? false,
+          focalNeuroDeficit: dto.focalNeuroDeficit ?? false,
+          severeEpigastricPain: dto.severeEpigastricPain ?? false,
+          newOnsetHeadache: dto.newOnsetHeadache ?? false,
+          ruqPain: dto.ruqPain ?? false,
+          edema: dto.edema ?? false,
+          otherSymptoms: [
+            ...(dto.otherSymptoms ?? []),
+            ...(dto.symptoms ?? []),
+          ],
           teachBackAnswer: dto.teachBackAnswer ?? null,
           teachBackCorrect: dto.teachBackCorrect ?? null,
           notes: dto.notes ?? null,
@@ -118,7 +155,29 @@ export class DailyJournalService {
           (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull
       if (dto.medicationTaken !== undefined) data.medicationTaken = dto.medicationTaken
       if (dto.missedDoses !== undefined) data.missedDoses = dto.missedDoses
-      if (dto.symptoms !== undefined) data.otherSymptoms = dto.symptoms ?? []
+      if (dto.missedMedications !== undefined) {
+        data.missedMedications =
+          (dto.missedMedications as unknown as JsonValue) ?? Prisma.JsonNull
+      }
+
+      // Structured V2 symptom booleans (Flow B). Each is independently
+      // patchable so a partial update doesn't blow away the others.
+      if (dto.severeHeadache !== undefined) data.severeHeadache = dto.severeHeadache
+      if (dto.visualChanges !== undefined) data.visualChanges = dto.visualChanges
+      if (dto.alteredMentalStatus !== undefined) data.alteredMentalStatus = dto.alteredMentalStatus
+      if (dto.chestPainOrDyspnea !== undefined) data.chestPainOrDyspnea = dto.chestPainOrDyspnea
+      if (dto.focalNeuroDeficit !== undefined) data.focalNeuroDeficit = dto.focalNeuroDeficit
+      if (dto.severeEpigastricPain !== undefined) data.severeEpigastricPain = dto.severeEpigastricPain
+      if (dto.newOnsetHeadache !== undefined) data.newOnsetHeadache = dto.newOnsetHeadache
+      if (dto.ruqPain !== undefined) data.ruqPain = dto.ruqPain
+      if (dto.edema !== undefined) data.edema = dto.edema
+
+      if (dto.otherSymptoms !== undefined || dto.symptoms !== undefined) {
+        data.otherSymptoms = [
+          ...(dto.otherSymptoms ?? []),
+          ...(dto.symptoms ?? []),
+        ]
+      }
       if (dto.teachBackAnswer !== undefined) data.teachBackAnswer = dto.teachBackAnswer
       if (dto.teachBackCorrect !== undefined) data.teachBackCorrect = dto.teachBackCorrect
       if (dto.notes !== undefined) data.notes = dto.notes
@@ -698,7 +757,15 @@ export class DailyJournalService {
             id: true,
             type: true,
             severity: true,
+            tier: true,
+            ruleId: true,
             actualValue: true,
+            // Three-tier messages populated by OutputGenerator (phase/6).
+            // Reviewed wording signed off by Dr. Singal; prefer these over
+            // any hand-rolled strings in this endpoint.
+            patientMessage: true,
+            caregiverMessage: true,
+            physicianMessage: true,
             journalEntry: {
               select: {
                 measuredAt: true,
@@ -718,18 +785,29 @@ export class DailyJournalService {
         const systolicBP = e.alert.journalEntry?.systolicBP ?? 0
         const diastolicBP = e.alert.journalEntry?.diastolicBP ?? 0
 
-        // TODO(phase/6): replace this v1 fallback copy with the three-tier
-        // messages persisted on DeviationAlert (patientMessage / caregiverMessage
-        // / physicianMessage) once the message registry lands.
+        // Prefer the three-tier messages persisted on DeviationAlert
+        // (populated by OutputGenerator in phase/6). The v1 fallback copy
+        // below only fires when a legacy escalation has all three message
+        // columns null — shouldn't happen for phase/5+ alerts but kept as
+        // a defensive last resort so the endpoint never returns an empty
+        // string to the dashboard.
         const patientMessage =
-          e.escalationLevel === EscalationLevel.LEVEL_2
+          e.alert.patientMessage ??
+          (e.escalationLevel === EscalationLevel.LEVEL_2
             ? 'URGENT: Your blood pressure reading indicates a medical emergency. Call 911 immediately or go to your nearest emergency room.'
-            : 'Your recent blood pressure reading has been flagged. Your care team has been notified and will follow up with you within 24 hours.'
+            : 'Your recent blood pressure reading has been flagged. Your care team has been notified and will follow up with you within 24 hours.')
 
+        // Provider dashboard consumes this as the clinical-side message.
+        // `physicianMessage` is the reviewed clinician wording; fall back
+        // to `caregiverMessage` if for some reason physician is null
+        // (Tier 3 physician-only rules DO populate physicianMessage, so
+        // this fallback is belt-and-suspenders).
         const careTeamMessage =
-          e.escalationLevel === EscalationLevel.LEVEL_2
+          e.alert.physicianMessage ??
+          e.alert.caregiverMessage ??
+          (e.escalationLevel === EscalationLevel.LEVEL_2
             ? `IMMEDIATE ACTION REQUIRED: Patient ${e.userId} has critical BP readings (${systolicBP}/${diastolicBP} mmHg). Emergency escalation triggered.`
-            : `FOLLOW-UP WITHIN 24H: Patient ${e.userId} has elevated BP readings (${systolicBP}/${diastolicBP} mmHg). Review recommended.`
+            : `FOLLOW-UP WITHIN 24H: Patient ${e.userId} has elevated BP readings (${systolicBP}/${diastolicBP} mmHg). Review recommended.`)
 
         return {
           id: e.id,
@@ -741,6 +819,8 @@ export class DailyJournalService {
             id: e.alert.id,
             type: e.alert.type,
             severity: e.alert.severity,
+            tier: e.alert.tier,
+            ruleId: e.alert.ruleId,
             actualValue: e.alert.actualValue ? Number(e.alert.actualValue) : null,
             journalEntry: e.alert.journalEntry
               ? {
@@ -767,6 +847,15 @@ export class DailyJournalService {
     sessionId: string | null
     medicationTaken: boolean | null
     missedDoses: number | null
+    severeHeadache?: boolean
+    visualChanges?: boolean
+    alteredMentalStatus?: boolean
+    chestPainOrDyspnea?: boolean
+    focalNeuroDeficit?: boolean
+    severeEpigastricPain?: boolean
+    newOnsetHeadache?: boolean
+    ruqPain?: boolean
+    edema?: boolean
     otherSymptoms: string[]
     teachBackAnswer: string | null
     teachBackCorrect: boolean | null
@@ -788,6 +877,15 @@ export class DailyJournalService {
       sessionId: entry.sessionId,
       medicationTaken: entry.medicationTaken,
       missedDoses: entry.missedDoses,
+      severeHeadache: entry.severeHeadache ?? false,
+      visualChanges: entry.visualChanges ?? false,
+      alteredMentalStatus: entry.alteredMentalStatus ?? false,
+      chestPainOrDyspnea: entry.chestPainOrDyspnea ?? false,
+      focalNeuroDeficit: entry.focalNeuroDeficit ?? false,
+      severeEpigastricPain: entry.severeEpigastricPain ?? false,
+      newOnsetHeadache: entry.newOnsetHeadache ?? false,
+      ruqPain: entry.ruqPain ?? false,
+      edema: entry.edema ?? false,
       otherSymptoms: entry.otherSymptoms,
       teachBackAnswer: entry.teachBackAnswer,
       teachBackCorrect: entry.teachBackCorrect,

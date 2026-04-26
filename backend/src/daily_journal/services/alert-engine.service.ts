@@ -53,6 +53,7 @@ import {
   getLoopDiureticAnnotation,
   loopDiureticHypotensionRule,
 } from '../engine/loop-diuretic.js'
+import { medicationMissedRule } from '../engine/adherence.js'
 
 /**
  * Phase/5 AlertEngineService — the single owner of rule evaluation.
@@ -106,7 +107,21 @@ export class AlertEngineService {
     )
   }
 
-  /** Evaluate a single JournalEntry. Public so tests + ops tooling can call. */
+  /**
+   * Evaluate a single JournalEntry. Public so tests + ops tooling can call.
+   *
+   * Runs two independent passes against the same session:
+   *   Pass 1 — BP/HR rule pipeline (short-circuits on first match, one alert).
+   *   Pass 2 — Medication-adherence rule (fires if the session reports any
+   *            missed dose). Runs regardless of Pass 1's outcome, so a single
+   *            entry can persist up to TWO DeviationAlert rows (different
+   *            ruleIds; dedup key is `journalEntryId + ruleId`).
+   *
+   * The return value preserves the legacy "primary result" shape for callers
+   * that expect one RuleResult — BP/HR wins if fired, else adherence, else
+   * null. Tests that assert on `prisma.deviationAlert.create.mock.calls[0]`
+   * stay stable because BP is persisted before adherence.
+   */
   async evaluate(entryId: string): Promise<RuleResult | null> {
     const session = await this.sessionAverager.averageForEntry(entryId)
     if (!session) return null
@@ -124,17 +139,27 @@ export class AlertEngineService {
       throw err
     }
 
-    const result = await this.runPipeline(session, ctx)
-    if (!result) {
-      await this.resolveOpenAlerts(session.userId)
-      return null
+    // Pass 1 — BP/HR pipeline
+    const bpResult = await this.runPipeline(session, ctx)
+    if (bpResult) {
+      this.addPhysicianAnnotations(bpResult, session, ctx)
+      await this.persistAlert(session, ctx, bpResult)
     }
 
-    // Annotate physicianMessage for wide PP + loop-diuretic sensitivity.
-    this.addPhysicianAnnotations(result, session, ctx)
+    // Pass 2 — Adherence pipeline (independent of Pass 1)
+    const adherenceResult = medicationMissedRule(session, ctx)
+    if (adherenceResult) {
+      await this.persistAlert(session, ctx, adherenceResult)
+    }
 
-    await this.persistAlert(session, ctx, result)
-    return result
+    // Only run the BP-L1 resolve-sweep when NEITHER pipeline fired. This
+    // preserves Bug 2 fix scope (sweep is scoped to BP L1 tiers only) and
+    // avoids auto-resolving adherence alerts on an unrelated benign BP entry.
+    if (!bpResult && !adherenceResult) {
+      await this.resolveOpenAlerts(session.userId)
+    }
+
+    return bpResult ?? adherenceResult
   }
 
   // ─── pipeline ──────────────────────────────────────────────────────────
@@ -357,7 +382,8 @@ export class AlertEngineService {
     // constraint until it can be dropped (phase/7+).
     if (
       result.ruleId === 'RULE_PREGNANCY_ACE_ARB' ||
-      result.ruleId === 'RULE_NDHP_HFREF'
+      result.ruleId === 'RULE_NDHP_HFREF' ||
+      result.ruleId === 'RULE_MEDICATION_MISSED'
     ) {
       return 'MEDICATION_ADHERENCE'
     }

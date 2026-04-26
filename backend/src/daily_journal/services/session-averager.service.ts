@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service.js'
-import type { SessionAverage, SessionSymptoms } from '../engine/types.js'
+import type {
+  SessionAverage,
+  SessionMissedMedication,
+  SessionSymptoms,
+} from '../engine/types.js'
 
 /**
  * Phase/5 SessionAverager — groups readings that belong to the same "session"
@@ -99,6 +103,8 @@ export class SessionAveragerService {
       ruqPain: boolean
       edema: boolean
       otherSymptoms: string[]
+      medicationTaken?: boolean | null
+      missedMedications?: unknown
     }>,
   ): SessionAverage | null {
     if (siblings.length === 0) return null
@@ -118,6 +124,8 @@ export class SessionAveragerService {
     const latest = siblings.reduce((a, b) =>
       a.measuredAt > b.measuredAt ? a : b,
     )
+    const medicationTaken = orReduceMedicationTaken(siblings)
+    const missedMedications = unionMissedMedications(siblings)
 
     return {
       entryId: anchor.id,
@@ -130,6 +138,8 @@ export class SessionAveragerService {
       symptoms,
       suboptimalMeasurement: suboptimal,
       sessionId: anchor.sessionId,
+      medicationTaken,
+      missedMedications,
     }
   }
 }
@@ -190,4 +200,55 @@ function hasAnyFalseChecklistItem(raw: unknown): boolean {
     if (v === false) return true
   }
   return false
+}
+
+/**
+ * OR-reduce the session's adherence signal. Any `false` wins; otherwise the
+ * first non-null value (`true`) wins; else `null` (not asked).
+ */
+function orReduceMedicationTaken(
+  entries: Array<{ medicationTaken?: boolean | null }>,
+): boolean | null {
+  let anyFalse = false
+  let anyTrue = false
+  for (const e of entries) {
+    if (e.medicationTaken === false) anyFalse = true
+    else if (e.medicationTaken === true) anyTrue = true
+  }
+  if (anyFalse) return false
+  if (anyTrue) return true
+  return null
+}
+
+/**
+ * Union per-medication miss detail across the session's entries. If the same
+ * medicationId appears twice, the latest entry's reason/missedDoses wins
+ * (entries arrive sorted ascending by measuredAt, so iterate in order and
+ * overwrite).
+ */
+function unionMissedMedications(
+  entries: Array<{ missedMedications?: unknown }>,
+): SessionMissedMedication[] {
+  const byId = new Map<string, SessionMissedMedication>()
+  for (const e of entries) {
+    const raw = e.missedMedications
+    if (!Array.isArray(raw)) continue
+    for (const item of raw) {
+      if (!isValidMissedMedication(item)) continue
+      byId.set(item.medicationId, item)
+    }
+  }
+  return [...byId.values()]
+}
+
+function isValidMissedMedication(v: unknown): v is SessionMissedMedication {
+  if (v == null || typeof v !== 'object') return false
+  const o = v as Record<string, unknown>
+  return (
+    typeof o.medicationId === 'string' &&
+    typeof o.drugName === 'string' &&
+    typeof o.drugClass === 'string' &&
+    typeof o.reason === 'string' &&
+    typeof o.missedDoses === 'number'
+  )
 }

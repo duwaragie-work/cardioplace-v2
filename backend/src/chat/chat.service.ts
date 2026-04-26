@@ -1,7 +1,11 @@
 import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { Content } from '@google/genai'
-import { ProfileNotFoundException, type ResolvedContext } from '@cardioplace/shared'
+import {
+  getTrailing7DayBaseline,
+  ProfileNotFoundException,
+  type ResolvedContext,
+} from '@cardioplace/shared'
 import { ChatRequestDto } from './dto/chat-request.dto.js'
 import { SystemPromptService } from './services/system-prompt.service.js'
 import { RagService } from './services/rag.service.js'
@@ -65,6 +69,9 @@ export class ChatService {
       this.prisma.journalEntry.findMany({
         where: { userId },
         orderBy: { measuredAt: 'desc' },
+        // Cap at 30 most-recent readings — more than covers the 7-day baseline
+        // window while keeping prompt size bounded for long-enrolled patients.
+        take: 30,
         select: {
           measuredAt: true, systolicBP: true, diastolicBP: true,
           weight: true, medicationTaken: true,
@@ -99,26 +106,10 @@ export class ChatService {
       }) as Promise<ResolvedContext | null>,
     ])
 
-    // Compute trailing 7-day mean inline (v2: derived, never stored).
-    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
-    const recentComplete = recentEntries.filter(
-      (e) =>
-        e.systolicBP != null &&
-        e.diastolicBP != null &&
-        new Date(e.measuredAt).getTime() >= sevenDaysAgo,
-    )
-    const baseline = recentComplete.length > 0
-      ? {
-          baselineSystolic: Math.round(
-            recentComplete.reduce((a, e) => a + (e.systolicBP as number), 0) /
-              recentComplete.length,
-          ),
-          baselineDiastolic: Math.round(
-            recentComplete.reduce((a, e) => a + (e.diastolicBP as number), 0) /
-              recentComplete.length,
-          ),
-        }
-      : null
+    // Trailing 7-day mean — single source of truth lives in
+    // @cardioplace/shared/derivatives. Voice uses the same helper so the
+    // chat and voice agents render identical baselines.
+    const baseline = getTrailing7DayBaseline(recentEntries)
 
     const patientContext = this.systemPromptService.buildPatientContext({
       recentEntries: recentEntries.map((e) => ({
@@ -265,32 +256,19 @@ export class ChatService {
 
         let resultStr: string
 
-        // Guard submit_checkin: ensure medication and symptoms were discussed.
-        // If the patient provided the values (tool args have them), allow it.
-        // If not, check if the model asked about them in the conversation.
+        // Two-layer submit_checkin safety net (see checkSubmitCheckinDiscussion
+        // below for the rationale). This call is the outer layer — catches
+        // the case where Gemini fabricated values without a prior Q/A exchange.
+        // The inner layer in journal-tools.ts:168–184 still enforces that
+        // required args are present on the call.
         if (toolName === 'submit_checkin') {
-          const allText = contents
-            .flatMap((c) => (c.parts as any[])?.filter((p: any) => p.text).map((p: any) => p.text) ?? [])
-            .join(' ')
-
-          // The patient provided medication_taken explicitly OR the model discussed it
-          const hasMedication = toolArgs.medication_taken != null || /medication|meds|medicine|pills/.test(allText)
-          // The patient provided symptoms explicitly OR the model discussed it
-          const hasSymptoms = Array.isArray(toolArgs.symptoms) || /symptom|headache|dizziness|chest|no symptom|none|nothing|fine/.test(allText)
-          // Weight was discussed or provided
-          const hasWeight = toolArgs.weight != null || /weight|weigh|lbs|pounds|skip/.test(allText)
-
-          const missing: string[] = []
-          if (!hasMedication) missing.push('medication (ask: "Did you take your medication today?")')
-          if (!hasSymptoms) missing.push('symptoms (ask: "Any symptoms like headache, dizziness, or chest tightness?")')
-          if (!hasWeight) missing.push('weight (ask: "Do you know your weight today? Totally fine to skip.")')
-
-          if (missing.length > 0) {
-            console.log(`[submit_checkin BLOCKED] Missing: ${missing.join(', ')}`)
+          const gate = ChatService.checkSubmitCheckinDiscussion(contents, toolArgs)
+          if (gate.block) {
+            console.log(`[submit_checkin BLOCKED] Missing: ${gate.missing.join(', ')}`)
             resultStr = JSON.stringify({
               saved: false,
               _internal: true,
-              next_action: `Continue asking. Missing: ${missing[0]}`,
+              next_action: `Continue asking. Missing: ${gate.missing[0]}`,
             })
           } else {
             resultStr = await executeJournalTool(toolName, toolArgs, this.dailyJournalService, userId)
@@ -370,16 +348,23 @@ export class ChatService {
   }
 
   /**
-   * Stream response token-by-token (SSE).
+   * Stream response token-by-token (SSE) with live Gemini streaming.
    *
    * Tier 1 (parallel, no Gemini calls): DB queries + local embeddings
-   * Tier 2 (single Gemini call): generateContentWithTools (+ emergency via flag_emergency tool)
+   * Tier 2 (streaming Gemini call): streamContentWithTools driving the
+   *        function-calling loop — text parts yield to the client as they
+   *        arrive; function calls at end-of-iteration run tools, then the
+   *        next iteration streams through again.
    * Tier 3 (fire-and-forget): saveConversation + title
    */
   async *getStreamingResponse(
     request: ChatRequestDto,
     userId: string,
-  ): AsyncIterable<string | { type: 'emergency'; emergencySituation: string | null }> {
+  ): AsyncIterable<
+    | string
+    | { type: 'emergency'; emergencySituation: string | null }
+    | { type: 'toolResult'; tool: string; result: any }
+  > {
     const { prompt } = request
     const sessionId = request.sessionId as string
 
@@ -397,23 +382,157 @@ export class ChatService {
       const systemPrompt = this.assembleSystemPrompt(basePrompt, sessionSummary, ragDocs)
       const contents = this.buildGeminiContents(chatHistory, prompt)
 
-      // ── Tier 2: Single Gemini call — LLM response + emergency detection via tool ──
-      const { text: fullResponse, emergency } = await this.runToolLoop(systemPrompt, contents, userId, prompt)
+      // ── Tier 2: Streaming Gemini + function-calling loop ────────────────
+      const toolDeclarations = getJournalToolDeclarations()
+      let fullResponse = ''
+      const toolResultsCollected: Array<{ tool: string; result: any }> = []
+      let emergency: EmergencyDetectionResult = { isEmergency: false, emergencySituation: null }
+      let emergencyYielded = false
 
-      if (emergency.isEmergency) {
-        yield { type: 'emergency', emergencySituation: emergency.emergencySituation }
-        this.recordEmergencyEvent(sessionId, userId, prompt, emergency.emergencySituation!)
-      }
+      for (let iteration = 0; iteration < 5; iteration++) {
+        const stream = this.geminiService.streamContentWithTools({
+          contents,
+          systemInstruction: systemPrompt,
+          tools: toolDeclarations,
+        })
 
-      if (fullResponse) {
-        const words = fullResponse.split(' ')
-        for (let i = 0; i < words.length; i++) {
-          yield (i > 0 ? ' ' : '') + words[i]
+        let iterationText = ''
+        const iterationParts: any[] = []
+        const iterationFunctionCalls: any[] = []
+
+        for await (const chunk of stream) {
+          const parts = chunk.candidates?.[0]?.content?.parts ?? []
+          for (const part of parts) {
+            iterationParts.push(part)
+            if (part.text) {
+              iterationText += part.text
+              // Stream raw text fragments to the client the moment they arrive.
+              // Guard-pattern stripping runs only on the persisted record —
+              // if guards leak to the UI briefly it's a known tradeoff.
+              yield part.text
+            }
+            if (part.functionCall) {
+              iterationFunctionCalls.push(part)
+            }
+          }
         }
 
-        // ── Tier 3: Save conversation ──────────────────────────────────────
+        fullResponse += iterationText
+
+        if (iterationFunctionCalls.length === 0) {
+          // Final iteration — no more tool calls.
+          break
+        }
+
+        // Tool calls present: feed the model's response back + execute tools.
+        contents.push({ role: 'model', parts: iterationParts })
+
+        const functionResponseParts: any[] = []
+        for (const part of iterationFunctionCalls) {
+          const fc = part.functionCall
+          const toolName = fc.name
+          const toolArgs = (fc.args ?? {}) as Record<string, any>
+
+          console.log(`Executing tool: ${toolName}`, JSON.stringify(toolArgs))
+
+          let resultStr: string
+          if (toolName === 'submit_checkin') {
+            const gate = ChatService.checkSubmitCheckinDiscussion(contents, toolArgs)
+            if (gate.block) {
+              console.log(`[submit_checkin BLOCKED] Missing: ${gate.missing.join(', ')}`)
+              resultStr = JSON.stringify({
+                saved: false,
+                _internal: true,
+                next_action: `Continue asking. Missing: ${gate.missing[0]}`,
+              })
+            } else {
+              resultStr = await executeJournalTool(toolName, toolArgs, this.dailyJournalService, userId)
+            }
+          } else {
+            resultStr = await executeJournalTool(toolName, toolArgs, this.dailyJournalService, userId)
+          }
+
+          console.log(`Tool result [${toolName}]:`, resultStr.slice(0, 200))
+
+          if (toolName === 'flag_emergency') {
+            emergency = {
+              isEmergency: true,
+              emergencySituation: toolArgs.emergency_situation ?? 'Emergency detected',
+            }
+            if (!emergencyYielded) {
+              emergencyYielded = true
+              yield { type: 'emergency', emergencySituation: emergency.emergencySituation }
+              this.recordEmergencyEvent(sessionId, userId, prompt, emergency.emergencySituation!)
+            }
+          }
+
+          functionResponseParts.push({
+            functionResponse: {
+              name: toolName,
+              response: JSON.parse(resultStr),
+            },
+          })
+
+          if (toolName !== 'flag_emergency') {
+            try {
+              const parsed = JSON.parse(resultStr)
+              const wasBlocked = (toolName === 'submit_checkin' && parsed.saved === false) ||
+                                 (toolName === 'update_checkin' && parsed.updated === false)
+              if (!wasBlocked) {
+                toolResultsCollected.push({ tool: toolName, result: parsed })
+                yield { type: 'toolResult', tool: toolName, result: parsed }
+              }
+            } catch {
+              const fallbackResult = { message: resultStr }
+              toolResultsCollected.push({ tool: toolName, result: fallbackResult })
+              yield { type: 'toolResult', tool: toolName, result: fallbackResult }
+            }
+          }
+        }
+
+        contents.push({ role: 'user', parts: functionResponseParts })
+      }
+
+      // Fallback: if a tool succeeded but the model produced no user-facing
+      // text, stream a synthesized acknowledgement (mirrors runToolLoop's
+      // fallback so the UX matches the structured endpoint).
+      if (!fullResponse.trim() && toolResultsCollected.length > 0) {
+        let fallback = ''
+        for (const tr of toolResultsCollected) {
+          if (tr.tool === 'submit_checkin' && tr.result.saved) {
+            fallback = `Your check-in has been saved successfully! ${tr.result.message || ''}`
+          } else if (tr.tool === 'update_checkin' && tr.result.updated) {
+            fallback = `Your reading has been updated successfully! ${tr.result.message || ''}`
+          } else if (tr.tool === 'delete_checkin') {
+            fallback = tr.result.deleted
+              ? `Your reading has been deleted. ${tr.result.message || ''}`
+              : `I wasn't able to delete your reading. ${tr.result.message || 'Please try again.'}`
+          }
+        }
+        if (fallback) {
+          fullResponse = fallback
+          yield fallback
+        }
+      }
+
+      // Strip any leaked internal guard messages from the persisted record
+      // (the live stream may have shown them; the saved version is clean).
+      const guardPatterns = [
+        /You still need to ask the patient about:.*?(?:Ask the next|Do NOT call)/gs,
+        /REJECTED:.*?(?:Only call submit_checkin|before saving)/gs,
+        /You still need to ask.*?answered\./gs,
+        /Ask the next missing question ONE AT A TIME.*?\./g,
+        /Do NOT call submit_checkin again until all questions are answered\./g,
+      ]
+      let cleanedResponse = fullResponse
+      for (const pattern of guardPatterns) {
+        cleanedResponse = cleanedResponse.replace(pattern, '').trim()
+      }
+
+      // ── Tier 3: Save conversation (fire-and-forget after stream closes) ──
+      if (cleanedResponse) {
         try {
-          await this.conversationHistoryService.saveConversation(sessionId, prompt, fullResponse)
+          await this.conversationHistoryService.saveConversation(sessionId, prompt, cleanedResponse)
         } catch (err) {
           console.error('Error saving conversation:', err)
         }
@@ -607,5 +726,70 @@ export class ChatService {
     } catch (error) {
       console.error('Error generating session title:', error)
     }
+  }
+
+  /**
+   * Pre-tool-call gate for submit_checkin.
+   *
+   * Why this exists on top of the journal-tools.ts arg-shape guard:
+   * the tool-layer guard (journal-tools.ts:168–184) checks that required
+   * args are PRESENT on the function call. This guard checks that the
+   * topics were DISCUSSED in the conversation before the save fires. The
+   * two catch different model failure modes:
+   *   - arg-shape guard catches "model forgot a required arg"
+   *   - this discussion guard catches "model fabricated plausible values
+   *     without a prior Q/A turn" (Gemini is prone to this if the patient's
+   *     first message already contains enough info)
+   *
+   * Both gates are intentionally layered. Don't remove this without the
+   * other layer; don't collapse them without a regression plan.
+   *
+   * Pure / stateless so it can be unit-tested without constructing the
+   * full ChatService.
+   */
+  static checkSubmitCheckinDiscussion(
+    contents: readonly Content[],
+    toolArgs: Record<string, unknown>,
+  ): { block: boolean; missing: string[] } {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const allText = contents
+      .flatMap(
+        (c) =>
+          (c.parts as any[])
+            ?.filter((p: any) => p.text)
+            .map((p: any) => p.text) ?? [],
+      )
+      .join(' ')
+
+    const hasMedication =
+      toolArgs.medication_taken != null ||
+      /medication|meds|medicine|pills/.test(allText)
+    const hasSymptoms =
+      Array.isArray(toolArgs.symptoms) ||
+      /symptom|headache|dizziness|chest|no symptom|none|nothing|fine/.test(
+        allText,
+      )
+    const hasWeight =
+      toolArgs.weight != null ||
+      /weight|weigh|lbs|pounds|skip/.test(allText)
+
+    const missing: string[] = []
+    if (!hasMedication) {
+      missing.push(
+        'medication (ask: "Did you take your medication today?")',
+      )
+    }
+    if (!hasSymptoms) {
+      missing.push(
+        'symptoms (ask: "Any symptoms like headache, dizziness, or chest tightness?")',
+      )
+    }
+    if (!hasWeight) {
+      missing.push(
+        'weight (ask: "Do you know your weight today? Totally fine to skip.")',
+      )
+    }
+
+    return { block: missing.length > 0, missing }
   }
 }
