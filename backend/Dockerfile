@@ -8,6 +8,11 @@ WORKDIR /app
 
 ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 
+# OpenSSL + ca-certs needed by Prisma's CLI/engine on slim base image
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 # Workspace manifests for cache-friendly install
 COPY package.json package-lock.json ./
 COPY backend/package.json ./backend/
@@ -31,6 +36,11 @@ WORKDIR /app
 
 ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 ENV NODE_ENV=production
+
+# OpenSSL + ca-certs needed by Prisma at runtime on slim base image
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
 COPY backend/package.json ./backend/
