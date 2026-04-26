@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-# Build context: REPO ROOT (not frontend/). Set Railway's rootDirectory to "/"
-# and dockerfilePath to "frontend/Dockerfile".
+# Build context: REPO ROOT (not admin/). Set Railway's rootDirectory to "/"
+# and dockerfilePath to "admin/Dockerfile".
 
 FROM node:20-alpine AS builder
 
@@ -8,8 +8,6 @@ WORKDIR /app
 
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-ARG NEXT_PUBLIC_VOICE_WS_URL
-ENV NEXT_PUBLIC_VOICE_WS_URL=$NEXT_PUBLIC_VOICE_WS_URL
 
 # Workspace manifests for cache-friendly install
 COPY package.json package-lock.json ./
@@ -20,12 +18,12 @@ COPY shared/package.json ./shared/
 
 RUN npm ci
 
-# Source for the workspaces frontend depends on
+# Source for the workspaces admin depends on
 COPY shared ./shared
-COPY frontend ./frontend
+COPY admin ./admin
 
 RUN npm run build -w @cardioplace/shared
-RUN npm run build -w frontend
+RUN npm run build -w admin
 
 # ── Production image ──────────────────────────────────────────────────────────
 FROM node:20-alpine
@@ -35,12 +33,12 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # Next.js standalone output (with outputFileTracingRoot=monorepo root) lays out
-# files mirroring the monorepo, so /app/frontend/server.js is the entrypoint.
-COPY --from=builder /app/frontend/.next/standalone ./
-COPY --from=builder /app/frontend/.next/static ./frontend/.next/static
-COPY --from=builder /app/frontend/public ./frontend/public
+# files mirroring the monorepo, so /app/admin/server.js is the entrypoint.
+COPY --from=builder /app/admin/.next/standalone ./
+COPY --from=builder /app/admin/.next/static ./admin/.next/static
+COPY --from=builder /app/admin/public ./admin/public
 
-EXPOSE 3000
+EXPOSE 3001
 
-WORKDIR /app/frontend
+WORKDIR /app/admin
 CMD ["node", "server.js"]

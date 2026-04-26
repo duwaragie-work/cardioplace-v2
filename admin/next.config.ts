@@ -5,6 +5,7 @@ const monorepoRoot = path.resolve(process.cwd(), '..');
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  outputFileTracingRoot: monorepoRoot,
   turbopack: {
     root: monorepoRoot,
   },
