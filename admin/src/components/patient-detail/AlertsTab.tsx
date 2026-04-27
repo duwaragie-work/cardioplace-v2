@@ -39,6 +39,9 @@ interface Props {
   alerts: PatientAlert[];
   loading: boolean;
   onResolved: () => void;
+  /** PatientProfile.heightCm — passed through to EscalationAuditTrail
+   *  so the resolution audit footer can compute BMI alongside PP. */
+  heightCm?: number | null;
 }
 
 type TierBucket = 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'TIER_3' | 'OTHER';
@@ -77,7 +80,7 @@ function timeAgo(iso: string): string {
 }
 
 
-export default function AlertsTab({ alerts, loading, onResolved }: Props) {
+export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Props) {
   const [tierFilter, setTierFilter] = useState<TierBucket>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('OPEN');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -278,9 +281,29 @@ export default function AlertsTab({ alerts, loading, onResolved }: Props) {
                     <p className="text-[12.5px] mt-0.5 line-clamp-1" style={{ color: 'var(--brand-text-primary)' }}>
                       {a.patientMessage ?? a.type ?? 'Alert'}
                       {a.journalEntry?.systolicBP != null && a.journalEntry?.diastolicBP != null && (
-                        <span className="ml-2 font-bold" style={{ color: chrome.color }}>
-                          {a.journalEntry.systolicBP}/{a.journalEntry.diastolicBP}
-                        </span>
+                        <>
+                          <span className="ml-2 font-bold" style={{ color: chrome.color }}>
+                            {a.journalEntry.systolicBP}/{a.journalEntry.diastolicBP}
+                          </span>
+                          {/* Pulse pressure inline — clinical signal admins
+                              scan for at a glance. Not shown to patients. */}
+                          <span
+                            className="ml-1.5 text-[10px] font-semibold px-1 py-0.5 rounded"
+                            style={{
+                              backgroundColor:
+                                a.journalEntry.systolicBP - a.journalEntry.diastolicBP > 60
+                                  ? 'var(--brand-warning-amber-light)'
+                                  : 'var(--brand-background)',
+                              color:
+                                a.journalEntry.systolicBP - a.journalEntry.diastolicBP > 60
+                                  ? 'var(--brand-warning-amber)'
+                                  : 'var(--brand-text-secondary)',
+                            }}
+                            title="Pulse pressure (SBP − DBP)"
+                          >
+                            PP {a.journalEntry.systolicBP - a.journalEntry.diastolicBP}
+                          </span>
+                        </>
                       )}
                     </p>
                     <p className="text-[10.5px] mt-0.5 inline-flex items-center gap-1" style={{ color: 'var(--brand-text-muted)' }}>
@@ -348,7 +371,7 @@ export default function AlertsTab({ alerts, loading, onResolved }: Props) {
                         and the 15-field resolution audit footer. Replaces
                         the prior horizontal pill ladder + standalone
                         resolution receipt. */}
-                    <EscalationAuditTrail alert={a} />
+                    <EscalationAuditTrail alert={a} heightCm={heightCm} />
                   </div>
                 )}
               </div>

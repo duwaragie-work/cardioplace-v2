@@ -47,6 +47,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/auth-context';
+import { hasAdminRole, isProviderOnly } from '@/lib/roleGates';
 import { useLanguage } from '@/contexts/LanguageContext';
 import AlertPanel, { type Alert, type AlertDetail } from './AlertPanel';
 import ScheduleModal, { type ScheduleDetails } from './ScheduleModal';
@@ -296,9 +297,15 @@ export default function AdminDashboard() {
   const [scheduleError, setScheduleError] = useState<string | null>(null);
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
+  // PROVIDER-only callers get the assigned-only scope. Other admin roles
+  // see everything.
+  const alertScope = isProviderOnly(user) ? 'assigned' : undefined;
   const refreshData = useCallback(() => {
     setDataLoading(true);
-    Promise.all([getProviderStats(), getProviderAlerts()])
+    Promise.all([
+      getProviderStats(),
+      getProviderAlerts(alertScope ? { scope: alertScope } : undefined),
+    ])
       .then(([statsData, alertsData]) => {
         setStats({
           totalPatients: statsData.totalActivePatients ?? statsData.totalPatients ?? 0,
@@ -313,7 +320,7 @@ export default function AdminDashboard() {
         // best-effort
       })
       .finally(() => setDataLoading(false));
-  }, []);
+  }, [alertScope]);
 
   useEffect(() => {
     if (isLoading || !user) return;
@@ -499,7 +506,7 @@ export default function AdminDashboard() {
     );
   }
 
-  if (user?.email !== 'support@healplace.com') {
+  if (!hasAdminRole(user)) {
     return (
       <div
         style={{
@@ -707,49 +714,58 @@ export default function AdminDashboard() {
                     border: '2px solid var(--brand-alert-red)',
                   }}
                 >
+                  {/* Mobile (default): icon + content stack vertically with
+                      buttons going full-width at the bottom (each taking
+                      half the row). Desktop (md+): traditional single-row
+                      layout with right-aligned buttons. */}
                   <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
-                    <div
-                      className="shrink-0 w-10 h-10 md:w-11 md:h-11 rounded-xl flex items-center justify-center text-white"
-                      style={{ backgroundColor: 'var(--brand-alert-red)' }}
-                      aria-hidden
-                    >
-                      <ShieldAlert className="w-5 h-5" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center flex-wrap gap-2 mb-1">
-                        <span
-                          className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full text-white"
-                          style={{ backgroundColor: 'var(--brand-alert-red)' }}
-                        >
-                          BP Level 2 · Emergency
-                        </span>
-                        <span className="text-[11px] font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
-                          {timeAgo(a.createdAt)}
-                        </span>
-                        {a.followUpScheduledAt && (
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <div
+                        className="shrink-0 w-10 h-10 md:w-11 md:h-11 rounded-xl flex items-center justify-center text-white"
+                        style={{ backgroundColor: 'var(--brand-alert-red)' }}
+                        aria-hidden
+                      >
+                        <ShieldAlert className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center flex-wrap gap-x-2 gap-y-1 mb-1">
                           <span
-                            className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                            style={{ backgroundColor: '#CCFBF1', color: '#0D9488' }}
+                            className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full text-white whitespace-nowrap"
+                            style={{ backgroundColor: 'var(--brand-alert-red)' }}
                           >
-                            Call scheduled
+                            BP Level 2 · Emergency
                           </span>
+                          <span className="text-[11px] font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
+                            {timeAgo(a.createdAt)}
+                          </span>
+                          {a.followUpScheduledAt && (
+                            <span
+                              className="text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap"
+                              style={{ backgroundColor: '#CCFBF1', color: '#0D9488' }}
+                            >
+                              Call scheduled
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[13.5px] sm:text-[14px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
+                          <span className="break-words">{a.patient?.name ?? 'Unknown patient'}</span>
+                          {a.journalEntry?.systolicBP != null && a.journalEntry?.diastolicBP != null && (
+                            <span className="ml-2 whitespace-nowrap" style={{ color: 'var(--brand-alert-red)' }}>
+                              {a.journalEntry.systolicBP}/{a.journalEntry.diastolicBP} mmHg
+                            </span>
+                          )}
+                        </p>
+                        {a.patientMessage && (
+                          <p className="text-[12px] sm:text-[12.5px] mt-1.5 leading-relaxed break-words" style={{ color: 'var(--brand-text-secondary)' }}>
+                            {a.patientMessage}
+                          </p>
                         )}
                       </div>
-                      <p className="text-[14px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
-                        {a.patient?.name ?? 'Unknown patient'}
-                        {a.journalEntry?.systolicBP != null && a.journalEntry?.diastolicBP != null && (
-                          <span className="ml-2" style={{ color: 'var(--brand-alert-red)' }}>
-                            {a.journalEntry.systolicBP}/{a.journalEntry.diastolicBP} mmHg
-                          </span>
-                        )}
-                      </p>
-                      {a.patientMessage && (
-                        <p className="text-[12.5px] mt-1.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
-                          {a.patientMessage}
-                        </p>
-                      )}
                     </div>
-                    <div className="flex gap-2 shrink-0">
+                    {/* Buttons: full-width pair on mobile, compact inline
+                        on desktop. flex-1 on each button on mobile so they
+                        share the row evenly. */}
+                    <div className="flex gap-2 md:shrink-0 [&>button]:flex-1 md:[&>button]:flex-none">
                       <button
                         type="button"
                         className="btn-admin-secondary"
@@ -788,40 +804,42 @@ export default function AdminDashboard() {
                   }}
                 >
                   <div className="flex flex-col md:flex-row md:items-center gap-3">
-                    <div
-                      className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-white"
-                      style={{ backgroundColor: 'var(--brand-alert-red)' }}
-                      aria-hidden
-                    >
-                      <Pill className="w-4 h-4" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center flex-wrap gap-2 mb-0.5">
-                        <span
-                          className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full"
-                          style={{ backgroundColor: 'var(--brand-alert-red)', color: 'white' }}
-                        >
-                          Tier 1 · Contraindication
-                        </span>
-                        <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
-                          {timeAgo(a.createdAt)}
-                        </span>
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <div
+                        className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-white"
+                        style={{ backgroundColor: 'var(--brand-alert-red)' }}
+                        aria-hidden
+                      >
+                        <Pill className="w-4 h-4" />
                       </div>
-                      <p className="text-[13.5px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
-                        {a.patient?.name ?? 'Unknown patient'}
-                        {a.ruleId && (
-                          <span className="ml-2 text-[11px] font-mono font-normal" style={{ color: 'var(--brand-text-muted)' }}>
-                            {a.ruleId}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center flex-wrap gap-x-2 gap-y-1 mb-0.5">
+                          <span
+                            className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full whitespace-nowrap"
+                            style={{ backgroundColor: 'var(--brand-alert-red)', color: 'white' }}
+                          >
+                            Tier 1 · Contraindication
                           </span>
-                        )}
-                      </p>
-                      {a.patientMessage && (
-                        <p className="text-[12px] mt-1 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
-                          {a.patientMessage}
+                          <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
+                            {timeAgo(a.createdAt)}
+                          </span>
+                        </div>
+                        <p className="text-[13px] sm:text-[13.5px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
+                          <span className="break-words">{a.patient?.name ?? 'Unknown patient'}</span>
+                          {a.ruleId && (
+                            <span className="ml-2 text-[11px] font-mono font-normal break-all" style={{ color: 'var(--brand-text-muted)' }}>
+                              {a.ruleId}
+                            </span>
+                          )}
                         </p>
-                      )}
+                        {a.patientMessage && (
+                          <p className="text-[12px] mt-1 leading-relaxed break-words" style={{ color: 'var(--brand-text-secondary)' }}>
+                            {a.patientMessage}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex gap-2 shrink-0">
+                    <div className="flex gap-2 md:shrink-0 [&>button]:flex-1 md:[&>button]:flex-none">
                       <button
                         type="button"
                         className="btn-admin-secondary"
@@ -903,23 +921,23 @@ export default function AdminDashboard() {
                         {tier2Alerts.map((a) => (
                           <div
                             key={a.id}
-                            className="rounded-lg p-3 flex flex-col md:flex-row md:items-center gap-2 bg-white"
+                            className="rounded-lg p-3 flex flex-col md:flex-row md:items-center gap-2 md:gap-3 bg-white"
                             style={{ border: '1px solid var(--brand-border)' }}
                           >
                             <div className="flex-1 min-w-0">
                               <p className="text-[12.5px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                                {a.patient?.name ?? 'Unknown patient'}
-                                <span className="ml-2 text-[11px] font-normal" style={{ color: 'var(--brand-text-muted)' }}>
+                                <span className="break-words">{a.patient?.name ?? 'Unknown patient'}</span>
+                                <span className="ml-2 text-[11px] font-normal whitespace-nowrap" style={{ color: 'var(--brand-text-muted)' }}>
                                   {timeAgo(a.createdAt)}
                                 </span>
                               </p>
                               {a.patientMessage && (
-                                <p className="text-[11.5px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+                                <p className="text-[11.5px] mt-0.5 leading-relaxed break-words" style={{ color: 'var(--brand-text-secondary)' }}>
                                   {a.patientMessage}
                                 </p>
                               )}
                             </div>
-                            <div className="flex gap-2 shrink-0">
+                            <div className="flex gap-2 md:shrink-0 [&>button]:flex-1 md:[&>button]:flex-none">
                               <button
                                 type="button"
                                 className="btn-admin-ghost"

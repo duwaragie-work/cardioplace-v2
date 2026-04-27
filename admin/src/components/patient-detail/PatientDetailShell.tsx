@@ -20,9 +20,12 @@ import {
   Mail,
   Calendar,
   Users as UsersIcon,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getPatientSummary } from '@/lib/services/provider.service';
+import { getBMI } from '@cardioplace/shared';
 import {
   getPatientProfile,
   getPatientMedications,
@@ -52,7 +55,7 @@ interface PatientHeader {
   primaryCondition: string | null;
   communicationPreference: string | null;
   activeAlertsCount: number;
-  latestBP: { systolicBP: number | null; diastolicBP: number | null; entryDate: string | null } | null;
+  latestBP: { systolicBP: number | null; diastolicBP: number | null; weight: number | null; entryDate: string | null } | null;
   lastEntryDate: string | null;
 }
 
@@ -82,6 +85,15 @@ export default function PatientDetailShell({ patientId }: Props) {
   const [thresholdLoading, setThresholdLoading] = useState(false);
   const [logsLoading, setLogsLoading] = useState(false);
 
+  // Per-tab load errors. Stored separately so a profile failure doesn't
+  // wipe a healthy medications cache. Each loader catches and writes here
+  // instead of letting the rejection bubble to an unhandled console crash.
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [medsError, setMedsError] = useState<string | null>(null);
+  const [alertsError, setAlertsError] = useState<string | null>(null);
+  const [thresholdError, setThresholdError] = useState<string | null>(null);
+  const [logsError, setLogsError] = useState<string | null>(null);
+
   // ── Header fetch ──────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -90,6 +102,18 @@ export default function PatientDetailShell({ patientId }: Props) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setHeaderLoading(true);
     setHeaderError(null);
+    // Pre-load PatientProfile in parallel so the BMI chip in the header
+    // can render on every tab — not just after the user visits Profile or
+    // Thresholds. Cheap call, no UI block; the BMI chip just hides until
+    // height arrives.
+    getPatientProfile(patientId)
+      .then((p) => {
+        if (!cancelled) setProfile(p);
+      })
+      .catch(() => {
+        // Silent — header still renders. Per-tab loader catches the
+        // visible error on the Profile tab.
+      });
     getPatientSummary(patientId)
       .then((data) => {
         if (cancelled) return;
@@ -119,11 +143,21 @@ export default function PatientDetailShell({ patientId }: Props) {
   }, [patientId]);
 
   // ── Per-tab loaders ───────────────────────────────────────────────────────
+  // Every loader has a `catch` so a transient network blip (dev backend
+  // restart, browser dropping the connection on tab switch, etc.) becomes
+  // a recoverable inline error with a Retry button — never an unhandled
+  // promise rejection that crashes the console.
+  const errMsg = (e: unknown): string =>
+    e instanceof Error ? e.message : 'Network error — please retry.';
+
   const loadProfile = useCallback(async () => {
     setProfileLoading(true);
+    setProfileError(null);
     try {
       const p = await getPatientProfile(patientId);
       setProfile(p);
+    } catch (e) {
+      setProfileError(errMsg(e));
     } finally {
       setProfileLoading(false);
     }
@@ -131,9 +165,12 @@ export default function PatientDetailShell({ patientId }: Props) {
 
   const loadMedications = useCallback(async () => {
     setMedsLoading(true);
+    setMedsError(null);
     try {
       const m = await getPatientMedications(patientId);
       setMedications(m);
+    } catch (e) {
+      setMedsError(errMsg(e));
     } finally {
       setMedsLoading(false);
     }
@@ -141,9 +178,12 @@ export default function PatientDetailShell({ patientId }: Props) {
 
   const loadAlerts = useCallback(async () => {
     setAlertsLoading(true);
+    setAlertsError(null);
     try {
       const a = await getPatientAlerts(patientId);
       setAlerts(a);
+    } catch (e) {
+      setAlertsError(errMsg(e));
     } finally {
       setAlertsLoading(false);
     }
@@ -151,9 +191,12 @@ export default function PatientDetailShell({ patientId }: Props) {
 
   const loadThreshold = useCallback(async () => {
     setThresholdLoading(true);
+    setThresholdError(null);
     try {
       const t = await getPatientThreshold(patientId);
       setThreshold(t);
+    } catch (e) {
+      setThresholdError(errMsg(e));
     } finally {
       setThresholdLoading(false);
     }
@@ -161,9 +204,12 @@ export default function PatientDetailShell({ patientId }: Props) {
 
   const loadLogs = useCallback(async () => {
     setLogsLoading(true);
+    setLogsError(null);
     try {
       const l = await getVerificationLogs(patientId);
       setLogs(l);
+    } catch (e) {
+      setLogsError(errMsg(e));
     } finally {
       setLogsLoading(false);
     }
@@ -288,67 +334,154 @@ export default function PatientDetailShell({ patientId }: Props) {
               <Link href="/patients" className="underline">Back</Link>
             </div>
           ) : header ? (
-            <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6">
-              <div
-                className="w-14 h-14 rounded-full flex items-center justify-center shrink-0 text-[15px] font-bold"
-                style={{
-                  backgroundColor: 'var(--brand-primary-purple-light)',
-                  color: 'var(--brand-primary-purple)',
-                }}
-              >
-                {initials}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center flex-wrap gap-2 mb-0.5">
-                  <h1 className="text-xl font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>
-                    {header.name ?? 'Unknown patient'}
-                  </h1>
-                  <span
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold uppercase tracking-wider"
-                    style={{ backgroundColor: verificationBadge.bg, color: verificationBadge.fg }}
-                  >
-                    {verificationBadge.icon}
-                    {verificationBadge.label}
-                  </span>
+            // Header layout:
+            //   • Mobile/tablet (<lg): two stacked rows. Row 1 = avatar +
+            //     identity (always horizontal so the name doesn't lose its
+            //     anchor). Row 2 = stats cluster, left-aligned and using
+            //     the full width so it doesn't float orphaned at the right.
+            //   • Desktop (lg+): single row — avatar + identity (flex-1)
+            //     + stats cluster on the right edge.
+            <div className="flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-6">
+              {/* Avatar + identity — always a horizontal pair. */}
+              <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
+                <div
+                  className="w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center shrink-0 text-[14px] sm:text-[15px] font-bold"
+                  style={{
+                    backgroundColor: 'var(--brand-primary-purple-light)',
+                    color: 'var(--brand-primary-purple)',
+                  }}
+                >
+                  {initials}
                 </div>
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
-                  {header.email && (
-                    <span className="inline-flex items-center gap-1">
-                      <Mail className="w-3 h-3" />
-                      {header.email}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center flex-wrap gap-x-2 gap-y-1 mb-0.5">
+                    <h1
+                      className="text-lg sm:text-xl font-bold leading-tight truncate"
+                      style={{ color: 'var(--brand-text-primary)' }}
+                    >
+                      {header.name ?? 'Unknown patient'}
+                    </h1>
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider whitespace-nowrap"
+                      style={{ backgroundColor: verificationBadge.bg, color: verificationBadge.fg }}
+                    >
+                      {verificationBadge.icon}
+                      {verificationBadge.label}
                     </span>
-                  )}
-                  {header.lastEntryDate && (
-                    <span className="inline-flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      Last reading {new Date(header.lastEntryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </span>
-                  )}
-                  {header.primaryCondition && (
-                    <span className="inline-flex items-center gap-1 font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
-                      {header.primaryCondition}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-3 md:gap-4">
-                {header.latestBP && header.latestBP.systolicBP != null && (
-                  <div className="text-right">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
-                      Latest BP
-                    </p>
-                    <p className="text-lg font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                      {header.latestBP.systolicBP}/{header.latestBP.diastolicBP}
-                      <span className="text-[11px] font-normal ml-1" style={{ color: 'var(--brand-text-muted)' }}>mmHg</span>
-                    </p>
                   </div>
+                  <div
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] sm:text-[12px]"
+                    style={{ color: 'var(--brand-text-muted)' }}
+                  >
+                    {header.email && (
+                      <span className="inline-flex items-center gap-1 min-w-0 max-w-full">
+                        <Mail className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{header.email}</span>
+                      </span>
+                    )}
+                    {header.lastEntryDate && (
+                      <span className="inline-flex items-center gap-1">
+                        <Calendar className="w-3 h-3 shrink-0" />
+                        <span className="hidden sm:inline">Last reading </span>
+                        {new Date(header.lastEntryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
+                    )}
+                    {header.primaryCondition && (
+                      <span className="inline-flex items-center gap-1 font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
+                        {header.primaryCondition}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {/* Stats cluster.
+                  • Mobile/tablet: full-width row, left-aligned, separated
+                    from identity by a hairline top border so it doesn't
+                    look orphaned.
+                  • Desktop (lg+): right-aligned, no top border (vertical
+                    column divider does the visual separation). */}
+              <div className="flex items-stretch gap-4 sm:gap-5 lg:gap-5 shrink-0 pt-3 lg:pt-0 border-t border-[var(--brand-border)] lg:border-t-0">
+
+                {header.latestBP && header.latestBP.systolicBP != null && (
+                  <>
+                    <div className="text-left lg:text-right flex flex-col min-w-[100px]">
+                      <p
+                        className="text-[10px] font-semibold uppercase tracking-wider mb-0.5"
+                        style={{ color: 'var(--brand-text-muted)' }}
+                      >
+                        Latest BP
+                      </p>
+                      <p
+                        className="text-lg font-bold leading-tight"
+                        style={{ color: 'var(--brand-text-primary)' }}
+                      >
+                        {header.latestBP.systolicBP}/{header.latestBP.diastolicBP}
+                        <span
+                          className="text-[11px] font-normal ml-1"
+                          style={{ color: 'var(--brand-text-muted)' }}
+                        >
+                          mmHg
+                        </span>
+                      </p>
+                      {(() => {
+                        const sbp = header.latestBP.systolicBP;
+                        const dbp = header.latestBP.diastolicBP;
+                        const pp = sbp != null && dbp != null ? sbp - dbp : null;
+                        const bmi = getBMI(profile?.heightCm ?? null, header.latestBP.weight);
+                        if (pp == null && bmi == null) return null;
+                        return (
+                          <div className="mt-1.5 flex items-center justify-start lg:justify-end gap-1.5 flex-wrap">
+                            {pp != null && (
+                              <span
+                                className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                                style={{
+                                  backgroundColor:
+                                    pp > 60
+                                      ? 'var(--brand-warning-amber-light)'
+                                      : 'var(--brand-background)',
+                                  color:
+                                    pp > 60
+                                      ? 'var(--brand-warning-amber)'
+                                      : 'var(--brand-text-secondary)',
+                                }}
+                                title="Pulse pressure (SBP − DBP). >60 mmHg flagged amber."
+                              >
+                                PP {pp}
+                              </span>
+                            )}
+                            {bmi != null && (
+                              <span
+                                className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                                style={{
+                                  backgroundColor: 'var(--brand-primary-purple-light)',
+                                  color: 'var(--brand-primary-purple)',
+                                }}
+                                title="BMI = weight ÷ height² (computed from intake-time height)"
+                              >
+                                BMI {bmi.toFixed(1)}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    {/* Hairline column divider */}
+                    <div
+                      className="w-px self-stretch"
+                      style={{ backgroundColor: 'var(--brand-border)' }}
+                      aria-hidden
+                    />
+                  </>
                 )}
-                <div className="text-right">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
+                <div className="text-left lg:text-right flex flex-col min-w-[80px]">
+                  <p
+                    className="text-[10px] font-semibold uppercase tracking-wider mb-0.5"
+                    style={{ color: 'var(--brand-text-muted)' }}
+                  >
                     Open alerts
                   </p>
                   <p
-                    className="text-lg font-bold"
+                    className="text-lg font-bold leading-tight"
                     style={{
                       color:
                         (header.activeAlertsCount ?? 0) > 0
@@ -415,45 +548,62 @@ export default function PatientDetailShell({ patientId }: Props) {
             transition={{ duration: 0.18 }}
           >
             {tab === 'profile' && (
-              <ProfileTab
-                patientId={patientId}
-                profile={profile}
-                loading={profileLoading}
-                onChanged={onProfileChanged}
-              />
+              <>
+                {profileError && <LoadErrorBanner message={profileError} onRetry={loadProfile} />}
+                <ProfileTab
+                  patientId={patientId}
+                  profile={profile}
+                  loading={profileLoading}
+                  onChanged={onProfileChanged}
+                />
+              </>
             )}
             {tab === 'medications' && (
-              <MedicationsTab
-                medications={medications}
-                loading={medsLoading}
-                onChanged={onMedicationsChanged}
-              />
+              <>
+                {medsError && <LoadErrorBanner message={medsError} onRetry={loadMedications} />}
+                <MedicationsTab
+                  medications={medications}
+                  loading={medsLoading}
+                  onChanged={onMedicationsChanged}
+                />
+              </>
             )}
             {tab === 'alerts' && (
-              <AlertsTab
-                alerts={alerts}
-                loading={alertsLoading}
-                onResolved={onAlertsResolved}
-              />
+              <>
+                {alertsError && <LoadErrorBanner message={alertsError} onRetry={loadAlerts} />}
+                <AlertsTab
+                  alerts={alerts}
+                  loading={alertsLoading}
+                  onResolved={onAlertsResolved}
+                  heightCm={profile?.heightCm ?? null}
+                />
+              </>
             )}
             {tab === 'thresholds' && (
-              <ThresholdsTab
-                patientId={patientId}
-                profile={profile}
-                threshold={threshold}
-                loading={thresholdLoading || profileLoading}
-                onChanged={onThresholdChanged}
-              />
+              <>
+                {thresholdError && <LoadErrorBanner message={thresholdError} onRetry={loadThreshold} />}
+                <ThresholdsTab
+                  patientId={patientId}
+                  profile={profile}
+                  threshold={threshold}
+                  loading={thresholdLoading || profileLoading}
+                  onChanged={onThresholdChanged}
+                />
+              </>
             )}
             {tab === 'careteam' && <CareTeamTab patientId={patientId} />}
             {tab === 'timeline' && (
-              <TimelineTab
-                logs={logs}
-                alerts={alerts}
-                medications={medications}
-                logsLoading={logsLoading}
-                alertsLoading={alertsLoading}
-              />
+              <>
+                {logsError && <LoadErrorBanner message={logsError} onRetry={loadLogs} />}
+                {alertsError && !logsError && <LoadErrorBanner message={alertsError} onRetry={loadAlerts} />}
+                <TimelineTab
+                  logs={logs}
+                  alerts={alerts}
+                  medications={medications}
+                  logsLoading={logsLoading}
+                  alertsLoading={alertsLoading}
+                />
+              </>
             )}
           </motion.div>
         </AnimatePresence>
@@ -464,6 +614,48 @@ export default function PatientDetailShell({ patientId }: Props) {
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+/**
+ * Inline retry banner shown above a tab body when its loader fails. Keeps
+ * the user in context — they don't lose their place — and gives them an
+ * explicit Retry button instead of a silent broken UI. Used by every tab
+ * loader in PatientDetailShell.
+ */
+function LoadErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div
+      className="mb-4 rounded-2xl p-4 flex items-start gap-3"
+      style={{
+        backgroundColor: 'var(--brand-alert-red-light)',
+        borderLeft: '4px solid var(--brand-alert-red)',
+      }}
+      role="alert"
+    >
+      <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--brand-alert-red)' }} />
+      <div className="flex-1 min-w-0">
+        <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+          Couldn&apos;t load this tab
+        </p>
+        <p className="text-[11.5px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+          {message}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12px] font-semibold cursor-pointer"
+        style={{
+          backgroundColor: 'white',
+          color: 'var(--brand-alert-red)',
+          border: '1.5px solid var(--brand-alert-red)',
+        }}
+      >
+        <RefreshCw className="w-3 h-3" />
+        Retry
+      </button>
     </div>
   );
 }

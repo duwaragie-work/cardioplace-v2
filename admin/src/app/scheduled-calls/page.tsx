@@ -17,6 +17,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { canAccessLegacyV1 } from '@/lib/roleGates';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getScheduledCalls, updateCallStatus, deleteScheduledCall } from '@/lib/services/provider.service';
 
@@ -470,7 +471,7 @@ export default function ScheduledCallsPage() {
   // ─── Auth guard ─────────────────────────────────────────────────────────────
   if (isLoading) return null;
 
-  if (user?.email !== 'support@healplace.com') {
+  if (!canAccessLegacyV1(user)) {
     return (
       <div className="h-full flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
         <div className="text-center p-8 rounded-2xl bg-white" style={{ boxShadow: 'var(--brand-shadow-card)' }}>

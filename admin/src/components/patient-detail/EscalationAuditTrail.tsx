@@ -29,6 +29,7 @@ import type {
   PatientAlertEscalationEvent,
   NotificationChannel,
 } from '@/lib/services/patient-detail.service';
+import { getBMI } from '@cardioplace/shared';
 
 // ─── Canonical ladder ────────────────────────────────────────────────────────
 // Mirrors the EscalationLevel + LadderStep enums from
@@ -118,6 +119,9 @@ function fmtRole(r: string): string {
 
 interface Props {
   alert: PatientAlert;
+  /** From PatientProfile.heightCm — fixed at intake. Used by the 15-field
+   *  audit footer to compute BMI alongside the existing pulse-pressure row. */
+  heightCm?: number | null;
 }
 
 /**
@@ -125,7 +129,7 @@ interface Props {
  * (so empty steps stay visible as "not yet triggered") AND any extra events
  * that don't fit a known step (e.g. T+4h retries from BP_L2_UNABLE_TO_REACH).
  */
-export default function EscalationAuditTrail({ alert }: Props) {
+export default function EscalationAuditTrail({ alert, heightCm }: Props) {
   const ladder = ladderFor(alert.tier);
 
   // Group events by ladder step. We accept either `ladderStep` (preferred,
@@ -186,7 +190,7 @@ export default function EscalationAuditTrail({ alert }: Props) {
       </ol>
 
       {/* Resolution + 15-field audit footer */}
-      {alert.status === 'RESOLVED' && <ResolutionAuditFooter alert={alert} />}
+      {alert.status === 'RESOLVED' && <ResolutionAuditFooter alert={alert} heightCm={heightCm} />}
     </div>
   );
 }
@@ -414,7 +418,18 @@ function EventDetail({ event }: { event: PatientAlertEscalationEvent }) {
 
 // ─── 15-field audit footer ──────────────────────────────────────────────────
 
-function ResolutionAuditFooter({ alert }: { alert: PatientAlert }) {
+function ResolutionAuditFooter({
+  alert,
+  heightCm,
+}: {
+  alert: PatientAlert;
+  heightCm?: number | null;
+}) {
+  // BMI is computed from this alert's reading weight + the patient's
+  // intake-time height. Clinically valuable alongside pulse pressure for
+  // the resolving clinician.
+  const bmi = getBMI(heightCm ?? null, alert.journalEntry?.weight ?? null);
+
   // The 15 Joint-Commission audit fields (per CLAUDE.md). We surface every
   // field we currently have available; missing fields render as "—" so the
   // structure stays predictable.
@@ -431,6 +446,7 @@ function ResolutionAuditFooter({ alert }: { alert: PatientAlert }) {
     { label: 'Resolution action', value: prettify(alert.resolutionAction) },
     { label: 'Reading', value: alert.journalEntry?.systolicBP != null ? `${alert.journalEntry.systolicBP}/${alert.journalEntry.diastolicBP} mmHg` : '—' },
     { label: 'Pulse pressure', value: alert.pulsePressure != null ? `${alert.pulsePressure} mmHg` : '—' },
+    { label: 'BMI', value: bmi != null ? bmi.toFixed(1) : '—' },
     { label: 'Baseline value', value: alert.baselineValue != null ? String(alert.baselineValue) : '—' },
     { label: 'Actual value', value: alert.actualValue != null ? String(alert.actualValue) : '—' },
     { label: 'Escalation count', value: String(alert.escalationEvents.length) },

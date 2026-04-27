@@ -14,7 +14,7 @@
 
 import { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, AlertCircle } from 'lucide-react';
+import { ArrowLeft, AlertCircle, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import {
@@ -70,6 +70,59 @@ function AlertSkeleton() {
           className="rounded-full animate-pulse"
           style={{ height: 48, backgroundColor: '#EDE9F6' }}
         />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Friendly "no action needed" screen for alerts that are admin-only
+ * (Tier 2 medication-discrepancy). The alert exists — it's just not for
+ * the patient to act on. Distinct from NotFound so the user doesn't think
+ * something is broken when they arrive here from a stale link.
+ */
+function CareTeamOnly() {
+  const router = useRouter();
+  const { t } = useLanguage();
+  return (
+    <div
+      className="min-h-screen flex items-center justify-center px-4"
+      style={{ backgroundColor: '#FAFBFF' }}
+    >
+      <div className="max-w-sm w-full text-center">
+        <div
+          className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center"
+          style={{ backgroundColor: 'var(--brand-success-green-light)' }}
+        >
+          <ShieldCheck
+            className="w-8 h-8"
+            style={{ color: 'var(--brand-success-green)' }}
+          />
+        </div>
+        <h1
+          className="text-[20px] font-bold mb-2"
+          style={{ color: 'var(--brand-text-primary)' }}
+        >
+          Reviewed by your care team
+        </h1>
+        <p
+          className="text-[13.5px] mb-6 leading-relaxed"
+          style={{ color: 'var(--brand-text-secondary)' }}
+        >
+          {t('alerts.notFound.tier2')}
+        </p>
+        <button
+          type="button"
+          onClick={() => router.push('/dashboard')}
+          className="inline-flex items-center gap-2 h-11 px-6 rounded-full text-white font-bold text-[14px] cursor-pointer"
+          style={{
+            backgroundColor: 'var(--brand-primary-purple)',
+            boxShadow: 'var(--brand-shadow-button)',
+          }}
+        >
+          <ArrowLeft className="w-4 h-4" />
+          {t('alerts.notFound.backToDashboard')}
+        </button>
       </div>
     </div>
   );
@@ -172,6 +225,15 @@ export default function AlertDetailPage({ params }: PageProps) {
 
   async function handleAcknowledge() {
     if (!alert || ackLoading) return;
+    // CLINICAL_SPEC V2-C — Tier 1 contraindications (and any other alert the
+    // backend marks `dismissible: false`) cannot be acknowledged by the
+    // patient. The acknowledge endpoint sets acknowledgedAt + status=
+    // ACKNOWLEDGED, which the escalation cron treats as "stop paging." If
+    // the patient could acknowledge a Tier 1, the provider ladder would
+    // silently die — a clinical-safety hole. Defense in depth: the child
+    // views also hide the button when dismissible=false; this guard
+    // ensures even a stray prop wiring can't bypass the rule.
+    if (alert.dismissible === false) return;
     setAckLoading(true);
     try {
       await acknowledgeAlert(alert.id);
@@ -210,8 +272,11 @@ export default function AlertDetailPage({ params }: PageProps) {
     (tier == null && (sbp >= 180 || dbp >= 120));
 
   if (tier === 'TIER_2_DISCREPANCY') {
-    // Tier 2 is admin-only per V2-C. Patients shouldn't land here.
-    return <NotFound reason={t('alerts.notFound.tier2')} />;
+    // Tier 2 is admin-only per V2-C. Patients shouldn't land here from
+    // the dashboard (Recent Alerts filters Tier 2 out), but a stale link
+    // or bookmark can still lead here — render a friendly "reviewed by
+    // your care team" screen instead of a misleading "not found" error.
+    return <CareTeamOnly />;
   }
 
   // Only show the full-screen red takeover for OPEN emergencies. Once the
