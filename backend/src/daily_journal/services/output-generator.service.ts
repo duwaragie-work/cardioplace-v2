@@ -69,12 +69,23 @@ export class OutputGeneratorService implements OnModuleInit {
     session: SessionAverage,
     preDay3: boolean,
   ): AlertContext {
+    // Default `drugNames` from rule metadata; fall back to a single-element
+    // array of `drugName` so legacy single-drug rules still satisfy the
+    // non-optional shape on AlertContext.
+    const drugNames =
+      result.metadata.drugNames && result.metadata.drugNames.length > 0
+        ? result.metadata.drugNames
+        : result.metadata.drugName
+          ? [result.metadata.drugName]
+          : []
+
     return {
       systolicBP: session.systolicBP,
       diastolicBP: session.diastolicBP,
       pulse: session.pulse,
       pulsePressure: result.pulsePressure,
       drugName: result.metadata.drugName ?? null,
+      drugNames,
       drugClass: result.metadata.drugClass ?? null,
       conditionLabel: result.metadata.conditionLabel ?? null,
       thresholdValue: result.metadata.thresholdValue ?? null,

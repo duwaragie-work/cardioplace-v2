@@ -39,6 +39,13 @@ type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
 type Alert = {
   id: string;
   type?: AlertType | string | null;
+  /** v2 tier — preferred over `type` for derived UI labels (the legacy
+   *  `type` enum can't represent Tier 1 contraindications, so cards drove
+   *  off it would all read "Missed Medication"). */
+  tier?: string | null;
+  /** Three-tier patient-facing message. Backend always populates this on
+   *  v2 alerts; falling back to the legacy BP/value rendering when null. */
+  patientMessage?: string | null;
   severity?: AlertSeverity | string | null;
   magnitude?: number | null;
   baselineValue?: number | null;
@@ -74,6 +81,23 @@ const TYPE_META: Record<string, { label: string; icon: typeof Activity }> = {
   BP_COMBINED: { label: 'Elevated Blood Pressure', icon: Activity },
   WEIGHT: { label: 'Weight Change Detected', icon: Scale },
   MEDICATION_ADHERENCE: { label: 'Missed Medication', icon: Pill },
+};
+
+// Tier-aware card chrome. Preferred over TYPE_META so a Tier 1 contraindication
+// doesn't display as "Missed Medication Urgent" just because its legacy
+// `type` field is MEDICATION_ADHERENCE. `null` tier falls through to the
+// legacy type-based path so v1 alerts still render.
+const TIER_META: Record<
+  string,
+  { label: string; icon: typeof Activity; severity: 'HIGH' | 'MEDIUM' | 'LOW' }
+> = {
+  BP_LEVEL_2: { label: 'Urgent Blood Pressure Alert', icon: AlertTriangle, severity: 'HIGH' },
+  BP_LEVEL_2_SYMPTOM_OVERRIDE: { label: 'Urgent Blood Pressure Alert', icon: AlertTriangle, severity: 'HIGH' },
+  TIER_1_CONTRAINDICATION: { label: 'Important medication alert', icon: Pill, severity: 'HIGH' },
+  TIER_2_DISCREPANCY: { label: 'Medication check-in needed', icon: Pill, severity: 'MEDIUM' },
+  BP_LEVEL_1_HIGH: { label: 'Elevated blood pressure', icon: Activity, severity: 'MEDIUM' },
+  BP_LEVEL_1_LOW: { label: 'Low blood pressure', icon: Activity, severity: 'MEDIUM' },
+  TIER_3_INFO: { label: 'Care team update', icon: Bell, severity: 'LOW' },
 };
 
 const SEVERITY_META = {
@@ -189,12 +213,20 @@ function AlertCard({
   acknowledging: string | null;
 }) {
   const { t } = useLanguage();
-  // Cast back to the strict enum types — alert.type / .severity are loose
-  // strings on the model so legacy/null values can flow through, but the
-  // lookups want the strict enum keys. Both lookups fall back gracefully.
+  // Tier-first label resolution: v2 alerts always carry a `tier`, and the
+  // tier is the only field that distinguishes a Tier 1 contraindication
+  // from a missed-dose Tier 2 (both carry the legacy MEDICATION_ADHERENCE
+  // type). Falls back to the legacy `type` lookup for any v1 row that
+  // never had `tier` populated.
+  const tierMeta = alert.tier ? TIER_META[alert.tier] : null;
   const meta =
-    TYPE_META[alert.type as AlertType] ?? { label: alert.type, icon: AlertTriangle };
-  const sevMeta = SEVERITY_META[alert.severity as AlertSeverity] ?? SEVERITY_META.LOW;
+    tierMeta ??
+    TYPE_META[alert.type as AlertType] ??
+    { label: alert.type ?? '—', icon: AlertTriangle };
+  // Tier severity wins over the legacy severity field so the badge color
+  // matches the actual clinical priority.
+  const effectiveSeverity = (tierMeta?.severity ?? alert.severity) as AlertSeverity | undefined;
+  const sevMeta = SEVERITY_META[effectiveSeverity as AlertSeverity] ?? SEVERITY_META.LOW;
   const Icon = meta.icon;
   const isOpen = alert.status === 'OPEN';
   const isAcking = acknowledging === alert.id;
@@ -249,13 +281,17 @@ function AlertCard({
                 className="text-[14px] font-bold"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
-                {alert.type ? (alertTypeLabels[alert.type] ?? alert.type) : '—'}
+                {tierMeta
+                  ? tierMeta.label
+                  : alert.type
+                    ? (alertTypeLabels[alert.type] ?? alert.type)
+                    : '—'}
               </span>
               <span
                 className="px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0"
                 style={{ backgroundColor: sevMeta.bg, color: sevMeta.text }}
               >
-                {alert.severity ? (sevLabels[alert.severity] ?? alert.severity) : '—'}
+                {effectiveSeverity ? (sevLabels[effectiveSeverity] ?? effectiveSeverity) : '—'}
               </span>
               {alert.escalated && (
                 <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-600 text-white shrink-0 flex items-center gap-1">
@@ -264,6 +300,20 @@ function AlertCard({
                 </span>
               )}
             </div>
+
+            {/* Tier-1/Tier-2/BP-Level-2 alerts carry a clinical patient
+                message from the alert engine. Surface it verbatim so the
+                instruction (e.g. "stop and call your provider before next
+                dose") reaches the patient on the notifications inbox, not
+                just on the dedicated alert detail screen. */}
+            {alert.patientMessage && (
+              <p
+                className="text-[12.5px] mb-1 leading-relaxed"
+                style={{ color: 'var(--brand-text-secondary)' }}
+              >
+                {alert.patientMessage}
+              </p>
+            )}
 
             {/* BP reading for combined/BP alerts */}
             {alert.journalEntry && (alert.type === 'BP_COMBINED' || (alert.type ?? '').includes('BP')) && (

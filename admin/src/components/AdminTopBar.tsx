@@ -7,7 +7,8 @@
 // the workspace happens in the page content below.
 
 import { usePathname } from 'next/navigation';
-import { Menu, Bell, Search } from 'lucide-react';
+import { Menu, Search } from 'lucide-react';
+import NotificationBell from './NotificationBell';
 
 const ROUTE_TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -84,15 +85,7 @@ export default function AdminTopBar({ onOpenMobileNav }: Props) {
               ⌘K
             </span>
           </button>
-          <button
-            type="button"
-            className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-gray-100 cursor-pointer transition-colors relative"
-            style={{ color: 'var(--brand-text-secondary)' }}
-            aria-label="Notifications"
-            title="Notifications"
-          >
-            <Bell className="w-4 h-4" />
-          </button>
+          <NotificationBell />
         </div>
       </div>
     </header>

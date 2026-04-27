@@ -36,6 +36,13 @@ export interface AlertContext {
 
   /** Drug name (single) that triggered a medication-linked rule. */
   drugName: string | null
+  /**
+   * All drug names matched by the rule. Populated by rules that can fire
+   * on multiple meds at once (e.g. pregnancy + ACE/ARB when the patient is
+   * on Prinivil and Zestoretic). Falls back to `[drugName]` when the rule
+   * only carries a single match. Always non-empty when `drugName` is set.
+   */
+  drugNames: string[]
   /** Drug class, used for physician-facing messages. */
   drugClass: string | null
 
@@ -109,17 +116,50 @@ function suboptimalSuffix(ctx: AlertContext): string {
   return ctx.suboptimalMeasurement ? SUBOPTIMAL_SUFFIX : ''
 }
 
+/**
+ * Plain-English join of drug names: "" / "X" / "X and Y" / "X, Y, and Z".
+ * Used by patient + caregiver messages so a multi-drug Tier 1 reads as
+ * natural prose instead of a comma-joined CSV.
+ */
+function formatDrugList(names: string[]): string {
+  if (names.length === 0) return ''
+  if (names.length === 1) return names[0]
+  if (names.length === 2) return `${names[0]} and ${names[1]}`
+  return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`
+}
+
 // ─── registry ────────────────────────────────────────────────────────────────
 
 export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   // ── Tier 1 contraindications ──────────────────────────────────────────
   RULE_PREGNANCY_ACE_ARB: {
-    patientMessage: () =>
-      'Your care team needs to review your blood pressure medicine because you are pregnant. Please call your provider today before taking your next dose.',
-    caregiverMessage: () =>
-      'The patient is pregnant and has a blood pressure medicine that needs urgent provider review. Please help them contact their care team today.',
-    physicianMessage: (ctx) =>
-      `Tier 1 — ACE/ARB (${ctx.drugName ?? 'unknown'}, ${ctx.drugClass ?? 'unknown'}) in pregnant patient. Teratogenic; discontinue and switch to CHAP-protocol alternative (labetalol or long-acting nifedipine).${physSuffix(ctx)}`,
+    patientMessage: (ctx) => {
+      // Name every offending drug — patient may be on Prinivil + Zestoretic,
+      // and discontinuing only the named one is unsafe. Plain language only;
+      // patient hears the brand/generic names they recognize from their
+      // pillbox, no drug-class jargon.
+      const names = ctx.drugNames.length > 0 ? ctx.drugNames : ctx.drugName ? [ctx.drugName] : []
+      const drugList = formatDrugList(names)
+      const lead = drugList
+        ? `Your care team needs to review ${drugList} because you are pregnant.`
+        : 'Your care team needs to review your blood pressure medicine because you are pregnant.'
+      return `${lead} Please call your provider today before taking your next dose.`
+    },
+    caregiverMessage: (ctx) => {
+      const names = ctx.drugNames.length > 0 ? ctx.drugNames : ctx.drugName ? [ctx.drugName] : []
+      const drugList = formatDrugList(names)
+      const lead = drugList
+        ? `The patient is pregnant and is taking ${drugList}, which need urgent provider review.`
+        : 'The patient is pregnant and has a blood pressure medicine that needs urgent provider review.'
+      return `${lead} Please help them contact their care team today.`
+    },
+    physicianMessage: (ctx) => {
+      const names =
+        ctx.drugNames.length > 0
+          ? ctx.drugNames.join(', ')
+          : (ctx.drugName ?? 'unknown')
+      return `Tier 1 — ACE/ARB (${names}, ${ctx.drugClass ?? 'unknown'}) in pregnant patient. Teratogenic; discontinue and switch to CHAP-protocol alternative (labetalol or long-acting nifedipine).${physSuffix(ctx)}`
+    },
   },
 
   RULE_NDHP_HFREF: {
