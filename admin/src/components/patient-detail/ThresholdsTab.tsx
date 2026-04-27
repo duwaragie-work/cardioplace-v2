@@ -398,7 +398,11 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
             </span>
             <span style={{ color: 'var(--brand-text-secondary)' }}>
               <span className="font-bold">Set by:</span>{' '}
-              <span className="font-mono text-[11px]">{threshold.setByProviderId.slice(0, 8)}…</span>
+              {threshold.setByName ?? (
+                <span className="italic" style={{ color: 'var(--brand-text-muted)' }}>
+                  Unknown clinician
+                </span>
+              )}
             </span>
             {threshold.replacedAt && (
               <span style={{ color: 'var(--brand-text-muted)' }}>

@@ -100,6 +100,10 @@ export interface PatientThreshold {
   hrUpperTarget: number | null
   hrLowerTarget: number | null
   setByProviderId: string
+  /** Resolved display name of the clinician in setByProviderId — falls
+   *  back to email when name is missing, or null when the user record is
+   *  gone. Surfaced as "Set by …" in the Thresholds tab. */
+  setByName: string | null
   setAt: string
   replacedAt: string | null
   notes: string | null
@@ -130,6 +134,10 @@ export interface ProfileVerificationLog {
   previousValue: unknown
   newValue: unknown
   changedBy: string
+  /** Resolved display name for changedBy — name → email → null. Used by the
+   *  Timeline tab so the actor line reads "Dr. Singal" instead of a
+   *  truncated UUID. */
+  changedByName: string | null
   changedByRole: VerifierRole
   changeType: VerificationChangeType
   discrepancyFlag: boolean
@@ -162,8 +170,12 @@ export interface PatientAlertEscalationEvent {
   recipientRoles: string[]
   acknowledgedAt: string | null
   acknowledgedBy: string | null
+  /** Resolved display name for acknowledgedBy. */
+  acknowledgedByName: string | null
   resolvedAt: string | null
   resolvedBy: string | null
+  /** Resolved display name for resolvedBy. */
+  resolvedByName: string | null
   afterHours: boolean
   triggeredByResolution: boolean
   notifications: EscalationNotification[]
@@ -190,6 +202,9 @@ export interface PatientAlert {
   resolutionAction: string | null
   resolutionRationale: string | null
   resolvedBy: string | null
+  /** Resolved display name for the alert-level resolvedBy — used by the
+   *  15-field audit footer in EscalationAuditTrail. */
+  resolvedByName: string | null
   createdAt: string
   acknowledgedAt: string | null
   journalEntry: {

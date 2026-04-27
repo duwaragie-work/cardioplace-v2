@@ -327,7 +327,14 @@ function entriesFromLogs(
     const usedDiffForBody = body != null && body.includes('→');
     const secondary = usedDiffForBody && l.rationale ? l.rationale : undefined;
 
-    // Actor line: prefer the drug name over the meaningless UUID prefix.
+    // Actor line: lead with the resolved user's name (falls back to role
+    // when name is missing — e.g. self-served patient log without a name on
+    // file). Suffix the drug name on medication-scoped events so the reader
+    // can tell which med was changed without scanning IDs.
+    const roleLabel = l.changedByRole.toLowerCase();
+    const who = l.changedByName
+      ? `${l.changedByName} (${roleLabel})`
+      : roleLabel;
     const medSuffix =
       parsed.scope === 'medication'
         ? drugName
@@ -336,7 +343,7 @@ function entriesFromLogs(
             ? ` · med ${parsed.medIdShort}…`
             : ''
         : '';
-    const actor = `${l.changedByRole.toLowerCase()}${medSuffix}`;
+    const actor = `${who}${medSuffix}`;
 
     return {
       id: `verif-${l.id}`,
@@ -423,7 +430,11 @@ function entriesFromAlerts(alerts: PatientAlert[]): FeedEntry[] {
         bg: 'var(--brand-success-green-light)',
         title: `${tlabel} alert resolved`,
         body: a.resolutionRationale ?? a.resolutionAction ?? undefined,
-        actor: a.resolvedBy ? `provider · ${a.resolvedBy.slice(0, 8)}…` : undefined,
+        actor: a.resolvedByName
+          ? `${a.resolvedByName} (provider)`
+          : a.resolvedBy
+            ? 'provider'
+            : undefined,
       });
     }
   }
@@ -584,7 +595,7 @@ export default function TimelineTab({ logs, alerts, medications, logsLoading, al
                         </p>
                       )}
                       {e.actor && (
-                        <p className="text-[10px] mt-1 font-mono" style={{ color: 'var(--brand-text-muted)' }}>
+                        <p className="text-[10.5px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
                           {e.actor}
                         </p>
                       )}
