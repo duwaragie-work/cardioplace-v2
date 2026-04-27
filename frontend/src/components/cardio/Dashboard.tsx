@@ -253,7 +253,14 @@ export default function Dashboard() {
   const baselineStr = baseline?.baselineSystolic && baseline?.baselineDiastolic
     ? `${Math.round(Number(baseline.baselineSystolic))}/${Math.round(Number(baseline.baselineDiastolic))}` : '--/--';
 
-  const openAlerts = alerts.filter((a) => a.status === 'OPEN');
+  // Patient-actionable open alerts. Excludes TIER_2_DISCREPANCY because
+  // those are admin-facing per the v2 clinical spec — patients can't action
+  // them, the detail page refuses to render them, and showing them as
+  // clickable cards on the dashboard sends the user into a dead-end "not
+  // found" screen.
+  const openAlerts = alerts.filter(
+    (a) => a.status === 'OPEN' && a.tier !== 'TIER_2_DISCREPANCY',
+  );
 
   // ── Flow D helpers ────────────────────────────────────────────────────────
   // D1 verification badge: shown only when the patient has submitted intake
