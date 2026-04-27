@@ -225,6 +225,15 @@ export default function AlertDetailPage({ params }: PageProps) {
 
   async function handleAcknowledge() {
     if (!alert || ackLoading) return;
+    // CLINICAL_SPEC V2-C — Tier 1 contraindications (and any other alert the
+    // backend marks `dismissible: false`) cannot be acknowledged by the
+    // patient. The acknowledge endpoint sets acknowledgedAt + status=
+    // ACKNOWLEDGED, which the escalation cron treats as "stop paging." If
+    // the patient could acknowledge a Tier 1, the provider ladder would
+    // silently die — a clinical-safety hole. Defense in depth: the child
+    // views also hide the button when dismissible=false; this guard
+    // ensures even a stray prop wiring can't bypass the rule.
+    if (alert.dismissible === false) return;
     setAckLoading(true);
     try {
       await acknowledgeAlert(alert.id);

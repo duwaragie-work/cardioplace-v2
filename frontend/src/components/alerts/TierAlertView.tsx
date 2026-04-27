@@ -16,6 +16,7 @@ import {
   Pill,
   Heart,
   CheckCircle2,
+  ShieldAlert,
 } from 'lucide-react';
 import type { DeviationAlertDto, AlertTier } from '@/lib/services/journal.service';
 import AudioButton from '@/components/intake/AudioButton';
@@ -286,7 +287,12 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
           </p>
         </div>
 
-        {/* Acknowledge / resolved state */}
+        {/* Acknowledge / resolved / non-dismissable state.
+            CLINICAL_SPEC V2-C — Tier 1 contraindications cannot be cleared
+            by the patient. Backend marks them dismissible=false; we hide
+            the acknowledge button entirely and show a calm "care team
+            notified" banner. The provider escalation ladder must continue
+            running until a clinician acts. */}
         {isResolved ? (
           <div
             className="rounded-xl px-4 py-3 flex items-center gap-3"
@@ -299,6 +305,35 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
             <p className="text-[13px]" style={{ color: 'var(--brand-success-green)' }}>
               {t('alerts.tier.seenResolved')}
             </p>
+          </div>
+        ) : alert.dismissible === false ? (
+          <div
+            className="rounded-xl px-4 py-3 flex items-start gap-3"
+            style={{
+              backgroundColor: 'var(--brand-primary-purple-light)',
+              border: '1px solid rgba(123,0,224,0.2)',
+            }}
+          >
+            <ShieldAlert
+              className="w-5 h-5 shrink-0 mt-0.5"
+              style={{ color: 'var(--brand-primary-purple)' }}
+            />
+            <div>
+              <p
+                className="text-[13.5px] font-bold mb-1"
+                style={{ color: 'var(--brand-primary-purple)' }}
+              >
+                Your care team has been notified
+              </p>
+              <p
+                className="text-[12.5px] leading-relaxed"
+                style={{ color: 'var(--brand-text-secondary)' }}
+              >
+                A clinician needs to review this with you before it can be
+                closed. You don&apos;t need to do anything — they&apos;ll
+                reach out shortly.
+              </p>
+            </div>
           </div>
         ) : (
           <motion.button

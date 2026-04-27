@@ -129,12 +129,22 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
   }
 
   async function handleUnderstand() {
+    // Local "I understood, stop showing me this takeover" — written to
+    // localStorage so the same alert doesn't re-prompt every page load.
     writeUnderstoodAt(alert.id, Date.now());
-    try {
-      await onAcknowledge();
-    } catch {
-      // surface failure isn't blocking — the patient still gets out of the
-      // overlay and the cron will retry the ack server-side
+    // CLINICAL_SPEC V2-C — non-dismissable alerts (Tier 1 + BP Level 2)
+    // must NOT be acknowledged server-side by the patient. The backend
+    // acknowledge endpoint stops the provider escalation ladder, which is
+    // a clinical-safety hole if a patient could trigger it. Skip the API
+    // call when dismissible=false; the local writeUnderstoodAt above is
+    // enough to get the patient out of the overlay.
+    if (alert.dismissible !== false) {
+      try {
+        await onAcknowledge();
+      } catch {
+        // surface failure isn't blocking — the patient still gets out of
+        // the overlay and the cron will retry the ack server-side
+      }
     }
     setMode('closed');
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
