@@ -13,9 +13,18 @@ import { PrismaService } from '../prisma/prisma.service.js'
  * have no staff yet. This endpoint returns the whole pool so admins can
  * bootstrap the first assignment.
  */
+// Clinician lookup is a pure read endpoint used by the AssignmentPanel
+// dropdowns. PROVIDER needs read access to see who the medical directors
+// and other providers are on a patient's Care Team — even though they
+// can't reassign. All four admin roles are allowed.
 @Controller('admin/clinicians')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.HEALPLACE_OPS)
+@Roles(
+  UserRole.SUPER_ADMIN,
+  UserRole.MEDICAL_DIRECTOR,
+  UserRole.HEALPLACE_OPS,
+  UserRole.PROVIDER,
+)
 export class ClinicianController {
   constructor(private readonly prisma: PrismaService) {}
 

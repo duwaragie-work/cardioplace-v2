@@ -33,6 +33,8 @@ import {
   type PatientThreshold,
   type UpsertThresholdPayload,
 } from '@/lib/services/patient-detail.service';
+import { useAuth } from '@/lib/auth-context';
+import { canEditThresholds } from '@/lib/roleGates';
 
 interface Props {
   patientId: string;
@@ -89,6 +91,12 @@ function formToPayload(f: FormState): UpsertThresholdPayload {
 }
 
 export default function ThresholdsTab({ patientId, profile, threshold, loading, onChanged }: Props) {
+  const { user } = useAuth();
+  // Editor (numeric inputs, defaults-apply, save button) only renders for
+  // SUPER_ADMIN + MEDICAL_DIRECTOR per CLINICAL_SPEC. Other admin roles
+  // get a clean read-only summary of the configured targets.
+  const canEdit = canEditThresholds(user);
+
   const [form, setForm] = useState<FormState>(() => thresholdToForm(threshold));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -185,8 +193,8 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
         </div>
       )}
 
-      {/* Defaults hint */}
-      {(defaults.sbpLowerTarget != null || defaults.dbpLowerTarget != null) && (
+      {/* Defaults hint — only shown for roles that can apply them. */}
+      {canEdit && (defaults.sbpLowerTarget != null || defaults.dbpLowerTarget != null) && (
         <div
           className="rounded-2xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
           style={{
@@ -216,7 +224,71 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
         </div>
       )}
 
-      {/* Editor card */}
+      {/* Read-only summary for non-editor roles. Shows the actual configured
+          values without any inputs / save controls. PROVIDER + HEALPLACE_OPS
+          land here. */}
+      {!canEdit && (
+        <div className="bg-white rounded-2xl p-5 md:p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+          <div className="flex items-center gap-2 mb-4">
+            <Sliders className="w-4 h-4" style={{ color: 'var(--brand-primary-purple)' }} />
+            <h2 className="text-[14px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+              Personalized targets
+            </h2>
+            <span
+              className="ml-auto text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+              style={{
+                backgroundColor: 'var(--brand-background)',
+                color: 'var(--brand-text-muted)',
+              }}
+              title="Read-only — only a Medical Director can change BP / HR thresholds."
+            >
+              Read-only
+            </span>
+          </div>
+          {threshold ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <ReadonlyPair
+                title="Systolic BP (SBP)"
+                unit="mmHg"
+                upper={threshold.sbpUpperTarget}
+                lower={threshold.sbpLowerTarget}
+                color="var(--brand-alert-red)"
+              />
+              <ReadonlyPair
+                title="Diastolic BP (DBP)"
+                unit="mmHg"
+                upper={threshold.dbpUpperTarget}
+                lower={threshold.dbpLowerTarget}
+                color="var(--brand-primary-purple)"
+              />
+              <ReadonlyPair
+                title="Heart rate"
+                unit="bpm"
+                upper={threshold.hrUpperTarget}
+                lower={threshold.hrLowerTarget}
+                color="var(--brand-accent-teal)"
+              />
+              {threshold.notes && (
+                <div className="sm:col-span-2">
+                  <p className="text-[10.5px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--brand-text-muted)' }}>
+                    Clinical rationale
+                  </p>
+                  <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+                    {threshold.notes}
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-[12.5px]" style={{ color: 'var(--brand-text-muted)' }}>
+              No personalized targets configured yet. A medical director will set these.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Editor card — render only for SUPER_ADMIN + MEDICAL_DIRECTOR. */}
+      {canEdit && (
       <div className="bg-white rounded-2xl p-5 md:p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
         <div className="flex items-center gap-2 mb-4">
           <Sliders className="w-4 h-4" style={{ color: 'var(--brand-primary-purple)' }} />
@@ -311,6 +383,7 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
           </button>
         </div>
       </div>
+      )}
 
       {/* Current version metadata */}
       {threshold && (
@@ -374,6 +447,51 @@ function PairRow({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <NumberInput label={upperLabel} unit={unit} value={upperValue} onChange={onUpper} />
         <NumberInput label={lowerLabel} unit={unit} value={lowerValue} onChange={onLower} />
+      </div>
+    </div>
+  );
+}
+
+/** Read-only display of an upper/lower target pair. Used by the
+ *  non-editor view (PROVIDER, HEALPLACE_OPS) so they see the configured
+ *  values without any inputs or save controls. */
+function ReadonlyPair({
+  title,
+  unit,
+  upper,
+  lower,
+  color,
+}: {
+  title: string;
+  unit: string;
+  upper: number | null;
+  lower: number | null;
+  color: string;
+}) {
+  return (
+    <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--brand-background)', border: '1px solid var(--brand-border)' }}>
+      <p className="text-[11px] font-bold mb-2" style={{ color }}>
+        {title}
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <p className="text-[9.5px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
+            Upper
+          </p>
+          <p className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+            {upper != null ? upper : '—'}
+            <span className="text-[10px] font-normal ml-1" style={{ color: 'var(--brand-text-muted)' }}>{unit}</span>
+          </p>
+        </div>
+        <div>
+          <p className="text-[9.5px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
+            Lower
+          </p>
+          <p className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+            {lower != null ? lower : '—'}
+            <span className="text-[10px] font-normal ml-1" style={{ color: 'var(--brand-text-muted)' }}>{unit}</span>
+          </p>
+        </div>
       </div>
     </div>
   );
