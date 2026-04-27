@@ -47,6 +47,28 @@ function clearAuthStorage() {
   document.cookie = 'cardioplace_admin_token=; path=/; max-age=0; SameSite=Lax';
 }
 
+/**
+ * Wrap `fetch` with a tiny retry-once on transient network errors.
+ * `TypeError: Failed to fetch` happens when the browser can't even start
+ * the request — typically a dev backend hot-reload, brief connection
+ * drop, or tab-switch abort. One immediate retry covers the common case
+ * without masking real outages (a second failure throws as before).
+ */
+async function fetchWithRetry(input: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (err) {
+    // Only retry on the network-level TypeError. AbortError / generic Errors
+    // pass through so we don't paper over genuine bugs.
+    if (err instanceof TypeError && /fetch/i.test(err.message)) {
+      // Tiny back-off so we don't slam a backend that's mid-restart.
+      await new Promise((r) => setTimeout(r, 250));
+      return await fetch(input, init);
+    }
+    throw err;
+  }
+}
+
 export async function fetchWithAuth(
   url: string,
   options: RequestInit = {},
@@ -61,7 +83,7 @@ export async function fetchWithAuth(
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   });
 
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     ...options,
     credentials: 'include',
     headers: buildHeaders(localStorage.getItem(TOKEN_KEY)),
@@ -72,7 +94,7 @@ export async function fetchWithAuth(
   const newToken = await attemptTokenRefresh();
 
   if (newToken) {
-    return fetch(url, {
+    return fetchWithRetry(url, {
       ...options,
       credentials: 'include',
       headers: buildHeaders(newToken),

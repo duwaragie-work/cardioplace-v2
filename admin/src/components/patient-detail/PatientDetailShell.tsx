@@ -20,6 +20,8 @@ import {
   Mail,
   Calendar,
   Users as UsersIcon,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getPatientSummary } from '@/lib/services/provider.service';
@@ -82,6 +84,15 @@ export default function PatientDetailShell({ patientId }: Props) {
   const [thresholdLoading, setThresholdLoading] = useState(false);
   const [logsLoading, setLogsLoading] = useState(false);
 
+  // Per-tab load errors. Stored separately so a profile failure doesn't
+  // wipe a healthy medications cache. Each loader catches and writes here
+  // instead of letting the rejection bubble to an unhandled console crash.
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [medsError, setMedsError] = useState<string | null>(null);
+  const [alertsError, setAlertsError] = useState<string | null>(null);
+  const [thresholdError, setThresholdError] = useState<string | null>(null);
+  const [logsError, setLogsError] = useState<string | null>(null);
+
   // ── Header fetch ──────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -119,11 +130,21 @@ export default function PatientDetailShell({ patientId }: Props) {
   }, [patientId]);
 
   // ── Per-tab loaders ───────────────────────────────────────────────────────
+  // Every loader has a `catch` so a transient network blip (dev backend
+  // restart, browser dropping the connection on tab switch, etc.) becomes
+  // a recoverable inline error with a Retry button — never an unhandled
+  // promise rejection that crashes the console.
+  const errMsg = (e: unknown): string =>
+    e instanceof Error ? e.message : 'Network error — please retry.';
+
   const loadProfile = useCallback(async () => {
     setProfileLoading(true);
+    setProfileError(null);
     try {
       const p = await getPatientProfile(patientId);
       setProfile(p);
+    } catch (e) {
+      setProfileError(errMsg(e));
     } finally {
       setProfileLoading(false);
     }
@@ -131,9 +152,12 @@ export default function PatientDetailShell({ patientId }: Props) {
 
   const loadMedications = useCallback(async () => {
     setMedsLoading(true);
+    setMedsError(null);
     try {
       const m = await getPatientMedications(patientId);
       setMedications(m);
+    } catch (e) {
+      setMedsError(errMsg(e));
     } finally {
       setMedsLoading(false);
     }
@@ -141,9 +165,12 @@ export default function PatientDetailShell({ patientId }: Props) {
 
   const loadAlerts = useCallback(async () => {
     setAlertsLoading(true);
+    setAlertsError(null);
     try {
       const a = await getPatientAlerts(patientId);
       setAlerts(a);
+    } catch (e) {
+      setAlertsError(errMsg(e));
     } finally {
       setAlertsLoading(false);
     }
@@ -151,9 +178,12 @@ export default function PatientDetailShell({ patientId }: Props) {
 
   const loadThreshold = useCallback(async () => {
     setThresholdLoading(true);
+    setThresholdError(null);
     try {
       const t = await getPatientThreshold(patientId);
       setThreshold(t);
+    } catch (e) {
+      setThresholdError(errMsg(e));
     } finally {
       setThresholdLoading(false);
     }
@@ -161,9 +191,12 @@ export default function PatientDetailShell({ patientId }: Props) {
 
   const loadLogs = useCallback(async () => {
     setLogsLoading(true);
+    setLogsError(null);
     try {
       const l = await getVerificationLogs(patientId);
       setLogs(l);
+    } catch (e) {
+      setLogsError(errMsg(e));
     } finally {
       setLogsLoading(false);
     }
@@ -415,45 +448,61 @@ export default function PatientDetailShell({ patientId }: Props) {
             transition={{ duration: 0.18 }}
           >
             {tab === 'profile' && (
-              <ProfileTab
-                patientId={patientId}
-                profile={profile}
-                loading={profileLoading}
-                onChanged={onProfileChanged}
-              />
+              <>
+                {profileError && <LoadErrorBanner message={profileError} onRetry={loadProfile} />}
+                <ProfileTab
+                  patientId={patientId}
+                  profile={profile}
+                  loading={profileLoading}
+                  onChanged={onProfileChanged}
+                />
+              </>
             )}
             {tab === 'medications' && (
-              <MedicationsTab
-                medications={medications}
-                loading={medsLoading}
-                onChanged={onMedicationsChanged}
-              />
+              <>
+                {medsError && <LoadErrorBanner message={medsError} onRetry={loadMedications} />}
+                <MedicationsTab
+                  medications={medications}
+                  loading={medsLoading}
+                  onChanged={onMedicationsChanged}
+                />
+              </>
             )}
             {tab === 'alerts' && (
-              <AlertsTab
-                alerts={alerts}
-                loading={alertsLoading}
-                onResolved={onAlertsResolved}
-              />
+              <>
+                {alertsError && <LoadErrorBanner message={alertsError} onRetry={loadAlerts} />}
+                <AlertsTab
+                  alerts={alerts}
+                  loading={alertsLoading}
+                  onResolved={onAlertsResolved}
+                />
+              </>
             )}
             {tab === 'thresholds' && (
-              <ThresholdsTab
-                patientId={patientId}
-                profile={profile}
-                threshold={threshold}
-                loading={thresholdLoading || profileLoading}
-                onChanged={onThresholdChanged}
-              />
+              <>
+                {thresholdError && <LoadErrorBanner message={thresholdError} onRetry={loadThreshold} />}
+                <ThresholdsTab
+                  patientId={patientId}
+                  profile={profile}
+                  threshold={threshold}
+                  loading={thresholdLoading || profileLoading}
+                  onChanged={onThresholdChanged}
+                />
+              </>
             )}
             {tab === 'careteam' && <CareTeamTab patientId={patientId} />}
             {tab === 'timeline' && (
-              <TimelineTab
-                logs={logs}
-                alerts={alerts}
-                medications={medications}
-                logsLoading={logsLoading}
-                alertsLoading={alertsLoading}
-              />
+              <>
+                {logsError && <LoadErrorBanner message={logsError} onRetry={loadLogs} />}
+                {alertsError && !logsError && <LoadErrorBanner message={alertsError} onRetry={loadAlerts} />}
+                <TimelineTab
+                  logs={logs}
+                  alerts={alerts}
+                  medications={medications}
+                  logsLoading={logsLoading}
+                  alertsLoading={alertsLoading}
+                />
+              </>
             )}
           </motion.div>
         </AnimatePresence>
@@ -464,6 +513,48 @@ export default function PatientDetailShell({ patientId }: Props) {
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+/**
+ * Inline retry banner shown above a tab body when its loader fails. Keeps
+ * the user in context — they don't lose their place — and gives them an
+ * explicit Retry button instead of a silent broken UI. Used by every tab
+ * loader in PatientDetailShell.
+ */
+function LoadErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div
+      className="mb-4 rounded-2xl p-4 flex items-start gap-3"
+      style={{
+        backgroundColor: 'var(--brand-alert-red-light)',
+        borderLeft: '4px solid var(--brand-alert-red)',
+      }}
+      role="alert"
+    >
+      <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--brand-alert-red)' }} />
+      <div className="flex-1 min-w-0">
+        <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+          Couldn&apos;t load this tab
+        </p>
+        <p className="text-[11.5px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+          {message}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12px] font-semibold cursor-pointer"
+        style={{
+          backgroundColor: 'white',
+          color: 'var(--brand-alert-red)',
+          border: '1.5px solid var(--brand-alert-red)',
+        }}
+      >
+        <RefreshCw className="w-3 h-3" />
+        Retry
+      </button>
     </div>
   );
 }
