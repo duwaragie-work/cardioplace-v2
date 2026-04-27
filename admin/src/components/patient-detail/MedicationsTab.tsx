@@ -33,7 +33,22 @@ interface Props {
   onChanged: () => void;
 }
 
-type ReconStatus = 'MATCHED' | 'DISCREPANCY' | 'UNVERIFIED' | 'DISCONTINUED' | 'REJECTED';
+// PENDING_PROVIDER_ENTRY = patient self-reported a med but no provider
+// prescription record exists yet. Per CLINICAL_SPEC V2-F Priority 3 #25
+// the provider-side prescription entry workflow is deferred to post-MVP,
+// so during MVP this state is unactionable from the admin UI. We surface
+// it as informational instead of as an amber DISCREPANCY warning to
+// avoid showing "Action required" prompts the admin can't fulfill.
+//
+// DISCREPANCY = a true mismatch the admin CAN act on today (prescribed
+// but not patient-reported, or frequency mismatch between sides).
+type ReconStatus =
+  | 'MATCHED'
+  | 'DISCREPANCY'
+  | 'PENDING_PROVIDER_ENTRY'
+  | 'UNVERIFIED'
+  | 'DISCONTINUED'
+  | 'REJECTED';
 
 interface ReconRow {
   drugClassKey: string;
@@ -98,8 +113,13 @@ export default function MedicationsTab({ medications, loading, onChanged }: Prop
       if (allDiscontinued) status = 'DISCONTINUED';
       else if (anyRejected) status = 'REJECTED';
       else if (providerEntered.length > 0 && patientReported.length > 0) status = 'MATCHED';
+      // Prescribed but no patient self-report → real discrepancy (potential
+      // non-adherence). Admin can verify or reject the existing prescription.
       else if (providerEntered.length > 0 && patientReported.length === 0) status = 'DISCREPANCY';
-      else if (patientReported.length > 0 && providerEntered.length === 0) status = 'DISCREPANCY';
+      // Patient-reported but no prescription on file → unactionable until
+      // the provider-entry workflow ships (CLINICAL_SPEC V2-C Layer 2 /
+      // V2-F #25). Surface as informational, not as a warning.
+      else if (patientReported.length > 0 && providerEntered.length === 0) status = 'PENDING_PROVIDER_ENTRY';
       else status = 'UNVERIFIED';
       // Within MATCHED, downgrade to DISCREPANCY if frequencies don't align.
       if (status === 'MATCHED') {
@@ -259,7 +279,9 @@ export default function MedicationsTab({ medications, loading, onChanged }: Prop
               </div>
             </div>
 
-            {/* Action required strip */}
+            {/* True discrepancy — admin can act on this from the existing UI
+                (verify or reject the prescription / patient row). Keep the
+                amber warning + "Action required" prompt. */}
             {row.status === 'DISCREPANCY' && (
               <div
                 className="px-5 py-2.5 flex items-center gap-2"
@@ -270,7 +292,29 @@ export default function MedicationsTab({ medications, loading, onChanged }: Prop
               >
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-warning-amber)' }} />
                 <p className="text-[11.5px] font-semibold" style={{ color: 'var(--brand-warning-amber)' }}>
-                  Action required — confirm or reject the patient&apos;s entry, then add the matching prescription.
+                  Action required — confirm or reject the entry to reconcile this medication.
+                </p>
+              </div>
+            )}
+
+            {/* Pending provider entry — the patient self-report side is
+                fully verifiable today, but the right-hand prescription
+                column needs the provider-entry workflow (CLINICAL_SPEC
+                V2-C Layer 2 / V2-F #25 — deferred to post-MVP). Shown as
+                a quiet info note so the admin knows the system knows; no
+                "Action required" because there's nothing the admin can
+                do about it from MVP UI. */}
+            {row.status === 'PENDING_PROVIDER_ENTRY' && (
+              <div
+                className="px-5 py-2.5 flex items-center gap-2"
+                style={{
+                  backgroundColor: 'var(--brand-background)',
+                  borderTop: '1px solid var(--brand-border)',
+                }}
+              >
+                <ClockIcon className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-text-muted)' }} />
+                <p className="text-[11.5px]" style={{ color: 'var(--brand-text-muted)' }}>
+                  Pending provider entry — the prescription record will be added once provider entry is enabled.
                 </p>
               </div>
             )}
@@ -301,6 +345,17 @@ function statusChrome(status: ReconStatus): {
         bg: 'var(--brand-warning-amber-light)',
         color: 'var(--brand-warning-amber)',
         icon: <AlertTriangle className="w-3 h-3" />,
+      };
+    case 'PENDING_PROVIDER_ENTRY':
+      // Neutral / informational — provider-entry workflow ships post-MVP,
+      // so this is "waiting on a feature" rather than "waiting on the
+      // admin". Tinted in the brand-neutral palette so the row doesn't
+      // compete visually with rows that DO need attention.
+      return {
+        label: 'Patient-reported',
+        bg: 'var(--brand-background)',
+        color: 'var(--brand-text-secondary)',
+        icon: <ClockIcon className="w-3 h-3" />,
       };
     case 'REJECTED':
       return {
