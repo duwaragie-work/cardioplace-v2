@@ -47,6 +47,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/auth-context';
+import { hasAdminRole, isProviderOnly } from '@/lib/roleGates';
 import { useLanguage } from '@/contexts/LanguageContext';
 import AlertPanel, { type Alert, type AlertDetail } from './AlertPanel';
 import ScheduleModal, { type ScheduleDetails } from './ScheduleModal';
@@ -296,9 +297,15 @@ export default function AdminDashboard() {
   const [scheduleError, setScheduleError] = useState<string | null>(null);
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
+  // PROVIDER-only callers get the assigned-only scope. Other admin roles
+  // see everything.
+  const alertScope = isProviderOnly(user) ? 'assigned' : undefined;
   const refreshData = useCallback(() => {
     setDataLoading(true);
-    Promise.all([getProviderStats(), getProviderAlerts()])
+    Promise.all([
+      getProviderStats(),
+      getProviderAlerts(alertScope ? { scope: alertScope } : undefined),
+    ])
       .then(([statsData, alertsData]) => {
         setStats({
           totalPatients: statsData.totalActivePatients ?? statsData.totalPatients ?? 0,
@@ -313,7 +320,7 @@ export default function AdminDashboard() {
         // best-effort
       })
       .finally(() => setDataLoading(false));
-  }, []);
+  }, [alertScope]);
 
   useEffect(() => {
     if (isLoading || !user) return;
@@ -499,7 +506,7 @@ export default function AdminDashboard() {
     );
   }
 
-  if (user?.email !== 'support@healplace.com') {
+  if (!hasAdminRole(user)) {
     return (
       <div
         style={{
