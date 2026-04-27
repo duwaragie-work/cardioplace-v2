@@ -26,7 +26,6 @@ import {
   Pill,
   Droplet,
   Shield,
-  Camera,
   Mic,
   ArrowLeft,
   ArrowRight,
@@ -295,7 +294,10 @@ function A2Pregnancy({ state, setState }: StepProps) {
         audio={t('intake.a2.audio')}
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {/* Pregnancy is a binary clinical question — Yes / No only. The prior
+          "Not applicable" option was confusing for female patients (the
+          step is gated to gender === FEMALE upstream). */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <ChoiceCard
           icon={<Baby className="w-6 h-6" />}
           title={t('intake.a2.yesTitle')}
@@ -311,14 +313,6 @@ function A2Pregnancy({ state, setState }: StepProps) {
           selected={state.isPregnant === false}
           onClick={() => setState((p) => ({ ...p, isPregnant: false, pregnancyDueDate: undefined }))}
           audioText={t('intake.a2.noAudio')}
-        />
-        <ChoiceCard
-          icon={<Asterisk className="w-6 h-6" />}
-          title={t('intake.a2.naTitle')}
-          description={t('intake.a2.naDesc')}
-          selected={state.isPregnant === undefined}
-          onClick={() => setState((p) => ({ ...p, isPregnant: undefined, pregnancyDueDate: undefined }))}
-          audioText={t('intake.a2.naAudio')}
         />
       </div>
 
@@ -365,11 +359,15 @@ function A2Pregnancy({ state, setState }: StepProps) {
 function A3Conditions({ state, setState }: StepProps) {
   const { t } = useLanguage();
   const has = (k: keyof IntakeFormState): boolean => Boolean(state[k]);
+  // Toggling any condition clears the explicit "None" ack — they're mutually
+  // exclusive by definition.
   const set = (k: keyof IntakeFormState, v: boolean) =>
-    setState((p) => ({ ...p, [k]: v }));
+    setState((p) => ({ ...p, [k]: v, noneOfTheAboveAck: false }));
 
-  const noneSelected =
-    !state.hasHeartFailure && !state.hasAFib && !state.hasCAD && !state.hasHCM && !state.hasDCM;
+  // "None of the above" is selected ONLY when the user explicitly clicked
+  // it (noneOfTheAboveAck === true). Just having all booleans empty is the
+  // initial state and must NOT pre-select anything.
+  const noneSelected = state.noneOfTheAboveAck === true;
 
   return (
     <div className="space-y-6">
@@ -434,6 +432,9 @@ function A3Conditions({ state, setState }: StepProps) {
             hasHCM: false,
             hasDCM: false,
             heartFailureType: undefined,
+            // Explicit acknowledgement — distinguishes "user said no"
+            // from "user hasn't touched the step yet".
+            noneOfTheAboveAck: true,
           }))}
           audioText={t('intake.a3.noneAudio')}
         />
@@ -481,7 +482,9 @@ function A4HFType({ state, setState }: StepProps) {
           icon={<Asterisk className="w-6 h-6" />}
           title={t('intake.a4.unknownTitle')}
           description={t('intake.a4.unknownDesc')}
-          selected={state.heartFailureType === 'UNKNOWN' || state.heartFailureType === undefined}
+          // Only highlight when explicitly chosen — undefined is the
+          // initial state and must NOT auto-select an option.
+          selected={state.heartFailureType === 'UNKNOWN'}
           onClick={() => setState((p) => ({ ...p, heartFailureType: 'UNKNOWN' }))}
           audioText={t('intake.a4.unknownAudio')}
         />
@@ -653,7 +656,9 @@ function A8Categories({ state, setState }: StepProps) {
   const { t } = useLanguage();
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [otherText, setOtherText] = useState(state.otherDraft?.text ?? '');
-  const [photoNote, setPhotoNote] = useState(state.otherDraft?.photoNote ?? '');
+  // Photo capture removed — patients can type or use device-level voice
+  // dictation instead. Backend still accepts PATIENT_PHOTO source for
+  // back-compat; we just don't surface that path in the UI any more.
 
   const selectedIds = useMemo(
     () => new Set(state.selectedMedications.map((m) => m.catalogId).filter(Boolean) as string[]),
@@ -699,7 +704,6 @@ function A8Categories({ state, setState }: StepProps) {
       otherDraft: undefined,
     }));
     setOtherText('');
-    setPhotoNote('');
   };
 
   const otherCount = state.selectedMedications.filter((m) => m.drugClass === 'OTHER_UNVERIFIED').length;
@@ -804,36 +808,6 @@ function A8Categories({ state, setState }: StepProps) {
                 </div>
               </div>
 
-              <div className="flex items-start gap-3">
-                <div
-                  className="shrink-0 rounded-xl flex items-center justify-center"
-                  style={{ width: 40, height: 40, backgroundColor: 'var(--brand-accent-teal)', color: 'white' }}
-                >
-                  <Camera className="w-5 h-5" />
-                </div>
-                <div className="flex-1">
-                  <label className="block text-[12px] font-semibold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-                    {t('intake.a8.otherPhotoLabel')}
-                  </label>
-                  <input
-                    type="text"
-                    value={photoNote}
-                    onChange={(e) => setPhotoNote(e.target.value)}
-                    placeholder={t('intake.a8.otherPhotoPlaceholder')}
-                    className="w-full h-11 px-4 rounded-lg text-[14px] outline-none transition box-border bg-white"
-                    style={{ border: '2px solid var(--brand-border)', color: 'var(--brand-text-primary)' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => addOther('PATIENT_PHOTO', photoNote)}
-                    disabled={!photoNote.trim()}
-                    className="mt-2 px-4 py-1.5 rounded-full text-white text-[12px] font-bold disabled:opacity-50 cursor-pointer"
-                    style={{ backgroundColor: 'var(--brand-accent-teal)' }}
-                  >
-                    {t('intake.a8.otherAdd')}
-                  </button>
-                </div>
-              </div>
             </div>
 
             {otherCount > 0 && (
@@ -1596,28 +1570,33 @@ function ClinicalIntakeWizard() {
     }
   };
 
-  // Exit-and-save from the top-bar Save button. In edit mode this upserts the
-  // profile AND replaces the medication list via PUT /me/medications, then
-  // clears the local draft before navigating. In fresh-intake mode the draft
-  // is already persisted to localStorage on every setState, so we just
-  // navigate.
+  // Exit-and-save from the top-bar Save button. Behaves the same in both
+  // create AND edit mode: if the user has filled enough to make a valid
+  // profile (gender is the minimum the backend requires), we upsert via
+  // saveIntakeProfile + replaceIntakeMedications. If they haven't even
+  // picked a gender yet, the localStorage draft is already in sync — just
+  // navigate so they can resume from the Action Required card.
   const handleExitSave = async () => {
     if (exitSaving) return;
     setExitError('');
-    if (!editMode) {
-      // Fresh intake: the draft was already persisted to localStorage on every
-      // setState (see saveDraft wrapper above). Keep it so the patient can
-      // resume from the dashboard's Action Required card.
+
+    // No gender yet → can't create a profile server-side. Keep the draft
+    // and let them resume later. (Backend POST /intake/profile rejects
+    // payloads with no gender.)
+    if (!state.gender) {
       router.push('/dashboard');
       return;
     }
+
     setExitSaving(true);
     try {
       await Promise.all([
         saveIntakeProfile(buildProfilePayload(state)),
         replaceIntakeMedications(buildMedsPayload(state)),
       ]);
-      // Edit mode: the profile is now the source of truth — no resume needed.
+      // Profile is now persisted — drop the local draft so the dashboard
+      // sees a "done" intake state and stops showing the Action Required
+      // card. (Edit mode never had a draft, but the call is harmless.)
       if (user?.id) clearDraft(user.id);
       router.push('/dashboard');
     } catch (e) {
