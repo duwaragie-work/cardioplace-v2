@@ -4,6 +4,10 @@ import { PrismaService } from '../prisma/prisma.service.js'
 import { EmailService } from '../email/email.service.js'
 import { scheduleCallEmailHtml } from '../email/email-templates.js'
 import { UserRole } from '../generated/prisma/enums.js'
+import {
+  pickDisplayName,
+  resolveUserDisplays,
+} from '../common/user-name-resolver.js'
 
 const SEVERITY_ORDER: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 }
 
@@ -411,6 +415,20 @@ export class ProviderService {
       },
     })
 
+    // Resolve every "by" user-id appearing on either the alert (resolvedBy)
+    // or its escalation events (acknowledgedBy + resolvedBy) into a display
+    // name so the admin UI can show "Resolved by Dr. Singal" instead of a
+    // truncated UUID. One batched lookup, no N+1.
+    const idsToResolve: string[] = []
+    for (const a of alerts) {
+      if (a.resolvedBy) idsToResolve.push(a.resolvedBy)
+      for (const e of a.escalationEvents) {
+        if (e.acknowledgedBy) idsToResolve.push(e.acknowledgedBy)
+        if (e.resolvedBy) idsToResolve.push(e.resolvedBy)
+      }
+    }
+    const names = await resolveUserDisplays(this.prisma, idsToResolve)
+
     return {
       statusCode: 200,
       data: alerts.map((a) => ({
@@ -434,6 +452,7 @@ export class ProviderService {
         resolutionAction: a.resolutionAction,
         resolutionRationale: a.resolutionRationale,
         resolvedBy: a.resolvedBy,
+        resolvedByName: pickDisplayName(a.resolvedBy, names),
         createdAt: a.createdAt,
         acknowledgedAt: a.acknowledgedAt,
         journalEntry: a.journalEntry
@@ -446,7 +465,11 @@ export class ProviderService {
                   : null,
             }
           : null,
-        escalationEvents: a.escalationEvents,
+        escalationEvents: a.escalationEvents.map((e) => ({
+          ...e,
+          acknowledgedByName: pickDisplayName(e.acknowledgedBy, names),
+          resolvedByName: pickDisplayName(e.resolvedBy, names),
+        })),
       })),
     }
   }

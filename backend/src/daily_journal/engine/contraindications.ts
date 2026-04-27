@@ -8,14 +8,36 @@ import type { RuleFunction } from './types.js'
  * Rule 1 — Pregnancy + ACE/ARB (teratogenic). Fires regardless of BP.
  * Fires on UNVERIFIED meds too (safety-critical; ctx.triggerPregnancyContraindicationCheck
  * is true whenever isPregnant is true — resolver sets it).
+ *
+ * Bug fix — collect ALL ACE/ARB meds the patient is on, not just the first.
+ * A pregnant patient on Prinivil + Zestoretic must hear both names; naming
+ * one and silently dropping the other risks the patient discontinuing the
+ * named drug while continuing the unnamed one. `metadata.drugName` keeps
+ * the first match for back-compat; `metadata.drugNames` is the full list
+ * the OutputGenerator joins for the physician message.
  */
 export const pregnancyAceArbRule: RuleFunction = (session, ctx) => {
   if (!ctx.triggerPregnancyContraindicationCheck) return null
 
-  const aceOrArbMed =
-    findMedWithDrugClass(ctx.contextMeds, 'ACE_INHIBITOR') ??
-    findMedWithDrugClass(ctx.contextMeds, 'ARB')
-  if (!aceOrArbMed) return null
+  const matched = [
+    ...findAllMedsWithDrugClass(ctx.contextMeds, 'ACE_INHIBITOR'),
+    ...findAllMedsWithDrugClass(ctx.contextMeds, 'ARB'),
+  ]
+  if (matched.length === 0) return null
+
+  // Dedup by id in case a combo med flagged on both ACE and ARB (rare).
+  const seen = new Set<string>()
+  const unique = matched.filter((m) => {
+    if (seen.has(m.id)) return false
+    seen.add(m.id)
+    return true
+  })
+
+  const drugNames = unique.map((m) => m.drugName)
+  const reason =
+    unique.length === 1
+      ? `ACE/ARB (${unique[0].drugName}) in pregnant patient — teratogenic.`
+      : `ACE/ARB (${drugNames.join(', ')}) in pregnant patient — teratogenic.`
 
   return {
     ruleId: RULE_IDS.PREGNANCY_ACE_ARB,
@@ -24,10 +46,11 @@ export const pregnancyAceArbRule: RuleFunction = (session, ctx) => {
     pulsePressure: null,
     suboptimalMeasurement: session.suboptimalMeasurement,
     actualValue: null,
-    reason: `ACE/ARB (${aceOrArbMed.drugName}) in pregnant patient — teratogenic.`,
+    reason,
     metadata: {
-      drugName: aceOrArbMed.drugName,
-      drugClass: aceOrArbMed.drugClass,
+      drugName: unique[0].drugName,
+      drugClass: unique[0].drugClass,
+      drugNames,
       conditionLabel: 'Pregnancy',
     },
   }
@@ -84,4 +107,26 @@ export function findMedWithDrugClass(
     if (med.isCombination && med.combinationComponents.includes(target)) return med
   }
   return null
+}
+
+/**
+ * Returns ALL medications whose primary drugClass matches OR whose combo
+ * components include the target. Used by the pregnancy rule so the alert
+ * names every offending drug instead of stopping at the first match.
+ */
+export function findAllMedsWithDrugClass(
+  meds: ContextMedication[],
+  target: DrugClassInput,
+): ContextMedication[] {
+  const out: ContextMedication[] = []
+  for (const med of meds) {
+    if (med.drugClass === target) {
+      out.push(med)
+      continue
+    }
+    if (med.isCombination && med.combinationComponents.includes(target)) {
+      out.push(med)
+    }
+  }
+  return out
 }

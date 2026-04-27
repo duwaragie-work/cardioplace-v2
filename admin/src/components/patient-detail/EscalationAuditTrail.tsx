@@ -442,7 +442,7 @@ function ResolutionAuditFooter({
     { label: 'Status', value: prettify(alert.status) },
     { label: 'Created', value: fmtDateTime(alert.createdAt) },
     { label: 'Resolved', value: fmtDateTime(alert.acknowledgedAt) },
-    { label: 'Resolved by', value: alert.resolvedBy ?? '—' },
+    { label: 'Resolved by', value: alert.resolvedByName ?? alert.resolvedBy ?? '—' },
     { label: 'Resolution action', value: prettify(alert.resolutionAction) },
     { label: 'Reading', value: alert.journalEntry?.systolicBP != null ? `${alert.journalEntry.systolicBP}/${alert.journalEntry.diastolicBP} mmHg` : '—' },
     { label: 'Pulse pressure', value: alert.pulsePressure != null ? `${alert.pulsePressure} mmHg` : '—' },

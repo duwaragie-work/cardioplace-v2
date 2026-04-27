@@ -435,6 +435,26 @@ export class DailyJournalService {
     }
   }
 
+  /**
+   * Count of in-app unread notifications for the bell badge. EMAIL rows
+   * are excluded — they represent outbound deliveries, not in-app state
+   * the user can clear by clicking the bell. Cheap (indexed on
+   * [userId, readAt]).
+   */
+  async getNotificationsUnreadCount(userId: string) {
+    const count = await this.prisma.notification.count({
+      where: {
+        userId,
+        readAt: null,
+        channel: { not: 'EMAIL' },
+      },
+    })
+    return {
+      statusCode: 200,
+      data: { unread: count },
+    }
+  }
+
   async getNotificationById(userId: string, id: string) {
     const notification = await this.prisma.notification.findFirst({
       where: { id, userId },
