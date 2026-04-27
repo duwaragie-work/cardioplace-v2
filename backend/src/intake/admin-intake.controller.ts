@@ -20,13 +20,26 @@ import { VerifyMedicationDto } from './dto/verify-medication.dto.js'
 
 type AuthedReq = Request & { user: { id: string } }
 
+// Admin-scoped intake surface.
+//   • READ — open to all four admin roles. HEALPLACE_OPS needs to view
+//     profile + medications on the patient detail screen even though they
+//     can't verify or correct.
+//   • WRITE — SUPER_ADMIN, PROVIDER, MEDICAL_DIRECTOR. HEALPLACE_OPS is
+//     excluded from clinical verification per spec.
+// Method-level @Roles() overrides controller-level via getAllAndOverride.
 @Controller('admin')
-@Roles(UserRole.SUPER_ADMIN, UserRole.PROVIDER, UserRole.MEDICAL_DIRECTOR)
+@Roles(
+  UserRole.SUPER_ADMIN,
+  UserRole.PROVIDER,
+  UserRole.MEDICAL_DIRECTOR,
+  UserRole.HEALPLACE_OPS,
+)
 export class AdminIntakeController {
   constructor(private readonly intake: IntakeService) {}
 
   @Post('users/:id/verify-profile')
   @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.PROVIDER, UserRole.MEDICAL_DIRECTOR)
   verifyProfile(
     @Req() req: AuthedReq,
     @Param('id') patientUserId: string,
@@ -37,6 +50,7 @@ export class AdminIntakeController {
 
   @Post('users/:id/correct-profile')
   @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.PROVIDER, UserRole.MEDICAL_DIRECTOR)
   correctProfile(
     @Req() req: AuthedReq,
     @Param('id') patientUserId: string,
@@ -47,6 +61,7 @@ export class AdminIntakeController {
 
   @Post('users/:id/reject-profile-field')
   @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.PROVIDER, UserRole.MEDICAL_DIRECTOR)
   rejectProfileField(
     @Req() req: AuthedReq,
     @Param('id') patientUserId: string,
@@ -57,6 +72,7 @@ export class AdminIntakeController {
 
   @Post('medications/:id/verify')
   @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.PROVIDER, UserRole.MEDICAL_DIRECTOR)
   verifyMedication(
     @Req() req: AuthedReq,
     @Param('id') medicationId: string,

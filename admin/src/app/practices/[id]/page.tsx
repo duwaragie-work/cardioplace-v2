@@ -28,6 +28,7 @@ import {
   type StaffSlot,
 } from '@/lib/services/practice.service';
 import { useAuth } from '@/lib/auth-context';
+import { canManagePractices } from '@/lib/roleGates';
 
 interface FormState {
   name: string;
@@ -51,6 +52,9 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
   const { id } = use(params);
   const router = useRouter();
   const { user, isLoading: authLoading } = useAuth();
+  // Editable form (inputs + Save button) only for SUPER_ADMIN, MED_DIR,
+  // OPS. PROVIDER sees a clean read-only summary of the same fields.
+  const canManage = canManagePractices(user);
 
   const [practice, setPractice] = useState<Practice | null>(null);
   const [staff, setStaff] = useState<PracticeStaff[]>([]);
@@ -167,7 +171,10 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
               </div>
             </div>
 
-            {/* Form card */}
+            {/* Configuration — editor for managers, read-only summary for
+                PROVIDER. Same data either way; just no inputs / Save button
+                when the role can't write. */}
+            {canManage ? (
             <div className="bg-white rounded-2xl p-5 md:p-6 space-y-4" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
               <h2 className="text-[14px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
                 Practice configuration
@@ -263,6 +270,41 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
                 </button>
               </div>
             </div>
+            ) : (
+              <div className="bg-white rounded-2xl p-5 md:p-6 space-y-3" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-[14px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                    Practice configuration
+                  </h2>
+                  <span
+                    className="ml-auto text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                    style={{ backgroundColor: 'var(--brand-background)', color: 'var(--brand-text-muted)' }}
+                    title="Read-only — only an administrator can change practice settings."
+                  >
+                    Read-only
+                  </span>
+                </div>
+                <ReadonlyRow label="Practice name" value={practice.name} />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <ReadonlyRow label="Hours start" value={practice.businessHoursStart} />
+                  <ReadonlyRow label="Hours end" value={practice.businessHoursEnd} />
+                  <ReadonlyRow
+                    label={
+                      <span className="inline-flex items-center gap-1">
+                        <Globe className="w-2.5 h-2.5" />
+                        Timezone
+                      </span>
+                    }
+                    value={practice.businessHoursTimezone}
+                  />
+                </div>
+                <ReadonlyRow
+                  label="After-hours protocol"
+                  value={practice.afterHoursProtocol?.trim() || 'Not documented.'}
+                  multiline
+                />
+              </div>
+            )}
 
             {/* Staff list */}
             <div className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
@@ -372,5 +414,32 @@ function Field({ label, required, children }: { label: React.ReactNode; required
       </span>
       {children}
     </label>
+  );
+}
+
+/** Read-only display of a labelled field. Used by the non-manager view —
+ *  same visual rhythm as Field but renders the value as styled text
+ *  instead of an editable input. */
+function ReadonlyRow({
+  label,
+  value,
+  multiline = false,
+}: {
+  label: React.ReactNode;
+  value: string | null;
+  multiline?: boolean;
+}) {
+  return (
+    <div>
+      <p className="text-[10.5px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--brand-text-muted)' }}>
+        {label}
+      </p>
+      <p
+        className={`text-[13px] ${multiline ? 'leading-relaxed whitespace-pre-wrap' : ''}`}
+        style={{ color: 'var(--brand-text-primary)' }}
+      >
+        {value && value.length > 0 ? value : '—'}
+      </p>
+    </div>
   );
 }
