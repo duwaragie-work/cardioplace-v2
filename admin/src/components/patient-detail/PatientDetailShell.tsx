@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getPatientSummary } from '@/lib/services/provider.service';
+import { getBMI } from '@cardioplace/shared';
 import {
   getPatientProfile,
   getPatientMedications,
@@ -54,7 +55,7 @@ interface PatientHeader {
   primaryCondition: string | null;
   communicationPreference: string | null;
   activeAlertsCount: number;
-  latestBP: { systolicBP: number | null; diastolicBP: number | null; entryDate: string | null } | null;
+  latestBP: { systolicBP: number | null; diastolicBP: number | null; weight: number | null; entryDate: string | null } | null;
   lastEntryDate: string | null;
 }
 
@@ -101,6 +102,18 @@ export default function PatientDetailShell({ patientId }: Props) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setHeaderLoading(true);
     setHeaderError(null);
+    // Pre-load PatientProfile in parallel so the BMI chip in the header
+    // can render on every tab — not just after the user visits Profile or
+    // Thresholds. Cheap call, no UI block; the BMI chip just hides until
+    // height arrives.
+    getPatientProfile(patientId)
+      .then((p) => {
+        if (!cancelled) setProfile(p);
+      })
+      .catch(() => {
+        // Silent — header still renders. Per-tab loader catches the
+        // visible error on the Profile tab.
+      });
     getPatientSummary(patientId)
       .then((data) => {
         if (cancelled) return;
@@ -364,24 +377,95 @@ export default function PatientDetailShell({ patientId }: Props) {
                   )}
                 </div>
               </div>
-              <div className="flex items-center gap-3 md:gap-4">
+              {/* Right-side stat cluster. Columns top-align so the small
+                  labels line up; values share a baseline at the second
+                  row; chips (PP, BMI) hang under BP without throwing off
+                  the rhythm. A hairline divider visually separates the
+                  two columns. */}
+              <div className="flex items-stretch gap-4 md:gap-5 shrink-0">
                 {header.latestBP && header.latestBP.systolicBP != null && (
-                  <div className="text-right">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
-                      Latest BP
-                    </p>
-                    <p className="text-lg font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                      {header.latestBP.systolicBP}/{header.latestBP.diastolicBP}
-                      <span className="text-[11px] font-normal ml-1" style={{ color: 'var(--brand-text-muted)' }}>mmHg</span>
-                    </p>
-                  </div>
+                  <>
+                    <div className="text-right flex flex-col min-w-[100px]">
+                      <p
+                        className="text-[10px] font-semibold uppercase tracking-wider mb-0.5"
+                        style={{ color: 'var(--brand-text-muted)' }}
+                      >
+                        Latest BP
+                      </p>
+                      <p
+                        className="text-lg font-bold leading-tight"
+                        style={{ color: 'var(--brand-text-primary)' }}
+                      >
+                        {header.latestBP.systolicBP}/{header.latestBP.diastolicBP}
+                        <span
+                          className="text-[11px] font-normal ml-1"
+                          style={{ color: 'var(--brand-text-muted)' }}
+                        >
+                          mmHg
+                        </span>
+                      </p>
+                      {/* Clinical-signal chips: PP always derivable from
+                          BP, BMI only when weight + intake-time height
+                          exist. Patients never see these. */}
+                      {(() => {
+                        const sbp = header.latestBP.systolicBP;
+                        const dbp = header.latestBP.diastolicBP;
+                        const pp = sbp != null && dbp != null ? sbp - dbp : null;
+                        const bmi = getBMI(profile?.heightCm ?? null, header.latestBP.weight);
+                        if (pp == null && bmi == null) return null;
+                        return (
+                          <div className="mt-1.5 flex items-center justify-end gap-1.5 flex-wrap">
+                            {pp != null && (
+                              <span
+                                className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                                style={{
+                                  backgroundColor:
+                                    pp > 60
+                                      ? 'var(--brand-warning-amber-light)'
+                                      : 'var(--brand-background)',
+                                  color:
+                                    pp > 60
+                                      ? 'var(--brand-warning-amber)'
+                                      : 'var(--brand-text-secondary)',
+                                }}
+                                title="Pulse pressure (SBP − DBP). >60 mmHg flagged amber."
+                              >
+                                PP {pp}
+                              </span>
+                            )}
+                            {bmi != null && (
+                              <span
+                                className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                                style={{
+                                  backgroundColor: 'var(--brand-primary-purple-light)',
+                                  color: 'var(--brand-primary-purple)',
+                                }}
+                                title="BMI = weight ÷ height² (computed from intake-time height)"
+                              >
+                                BMI {bmi.toFixed(1)}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    {/* Hairline divider */}
+                    <div
+                      className="w-px self-stretch"
+                      style={{ backgroundColor: 'var(--brand-border)' }}
+                      aria-hidden
+                    />
+                  </>
                 )}
-                <div className="text-right">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
+                <div className="text-right flex flex-col min-w-[80px]">
+                  <p
+                    className="text-[10px] font-semibold uppercase tracking-wider mb-0.5"
+                    style={{ color: 'var(--brand-text-muted)' }}
+                  >
                     Open alerts
                   </p>
                   <p
-                    className="text-lg font-bold"
+                    className="text-lg font-bold leading-tight"
                     style={{
                       color:
                         (header.activeAlertsCount ?? 0) > 0
@@ -475,6 +559,7 @@ export default function PatientDetailShell({ patientId }: Props) {
                   alerts={alerts}
                   loading={alertsLoading}
                   onResolved={onAlertsResolved}
+                  heightCm={profile?.heightCm ?? null}
                 />
               </>
             )}

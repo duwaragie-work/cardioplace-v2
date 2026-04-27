@@ -368,6 +368,9 @@ export class ProviderService {
             measuredAt: true,
             systolicBP: true,
             diastolicBP: true,
+            // Weight in kg — admin patient detail computes BMI from
+            // weight + PatientProfile.heightCm.
+            weight: true,
           },
         },
         escalationEvents: {
@@ -433,7 +436,16 @@ export class ProviderService {
         resolvedBy: a.resolvedBy,
         createdAt: a.createdAt,
         acknowledgedAt: a.acknowledgedAt,
-        journalEntry: a.journalEntry,
+        journalEntry: a.journalEntry
+          ? {
+              ...a.journalEntry,
+              // Prisma Decimal → number for JSON.
+              weight:
+                a.journalEntry.weight != null
+                  ? Number(a.journalEntry.weight)
+                  : null,
+            }
+          : null,
         escalationEvents: a.escalationEvents,
       })),
     }
@@ -453,6 +465,9 @@ export class ProviderService {
             measuredAt: true,
             systolicBP: true,
             diastolicBP: true,
+            // Weight is needed for the admin BMI display on the header.
+            // BMI = weight ÷ height²; height comes from PatientProfile.
+            weight: true,
           },
         },
         deviationAlerts: {
@@ -491,6 +506,9 @@ export class ProviderService {
         ? {
             systolicBP: latestEntry.systolicBP,
             diastolicBP: latestEntry.diastolicBP,
+            // Weight in kg (Prisma Decimal). Converted to plain number so
+            // the JSON payload is consumable without a Decimal helper.
+            weight: latestEntry.weight != null ? Number(latestEntry.weight) : null,
             entryDate: latestEntry.measuredAt,
             measurementTime: null,
           }

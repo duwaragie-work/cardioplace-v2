@@ -196,6 +196,9 @@ export interface PatientAlert {
     measuredAt: string | null
     systolicBP: number | null
     diastolicBP: number | null
+    /** Weight in kg. Used by the admin patient detail to compute BMI
+     *  alongside the BP reading. */
+    weight: number | null
   } | null
   escalationEvents: PatientAlertEscalationEvent[]
 }

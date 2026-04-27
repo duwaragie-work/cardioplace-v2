@@ -55,6 +55,7 @@ import {
   listMyMedications,
   type PatientMedication,
 } from '@/lib/services/patient-medications.service';
+import { getBMI } from '@cardioplace/shared';
 import AudioButton from '@/components/intake/AudioButton';
 import ChoiceCard from '@/components/intake/ChoiceCard';
 import StepDots from '@/components/intake/StepDots';
@@ -123,6 +124,10 @@ interface SessionReading {
   systolicBP?: number;
   diastolicBP?: number;
   pulse?: number;
+  /** Always stored in kg (frontend converts from lbs before submit). Used
+   *  to compute BMI for the confirmation screen — patients never enter BMI
+   *  themselves per Niva's spec sign-off. */
+  weightKg?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -995,6 +1000,7 @@ function ConfirmationScreen({
   lastReading,
   sessionReadings,
   hasAFib,
+  heightCm,
   missedMedNames,
   onAddAnother,
   onDone,
@@ -1002,6 +1008,9 @@ function ConfirmationScreen({
   lastReading: SessionReading;
   sessionReadings: SessionReading[];
   hasAFib: boolean;
+  /** From PatientProfile.heightCm — fixed at intake. Used to compute BMI
+   *  when the patient logged a weight. */
+  heightCm: number | null;
   missedMedNames: string[];
   onAddAnother: () => void;
   onDone: () => void;
@@ -1009,6 +1018,10 @@ function ConfirmationScreen({
   const { t } = useLanguage();
   const total = sessionReadings.length;
   const aFibSatisfied = !hasAFib || total >= 3;
+  // BMI is read-only and only shown when both weight (this reading) and
+  // height (intake) are on file. Pulse pressure is intentionally NOT
+  // shown on the patient app per Niva — clinically too easy to misread.
+  const bmi = getBMI(heightCm, lastReading.weightKg);
 
   return (
     // Compacted to fit a typical phone viewport (~700px) without scrolling.
@@ -1062,6 +1075,24 @@ function ConfirmationScreen({
             </span>
           )}
         </div>
+        {/* BMI — read-only, computed from this reading's weight + the
+            patient's intake-time height. Only rendered when both are
+            available; never asks the patient to enter BMI directly. */}
+        {bmi != null && (
+          <div
+            className="mt-2 pt-2 flex items-center justify-center gap-2"
+            style={{ borderTop: '1px solid var(--brand-border)' }}
+          >
+            <Scale className="w-3.5 h-3.5" style={{ color: 'var(--brand-text-muted)' }} />
+            <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
+              Weight {Math.round((lastReading.weightKg ?? 0) * 10) / 10} kg
+            </span>
+            <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>·</span>
+            <span className="text-[11px] font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
+              BMI {bmi.toFixed(1)}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Missed-medication acknowledgement — visible confirmation so the
@@ -1347,6 +1378,7 @@ export default function CheckIn() {
         systolicBP: sys,
         diastolicBP: dia,
         pulse: pul,
+        weightKg,
       };
       setSessionReadings((prev) => [...prev, reading]);
       setReadingNumber((n) => n + 1);
@@ -1484,6 +1516,7 @@ export default function CheckIn() {
             lastReading={last}
             sessionReadings={sessionReadings}
             hasAFib={hasAFib}
+            heightCm={profile?.heightCm ?? null}
             missedMedNames={medications
               .filter((m) => form.medicationStatus[m.id]?.taken === 'no')
               .map((m) => m.drugName)}
