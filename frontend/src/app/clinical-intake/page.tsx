@@ -52,7 +52,9 @@ import {
   getMyPatientProfile,
   getMyMedications,
   saveIntakeProfile,
-  saveIntakeMedications,
+  // saveIntakeMedications (POST) intentionally not used here — see
+  // handleSubmit comment about idempotency. replaceIntakeMedications (PUT)
+  // is the canonical write path for this surface.
   replaceIntakeMedications,
 } from '@/lib/services/intake.service';
 import { CORE_MEDS as ALL_CORE_MEDS, CATEGORY_MEDS as ALL_CATEGORY_MEDS, COMBO_MEDS as ALL_COMBO_MEDS } from '@cardioplace/shared';
@@ -1555,9 +1557,13 @@ function ClinicalIntakeWizard() {
     setSubmitting(true);
     try {
       await saveIntakeProfile(buildProfilePayload(state));
-      if (state.selectedMedications.length > 0) {
-        await saveIntakeMedications(buildMedsPayload(state));
-      }
+      // Use PUT (replace) instead of POST (append) so a returning patient
+      // who already saved a partial draft, OR an edit-mode submit, doesn't
+      // duplicate every medication on top of the existing list. PUT with
+      // an empty array correctly represents "patient takes no medications"
+      // — soft-deleting any prior rows. Matches handleExitSave so both
+      // exit paths leave the DB in the same shape.
+      await replaceIntakeMedications(buildMedsPayload(state));
       setStateRaw((p) => ({ ...p, hasSubmitted: true }));
       setDirection(1);
       // Use raw setStep — persistStep would re-write the draft we just cleared.
