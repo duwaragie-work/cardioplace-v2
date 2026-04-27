@@ -220,7 +220,11 @@ export default function Dashboard() {
 
   // ─── Derived values ───────────────────────────────────────────────────────
   const visibleChartData = chartRange === 7 ? bpChartData.slice(-7) : bpChartData;
-  const loading = isLoading || dataLoading;
+  // Wait for BOTH data streams before lifting the skeleton — auth + journal
+  // (dataLoading) AND the intake-state probe (intakeUi.kind === 'unknown').
+  // Without this gate, journal loads first, the page paints, then the
+  // Action Required card pops in a moment later as a visual jolt.
+  const loading = isLoading || dataLoading || intakeUi.kind === 'unknown';
   const userName = user?.name?.split(' ')[0] ?? '';
 
   const todayStr = new Date().toISOString().slice(0, 10);

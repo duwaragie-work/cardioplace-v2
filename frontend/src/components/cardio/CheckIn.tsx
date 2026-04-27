@@ -44,6 +44,7 @@ import {
   Plus,
   Home,
   Volume2,
+  ClipboardCheck,
 } from 'lucide-react';
 
 import { useAuth } from '@/lib/auth-context';
@@ -1413,6 +1414,61 @@ export default function CheckIn() {
   // doesn't flash a generic spinner before the first step renders.
   if (isLoading || !isAuthenticated || profileLoading) {
     return <CheckInSkeleton />;
+  }
+
+  // Layer A journaling gate (matches backend daily_journal.service.ts). Without
+  // a PatientProfile, the rule engine has no clinical context, so the backend
+  // silently drops any reading. Block the wizard entirely + send the user to
+  // /clinical-intake instead of letting them fill out a form that won't save.
+  if (!profile) {
+    return (
+      <div
+        className="min-h-screen flex flex-col"
+        style={{ backgroundColor: 'var(--brand-background)' }}
+      >
+        <main className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-8">
+          <div
+            className="w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 text-center"
+            style={{ boxShadow: '0 4px 24px rgba(123,0,224,0.08)' }}
+          >
+            <div
+              className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5"
+              style={{
+                background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
+              }}
+              aria-hidden
+            >
+              <ClipboardCheck className="w-8 h-8 text-white" strokeWidth={2.25} />
+            </div>
+            <h1 className="text-xl sm:text-2xl font-bold text-[#170c1d] mb-3">
+              Let&apos;s get to know you first
+            </h1>
+            <p className="text-[#4b5563] text-sm sm:text-base leading-relaxed mb-6">
+              Before you log a reading, please answer a few quick questions
+              about your health. Your care team needs this to interpret your
+              numbers safely — readings logged without it won&apos;t be saved.
+            </p>
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                onClick={() => router.push('/clinical-intake')}
+                className="w-full h-12 sm:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm sm:text-base hover:bg-[#6600BC] transition-colors cursor-pointer inline-flex items-center justify-center gap-2"
+              >
+                Complete clinical intake
+                <ArrowRight className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push('/dashboard')}
+                className="w-full h-11 sm:h-12 rounded-full font-semibold text-[#7B00E0] text-sm sm:text-base hover:bg-[#f5f3ff] transition-colors cursor-pointer"
+              >
+                Back to dashboard
+              </button>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
   }
 
   // Confirmation overlays the whole flow
