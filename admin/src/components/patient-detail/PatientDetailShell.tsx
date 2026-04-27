@@ -334,58 +334,77 @@ export default function PatientDetailShell({ patientId }: Props) {
               <Link href="/patients" className="underline">Back</Link>
             </div>
           ) : header ? (
-            <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6">
-              <div
-                className="w-14 h-14 rounded-full flex items-center justify-center shrink-0 text-[15px] font-bold"
-                style={{
-                  backgroundColor: 'var(--brand-primary-purple-light)',
-                  color: 'var(--brand-primary-purple)',
-                }}
-              >
-                {initials}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center flex-wrap gap-2 mb-0.5">
-                  <h1 className="text-xl font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>
-                    {header.name ?? 'Unknown patient'}
-                  </h1>
-                  <span
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold uppercase tracking-wider"
-                    style={{ backgroundColor: verificationBadge.bg, color: verificationBadge.fg }}
+            // Header layout:
+            //   • Mobile/tablet (<lg): two stacked rows. Row 1 = avatar +
+            //     identity (always horizontal so the name doesn't lose its
+            //     anchor). Row 2 = stats cluster, left-aligned and using
+            //     the full width so it doesn't float orphaned at the right.
+            //   • Desktop (lg+): single row — avatar + identity (flex-1)
+            //     + stats cluster on the right edge.
+            <div className="flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-6">
+              {/* Avatar + identity — always a horizontal pair. */}
+              <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
+                <div
+                  className="w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center shrink-0 text-[14px] sm:text-[15px] font-bold"
+                  style={{
+                    backgroundColor: 'var(--brand-primary-purple-light)',
+                    color: 'var(--brand-primary-purple)',
+                  }}
+                >
+                  {initials}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center flex-wrap gap-x-2 gap-y-1 mb-0.5">
+                    <h1
+                      className="text-lg sm:text-xl font-bold leading-tight truncate"
+                      style={{ color: 'var(--brand-text-primary)' }}
+                    >
+                      {header.name ?? 'Unknown patient'}
+                    </h1>
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider whitespace-nowrap"
+                      style={{ backgroundColor: verificationBadge.bg, color: verificationBadge.fg }}
+                    >
+                      {verificationBadge.icon}
+                      {verificationBadge.label}
+                    </span>
+                  </div>
+                  <div
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] sm:text-[12px]"
+                    style={{ color: 'var(--brand-text-muted)' }}
                   >
-                    {verificationBadge.icon}
-                    {verificationBadge.label}
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
-                  {header.email && (
-                    <span className="inline-flex items-center gap-1">
-                      <Mail className="w-3 h-3" />
-                      {header.email}
-                    </span>
-                  )}
-                  {header.lastEntryDate && (
-                    <span className="inline-flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      Last reading {new Date(header.lastEntryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </span>
-                  )}
-                  {header.primaryCondition && (
-                    <span className="inline-flex items-center gap-1 font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
-                      {header.primaryCondition}
-                    </span>
-                  )}
+                    {header.email && (
+                      <span className="inline-flex items-center gap-1 min-w-0 max-w-full">
+                        <Mail className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{header.email}</span>
+                      </span>
+                    )}
+                    {header.lastEntryDate && (
+                      <span className="inline-flex items-center gap-1">
+                        <Calendar className="w-3 h-3 shrink-0" />
+                        <span className="hidden sm:inline">Last reading </span>
+                        {new Date(header.lastEntryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
+                    )}
+                    {header.primaryCondition && (
+                      <span className="inline-flex items-center gap-1 font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
+                        {header.primaryCondition}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-              {/* Right-side stat cluster. Columns top-align so the small
-                  labels line up; values share a baseline at the second
-                  row; chips (PP, BMI) hang under BP without throwing off
-                  the rhythm. A hairline divider visually separates the
-                  two columns. */}
-              <div className="flex items-stretch gap-4 md:gap-5 shrink-0">
+              {/* Stats cluster.
+                  • Mobile/tablet: full-width row, left-aligned, separated
+                    from identity by a hairline top border so it doesn't
+                    look orphaned.
+                  • Desktop (lg+): right-aligned, no top border (vertical
+                    column divider does the visual separation). */}
+              <div className="flex items-stretch gap-4 sm:gap-5 lg:gap-5 shrink-0 pt-3 lg:pt-0 border-t border-[var(--brand-border)] lg:border-t-0">
+
                 {header.latestBP && header.latestBP.systolicBP != null && (
                   <>
-                    <div className="text-right flex flex-col min-w-[100px]">
+                    <div className="text-left lg:text-right flex flex-col min-w-[100px]">
                       <p
                         className="text-[10px] font-semibold uppercase tracking-wider mb-0.5"
                         style={{ color: 'var(--brand-text-muted)' }}
@@ -404,9 +423,6 @@ export default function PatientDetailShell({ patientId }: Props) {
                           mmHg
                         </span>
                       </p>
-                      {/* Clinical-signal chips: PP always derivable from
-                          BP, BMI only when weight + intake-time height
-                          exist. Patients never see these. */}
                       {(() => {
                         const sbp = header.latestBP.systolicBP;
                         const dbp = header.latestBP.diastolicBP;
@@ -414,7 +430,7 @@ export default function PatientDetailShell({ patientId }: Props) {
                         const bmi = getBMI(profile?.heightCm ?? null, header.latestBP.weight);
                         if (pp == null && bmi == null) return null;
                         return (
-                          <div className="mt-1.5 flex items-center justify-end gap-1.5 flex-wrap">
+                          <div className="mt-1.5 flex items-center justify-start lg:justify-end gap-1.5 flex-wrap">
                             {pp != null && (
                               <span
                                 className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
@@ -449,7 +465,7 @@ export default function PatientDetailShell({ patientId }: Props) {
                         );
                       })()}
                     </div>
-                    {/* Hairline divider */}
+                    {/* Hairline column divider */}
                     <div
                       className="w-px self-stretch"
                       style={{ backgroundColor: 'var(--brand-border)' }}
@@ -457,7 +473,7 @@ export default function PatientDetailShell({ patientId }: Props) {
                     />
                   </>
                 )}
-                <div className="text-right flex flex-col min-w-[80px]">
+                <div className="text-left lg:text-right flex flex-col min-w-[80px]">
                   <p
                     className="text-[10px] font-semibold uppercase tracking-wider mb-0.5"
                     style={{ color: 'var(--brand-text-muted)' }}
