@@ -15,7 +15,22 @@
       "Bash(NODE_ENV=test node --experimental-vm-modules ../node_modules/jest/bin/jest.js chat.service)",
       "Bash(NODE_ENV=test node --experimental-vm-modules ../node_modules/jest/bin/jest.js chat)",
       "Bash(grep -E \"\\\\.\\(proto|yaml|json|toml|txt\\)$|Dockerfile\")",
-      "Bash(NODE_ENV=test node --experimental-vm-modules ../node_modules/jest/bin/jest.js voice.service)"
+      "Bash(NODE_ENV=test node --experimental-vm-modules ../node_modules/jest/bin/jest.js voice.service)",
+      "Bash(git fetch *)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(echo \"CLEAN=$?\")",
+      "Bash(node -e \"console.log\\('Collection valid:', !!JSON.parse\\(require\\('fs'\\).readFileSync\\('docs/postman/cardioplace-alerts.postman_collection.json', 'utf8'\\)\\)\\)\")",
+      "Bash(curl -s -X POST http://localhost:4000/api/v2/auth/otp/send -H \"Content-Type: application/json\" -d '{\"email\":\"priya.menon@cardioplace.test\"}')",
+      "Bash(curl -s -X POST http://localhost:4000/api/v2/auth/otp/verify -H \"Content-Type: application/json\" -d '{\"email\":\"priya.menon@cardioplace.test\",\"otp\":\"666666\"}')",
+      "Bash(npm config *)",
+      "Bash(NODE_OPTIONS='--experimental-vm-modules' npx jest --config ./test/jest-e2e.json --testPathPattern intake)",
+      "Bash(NODE_OPTIONS='--experimental-vm-modules' npx jest --config ./test/jest-e2e.json --testPathPatterns intake)",
+      "Bash(NODE_OPTIONS='--experimental-vm-modules' npx jest --config ./test/jest-e2e.json --testPathPatterns intake -t \"dedup\")",
+      "Bash(NODE_OPTIONS='--experimental-vm-modules' npx jest --testPathPatterns escalation.service.spec)",
+      "Bash(NODE_OPTIONS='--experimental-vm-modules' npx jest --testPathPatterns \"\\(alert-engine|escalation\\)\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\LENOVO\\Desktop\\Work-New\\cardioplace-v2\\backend\\prisma\\migrations\\0_init_cardio_v2"
     ]
   }
 }

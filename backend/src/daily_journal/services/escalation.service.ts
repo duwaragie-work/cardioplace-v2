@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter'
 import { Cron } from '@nestjs/schedule'
 import { PrismaService } from '../../prisma/prisma.service.js'
@@ -47,12 +48,21 @@ import {
 @Injectable()
 export class EscalationService {
   private readonly logger = new Logger(EscalationService.name)
+  private readonly adminBaseUrl: string
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
     private readonly emailService: EmailService,
-  ) {}
+    config: ConfigService,
+  ) {
+    // Used by escalation emails to deep-link providers to the alert in the
+    // admin app. Defaults to the local admin port so dev emails are clickable
+    // even without the env var set.
+    this.adminBaseUrl = config
+      .get<string>('ADMIN_BASE_URL', 'http://localhost:3001')
+      .replace(/\/+$/, '')
+  }
 
   // ─── event + cron entry points ──────────────────────────────────────────
 
@@ -576,7 +586,16 @@ export class EscalationService {
         if (channel === 'EMAIL') {
           const email = await this.emailFor(userId)
           if (email) {
-            await this.emailService.sendEmail(email, title, escalationEmailBody(title, body))
+            const rendered = escalationEmailBody({
+              alert,
+              step: step.step,
+              role,
+              message: body,
+              adminBaseUrl: this.adminBaseUrl,
+              afterHours: args.afterHours,
+              now: args.now,
+            })
+            await this.emailService.sendEmail(email, rendered.subject, rendered.html)
           }
         }
       }
@@ -746,12 +765,44 @@ export class EscalationService {
 
 // ─── alert-row include + types (shared fetch shape) ─────────────────────────
 
+// Wider include than v1 — escalation emails now embed patient identifiers
+// (name, email, DOB → age), the latest reading, and per-alert clinical
+// metadata (pulse pressure, suboptimal-measurement flag, mode). Practice.name
+// + business hours travel together so the email template can render the
+// practice tag in the subject, the practice-local timestamp in the body, and
+// the after-hours queueing pill where applicable.
 const ALERT_INCLUDE = {
   user: {
-    include: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      dateOfBirth: true,
+      enrollmentStatus: true,
       providerAssignmentAsPatient: {
-        include: { practice: true },
+        select: {
+          primaryProviderId: true,
+          backupProviderId: true,
+          medicalDirectorId: true,
+          practice: {
+            select: {
+              name: true,
+              businessHoursStart: true,
+              businessHoursEnd: true,
+              businessHoursTimezone: true,
+            },
+          },
+        },
       },
+    },
+  },
+  journalEntry: {
+    select: {
+      systolicBP: true,
+      diastolicBP: true,
+      pulse: true,
+      position: true,
+      measuredAt: true,
     },
   },
 } as const
@@ -761,6 +812,12 @@ interface AlertRow {
   userId: string
   tier: string | null
   ruleId: string | null
+  // Phase/22 — clinical metadata surfaced in the email body so the provider
+  // sees mode (STANDARD / PERSONALIZED), pulse pressure, and the
+  // suboptimal-measurement flag without having to click into the dashboard.
+  mode: string | null
+  pulsePressure: number | null
+  suboptimalMeasurement: boolean
   createdAt: Date
   status: string
   acknowledgedAt: Date | null
@@ -769,6 +826,9 @@ interface AlertRow {
   physicianMessage: string | null
   user: {
     id: string
+    name: string | null
+    email: string | null
+    dateOfBirth: Date | null
     // Layer B dispatch gate — escalation only fires for patients the admin
     // has passed through the 4-piece enrollment gate (assignment + practice
     // business hours + profile + threshold-if-HFREF/HCM/DCM). See
@@ -776,6 +836,7 @@ interface AlertRow {
     enrollmentStatus: 'NOT_ENROLLED' | 'ENROLLED'
     providerAssignmentAsPatient: AssignmentRow | null
   }
+  journalEntry: JournalEntrySnapshot | null
 }
 
 interface AssignmentRow {
@@ -783,14 +844,264 @@ interface AssignmentRow {
   backupProviderId: string
   medicalDirectorId: string
   practice: {
+    name: string
     businessHoursStart: string
     businessHoursEnd: string
     businessHoursTimezone: string
   }
 }
 
-function escalationEmailBody(title: string, body: string): string {
-  return `<html><body style="font-family:system-ui,sans-serif;max-width:560px;margin:auto;padding:24px"><h2 style="color:#b91c1c">${escapeHtml(title)}</h2><p>${escapeHtml(body)}</p><hr style="margin:20px 0;border:none;border-top:1px solid #e5e7eb"/><p style="font-size:12px;color:#6b7280">Sent by Cardioplace escalation service. Do not reply to this email.</p></body></html>`
+interface JournalEntrySnapshot {
+  systolicBP: number | null
+  diastolicBP: number | null
+  pulse: number | null
+  position: string | null
+  measuredAt: Date
+}
+
+// ─── email body ─────────────────────────────────────────────────────────────
+//
+// Tier-aware HTML template that wraps the role-picked clinical message
+// (physicianMessage / caregiverMessage / patientMessage) in a detailed
+// envelope: patient identifiers, latest reading + position, pulse pressure
+// (with wide-PP flag), suboptimal-measurement flag, alert mode, escalation
+// step pill, after-hours explanation, deep link to the admin dashboard, and a
+// stable footer with alert + patient IDs for ops reference. Returns subject
+// + html so the patient name renders in both the inbox preview and the body
+// via one pass.
+function escalationEmailBody(args: {
+  alert: AlertRow
+  step: LadderStepId
+  role: RecipientRole
+  message: string
+  adminBaseUrl: string
+  afterHours: boolean
+  now: Date
+}): { subject: string; html: string } {
+  const { alert, step, role, message, adminBaseUrl, afterHours, now } = args
+
+  const patientName = alert.user.name?.trim() || 'Patient (name unknown)'
+  const patientEmail = alert.user.email ?? ''
+  const age = ageFromDob(alert.user.dateOfBirth, now)
+  const dobStr = alert.user.dateOfBirth
+    ? alert.user.dateOfBirth.toISOString().slice(0, 10)
+    : '(DOB unknown)'
+  const ageStr = age != null ? `age ${age}` : 'age unknown'
+  const practice =
+    alert.user.providerAssignmentAsPatient?.practice ?? null
+  const practiceName = practice?.name ?? '(practice not assigned)'
+  const practiceTz = practice?.businessHoursTimezone ?? 'UTC'
+
+  const tierLabel = tierLabelFor(alert.tier)
+  const tierColor = tierColorFor(alert.tier)
+  const isPatient = role === 'PATIENT'
+
+  // Subject — patient-role emails keep the friendly, non-alarming title.
+  const subject = isPatient
+    ? patientSubject(alert.tier)
+    : `[${humanStep(step)} ${tierLabel}] ${patientName} — ${practiceName}`
+
+  const stepPill = `${humanStep(step)}${afterHours ? ' (after-hours queued)' : ''}`
+  const ackFooter = ackFooterFor(alert.tier)
+  const dashboardUrl = `${adminBaseUrl}/patients/${encodeURIComponent(alert.userId)}?alert=${encodeURIComponent(alert.id)}`
+
+  // Recipient role banner — clarifies why THIS person is getting THIS email.
+  // Skipped for PATIENT-role to avoid alarming wording like "as the patient".
+  const recipientBanner = isPatient
+    ? ''
+    : `<div style="margin-top:14px;padding:10px 14px;background:#eef2ff;border-radius:6px;font-size:12.5px;color:#3730a3">You are receiving this notification as the <strong>${escapeHtml(roleLabel(role))}</strong>.</div>`
+
+  // Reading block — BP, pulse, pulse pressure, position, measurement
+  // timestamp (UTC + practice-local). Only renders when a JournalEntry
+  // snapshot is on the alert (mostly always — created from a reading).
+  const readingBlock = alert.journalEntry
+    ? renderReadingBlock(alert.journalEntry, alert.pulsePressure, practiceTz)
+    : ''
+
+  // Suboptimal-measurement banner — patient missed at least one of the
+  // pre-measurement checklist items (caffeine / smoking / cuff position
+  // etc). Provider should weigh this before acting on the BP value.
+  const suboptimalBanner = alert.suboptimalMeasurement
+    ? `<div style="margin-top:12px;padding:10px 14px;background:#fef2f2;border-radius:6px;font-size:12.5px;color:#991b1b"><strong>⚠ Suboptimal measurement conditions.</strong> Patient flagged at least one pre-measurement checklist item (caffeine, smoking, recent activity, posture, or cuff position). Interpret the reading with this caveat.</div>`
+    : ''
+
+  // After-hours explanation — only render when the dispatch was queued or
+  // marked as a backup courtesy fire. Helps a recipient understand why they
+  // are paged at 11pm or why the primary hasn't responded yet.
+  const afterHoursBlock = afterHours
+    ? `<div style="margin-top:12px;padding:10px 14px;background:#fff7ed;border-radius:6px;font-size:12.5px;color:#9a3412"><strong>After-hours dispatch.</strong> The primary provider's notification is queued for the next business window (${escapeHtml(practiceName)} — ${escapeHtml(practice?.businessHoursStart ?? '')}–${escapeHtml(practice?.businessHoursEnd ?? '')} ${escapeHtml(practiceTz)}). This courtesy notification is sent to the backup so a clinician is aware overnight.</div>`
+    : ''
+
+  // Alert-metadata strip — small grey row of at-a-glance facts that don't
+  // need a full block but matter for triage: tier label, ladder step, mode,
+  // ruleId.
+  const metaItems: string[] = [
+    `Tier: <strong>${escapeHtml(tierLabel)}</strong>`,
+    `Step: <strong>${escapeHtml(humanStep(step))}</strong>`,
+  ]
+  if (alert.mode) metaItems.push(`Mode: <strong>${escapeHtml(alert.mode)}</strong>`)
+  if (alert.ruleId) metaItems.push(`Rule: <strong>${escapeHtml(alert.ruleId)}</strong>`)
+  const metaStrip = `<div style="margin-top:14px;font-size:12px;color:#6b7280;line-height:1.55">${metaItems.join(' &middot; ')}</div>`
+
+  // Timestamp block — alert created at, in both UTC and practice-local.
+  const createdUtc = alert.createdAt.toISOString()
+  const createdLocal = formatInTz(alert.createdAt, practiceTz)
+  const createdLine = `<div style="margin-top:6px;font-size:12px;color:#6b7280">Alert created: <strong>${escapeHtml(createdLocal)}</strong> <span style="color:#9ca3af">(${escapeHtml(createdUtc)})</span></div>`
+
+  // Footer with stable IDs so anyone replying via phone or Slack can
+  // reference exactly which alert / patient.
+  const idFooter = `<div style="margin-top:18px;font-size:11px;color:#9ca3af;font-family:ui-monospace,SFMono-Regular,monospace">Alert ID: ${escapeHtml(alert.id)} &middot; Patient ID: ${escapeHtml(alert.userId)}</div>`
+
+  // Header / clinical / detail / action / footer blocks. Keep inline styles
+  // — most email clients strip <style> tags.
+  const html = `<html><body style="font-family:system-ui,-apple-system,sans-serif;max-width:620px;margin:auto;padding:24px;color:#111827">
+  <div style="border-left:4px solid ${tierColor};padding:16px 20px;background:#f9fafb;border-radius:6px">
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${tierColor}">${escapeHtml(tierLabel)} &middot; ${escapeHtml(stepPill)}</div>
+    <div style="font-size:20px;font-weight:700;margin-top:6px;color:#111827">${escapeHtml(patientName)}</div>
+    <div style="font-size:13px;color:#6b7280;margin-top:2px">${escapeHtml(patientEmail)} &middot; DOB ${escapeHtml(dobStr)} &middot; ${escapeHtml(ageStr)}</div>
+    <div style="font-size:13px;color:#6b7280;margin-top:2px">Practice: ${escapeHtml(practiceName)}</div>
+  </div>
+  ${recipientBanner}
+  <div style="margin-top:20px;font-size:14px;line-height:1.6;color:#111827;font-weight:500">${escapeHtml(message)}</div>
+  ${readingBlock}
+  ${suboptimalBanner}
+  ${afterHoursBlock}
+  ${metaStrip}
+  ${createdLine}
+  <div style="margin-top:22px"><a href="${escapeAttr(dashboardUrl)}" style="display:inline-block;padding:11px 20px;background:${tierColor};color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px">View in dashboard →</a></div>
+  ${ackFooter ? `<div style="margin-top:18px;padding:12px 14px;background:#fef3c7;border-radius:6px;font-size:12.5px;color:#78350f"><strong>Acknowledgment expected.</strong> ${escapeHtml(ackFooter)}</div>` : ''}
+  ${idFooter}
+  <hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb"/>
+  <p style="font-size:11px;color:#9ca3af">Sent by Cardioplace escalation service. Do not reply to this email.</p>
+</body></html>`
+
+  return { subject, html }
+}
+
+function renderReadingBlock(
+  entry: JournalEntrySnapshot,
+  pulsePressure: number | null,
+  practiceTz: string,
+): string {
+  const sbp = entry.systolicBP
+  const dbp = entry.diastolicBP
+  const pulse = entry.pulse
+  const position = entry.position
+  const utc = entry.measuredAt.toISOString()
+  const local = formatInTz(entry.measuredAt, practiceTz)
+
+  const bpPart =
+    sbp != null && dbp != null
+      ? `${sbp}/${dbp} mmHg`
+      : sbp != null
+        ? `${sbp} mmHg systolic`
+        : '(no BP)'
+  const pulsePart = pulse != null ? ` &middot; pulse <strong>${pulse}</strong>` : ''
+  const ppPart =
+    pulsePressure != null
+      ? ` &middot; pulse pressure <strong>${pulsePressure}</strong>${pulsePressure > 60 ? ' <span style="color:#b91c1c">(wide)</span>' : ''}`
+      : ''
+  const posPart = position
+    ? ` &middot; position <strong>${escapeHtml(position)}</strong>`
+    : ''
+
+  return `<div style="margin-top:14px;padding:12px 14px;background:#f3f4f6;border-radius:6px;font-size:13px;color:#111827">
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#6b7280;margin-bottom:4px">Latest reading</div>
+    <div><strong>${escapeHtml(bpPart)}</strong>${pulsePart}${ppPart}${posPart}</div>
+    <div style="margin-top:4px;font-size:12px;color:#6b7280">Recorded <strong>${escapeHtml(local)}</strong> <span style="color:#9ca3af">(${escapeHtml(utc)})</span></div>
+  </div>`
+}
+
+function formatInTz(d: Date, tz: string): string {
+  // "Apr 22, 2026, 06:00 AM EDT" — readable, timezone-aware. Falls back to
+  // ISO if the runtime can't honour the tz (defensive — should never fire
+  // since Node 16+ ships full ICU).
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short',
+      timeZone: tz,
+    }).format(d)
+  } catch {
+    return d.toISOString()
+  }
+}
+
+function roleLabel(role: RecipientRole): string {
+  switch (role) {
+    case 'PRIMARY_PROVIDER':
+      return 'primary provider'
+    case 'BACKUP_PROVIDER':
+      return 'backup provider'
+    case 'MEDICAL_DIRECTOR':
+      return 'medical director'
+    case 'HEALPLACE_OPS':
+      return 'Healplace ops'
+    case 'PATIENT':
+      return 'patient'
+    default:
+      return role
+  }
+}
+
+function ageFromDob(dob: Date | null, now: Date): number | null {
+  if (!dob) return null
+  const ms = now.getTime() - dob.getTime()
+  if (ms < 0) return null
+  const years = ms / (365.25 * 24 * 3600 * 1000)
+  return Math.floor(years)
+}
+
+function tierLabelFor(tier: string | null): string {
+  if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') {
+    return 'BP EMERGENCY'
+  }
+  if (tier === 'TIER_1_CONTRAINDICATION') return 'TIER 1 CONTRAINDICATION'
+  if (tier === 'TIER_2_DISCREPANCY') return 'Tier 2 Review'
+  return 'Cardioplace Alert'
+}
+
+function tierColorFor(tier: string | null): string {
+  if (
+    tier === 'BP_LEVEL_2' ||
+    tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE' ||
+    tier === 'TIER_1_CONTRAINDICATION'
+  ) {
+    return '#b91c1c' // red-700
+  }
+  if (tier === 'TIER_2_DISCREPANCY') return '#b45309' // amber-700
+  return '#1d4ed8' // blue-700
+}
+
+function ackFooterFor(tier: string | null): string {
+  if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') {
+    return 'If you do not acknowledge within 2 hours, the medical director will be paged. Healplace ops will phone the practice within 4 hours.'
+  }
+  if (tier === 'TIER_1_CONTRAINDICATION') {
+    return 'If you do not acknowledge within 4 hours, your backup provider will be paged. If unresolved within 8 hours, the medical director will be notified.'
+  }
+  if (tier === 'TIER_2_DISCREPANCY') {
+    return 'If unreviewed within 7 days, this alert will be escalated to your backup provider.'
+  }
+  return ''
+}
+
+function humanStep(step: LadderStepId): string {
+  // The ladder uses ids like 'T0' / 'T2H' / 'T4H' / 'T8H' / 'T24H' / 'T48H'
+  // / 'T7D' / 'T14D'. Render with a `+` so it's unambiguous in the subject.
+  if (step === 'T0') return 'T+0'
+  return step.replace(/^T/, 'T+').toLowerCase().replace(/^t\+/, 'T+')
+}
+
+function patientSubject(tier: string | null): string {
+  if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') {
+    return 'Urgent Blood Pressure Alert — Cardioplace'
+  }
+  return 'Cardioplace Alert'
 }
 
 function escapeHtml(s: string): string {
@@ -803,5 +1114,14 @@ function escapeHtml(s: string): string {
   )
 }
 
+function escapeAttr(s: string): string {
+  // URLs go in href attributes; reuse escapeHtml since the same five chars
+  // need to be entitised in attribute context too.
+  return escapeHtml(s)
+}
+
 // Re-export for tests that want the public ladder shape without re-importing.
 export { TIER_1_LADDER }
+// Re-export the email-body helper so spec files can render and assert on the
+// output directly without spinning up the full Nest TestingModule.
+export { escalationEmailBody }

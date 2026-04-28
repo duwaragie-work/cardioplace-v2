@@ -1,10 +1,11 @@
 import { jest } from '@jest/globals'
 import { Test, TestingModule } from '@nestjs/testing'
+import { ConfigService } from '@nestjs/config'
 import { EventEmitter2 } from '@nestjs/event-emitter'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
-import { EscalationService } from './escalation.service.js'
+import { EscalationService, escalationEmailBody } from './escalation.service.js'
 import type { AlertCreatedEvent } from '../interfaces/events.interface.js'
 
 // Phase/7 — EscalationService state-machine tests.
@@ -24,6 +25,7 @@ import type { AlertCreatedEvent } from '../interfaces/events.interface.js'
 // ─── fixtures ───────────────────────────────────────────────────────────────
 
 const NY_PRACTICE = {
+  name: 'Cedar Hill Internal Medicine',
   businessHoursStart: '08:00',
   businessHoursEnd: '18:00',
   businessHoursTimezone: 'America/New_York',
@@ -36,12 +38,23 @@ const ASSIGNMENT_FULL = {
   practice: NY_PRACTICE,
 }
 
+const READING_SAMPLE = {
+  systolicBP: 165,
+  diastolicBP: 102,
+  pulse: 88,
+  position: 'SITTING',
+  measuredAt: new Date('2026-04-22T09:55:00Z'),
+}
+
 function buildAlert(over: Record<string, any> = {}) {
   return {
     id: 'alert-1',
     userId: 'patient-1',
     tier: 'TIER_1_CONTRAINDICATION',
     ruleId: 'RULE_PREGNANCY_ACE_ARB',
+    mode: 'STANDARD',
+    pulsePressure: 63,
+    suboptimalMeasurement: false,
     status: 'OPEN',
     acknowledgedAt: null,
     createdAt: new Date('2026-04-22T10:00:00Z'), // Wed 06:00 NY — after-hours
@@ -50,12 +63,16 @@ function buildAlert(over: Record<string, any> = {}) {
     physicianMessage: 'Tier 1 — ACE/ARB in pregnancy.',
     user: {
       id: 'patient-1',
+      name: 'Alan Smith',
+      email: 'alan@example.com',
+      dateOfBirth: new Date('1985-04-24T00:00:00Z'),
       // Layer B gate — default fixture is ENROLLED so every existing test
       // case exercises the happy path. Override to 'NOT_ENROLLED' to verify
       // the dispatch gate.
       enrollmentStatus: 'ENROLLED',
       providerAssignmentAsPatient: ASSIGNMENT_FULL,
     },
+    journalEntry: READING_SAMPLE,
     ...over,
   }
 }
@@ -131,6 +148,15 @@ describe('EscalationService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: EventEmitter2, useValue: eventEmitter },
         { provide: EmailService, useValue: email },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (key: string, fallback?: string) =>
+              key === 'ADMIN_BASE_URL'
+                ? 'https://admin.cardioplaceai.com'
+                : (fallback ?? undefined),
+          },
+        },
       ],
     }).compile()
 
@@ -795,6 +821,230 @@ describe('EscalationService', () => {
         'HEALPLACE_OPS',
         'HEALPLACE_OPS',
       ])
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Email body content (phase/22) — verifies that escalation emails carry
+  // patient identifiers, alert timestamp, BP reading, escalation step, and
+  // a deep link to the admin dashboard. The previous template only carried
+  // the alert message, which forced providers to log in and hunt for
+  // context on every notification.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('email body content', () => {
+    it('Tier 1 T+0 to primary provider includes name, practice, BP reading, and dashboard link', async () => {
+      // Business-hours dispatch so the email fires immediately — no queueing.
+      const now = new Date('2026-04-22T15:00:00Z') // 11:00 NY, in hours
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildAlert({ createdAt: now }),
+      )
+      ;(prisma.user.findUnique as jest.Mock<any>).mockResolvedValue({
+        email: 'primary@example.com',
+      })
+
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({ tier: 'TIER_1_CONTRAINDICATION' }),
+        now,
+      )
+
+      expect(email.sendEmail).toHaveBeenCalled()
+      const [to, subject, html] = email.sendEmail.mock.calls[0] as [
+        string,
+        string,
+        string,
+      ]
+      expect(to).toBe('primary@example.com')
+      // Subject — step + tier prefix + patient name + practice.
+      expect(subject).toContain('T+0')
+      expect(subject).toContain('TIER 1 CONTRAINDICATION')
+      expect(subject).toContain('Alan Smith')
+      expect(subject).toContain('Cedar Hill Internal Medicine')
+      // Body — patient identifiers, BP reading, dashboard link, ack footer.
+      expect(html).toContain('Alan Smith')
+      expect(html).toContain('alan@example.com')
+      expect(html).toContain('1985-04-24')
+      expect(html).toMatch(/age 4[01]/) // 40 or 41 depending on now/dob math
+      expect(html).toContain('Cedar Hill Internal Medicine')
+      expect(html).toContain('165/102 mmHg')
+      expect(html).toContain('pulse <strong>88</strong>')
+      expect(html).toContain('Tier 1 — ACE/ARB in pregnancy.')
+      expect(html).toContain(
+        'https://admin.cardioplaceai.com/patients/patient-1?alert=alert-1',
+      )
+      expect(html).toContain('within 4 hours')
+      // Detail richness — recipient role banner, alert metadata strip,
+      // pulse pressure, position, alert + patient IDs in footer.
+      expect(html).toContain('primary provider')
+      expect(html).toContain('pulse pressure <strong>63</strong>')
+      expect(html).toContain('(wide)') // pulsePressure 63 > 60
+      expect(html).toContain('position <strong>SITTING</strong>')
+      expect(html).toContain('Mode: <strong>STANDARD</strong>')
+      expect(html).toContain('Rule: <strong>RULE_PREGNANCY_ACE_ARB</strong>')
+      expect(html).toContain('Alert ID: alert-1')
+      expect(html).toContain('Patient ID: patient-1')
+    })
+
+    it('renders the suboptimal-measurement banner when the alert flagged it', () => {
+      const out = escalationEmailBody({
+        alert: buildAlert({ suboptimalMeasurement: true }) as any,
+        step: 'T0',
+        role: 'PRIMARY_PROVIDER',
+        message: 'Tier 1 — ACE/ARB in pregnancy.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-04-22T15:00:00Z'),
+      })
+      expect(out.html).toContain('Suboptimal measurement conditions')
+      expect(out.html).toMatch(/checklist item/i)
+    })
+
+    it('renders the after-hours explanation block when afterHours=true', () => {
+      const out = escalationEmailBody({
+        alert: buildAlert() as any,
+        step: 'T0',
+        role: 'BACKUP_PROVIDER',
+        message: 'Tier 1 — ACE/ARB in pregnancy.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        afterHours: true,
+        now: new Date('2026-04-22T10:00:00Z'),
+      })
+      expect(out.html).toContain('After-hours dispatch')
+      expect(out.html).toContain('queued for the next business window')
+      expect(out.html).toContain('America/New_York')
+      expect(out.html).toContain('backup provider')
+    })
+
+    it('renders practice-local timestamps in addition to UTC', () => {
+      const out = escalationEmailBody({
+        alert: buildAlert() as any,
+        step: 'T0',
+        role: 'PRIMARY_PROVIDER',
+        message: 'Tier 1 — ACE/ARB in pregnancy.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-04-22T15:00:00Z'),
+      })
+      // Both UTC and a practice-local rendering present.
+      expect(out.html).toContain('2026-04-22T10:00:00.000Z') // alert.createdAt UTC
+      expect(out.html).toMatch(/Apr 22, 2026/) // practice-local readable form
+    })
+
+    it('BP Level 2 T+0 carries the 2-hour acknowledgment footer', async () => {
+      const now = new Date('2026-04-22T15:00:00Z')
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildAlert({
+          tier: 'BP_LEVEL_2',
+          ruleId: 'RULE_ABSOLUTE_EMERGENCY',
+          physicianMessage: 'BP Level 2 — 190/120 mmHg.',
+          createdAt: now,
+        }),
+      )
+
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({
+          tier: 'BP_LEVEL_2',
+          ruleId: 'RULE_ABSOLUTE_EMERGENCY',
+        }),
+        now,
+      )
+
+      const emailCalls = email.sendEmail.mock.calls as Array<
+        [string, string, string]
+      >
+      expect(emailCalls.length).toBeGreaterThan(0)
+      const html = emailCalls[0][2]
+      const subject = emailCalls[0][1]
+      expect(subject).toContain('BP EMERGENCY')
+      expect(html).toContain('within 2 hours')
+      expect(html).toContain('Healplace ops will phone the practice')
+      expect(html).toContain('BP Level 2 — 190/120 mmHg.')
+    })
+
+    it('after-hours Tier 1 backup courtesy fire flags "(after-hours queued)" in the body', async () => {
+      // Default fixture's createdAt is 06:00 NY = after-hours.
+      const afterHoursNow = new Date('2026-04-22T10:00:00Z')
+      prisma.deviationAlert.findUnique.mockResolvedValue(buildAlert())
+
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload(),
+        afterHoursNow,
+      )
+
+      // Tier 1 after-hours: primary queued (no email yet) + backup courtesy
+      // fire (email goes out with afterHours flag). The first call here is
+      // the backup courtesy email.
+      const emailCalls = email.sendEmail.mock.calls as Array<
+        [string, string, string]
+      >
+      expect(emailCalls.length).toBeGreaterThan(0)
+      const html = emailCalls[0][2]
+      expect(html).toContain('after-hours queued')
+    })
+
+    it('escalationEmailBody renders friendly subject (no tier prefix) for PATIENT role', () => {
+      const out = escalationEmailBody({
+        alert: buildAlert({ tier: 'BP_LEVEL_2' }) as any,
+        step: 'T0',
+        role: 'PATIENT',
+        message: 'Your BP is 190/120. If you have chest pain, call 911 now.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-04-22T15:00:00Z'),
+      })
+      expect(out.subject).toBe('Urgent Blood Pressure Alert — Cardioplace')
+      expect(out.subject).not.toContain('TIER')
+      expect(out.subject).not.toContain('T+0')
+      expect(out.html).toContain(
+        'Your BP is 190/120. If you have chest pain, call 911 now.',
+      )
+    })
+
+    it('escalationEmailBody handles missing DOB gracefully', () => {
+      const alert = buildAlert({
+        user: {
+          id: 'patient-1',
+          name: 'Alan Smith',
+          email: 'alan@example.com',
+          dateOfBirth: null,
+          enrollmentStatus: 'ENROLLED',
+          providerAssignmentAsPatient: ASSIGNMENT_FULL,
+        },
+      })
+      const out = escalationEmailBody({
+        alert: alert as any,
+        step: 'T0',
+        role: 'PRIMARY_PROVIDER',
+        message: 'Tier 1 — ACE/ARB in pregnancy.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-04-22T15:00:00Z'),
+      })
+      expect(out.html).toContain('(DOB unknown)')
+      expect(out.html).toContain('age unknown')
+    })
+
+    it('escalationEmailBody handles missing practice gracefully', () => {
+      const alert = buildAlert({
+        user: {
+          id: 'patient-1',
+          name: 'Alan Smith',
+          email: 'alan@example.com',
+          dateOfBirth: new Date('1985-04-24T00:00:00Z'),
+          enrollmentStatus: 'ENROLLED',
+          providerAssignmentAsPatient: null,
+        },
+      })
+      const out = escalationEmailBody({
+        alert: alert as any,
+        step: 'T0',
+        role: 'PRIMARY_PROVIDER',
+        message: 'Tier 1 — ACE/ARB in pregnancy.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-04-22T15:00:00Z'),
+      })
+      expect(out.html).toContain('(practice not assigned)')
+      expect(out.subject).toContain('(practice not assigned)')
     })
   })
 })

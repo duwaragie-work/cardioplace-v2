@@ -1,0 +1,1574 @@
+{
+  "info": {
+    "_postman_id": "cd2f1a3e-0002-4000-8000-000000000001",
+    "name": "Cardioplace v2 — Alert Engine Tests",
+    "description": "Postman collection mirroring docs/POSTMAN_ALERT_TESTING.md.\n\nImport this + the cardioplace-dev environment file.\n\nWorkflow per scenario:\n1. Run a request from '1. Setup' to populate {{accessToken}} or {{mdAccessToken}}.\n2. Run a scenario request from '3. Category A' or '4. Category B'.\n3. Run 'List my alerts' from '2. Helpers' to see what fired.\n\nCollection-level pre-request script auto-sets {{measuredAt}} to now-ISO before every request, so payloads always pass the 30-day-window validator.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Refresh measuredAt for every request so the backend's 30-day window validator passes.",
+          "pm.environment.set('measuredAt', new Date().toISOString());"
+        ]
+      }
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "1. Setup — Authentication",
+      "description": "Run these in order. Patient OTP → token, then MD OTP → mdToken (Category B only).",
+      "item": [
+        {
+          "name": "Send OTP — patient",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{patientEmail}}\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/otp/send",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "auth", "otp", "send"]
+            }
+          }
+        },
+        {
+          "name": "Verify OTP — patient (saves accessToken + patientUserId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "if (r.accessToken) pm.environment.set('accessToken', r.accessToken);",
+                  "if (r.userId) pm.environment.set('patientUserId', r.userId);",
+                  "pm.test('JWT received', () => pm.expect(r.accessToken).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{patientEmail}}\",\n  \"otp\": \"666666\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/otp/verify",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "auth", "otp", "verify"]
+            }
+          }
+        },
+        {
+          "name": "Send OTP — Medical Director (Category B prerequisite)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{mdEmail}}\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/otp/send",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "auth", "otp", "send"]
+            }
+          }
+        },
+        {
+          "name": "Verify OTP — MD (saves mdAccessToken)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "if (r.accessToken) pm.environment.set('mdAccessToken', r.accessToken);",
+                  "pm.test('JWT received', () => pm.expect(r.accessToken).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{mdEmail}}\",\n  \"otp\": \"666666\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/otp/verify",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "auth", "otp", "verify"]
+            }
+          }
+        },
+        {
+          "name": "Sanity — GET /me",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "auth", "me"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Helpers — Verify state",
+      "description": "Run these any time to inspect what the engine has done.",
+      "item": [
+        {
+          "name": "List my alerts (verify what fired)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/daily-journal/alerts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "daily-journal", "alerts"]
+            }
+          }
+        },
+        {
+          "name": "Get latest alert by entryId (after a scenario)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "// Endpoint returns { statusCode, message, data: DeviationAlert[] } — unwrap.",
+                  "const alerts = Array.isArray(body) ? body : (body.data || []);",
+                  "const entryId = pm.environment.get('entryId');",
+                  "const matching = alerts.filter(a => a.journalEntry && a.journalEntry.id === entryId);",
+                  "console.log('Found ' + matching.length + ' alert(s) for entryId ' + entryId + ':');",
+                  "matching.forEach(a => console.log('  -', a.ruleId, '/', a.tier, '/ dismissible=' + a.dismissible));",
+                  "if (matching.length) pm.environment.set('alertId', matching[0].id);",
+                  "pm.test('Got alert array', () => pm.expect(matching).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/daily-journal/alerts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "daily-journal", "alerts"]
+            }
+          }
+        },
+        {
+          "name": "List my medications (auto-saves first medicationId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('200', () => pm.response.to.have.status(200));",
+                "const body = pm.response.json();",
+                "// Endpoint returns { statusCode, message, data: PatientMedication[] } — unwrap.",
+                "const meds = Array.isArray(body) ? body : (body.data || []);",
+                "if (meds.length) {",
+                "  pm.environment.set('medicationId', meds[0].id);",
+                "  console.log('Saved medicationId=' + meds[0].id + ' (' + meds[0].drugName + ' / ' + meds[0].drugClass + ')');",
+                "} else {",
+                "  console.warn('No medications on file — Scenario 61 (per-med miss) needs at least one med.');",
+                "}"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/me/medications",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "me", "medications"]
+            }
+          }
+        },
+        {
+          "name": "Get my profile",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/me/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "me", "profile"]
+            }
+          }
+        },
+        {
+          "name": "Get my threshold (Category B)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/me/threshold",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "me", "threshold"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Category A — No threshold needed",
+      "description": "Standard-mode scenarios. No PatientThreshold required. Each request POSTs a journal entry and saves entryId for follow-up alert verification via the helper.",
+      "item": [
+        {
+          "name": "A1. Tier 1 contraindications",
+          "item": [
+            {
+              "name": "Scenario 1 — Pregnancy + ACE (login as priya.menon)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('202', () => pm.response.to.have.status(202));",
+                      "const r = pm.response.json();",
+                      "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);",
+                      "console.log('Expected: RULE_PREGNANCY_ACE_ARB / TIER_1_CONTRAINDICATION / dismissible=false');",
+                      "console.log('Now run: 2. Helpers → Get latest alert by entryId');"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 130,\n  \"diastolicBP\": 82,\n  \"pulse\": 78,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 2 — HFrEF + NDHP (login as james.okafor)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('202', () => pm.response.to.have.status(202));",
+                      "const r = pm.response.json();",
+                      "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);",
+                      "console.log('Expected: RULE_NDHP_HFREF / TIER_1_CONTRAINDICATION');"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 118,\n  \"diastolicBP\": 74,\n  \"pulse\": 68,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 51 — Pregnancy + ACE + 195/130 (Tier 1 beats BP L2)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('202', () => pm.response.to.have.status(202));",
+                      "const r = pm.response.json();",
+                      "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);",
+                      "console.log('Expected: RULE_PREGNANCY_ACE_ARB (NOT RULE_ABSOLUTE_EMERGENCY — Tier 1 short-circuits)');"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 195,\n  \"diastolicBP\": 130,\n  \"pulse\": 90,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "A2. BP Level 2 emergency",
+          "item": [
+            {
+              "name": "Scenario 4 — Absolute emergency 190/105 (login as aisha.johnson)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('202', () => pm.response.to.have.status(202));",
+                      "const r = pm.response.json();",
+                      "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);",
+                      "console.log('Expected: RULE_ABSOLUTE_EMERGENCY / BP_LEVEL_2 / pulsePressure=85 / patientMessage contains 911');"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 190,\n  \"diastolicBP\": 105,\n  \"pulse\": 88,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "A3. Symptom overrides (BP L2 at any BP)",
+          "item": [
+            {
+              "name": "Scenario 5 — severeHeadache at 122/76",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": { "type": "text/javascript", "exec": [
+                    "pm.test('202', () => pm.response.to.have.status(202));",
+                    "const r = pm.response.json();",
+                    "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);",
+                    "console.log('Expected: RULE_SYMPTOM_OVERRIDE_GENERAL / BP_LEVEL_2_SYMPTOM_OVERRIDE');"
+                  ] }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 122,\n  \"diastolicBP\": 76,\n  \"pulse\": 74,\n  \"position\": \"SITTING\",\n  \"severeHeadache\": true\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 39 — visualChanges at 125/75",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_SYMPTOM_OVERRIDE_GENERAL');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 125,\n  \"diastolicBP\": 75,\n  \"pulse\": 72,\n  \"position\": \"SITTING\",\n  \"visualChanges\": true\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 40 — alteredMentalStatus at 125/75",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_SYMPTOM_OVERRIDE_GENERAL');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 125,\n  \"diastolicBP\": 75,\n  \"pulse\": 72,\n  \"position\": \"SITTING\",\n  \"alteredMentalStatus\": true\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 41 — chestPainOrDyspnea at 125/75",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_SYMPTOM_OVERRIDE_GENERAL');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 125,\n  \"diastolicBP\": 75,\n  \"pulse\": 72,\n  \"position\": \"SITTING\",\n  \"chestPainOrDyspnea\": true\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 42 — focalNeuroDeficit at 125/75",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_SYMPTOM_OVERRIDE_GENERAL');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 125,\n  \"diastolicBP\": 75,\n  \"pulse\": 72,\n  \"position\": \"SITTING\",\n  \"focalNeuroDeficit\": true\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 43 — severeEpigastricPain at 125/75",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_SYMPTOM_OVERRIDE_GENERAL');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 125,\n  \"diastolicBP\": 75,\n  \"pulse\": 72,\n  \"position\": \"SITTING\",\n  \"severeEpigastricPain\": true\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 22 — Pregnant + ruqPain (login as pregnant user without ACE/ARB)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_SYMPTOM_OVERRIDE_PREGNANCY');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 128,\n  \"diastolicBP\": 82,\n  \"pulse\": 76,\n  \"position\": \"SITTING\",\n  \"ruqPain\": true\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "A4. BP L1 High",
+          "item": [
+            {
+              "name": "Scenario 7 — Pregnancy L1 High 144/88 (clean pregnant patient)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_PREGNANCY_L1_HIGH');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 144,\n  \"diastolicBP\": 88,\n  \"pulse\": 82,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 9 (1/3) — AFib + 3 readings, pulse 115 (charles.brown — call THREE times)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Run this request THREE times within 30 minutes (same sessionUuid). Expected on 3rd: RULE_AFIB_HR_HIGH');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 130,\n  \"diastolicBP\": 76,\n  \"pulse\": 115,\n  \"position\": \"SITTING\",\n  \"sessionId\": \"{{sessionUuid}}\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 15 — Wide PP 172/88 (aisha)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_STANDARD_L1_HIGH + pulsePressure=84 + physicianMessage with PP annotation');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 172,\n  \"diastolicBP\": 88,\n  \"pulse\": 78,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 20 — Suboptimal 164/96 + retake suffix",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_STANDARD_L1_HIGH + suboptimalMeasurement=true + retake in patientMessage');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 164,\n  \"diastolicBP\": 96,\n  \"pulse\": 78,\n  \"position\": \"SITTING\",\n  \"measurementConditions\": {\n    \"noCaffeine\": false,\n    \"noSmoking\": true,\n    \"noExercise\": true,\n    \"bladderEmpty\": true,\n    \"seatedQuietly\": true,\n    \"posturalSupport\": true,\n    \"notTalking\": true,\n    \"cuffOnBareArm\": true\n  }\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 52 — Boundary SBP=160 (fires)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_STANDARD_L1_HIGH (160 IS the cutoff)');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 160,\n  \"diastolicBP\": 95,\n  \"pulse\": 75,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "A5. BP L1 Low",
+          "item": [
+            {
+              "name": "Scenario 8 — CAD + DBP critical 132/68 (rita.washington)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_CAD_DBP_CRITICAL / type=DIASTOLIC_BP / patientMessage contains lower number');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 132,\n  \"diastolicBP\": 68,\n  \"pulse\": 66,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 11 — Age 65+ 96/58 (custom DOB 1953)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_AGE_65_LOW / patientMessage contains dizziness + fall risk');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 96,\n  \"diastolicBP\": 58,\n  \"pulse\": 70,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 32 — Age 40-64 + SBP 88 (standard low)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_STANDARD_L1_LOW');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 88,\n  \"diastolicBP\": 58,\n  \"pulse\": 72,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 36 — Brady asymptomatic pulse 38 (custom hasBradycardia, no BB)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_BRADY_HR_ASYMPTOMATIC');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 115,\n  \"diastolicBP\": 70,\n  \"pulse\": 38,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "A7. Tier 3 physician-only",
+          "item": [
+            {
+              "name": "Scenario 37 — Wide PP standalone 145/80 (PP=65)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_PULSE_PRESSURE_WIDE / TIER_3_INFO / patientMessage=\"\" / pulsePressure=65');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 145,\n  \"diastolicBP\": 80,\n  \"pulse\": 74,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 38 — Loop diuretic + SBP 92 (custom + Furosemide)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_LOOP_DIURETIC_HYPOTENSION / TIER_3_INFO');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 92,\n  \"diastolicBP\": 60,\n  \"pulse\": 72,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "A8. Tier 2 medication adherence (NEW)",
+          "item": [
+            {
+              "name": "Scenario 60 — medicationTaken: false (no per-med detail)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_MEDICATION_MISSED / TIER_2_DISCREPANCY / type=MEDICATION_ADHERENCE');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 124,\n  \"diastolicBP\": 78,\n  \"pulse\": 72,\n  \"position\": \"SITTING\",\n  \"medicationTaken\": false\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 61 — Per-medication miss (Lisinopril FORGOT — fill medicationId from helper first)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: physicianMessage contains Lisinopril + ACE_INHIBITOR + FORGOT + doses missed: 1');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 124,\n  \"diastolicBP\": 78,\n  \"pulse\": 72,\n  \"position\": \"SITTING\",\n  \"medicationTaken\": true,\n  \"missedMedications\": [\n    {\n      \"medicationId\": \"{{medicationId}}\",\n      \"drugName\": \"Lisinopril\",\n      \"drugClass\": \"ACE_INHIBITOR\",\n      \"reason\": \"FORGOT\",\n      \"missedDoses\": 1\n    }\n  ]\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 62 — Co-occurrence: BP L1 High + missed med (TWO alert rows)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: TWO rows. Row 1: RULE_STANDARD_L1_HIGH (type=SYSTOLIC_BP). Row 2: RULE_MEDICATION_MISSED (type=MEDICATION_ADHERENCE).');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 165,\n  \"diastolicBP\": 94,\n  \"pulse\": 78,\n  \"position\": \"SITTING\",\n  \"medicationTaken\": false\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 63 — Happy path (no alert, resolve-sweep only)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: NO new alert row. updateMany scoped to BP_LEVEL_1_HIGH/LOW only — Tier 2 + Tier 1 + BP L2 preserved.');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 124,\n  \"diastolicBP\": 78,\n  \"pulse\": 72,\n  \"position\": \"SITTING\",\n  \"medicationTaken\": true\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "A9. No-alert (control)",
+          "item": [
+            {
+              "name": "Scenario 16 — Benign 124/78 + L1 resolve sweep (aisha)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: NO new alert. Any prior OPEN BP_LEVEL_1_* rows now status=RESOLVED.');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 124,\n  \"diastolicBP\": 78,\n  \"pulse\": 70,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 17 — AFib + 1 reading + pulse 118 (gate closed, charles)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: NO row (AFib gate requires 3+ readings)');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 135,\n  \"diastolicBP\": 82,\n  \"pulse\": 118,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            },
+            {
+              "name": "Scenario 19 — Brady + BB pulse 55 (suppression window, custom)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: NO row (BB suppresses 50-60 window)');"] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 118,\n  \"diastolicBP\": 72,\n  \"pulse\": 55,\n  \"position\": \"SITTING\"\n}" },
+                "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Category B — Threshold required (PERSONALIZED)",
+      "description": "Only TWO rules need a provider-set threshold + ≥7 prior readings.",
+      "item": [
+        {
+          "name": "B1. Set threshold (uses {{mdAccessToken}} — sign in as MD first)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('200', () => pm.response.to.have.status(200));",
+                "console.log('Threshold set. Now log 7+ benign readings, then run B2 or B3.');"
+              ] }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{mdAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"sbpUpperTarget\": 130,\n  \"sbpLowerTarget\": 90,\n  \"dbpUpperTarget\": null,\n  \"dbpLowerTarget\": null,\n  \"hrUpperTarget\": null,\n  \"hrLowerTarget\": null,\n  \"notes\": \"Postman test — set via Cardioplace Alert collection\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/patients/{{patientUserId}}/threshold",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "patients", "{{patientUserId}}", "threshold"]
+            }
+          }
+        },
+        {
+          "name": "B-Prep. Log a benign reading (run 7× before B2/B3 to satisfy ≥7 readings)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const n = parseInt(pm.environment.get('benignCount') || '0', 10) + 1;", "pm.environment.set('benignCount', String(n));", "console.log('Benign reading #' + n + ' / 7 logged for Personalized rule prerequisite');"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 124,\n  \"diastolicBP\": 78,\n  \"pulse\": 72,\n  \"position\": \"SITTING\",\n  \"medicationTaken\": true\n}" },
+            "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+          }
+        },
+        {
+          "name": "B2. Personalized HIGH — SBP 152 (threshold upper=130 + ≥7 readings)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_PERSONALIZED_HIGH / mode=PERSONALIZED. SBP 152 ≥ 130+20=150.');"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 152,\n  \"diastolicBP\": 88,\n  \"pulse\": 76,\n  \"position\": \"SITTING\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+          }
+        },
+        {
+          "name": "B3. Personalized LOW — SBP 108 (threshold lower=110 + ≥7 readings — re-run B1 with sbpLowerTarget:110 first)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_PERSONALIZED_LOW / mode=PERSONALIZED. SBP 108 < lowerTarget 110.');"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 108,\n  \"diastolicBP\": 70,\n  \"pulse\": 72,\n  \"position\": \"SITTING\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+          }
+        },
+        {
+          "name": "B4. Edge — threshold present but <7 readings (pre-Day-3 disclaimer)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_STANDARD_L1_HIGH (NOT _PERSONALIZED_) + mode=STANDARD + patientMessage matches /personalization begins after Day 3/i');"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 165,\n  \"diastolicBP\": 94,\n  \"pulse\": 82,\n  \"position\": \"SITTING\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+          }
+        },
+        {
+          "name": "B5. Edge — threshold required but NOT set + payload sent (graceful no-op)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: NO row. SBP 152 < 160 standard cutoff, no threshold to compare against. Engine never errors.');"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 152,\n  \"diastolicBP\": 88,\n  \"pulse\": 76,\n  \"position\": \"SITTING\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Boundary tests",
+      "item": [
+        {
+          "name": "SBP=159 (no alert — below 160 cutoff)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: NO row');"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 159,\n  \"diastolicBP\": 95,\n  \"pulse\": 75,\n  \"position\": \"SITTING\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+          }
+        },
+        {
+          "name": "SBP=89 (fires standard low — strict <90)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_STANDARD_L1_LOW');"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 89,\n  \"diastolicBP\": 60,\n  \"pulse\": 72,\n  \"position\": \"SITTING\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+          }
+        },
+        {
+          "name": "CAD + DBP=70 (no alert — strict <70)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected (rita.washington): NO row');"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 130,\n  \"diastolicBP\": 70,\n  \"pulse\": 72,\n  \"position\": \"SITTING\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+          }
+        },
+        {
+          "name": "PP boundary 60 (no alert — strict >60)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: NO row (PP=60 strict >60 fails)');"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 140,\n  \"diastolicBP\": 80,\n  \"pulse\": 72,\n  \"position\": \"SITTING\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Auth + gate errors",
+      "item": [
+        {
+          "name": "No clinical intake → 403 clinical-intake-required",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('403', () => pm.response.to.have.status(403));",
+                "const r = pm.response.json();",
+                "pm.test('Layer A error', () => pm.expect(r.message).to.eql('clinical-intake-required'));",
+                "console.log('Sign in as a brand-new patient who has NOT completed POST /api/intake/profile to see this.');"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 120,\n  \"diastolicBP\": 75,\n  \"pulse\": 72,\n  \"position\": \"SITTING\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+          }
+        },
+        {
+          "name": "No JWT → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('401', () => pm.response.to.have.status(401));"
+              ] }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 120,\n  \"diastolicBP\": 75,\n  \"pulse\": 72,\n  \"position\": \"SITTING\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+          }
+        },
+        {
+          "name": "Patient hits admin endpoint → 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('403', () => pm.response.to.have.status(403));"
+              ] }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"sbpUpperTarget\": 130,\n  \"sbpLowerTarget\": 90\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/patients/{{patientUserId}}/threshold",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "patients", "{{patientUserId}}", "threshold"]
+            }
+          }
+        },
+        {
+          "name": "Bad payload — SBP out of range → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('400', () => pm.response.to.have.status(400));"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 251,\n  \"diastolicBP\": 75,\n  \"pulse\": 72,\n  \"position\": \"SITTING\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+          }
+        },
+        {
+          "name": "Bad payload — invalid reason enum → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('400', () => pm.response.to.have.status(400));"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"measuredAt\": \"{{measuredAt}}\",\n  \"systolicBP\": 124,\n  \"diastolicBP\": 78,\n  \"pulse\": 72,\n  \"position\": \"SITTING\",\n  \"medicationTaken\": false,\n  \"missedMedications\": [\n    {\n      \"medicationId\": \"some-id\",\n      \"drugName\": \"Lisinopril\",\n      \"drugClass\": \"ACE_INHIBITOR\",\n      \"reason\": \"NOT_A_REAL_REASON\",\n      \"missedDoses\": 1\n    }\n  ]\n}" },
+            "url": { "raw": "{{baseUrl}}/api/daily-journal", "host": ["{{baseUrl}}"], "path": ["api", "daily-journal"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Alert resolution (admin) — §12",
+      "description": "Workflow: 1) Trigger an alert (Category A). 2) Run 'Save first OPEN alertId' to capture it. 3) Sign in as MD or Provider. 4) Run acknowledge / resolve / audit requests. Maps to E2E_TEST_CASES.md §12 (TC-RES.*).",
+      "item": [
+        {
+          "name": "Save first OPEN alertId (patient JWT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('200', () => pm.response.to.have.status(200));",
+                "const body = pm.response.json();",
+                "// Endpoint returns { statusCode, message, data: DeviationAlert[] } — unwrap.",
+                "const alerts = Array.isArray(body) ? body : (body.data || []);",
+                "const open = alerts.find(a => a.status === 'OPEN');",
+                "if (open) {",
+                "  pm.environment.set('alertId', open.id);",
+                "  console.log('Saved alertId=' + open.id + ' (' + open.ruleId + ' / ' + open.tier + ')');",
+                "} else {",
+                "  console.warn('No OPEN alert found — trigger a Category A scenario first.');",
+                "}"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/daily-journal/alerts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "daily-journal", "alerts"]
+            }
+          }
+        },
+        {
+          "name": "Send OTP — Provider (for resolution endpoints)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{providerEmail}}\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/otp/send",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "auth", "otp", "send"]
+            }
+          }
+        },
+        {
+          "name": "Verify OTP — Provider (saves providerAccessToken)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('200', () => pm.response.to.have.status(200));",
+                "const r = pm.response.json();",
+                "if (r.accessToken) pm.environment.set('providerAccessToken', r.accessToken);"
+              ] }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{providerEmail}}\",\n  \"otp\": \"666666\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/otp/verify",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "auth", "otp", "verify"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.01 — Acknowledge alert (PROVIDER)",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "const r = pm.response.json();",
+              "pm.test('acknowledgedAt set', () => pm.expect(r.acknowledgedAt).to.exist);",
+              "console.log('Expected: status=ACKNOWLEDGED + open EscalationEvent.acknowledgedAt set');"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/acknowledge",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "acknowledge"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.02 — Acknowledge same alert again (idempotent)",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 idempotent', () => pm.response.to.have.status(200));"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/acknowledge",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "acknowledge"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.10 — Resolve Tier 1: TIER1_DISCONTINUED + rationale",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "const r = pm.response.json();",
+              "pm.test('status RESOLVED', () => pm.expect(r.status).to.eql('RESOLVED'));",
+              "pm.test('resolvedAt set', () => pm.expect(r.resolvedAt).to.exist);",
+              "pm.test('action persisted', () => pm.expect(r.resolutionAction).to.eql('TIER1_DISCONTINUED'));"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER1_DISCONTINUED\",\n  \"resolutionRationale\": \"Confirmed with pharmacy that the medication was discontinued; patient now on alternative regimen.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.11 — Resolve Tier 1: TIER1_CHANGE_ORDERED + rationale",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER1_CHANGE_ORDERED\",\n  \"resolutionRationale\": \"Switched patient from Lisinopril to Labetalol per ACOG protocol.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.12 — Resolve Tier 1: TIER1_FALSE_POSITIVE + rationale",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER1_FALSE_POSITIVE\",\n  \"resolutionRationale\": \"Medication was Losartan per pharmacy record, not Lisinopril; updating record.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.13 — Resolve Tier 1: TIER1_ACKNOWLEDGED + rationale",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER1_ACKNOWLEDGED\",\n  \"resolutionRationale\": \"Reviewed and discussed with patient; will continue current regimen with monitoring.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.14 — Resolve Tier 1: TIER1_DEFERRED + rationale",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER1_DEFERRED\",\n  \"resolutionRationale\": \"Deferred to MD review at scheduled visit on Friday.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.20 — Resolve Tier 1 with NO rationale → 400",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('400', () => pm.response.to.have.status(400));"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER1_DISCONTINUED\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.21 — Rationale too short (2 chars) → 400",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('400', () => pm.response.to.have.status(400));"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER1_DISCONTINUED\",\n  \"resolutionRationale\": \"OK\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.23 — Wrong action enum (BP_L2 on Tier 1) → 400",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('400', () => pm.response.to.have.status(400));",
+              "console.log('Expected: 400 with tier-action mismatch error');"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"BP_L2_CONTACTED_MED_ADJUSTED\",\n  \"resolutionRationale\": \"Trying wrong action enum on a Tier 1 alert\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.24 — Resolve already-resolved alert → 400",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('400', () => pm.response.to.have.status(400));",
+              "console.log('Expected: 400 \"Alert is already resolved\". Run TC-RES.10 first to resolve, then this.');"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER1_ACKNOWLEDGED\",\n  \"resolutionRationale\": \"Trying to re-resolve.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.30 — Resolve Tier 2: REVIEWED_NO_ACTION without rationale → 400",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('400', () => pm.response.to.have.status(400));",
+              "console.log('REVIEWED_NO_ACTION is the only Tier 2 action that requires rationale.');"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER2_REVIEWED_NO_ACTION\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.31 — Resolve Tier 2: REVIEWED_NO_ACTION + rationale",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER2_REVIEWED_NO_ACTION\",\n  \"resolutionRationale\": \"Reviewed adherence pattern; patient confirms one-off miss.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.32 — Resolve Tier 2: WILL_CONTACT (no rationale needed)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER2_WILL_CONTACT\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.33 — Resolve Tier 2: CHANGE_ORDERED (no rationale needed)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER2_CHANGE_ORDERED\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.34 — Resolve Tier 2: PHARMACY_RECONCILE (no rationale needed)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER2_PHARMACY_RECONCILE\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.35 — Resolve Tier 2: DEFERRED (no rationale needed)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER2_DEFERRED\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.40 — Resolve BP L2: CONTACTED_MED_ADJUSTED + rationale",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"BP_L2_CONTACTED_MED_ADJUSTED\",\n  \"resolutionRationale\": \"Spoke with patient; increased Lisinopril to 20mg daily; recheck in 3 days.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.41 — Resolve BP L2: CONTACTED_ADVISED_ED + rationale",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"BP_L2_CONTACTED_ADVISED_ED\",\n  \"resolutionRationale\": \"Reading + symptoms warrant ED evaluation; patient en route.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.42 — Resolve BP L2: CONTACTED_RECHECK + rationale",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"BP_L2_CONTACTED_RECHECK\",\n  \"resolutionRationale\": \"Asked patient to recheck in 30 minutes after rest; awaiting result.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.43 — Resolve BP L2: SEEN_IN_OFFICE + rationale",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"BP_L2_SEEN_IN_OFFICE\",\n  \"resolutionRationale\": \"Patient seen in clinic 14:00; adjusted regimen, BP normalized.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.44 — Resolve BP L2: REVIEWED_TRENDING_DOWN + rationale",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"BP_L2_REVIEWED_TRENDING_DOWN\",\n  \"resolutionRationale\": \"Last 3 readings: 192/104, 168/96, 152/88 — trending down on recent dose increase.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.45 — Resolve BP L2: UNABLE_TO_REACH_RETRY (alert stays OPEN, retry scheduled)",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "const r = pm.response.json();",
+              "pm.test('Alert stays OPEN', () => pm.expect(r.status).to.eql('OPEN'));",
+              "pm.test('retryScheduledFor set', () => pm.expect(r.retryScheduledFor).to.exist);",
+              "console.log('Expected: status=OPEN; fresh EscalationEvent with triggeredByResolution=true; scheduledFor +4h');"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"BP_L2_UNABLE_TO_REACH_RETRY\",\n  \"resolutionRationale\": \"Called twice, no answer; left voicemail; retry scheduled for +4h.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.46 — Resolve BP L2 with no rationale → 400",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('400', () => pm.response.to.have.status(400));"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"BP_L2_CONTACTED_MED_ADJUSTED\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RES.50 — Get audit (15 fields)",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "const r = pm.response.json();",
+              "const expected = ['alertId','alertType','alertTrigger','patientId','alertGenerationTimestamp','escalationLevel','escalationTimestamp','recipientsNotified','acknowledgmentTimestamp','resolutionTimestamp','timeToAcknowledgmentMs','timeToResolutionMs','escalationTriggered','resolutionAction','resolutionRationale','escalationTimeline'];",
+              "expected.forEach(k => pm.test('Has ' + k, () => pm.expect(r).to.have.property(k)));"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/audit",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "audit"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Patient escalations + notifications — §11.2",
+      "description": "Patient-side reads for escalation events and push notifications. Maps to TC-RDG.10–15.",
+      "item": [
+        {
+          "name": "TC-RDG.10 — GET /daily-journal/escalations",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "console.log('Returns escalation events for THIS patient. Empty array if no alerts have escalated yet.');"
+            ] } }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/daily-journal/escalations",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "daily-journal", "escalations"]
+            }
+          }
+        },
+        {
+          "name": "TC-RDG.12 — GET /daily-journal/notifications (all, auto-saves first notificationId)",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "// Endpoint returns { statusCode, message, data: Notification[] } — unwrap.",
+              "const list = Array.isArray(body) ? body : (body.data || []);",
+              "if (list.length) {",
+              "  pm.environment.set('notificationId', list[0].id);",
+              "  console.log('Saved notificationId=' + list[0].id);",
+              "} else {",
+              "  console.warn('No notifications yet. Trigger an alert first to populate.');",
+              "}"
+            ] } }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/daily-journal/notifications",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "daily-journal", "notifications"]
+            }
+          }
+        },
+        {
+          "name": "TC-RDG.13 — GET /daily-journal/notifications?status=unread",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/daily-journal/notifications?status=unread",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "daily-journal", "notifications"],
+              "query": [{ "key": "status", "value": "unread" }]
+            }
+          }
+        },
+        {
+          "name": "TC-RDG.14 — Mark a notification as watched",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));"
+            ] } }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"watched\": true\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/daily-journal/notifications/{{notificationId}}/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "daily-journal", "notifications", "{{notificationId}}", "status"]
+            }
+          }
+        },
+        {
+          "name": "TC-RDG.15 — Bulk mark notifications as watched",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"ids\": [\"{{notificationId}}\"],\n  \"watched\": true\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/daily-journal/notifications/bulk-status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "daily-journal", "notifications", "bulk-status"]
+            }
+          }
+        },
+        {
+          "name": "TC-RDG.09 — GET /daily-journal/alerts (patient-side)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/daily-journal/alerts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "daily-journal", "alerts"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. RBAC — alert endpoints — §15",
+      "description": "Negative auth tests for alert resolution endpoints. Maps to TC-RBAC.17, TC-RBAC.18, TC-RBAC.24, TC-RBAC.44.",
+      "item": [
+        {
+          "name": "TC-RBAC.17 — PATIENT → POST /admin/alerts/:id/resolve → 403",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('403', () => pm.response.to.have.status(403));"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER1_ACKNOWLEDGED\",\n  \"resolutionRationale\": \"Patient trying to resolve their own alert.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RBAC.18 — PATIENT → GET /admin/alerts/:id/audit → 403",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('403', () => pm.response.to.have.status(403));"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/audit",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "audit"]
+            }
+          }
+        },
+        {
+          "name": "TC-RBAC.24 — PROVIDER → POST /admin/alerts/:id/resolve → 200",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 (PROVIDER allowed)', () => pm.response.to.have.status(200));"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER1_ACKNOWLEDGED\",\n  \"resolutionRationale\": \"PROVIDER role can resolve alerts.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "TC-RBAC.44 — HEALPLACE_OPS → POST /admin/alerts/:id/resolve → 200",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 (HEALPLACE_OPS allowed)', () => pm.response.to.have.status(200));"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{opsAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resolutionAction\": \"TIER1_ACKNOWLEDGED\",\n  \"resolutionRationale\": \"HEALPLACE_OPS role can resolve alerts.\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "alerts", "{{alertId}}", "resolve"]
+            }
+          }
+        },
+        {
+          "name": "Send OTP — HEALPLACE_OPS (helper, run before TC-RBAC.44)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{opsEmail}}\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/otp/send",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "auth", "otp", "send"]
+            }
+          }
+        },
+        {
+          "name": "Verify OTP — HEALPLACE_OPS (saves opsAccessToken)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('200', () => pm.response.to.have.status(200));",
+                "const r = pm.response.json();",
+                "if (r.accessToken) pm.environment.set('opsAccessToken', r.accessToken);"
+              ] }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{opsEmail}}\",\n  \"otp\": \"666666\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/otp/verify",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "auth", "otp", "verify"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Escalation ladder — §13 (notes only)",
+      "description": "Escalation ladder testing requires time-travel via EscalationService.runScan(now) — a Nest service method, NOT an HTTP endpoint. Postman cannot test §13 directly. Use Jest integration tests in backend/test/escalation.e2e-spec.ts instead.\n\nWhat you CAN do via Postman:\n• Trigger an alert (Category A) → query GET /api/daily-journal/escalations as that patient → see EscalationEvent rows the engine has already persisted.\n• Wait 15 minutes for the real cron to fire (@Cron('*/15 * * * *')) → re-query.\n• For deterministic tests, run: cd backend && npx jest escalation.e2e-spec\n\nThis folder contains only pointer requests for visibility.",
+      "item": [
+        {
+          "name": "GET escalation events for patient (after triggering an alert)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/daily-journal/escalations",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "daily-journal", "escalations"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
