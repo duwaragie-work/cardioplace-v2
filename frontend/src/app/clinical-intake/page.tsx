@@ -656,7 +656,14 @@ function A6Combos({ state, setState }: StepProps) {
 
 function A8Categories({ state, setState }: StepProps) {
   const { t } = useLanguage();
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  // Multi-expand: a Set of currently-open category keys. Patients can have
+  // multiple categories expanded at once so they don't lose visual sight of
+  // a Furosemide tick when they go check the blood-thinner list. Selections
+  // already persist cross-category in state.selectedMedications; this just
+  // matches the UI affordance to that reality.
+  const [activeCategories, setActiveCategories] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [otherText, setOtherText] = useState(state.otherDraft?.text ?? '');
   // Photo capture removed — patients can type or use device-level voice
   // dictation instead. Backend still accepts PATIENT_PHOTO source for
@@ -734,39 +741,56 @@ function A8Categories({ state, setState }: StepProps) {
             key={cat.key}
             icon={cat.icon}
             title={cat.label}
-            selected={activeCategory === cat.key}
-            onClick={() => setActiveCategory(activeCategory === cat.key ? null : cat.key)}
+            selected={activeCategories.has(cat.key)}
+            onClick={() =>
+              setActiveCategories((prev) => {
+                const next = new Set(prev);
+                if (next.has(cat.key)) next.delete(cat.key);
+                else next.add(cat.key);
+                return next;
+              })
+            }
             audioText={cat.audio}
             compact
           />
         ))}
       </div>
 
-      <AnimatePresence mode="wait">
-        {activeCategory && activeCategory !== 'OTHER' && (
-          <motion.div
-            key={activeCategory}
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2"
-          >
-            {CATEGORY_MEDS.filter((m) => m.category === activeCategory).map((m) => (
-              <MedicationCard
-                key={m.id}
-                brandName={m.brandName}
-                genericName={m.genericName}
-                purpose={m.purpose}
-                drugClass={m.drugClass}
-                selected={selectedIds.has(m.id)}
-                onToggle={() => toggleCategoryMed(m.id)}
-                audioText={`${m.brandName}, ${alsoKnown} ${m.genericName}. ${m.purpose}`}
-              />
-            ))}
-          </motion.div>
-        )}
+      <AnimatePresence>
+        {categories
+          .filter((c) => c.key !== 'OTHER' && activeCategories.has(c.key))
+          .map((cat) => (
+            <motion.div
+              key={cat.key}
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="pt-2"
+            >
+              <p
+                className="text-[11px] font-bold uppercase tracking-wider mb-2"
+                style={{ color: 'var(--brand-text-muted)' }}
+              >
+                {cat.label}
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {CATEGORY_MEDS.filter((m) => m.category === cat.key).map((m) => (
+                  <MedicationCard
+                    key={m.id}
+                    brandName={m.brandName}
+                    genericName={m.genericName}
+                    purpose={m.purpose}
+                    drugClass={m.drugClass}
+                    selected={selectedIds.has(m.id)}
+                    onToggle={() => toggleCategoryMed(m.id)}
+                    audioText={`${m.brandName}, ${alsoKnown} ${m.genericName}. ${m.purpose}`}
+                  />
+                ))}
+              </div>
+            </motion.div>
+          ))}
 
-        {activeCategory === 'OTHER' && (
+        {activeCategories.has('OTHER') && (
           <motion.div
             key="other"
             initial={{ opacity: 0, y: -6 }}
