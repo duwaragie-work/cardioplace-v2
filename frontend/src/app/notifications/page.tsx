@@ -787,8 +787,11 @@ export default function NotificationsPage() {
   const [acknowledging, setAcknowledging] = useState<string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // First load shows the skeleton; subsequent polls refresh state silently
+  // so the user doesn't see a "page refresh" flash every 30s. The motion-list
+  // animations smooth over the in-place card updates.
+  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) setLoading(true);
     try {
       const [alertData, notifData] = await Promise.all([
         getAlerts().catch(() => []),
@@ -804,16 +807,26 @@ export default function NotificationsPage() {
       const pushOnly = notifArr.filter((n) => !n.channel || n.channel === 'PUSH');
       setNotifs(pushOnly.sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime()));
     } finally {
-      setLoading(false);
+      if (!opts.silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     load();
-    // Poll every 30s for new alerts/notifications
-    const interval = setInterval(() => { load(); }, 30_000);
+    // Background poll — silent so the skeleton doesn't flash every 30s.
+    const interval = setInterval(() => { load({ silent: true }); }, 30_000);
     return () => clearInterval(interval);
   }, [load]);
+
+  // Sibling components (e.g. the Navbar bell) keep their own count and
+  // cache their own state. After any local mutation that changes the
+  // alert/notification surface, broadcast a window-level event so they can
+  // refetch on the same tick instead of waiting for the next 30s poll.
+  const broadcastChange = () => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('cardio:notifications-changed'));
+    }
+  };
 
   async function handleAcknowledge(id: string) {
     setAcknowledging(id);
@@ -844,6 +857,7 @@ export default function NotificationsPage() {
           idsToAck.includes(a.id) ? { ...a, status: 'ACKNOWLEDGED' as AlertStatus } : a,
         ),
       );
+      broadcastChange();
     } catch {
       // leave open
     } finally {
@@ -855,6 +869,7 @@ export default function NotificationsPage() {
     try {
       await markNotificationRead(id, true);
       setNotifs((prev) => prev.map((n) => (n.id === id ? { ...n, watched: true } : n)));
+      broadcastChange();
     } catch {
       // optimistic update is fine to keep
     }
@@ -867,6 +882,7 @@ export default function NotificationsPage() {
     try {
       await Promise.all(unread.map((n) => markNotificationRead(n.id, true)));
       setNotifs((prev) => prev.map((n) => ({ ...n, watched: true })));
+      broadcastChange();
     } catch {
       // partial update is ok
     } finally {

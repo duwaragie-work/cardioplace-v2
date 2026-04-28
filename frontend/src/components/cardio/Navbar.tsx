@@ -21,15 +21,20 @@ export default function Navbar() {
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    Promise.all([
-      getAlerts().catch(() => []),
-      getNotifications('unread').catch(() => []),
-    ]).then(([alertData, notifData]) => {
+    let cancelled = false;
+    // Silent refresh — only updates state when the badge value actually
+    // changes, so React skips no-op re-renders and there's no visible blink
+    // even when the user is mid-page.
+    const refresh = async () => {
+      const [alertData, notifData] = await Promise.all([
+        getAlerts().catch(() => []),
+        getNotifications('unread').catch(() => []),
+      ]);
+      if (cancelled) return;
       const alerts = Array.isArray(alertData) ? alertData : [];
       const notifs = Array.isArray(notifData) ? notifData : [];
 
       // Consolidate alerts by journal entry (same as notifications page).
-      // status is now optional on the v2 DTO so we coerce nullable → 'OPEN' check.
       // CLINICAL_SPEC §V2-C — exclude TIER_2_DISCREPANCY (admin-only) so the
       // bell badge matches what the patient actually sees on /notifications.
       const byEntry = new Map<string, typeof alerts>();
@@ -48,8 +53,30 @@ export default function Navbar() {
         !n.channel || n.channel === 'PUSH',
       ).length;
 
-      setAlertCount(consolidatedAlertCount + pushNotifCount);
-    });
+      setAlertCount((prev) => {
+        const next = consolidatedAlertCount + pushNotifCount;
+        return prev === next ? prev : next;
+      });
+    };
+    void refresh();
+    // Quiet 30s background poll — keeps the badge in sync with admin
+    // resolutions and incoming escalation events without any visible
+    // refresh / flash. State only updates when the count actually changes.
+    const interval = setInterval(() => { void refresh(); }, 30_000);
+    // Local mutations on /notifications (mark-read / mark-all-read /
+    // acknowledge) broadcast a window event so the bell can refetch on the
+    // same tick instead of waiting up to 30s for the next poll.
+    const onChange = () => { void refresh(); };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('cardio:notifications-changed', onChange);
+    }
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('cardio:notifications-changed', onChange);
+      }
+    };
   }, [isAuthenticated]);
 
   // Close language dropdown on outside click
