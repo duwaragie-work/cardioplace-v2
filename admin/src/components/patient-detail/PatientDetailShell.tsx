@@ -243,7 +243,15 @@ export default function PatientDetailShell({ patientId }: Props) {
   /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
   useEffect(() => {
     if (tab === 'profile' && !profile && !profileLoading) loadProfile();
-    if (tab === 'medications' && medications.length === 0 && !medsLoading) loadMedications();
+    if (tab === 'medications') {
+      if (medications.length === 0 && !medsLoading) loadMedications();
+      // Tier 3 informational notes for medication-bound rules
+      // (RULE_HCM_VASODILATOR / RULE_LOOP_DIURETIC_HYPOTENSION) live on
+      // the alert feed and are rendered inline on the matching drug-class
+      // row. Pull alerts here so the badge appears on first visit instead
+      // of only after the user has bounced through the Alerts tab.
+      if (alerts.length === 0 && !alertsLoading) loadAlerts();
+    }
     if (tab === 'alerts' && alerts.length === 0 && !alertsLoading) loadAlerts();
     if (tab === 'thresholds' && !threshold && !thresholdLoading) loadThreshold();
     if (tab === 'timeline') {
@@ -592,6 +600,7 @@ export default function PatientDetailShell({ patientId }: Props) {
                   medications={medications}
                   loading={medsLoading}
                   onChanged={onMedicationsChanged}
+                  alerts={alerts}
                 />
               </>
             )}

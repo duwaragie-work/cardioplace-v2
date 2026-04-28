@@ -328,8 +328,17 @@ export default function AdminDashboard() {
   }, [user, isLoading, refreshData]);
 
   // ── Derived buckets ───────────────────────────────────────────────────────
+  // Tier 3 (TIER_3_INFO) is excluded from the dashboard queue per
+  // CLINICAL_SPEC V2-C Layer 1 — Tier 3 is informational physician-only
+  // context, not a safety-critical alert. Mixing it with BP L2 / Tier 1
+  // creates alert fatigue. It surfaces inline on the relevant medication
+  // row in the patient detail Medications tab + in the Physician notes
+  // section of the patient Alerts tab instead.
   const visibleAlerts = useMemo(
-    () => rawAlerts.filter((a) => !reviewedIds.has(a.id)),
+    () =>
+      rawAlerts.filter(
+        (a) => !reviewedIds.has(a.id) && tierBucket(a) !== 'TIER_3',
+      ),
     [rawAlerts, reviewedIds],
   );
 
@@ -337,7 +346,6 @@ export default function AdminDashboard() {
   const tier1Alerts = useMemo(() => visibleAlerts.filter((a) => tierBucket(a) === 'TIER_1'), [visibleAlerts]);
   const tier2Alerts = useMemo(() => visibleAlerts.filter((a) => tierBucket(a) === 'TIER_2'), [visibleAlerts]);
   const bpL1Alerts = useMemo(() => visibleAlerts.filter((a) => tierBucket(a) === 'BP_L1'), [visibleAlerts]);
-  const tier3Alerts = useMemo(() => visibleAlerts.filter((a) => tierBucket(a) === 'TIER_3'), [visibleAlerts]);
 
   const queueAlerts = useMemo(() => {
     let list = visibleAlerts;
@@ -1008,7 +1016,8 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {/* Tier filter chips */}
+              {/* Tier filter chips — Tier 3 chip omitted; see visibleAlerts
+                  comment above (Tier 3 lives in patient-detail surfaces). */}
               <div className="flex flex-wrap items-center gap-1.5">
                 {([
                   ['ALL', 'All', visibleAlerts.length],
@@ -1016,7 +1025,6 @@ export default function AdminDashboard() {
                   ['TIER_1', 'Tier 1', tier1Alerts.length],
                   ['TIER_2', 'Tier 2', tier2Alerts.length],
                   ['BP_L1', 'BP L1', bpL1Alerts.length],
-                  ['TIER_3', 'Tier 3', tier3Alerts.length],
                 ] as [TierFilter, string, number][]).map(([key, label, count]) => {
                   const active = tierFilter === key;
                   const chrome = key === 'ALL'

@@ -18,9 +18,11 @@ import {
   Loader2,
   Pill,
   AlertTriangle,
+  Info,
 } from 'lucide-react';
 import {
   verifyMedication,
+  type PatientAlert,
   type PatientMedication,
   type MedicationVerificationStatus,
 } from '@/lib/services/patient-detail.service';
@@ -31,6 +33,30 @@ interface Props {
   medications: PatientMedication[];
   loading: boolean;
   onChanged: () => void;
+  /** Open alerts for this patient — the tab uses these to surface Tier 3
+   *  informational alerts inline on the relevant drug-class row instead
+   *  of cluttering the Alerts tab queue (CLINICAL_SPEC V2-C Layer 1). */
+  alerts?: PatientAlert[];
+}
+
+/**
+ * Map a Tier 3 (informational) ruleId to the drugClass it relates to.
+ * Used to attach a green inline badge on the matching drug-class row
+ * in the medication reconciliation view.
+ *
+ * RULE_PULSE_PRESSURE_WIDE is intentionally absent — it isn't bound to
+ * a specific medication, so it surfaces in the "Physician notes"
+ * section of AlertsTab instead.
+ */
+function tier3DrugClassFor(ruleId: string | null | undefined): string | null {
+  switch (ruleId) {
+    case 'RULE_HCM_VASODILATOR':
+      return 'VASODILATOR_NITRATE';
+    case 'RULE_LOOP_DIURETIC_HYPOTENSION':
+      return 'LOOP_DIURETIC';
+    default:
+      return null;
+  }
 }
 
 // PENDING_PROVIDER_ENTRY = patient self-reported a med but no provider
@@ -87,7 +113,7 @@ function isPatientSourced(m: PatientMedication): boolean {
   return m.source !== 'PROVIDER_ENTERED';
 }
 
-export default function MedicationsTab({ medications, loading, onChanged }: Props) {
+export default function MedicationsTab({ medications, loading, onChanged, alerts }: Props) {
   const { user } = useAuth();
   // Verify / reject / hold buttons render only for the clinical-verifier
   // roles (SUPER_ADMIN, PROVIDER, MEDICAL_DIRECTOR). HEALPLACE_OPS sees
@@ -95,6 +121,23 @@ export default function MedicationsTab({ medications, loading, onChanged }: Prop
   const canVerify = canVerifyMedications(user);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Open Tier 3 alerts grouped by the drug class they relate to. Lets
+  // each row pick up its informational notes in O(1).
+  const tier3ByDrugClass = useMemo(() => {
+    const map = new Map<string, PatientAlert[]>();
+    if (!alerts) return map;
+    for (const a of alerts) {
+      if (a.tier !== 'TIER_3_INFO') continue;
+      if (a.status !== 'OPEN') continue;
+      const cls = tier3DrugClassFor(a.ruleId);
+      if (!cls) continue;
+      const arr = map.get(cls) ?? [];
+      arr.push(a);
+      map.set(cls, arr);
+    }
+    return map;
+  }, [alerts]);
 
   // Group by drugClass and split patient-reported vs provider-entered.
   const rows: ReconRow[] = useMemo(() => {
@@ -192,10 +235,11 @@ export default function MedicationsTab({ medications, loading, onChanged }: Prop
 
       {rows.map((row) => {
         const chrome = statusChrome(row.status);
+        const tier3Notes = tier3ByDrugClass.get(row.drugClassKey) ?? [];
         return (
           <div key={row.drugClassKey} className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
             {/* Row header */}
-            <div className="px-5 py-3 flex items-center justify-between gap-3" style={{ borderBottom: '1px solid var(--brand-border)' }}>
+            <div className="px-5 py-3 flex items-center justify-between gap-3 flex-wrap" style={{ borderBottom: '1px solid var(--brand-border)' }}>
               <div className="flex items-center gap-2.5 min-w-0">
                 <div
                   className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-white"
@@ -213,13 +257,33 @@ export default function MedicationsTab({ medications, loading, onChanged }: Prop
                   </p>
                 </div>
               </div>
-              <span
-                className="inline-flex items-center gap-1 text-[10.5px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0"
-                style={{ backgroundColor: chrome.bg, color: chrome.color }}
-              >
-                {chrome.icon}
-                {chrome.label}
-              </span>
+              <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                {/* Tier 3 informational notes for this drug class. Quiet
+                    teal palette + Info icon — physician-only context, not
+                    a safety-critical warning. Tooltip carries the full
+                    physicianMessage. */}
+                {tier3Notes.map((note) => (
+                  <span
+                    key={note.id}
+                    className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-2 py-0.5 rounded-full"
+                    style={{
+                      backgroundColor: 'var(--brand-accent-teal-light)',
+                      color: 'var(--brand-accent-teal)',
+                    }}
+                    title={note.physicianMessage ?? note.patientMessage ?? note.ruleId ?? 'Physician note'}
+                  >
+                    <Info className="w-3 h-3" />
+                    Note
+                  </span>
+                ))}
+                <span
+                  className="inline-flex items-center gap-1 text-[10.5px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                  style={{ backgroundColor: chrome.bg, color: chrome.color }}
+                >
+                  {chrome.icon}
+                  {chrome.label}
+                </span>
+              </div>
             </div>
 
             {/* Side-by-side body */}
