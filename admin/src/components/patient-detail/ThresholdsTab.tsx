@@ -367,16 +367,17 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
           </div>
         )}
 
-        {/* Footer */}
-        <div className="mt-5 flex items-center justify-between">
-          <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
+        {/* Footer — text on the left can shrink/wrap in narrow widths while
+            the Save button stays a fixed size on the right with a real gap. */}
+        <div className="mt-5 flex items-center justify-between gap-3 sm:gap-4">
+          <p className="text-[11px] flex-1 min-w-0" style={{ color: 'var(--brand-text-muted)' }}>
             All fields are optional except the mandatory configuration above.
           </p>
           <button
             type="button"
             onClick={save}
             disabled={saving || !dirty}
-            className="btn-admin-primary"
+            className="btn-admin-primary shrink-0"
           >
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
             {threshold ? 'Update targets' : 'Save targets'}
