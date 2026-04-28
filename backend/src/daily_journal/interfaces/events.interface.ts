@@ -63,6 +63,9 @@ export interface EscalationDispatchedEvent {
     | 'T8H'
     | 'T24H'
     | 'T48H'
+    // Phase/23 — BP Level 1 ladder steps.
+    | 'T72H'
+    | 'T7D'
     | 'TIER2_48H'
     | 'TIER2_7D'
     | 'TIER2_14D'

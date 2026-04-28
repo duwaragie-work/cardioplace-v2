@@ -27,7 +27,8 @@
       "Bash(NODE_OPTIONS='--experimental-vm-modules' npx jest --config ./test/jest-e2e.json --testPathPatterns intake)",
       "Bash(NODE_OPTIONS='--experimental-vm-modules' npx jest --config ./test/jest-e2e.json --testPathPatterns intake -t \"dedup\")",
       "Bash(NODE_OPTIONS='--experimental-vm-modules' npx jest --testPathPatterns escalation.service.spec)",
-      "Bash(NODE_OPTIONS='--experimental-vm-modules' npx jest --testPathPatterns \"\\(alert-engine|escalation\\)\")"
+      "Bash(NODE_OPTIONS='--experimental-vm-modules' npx jest --testPathPatterns \"\\(alert-engine|escalation\\)\")",
+      "Bash(NODE_OPTIONS='--experimental-vm-modules' npx jest --testPathPatterns escalation.service.spec -t \"BP Level 1 dispatch\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\LENOVO\\Desktop\\Work-New\\cardioplace-v2\\backend\\prisma\\migrations\\0_init_cardio_v2"

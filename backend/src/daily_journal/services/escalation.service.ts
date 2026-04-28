@@ -20,6 +20,7 @@ import {
   type NotificationChannel as LadderChannel,
   TIER_1_BACKUP_ON_T0,
   TIER_1_LADDER,
+  BP_LEVEL_1_PATIENT_T0,
 } from '../escalation/ladder-defs.js'
 import {
   isWithinBusinessHours,
@@ -197,6 +198,23 @@ export class EscalationService {
           now,
         })
       }
+    }
+
+    // Phase/23 — BP Level 1 patient-side T+0. Spec mandates out-of-app
+    // notification so the patient doesn't have to open the app to learn
+    // their BP needs attention. Fires immediately regardless of business
+    // hours; channel=PUSH writes a Notification row that surfaces in-app
+    // and (once web-push transport ships) delivers as an OS-level push.
+    if (ladder.kind === 'BP_LEVEL_1') {
+      await this.dispatchStep({
+        alert,
+        step: BP_LEVEL_1_PATIENT_T0,
+        ladderKind: ladder.kind,
+        recipientRoles: BP_LEVEL_1_PATIENT_T0.recipientRoles,
+        practice,
+        assignment,
+        now,
+      })
     }
   }
 
@@ -757,9 +775,9 @@ export class EscalationService {
 
   /** Maps phase/7 ladder kinds back to the legacy EscalationLevel enum until
    * the column is dropped. LEVEL_2 = Tier 1 + BP Level 2 (safety-critical),
-   * LEVEL_1 = Tier 2 (discrepancy). */
+   * LEVEL_1 = Tier 2 + BP Level 1 (non-emergent provider attention). */
   private legacyLevelFor(kind: LadderKind): 'LEVEL_1' | 'LEVEL_2' {
-    return kind === 'TIER_2' ? 'LEVEL_1' : 'LEVEL_2'
+    return kind === 'TIER_2' || kind === 'BP_LEVEL_1' ? 'LEVEL_1' : 'LEVEL_2'
   }
 }
 
@@ -1061,6 +1079,8 @@ function tierLabelFor(tier: string | null): string {
     return 'BP EMERGENCY'
   }
   if (tier === 'TIER_1_CONTRAINDICATION') return 'TIER 1 CONTRAINDICATION'
+  if (tier === 'BP_LEVEL_1_HIGH') return 'BP LEVEL 1 HIGH'
+  if (tier === 'BP_LEVEL_1_LOW') return 'BP LEVEL 1 LOW'
   if (tier === 'TIER_2_DISCREPANCY') return 'Tier 2 Review'
   return 'Cardioplace Alert'
 }
@@ -1073,7 +1093,15 @@ function tierColorFor(tier: string | null): string {
   ) {
     return '#b91c1c' // red-700
   }
-  if (tier === 'TIER_2_DISCREPANCY') return '#b45309' // amber-700
+  // BP Level 1 + Tier 2 share the amber palette — non-emergency,
+  // provider-attention-required-within-a-business-day.
+  if (
+    tier === 'BP_LEVEL_1_HIGH' ||
+    tier === 'BP_LEVEL_1_LOW' ||
+    tier === 'TIER_2_DISCREPANCY'
+  ) {
+    return '#b45309' // amber-700
+  }
   return '#1d4ed8' // blue-700
 }
 
@@ -1084,6 +1112,9 @@ function ackFooterFor(tier: string | null): string {
   if (tier === 'TIER_1_CONTRAINDICATION') {
     return 'If you do not acknowledge within 4 hours, your backup provider will be paged. If unresolved within 8 hours, the medical director will be notified.'
   }
+  if (tier === 'BP_LEVEL_1_HIGH' || tier === 'BP_LEVEL_1_LOW') {
+    return 'If you do not acknowledge within 24 hours, your backup provider will be paged. If unresolved within 72 hours, the medical director will be notified.'
+  }
   if (tier === 'TIER_2_DISCREPANCY') {
     return 'If unreviewed within 7 days, this alert will be escalated to your backup provider.'
   }
@@ -1092,9 +1123,11 @@ function ackFooterFor(tier: string | null): string {
 
 function humanStep(step: LadderStepId): string {
   // The ladder uses ids like 'T0' / 'T2H' / 'T4H' / 'T8H' / 'T24H' / 'T48H'
-  // / 'T7D' / 'T14D'. Render with a `+` so it's unambiguous in the subject.
+  // / 'T72H' / 'T7D' / 'TIER2_*'. Render with a `+` so it's unambiguous in
+  // the subject. Tier-2-prefixed ids drop the prefix for display.
   if (step === 'T0') return 'T+0'
-  return step.replace(/^T/, 'T+').toLowerCase().replace(/^t\+/, 'T+')
+  const stripped = step.replace(/^TIER2_/, '')
+  return stripped.replace(/^T/, 'T+').toLowerCase().replace(/^t\+/, 'T+')
 }
 
 function patientSubject(tier: string | null): string {

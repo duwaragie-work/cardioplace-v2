@@ -24,6 +24,9 @@ export type LadderStepId =
   | 'T8H'
   | 'T24H'
   | 'T48H'
+  // Phase/23 — BP Level 1 ladder steps. Reused across HIGH and LOW.
+  | 'T72H'
+  | 'T7D'
   | 'TIER2_48H'
   | 'TIER2_7D'
   | 'TIER2_14D'
@@ -61,7 +64,7 @@ export interface LadderStep {
   displayHint?: 'RED_BANNER' | 'RED_BANNER_ANIMATED' | 'YELLOW_BANNER' | 'BADGE'
 }
 
-export type LadderKind = 'TIER_1' | 'TIER_2' | 'BP_LEVEL_2'
+export type LadderKind = 'TIER_1' | 'TIER_2' | 'BP_LEVEL_1' | 'BP_LEVEL_2'
 
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
@@ -240,11 +243,76 @@ export const BP_LEVEL_2_SYMPTOM_OVERRIDE_LADDER: LadderStep[] = [
   },
 ]
 
+// ─── BP Level 1 — non-emergent stage-2 HTN / hypotension ──────────────────
+// Source: CLINICAL_SPEC §1.2 + §3 + §4 (HFrEF/HCM/CAD/Pregnancy lower
+// bounds). "Notify provider" — non-emergent but requires provider attention
+// within a business day. Same ladder for HIGH and LOW; alert.tier
+// disambiguates the message text via the registry.
+//
+// Cadence vs Tier 1 / BP L2: provider gets EMAIL+DASHBOARD at T+0 (no push,
+// not emergent), patient gets PUSH+DASHBOARD at T+0 (informational, fires
+// immediately so the patient doesn't have to open the app). T+24h escalates
+// the channel (push) to primary + audience (backup); T+72h hands off to the
+// medical director; T+7d compliance flag to Healplace ops.
+export const BP_LEVEL_1_LADDER: LadderStep[] = [
+  {
+    step: 'T0',
+    offsetMs: 0,
+    recipientRoles: ['PRIMARY_PROVIDER'],
+    channels: ['EMAIL', 'DASHBOARD'],
+    afterHoursBehavior: 'QUEUE_UNTIL_BUSINESS_HOURS',
+    displayHint: 'YELLOW_BANNER',
+  },
+  {
+    step: 'T24H',
+    offsetMs: 24 * HOUR,
+    recipientRoles: ['PRIMARY_PROVIDER', 'BACKUP_PROVIDER'],
+    channels: ['PUSH', 'EMAIL', 'DASHBOARD'],
+    afterHoursBehavior: 'QUEUE_UNTIL_BUSINESS_HOURS',
+    displayHint: 'YELLOW_BANNER',
+  },
+  {
+    step: 'T72H',
+    offsetMs: 72 * HOUR,
+    recipientRoles: ['MEDICAL_DIRECTOR'],
+    channels: ['EMAIL', 'DASHBOARD'],
+    afterHoursBehavior: 'QUEUE_UNTIL_BUSINESS_HOURS',
+    displayHint: 'YELLOW_BANNER',
+  },
+  {
+    step: 'T7D',
+    offsetMs: 7 * DAY,
+    recipientRoles: ['HEALPLACE_OPS'],
+    channels: ['DASHBOARD'],
+    afterHoursBehavior: 'QUEUE_UNTIL_BUSINESS_HOURS',
+    displayHint: 'YELLOW_BANNER',
+  },
+]
+
+/**
+ * Patient-facing T+0 row for BP Level 1. Spec mandates out-of-app
+ * notification so the patient doesn't have to open the app to learn their
+ * BP needs attention. Fires immediately regardless of business hours
+ * (informational, not interrupting the provider escalation clock). Wired as
+ * a separate dispatch in EscalationService.fireT0 so it doesn't pollute the
+ * provider ladder's recipientRoles[0].
+ *
+ * Web-push transport is not yet wired; the Notification row is written and
+ * surfaces in the patient app's in-app inbox until transport ships.
+ */
+export const BP_LEVEL_1_PATIENT_T0: LadderStep = {
+  step: 'T0',
+  offsetMs: 0,
+  recipientRoles: ['PATIENT'],
+  channels: ['PUSH', 'DASHBOARD'],
+  afterHoursBehavior: 'FIRE_IMMEDIATELY',
+}
+
 // ─── Tier router ──────────────────────────────────────────────────────────
 
 /**
- * Resolves the ladder for a given alert tier. Tier 3 + BP Level 1 (both
- * high/low) are not escalated — the caller should treat null as "no ladder".
+ * Resolves the ladder for a given alert tier. Tier 3 is not escalated — the
+ * caller should treat null as "no ladder".
  *
  * Tier values mirror Prisma's AlertTier enum.
  */
@@ -257,14 +325,16 @@ export function ladderForTier(tier: string | null): {
       return { kind: 'TIER_1', steps: TIER_1_LADDER }
     case 'TIER_2_DISCREPANCY':
       return { kind: 'TIER_2', steps: TIER_2_LADDER }
+    case 'BP_LEVEL_1_HIGH':
+    case 'BP_LEVEL_1_LOW':
+      // Phase/23 — same ladder shape; the registry-resolved patientMessage /
+      // physicianMessage already encodes HIGH vs LOW wording.
+      return { kind: 'BP_LEVEL_1', steps: BP_LEVEL_1_LADDER }
     case 'BP_LEVEL_2':
       return { kind: 'BP_LEVEL_2', steps: BP_LEVEL_2_LADDER }
     case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
       return { kind: 'BP_LEVEL_2', steps: BP_LEVEL_2_SYMPTOM_OVERRIDE_LADDER }
-    // TIER_3_INFO, BP_LEVEL_1_HIGH, BP_LEVEL_1_LOW → no ladder.
-    // TODO(phase/11 Dev 1): surface BP_LEVEL_1_HIGH / BP_LEVEL_1_LOW on the
-    // admin dashboard so providers can see non-escalated alerts at a glance.
-    // MVP relies on dashboard visibility (no push) for those tiers.
+    // TIER_3_INFO → no ladder; surface via dashboard/details only.
     default:
       return null
   }
