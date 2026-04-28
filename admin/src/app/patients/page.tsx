@@ -63,6 +63,12 @@ interface Patient {
   riskTier: string;
   communicationPreference: string | null;
   primaryCondition: string | null;
+  /** Pregnancy + preeclampsia-history flags, surfaced separately so the
+   *  list / detail header can render the "Preeclampsia history" notation
+   *  (CLINICAL_SPEC §3 enhanced-monitoring marker for women with a
+   *  documented history, including outside pregnancy). */
+  isPregnant?: boolean;
+  historyPreeclampsia?: boolean;
   onboardingStatus: string;
   // Clinical enrollment state (admin-owned). `onboardingStatus` above is
   // identity onboarding only (name/DOB/timezone). See TESTING_FLOW_GUIDE §4.1.
@@ -1118,9 +1124,29 @@ export default function PatientsPage() {
                         {initials}
                       </div>
                       <div className="min-w-0">
-                        <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
-                          {p.name ?? 'Unknown'}
-                        </p>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
+                            {p.name ?? 'Unknown'}
+                          </p>
+                          {/* Preeclampsia-history notation per CLINICAL_SPEC §3.
+                              Only when patient is NOT currently pregnant — the
+                              pregnancy banner already covers active pregnancies,
+                              so the value of this flag is for women with a
+                              documented history outside pregnancy. */}
+                          {p.historyPreeclampsia && !p.isPregnant && (
+                            <span
+                              className="shrink-0 inline-flex items-center"
+                              title="Preeclampsia history — enhanced monitoring recommended outside pregnancy per 2025 AHA/ACC Hypertension Guideline."
+                              aria-label="Preeclampsia history"
+                            >
+                              <Heart
+                                className="w-3 h-3"
+                                style={{ color: 'var(--brand-warning-amber)' }}
+                                aria-hidden
+                              />
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[11px] truncate" style={{ color: 'var(--brand-text-muted)' }}>
                           {p.email ?? '--'}
                         </p>
