@@ -53,6 +53,12 @@ type Alert = {
   actualValue?: number | null;
   status?: AlertStatus | string;
   escalated?: boolean;
+  /** False when the alert may NOT be cleared by the patient (Tier 1
+   *  contraindication, BP Level 2 emergency). Backend marks these
+   *  dismissible:false; UI must hide the Acknowledge button so the patient
+   *  can't accidentally halt the provider escalation ladder per
+   *  CLINICAL_SPEC §V2-C. */
+  dismissible?: boolean;
   /** Set to the admin's userId once the alert is terminally resolved.
    *  Drives the "Reviewed by care team" badge so patients can tell at a
    *  glance which alerts have provider action without opening each one. */
@@ -239,6 +245,11 @@ function AlertCard({
   const sevMeta = SEVERITY_META[effectiveSeverity as AlertSeverity] ?? SEVERITY_META.LOW;
   const Icon = meta.icon;
   const isOpen = alert.status === 'OPEN';
+  // CLINICAL_SPEC §V2-C — Tier 1 contraindications + BP Level 2 are
+  // non-dismissable: the escalation cron stops paging once acknowledgedAt is
+  // set, so a patient tap silently kills the provider ladder. Hide the
+  // Acknowledge button entirely for those alerts; only "View details" stays.
+  const canAck = isOpen && alert.dismissible !== false;
   const isAcking = acknowledging === alert.id;
 
   const alertTypeLabels: Record<string, string> = {
@@ -391,7 +402,7 @@ function AlertCard({
 
         {/* Action row — Acknowledge + deep-link to the Flow C alert detail */}
         <div className="mt-3 flex items-center gap-2">
-          {isOpen && (
+          {canAck && (
             <motion.button
               onClick={() => onAcknowledge(alert.id)}
               disabled={isAcking}
@@ -412,7 +423,7 @@ function AlertCard({
           <Link
             href={`/alerts/${alert.id}`}
             className={
-              (isOpen ? 'h-10 px-4' : 'flex-1 h-10') +
+              (canAck ? 'h-10 px-4' : 'flex-1 h-10') +
               ' rounded-xl text-[13px] font-bold flex items-center justify-center gap-1 transition cursor-pointer'
             }
             style={{
@@ -817,7 +828,13 @@ export default function NotificationsPage() {
       const groupIds = alerts
         .filter(
           (a) =>
-            (a.journalEntry?.id ?? a.id) === groupKey && a.status === 'OPEN',
+            (a.journalEntry?.id ?? a.id) === groupKey
+            && a.status === 'OPEN'
+            // CLINICAL_SPEC §V2-C — never ack a non-dismissable sibling
+            // (Tier 1 / BP L2). Patient-ack stops the escalation cron, so
+            // even when the merged-card UI happens to show the button we
+            // must skip dismissible=false rows here too.
+            && a.dismissible !== false,
         )
         .map((a) => a.id);
       const idsToAck = groupIds.length > 0 ? groupIds : [id];
