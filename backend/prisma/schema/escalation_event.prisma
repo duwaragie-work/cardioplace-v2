@@ -39,6 +39,11 @@ enum LadderStep {
   T8H
   T24H
   T48H
+  // Phase/23 — BP Level 1 ladder. Same wall-clock offsets reused across both
+  // BP_LEVEL_1_HIGH and BP_LEVEL_1_LOW (router picks via alert.tier). T72H is
+  // the medical-director step, T7D is the Healplace-ops compliance flag.
+  T72H
+  T7D
   TIER2_48H
   TIER2_7D
   TIER2_14D

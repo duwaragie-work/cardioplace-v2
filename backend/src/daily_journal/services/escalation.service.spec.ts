@@ -1,10 +1,11 @@
 import { jest } from '@jest/globals'
 import { Test, TestingModule } from '@nestjs/testing'
+import { ConfigService } from '@nestjs/config'
 import { EventEmitter2 } from '@nestjs/event-emitter'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
-import { EscalationService } from './escalation.service.js'
+import { EscalationService, escalationEmailBody } from './escalation.service.js'
 import type { AlertCreatedEvent } from '../interfaces/events.interface.js'
 
 // Phase/7 — EscalationService state-machine tests.
@@ -24,6 +25,7 @@ import type { AlertCreatedEvent } from '../interfaces/events.interface.js'
 // ─── fixtures ───────────────────────────────────────────────────────────────
 
 const NY_PRACTICE = {
+  name: 'Cedar Hill Internal Medicine',
   businessHoursStart: '08:00',
   businessHoursEnd: '18:00',
   businessHoursTimezone: 'America/New_York',
@@ -36,12 +38,23 @@ const ASSIGNMENT_FULL = {
   practice: NY_PRACTICE,
 }
 
+const READING_SAMPLE = {
+  systolicBP: 165,
+  diastolicBP: 102,
+  pulse: 88,
+  position: 'SITTING',
+  measuredAt: new Date('2026-04-22T09:55:00Z'),
+}
+
 function buildAlert(over: Record<string, any> = {}) {
   return {
     id: 'alert-1',
     userId: 'patient-1',
     tier: 'TIER_1_CONTRAINDICATION',
     ruleId: 'RULE_PREGNANCY_ACE_ARB',
+    mode: 'STANDARD',
+    pulsePressure: 63,
+    suboptimalMeasurement: false,
     status: 'OPEN',
     acknowledgedAt: null,
     createdAt: new Date('2026-04-22T10:00:00Z'), // Wed 06:00 NY — after-hours
@@ -50,12 +63,16 @@ function buildAlert(over: Record<string, any> = {}) {
     physicianMessage: 'Tier 1 — ACE/ARB in pregnancy.',
     user: {
       id: 'patient-1',
+      name: 'Alan Smith',
+      email: 'alan@example.com',
+      dateOfBirth: new Date('1985-04-24T00:00:00Z'),
       // Layer B gate — default fixture is ENROLLED so every existing test
       // case exercises the happy path. Override to 'NOT_ENROLLED' to verify
       // the dispatch gate.
       enrollmentStatus: 'ENROLLED',
       providerAssignmentAsPatient: ASSIGNMENT_FULL,
     },
+    journalEntry: READING_SAMPLE,
     ...over,
   }
 }
@@ -131,6 +148,15 @@ describe('EscalationService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: EventEmitter2, useValue: eventEmitter },
         { provide: EmailService, useValue: email },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (key: string, fallback?: string) =>
+              key === 'ADMIN_BASE_URL'
+                ? 'https://admin.cardioplaceai.com'
+                : (fallback ?? undefined),
+          },
+        },
       ],
     }).compile()
 
@@ -152,24 +178,29 @@ describe('EscalationService', () => {
       expect(eventEmitter.emit).not.toHaveBeenCalled()
     })
 
-    it('BP_LEVEL_1_HIGH → no EscalationEvent rows', async () => {
+    // Phase/23 — BP_LEVEL_1_HIGH and BP_LEVEL_1_LOW are now escalatable. The
+    // detailed dispatch behavior (provider + patient T+0 fan-out, ladder
+    // walk, ack-stops-ladder) lives in the dedicated `BP Level 1 dispatch`
+    // describe block below; we only assert here that fireT0 routes them
+    // through ladderForTier instead of dropping them.
+    it('BP_LEVEL_1_HIGH → fires T+0 dispatch (was a no-op before phase/23)', async () => {
       prisma.deviationAlert.findUnique.mockResolvedValue(
         buildAlert({ tier: 'BP_LEVEL_1_HIGH' }),
       )
       await service.handleAlertCreated(
         buildAlertCreatedPayload({ tier: 'BP_LEVEL_1_HIGH' }),
       )
-      expect(prisma.escalationEvent.create).not.toHaveBeenCalled()
+      expect(prisma.escalationEvent.create).toHaveBeenCalled()
     })
 
-    it('BP_LEVEL_1_LOW → no EscalationEvent rows', async () => {
+    it('BP_LEVEL_1_LOW → fires T+0 dispatch (was a no-op before phase/23)', async () => {
       prisma.deviationAlert.findUnique.mockResolvedValue(
         buildAlert({ tier: 'BP_LEVEL_1_LOW' }),
       )
       await service.handleAlertCreated(
         buildAlertCreatedPayload({ tier: 'BP_LEVEL_1_LOW' }),
       )
-      expect(prisma.escalationEvent.create).not.toHaveBeenCalled()
+      expect(prisma.escalationEvent.create).toHaveBeenCalled()
     })
   })
 
@@ -795,6 +826,559 @@ describe('EscalationService', () => {
         'HEALPLACE_OPS',
         'HEALPLACE_OPS',
       ])
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Email body content (phase/22) — verifies that escalation emails carry
+  // patient identifiers, alert timestamp, BP reading, escalation step, and
+  // a deep link to the admin dashboard. The previous template only carried
+  // the alert message, which forced providers to log in and hunt for
+  // context on every notification.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('email body content', () => {
+    it('Tier 1 T+0 to primary provider includes name, practice, BP reading, and dashboard link', async () => {
+      // Business-hours dispatch so the email fires immediately — no queueing.
+      const now = new Date('2026-04-22T15:00:00Z') // 11:00 NY, in hours
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildAlert({ createdAt: now }),
+      )
+      ;(prisma.user.findUnique as jest.Mock<any>).mockResolvedValue({
+        email: 'primary@example.com',
+      })
+
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({ tier: 'TIER_1_CONTRAINDICATION' }),
+        now,
+      )
+
+      expect(email.sendEmail).toHaveBeenCalled()
+      const [to, subject, html] = email.sendEmail.mock.calls[0] as [
+        string,
+        string,
+        string,
+      ]
+      expect(to).toBe('primary@example.com')
+      // Subject — step + tier prefix + patient name + practice.
+      expect(subject).toContain('T+0')
+      expect(subject).toContain('TIER 1 CONTRAINDICATION')
+      expect(subject).toContain('Alan Smith')
+      expect(subject).toContain('Cedar Hill Internal Medicine')
+      // Body — patient identifiers, BP reading, dashboard link, ack footer.
+      expect(html).toContain('Alan Smith')
+      expect(html).toContain('alan@example.com')
+      expect(html).toContain('1985-04-24')
+      expect(html).toMatch(/age 4[01]/) // 40 or 41 depending on now/dob math
+      expect(html).toContain('Cedar Hill Internal Medicine')
+      expect(html).toContain('165/102 mmHg')
+      expect(html).toContain('pulse <strong>88</strong>')
+      expect(html).toContain('Tier 1 — ACE/ARB in pregnancy.')
+      expect(html).toContain(
+        'https://admin.cardioplaceai.com/patients/patient-1?alert=alert-1',
+      )
+      expect(html).toContain('within 4 hours')
+      // Detail richness — recipient role banner, alert metadata strip,
+      // pulse pressure, position, alert + patient IDs in footer.
+      expect(html).toContain('primary provider')
+      expect(html).toContain('pulse pressure <strong>63</strong>')
+      expect(html).toContain('(wide)') // pulsePressure 63 > 60
+      expect(html).toContain('position <strong>SITTING</strong>')
+      expect(html).toContain('Mode: <strong>STANDARD</strong>')
+      expect(html).toContain('Rule: <strong>RULE_PREGNANCY_ACE_ARB</strong>')
+      expect(html).toContain('Alert ID: alert-1')
+      expect(html).toContain('Patient ID: patient-1')
+    })
+
+    it('renders the suboptimal-measurement banner when the alert flagged it', () => {
+      const out = escalationEmailBody({
+        alert: buildAlert({ suboptimalMeasurement: true }) as any,
+        step: 'T0',
+        role: 'PRIMARY_PROVIDER',
+        message: 'Tier 1 — ACE/ARB in pregnancy.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-04-22T15:00:00Z'),
+      })
+      expect(out.html).toContain('Suboptimal measurement conditions')
+      expect(out.html).toMatch(/checklist item/i)
+    })
+
+    it('renders the after-hours explanation block when afterHours=true', () => {
+      const out = escalationEmailBody({
+        alert: buildAlert() as any,
+        step: 'T0',
+        role: 'BACKUP_PROVIDER',
+        message: 'Tier 1 — ACE/ARB in pregnancy.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        afterHours: true,
+        now: new Date('2026-04-22T10:00:00Z'),
+      })
+      expect(out.html).toContain('After-hours dispatch')
+      expect(out.html).toContain('queued for the next business window')
+      expect(out.html).toContain('America/New_York')
+      expect(out.html).toContain('backup provider')
+    })
+
+    it('renders practice-local timestamps in addition to UTC', () => {
+      const out = escalationEmailBody({
+        alert: buildAlert() as any,
+        step: 'T0',
+        role: 'PRIMARY_PROVIDER',
+        message: 'Tier 1 — ACE/ARB in pregnancy.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-04-22T15:00:00Z'),
+      })
+      // Both UTC and a practice-local rendering present.
+      expect(out.html).toContain('2026-04-22T10:00:00.000Z') // alert.createdAt UTC
+      expect(out.html).toMatch(/Apr 22, 2026/) // practice-local readable form
+    })
+
+    it('BP Level 2 T+0 carries the 2-hour acknowledgment footer', async () => {
+      const now = new Date('2026-04-22T15:00:00Z')
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildAlert({
+          tier: 'BP_LEVEL_2',
+          ruleId: 'RULE_ABSOLUTE_EMERGENCY',
+          physicianMessage: 'BP Level 2 — 190/120 mmHg.',
+          createdAt: now,
+        }),
+      )
+
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({
+          tier: 'BP_LEVEL_2',
+          ruleId: 'RULE_ABSOLUTE_EMERGENCY',
+        }),
+        now,
+      )
+
+      const emailCalls = email.sendEmail.mock.calls as Array<
+        [string, string, string]
+      >
+      expect(emailCalls.length).toBeGreaterThan(0)
+      const html = emailCalls[0][2]
+      const subject = emailCalls[0][1]
+      expect(subject).toContain('BP EMERGENCY')
+      expect(html).toContain('within 2 hours')
+      expect(html).toContain('Healplace ops will phone the practice')
+      expect(html).toContain('BP Level 2 — 190/120 mmHg.')
+    })
+
+    it('after-hours Tier 1 backup courtesy fire flags "(after-hours queued)" in the body', async () => {
+      // Default fixture's createdAt is 06:00 NY = after-hours.
+      const afterHoursNow = new Date('2026-04-22T10:00:00Z')
+      prisma.deviationAlert.findUnique.mockResolvedValue(buildAlert())
+
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload(),
+        afterHoursNow,
+      )
+
+      // Tier 1 after-hours: primary queued (no email yet) + backup courtesy
+      // fire (email goes out with afterHours flag). The first call here is
+      // the backup courtesy email.
+      const emailCalls = email.sendEmail.mock.calls as Array<
+        [string, string, string]
+      >
+      expect(emailCalls.length).toBeGreaterThan(0)
+      const html = emailCalls[0][2]
+      expect(html).toContain('after-hours queued')
+    })
+
+    it('escalationEmailBody renders friendly subject (no tier prefix) for PATIENT role', () => {
+      const out = escalationEmailBody({
+        alert: buildAlert({ tier: 'BP_LEVEL_2' }) as any,
+        step: 'T0',
+        role: 'PATIENT',
+        message: 'Your BP is 190/120. If you have chest pain, call 911 now.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-04-22T15:00:00Z'),
+      })
+      expect(out.subject).toBe('Urgent Blood Pressure Alert — Cardioplace')
+      expect(out.subject).not.toContain('TIER')
+      expect(out.subject).not.toContain('T+0')
+      expect(out.html).toContain(
+        'Your BP is 190/120. If you have chest pain, call 911 now.',
+      )
+    })
+
+    it('escalationEmailBody handles missing DOB gracefully', () => {
+      const alert = buildAlert({
+        user: {
+          id: 'patient-1',
+          name: 'Alan Smith',
+          email: 'alan@example.com',
+          dateOfBirth: null,
+          enrollmentStatus: 'ENROLLED',
+          providerAssignmentAsPatient: ASSIGNMENT_FULL,
+        },
+      })
+      const out = escalationEmailBody({
+        alert: alert as any,
+        step: 'T0',
+        role: 'PRIMARY_PROVIDER',
+        message: 'Tier 1 — ACE/ARB in pregnancy.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-04-22T15:00:00Z'),
+      })
+      expect(out.html).toContain('(DOB unknown)')
+      expect(out.html).toContain('age unknown')
+    })
+
+    it('escalationEmailBody handles missing practice gracefully', () => {
+      const alert = buildAlert({
+        user: {
+          id: 'patient-1',
+          name: 'Alan Smith',
+          email: 'alan@example.com',
+          dateOfBirth: new Date('1985-04-24T00:00:00Z'),
+          enrollmentStatus: 'ENROLLED',
+          providerAssignmentAsPatient: null,
+        },
+      })
+      const out = escalationEmailBody({
+        alert: alert as any,
+        step: 'T0',
+        role: 'PRIMARY_PROVIDER',
+        message: 'Tier 1 — ACE/ARB in pregnancy.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-04-22T15:00:00Z'),
+      })
+      expect(out.html).toContain('(practice not assigned)')
+      expect(out.subject).toContain('(practice not assigned)')
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // BP Level 1 dispatch (phase/23) — fixes the gap where stage-2 HTN /
+  // hypotension alerts wrote a DeviationAlert row but no EscalationEvent or
+  // Notification, leaving providers + patients with no out-of-app surface.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('BP Level 1 dispatch', () => {
+    function buildBpL1HighAlert(over: Record<string, any> = {}) {
+      return buildAlert({
+        tier: 'BP_LEVEL_1_HIGH',
+        ruleId: 'RULE_PREGNANCY_L1_HIGH',
+        physicianMessage:
+          'BP Level 1 High — pregnancy SBP ≥140 / DBP ≥90: 148/94 mmHg. Assess for preeclampsia features.',
+        patientMessage:
+          'Your blood pressure is higher than the goal for your pregnancy. Please contact your care team today.',
+        ...over,
+      })
+    }
+
+    function buildBpL1Payload(
+      over: Partial<AlertCreatedEvent> = {},
+    ): AlertCreatedEvent {
+      return buildAlertCreatedPayload({
+        tier: 'BP_LEVEL_1_HIGH',
+        ruleId: 'RULE_PREGNANCY_L1_HIGH',
+        ...over,
+      })
+    }
+
+    it('BP_LEVEL_1_HIGH T+0 in business hours fires PRIMARY (email+dashboard) AND PATIENT (push+dashboard)', async () => {
+      const now = new Date('2026-04-22T15:00:00Z') // 11:00 NY business hours
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildBpL1HighAlert({ createdAt: now }),
+      )
+
+      await service.handleAlertCreated(buildBpL1Payload(), now)
+
+      // Two EscalationEvent rows at T+0: one for the provider step, one for
+      // the patient courtesy fire.
+      expect(prisma.escalationEvent.create).toHaveBeenCalledTimes(2)
+      const recipientRoles = createdEvents.map(
+        (e) => e.data.recipientRoles as string[],
+      )
+      // Provider event has PRIMARY_PROVIDER, patient event has PATIENT.
+      expect(recipientRoles.flat()).toEqual(
+        expect.arrayContaining(['PRIMARY_PROVIDER', 'PATIENT']),
+      )
+
+      // Notification rows fan out per (recipient × channel).
+      const notifChannels = (
+        prisma.notification.create.mock.calls as Array<[{ data: any }]>
+      ).map((c) => c[0].data.channel)
+      expect(notifChannels).toEqual(
+        expect.arrayContaining(['EMAIL', 'DASHBOARD', 'PUSH']),
+      )
+
+      // Provider email subject/body uses the new BP LEVEL 1 HIGH label.
+      const emailCalls = email.sendEmail.mock.calls as Array<
+        [string, string, string]
+      >
+      expect(emailCalls.length).toBeGreaterThan(0)
+      const [, subject, html] = emailCalls[0]
+      expect(subject).toContain('T+0')
+      expect(subject).toContain('BP LEVEL 1 HIGH')
+      expect(subject).toContain('Alan Smith')
+      expect(html).toContain('within 24 hours')
+      expect(html).toContain('148/94 mmHg')
+    })
+
+    it('BP_LEVEL_1_LOW uses the same ladder shape with HIGH→LOW label swap', async () => {
+      const now = new Date('2026-04-22T15:00:00Z')
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildBpL1HighAlert({
+          tier: 'BP_LEVEL_1_LOW',
+          ruleId: 'RULE_HFREF_LOW',
+          createdAt: now,
+          physicianMessage:
+            'BP Level 1 Low — HFrEF SBP <85: 82/55 mmHg. Review GDMT titration.',
+        }),
+      )
+
+      await service.handleAlertCreated(
+        buildBpL1Payload({
+          tier: 'BP_LEVEL_1_LOW',
+          ruleId: 'RULE_HFREF_LOW',
+        }),
+        now,
+      )
+
+      expect(prisma.escalationEvent.create).toHaveBeenCalledTimes(2)
+      const emailCalls = email.sendEmail.mock.calls as Array<
+        [string, string, string]
+      >
+      const [, subject] = emailCalls[0]
+      expect(subject).toContain('BP LEVEL 1 LOW')
+    })
+
+    it('after-hours: PRIMARY queued for next business window, PATIENT push fires immediately', async () => {
+      // Default fixture's createdAt is 06:00 NY = after-hours.
+      const afterHoursNow = new Date('2026-04-22T10:00:00Z')
+      prisma.deviationAlert.findUnique.mockResolvedValue(buildBpL1HighAlert())
+
+      await service.handleAlertCreated(buildBpL1Payload(), afterHoursNow)
+
+      // Provider event is created but its scheduledFor is set to next
+      // business open; patient event has notificationSentAt set (immediate).
+      const events = createdEvents.map((e) => e.data)
+      const providerEvent = events.find((e) =>
+        (e.recipientRoles as string[]).includes('PRIMARY_PROVIDER'),
+      )!
+      const patientEvent = events.find((e) =>
+        (e.recipientRoles as string[]).includes('PATIENT'),
+      )!
+      expect(providerEvent.scheduledFor).toBeTruthy()
+      expect(providerEvent.notificationSentAt).toBeFalsy()
+      expect(patientEvent.notificationSentAt).toBeTruthy()
+    })
+
+    it('Layer B enrollment gate suppresses BP L1 dispatch for un-enrolled patients', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildBpL1HighAlert({
+          user: {
+            id: 'patient-1',
+            name: 'Alan Smith',
+            email: 'alan@example.com',
+            dateOfBirth: new Date('1985-04-24T00:00:00Z'),
+            enrollmentStatus: 'NOT_ENROLLED',
+            providerAssignmentAsPatient: ASSIGNMENT_FULL,
+          },
+        }),
+      )
+
+      await service.handleAlertCreated(buildBpL1Payload())
+
+      expect(prisma.escalationEvent.create).not.toHaveBeenCalled()
+      expect(prisma.notification.create).not.toHaveBeenCalled()
+    })
+
+    it('escalationEmailBody renders amber tier color + 24-hour ack footer for BP L1', () => {
+      const out = escalationEmailBody({
+        alert: buildBpL1HighAlert() as any,
+        step: 'T0',
+        role: 'PRIMARY_PROVIDER',
+        message: 'BP Level 1 High — pregnancy SBP ≥140 / DBP ≥90.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-04-22T15:00:00Z'),
+      })
+      // Amber palette (#b45309) drives the sidebar border + header label +
+      // CTA button. (The wide-pulse-pressure inline tag uses red regardless
+      // of tier — that's a clinical flag, not a tier signal.)
+      expect(out.html).toContain('border-left:4px solid #b45309')
+      expect(out.html).toContain('color:#b45309')
+      expect(out.html).toContain('background:#b45309')
+      expect(out.html).toContain('BP LEVEL 1 HIGH')
+      expect(out.html).toContain('within 24 hours')
+      expect(out.html).toContain('72 hours')
+    })
+
+    it('humanStep renders T72H and T7D with the canonical T+ prefix', () => {
+      // Step display in the email subject pill — verifies the new helpers
+      // didn't break either the existing or the new step IDs.
+      const t72h = escalationEmailBody({
+        alert: buildBpL1HighAlert() as any,
+        step: 'T72H',
+        role: 'MEDICAL_DIRECTOR',
+        message: 'BP Level 1 High',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-04-22T15:00:00Z'),
+      })
+      expect(t72h.subject).toContain('T+72h')
+
+      const t7d = escalationEmailBody({
+        alert: buildBpL1HighAlert() as any,
+        step: 'T7D',
+        role: 'HEALPLACE_OPS',
+        message: 'BP Level 1 High',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-04-22T15:00:00Z'),
+      })
+      expect(t7d.subject).toContain('T+7d')
+    })
+
+    // ────────────────────────────────────────────────────────────────────
+    // Cron-driven ladder progression. The walk logic is shared with Tier 1
+    // / Tier 2 / BP L2 (advanceOverdueLadders is tier-agnostic), so these
+    // three tests verify that BP L1 alerts route through that machinery
+    // correctly — picking the right next step from the BP L1 ladder, not
+    // accidentally falling through to a different ladder's step IDs.
+    // ────────────────────────────────────────────────────────────────────
+    it('advanceOverdueLadders walks BP L1 from T+0 → T+24H → T+72H → T+7D', async () => {
+      // Anchor alert at Tuesday 11:00 NY (15:00 UTC) — clean business hours
+      // so QUEUE_UNTIL_BUSINESS_HOURS doesn't push the next-step deadlines
+      // out into the next morning.
+      const alertCreatedAt = new Date('2026-04-21T15:00:00Z')
+      const overdueAlert = buildBpL1HighAlert({ createdAt: alertCreatedAt })
+
+      prisma.deviationAlert.findUnique.mockResolvedValue(overdueAlert)
+      prisma.deviationAlert.findMany.mockResolvedValue([overdueAlert])
+
+      // Round 1 — alert is past T+24h with only the T+0 events on file.
+      // The cron should create a T24H event addressed to PRIMARY+BACKUP.
+      ;(prisma.escalationEvent.findMany as jest.Mock<any>).mockImplementation(
+        (args: any) => {
+          if (args?.where?.alertId === overdueAlert.id) {
+            return Promise.resolve([
+              {
+                ladderStep: 'T0',
+                recipientRoles: ['PRIMARY_PROVIDER'],
+                triggeredAt: alertCreatedAt,
+                scheduledFor: null,
+                notificationSentAt: alertCreatedAt,
+              },
+              {
+                ladderStep: 'T0',
+                recipientRoles: ['PATIENT'],
+                triggeredAt: alertCreatedAt,
+                scheduledFor: null,
+                notificationSentAt: alertCreatedAt,
+              },
+            ])
+          }
+          return Promise.resolve([])
+        },
+      )
+
+      const t24Scan = new Date('2026-04-22T15:30:00Z') // T+0 + 24h30m
+      await service.runScan(t24Scan)
+
+      const t24 = createdEvents.find((e) => e.data.ladderStep === 'T24H')
+      expect(t24).toBeDefined()
+      expect(t24 && new Set(t24.data.recipientRoles)).toEqual(
+        new Set(['PRIMARY_PROVIDER', 'BACKUP_PROVIDER']),
+      )
+
+      // Round 2 — pretend T+24H is now on the timeline; cron should walk
+      // to T+72H (medical director).
+      createdEvents.length = 0
+      ;(prisma.escalationEvent.findMany as jest.Mock<any>).mockImplementation(
+        (args: any) => {
+          if (args?.where?.alertId === overdueAlert.id) {
+            return Promise.resolve([
+              {
+                ladderStep: 'T0',
+                recipientRoles: ['PRIMARY_PROVIDER'],
+                triggeredAt: alertCreatedAt,
+                scheduledFor: null,
+                notificationSentAt: alertCreatedAt,
+              },
+              {
+                ladderStep: 'T24H',
+                recipientRoles: ['PRIMARY_PROVIDER', 'BACKUP_PROVIDER'],
+                triggeredAt: t24Scan,
+                scheduledFor: null,
+                notificationSentAt: t24Scan,
+              },
+            ])
+          }
+          return Promise.resolve([])
+        },
+      )
+
+      const t72Scan = new Date('2026-04-24T15:30:00Z') // T+0 + 72h30m
+      await service.runScan(t72Scan)
+
+      const t72 = createdEvents.find((e) => e.data.ladderStep === 'T72H')
+      expect(t72).toBeDefined()
+      expect(t72 && t72.data.recipientRoles).toEqual(['MEDICAL_DIRECTOR'])
+
+      // Round 3 — past T+7d; cron walks to T+7D (Healplace ops).
+      createdEvents.length = 0
+      ;(prisma.escalationEvent.findMany as jest.Mock<any>).mockImplementation(
+        (args: any) => {
+          if (args?.where?.alertId === overdueAlert.id) {
+            return Promise.resolve([
+              {
+                ladderStep: 'T72H',
+                recipientRoles: ['MEDICAL_DIRECTOR'],
+                triggeredAt: t72Scan,
+                scheduledFor: null,
+                notificationSentAt: t72Scan,
+              },
+            ])
+          }
+          return Promise.resolve([])
+        },
+      )
+      ;(prisma.user.findMany as jest.Mock<any>).mockResolvedValue([
+        { id: 'ops-1' },
+      ])
+
+      const t7dScan = new Date('2026-04-28T16:00:00Z') // T+0 + 7d+1h
+      await service.runScan(t7dScan)
+
+      const t7d = createdEvents.find((e) => e.data.ladderStep === 'T7D')
+      expect(t7d).toBeDefined()
+      expect(t7d && t7d.data.recipientRoles).toEqual(['HEALPLACE_OPS'])
+    })
+
+    it('acknowledged BP L1 alert is filtered out of advanceOverdueLadders', async () => {
+      // The cron's findMany clause excludes `acknowledgedAt != null`, so an
+      // acked alert never reaches the ladder comparator. Verify the same
+      // OPEN+unack filter applies regardless of tier.
+      prisma.deviationAlert.findMany.mockResolvedValue([])
+      await service.runScan(new Date('2026-04-22T20:00:00Z'))
+      expect(prisma.deviationAlert.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            acknowledgedAt: null,
+            status: 'OPEN',
+          }),
+        }),
+      )
+      expect(prisma.escalationEvent.create).not.toHaveBeenCalled()
+    })
+
+    it('resolved BP L1 alert: cron skips, no T+24H ever fires', async () => {
+      // Even if a stale pending event exists for a now-resolved BP L1
+      // alert, the alert's status: 'OPEN' filter on findMany excludes it.
+      prisma.deviationAlert.findMany.mockResolvedValue([])
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildBpL1HighAlert({ status: 'RESOLVED' }),
+      )
+      await service.runScan(new Date('2026-04-22T20:00:00Z'))
+      expect(prisma.escalationEvent.create).not.toHaveBeenCalled()
     })
   })
 })

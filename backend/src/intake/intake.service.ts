@@ -139,8 +139,44 @@ export class IntakeService {
 
   async createMedications(userId: string, dto: IntakeMedicationsDto) {
     return this.prisma.$transaction(async (tx) => {
+      // Dedup against the patient's currently-active medications using the
+      // same canonical key as PUT /me/medications (see medicationKey). Any
+      // incoming item whose key matches an active row is silently dropped —
+      // the existing row is returned in `data` instead of a duplicate. This
+      // makes POST idempotent so a re-render or double-tap on the intake
+      // screen can't produce phantom rows. The DB-level partial unique index
+      // (uq_patientmed_active) is the belt to this suspenders.
+      const existingActive = await tx.patientMedication.findMany({
+        where: { userId, discontinuedAt: null },
+      })
+      const existingByKey = new Map(
+        existingActive.map((m) => [this.medicationKey(m), m]),
+      )
+
+      const toCreate: IntakeMedicationItemDto[] = []
+      const skippedExisting: PatientMedication[] = []
+      const seenInPayload = new Set<string>()
+      for (const item of dto.medications) {
+        const key = this.medicationKey({
+          drugName: item.drugName,
+          drugClass: item.drugClass,
+          isCombination: item.isCombination ?? false,
+          frequency: item.frequency,
+          combinationComponents: item.combinationComponents ?? [],
+        })
+        const existing = existingByKey.get(key)
+        if (existing) {
+          // Skip a row already on file; echo it back exactly once even if
+          // the patient submits the same dup multiple times in one payload.
+          if (!seenInPayload.has(key)) skippedExisting.push(existing)
+        } else if (!seenInPayload.has(key)) {
+          toCreate.push(item)
+        }
+        seenInPayload.add(key)
+      }
+
       const created = await Promise.all(
-        dto.medications.map((item) =>
+        toCreate.map((item) =>
           tx.patientMedication.create({
             data: {
               userId,
@@ -164,25 +200,34 @@ export class IntakeService {
         ),
       )
 
-      await tx.profileVerificationLog.createMany({
-        data: created.map((med) => ({
-          userId,
-          fieldPath: `medication:${med.id}`,
-          previousValue: Prisma.JsonNull,
-          newValue: this.serializeMedication(med) as Prisma.InputJsonValue,
-          changedBy: userId,
-          changedByRole: VerifierRole.PATIENT,
-          changeType: VerificationChangeType.PATIENT_REPORT,
-        })),
-      })
+      if (created.length) {
+        await tx.profileVerificationLog.createMany({
+          data: created.map((med) => ({
+            userId,
+            fieldPath: `medication:${med.id}`,
+            previousValue: Prisma.JsonNull,
+            newValue: this.serializeMedication(med) as Prisma.InputJsonValue,
+            changedBy: userId,
+            changedByRole: VerifierRole.PATIENT,
+            changeType: VerificationChangeType.PATIENT_REPORT,
+          })),
+        })
 
-      // Adding a new medication flips the patient profile back to UNVERIFIED.
-      await this.flipProfileToUnverified(tx, userId)
+        // Adding a new medication flips the patient profile back to
+        // UNVERIFIED. Pure-dedup calls (no new rows) leave verification
+        // status alone.
+        await this.flipProfileToUnverified(tx, userId)
+      }
+
+      const responseRows = [...created, ...skippedExisting]
+      const message = skippedExisting.length
+        ? `${created.length} medication(s) recorded, ${skippedExisting.length} duplicate(s) skipped`
+        : `${created.length} medication(s) recorded`
 
       return {
         statusCode: 201,
-        message: `${created.length} medication(s) recorded`,
-        data: created.map((m) => this.serializeMedication(m)),
+        message,
+        data: responseRows.map((m) => this.serializeMedication(m)),
       }
     }, TX_OPTIONS)
   }

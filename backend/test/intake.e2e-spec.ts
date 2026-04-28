@@ -314,6 +314,232 @@ describe('Intake API (e2e)', () => {
     })
   })
 
+  // ─── POST /intake/medications dedup (phase/21) ─────────────────────────────
+
+  describe('POST /intake/medications — dedup', () => {
+    // Dedicated patient so state from the earlier POST/PATCH/PUT blocks
+    // doesn't poison the canonical-key lookups.
+    const dedupEmail = `${runTag}-dedup-patient@example.com`
+    let dedupId: string
+    let dedupToken: string
+
+    async function activeMedsFor(userId: string) {
+      return prisma.patientMedication.findMany({
+        where: { userId, discontinuedAt: null },
+        orderBy: { reportedAt: 'asc' },
+      })
+    }
+
+    beforeAll(async () => {
+      const patient = await prisma.user.create({
+        data: {
+          email: dedupEmail,
+          name: 'Dedup Patient',
+          roles: ['PATIENT'],
+          isVerified: true,
+          onboardingStatus: 'COMPLETED',
+        },
+      })
+      dedupId = patient.id
+      dedupToken = jwt.sign({
+        sub: patient.id,
+        email: patient.email,
+        roles: patient.roles,
+      })
+      await prisma.patientProfile.create({
+        data: {
+          userId: dedupId,
+          gender: 'MALE',
+          heightCm: 178,
+          profileVerificationStatus: 'UNVERIFIED',
+        },
+      })
+    })
+
+    afterAll(async () => {
+      await prisma.profileVerificationLog.deleteMany({
+        where: { userId: dedupId },
+      })
+      await prisma.patientMedication.deleteMany({ where: { userId: dedupId } })
+      await prisma.patientProfile.deleteMany({ where: { userId: dedupId } })
+      await prisma.user.deleteMany({ where: { id: dedupId } })
+    })
+
+    it('POST same medication twice creates only one active row', async () => {
+      const payload = {
+        medications: [
+          {
+            drugName: 'Eliquis',
+            drugClass: 'ANTICOAGULANT',
+            frequency: 'TWICE_DAILY',
+          },
+        ],
+      }
+
+      const first = await request(app.getHttpServer())
+        .post('/intake/medications')
+        .set('Authorization', `Bearer ${dedupToken}`)
+        .send(payload)
+        .expect(201)
+      expect(first.body.data).toHaveLength(1)
+      const firstId = first.body.data[0].id
+
+      const second = await request(app.getHttpServer())
+        .post('/intake/medications')
+        .set('Authorization', `Bearer ${dedupToken}`)
+        .send(payload)
+        .expect(201)
+      // Response still echoes the canonical row so the client gets a usable
+      // medicationId either way, but no new row is created.
+      expect(second.body.data).toHaveLength(1)
+      expect(second.body.data[0].id).toBe(firstId)
+      expect(second.body.message).toMatch(/duplicate.*skipped/i)
+
+      const active = await activeMedsFor(dedupId)
+      expect(active).toHaveLength(1)
+      expect(active[0].id).toBe(firstId)
+    })
+
+    it('mixed payload — only the new medication is created, existing is preserved', async () => {
+      const beforeIds = (await activeMedsFor(dedupId)).map((m) => m.id)
+
+      const res = await request(app.getHttpServer())
+        .post('/intake/medications')
+        .set('Authorization', `Bearer ${dedupToken}`)
+        .send({
+          medications: [
+            // Already-active dup — should be skipped.
+            {
+              drugName: 'Eliquis',
+              drugClass: 'ANTICOAGULANT',
+              frequency: 'TWICE_DAILY',
+            },
+            // Net-new — should be created.
+            {
+              drugName: 'Toprol XL',
+              drugClass: 'BETA_BLOCKER',
+              frequency: 'ONCE_DAILY',
+            },
+          ],
+        })
+        .expect(201)
+      expect(res.body.data).toHaveLength(2)
+      expect(res.body.message).toMatch(/1 medication\(s\) recorded.*1 duplicate/i)
+
+      const active = await activeMedsFor(dedupId)
+      expect(active).toHaveLength(2)
+      const newIds = active.map((m) => m.id).filter((id) => !beforeIds.includes(id))
+      expect(newIds).toHaveLength(1)
+    })
+
+    it('case-insensitive drugName — "ELIQUIS" matches "Eliquis"', async () => {
+      const before = await activeMedsFor(dedupId)
+      const beforeCount = before.length
+
+      await request(app.getHttpServer())
+        .post('/intake/medications')
+        .set('Authorization', `Bearer ${dedupToken}`)
+        .send({
+          medications: [
+            {
+              drugName: 'ELIQUIS',
+              drugClass: 'ANTICOAGULANT',
+              frequency: 'TWICE_DAILY',
+            },
+          ],
+        })
+        .expect(201)
+
+      const after = await activeMedsFor(dedupId)
+      expect(after).toHaveLength(beforeCount)
+    })
+
+    it('re-add allowed after discontinue (different active row, same canonical key)', async () => {
+      const eliquis = (await activeMedsFor(dedupId)).find(
+        (m) => m.drugName === 'Eliquis',
+      )!
+      // Discontinue the active Eliquis.
+      await request(app.getHttpServer())
+        .patch(`/me/medications/${eliquis.id}`)
+        .set('Authorization', `Bearer ${dedupToken}`)
+        .send({ discontinue: true })
+        .expect(200)
+
+      // Now re-adding it should produce a new active row — the partial unique
+      // index excludes discontinued rows.
+      const res = await request(app.getHttpServer())
+        .post('/intake/medications')
+        .set('Authorization', `Bearer ${dedupToken}`)
+        .send({
+          medications: [
+            {
+              drugName: 'Eliquis',
+              drugClass: 'ANTICOAGULANT',
+              frequency: 'TWICE_DAILY',
+            },
+          ],
+        })
+        .expect(201)
+      expect(res.body.data).toHaveLength(1)
+      expect(res.body.data[0].id).not.toBe(eliquis.id)
+
+      const activeEliquis = (await activeMedsFor(dedupId)).filter(
+        (m) => m.drugName === 'Eliquis',
+      )
+      expect(activeEliquis).toHaveLength(1)
+    })
+
+    it('DB partial unique index rejects direct duplicate insert (belt to suspenders)', async () => {
+      // Bypass the app dedup by hitting Prisma directly. The migration's
+      // partial unique index on active rows must throw P2002.
+      const eliquis = (await activeMedsFor(dedupId)).find(
+        (m) => m.drugName === 'Eliquis',
+      )!
+      await expect(
+        prisma.patientMedication.create({
+          data: {
+            userId: dedupId,
+            drugName: eliquis.drugName,
+            drugClass: eliquis.drugClass,
+            frequency: eliquis.frequency,
+            isCombination: eliquis.isCombination,
+            combinationComponents: eliquis.combinationComponents,
+            source: 'PATIENT_SELF_REPORT',
+            verificationStatus: 'UNVERIFIED',
+          },
+        }),
+      ).rejects.toMatchObject({ code: 'P2002' })
+    })
+
+    it('within-payload dedup — same med listed twice in one POST creates one row', async () => {
+      const before = await activeMedsFor(dedupId)
+      const beforeCount = before.length
+
+      const res = await request(app.getHttpServer())
+        .post('/intake/medications')
+        .set('Authorization', `Bearer ${dedupToken}`)
+        .send({
+          medications: [
+            {
+              drugName: 'Atorvastatin',
+              drugClass: 'STATIN',
+              frequency: 'ONCE_DAILY',
+            },
+            {
+              drugName: 'Atorvastatin',
+              drugClass: 'STATIN',
+              frequency: 'ONCE_DAILY',
+            },
+          ],
+        })
+        .expect(201)
+      expect(res.body.data).toHaveLength(1)
+
+      const after = await activeMedsFor(dedupId)
+      expect(after).toHaveLength(beforeCount + 1)
+    })
+  })
+
   // ─── Medication replace (PUT /me/medications) ──────────────────────────────
 
   describe('PUT /me/medications', () => {
