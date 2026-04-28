@@ -340,6 +340,50 @@ export function actionsForTier(tier: AlertTier | string | null): ResolutionActio
     .map(([k]) => k)
 }
 
+// ─── Notifications ──────────────────────────────────────────────────────────
+//
+// Bell + /admin/notifications page both pull from this. The endpoint is
+// scoped to the authenticated user (admin sees their own dispatched
+// notifications — escalation pings, dashboard pushes, etc.). Filters
+// EMAIL-channel rows by default since those are tracking-only and don't
+// represent in-app state the admin can act on.
+
+export interface AdminNotificationDto {
+  id: string
+  alertId: string | null
+  channel: 'PUSH' | 'EMAIL' | 'PHONE' | 'DASHBOARD'
+  title: string
+  body: string
+  tips?: string[]
+  sentAt: string
+  readAt: string | null
+  watched: boolean
+}
+
+export async function getAdminNotifications(opts?: {
+  status?: 'all' | 'unread' | 'read'
+  /** Soft cap on returned rows (the bell needs ~10, the page wants more). */
+  limit?: number
+}): Promise<AdminNotificationDto[]> {
+  const status = opts?.status ?? 'all'
+  const res = await fetchWithAuth(`${API}/api/daily-journal/notifications?status=${status}`)
+  if (!res.ok) return []
+  const json = await res.json()
+  const data: AdminNotificationDto[] = Array.isArray(json?.data) ? json.data : []
+  // EMAIL rows are SMTP receipts, not in-app surface — exclude from
+  // the bell + admin notifications page.
+  const filtered = data.filter((n) => n.channel !== 'EMAIL')
+  return opts?.limit ? filtered.slice(0, opts.limit) : filtered
+}
+
+export async function markAdminNotificationRead(id: string): Promise<void> {
+  await fetchWithAuth(`${API}/api/daily-journal/notifications/${id}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ watched: true }),
+  })
+}
+
 /**
  * Resolve an alert via the admin endpoint. The endpoint validates that
  * `action` matches the alert's tier and that `rationale` is provided when

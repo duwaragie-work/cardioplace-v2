@@ -18,22 +18,64 @@ import {
   Loader2,
   Pill,
   AlertTriangle,
+  Info,
 } from 'lucide-react';
 import {
   verifyMedication,
+  type PatientAlert,
   type PatientMedication,
   type MedicationVerificationStatus,
 } from '@/lib/services/patient-detail.service';
 import { useAuth } from '@/lib/auth-context';
 import { canVerifyMedications } from '@/lib/roleGates';
+import MedicationRejectModal from './MedicationRejectModal';
 
 interface Props {
   medications: PatientMedication[];
   loading: boolean;
   onChanged: () => void;
+  /** Open alerts for this patient — the tab uses these to surface Tier 3
+   *  informational alerts inline on the relevant drug-class row instead
+   *  of cluttering the Alerts tab queue (CLINICAL_SPEC V2-C Layer 1). */
+  alerts?: PatientAlert[];
 }
 
-type ReconStatus = 'MATCHED' | 'DISCREPANCY' | 'UNVERIFIED' | 'DISCONTINUED' | 'REJECTED';
+/**
+ * Map a Tier 3 (informational) ruleId to the drugClass it relates to.
+ * Used to attach a green inline badge on the matching drug-class row
+ * in the medication reconciliation view.
+ *
+ * RULE_PULSE_PRESSURE_WIDE is intentionally absent — it isn't bound to
+ * a specific medication, so it surfaces in the "Physician notes"
+ * section of AlertsTab instead.
+ */
+function tier3DrugClassFor(ruleId: string | null | undefined): string | null {
+  switch (ruleId) {
+    case 'RULE_HCM_VASODILATOR':
+      return 'VASODILATOR_NITRATE';
+    case 'RULE_LOOP_DIURETIC_HYPOTENSION':
+      return 'LOOP_DIURETIC';
+    default:
+      return null;
+  }
+}
+
+// PENDING_PROVIDER_ENTRY = patient self-reported a med but no provider
+// prescription record exists yet. Per CLINICAL_SPEC V2-F Priority 3 #25
+// the provider-side prescription entry workflow is deferred to post-MVP,
+// so during MVP this state is unactionable from the admin UI. We surface
+// it as informational instead of as an amber DISCREPANCY warning to
+// avoid showing "Action required" prompts the admin can't fulfill.
+//
+// DISCREPANCY = a true mismatch the admin CAN act on today (prescribed
+// but not patient-reported, or frequency mismatch between sides).
+type ReconStatus =
+  | 'MATCHED'
+  | 'DISCREPANCY'
+  | 'PENDING_PROVIDER_ENTRY'
+  | 'UNVERIFIED'
+  | 'DISCONTINUED'
+  | 'REJECTED';
 
 interface ReconRow {
   drugClassKey: string;
@@ -72,7 +114,7 @@ function isPatientSourced(m: PatientMedication): boolean {
   return m.source !== 'PROVIDER_ENTERED';
 }
 
-export default function MedicationsTab({ medications, loading, onChanged }: Props) {
+export default function MedicationsTab({ medications, loading, onChanged, alerts }: Props) {
   const { user } = useAuth();
   // Verify / reject / hold buttons render only for the clinical-verifier
   // roles (SUPER_ADMIN, PROVIDER, MEDICAL_DIRECTOR). HEALPLACE_OPS sees
@@ -80,6 +122,24 @@ export default function MedicationsTab({ medications, loading, onChanged }: Prop
   const canVerify = canVerifyMedications(user);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [rejecting, setRejecting] = useState<PatientMedication | null>(null);
+
+  // Open Tier 3 alerts grouped by the drug class they relate to. Lets
+  // each row pick up its informational notes in O(1).
+  const tier3ByDrugClass = useMemo(() => {
+    const map = new Map<string, PatientAlert[]>();
+    if (!alerts) return map;
+    for (const a of alerts) {
+      if (a.tier !== 'TIER_3_INFO') continue;
+      if (a.status !== 'OPEN') continue;
+      const cls = tier3DrugClassFor(a.ruleId);
+      if (!cls) continue;
+      const arr = map.get(cls) ?? [];
+      arr.push(a);
+      map.set(cls, arr);
+    }
+    return map;
+  }, [alerts]);
 
   // Group by drugClass and split patient-reported vs provider-entered.
   const rows: ReconRow[] = useMemo(() => {
@@ -98,8 +158,13 @@ export default function MedicationsTab({ medications, loading, onChanged }: Prop
       if (allDiscontinued) status = 'DISCONTINUED';
       else if (anyRejected) status = 'REJECTED';
       else if (providerEntered.length > 0 && patientReported.length > 0) status = 'MATCHED';
+      // Prescribed but no patient self-report → real discrepancy (potential
+      // non-adherence). Admin can verify or reject the existing prescription.
       else if (providerEntered.length > 0 && patientReported.length === 0) status = 'DISCREPANCY';
-      else if (patientReported.length > 0 && providerEntered.length === 0) status = 'DISCREPANCY';
+      // Patient-reported but no prescription on file → unactionable until
+      // the provider-entry workflow ships (CLINICAL_SPEC V2-C Layer 2 /
+      // V2-F #25). Surface as informational, not as a warning.
+      else if (patientReported.length > 0 && providerEntered.length === 0) status = 'PENDING_PROVIDER_ENTRY';
       else status = 'UNVERIFIED';
       // Within MATCHED, downgrade to DISCREPANCY if frequencies don't align.
       if (status === 'MATCHED') {
@@ -120,10 +185,17 @@ export default function MedicationsTab({ medications, loading, onChanged }: Prop
     // No-op when the chosen status already matches — prevents accidental
     // duplicate timeline entries from a second click on the active button.
     if (med.verificationStatus === status) return;
+    // Reject requires a rationale (backend mandates it). Collect it via
+    // the modal first; the modal calls verifyMedication itself on submit.
+    if (status === 'REJECTED') {
+      setError(null);
+      setRejecting(med);
+      return;
+    }
     setSavingId(med.id);
     setError(null);
     try {
-      await verifyMedication(med.id, status as 'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER');
+      await verifyMedication(med.id, status as 'VERIFIED' | 'AWAITING_PROVIDER');
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not update medication.');
@@ -172,10 +244,11 @@ export default function MedicationsTab({ medications, loading, onChanged }: Prop
 
       {rows.map((row) => {
         const chrome = statusChrome(row.status);
+        const tier3Notes = tier3ByDrugClass.get(row.drugClassKey) ?? [];
         return (
           <div key={row.drugClassKey} className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
             {/* Row header */}
-            <div className="px-5 py-3 flex items-center justify-between gap-3" style={{ borderBottom: '1px solid var(--brand-border)' }}>
+            <div className="px-5 py-3 flex items-center justify-between gap-3 flex-wrap" style={{ borderBottom: '1px solid var(--brand-border)' }}>
               <div className="flex items-center gap-2.5 min-w-0">
                 <div
                   className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-white"
@@ -193,13 +266,33 @@ export default function MedicationsTab({ medications, loading, onChanged }: Prop
                   </p>
                 </div>
               </div>
-              <span
-                className="inline-flex items-center gap-1 text-[10.5px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0"
-                style={{ backgroundColor: chrome.bg, color: chrome.color }}
-              >
-                {chrome.icon}
-                {chrome.label}
-              </span>
+              <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                {/* Tier 3 informational notes for this drug class. Quiet
+                    teal palette + Info icon — physician-only context, not
+                    a safety-critical warning. Tooltip carries the full
+                    physicianMessage. */}
+                {tier3Notes.map((note) => (
+                  <span
+                    key={note.id}
+                    className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-2 py-0.5 rounded-full"
+                    style={{
+                      backgroundColor: 'var(--brand-accent-teal-light)',
+                      color: 'var(--brand-accent-teal)',
+                    }}
+                    title={note.physicianMessage ?? note.patientMessage ?? note.ruleId ?? 'Physician note'}
+                  >
+                    <Info className="w-3 h-3" />
+                    Note
+                  </span>
+                ))}
+                <span
+                  className="inline-flex items-center gap-1 text-[10.5px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                  style={{ backgroundColor: chrome.bg, color: chrome.color }}
+                >
+                  {chrome.icon}
+                  {chrome.label}
+                </span>
+              </div>
             </div>
 
             {/* Side-by-side body */}
@@ -259,7 +352,9 @@ export default function MedicationsTab({ medications, loading, onChanged }: Prop
               </div>
             </div>
 
-            {/* Action required strip */}
+            {/* True discrepancy — admin can act on this from the existing UI
+                (verify or reject the prescription / patient row). Keep the
+                amber warning + "Action required" prompt. */}
             {row.status === 'DISCREPANCY' && (
               <div
                 className="px-5 py-2.5 flex items-center gap-2"
@@ -270,13 +365,42 @@ export default function MedicationsTab({ medications, loading, onChanged }: Prop
               >
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-warning-amber)' }} />
                 <p className="text-[11.5px] font-semibold" style={{ color: 'var(--brand-warning-amber)' }}>
-                  Action required — confirm or reject the patient&apos;s entry, then add the matching prescription.
+                  Action required — confirm or reject the entry to reconcile this medication.
+                </p>
+              </div>
+            )}
+
+            {/* Pending provider entry — the patient self-report side is
+                fully verifiable today, but the right-hand prescription
+                column needs the provider-entry workflow (CLINICAL_SPEC
+                V2-C Layer 2 / V2-F #25 — deferred to post-MVP). Shown as
+                a quiet info note so the admin knows the system knows; no
+                "Action required" because there's nothing the admin can
+                do about it from MVP UI. */}
+            {row.status === 'PENDING_PROVIDER_ENTRY' && (
+              <div
+                className="px-5 py-2.5 flex items-center gap-2"
+                style={{
+                  backgroundColor: 'var(--brand-background)',
+                  borderTop: '1px solid var(--brand-border)',
+                }}
+              >
+                <ClockIcon className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-text-muted)' }} />
+                <p className="text-[11.5px]" style={{ color: 'var(--brand-text-muted)' }}>
+                  Pending provider entry — the prescription record will be added once provider entry is enabled.
                 </p>
               </div>
             )}
           </div>
         );
       })}
+
+      <MedicationRejectModal
+        med={rejecting}
+        open={rejecting != null}
+        onClose={() => setRejecting(null)}
+        onConfirmed={() => onChanged()}
+      />
     </div>
   );
 }
@@ -301,6 +425,17 @@ function statusChrome(status: ReconStatus): {
         bg: 'var(--brand-warning-amber-light)',
         color: 'var(--brand-warning-amber)',
         icon: <AlertTriangle className="w-3 h-3" />,
+      };
+    case 'PENDING_PROVIDER_ENTRY':
+      // Neutral / informational — provider-entry workflow ships post-MVP,
+      // so this is "waiting on a feature" rather than "waiting on the
+      // admin". Tinted in the brand-neutral palette so the row doesn't
+      // compete visually with rows that DO need attention.
+      return {
+        label: 'Patient-reported',
+        bg: 'var(--brand-background)',
+        color: 'var(--brand-text-secondary)',
+        icon: <ClockIcon className="w-3 h-3" />,
       };
     case 'REJECTED':
       return {

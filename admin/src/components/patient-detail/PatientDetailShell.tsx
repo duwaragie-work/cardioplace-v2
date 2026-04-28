@@ -22,6 +22,7 @@ import {
   Users as UsersIcon,
   AlertTriangle,
   RefreshCw,
+  Heart,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getPatientSummary } from '@/lib/services/provider.service';
@@ -242,7 +243,15 @@ export default function PatientDetailShell({ patientId }: Props) {
   /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
   useEffect(() => {
     if (tab === 'profile' && !profile && !profileLoading) loadProfile();
-    if (tab === 'medications' && medications.length === 0 && !medsLoading) loadMedications();
+    if (tab === 'medications') {
+      if (medications.length === 0 && !medsLoading) loadMedications();
+      // Tier 3 informational notes for medication-bound rules
+      // (RULE_HCM_VASODILATOR / RULE_LOOP_DIURETIC_HYPOTENSION) live on
+      // the alert feed and are rendered inline on the matching drug-class
+      // row. Pull alerts here so the badge appears on first visit instead
+      // of only after the user has bounced through the Alerts tab.
+      if (alerts.length === 0 && !alertsLoading) loadAlerts();
+    }
     if (tab === 'alerts' && alerts.length === 0 && !alertsLoading) loadAlerts();
     if (tab === 'thresholds' && !threshold && !thresholdLoading) loadThreshold();
     if (tab === 'timeline') {
@@ -386,9 +395,35 @@ export default function PatientDetailShell({ patientId }: Props) {
                         {new Date(header.lastEntryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                       </span>
                     )}
-                    {header.primaryCondition && (
-                      <span className="inline-flex items-center gap-1 font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
-                        {header.primaryCondition}
+                    {header.primaryCondition &&
+                      // Suppress when the backend's primary-condition string
+                      // is "Preeclampsia history" — that case is owned by
+                      // the dedicated amber notation pill below, so showing
+                      // the gray label too would double-render the same
+                      // text. Every other primary condition (Pregnancy,
+                      // Heart Failure, CAD, etc.) still renders here.
+                      header.primaryCondition !== 'Preeclampsia history' && (
+                        <span className="inline-flex items-center gap-1 font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
+                          {header.primaryCondition}
+                        </span>
+                      )}
+                    {/* CLINICAL_SPEC §3 — preeclampsia-history notation for
+                        women with documented history outside pregnancy.
+                        Hidden when isPregnant=true since the pregnancy
+                        primary-condition pill above already covers active
+                        pregnancies (avoids double-flagging). Notation only
+                        — no threshold logic. */}
+                    {profile?.historyPreeclampsia && !profile?.isPregnant && (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold"
+                        style={{
+                          backgroundColor: 'var(--brand-warning-amber-light)',
+                          color: 'var(--brand-warning-amber)',
+                        }}
+                        title="Documented history of preeclampsia or gestational hypertension — enhanced monitoring recommended outside pregnancy per 2025 AHA/ACC Hypertension Guideline."
+                      >
+                        <Heart className="w-3 h-3" aria-hidden />
+                        Preeclampsia history
                       </span>
                     )}
                   </div>
@@ -565,6 +600,7 @@ export default function PatientDetailShell({ patientId }: Props) {
                   medications={medications}
                   loading={medsLoading}
                   onChanged={onMedicationsChanged}
+                  alerts={alerts}
                 />
               </>
             )}

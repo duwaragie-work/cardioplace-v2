@@ -42,6 +42,7 @@ import {
   CheckCircle2,
   Clock,
   ShieldAlert,
+  ArrowRight,
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
@@ -261,7 +262,6 @@ export default function AdminDashboard() {
   const [dataLoading, setDataLoading] = useState(true);
 
   // Layer 1 UI state
-  const [tier2Expanded, setTier2Expanded] = useState(false);
   const [bpL2Resolving, setBpL2Resolving] = useState<RawAlert | null>(null);
   const [tier1Resolving, setTier1Resolving] = useState<RawAlert | null>(null);
   const [tier2Resolving, setTier2Resolving] = useState<RawAlert | null>(null);
@@ -328,8 +328,17 @@ export default function AdminDashboard() {
   }, [user, isLoading, refreshData]);
 
   // ── Derived buckets ───────────────────────────────────────────────────────
+  // Tier 3 (TIER_3_INFO) is excluded from the dashboard queue per
+  // CLINICAL_SPEC V2-C Layer 1 — Tier 3 is informational physician-only
+  // context, not a safety-critical alert. Mixing it with BP L2 / Tier 1
+  // creates alert fatigue. It surfaces inline on the relevant medication
+  // row in the patient detail Medications tab + in the Physician notes
+  // section of the patient Alerts tab instead.
   const visibleAlerts = useMemo(
-    () => rawAlerts.filter((a) => !reviewedIds.has(a.id)),
+    () =>
+      rawAlerts.filter(
+        (a) => !reviewedIds.has(a.id) && tierBucket(a) !== 'TIER_3',
+      ),
     [rawAlerts, reviewedIds],
   );
 
@@ -337,7 +346,7 @@ export default function AdminDashboard() {
   const tier1Alerts = useMemo(() => visibleAlerts.filter((a) => tierBucket(a) === 'TIER_1'), [visibleAlerts]);
   const tier2Alerts = useMemo(() => visibleAlerts.filter((a) => tierBucket(a) === 'TIER_2'), [visibleAlerts]);
   const bpL1Alerts = useMemo(() => visibleAlerts.filter((a) => tierBucket(a) === 'BP_L1'), [visibleAlerts]);
-  const tier3Alerts = useMemo(() => visibleAlerts.filter((a) => tierBucket(a) === 'TIER_3'), [visibleAlerts]);
+
 
   const queueAlerts = useMemo(() => {
     let list = visibleAlerts;
@@ -544,13 +553,45 @@ export default function AdminDashboard() {
 
   return (
     <div className="h-full" style={{ backgroundColor: 'var(--brand-background)' }}>
-      {/* Local pulse keyframe for the BP L2 emergency banner */}
+      {/* Row-level emphasis effects — INNER glows so the effect lives
+          inside the row's rounded rectangle. Doesn't bleed into adjacent
+          rows or push outside the queue card.
+          • BP L2 — inset glow that "breathes" in/out: a feathered red
+            wash from the row's edges + a thin red ring just inside the
+            border. Slow 3s ease so it feels alive, not twitchy.
+          • Tier 1 — static inner glow (no animation) so it reads as
+            urgent but doesn't compete with the L2 breathing.
+          Respects prefers-reduced-motion: animations stop, L2 falls
+          back to a steady soft inner glow so the safety signal stays. */}
       <style>{`
-        @keyframes adminBpL2Pulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.55); }
-          50%      { box-shadow: 0 0 0 10px rgba(220,38,38,0); }
+        @keyframes adminBpL2InnerBreathe {
+          0%, 100% {
+            box-shadow:
+              inset 0 0 0 2px rgba(220,38,38,0.35),
+              inset 0 0 12px 0 rgba(220,38,38,0.18);
+          }
+          50% {
+            box-shadow:
+              inset 0 0 0 2px rgba(220,38,38,0.85),
+              inset 0 0 32px 0 rgba(220,38,38,0.50);
+          }
         }
-        .admin-bp-l2-pulse { animation: adminBpL2Pulse 1.6s ease-out infinite; }
+        .admin-bp-l2-pulse {
+          animation: adminBpL2InnerBreathe 2.2s cubic-bezier(0.4, 0, 0.4, 1) infinite;
+        }
+        .admin-tier1-emphasis {
+          box-shadow:
+            inset 0 0 0 2px rgba(220,38,38,0.55),
+            inset 0 0 18px 0 rgba(220,38,38,0.22);
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .admin-bp-l2-pulse {
+            animation: none;
+            box-shadow:
+              inset 0 0 0 2px rgba(220,38,38,0.75),
+              inset 0 0 24px 0 rgba(220,38,38,0.35);
+          }
+        }
 
         .admin-scroll::-webkit-scrollbar { width: 5px; }
         .admin-scroll::-webkit-scrollbar-track { background: transparent; }
@@ -684,285 +725,6 @@ export default function AdminDashboard() {
           )}
         </div>
 
-        {/* ════════════════════════════════════════════════════════════════════
-           LAYER 1 — Medication & Emergency Alerts Panel
-           ════════════════════════════════════════════════════════════════════ */}
-        {(bpL2Alerts.length > 0 || tier1Alerts.length > 0 || tier2Alerts.length > 0) && (
-          <section className="mb-6 space-y-3">
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4" style={{ color: 'var(--brand-alert-red)' }} />
-              <h2
-                className="text-[11px] font-extrabold uppercase tracking-wider"
-                style={{ color: 'var(--brand-text-secondary)' }}
-              >
-                Action required
-              </h2>
-            </div>
-
-            {/* BP Level 2 emergency banners — pulsing red */}
-            <AnimatePresence initial={false}>
-              {bpL2Alerts.map((a) => (
-                <motion.div
-                  key={a.id}
-                  layout
-                  initial={{ opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  className="admin-bp-l2-pulse rounded-2xl p-4 md:p-5"
-                  style={{
-                    backgroundColor: 'var(--brand-alert-red-light)',
-                    border: '2px solid var(--brand-alert-red)',
-                  }}
-                >
-                  {/* Mobile (default): icon + content stack vertically with
-                      buttons going full-width at the bottom (each taking
-                      half the row). Desktop (md+): traditional single-row
-                      layout with right-aligned buttons. */}
-                  <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
-                    <div className="flex items-start gap-3 flex-1 min-w-0">
-                      <div
-                        className="shrink-0 w-10 h-10 md:w-11 md:h-11 rounded-xl flex items-center justify-center text-white"
-                        style={{ backgroundColor: 'var(--brand-alert-red)' }}
-                        aria-hidden
-                      >
-                        <ShieldAlert className="w-5 h-5" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center flex-wrap gap-x-2 gap-y-1 mb-1">
-                          <span
-                            className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full text-white whitespace-nowrap"
-                            style={{ backgroundColor: 'var(--brand-alert-red)' }}
-                          >
-                            BP Level 2 · Emergency
-                          </span>
-                          <span className="text-[11px] font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
-                            {timeAgo(a.createdAt)}
-                          </span>
-                          {a.followUpScheduledAt && (
-                            <span
-                              className="text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap"
-                              style={{ backgroundColor: '#CCFBF1', color: '#0D9488' }}
-                            >
-                              Call scheduled
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[13.5px] sm:text-[14px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
-                          <span className="break-words">{a.patient?.name ?? 'Unknown patient'}</span>
-                          {a.journalEntry?.systolicBP != null && a.journalEntry?.diastolicBP != null && (
-                            <span className="ml-2 whitespace-nowrap" style={{ color: 'var(--brand-alert-red)' }}>
-                              {a.journalEntry.systolicBP}/{a.journalEntry.diastolicBP} mmHg
-                            </span>
-                          )}
-                        </p>
-                        {a.patientMessage && (
-                          <p className="text-[12px] sm:text-[12.5px] mt-1.5 leading-relaxed break-words" style={{ color: 'var(--brand-text-secondary)' }}>
-                            {a.patientMessage}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    {/* Buttons: full-width pair on mobile, compact inline
-                        on desktop. flex-1 on each button on mobile so they
-                        share the row evenly. */}
-                    <div className="flex gap-2 md:shrink-0 [&>button]:flex-1 md:[&>button]:flex-none">
-                      <button
-                        type="button"
-                        className="btn-admin-secondary"
-                        onClick={() => handleSelectForReview(a)}
-                      >
-                        Review
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-admin-danger"
-                        onClick={() => setBpL2Resolving(a)}
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        Resolve
-                      </button>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-
-            {/* Tier 1 contraindication banners — red, stacking */}
-            <AnimatePresence initial={false}>
-              {tier1Alerts.map((a) => (
-                <motion.div
-                  key={a.id}
-                  layout
-                  initial={{ opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  className="rounded-2xl p-4"
-                  style={{
-                    backgroundColor: 'var(--brand-alert-red-light)',
-                    borderLeft: '4px solid var(--brand-alert-red)',
-                    boxShadow: 'var(--brand-shadow-card)',
-                  }}
-                >
-                  <div className="flex flex-col md:flex-row md:items-center gap-3">
-                    <div className="flex items-start gap-3 flex-1 min-w-0">
-                      <div
-                        className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-white"
-                        style={{ backgroundColor: 'var(--brand-alert-red)' }}
-                        aria-hidden
-                      >
-                        <Pill className="w-4 h-4" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center flex-wrap gap-x-2 gap-y-1 mb-0.5">
-                          <span
-                            className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full whitespace-nowrap"
-                            style={{ backgroundColor: 'var(--brand-alert-red)', color: 'white' }}
-                          >
-                            Tier 1 · Contraindication
-                          </span>
-                          <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
-                            {timeAgo(a.createdAt)}
-                          </span>
-                        </div>
-                        <p className="text-[13px] sm:text-[13.5px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
-                          <span className="break-words">{a.patient?.name ?? 'Unknown patient'}</span>
-                          {a.ruleId && (
-                            <span className="ml-2 text-[11px] font-mono font-normal break-all" style={{ color: 'var(--brand-text-muted)' }}>
-                              {a.ruleId}
-                            </span>
-                          )}
-                        </p>
-                        {a.patientMessage && (
-                          <p className="text-[12px] mt-1 leading-relaxed break-words" style={{ color: 'var(--brand-text-secondary)' }}>
-                            {a.patientMessage}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex gap-2 md:shrink-0 [&>button]:flex-1 md:[&>button]:flex-none">
-                      <button
-                        type="button"
-                        className="btn-admin-secondary"
-                        onClick={() => handleSelectForReview(a)}
-                      >
-                        Review
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-admin-danger"
-                        onClick={() => setTier1Resolving(a)}
-                      >
-                        Resolve
-                      </button>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-
-            {/* Tier 2 — collapsed numbered card, expand inline */}
-            {tier2Alerts.length > 0 && (
-              <div
-                className="rounded-2xl"
-                style={{
-                  backgroundColor: 'var(--brand-warning-amber-light)',
-                  borderLeft: '4px solid var(--brand-warning-amber)',
-                  boxShadow: 'var(--brand-shadow-card)',
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => setTier2Expanded((v) => !v)}
-                  className="w-full flex items-center gap-3 p-4 cursor-pointer text-left"
-                >
-                  <div
-                    className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-white"
-                    style={{ backgroundColor: 'var(--brand-warning-amber)' }}
-                    aria-hidden
-                  >
-                    <ArrowUp className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full text-white"
-                        style={{ backgroundColor: 'var(--brand-warning-amber)' }}
-                      >
-                        Tier 2 · Discrepancy
-                      </span>
-                      <span
-                        className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                        style={{ backgroundColor: 'white', color: 'var(--brand-warning-amber)' }}
-                      >
-                        {tier2Alerts.length}
-                      </span>
-                    </div>
-                    <p className="text-[13px] font-semibold mt-0.5" style={{ color: 'var(--brand-text-primary)' }}>
-                      {tier2Alerts.length === 1
-                        ? '1 medication discrepancy needs review'
-                        : `${tier2Alerts.length} medication discrepancies need review`}
-                    </p>
-                  </div>
-                  {tier2Expanded ? (
-                    <ChevronUp className="w-4 h-4 shrink-0" style={{ color: 'var(--brand-warning-amber)' }} />
-                  ) : (
-                    <ChevronDown className="w-4 h-4 shrink-0" style={{ color: 'var(--brand-warning-amber)' }} />
-                  )}
-                </button>
-                <AnimatePresence initial={false}>
-                  {tier2Expanded && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden"
-                    >
-                      <div className="px-4 pb-4 space-y-2">
-                        {tier2Alerts.map((a) => (
-                          <div
-                            key={a.id}
-                            className="rounded-lg p-3 flex flex-col md:flex-row md:items-center gap-2 md:gap-3 bg-white"
-                            style={{ border: '1px solid var(--brand-border)' }}
-                          >
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[12.5px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                                <span className="break-words">{a.patient?.name ?? 'Unknown patient'}</span>
-                                <span className="ml-2 text-[11px] font-normal whitespace-nowrap" style={{ color: 'var(--brand-text-muted)' }}>
-                                  {timeAgo(a.createdAt)}
-                                </span>
-                              </p>
-                              {a.patientMessage && (
-                                <p className="text-[11.5px] mt-0.5 leading-relaxed break-words" style={{ color: 'var(--brand-text-secondary)' }}>
-                                  {a.patientMessage}
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex gap-2 md:shrink-0 [&>button]:flex-1 md:[&>button]:flex-none">
-                              <button
-                                type="button"
-                                className="btn-admin-ghost"
-                                onClick={() => handleSelectForReview(a)}
-                              >
-                                Review
-                              </button>
-                              <button
-                                type="button"
-                                className="btn-admin-primary"
-                                onClick={() => setTier2Resolving(a)}
-                              >
-                                Resolve
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            )}
-          </section>
-        )}
 
         {/* ════════════════════════════════════════════════════════════════════
            LAYER 2 — Tier-filterable alert queue + BP trend
@@ -1008,7 +770,8 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {/* Tier filter chips */}
+              {/* Tier filter chips — Tier 3 chip omitted; see visibleAlerts
+                  comment above (Tier 3 lives in patient-detail surfaces). */}
               <div className="flex flex-wrap items-center gap-1.5">
                 {([
                   ['ALL', 'All', visibleAlerts.length],
@@ -1016,7 +779,6 @@ export default function AdminDashboard() {
                   ['TIER_1', 'Tier 1', tier1Alerts.length],
                   ['TIER_2', 'Tier 2', tier2Alerts.length],
                   ['BP_L1', 'BP L1', bpL1Alerts.length],
-                  ['TIER_3', 'Tier 3', tier3Alerts.length],
                 ] as [TierFilter, string, number][]).map(([key, label, count]) => {
                   const active = tierFilter === key;
                   const chrome = key === 'ALL'
@@ -1078,15 +840,28 @@ export default function AdminDashboard() {
                     const adapted = toAlertPanelShape(a);
                     const isSelected = trendAlert?.id === adapted.id;
                     const canResolve = resolutionTierFor(a.tier) != null;
+                    // Highlight critical tiers — BP L2 breathes (soft glow
+                    // that fades in/out, much smoother than the old hard
+                    // pulse). Tier 1 gets a static red glow + heavier left
+                    // bar so it reads as urgent but doesn't compete with
+                    // the L2 motion. Other tiers stay flat.
+                    const isBpL2 = bucket === 'BP_L2';
+                    const isTier1 = bucket === 'TIER_1';
+                    const highlightClass = isBpL2
+                      ? 'admin-bp-l2-pulse'
+                      : isTier1
+                        ? 'admin-tier1-emphasis'
+                        : '';
+                    const borderLeftWidth = isBpL2 ? 6 : isTier1 ? 5 : 4;
                     return (
                       <li key={a.id}>
                         <div
                           className={`group rounded-xl p-3 flex items-center gap-3 cursor-pointer transition-all ${
                             isSelected ? 'ring-2 ring-purple-300' : 'hover:brightness-[0.98]'
-                          }`}
+                          } ${highlightClass}`}
                           style={{
                             backgroundColor: chrome.light,
-                            borderLeft: `4px solid ${chrome.accent}`,
+                            borderLeft: `${borderLeftWidth}px solid ${chrome.accent}`,
                           }}
                           onMouseEnter={() => handleRowHover(a)}
                           onClick={() => handleRowHover(a)}

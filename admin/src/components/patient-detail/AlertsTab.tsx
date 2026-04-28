@@ -86,23 +86,36 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [resolving, setResolving] = useState<PatientAlert | null>(null);
 
+  // Tier 3 (TIER_3_INFO) is informational physician-only context per
+  // CLINICAL_SPEC V2-C Layer 1 — it should NOT mix with safety-critical
+  // alerts in the main queue. Surface it in the dedicated "Physician
+  // notes" section below the main list instead.
+  const tier3Alerts = useMemo(
+    () => alerts.filter((a) => tierBucket(a.tier) === 'TIER_3'),
+    [alerts],
+  );
+  const nonTier3Alerts = useMemo(
+    () => alerts.filter((a) => tierBucket(a.tier) !== 'TIER_3'),
+    [alerts],
+  );
+
   const counts = useMemo(() => {
     const acc: Record<TierBucket, number> = { ALL: 0, BP_L2: 0, TIER_1: 0, TIER_2: 0, BP_L1: 0, TIER_3: 0, OTHER: 0 };
-    for (const a of alerts) {
+    for (const a of nonTier3Alerts) {
       if (statusFilter !== 'ALL' && a.status !== statusFilter) continue;
       acc.ALL++;
       acc[tierBucket(a.tier)]++;
     }
     return acc;
-  }, [alerts, statusFilter]);
+  }, [nonTier3Alerts, statusFilter]);
 
   const filtered = useMemo(() => {
-    return alerts.filter((a) => {
+    return nonTier3Alerts.filter((a) => {
       if (statusFilter !== 'ALL' && a.status !== statusFilter) return false;
       if (tierFilter !== 'ALL' && tierBucket(a.tier) !== tierFilter) return false;
       return true;
     });
-  }, [alerts, tierFilter, statusFilter]);
+  }, [nonTier3Alerts, tierFilter, statusFilter]);
 
   const resolvable: ResolvableAlert | null = useMemo(() => {
     if (!resolving) return null;
@@ -169,7 +182,8 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
           </div>
         </div>
 
-        {/* Tier filter chips */}
+        {/* Tier filter chips — Tier 3 omitted; rendered separately in the
+            "Physician notes" section below since it's informational. */}
         <div className="flex flex-wrap items-center gap-1.5">
           {([
             ['ALL', 'All'],
@@ -177,7 +191,6 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
             ['TIER_1', 'Tier 1'],
             ['TIER_2', 'Tier 2'],
             ['BP_L1', 'BP L1'],
-            ['TIER_3', 'Tier 3'],
           ] as [TierBucket, string][]).map(([key, label]) => {
             const active = tierFilter === key;
             const chrome = key === 'ALL'
@@ -377,6 +390,71 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Physician notes — Tier 3 informational alerts. Visually separated
+          from the main alert list so they don't compete with safety-critical
+          tiers for attention. Quiet teal palette + Stethoscope icon signals
+          "context for the clinician" rather than "action required". Per
+          CLINICAL_SPEC V2-C Layer 1 these are physician-only and have no
+          patientMessage / caregiverMessage. */}
+      {tier3Alerts.length > 0 && (
+        <div
+          className="bg-white rounded-2xl overflow-hidden"
+          style={{ boxShadow: 'var(--brand-shadow-card)' }}
+        >
+          <div
+            className="px-4 md:px-5 py-2.5 flex items-center gap-2"
+            style={{
+              backgroundColor: 'var(--brand-accent-teal-light)',
+              borderBottom: '1px solid var(--brand-border)',
+            }}
+          >
+            <Stethoscope className="w-3.5 h-3.5" style={{ color: 'var(--brand-accent-teal)' }} />
+            <p
+              className="text-[11px] font-bold uppercase tracking-wider"
+              style={{ color: 'var(--brand-accent-teal)' }}
+            >
+              Physician notes
+            </p>
+            <span
+              className="text-[10px] font-bold px-1.5 rounded-full ml-auto"
+              style={{
+                backgroundColor: 'white',
+                color: 'var(--brand-accent-teal)',
+                minWidth: 18,
+                textAlign: 'center',
+              }}
+            >
+              {tier3Alerts.length}
+            </span>
+          </div>
+          {tier3Alerts.map((a, idx) => (
+            <div
+              key={a.id}
+              className="px-4 md:px-5 py-3"
+              style={{ borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none' }}
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-white"
+                  style={{ backgroundColor: 'var(--brand-accent-teal)' }}
+                  aria-hidden
+                >
+                  <Bell className="w-3 h-3" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10.5px] mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+                    {a.ruleId ?? '—'} · {timeAgo(a.createdAt)}
+                  </p>
+                  <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+                    {a.physicianMessage ?? a.patientMessage ?? a.type ?? 'Physician note'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

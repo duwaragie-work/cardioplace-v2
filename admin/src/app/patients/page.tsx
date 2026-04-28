@@ -63,6 +63,12 @@ interface Patient {
   riskTier: string;
   communicationPreference: string | null;
   primaryCondition: string | null;
+  /** Pregnancy + preeclampsia-history flags, surfaced separately so the
+   *  list / detail header can render the "Preeclampsia history" notation
+   *  (CLINICAL_SPEC §3 enhanced-monitoring marker for women with a
+   *  documented history, including outside pregnancy). */
+  isPregnant?: boolean;
+  historyPreeclampsia?: boolean;
   onboardingStatus: string;
   // Clinical enrollment state (admin-owned). `onboardingStatus` above is
   // identity onboarding only (name/DOB/timezone). See TESTING_FLOW_GUIDE §4.1.
@@ -292,25 +298,64 @@ function highestTier(alertsByTier: Record<string, number> | undefined): string |
   return fallback ? fallback[0] : null;
 }
 
-function tierChrome(tier: string | null): { bg: string; color: string; label: string } {
+function tierChrome(tier: string | null): {
+  bg: string
+  color: string
+  label: string
+  /** Compact 2–3 char abbreviation for cells where horizontal space is
+   *  scarce (multi-tier patient-list badge). Keeps a uniform width per
+   *  chip so the row height stays constant. */
+  short: string
+} {
   switch (tier) {
     case 'BP_LEVEL_2':
     case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
-      return { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)', label: 'BP L2' };
+      return { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)', label: 'BP L2', short: 'L2' };
     case 'TIER_1_CONTRAINDICATION':
-      return { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)', label: 'Tier 1' };
+      return { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)', label: 'Tier 1', short: 'T1' };
     case 'TIER_2_DISCREPANCY':
-      return { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)', label: 'Tier 2' };
+      return { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)', label: 'Tier 2', short: 'T2' };
     case 'BP_LEVEL_1_HIGH':
     case 'BP_LEVEL_1_LOW':
-      return { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)', label: 'BP L1' };
+      return { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)', label: 'BP L1', short: 'L1' };
     case 'TIER_3_INFO':
-      return { bg: 'var(--brand-accent-teal-light)', color: 'var(--brand-accent-teal)', label: 'Tier 3' };
+      return { bg: 'var(--brand-accent-teal-light)', color: 'var(--brand-accent-teal)', label: 'Tier 3', short: 'T3' };
     default:
-      return { bg: 'var(--brand-background)', color: 'var(--brand-text-muted)', label: 'Open' };
+      return { bg: 'var(--brand-background)', color: 'var(--brand-text-muted)', label: 'Open', short: 'OP' };
   }
 }
 
+// Tier severity order — stable across the file. Highest first so the top
+// of any list / leading chip is the most-severe alert.
+const TIER_SEVERITY_ORDER = [
+  'BP_LEVEL_2',
+  'BP_LEVEL_2_SYMPTOM_OVERRIDE',
+  'TIER_1_CONTRAINDICATION',
+  'TIER_2_DISCREPANCY',
+  'BP_LEVEL_1_HIGH',
+  'BP_LEVEL_1_LOW',
+  'TIER_3_INFO',
+];
+
+/**
+ * Per-tier alert badge for the patients-list "Alerts" column.
+ *
+ * Design — fixed width AND fixed height regardless of tier mix:
+ *   [count] •••
+ *
+ * The leading chip shows the total open count colored by the worst tier
+ * present. To its right, one tiny colored dot per tier indicates which
+ * tiers are open (red = Tier 1 / BP L2, amber = Tier 2 / BP L1, teal =
+ * Tier 3). Max 3 dots visible; "+N" appears when more tiers are present.
+ *
+ * Why this shape:
+ *   • Width is bounded (~52px desktop, ~46px mobile) so the table column
+ *     never grows when a patient picks up another tier.
+ *   • Height is one line, locked, regardless of mix.
+ *   • Color carries the per-tier signal without horizontal text labels.
+ *   • Tooltip + the patient detail page surface the exact breakdown
+ *     ("Tier 1: 2 · Tier 2: 2") for anyone who needs the specifics.
+ */
 function AlertsCell({
   alertsByTier,
   count,
@@ -322,37 +367,85 @@ function AlertsCell({
 }) {
   if (count === 0) {
     if (compact) return null;
-    return <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>None</span>;
-  }
-  const top = highestTier(alertsByTier);
-  const chrome = tierChrome(top);
-  // Build a hover title with the per-tier breakdown so the admin sees the
-  // mix at a glance even when the badge can only show the worst offender.
-  const breakdown = alertsByTier
-    ? Object.entries(alertsByTier)
-        .filter(([, n]) => n > 0)
-        .map(([t, n]) => `${tierChrome(t).label}: ${n}`)
-        .join(' · ')
-    : '';
-  if (compact) {
     return (
       <span
-        className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
-        style={{ backgroundColor: chrome.color }}
-        title={breakdown}
+        className="inline-flex items-center gap-1 h-6 text-[11px]"
+        style={{ color: 'var(--brand-text-muted)' }}
       >
-        {count}
+        <span
+          className="w-1.5 h-1.5 rounded-full"
+          style={{ backgroundColor: 'var(--brand-success-green)' }}
+          aria-hidden
+        />
+        Clear
       </span>
     );
   }
+
+  // Build per-tier segments in severity order. Anything outside the known
+  // tier list (legacy "UNTIERED" rows) bubbles up as one "Open" segment so
+  // the totals always reconcile with `count`.
+  const segments: {
+    tier: string
+    label: string
+    color: string
+    count: number
+  }[] = [];
+  if (alertsByTier) {
+    for (const tier of TIER_SEVERITY_ORDER) {
+      const n = alertsByTier[tier] ?? 0;
+      if (n > 0) {
+        const c = tierChrome(tier);
+        segments.push({ tier, label: c.label, color: c.color, count: n });
+      }
+    }
+    const accountedFor = segments.reduce((s, x) => s + x.count, 0);
+    if (accountedFor < count) {
+      const c = tierChrome(null);
+      segments.push({ tier: 'OTHER', label: 'Open', color: c.color, count: count - accountedFor });
+    }
+  } else {
+    const c = tierChrome(null);
+    segments.push({ tier: 'OTHER', label: 'Open', color: c.color, count });
+  }
+
+  const breakdown = segments.map((s) => `${s.label}: ${s.count}`).join(' · ');
+  const worstColor = segments[0].color;
+  const visible = segments.slice(0, 3);
+  const overflow = segments.length - visible.length;
+
+  // Same shape on desktop and mobile — only the chip dimensions differ.
+  // Single-tier patients show no dots row (count alone tells the story).
+  const chipSize = compact ? 'min-w-[20px] h-5 text-[10px]' : 'min-w-[22px] h-6 text-[11px]';
+
   return (
-    <span
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide"
-      style={{ backgroundColor: chrome.bg, color: chrome.color }}
-      title={breakdown}
-    >
-      <AlertTriangle className="w-3 h-3" />
-      {count} {chrome.label}
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap" title={breakdown}>
+      <span
+        className={`${chipSize} px-1.5 rounded-full inline-flex items-center justify-center font-bold text-white leading-none`}
+        style={{ backgroundColor: worstColor }}
+      >
+        {count}
+      </span>
+      {segments.length > 1 && (
+        <span className="inline-flex items-center gap-0.5">
+          {visible.map((s) => (
+            <span
+              key={s.tier}
+              className="w-1.5 h-1.5 rounded-full"
+              style={{ backgroundColor: s.color }}
+              aria-hidden
+            />
+          ))}
+          {overflow > 0 && (
+            <span
+              className="text-[9px] font-bold ml-0.5 leading-none"
+              style={{ color: 'var(--brand-text-muted)' }}
+            >
+              +{overflow}
+            </span>
+          )}
+        </span>
+      )}
     </span>
   );
 }
@@ -848,10 +941,18 @@ export default function PatientsPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Filter cluster — responsive:
+             • Mobile (<sm): search bar gets its own full-width row;
+               filter chips sit below in a horizontal-scroll strip so a
+               350px screen never has to fit 3 controls side-by-side.
+             • sm: search shrinks to fixed width and joins the filter
+               row inline.
+             • md+: everything sits on the same line as the title.
+          */}
+          <div className="flex flex-col gap-2 w-full sm:w-auto sm:flex-row sm:items-center">
             {/* Search */}
             <div
-              className="flex items-center gap-2 px-3 h-9 rounded-full flex-1 sm:flex-none sm:w-56"
+              className="flex items-center gap-2 px-3 h-9 rounded-full w-full sm:w-56"
               style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)' }}
             >
               <Search className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-text-muted)' }} />
@@ -860,80 +961,94 @@ export default function PatientsPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={t('provider.searchPatients')}
-                className="flex-1 text-[12px] outline-none bg-transparent"
+                className="flex-1 text-[12px] outline-none bg-transparent min-w-0"
                 style={{ color: 'var(--brand-text-primary)' }}
               />
               {search && (
-                <button onClick={() => setSearch('')} className="shrink-0">
+                <button onClick={() => setSearch('')} className="shrink-0" aria-label="Clear search">
                   <X className="w-3 h-3" style={{ color: 'var(--brand-text-muted)' }} />
                 </button>
               )}
             </div>
 
-            {/* Risk filter */}
-            <div className="relative">
-              <select
-                value={riskFilter}
-                onChange={(e) => setRiskFilter(e.target.value)}
-                className="appearance-none h-9 pl-3 pr-7 rounded-full text-[12px] font-semibold outline-none cursor-pointer"
-                style={{
-                  backgroundColor: 'white',
-                  border: '1.5px solid var(--brand-border)',
-                  color: 'var(--brand-text-secondary)',
-                }}
-              >
-                <option value="ALL">{t('provider.allTiers')}</option>
-                <option value="HIGH">{t('provider.high')}</option>
-                <option value="ELEVATED">{t('provider.elevated')}</option>
-                <option value="STANDARD">{t('provider.standard')}</option>
-              </select>
-              <ChevronDown
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none"
-                style={{ color: 'var(--brand-text-muted)' }}
-              />
-            </div>
-
-            {/* Flow K1 — Awaiting verification quick-toggle chip */}
-            {(() => {
-              const count = patients.filter((p) => p.profileVerificationStatus !== 'VERIFIED').length;
-              const active = awaitingVerificationOnly;
-              return (
-                <button
-                  type="button"
-                  onClick={() => setAwaitingVerificationOnly((v) => !v)}
-                  aria-pressed={active}
-                  className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer"
+            {/* Filter chip row — wraps on tablet, scroll-x on phone so it
+                never breaks layout. -mx-4 + px-4 lets the scroll strip
+                bleed to the screen edges on mobile so users can flick
+                without bumping the page padding. */}
+            <div
+              className="flex items-center gap-2 overflow-x-auto sm:overflow-visible -mx-4 px-4 sm:mx-0 sm:px-0 pb-1 sm:pb-0"
+              style={{ scrollbarWidth: 'thin' }}
+            >
+              {/* Risk filter */}
+              <div className="relative shrink-0">
+                <select
+                  value={riskFilter}
+                  onChange={(e) => setRiskFilter(e.target.value)}
+                  className="appearance-none h-9 pl-3 pr-7 rounded-full text-[12px] font-semibold outline-none cursor-pointer"
                   style={{
-                    backgroundColor: active ? 'var(--brand-warning-amber)' : 'var(--brand-warning-amber-light)',
-                    color: active ? 'white' : 'var(--brand-warning-amber)',
-                    border: `1.5px solid ${active ? 'var(--brand-warning-amber)' : 'transparent'}`,
+                    backgroundColor: 'white',
+                    border: '1.5px solid var(--brand-border)',
+                    color: 'var(--brand-text-secondary)',
                   }}
                 >
-                  <ShieldAlert className="w-3 h-3" />
-                  Awaiting verification
-                  <span
-                    className="text-[10px] font-bold px-1.5 rounded-full"
+                  <option value="ALL">{t('provider.allTiers')}</option>
+                  <option value="HIGH">{t('provider.high')}</option>
+                  <option value="ELEVATED">{t('provider.elevated')}</option>
+                  <option value="STANDARD">{t('provider.standard')}</option>
+                </select>
+                <ChevronDown
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none"
+                  style={{ color: 'var(--brand-text-muted)' }}
+                />
+              </div>
+
+              {/* Flow K1 — Awaiting verification quick-toggle chip.
+                  Label collapses to "Unverified" on small screens to save
+                  ~80px of horizontal space; the icon + count badge keep
+                  the affordance intact. */}
+              {(() => {
+                const count = patients.filter((p) => p.profileVerificationStatus !== 'VERIFIED').length;
+                const active = awaitingVerificationOnly;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setAwaitingVerificationOnly((v) => !v)}
+                    aria-pressed={active}
+                    aria-label={active ? 'Showing only unverified patients' : 'Filter to unverified patients'}
+                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap"
                     style={{
-                      backgroundColor: active ? 'rgba(255,255,255,0.25)' : 'white',
+                      backgroundColor: active ? 'var(--brand-warning-amber)' : 'var(--brand-warning-amber-light)',
                       color: active ? 'white' : 'var(--brand-warning-amber)',
-                      minWidth: 18,
-                      textAlign: 'center',
+                      border: `1.5px solid ${active ? 'var(--brand-warning-amber)' : 'transparent'}`,
                     }}
                   >
-                    {count}
-                  </span>
-                  {active && (
-                    <X
-                      className="w-3 h-3"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setAwaitingVerificationOnly(false);
+                    <ShieldAlert className="w-3 h-3" />
+                    <span className="hidden md:inline">Awaiting verification</span>
+                    <span className="md:hidden">Unverified</span>
+                    <span
+                      className="text-[10px] font-bold px-1.5 rounded-full"
+                      style={{
+                        backgroundColor: active ? 'rgba(255,255,255,0.25)' : 'white',
+                        color: active ? 'white' : 'var(--brand-warning-amber)',
+                        minWidth: 18,
+                        textAlign: 'center',
                       }}
-                    />
-                  )}
-                </button>
-              );
-            })()}
+                    >
+                      {count}
+                    </span>
+                    {active && (
+                      <X
+                        className="w-3 h-3"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAwaitingVerificationOnly(false);
+                        }}
+                      />
+                    )}
+                  </button>
+                );
+              })()}
+            </div>
           </div>
         </div>
 
@@ -1009,9 +1124,29 @@ export default function PatientsPage() {
                         {initials}
                       </div>
                       <div className="min-w-0">
-                        <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
-                          {p.name ?? 'Unknown'}
-                        </p>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
+                            {p.name ?? 'Unknown'}
+                          </p>
+                          {/* Preeclampsia-history notation per CLINICAL_SPEC §3.
+                              Only when patient is NOT currently pregnant — the
+                              pregnancy banner already covers active pregnancies,
+                              so the value of this flag is for women with a
+                              documented history outside pregnancy. */}
+                          {p.historyPreeclampsia && !p.isPregnant && (
+                            <span
+                              className="shrink-0 inline-flex items-center"
+                              title="Preeclampsia history — enhanced monitoring recommended outside pregnancy per 2025 AHA/ACC Hypertension Guideline."
+                              aria-label="Preeclampsia history"
+                            >
+                              <Heart
+                                className="w-3 h-3"
+                                style={{ color: 'var(--brand-warning-amber)' }}
+                                aria-hidden
+                              />
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[11px] truncate" style={{ color: 'var(--brand-text-muted)' }}>
                           {p.email ?? '--'}
                         </p>

@@ -46,9 +46,13 @@ export class ProviderService {
     profile: PatientProfileShape | null,
   ): string | null {
     if (!profile) return null
-    if (profile.isPregnant || profile.historyPreeclampsia) {
-      return 'Pregnancy / preeclampsia history'
-    }
+    // Split pregnancy from preeclampsia history. Conflating them ("Pregnancy
+    // / preeclampsia history") was misleading for non-pregnant patients
+    // with only a documented history — it implied current pregnancy. Per
+    // CLINICAL_SPEC §3 the history flag is a *notation* for enhanced
+    // monitoring, not a pregnancy indicator.
+    if (profile.isPregnant) return 'Pregnancy'
+    if (profile.historyPreeclampsia) return 'Preeclampsia history'
     if (profile.hasHeartFailure) {
       const t = profile.heartFailureType
       if (t === 'HFREF') return 'Heart Failure (HFrEF)'
@@ -314,6 +318,14 @@ export class ProviderService {
         riskTier: this.deriveRiskTier(profile, u.dateOfBirth),
         communicationPreference: u.communicationPreference ?? null,
         primaryCondition: this.derivePrimaryCondition(profile),
+        // Surface pregnancy + preeclampsia-history flags directly so the
+        // patient list can render the "Preeclampsia history" notation per
+        // CLINICAL_SPEC §3 (enhanced-monitoring marker for women with
+        // history, even outside pregnancy). Frontend hides the history
+        // badge when isPregnant=true so the pregnancy banner takes
+        // priority and the row doesn't double-flag.
+        isPregnant: profile?.isPregnant ?? false,
+        historyPreeclampsia: profile?.historyPreeclampsia ?? false,
         onboardingStatus: u.onboardingStatus,
         enrollmentStatus: u.enrollmentStatus,
         // Flow K — surface the patient's profile verification state so the
