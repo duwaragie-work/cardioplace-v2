@@ -157,12 +157,6 @@ function validateEditForm(f: EditForm, t: TFn): string | null {
 // booleans below. Kept here only as a reference of which strings might appear
 // in the read-only `entry.symptoms` array on legacy rows.
 
-function getBpStatus(sys: number, dia: number) {
-  if (sys >= 180 || dia >= 120) return { label: 'Crisis', color: 'red' as const };
-  if (sys >= 140 || dia >= 90) return { label: 'Elevated', color: 'amber' as const };
-  return { label: 'Normal', color: 'green' as const };
-}
-
 function formatDate(dateStr: string) {
   try {
     return new Date(dateStr).toLocaleDateString('en-US', {
@@ -229,17 +223,10 @@ function EntryCard({
 }) {
   const { t } = useLanguage();
   const hasBP = entry.systolicBP && entry.diastolicBP;
-  const bpStatus = hasBP ? getBpStatus(entry.systolicBP!, entry.diastolicBP!) : null;
   // BMI is read-only and only shown when both weight AND height exist.
   // Pulse pressure is intentionally NOT rendered on the patient app per
   // Niva — patients shouldn't see clinical signals they can't action.
   const bmi = getBMI(heightCm, entry.weight);
-
-  const statusColors = {
-    red: { bg: '#FEE2E2', text: '#DC2626' },
-    amber: { bg: 'var(--brand-warning-amber-light)', text: 'var(--brand-warning-amber)' },
-    green: { bg: 'var(--brand-success-green-light)', text: 'var(--brand-success-green)' },
-  };
 
   return (
     <motion.div
@@ -296,17 +283,6 @@ function EntryCard({
                   {t('readings.mmHg')}
                 </span>
               </div>
-              {bpStatus && (
-                <span
-                  className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold"
-                  style={{
-                    backgroundColor: statusColors[bpStatus.color].bg,
-                    color: statusColors[bpStatus.color].text,
-                  }}
-                >
-                  {bpStatus.label === 'Crisis' ? t('readings.crisis') : bpStatus.label === 'Elevated' ? t('dashboard.elevated') : t('checkin.normal')}
-                </span>
-              )}
             </div>
           ) : (
             <p className="text-[13px] mb-2" style={{ color: 'var(--brand-text-muted)' }}>

@@ -356,10 +356,6 @@ function B1Checklist({ form, setField }: StepProps) {
 
 function B2Reading({ form, setField }: StepProps) {
   const { t } = useLanguage();
-  const sys = parseInt(form.systolicBP || '0', 10);
-  const dia = parseInt(form.diastolicBP || '0', 10);
-  const isElevated = sys >= 140 || dia >= 90;
-  const isCritical = sys >= 180 || dia >= 110;
 
   return (
     <div className="space-y-6">
@@ -466,11 +462,9 @@ function B2Reading({ form, setField }: StepProps) {
               style={{
                 height: 76,
                 borderRadius: 'var(--brand-radius-input)',
-                border: `2px solid ${form.systolicBP && isCritical ? 'var(--brand-alert-red)' : form.systolicBP && isElevated ? 'var(--brand-warning-amber)' : 'var(--brand-border)'}`,
+                border: '2px solid var(--brand-border)',
                 fontSize: 32,
-                color: form.systolicBP
-                  ? isCritical ? 'var(--brand-alert-red)' : isElevated ? 'var(--brand-warning-amber)' : 'var(--brand-text-primary)'
-                  : 'var(--brand-text-muted)',
+                color: form.systolicBP ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
                 backgroundColor: 'white',
               }}
             />
@@ -500,46 +494,6 @@ function B2Reading({ form, setField }: StepProps) {
           </div>
         </div>
 
-        <AnimatePresence>
-          {form.systolicBP && form.diastolicBP && (
-            <motion.div
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className="rounded-xl px-4 py-2.5 mt-3 flex items-center gap-3"
-              style={{
-                backgroundColor: isCritical
-                  ? 'var(--brand-alert-red-light)'
-                  : isElevated
-                    ? 'var(--brand-warning-amber-light)'
-                    : 'var(--brand-success-green-light)',
-              }}
-            >
-              <span
-                className="w-2 h-2 rounded-full animate-pulse"
-                style={{
-                  backgroundColor: isCritical
-                    ? 'var(--brand-alert-red)'
-                    : isElevated
-                      ? 'var(--brand-warning-amber)'
-                      : 'var(--brand-success-green)',
-                }}
-              />
-              <p
-                className="text-[12.5px] font-semibold"
-                style={{
-                  color: isCritical
-                    ? 'var(--brand-alert-red)'
-                    : isElevated
-                      ? 'var(--brand-warning-amber)'
-                      : 'var(--brand-success-green)',
-                }}
-              >
-                {isCritical ? t('checkin.b2.bpStatusCritical') : isElevated ? t('checkin.b2.bpStatusElevated') : t('checkin.b2.bpStatusNormal')}
-              </p>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
 
       {/* Pulse */}
