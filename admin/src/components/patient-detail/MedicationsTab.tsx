@@ -28,6 +28,7 @@ import {
 } from '@/lib/services/patient-detail.service';
 import { useAuth } from '@/lib/auth-context';
 import { canVerifyMedications } from '@/lib/roleGates';
+import MedicationRejectModal from './MedicationRejectModal';
 
 interface Props {
   medications: PatientMedication[];
@@ -121,6 +122,7 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
   const canVerify = canVerifyMedications(user);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [rejecting, setRejecting] = useState<PatientMedication | null>(null);
 
   // Open Tier 3 alerts grouped by the drug class they relate to. Lets
   // each row pick up its informational notes in O(1).
@@ -183,10 +185,17 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
     // No-op when the chosen status already matches — prevents accidental
     // duplicate timeline entries from a second click on the active button.
     if (med.verificationStatus === status) return;
+    // Reject requires a rationale (backend mandates it). Collect it via
+    // the modal first; the modal calls verifyMedication itself on submit.
+    if (status === 'REJECTED') {
+      setError(null);
+      setRejecting(med);
+      return;
+    }
     setSavingId(med.id);
     setError(null);
     try {
-      await verifyMedication(med.id, status as 'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER');
+      await verifyMedication(med.id, status as 'VERIFIED' | 'AWAITING_PROVIDER');
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not update medication.');
@@ -385,6 +394,13 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
           </div>
         );
       })}
+
+      <MedicationRejectModal
+        med={rejecting}
+        open={rejecting != null}
+        onClose={() => setRejecting(null)}
+        onConfirmed={() => onChanged()}
+      />
     </div>
   );
 }
