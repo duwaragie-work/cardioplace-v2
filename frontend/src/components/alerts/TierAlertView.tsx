@@ -21,6 +21,7 @@ import {
 import type { DeviationAlertDto, AlertTier } from '@/lib/services/journal.service';
 import AudioButton from '@/components/intake/AudioButton';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { patientLabelForResolutionAction } from '@cardioplace/shared';
 
 interface Props {
   alert: DeviationAlertDto;
@@ -179,10 +180,18 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
   return (
     <div className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
       <div className="max-w-2xl mx-auto px-4 md:px-8 py-6 space-y-5">
-        {/* Top: back to dashboard */}
+        {/* Back to wherever the patient came from (notifications page,
+            dashboard, deep link). Falls back to dashboard when there's no
+            in-app history (cold open from a push-notification deep link). */}
         <button
           type="button"
-          onClick={() => router.push('/dashboard')}
+          onClick={() => {
+            if (typeof window !== 'undefined' && window.history.length > 1) {
+              router.back();
+            } else {
+              router.push('/dashboard');
+            }
+          }}
           className="inline-flex items-center gap-1.5 text-[13px] font-semibold cursor-pointer"
           style={{ color: 'var(--brand-text-secondary)' }}
         >
@@ -287,69 +296,134 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
           </p>
         </div>
 
-        {/* Acknowledge / resolved / non-dismissable state.
-            CLINICAL_SPEC V2-C — Tier 1 contraindications cannot be cleared
-            by the patient. Backend marks them dismissible=false; we hide
-            the acknowledge button entirely and show a calm "care team
-            notified" banner. The provider escalation ladder must continue
-            running until a clinician acts. */}
-        {isResolved ? (
-          <div
-            className="rounded-xl px-4 py-3 flex items-center gap-3"
-            style={{ backgroundColor: 'var(--brand-success-green-light)' }}
-          >
-            <CheckCircle2
-              className="w-5 h-5 shrink-0"
-              style={{ color: 'var(--brand-success-green)' }}
-            />
-            <p className="text-[13px]" style={{ color: 'var(--brand-success-green)' }}>
-              {t('alerts.tier.seenResolved')}
-            </p>
-          </div>
-        ) : alert.dismissible === false ? (
-          <div
-            className="rounded-xl px-4 py-3 flex items-start gap-3"
-            style={{
-              backgroundColor: 'var(--brand-primary-purple-light)',
-              border: '1px solid rgba(123,0,224,0.2)',
-            }}
-          >
-            <ShieldAlert
-              className="w-5 h-5 shrink-0 mt-0.5"
-              style={{ color: 'var(--brand-primary-purple)' }}
-            />
-            <div>
-              <p
-                className="text-[13.5px] font-bold mb-1"
-                style={{ color: 'var(--brand-primary-purple)' }}
+        {/* Resolution / care-team-notice / acknowledge state.
+            Two independent axes:
+              1. Admin resolution — `resolvedBy && resolutionAction`. Surfaces
+                 the green "what we did" banner.
+              2. Patient acknowledgment — `acknowledgedAt`. Drives the I've-
+                 seen-this button. Tier 1 (dismissible=false) hides the
+                 button entirely per CLINICAL_SPEC V2-C — only a clinician
+                 closes those out.
+            Both can be true simultaneously: an admin can resolve before the
+            patient has clicked acknowledge. We render the resolution banner
+            AND the ack button so the patient still gets to confirm they've
+            seen the update. */}
+        {(() => {
+          const actionLabel = patientLabelForResolutionAction(alert.resolutionAction);
+          const rationale = alert.resolutionRationale?.trim() || null;
+          const hasResolution = !!(alert.resolvedBy && actionLabel);
+          const isPatientAcked = !!alert.acknowledgedAt;
+          const canAck = !isPatientAcked && alert.dismissible !== false;
+
+          // Pick the top "status" panel — at most one of resolution / care-
+          // team-notice / seenResolved renders. The ack button renders
+          // separately below it.
+          let statusPanel: React.ReactNode = null;
+          if (hasResolution) {
+            statusPanel = (
+              <div
+                className="rounded-xl px-4 py-3 flex items-start gap-3"
+                style={{ backgroundColor: 'var(--brand-success-green-light)' }}
               >
-                Your care team has been notified
-              </p>
-              <p
-                className="text-[12.5px] leading-relaxed"
-                style={{ color: 'var(--brand-text-secondary)' }}
+                <CheckCircle2
+                  className="w-5 h-5 shrink-0 mt-0.5"
+                  style={{ color: 'var(--brand-success-green)' }}
+                />
+                <div className="flex-1 min-w-0">
+                  <p
+                    className="text-[13px] font-semibold"
+                    style={{ color: 'var(--brand-success-green)' }}
+                  >
+                    {t('alerts.tier.resolvedAction')}
+                  </p>
+                  <p
+                    lang="en"
+                    className="text-[13px] mt-1 leading-relaxed"
+                    style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
+                  >
+                    {actionLabel}
+                  </p>
+                  {rationale && (
+                    <p
+                      lang="en"
+                      className="text-[12.5px] mt-1.5 leading-relaxed"
+                      style={{ color: 'var(--brand-text-secondary)', wordBreak: 'break-word' }}
+                    >
+                      {rationale}
+                    </p>
+                  )}
+                </div>
+              </div>
+            );
+          } else if (alert.dismissible === false) {
+            statusPanel = (
+              <div
+                className="rounded-xl px-4 py-3 flex items-start gap-3"
+                style={{
+                  backgroundColor: 'var(--brand-primary-purple-light)',
+                  border: '1px solid rgba(123,0,224,0.2)',
+                }}
               >
-                A clinician needs to review this with you before it can be
-                closed. You don&apos;t need to do anything — they&apos;ll
-                reach out shortly.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <motion.button
-            type="button"
-            onClick={onAcknowledge}
-            disabled={acknowledging}
-            className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer transition"
-            style={{
-              backgroundColor: 'var(--brand-primary-purple)',
-              boxShadow: 'var(--brand-shadow-button)',
-            }}
-            whileTap={{ scale: 0.98 }}
-          >
-            {acknowledging ? t('alerts.tier.saving') : t('alerts.tier.ackButton')}
-          </motion.button>
-        )}
+                <ShieldAlert
+                  className="w-5 h-5 shrink-0 mt-0.5"
+                  style={{ color: 'var(--brand-primary-purple)' }}
+                />
+                <div>
+                  <p
+                    className="text-[13.5px] font-bold mb-1"
+                    style={{ color: 'var(--brand-primary-purple)' }}
+                  >
+                    Your care team has been notified
+                  </p>
+                  <p
+                    className="text-[12.5px] leading-relaxed"
+                    style={{ color: 'var(--brand-text-secondary)' }}
+                  >
+                    A clinician needs to review this with you before it can be
+                    closed. You don&apos;t need to do anything — they&apos;ll
+                    reach out shortly.
+                  </p>
+                </div>
+              </div>
+            );
+          } else if (isPatientAcked) {
+            statusPanel = (
+              <div
+                className="rounded-xl px-4 py-3 flex items-center gap-3"
+                style={{ backgroundColor: 'var(--brand-success-green-light)' }}
+              >
+                <CheckCircle2
+                  className="w-5 h-5 shrink-0"
+                  style={{ color: 'var(--brand-success-green)' }}
+                />
+                <p className="text-[13px]" style={{ color: 'var(--brand-success-green)' }}>
+                  {t('alerts.tier.seenResolved')}
+                </p>
+              </div>
+            );
+          }
+
+          return (
+            <>
+              {statusPanel}
+              {canAck && (
+                <motion.button
+                  type="button"
+                  onClick={onAcknowledge}
+                  disabled={acknowledging}
+                  className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer transition"
+                  style={{
+                    backgroundColor: 'var(--brand-primary-purple)',
+                    boxShadow: 'var(--brand-shadow-button)',
+                  }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  {acknowledging ? t('alerts.tier.saving') : t('alerts.tier.ackButton')}
+                </motion.button>
+              )}
+            </>
+          );
+        })()}
       </div>
     </div>
   );

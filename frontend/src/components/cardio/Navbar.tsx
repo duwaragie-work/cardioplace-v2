@@ -30,8 +30,13 @@ export default function Navbar() {
 
       // Consolidate alerts by journal entry (same as notifications page).
       // status is now optional on the v2 DTO so we coerce nullable → 'OPEN' check.
+      // CLINICAL_SPEC §V2-C — exclude TIER_2_DISCREPANCY (admin-only) so the
+      // bell badge matches what the patient actually sees on /notifications.
       const byEntry = new Map<string, typeof alerts>();
-      for (const a of alerts.filter((a: { status?: string | null }) => a.status === 'OPEN')) {
+      for (const a of alerts.filter(
+        (a: { status?: string | null; tier?: string | null }) =>
+          a.status === 'OPEN' && a.tier !== 'TIER_2_DISCREPANCY',
+      )) {
         const key = a.journalEntry?.id ?? a.id;
         if (!byEntry.has(key)) byEntry.set(key, []);
         byEntry.get(key)!.push(a);

@@ -262,6 +262,8 @@ const es: Record<TranslationKey, string> = {
 
   // ─── Notifications ─────────────────────────────────────────────────────────
   'notifications.title': 'Notificaciones',
+  'notifications.topTab.alerts': 'Alertas',
+  'notifications.topTab.notifications': 'Notificaciones',
   'notifications.actionNeeded': 'Acción Requerida',
   'notifications.messages': 'Mensajes',
   'notifications.allTab': 'Todos',
@@ -277,6 +279,8 @@ const es: Record<TranslationKey, string> = {
   'notifications.actionsNeededPlural': 'acciones necesarias',
   'notifications.unread': 'sin leer',
   'notifications.tapToRead': 'Toca para marcar como leído',
+  'notifications.viewAlert': 'Ver alerta',
+  'notifications.markRead': 'Marcar leído',
   'notifications.hideTips': 'Ocultar consejos',
   'notifications.careTip': 'consejo de salud',
   'notifications.careTips': 'consejos de salud',
@@ -1086,9 +1090,11 @@ const es: Record<TranslationKey, string> = {
   'alerts.emergency.followupBody': 'Han pasado dos horas. Queremos asegurarnos de que está bien.',
   'alerts.emergency.followupYes': 'Sí',
   'alerts.emergency.followupNotYet': 'Todavía no',
-  'alerts.tier.back': 'Panel',
+  'alerts.tier.back': 'Atrás',
   'alerts.tier.whatNext': 'Qué sigue',
   'alerts.tier.seenResolved': 'Ya lo ha visto. Su equipo de atención ha sido notificado.',
+  'alerts.tier.resolvedAction': 'Su equipo de atención revisó esto y tomó medidas.',
+  'alerts.reviewedByCareTeam': 'Revisado',
   'alerts.tier.saving': 'Guardando…',
   'alerts.tier.ackButton': 'Ya lo vi',
 

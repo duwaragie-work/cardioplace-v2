@@ -11,6 +11,7 @@ import {
   type ResolutionAction,
 } from '../escalation/resolution-actions.js'
 import { EscalationService } from './escalation.service.js'
+import { patientLabelForResolutionAction } from '@cardioplace/shared'
 
 /**
  * Phase/7 AlertResolutionService — business logic for the three admin
@@ -125,6 +126,9 @@ export class AlertResolutionService {
     }
 
     // 4. Terminal resolution — mark resolved + close open escalation rows.
+    // Admin resolution is independent of patient acknowledgment: the patient
+    // still gets to click "I've seen this" on their detail page when the
+    // alert is dismissible. acknowledgedAt is patient-only state.
     await this.prisma.deviationAlert.update({
       where: { id: alertId },
       data: {
@@ -132,17 +136,65 @@ export class AlertResolutionService {
         resolutionAction: dto.resolutionAction,
         resolutionRationale: dto.resolutionRationale ?? null,
         resolvedBy: adminId,
-        acknowledgedAt: alert.acknowledgedAt ?? now,
       },
     })
     await this.prisma.escalationEvent.updateMany({
       where: { alertId, resolvedAt: null },
       data: { resolvedAt: now, resolvedBy: adminId },
     })
+
+    // 5. Patient notification — let the patient know an action was taken so
+    // they don't have to manually re-open every alert. Skipped for Tier 2
+    // (admin-only per CLINICAL_SPEC §V2-C) and for the retry case (alert
+    // still OPEN, handled above).
+    if (this.shouldNotifyPatient(alert.tier)) {
+      const actionLabel =
+        patientLabelForResolutionAction(dto.resolutionAction) ??
+        'Action taken by your care team.'
+      const body = `${this.alertTypeLabelForNotification(alert.tier)}: ${actionLabel}`
+      await this.prisma.notification
+        .create({
+          data: {
+            userId: alert.userId,
+            alertId: alert.id,
+            channel: 'PUSH',
+            title: 'Care team update',
+            body,
+            tips: [],
+          },
+        })
+        .catch((err: unknown) => {
+          // P2002 = duplicate (resolve called twice on the same alert).
+          // Idempotent — first notification is the source of truth.
+          const code = (err as { code?: string })?.code
+          if (code !== 'P2002') throw err
+        })
+    }
+
     this.logger.log(
       `Alert ${alertId} resolved by ${adminId} via ${dto.resolutionAction}`,
     )
     return { status: 'RESOLVED', resolvedAt: now }
+  }
+
+  private shouldNotifyPatient(tier: string | null): boolean {
+    return (
+      tier === 'TIER_1_CONTRAINDICATION' ||
+      tier === 'BP_LEVEL_2' ||
+      tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
+    )
+  }
+
+  private alertTypeLabelForNotification(tier: string | null): string {
+    switch (tier) {
+      case 'TIER_1_CONTRAINDICATION':
+        return 'Medication alert reviewed'
+      case 'BP_LEVEL_2':
+      case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
+        return 'Blood pressure alert reviewed'
+      default:
+        return 'Alert reviewed'
+    }
   }
 
   /**

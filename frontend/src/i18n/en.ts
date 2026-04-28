@@ -257,6 +257,8 @@ const en = {
 
   // ─── Notifications ─────────────────────────────────────────────────────────
   'notifications.title': 'Notifications',
+  'notifications.topTab.alerts': 'Alerts',
+  'notifications.topTab.notifications': 'Notifications',
   'notifications.actionNeeded': 'Action Required',
   'notifications.messages': 'Messages',
   'notifications.allTab': 'All',
@@ -272,6 +274,8 @@ const en = {
   'notifications.actionsNeededPlural': 'actions needed',
   'notifications.unread': 'unread',
   'notifications.tapToRead': 'Tap to mark as read',
+  'notifications.viewAlert': 'View alert',
+  'notifications.markRead': 'Mark read',
   'notifications.hideTips': 'Hide tips',
   'notifications.careTip': 'care tip',
   'notifications.careTips': 'care tips',
@@ -1084,9 +1088,11 @@ const en = {
   'alerts.emergency.followupBody': "Two hours have passed. We want to make sure you're safe.",
   'alerts.emergency.followupYes': 'Yes',
   'alerts.emergency.followupNotYet': 'Not yet',
-  'alerts.tier.back': 'Dashboard',
+  'alerts.tier.back': 'Back',
   'alerts.tier.whatNext': 'What happens next',
   'alerts.tier.seenResolved': "You've seen this. Care team has been notified.",
+  'alerts.tier.resolvedAction': 'Your care team reviewed this and took action.',
+  'alerts.reviewedByCareTeam': 'Reviewed',
   'alerts.tier.saving': 'Saving…',
   'alerts.tier.ackButton': "I've seen this",
 

@@ -264,6 +264,8 @@ const am: Record<TranslationKey, string> = {
 
   // ─── Notifications ─────────────────────────────────────────────────────────
   'notifications.title': 'ማሳወቂያዎች',
+  'notifications.topTab.alerts': 'ማንቂያዎች',
+  'notifications.topTab.notifications': 'ማሳወቂያዎች',
   'notifications.actionNeeded': 'እርምጃ ያስፈልጋል',
   'notifications.messages': 'መልዕክቶች',
   'notifications.allTab': 'ሁሉም',
@@ -279,6 +281,8 @@ const am: Record<TranslationKey, string> = {
   'notifications.actionsNeededPlural': 'እርምጃዎች ያስፈልጋሉ',
   'notifications.unread': 'ያልተነበበ',
   'notifications.tapToRead': 'እንደተነበበ ለምልክት ይጫኑ',
+  'notifications.viewAlert': 'ማንቂያ ይመልከቱ',
+  'notifications.markRead': 'እንደተነበበ ምልክት',
   'notifications.hideTips': 'ምክሮችን ደብቅ',
   'notifications.careTip': 'የእንክብካቤ ምክር',
   'notifications.careTips': 'የእንክብካቤ ምክሮች',
@@ -1090,9 +1094,11 @@ const am: Record<TranslationKey, string> = {
   'alerts.emergency.followupBody': 'ሁለት ሰዓት አልፏል። ደህና መሆንዎን ማረጋገጥ እንፈልጋለን።',
   'alerts.emergency.followupYes': 'አዎ',
   'alerts.emergency.followupNotYet': 'ገና',
-  'alerts.tier.back': 'ዳሽቦርድ',
+  'alerts.tier.back': 'ተመለስ',
   'alerts.tier.whatNext': 'ቀጥሎ የሚሆነው',
   'alerts.tier.seenResolved': 'አይተውታል። የተንከባካቢ ቡድንዎ ተነግሮታል።',
+  'alerts.tier.resolvedAction': 'የተንከባካቢ ቡድንዎ ይህን ገምግሞ እርምጃ ወስዷል።',
+  'alerts.reviewedByCareTeam': 'ተገምግሟል',
   'alerts.tier.saving': 'በማስቀመጥ…',
   'alerts.tier.ackButton': 'አይቻለሁ',
 
