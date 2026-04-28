@@ -92,6 +92,68 @@ interface DedupConflict {
   componentMedId: string;
 }
 
+/**
+ * Phase/25 — within-form dedup. Returns the index of the first existing
+ * selectedMedications entry whose drugName, catalog brandName, or catalog
+ * genericName case-insensitively matches `name`. Used to:
+ *   1. Block A8 voice/text "anything else" entries that name a med already
+ *      selected (catalog tick OR a prior voice entry).
+ *   2. Auto-promote OTHER_UNVERIFIED rows into verified catalog rows when
+ *      the patient later ticks the matching catalog tile in A5 / A6 / A8.
+ *
+ * The backend canonical-key dedup catches same-drugClass dupes; this layer
+ * catches cross-drugClass dupes (voice "Eliquis" → OTHER_UNVERIFIED versus
+ * catalog Eliquis → ANTICOAGULANT) which the canonical key treats as
+ * different meds.
+ */
+function findExistingMedIndex(
+  meds: SelectedMedication[],
+  name: string,
+): number {
+  const target = name.trim().toLowerCase();
+  if (!target) return -1;
+  return meds.findIndex((m) => {
+    if (m.drugName.trim().toLowerCase() === target) return true;
+    if (!m.catalogId) return false;
+    const core = CORE_MEDS.find((c) => c.id === m.catalogId);
+    if (core) {
+      if (core.brandName.trim().toLowerCase() === target) return true;
+      if (core.genericName.trim().toLowerCase() === target) return true;
+    }
+    const cat = CATEGORY_MEDS.find((c) => c.id === m.catalogId);
+    if (cat) {
+      if (cat.brandName.trim().toLowerCase() === target) return true;
+      if (cat.genericName.trim().toLowerCase() === target) return true;
+    }
+    const combo = COMBO_MEDS.find((c) => c.id === m.catalogId);
+    if (combo && combo.brandName.trim().toLowerCase() === target) return true;
+    return false;
+  });
+}
+
+/**
+ * Strip any existing OTHER_UNVERIFIED voice/photo entries that name the
+ * same drug as the catalog item being added. This auto-promotes a voice
+ * "Eliquis" row into the verified ANTICOAGULANT catalog row when the
+ * patient later ticks Eliquis in A5/A8. Untouched: catalog selections from
+ * other categories (those are intentional separate entries).
+ */
+function stripUnverifiedDuplicates(
+  meds: SelectedMedication[],
+  catalogBrandName: string,
+  catalogGenericName: string | null,
+): SelectedMedication[] {
+  const targets = new Set(
+    [catalogBrandName, catalogGenericName]
+      .filter((s): s is string => !!s)
+      .map((s) => s.trim().toLowerCase()),
+  );
+  return meds.filter((m) => {
+    if (m.drugClass !== 'OTHER_UNVERIFIED') return true;
+    return !targets.has(m.drugName.trim().toLowerCase());
+  });
+}
+
 function detectDedupConflicts(meds: SelectedMedication[]): DedupConflict[] {
   const selectedSingles = meds.filter((m) => !m.isCombination && m.catalogId);
   const selectedCombos = meds.filter((m) => m.isCombination && m.catalogId);
@@ -546,7 +608,14 @@ function A5CoreMeds({ state, setState }: StepProps) {
       const next = isSelected
         ? prev.selectedMedications.filter((m) => m.catalogId !== medId)
         : [
-            ...prev.selectedMedications,
+            // Auto-promote: strip any prior voice/photo entry naming the
+            // same drug so we don't end up with two rows (one OTHER_UNVERIFIED
+            // and one ACE_INHIBITOR / etc.) for the same medication.
+            ...stripUnverifiedDuplicates(
+              prev.selectedMedications,
+              med.brandName,
+              med.genericName,
+            ),
             {
               catalogId: med.id,
               drugName: med.brandName,
@@ -610,7 +679,13 @@ function A6Combos({ state, setState }: StepProps) {
       const next = isSelected
         ? prev.selectedMedications.filter((m) => m.catalogId !== comboId)
         : [
-            ...prev.selectedMedications,
+            // Auto-promote: strip any prior voice/photo entry naming the
+            // combo brand (e.g., voice "Zestoretic" → catalog tick).
+            ...stripUnverifiedDuplicates(
+              prev.selectedMedications,
+              combo.brandName,
+              null,
+            ),
             {
               catalogId: combo.id,
               drugName: combo.brandName,
@@ -656,8 +731,19 @@ function A6Combos({ state, setState }: StepProps) {
 
 function A8Categories({ state, setState }: StepProps) {
   const { t } = useLanguage();
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  // Multi-expand: a Set of currently-open category keys. Patients can have
+  // multiple categories expanded at once so they don't lose visual sight of
+  // a Furosemide tick when they go check the blood-thinner list. Selections
+  // already persist cross-category in state.selectedMedications; this just
+  // matches the UI affordance to that reality.
+  const [activeCategories, setActiveCategories] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [otherText, setOtherText] = useState(state.otherDraft?.text ?? '');
+  // Phase/25 — inline dedup error for the voice/photo "anything else" path.
+  // Cleared on next keystroke or after a 3.5s timeout so the UI doesn't
+  // get stuck in an error state.
+  const [dupError, setDupError] = useState<string | null>(null);
   // Photo capture removed — patients can type or use device-level voice
   // dictation instead. Backend still accepts PATIENT_PHOTO source for
   // back-compat; we just don't surface that path in the UI any more.
@@ -675,7 +761,13 @@ function A8Categories({ state, setState }: StepProps) {
       const next = isSelected
         ? prev.selectedMedications.filter((m) => m.catalogId !== medId)
         : [
-            ...prev.selectedMedications,
+            // Auto-promote: strip any prior voice/photo entry naming the
+            // same drug (e.g., voice "Furosemide" → tap Furosemide tile).
+            ...stripUnverifiedDuplicates(
+              prev.selectedMedications,
+              med.brandName,
+              med.genericName,
+            ),
             {
               catalogId: med.id,
               drugName: med.brandName,
@@ -691,6 +783,17 @@ function A8Categories({ state, setState }: StepProps) {
   const addOther = (source: 'PATIENT_VOICE' | 'PATIENT_PHOTO', rawText: string) => {
     const trimmed = rawText.trim();
     if (!trimmed) return;
+    // Block within-form duplicates. Match against drugName + catalog brand
+    // and generic names so voice "apixaban" still matches catalog "Eliquis".
+    const existing = findExistingMedIndex(state.selectedMedications, trimmed);
+    if (existing >= 0) {
+      const already = state.selectedMedications[existing];
+      setDupError(
+        `${already.drugName} is already on your list. Tap an existing medication to remove or edit it.`,
+      );
+      // Keep the typed text so the patient can amend it.
+      return;
+    }
     setState((prev) => ({
       ...prev,
       selectedMedications: [
@@ -706,7 +809,16 @@ function A8Categories({ state, setState }: StepProps) {
       otherDraft: undefined,
     }));
     setOtherText('');
+    setDupError(null);
   };
+
+  // Phase/25 — auto-clear the dedup error after 3.5s so a single accidental
+  // bump doesn't pin a red banner to the screen forever.
+  useEffect(() => {
+    if (!dupError) return;
+    const id = setTimeout(() => setDupError(null), 3500);
+    return () => clearTimeout(id);
+  }, [dupError]);
 
   const otherCount = state.selectedMedications.filter((m) => m.drugClass === 'OTHER_UNVERIFIED').length;
 
@@ -734,39 +846,56 @@ function A8Categories({ state, setState }: StepProps) {
             key={cat.key}
             icon={cat.icon}
             title={cat.label}
-            selected={activeCategory === cat.key}
-            onClick={() => setActiveCategory(activeCategory === cat.key ? null : cat.key)}
+            selected={activeCategories.has(cat.key)}
+            onClick={() =>
+              setActiveCategories((prev) => {
+                const next = new Set(prev);
+                if (next.has(cat.key)) next.delete(cat.key);
+                else next.add(cat.key);
+                return next;
+              })
+            }
             audioText={cat.audio}
             compact
           />
         ))}
       </div>
 
-      <AnimatePresence mode="wait">
-        {activeCategory && activeCategory !== 'OTHER' && (
-          <motion.div
-            key={activeCategory}
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2"
-          >
-            {CATEGORY_MEDS.filter((m) => m.category === activeCategory).map((m) => (
-              <MedicationCard
-                key={m.id}
-                brandName={m.brandName}
-                genericName={m.genericName}
-                purpose={m.purpose}
-                drugClass={m.drugClass}
-                selected={selectedIds.has(m.id)}
-                onToggle={() => toggleCategoryMed(m.id)}
-                audioText={`${m.brandName}, ${alsoKnown} ${m.genericName}. ${m.purpose}`}
-              />
-            ))}
-          </motion.div>
-        )}
+      <AnimatePresence>
+        {categories
+          .filter((c) => c.key !== 'OTHER' && activeCategories.has(c.key))
+          .map((cat) => (
+            <motion.div
+              key={cat.key}
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="pt-2"
+            >
+              <p
+                className="text-[11px] font-bold uppercase tracking-wider mb-2"
+                style={{ color: 'var(--brand-text-muted)' }}
+              >
+                {cat.label}
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {CATEGORY_MEDS.filter((m) => m.category === cat.key).map((m) => (
+                  <MedicationCard
+                    key={m.id}
+                    brandName={m.brandName}
+                    genericName={m.genericName}
+                    purpose={m.purpose}
+                    drugClass={m.drugClass}
+                    selected={selectedIds.has(m.id)}
+                    onToggle={() => toggleCategoryMed(m.id)}
+                    audioText={`${m.brandName}, ${alsoKnown} ${m.genericName}. ${m.purpose}`}
+                  />
+                ))}
+              </div>
+            </motion.div>
+          ))}
 
-        {activeCategory === 'OTHER' && (
+        {activeCategories.has('OTHER') && (
           <motion.div
             key="other"
             initial={{ opacity: 0, y: -6 }}
@@ -793,11 +922,30 @@ function A8Categories({ state, setState }: StepProps) {
                   <input
                     type="text"
                     value={otherText}
-                    onChange={(e) => setOtherText(e.target.value)}
+                    onChange={(e) => {
+                      setOtherText(e.target.value);
+                      // Clear stale dedup error as soon as the patient
+                      // edits the input — they're correcting it.
+                      if (dupError) setDupError(null);
+                    }}
                     placeholder={t('intake.a8.otherSpeakPlaceholder')}
                     className="w-full h-11 px-4 rounded-lg text-[14px] outline-none transition box-border bg-white"
-                    style={{ border: '2px solid var(--brand-border)', color: 'var(--brand-text-primary)' }}
+                    style={{
+                      border: dupError
+                        ? '2px solid #b91c1c'
+                        : '2px solid var(--brand-border)',
+                      color: 'var(--brand-text-primary)',
+                    }}
                   />
+                  {dupError && (
+                    <p
+                      role="alert"
+                      className="mt-1.5 text-[12px] leading-snug"
+                      style={{ color: '#b91c1c' }}
+                    >
+                      {dupError}
+                    </p>
+                  )}
                   <button
                     type="button"
                     onClick={() => addOther('PATIENT_VOICE', otherText)}
