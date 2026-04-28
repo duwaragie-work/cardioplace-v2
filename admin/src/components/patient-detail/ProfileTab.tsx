@@ -29,6 +29,8 @@ import {
   rejectProfileField,
   type PatientProfile,
 } from '@/lib/services/patient-detail.service';
+import { useAuth } from '@/lib/auth-context';
+import { canVerifyProfile } from '@/lib/roleGates';
 
 interface Props {
   patientId: string;
@@ -85,6 +87,11 @@ function fmtValue(v: unknown, type: FieldType): string {
 type FieldStatus = 'pending' | 'confirmed' | 'editing' | 'rejected';
 
 export default function ProfileTab({ patientId, profile, loading, onChanged }: Props) {
+  const { user } = useAuth();
+  // Verify / correct / reject + "Verification complete" only for the
+  // clinical roles (SUPER_ADMIN, PROVIDER, MEDICAL_DIRECTOR). HEALPLACE_OPS
+  // sees the same data but no action buttons.
+  const canVerify = canVerifyProfile(user);
   // Local row state — per-field action state. Reset whenever the underlying
   // profile changes (new fetch).
   const [edits, setEdits] = useState<Partial<Record<keyof PatientProfile, unknown>>>({});
@@ -282,54 +289,58 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
             <span className="ml-1.5 text-[10px] uppercase tracking-wider">Rejected — needs correction</span>
           ) : null}
         </span>
-        {/* Edit + Reject are always available so an admin can revisit a
-            previously-verified profile. Confirm is only meaningful before the
-            profile is locked in, so we hide it once isFullyVerified. */}
-        <div className="flex gap-1 shrink-0">
-          {!isFullyVerified && (
+        {/* Edit + Reject are always available so a clinician can revisit
+            a previously-verified profile. Confirm is only meaningful
+            before the profile is locked in, so we hide it once
+            isFullyVerified. Whole row hidden for HEALPLACE_OPS — they
+            can read but not write per spec. */}
+        {canVerify && (
+          <div className="flex gap-1 shrink-0">
+            {!isFullyVerified && (
+              <button
+                type="button"
+                title="Confirm"
+                onClick={() => setStatus(field.key, 'confirmed')}
+                className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-green-50 cursor-pointer"
+                style={{
+                  border: `1px solid ${status === 'confirmed' ? 'var(--brand-success-green)' : 'var(--brand-border)'}`,
+                  backgroundColor: status === 'confirmed' ? 'var(--brand-success-green-light)' : 'white',
+                  color: 'var(--brand-success-green)',
+                }}
+              >
+                <Check className="w-3 h-3" />
+              </button>
+            )}
             <button
               type="button"
-              title="Confirm"
-              onClick={() => setStatus(field.key, 'confirmed')}
-              className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-green-50 cursor-pointer"
+              title={isFullyVerified ? 'Edit (re-opens verification)' : 'Correct'}
+              onClick={() => setStatus(field.key, 'editing')}
+              disabled={saving}
+              className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-purple-50 cursor-pointer disabled:opacity-60"
               style={{
-                border: `1px solid ${status === 'confirmed' ? 'var(--brand-success-green)' : 'var(--brand-border)'}`,
-                backgroundColor: status === 'confirmed' ? 'var(--brand-success-green-light)' : 'white',
-                color: 'var(--brand-success-green)',
+                border: '1px solid var(--brand-border)',
+                backgroundColor: 'white',
+                color: 'var(--brand-primary-purple)',
               }}
             >
-              <Check className="w-3 h-3" />
+              <Edit3 className="w-3 h-3" />
             </button>
-          )}
-          <button
-            type="button"
-            title={isFullyVerified ? 'Edit (re-opens verification)' : 'Correct'}
-            onClick={() => setStatus(field.key, 'editing')}
-            disabled={saving}
-            className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-purple-50 cursor-pointer disabled:opacity-60"
-            style={{
-              border: '1px solid var(--brand-border)',
-              backgroundColor: 'white',
-              color: 'var(--brand-primary-purple)',
-            }}
-          >
-            <Edit3 className="w-3 h-3" />
-          </button>
-          <button
-            type="button"
-            title={isFullyVerified ? 'Reject (returns profile to unverified)' : 'Reject'}
-            onClick={() => rejectField(field)}
-            disabled={saving}
-            className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-red-50 cursor-pointer disabled:opacity-60"
-            style={{
-              border: `1px solid ${status === 'rejected' ? 'var(--brand-alert-red)' : 'var(--brand-border)'}`,
-              backgroundColor: status === 'rejected' ? 'var(--brand-alert-red-light)' : 'white',
-              color: 'var(--brand-alert-red)',
-            }}
-          >
-            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <XIcon className="w-3 h-3" />}
-          </button>
-        </div>
+            <button
+              type="button"
+              title={isFullyVerified ? 'Reject (returns profile to unverified)' : 'Reject'}
+              onClick={() => rejectField(field)}
+              disabled={saving}
+              className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-red-50 cursor-pointer disabled:opacity-60"
+              style={{
+                border: `1px solid ${status === 'rejected' ? 'var(--brand-alert-red)' : 'var(--brand-border)'}`,
+                backgroundColor: status === 'rejected' ? 'var(--brand-alert-red-light)' : 'white',
+                color: 'var(--brand-alert-red)',
+              }}
+            >
+              {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <XIcon className="w-3 h-3" />}
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -359,7 +370,9 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
             <p className="text-[11.5px] mt-0.5" style={{ color: 'var(--brand-text-secondary)' }}>
               {isFullyVerified
                 ? `Verified ${profile.profileVerifiedAt ? new Date(profile.profileVerifiedAt).toLocaleDateString() : ''}`
-                : 'Confirm or correct each field below, then click "Verification complete".'}
+                : canVerify
+                  ? 'Confirm or correct each field below, then click "Verification complete".'
+                  : 'A clinician will review this profile shortly.'}
             </p>
           </div>
         </div>
@@ -414,8 +427,8 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
         </div>
       )}
 
-      {/* Footer */}
-      {!isFullyVerified && (
+      {/* Footer — only for the clinical-verifier roles. */}
+      {canVerify && !isFullyVerified && (
         <div
           className="bg-white rounded-2xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
           style={{ boxShadow: 'var(--brand-shadow-card)' }}

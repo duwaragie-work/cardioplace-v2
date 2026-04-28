@@ -6,6 +6,10 @@ import {
 } from '@nestjs/common'
 import { Prisma } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import {
+  pickDisplayName,
+  resolveUserDisplays,
+} from '../common/user-name-resolver.js'
 import type { UpsertThresholdDto } from './dto/upsert-threshold.dto.js'
 
 @Injectable()
@@ -47,10 +51,14 @@ export class ThresholdService {
       where: { userId: patientUserId },
     })
     if (!threshold) throw new NotFoundException('Threshold not found')
+    const names = await resolveUserDisplays(this.prisma, [threshold.setByProviderId])
     return {
       statusCode: 200,
       message: 'Threshold retrieved',
-      data: threshold,
+      data: {
+        ...threshold,
+        setByName: pickDisplayName(threshold.setByProviderId, names),
+      },
     }
   }
 

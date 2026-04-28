@@ -36,6 +36,8 @@ import {
   type PatientAssignment,
   type UpsertAssignmentPayload,
 } from '@/lib/services/practice.service';
+import { useAuth } from '@/lib/auth-context';
+import { canAssignCareTeam } from '@/lib/roleGates';
 
 interface Props {
   patientId: string;
@@ -66,6 +68,12 @@ function toForm(a: PatientAssignment | null): FormState {
 }
 
 export default function CareTeamTab({ patientId }: Props) {
+  const { user } = useAuth();
+  // Editor surfaces (form, dropdowns, save button) only render for roles
+  // that can actually write — SUPER_ADMIN, MEDICAL_DIRECTOR, HEALPLACE_OPS.
+  // PROVIDER gets a clean read-only view of the existing assignment.
+  const canEdit = canAssignCareTeam(user);
+
   const [practices, setPractices] = useState<Practice[]>([]);
   const [providers, setProviders] = useState<Clinician[]>([]);
   const [medicalDirectors, setMedicalDirectors] = useState<Clinician[]>([]);
@@ -213,12 +221,17 @@ export default function CareTeamTab({ patientId }: Props) {
           <p className="text-[11.5px] mt-0.5" style={{ color: 'var(--brand-text-secondary)' }}>
             {assignment
               ? `Last updated ${new Date(assignment.assignedAt).toLocaleString()}`
-              : 'Pick a practice and assign primary, backup, and medical-director coverage.'}
+              : canEdit
+                ? 'Pick a practice and assign primary, backup, and medical-director coverage.'
+                : 'A medical director or operations admin will assign the care team.'}
           </p>
         </div>
       </div>
 
-      {/* Editor card */}
+      {/* Editor card — render only for roles that can write. PROVIDER skips
+          this entirely and sees just the read-only "Current care team"
+          summary below. */}
+      {canEdit && (
       <div className="bg-white rounded-2xl p-5 md:p-6 space-y-4" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
         <div className="flex items-center gap-2">
           <Users className="w-4 h-4" style={{ color: 'var(--brand-primary-purple)' }} />
@@ -317,6 +330,7 @@ export default function CareTeamTab({ patientId }: Props) {
           </button>
         </div>
       </div>
+      )}
 
       {/* Current assignment summary */}
       {assignment && (

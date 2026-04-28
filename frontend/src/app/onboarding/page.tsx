@@ -62,21 +62,50 @@ export default function OnboardingPage() {
     }
   }, [user, isLoading, router]);
 
-  function isDateOfBirthValid(raw: string): boolean {
-    if (!raw) return false;
+  /**
+   * Validate the DOB. Returns null when OK, otherwise the user-facing
+   * error message. Copy is intentionally friendly + actionable — the
+   * patient should always know what to fix and why.
+   */
+  function validateDateOfBirth(raw: string): string | null {
+    if (!raw) {
+      return 'Please pick your date of birth from the calendar.';
+    }
     const dob = new Date(raw);
-    if (Number.isNaN(dob.getTime())) return false;
+    if (Number.isNaN(dob.getTime())) {
+      return "That doesn't look like a valid date — please pick from the calendar.";
+    }
     const today = new Date();
-    // Strip time for comparison
     const dobDay = new Date(dob.getFullYear(), dob.getMonth(), dob.getDate());
     const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    // Reject future dates
-    if (dobDay > todayDay) return false;
-    // Basic sanity check: not older than 120 years
-    const minYear = todayDay.getFullYear() - 120;
-    if (dobDay.getFullYear() < minYear) return false;
-    return true;
+    if (dobDay > todayDay) {
+      return "That date is in the future. Please pick the day you were born.";
+    }
+    if (dobDay.getTime() === todayDay.getTime()) {
+      return "Today can't be your date of birth — please pick the day you were born.";
+    }
+    // 18+ check: compute "18 years ago today" and require dob <= that.
+    const eighteenAgo = new Date(
+      todayDay.getFullYear() - 18,
+      todayDay.getMonth(),
+      todayDay.getDate(),
+    );
+    if (dobDay > eighteenAgo) {
+      return 'Cardioplace is for adults 18 and older. Please double-check your date of birth.';
+    }
+    if (dobDay.getFullYear() < todayDay.getFullYear() - 120) {
+      return "That date doesn't look right — please check the year and try again.";
+    }
+    return null;
   }
+
+  /** Browser-level cap on the date picker: cannot select a date that
+   *  would make the user under 18. Computed once per render. */
+  const maxDobIso = (() => {
+    const t0 = new Date();
+    const max = new Date(t0.getFullYear() - 18, t0.getMonth(), t0.getDate());
+    return max.toISOString().slice(0, 10);
+  })();
 
   const isFormPartiallyFilled = name.trim() !== "" || dateOfBirth !== "" || communicationPreference !== "";
 
@@ -127,9 +156,12 @@ export default function OnboardingPage() {
 
   async function handleContinue() {
     if (!isFormPartiallyFilled || isSubmitting) return;
-    if (dateOfBirth && !isDateOfBirthValid(dateOfBirth)) {
-      setError(t('onboarding.invalidDob'));
-      return;
+    if (dateOfBirth) {
+      const dobError = validateDateOfBirth(dateOfBirth);
+      if (dobError) {
+        setError(dobError);
+        return;
+      }
     }
     await submitProfile({
       name: name.trim() || null,
@@ -201,6 +233,7 @@ export default function OnboardingPage() {
                 <input
                   type="date"
                   value={dateOfBirth}
+                  max={maxDobIso}
                   onChange={(e) => setDateOfBirth(e.target.value)}
                   className="w-full h-12 px-4 lg:px-5 bg-white border border-[#e5d9f2] rounded-lg text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
                   style={{ colorScheme: 'light', minHeight: 48 }}
@@ -223,10 +256,14 @@ export default function OnboardingPage() {
                 </select>
               </div>
 
-              {/* Error Message */}
+              {/* Error Message — explicit red palette so it matches other
+                  validation errors regardless of theme tokens. */}
               {error && (
                 <div className="w-full max-w-105">
-                  <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  <p
+                    role="alert"
+                    className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-600"
+                  >
                     {error}
                   </p>
                 </div>

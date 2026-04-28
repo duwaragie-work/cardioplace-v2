@@ -100,6 +100,17 @@ export class DailyJournalController {
     )
   }
 
+  // Unread count for the bell badge. Works for any authenticated role —
+  // the admin bell polls this every 30s; the patient app uses the same
+  // endpoint via the existing notifications page. Excludes EMAIL channel
+  // (those rows are tracking-only and don't represent in-app unread state).
+  // Declared BEFORE notifications/:id so Express matches the literal path.
+  @Get('notifications/unread-count')
+  getNotificationsUnreadCount(@Req() req: Request) {
+    const { id: userId } = req.user as { id: string }
+    return this.dailyJournalService.getNotificationsUnreadCount(userId)
+  }
+
   @Get('notifications/:id')
   getNotification(@Req() req: Request, @Param('id') id: string) {
     const { id: userId } = req.user as { id: string }

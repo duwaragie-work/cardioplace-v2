@@ -20,6 +20,8 @@ import {
   updateJournalEntry,
   deleteJournalEntry,
 } from '@/lib/services/journal.service';
+import { getMyPatientProfile } from '@/lib/services/intake.service';
+import { getBMI } from '@cardioplace/shared';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 
@@ -214,16 +216,24 @@ function EntrySkeleton() {
 // ─── Entry Card ───────────────────────────────────────────────────────────────
 function EntryCard({
   entry,
+  heightCm,
   onEdit,
   onDelete,
 }: {
   entry: Entry;
+  /** From PatientProfile.heightCm — fixed at intake. Used to compute BMI
+   *  next to the weight chip. Optional — when missing, BMI is hidden. */
+  heightCm: number | null;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   const { t } = useLanguage();
   const hasBP = entry.systolicBP && entry.diastolicBP;
   const bpStatus = hasBP ? getBpStatus(entry.systolicBP!, entry.diastolicBP!) : null;
+  // BMI is read-only and only shown when both weight AND height exist.
+  // Pulse pressure is intentionally NOT rendered on the patient app per
+  // Niva — patients shouldn't see clinical signals they can't action.
+  const bmi = getBMI(heightCm, entry.weight);
 
   const statusColors = {
     red: { bg: '#FEE2E2', text: '#DC2626' },
@@ -304,8 +314,11 @@ function EntryCard({
             </p>
           )}
 
-          {/* Detail chips — pulse + pulse pressure first (clinical signal),
-              then weight / med / symptoms / notes. */}
+          {/* Detail chips — pulse, weight, BMI, position, meds, symptoms.
+              Pulse pressure is intentionally hidden on the patient app per
+              Niva's spec sign-off (patients shouldn't see clinical signals
+              they can't action). It's still computed + visible to the
+              admin/provider on the patient detail screen. */}
           <div className="flex flex-wrap gap-1.5 mt-1">
             {entry.pulse != null && (
               <span
@@ -316,24 +329,6 @@ function EntryCard({
                 }}
               >
                 ♥ {entry.pulse} {t('readings.bpm')}
-              </span>
-            )}
-            {hasBP && (
-              <span
-                className="text-[11px] px-2 py-0.5 rounded-md font-medium"
-                style={{
-                  backgroundColor:
-                    (entry.systolicBP! - entry.diastolicBP!) > 60
-                      ? 'var(--brand-warning-amber-light)'
-                      : '#F1F5F9',
-                  color:
-                    (entry.systolicBP! - entry.diastolicBP!) > 60
-                      ? 'var(--brand-warning-amber)'
-                      : 'var(--brand-text-secondary)',
-                }}
-                title="Pulse pressure (SBP − DBP)"
-              >
-                PP {entry.systolicBP! - entry.diastolicBP!}
               </span>
             )}
             {entry.position && (
@@ -356,6 +351,18 @@ function EntryCard({
                 }}
               >
                 {entry.weight} {t('readings.lbs')}
+              </span>
+            )}
+            {bmi != null && (
+              <span
+                className="text-[11px] px-2 py-0.5 rounded-md font-medium"
+                style={{
+                  backgroundColor: 'var(--brand-primary-purple-light)',
+                  color: 'var(--brand-primary-purple)',
+                }}
+                title="BMI = weight ÷ height² (computed from your intake-time height)"
+              >
+                BMI {bmi.toFixed(1)}
               </span>
             )}
             {entry.medicationTaken != null && (
@@ -437,10 +444,12 @@ function EntryCard({
 // as a plain EntryCard (no shell) so the list doesn't feel over-decorated.
 function SessionCard({
   entries,
+  heightCm,
   onEdit,
   onDelete,
 }: {
   entries: Entry[];
+  heightCm: number | null;
   onEdit: (e: Entry) => void;
   onDelete: (id: string) => void;
 }) {
@@ -531,6 +540,7 @@ function SessionCard({
                 <EntryCard
                   key={e.id}
                   entry={e}
+                  heightCm={heightCm}
                   onEdit={() => onEdit(e)}
                   onDelete={() => onDelete(e.id)}
                 />
@@ -1019,6 +1029,10 @@ export default function ReadingsPage() {
   const { t } = useLanguage();
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
+  // Patient height (intake-time, fixed). Used to compute BMI per reading.
+  // Fetched once alongside the journal list — small endpoint, never blocks
+  // the page render (BMI just hides until it lands).
+  const [heightCm, setHeightCm] = useState<number | null>(null);
   const [editEntry, setEditEntry] = useState<Entry | null>(null);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   // Snapshot of the form taken at openEdit time — used to compute isDirty
@@ -1048,6 +1062,20 @@ export default function ReadingsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Fetch patient profile once for BMI height. Best-effort — readings still
+  // render normally if this fails; the BMI chip just doesn't appear.
+  useEffect(() => {
+    let cancelled = false;
+    getMyPatientProfile()
+      .then((p) => {
+        if (!cancelled) setHeightCm(p?.heightCm ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function openEdit(entry: Entry) {
     setEditEntry(entry);
@@ -1293,6 +1321,7 @@ export default function ReadingsPage() {
                           <SessionCard
                             key={bucket.sessionId}
                             entries={bucket.items}
+                            heightCm={heightCm}
                             onEdit={openEdit}
                             onDelete={(id) => setDeleteId(id)}
                           />
@@ -1300,6 +1329,7 @@ export default function ReadingsPage() {
                           <EntryCard
                             key={bucket.items[0].id + (bucket.sessionId ?? `solo-${i}`)}
                             entry={bucket.items[0]}
+                            heightCm={heightCm}
                             onEdit={() => openEdit(bucket.items[0])}
                             onDelete={() => setDeleteId(bucket.items[0].id)}
                           />

@@ -44,6 +44,7 @@ import {
   Plus,
   Home,
   Volume2,
+  ClipboardCheck,
 } from 'lucide-react';
 
 import { useAuth } from '@/lib/auth-context';
@@ -54,6 +55,7 @@ import {
   listMyMedications,
   type PatientMedication,
 } from '@/lib/services/patient-medications.service';
+import { getBMI } from '@cardioplace/shared';
 import AudioButton from '@/components/intake/AudioButton';
 import ChoiceCard from '@/components/intake/ChoiceCard';
 import StepDots from '@/components/intake/StepDots';
@@ -122,6 +124,10 @@ interface SessionReading {
   systolicBP?: number;
   diastolicBP?: number;
   pulse?: number;
+  /** Always stored in kg (frontend converts from lbs before submit). Used
+   *  to compute BMI for the confirmation screen — patients never enter BMI
+   *  themselves per Niva's spec sign-off. */
+  weightKg?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -994,6 +1000,7 @@ function ConfirmationScreen({
   lastReading,
   sessionReadings,
   hasAFib,
+  heightCm,
   missedMedNames,
   onAddAnother,
   onDone,
@@ -1001,6 +1008,9 @@ function ConfirmationScreen({
   lastReading: SessionReading;
   sessionReadings: SessionReading[];
   hasAFib: boolean;
+  /** From PatientProfile.heightCm — fixed at intake. Used to compute BMI
+   *  when the patient logged a weight. */
+  heightCm: number | null;
   missedMedNames: string[];
   onAddAnother: () => void;
   onDone: () => void;
@@ -1008,6 +1018,10 @@ function ConfirmationScreen({
   const { t } = useLanguage();
   const total = sessionReadings.length;
   const aFibSatisfied = !hasAFib || total >= 3;
+  // BMI is read-only and only shown when both weight (this reading) and
+  // height (intake) are on file. Pulse pressure is intentionally NOT
+  // shown on the patient app per Niva — clinically too easy to misread.
+  const bmi = getBMI(heightCm, lastReading.weightKg);
 
   return (
     // Compacted to fit a typical phone viewport (~700px) without scrolling.
@@ -1061,6 +1075,24 @@ function ConfirmationScreen({
             </span>
           )}
         </div>
+        {/* BMI — read-only, computed from this reading's weight + the
+            patient's intake-time height. Only rendered when both are
+            available; never asks the patient to enter BMI directly. */}
+        {bmi != null && (
+          <div
+            className="mt-2 pt-2 flex items-center justify-center gap-2"
+            style={{ borderTop: '1px solid var(--brand-border)' }}
+          >
+            <Scale className="w-3.5 h-3.5" style={{ color: 'var(--brand-text-muted)' }} />
+            <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
+              Weight {Math.round((lastReading.weightKg ?? 0) * 10) / 10} kg
+            </span>
+            <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>·</span>
+            <span className="text-[11px] font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
+              BMI {bmi.toFixed(1)}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Missed-medication acknowledgement — visible confirmation so the
@@ -1346,6 +1378,7 @@ export default function CheckIn() {
         systolicBP: sys,
         diastolicBP: dia,
         pulse: pul,
+        weightKg,
       };
       setSessionReadings((prev) => [...prev, reading]);
       setReadingNumber((n) => n + 1);
@@ -1415,6 +1448,61 @@ export default function CheckIn() {
     return <CheckInSkeleton />;
   }
 
+  // Layer A journaling gate (matches backend daily_journal.service.ts). Without
+  // a PatientProfile, the rule engine has no clinical context, so the backend
+  // silently drops any reading. Block the wizard entirely + send the user to
+  // /clinical-intake instead of letting them fill out a form that won't save.
+  if (!profile) {
+    return (
+      <div
+        className="min-h-screen flex flex-col"
+        style={{ backgroundColor: 'var(--brand-background)' }}
+      >
+        <main className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-8">
+          <div
+            className="w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 text-center"
+            style={{ boxShadow: '0 4px 24px rgba(123,0,224,0.08)' }}
+          >
+            <div
+              className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5"
+              style={{
+                background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
+              }}
+              aria-hidden
+            >
+              <ClipboardCheck className="w-8 h-8 text-white" strokeWidth={2.25} />
+            </div>
+            <h1 className="text-xl sm:text-2xl font-bold text-[#170c1d] mb-3">
+              Let&apos;s get to know you first
+            </h1>
+            <p className="text-[#4b5563] text-sm sm:text-base leading-relaxed mb-6">
+              Before you log a reading, please answer a few quick questions
+              about your health. Your care team needs this to interpret your
+              numbers safely — readings logged without it won&apos;t be saved.
+            </p>
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                onClick={() => router.push('/clinical-intake')}
+                className="w-full h-12 sm:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm sm:text-base hover:bg-[#6600BC] transition-colors cursor-pointer inline-flex items-center justify-center gap-2"
+              >
+                Complete clinical intake
+                <ArrowRight className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push('/dashboard')}
+                className="w-full h-11 sm:h-12 rounded-full font-semibold text-[#7B00E0] text-sm sm:text-base hover:bg-[#f5f3ff] transition-colors cursor-pointer"
+              >
+                Back to dashboard
+              </button>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   // Confirmation overlays the whole flow
   if (showConfirmation) {
     const last = sessionReadings[sessionReadings.length - 1];
@@ -1428,6 +1516,7 @@ export default function CheckIn() {
             lastReading={last}
             sessionReadings={sessionReadings}
             hasAFib={hasAFib}
+            heightCm={profile?.heightCm ?? null}
             missedMedNames={medications
               .filter((m) => form.medicationStatus[m.id]?.taken === 'no')
               .map((m) => m.drugName)}

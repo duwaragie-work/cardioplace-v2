@@ -53,6 +53,11 @@ export interface IntakeFormState {
   hasHCM?: boolean;
   hasDCM?: boolean;
   diagnosedHypertension?: boolean;
+  /** True only when the patient explicitly clicked "None of the above" on
+   *  step A3. Lets the UI distinguish "no conditions answered yet" from
+   *  "patient confirmed they have none" — avoids pre-selecting "None"
+   *  when the user hasn't touched the step. */
+  noneOfTheAboveAck?: boolean;
 
   // A4 HF subtype (only relevant if hasHeartFailure)
   heartFailureType?: HeartFailureTypeInput;

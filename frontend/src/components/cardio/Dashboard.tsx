@@ -220,7 +220,11 @@ export default function Dashboard() {
 
   // ─── Derived values ───────────────────────────────────────────────────────
   const visibleChartData = chartRange === 7 ? bpChartData.slice(-7) : bpChartData;
-  const loading = isLoading || dataLoading;
+  // Wait for BOTH data streams before lifting the skeleton — auth + journal
+  // (dataLoading) AND the intake-state probe (intakeUi.kind === 'unknown').
+  // Without this gate, journal loads first, the page paints, then the
+  // Action Required card pops in a moment later as a visual jolt.
+  const loading = isLoading || dataLoading || intakeUi.kind === 'unknown';
   const userName = user?.name?.split(' ')[0] ?? '';
 
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -249,7 +253,14 @@ export default function Dashboard() {
   const baselineStr = baseline?.baselineSystolic && baseline?.baselineDiastolic
     ? `${Math.round(Number(baseline.baselineSystolic))}/${Math.round(Number(baseline.baselineDiastolic))}` : '--/--';
 
-  const openAlerts = alerts.filter((a) => a.status === 'OPEN');
+  // Patient-actionable open alerts. Excludes TIER_2_DISCREPANCY because
+  // those are admin-facing per the v2 clinical spec — patients can't action
+  // them, the detail page refuses to render them, and showing them as
+  // clickable cards on the dashboard sends the user into a dead-end "not
+  // found" screen.
+  const openAlerts = alerts.filter(
+    (a) => a.status === 'OPEN' && a.tier !== 'TIER_2_DISCREPANCY',
+  );
 
   // ── Flow D helpers ────────────────────────────────────────────────────────
   // D1 verification badge: shown only when the patient has submitted intake

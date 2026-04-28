@@ -24,6 +24,8 @@ import {
   type PatientMedication,
   type MedicationVerificationStatus,
 } from '@/lib/services/patient-detail.service';
+import { useAuth } from '@/lib/auth-context';
+import { canVerifyMedications } from '@/lib/roleGates';
 
 interface Props {
   medications: PatientMedication[];
@@ -71,6 +73,11 @@ function isPatientSourced(m: PatientMedication): boolean {
 }
 
 export default function MedicationsTab({ medications, loading, onChanged }: Props) {
+  const { user } = useAuth();
+  // Verify / reject / hold buttons render only for the clinical-verifier
+  // roles (SUPER_ADMIN, PROVIDER, MEDICAL_DIRECTOR). HEALPLACE_OPS sees
+  // the same medication cards but no action buttons.
+  const canVerify = canVerifyMedications(user);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -220,6 +227,7 @@ export default function MedicationsTab({ medications, loading, onChanged }: Prop
                         savingId={savingId}
                         onSetStatus={setMedicationStatus}
                         side="patient"
+                        canVerify={canVerify}
                       />
                     ))}
                   </div>
@@ -243,6 +251,7 @@ export default function MedicationsTab({ medications, loading, onChanged }: Prop
                         savingId={savingId}
                         onSetStatus={setMedicationStatus}
                         side="provider"
+                        canVerify={canVerify}
                       />
                     ))}
                   </div>
@@ -337,9 +346,12 @@ interface MedCardProps {
   savingId: string | null;
   side: 'patient' | 'provider';
   onSetStatus: (med: PatientMedication, status: MedicationVerificationStatus) => void;
+  /** Whether the current admin role can verify medications. When false,
+   *  the card shows the data + status pill but no action buttons. */
+  canVerify: boolean;
 }
 
-function MedCard({ med, savingId, side, onSetStatus }: MedCardProps) {
+function MedCard({ med, savingId, side, onSetStatus, canVerify }: MedCardProps) {
   const v = verificationChrome(med.verificationStatus);
   const isDiscontinued = med.discontinuedAt != null;
   const saving = savingId === med.id;
@@ -389,7 +401,7 @@ function MedCard({ med, savingId, side, onSetStatus }: MedCardProps) {
         </p>
       )}
 
-      {!isDiscontinued && (
+      {!isDiscontinued && canVerify && (
         <div className="flex flex-wrap gap-1.5 mt-2.5">
           <StatusButton
             current={med.verificationStatus}

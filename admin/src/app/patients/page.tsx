@@ -46,6 +46,7 @@ import {
   Info,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { hasAdminRole, isProviderOnly } from '@/lib/roleGates';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getPatients, getPatientSummary } from '@/lib/services/provider.service';
 import {
@@ -750,15 +751,17 @@ export default function PatientsPage() {
   const [summary, setSummary] = useState<PatientSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
 
-  // Load patients
+  // Load patients. PROVIDER-only callers get the assigned-patients-only
+  // scope so the list never shows patients they don't treat. (Backend
+  // force-scopes too — this is for clarity / fewer wasted bytes.)
   useEffect(() => {
     if (isLoading || !isAuthenticated) return;
     setLoading(true);
-    getPatients()
+    getPatients(isProviderOnly(user) ? { scope: 'assigned' } : undefined)
       .then((data) => setPatients(Array.isArray(data) ? data : []))
       .catch(() => setPatients([]))
       .finally(() => setLoading(false));
-  }, [isAuthenticated, isLoading]);
+  }, [isAuthenticated, isLoading, user]);
 
   // Load summary when patient selected
   useEffect(() => {
@@ -795,7 +798,7 @@ export default function PatientsPage() {
   // ─── Auth guard ───────────────────────────────────────────────────────────
   if (isLoading) return null;
 
-  if (user?.email !== 'support@healplace.com') {
+  if (!hasAdminRole(user)) {
     return (
       <div className="h-full flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
         <div className="text-center p-8 rounded-2xl bg-white" style={{ boxShadow: 'var(--brand-shadow-card)' }}>

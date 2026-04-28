@@ -4,6 +4,10 @@ import { PrismaService } from '../prisma/prisma.service.js'
 import { EmailService } from '../email/email.service.js'
 import { scheduleCallEmailHtml } from '../email/email-templates.js'
 import { UserRole } from '../generated/prisma/enums.js'
+import {
+  pickDisplayName,
+  resolveUserDisplays,
+} from '../common/user-name-resolver.js'
 
 const SEVERITY_ORDER: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 }
 
@@ -233,6 +237,10 @@ export class ProviderService {
   async getPatients(filters: {
     riskTier?: string
     hasActiveAlerts?: boolean
+    /** PROVIDER privacy scope. 'assigned' = only patients in caller's
+     *  primary or backup slot. 'all' = unrestricted (admin/MD/OPS view). */
+    scope?: 'all' | 'assigned'
+    callerUserId?: string
   }) {
     const where: Record<string, unknown> = {
       roles: { has: UserRole.PATIENT },
@@ -241,6 +249,19 @@ export class ProviderService {
       const profileWhere = this.profileWhereForRiskTier(filters.riskTier)
       if (profileWhere) {
         where.patientProfile = { is: profileWhere }
+      }
+    }
+    // PROVIDER scoping — only patients whose care-team assignment names this
+    // caller as primary OR backup provider. Medical-director-only role does
+    // NOT scope (they oversee everyone) — that's enforced in the controller.
+    if (filters.scope === 'assigned' && filters.callerUserId) {
+      where.providerAssignmentAsPatient = {
+        is: {
+          OR: [
+            { primaryProviderId: filters.callerUserId },
+            { backupProviderId: filters.callerUserId },
+          ],
+        },
       }
     }
 
@@ -351,6 +372,9 @@ export class ProviderService {
             measuredAt: true,
             systolicBP: true,
             diastolicBP: true,
+            // Weight in kg — admin patient detail computes BMI from
+            // weight + PatientProfile.heightCm.
+            weight: true,
           },
         },
         escalationEvents: {
@@ -391,6 +415,20 @@ export class ProviderService {
       },
     })
 
+    // Resolve every "by" user-id appearing on either the alert (resolvedBy)
+    // or its escalation events (acknowledgedBy + resolvedBy) into a display
+    // name so the admin UI can show "Resolved by Dr. Singal" instead of a
+    // truncated UUID. One batched lookup, no N+1.
+    const idsToResolve: string[] = []
+    for (const a of alerts) {
+      if (a.resolvedBy) idsToResolve.push(a.resolvedBy)
+      for (const e of a.escalationEvents) {
+        if (e.acknowledgedBy) idsToResolve.push(e.acknowledgedBy)
+        if (e.resolvedBy) idsToResolve.push(e.resolvedBy)
+      }
+    }
+    const names = await resolveUserDisplays(this.prisma, idsToResolve)
+
     return {
       statusCode: 200,
       data: alerts.map((a) => ({
@@ -414,10 +452,24 @@ export class ProviderService {
         resolutionAction: a.resolutionAction,
         resolutionRationale: a.resolutionRationale,
         resolvedBy: a.resolvedBy,
+        resolvedByName: pickDisplayName(a.resolvedBy, names),
         createdAt: a.createdAt,
         acknowledgedAt: a.acknowledgedAt,
-        journalEntry: a.journalEntry,
-        escalationEvents: a.escalationEvents,
+        journalEntry: a.journalEntry
+          ? {
+              ...a.journalEntry,
+              // Prisma Decimal → number for JSON.
+              weight:
+                a.journalEntry.weight != null
+                  ? Number(a.journalEntry.weight)
+                  : null,
+            }
+          : null,
+        escalationEvents: a.escalationEvents.map((e) => ({
+          ...e,
+          acknowledgedByName: pickDisplayName(e.acknowledgedBy, names),
+          resolvedByName: pickDisplayName(e.resolvedBy, names),
+        })),
       })),
     }
   }
@@ -436,6 +488,9 @@ export class ProviderService {
             measuredAt: true,
             systolicBP: true,
             diastolicBP: true,
+            // Weight is needed for the admin BMI display on the header.
+            // BMI = weight ÷ height²; height comes from PatientProfile.
+            weight: true,
           },
         },
         deviationAlerts: {
@@ -474,6 +529,9 @@ export class ProviderService {
         ? {
             systolicBP: latestEntry.systolicBP,
             diastolicBP: latestEntry.diastolicBP,
+            // Weight in kg (Prisma Decimal). Converted to plain number so
+            // the JSON payload is consumable without a Decimal helper.
+            weight: latestEntry.weight != null ? Number(latestEntry.weight) : null,
             entryDate: latestEntry.measuredAt,
             measurementTime: null,
           }
@@ -684,13 +742,34 @@ export class ProviderService {
 
   // ─── GET /provider/alerts ─────────────────────────────────────────────────────
 
-  async getAlerts(filters: { severity?: string; escalated?: boolean }) {
+  async getAlerts(filters: {
+    severity?: string
+    escalated?: boolean
+    scope?: 'all' | 'assigned'
+    callerUserId?: string
+  }) {
     const where: Record<string, unknown> = { status: 'OPEN' }
     if (filters.severity) {
       where.severity = filters.severity
     }
     if (filters.escalated != null) {
       where.escalated = filters.escalated
+    }
+    // PROVIDER scoping — mirror getPatients. Only alerts for patients whose
+    // care-team assignment names the caller as primary OR backup.
+    if (filters.scope === 'assigned' && filters.callerUserId) {
+      where.user = {
+        is: {
+          providerAssignmentAsPatient: {
+            is: {
+              OR: [
+                { primaryProviderId: filters.callerUserId },
+                { backupProviderId: filters.callerUserId },
+              ],
+            },
+          },
+        },
+      }
     }
 
     const alerts = await this.prisma.deviationAlert.findMany({

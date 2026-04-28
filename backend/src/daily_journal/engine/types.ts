@@ -102,6 +102,13 @@ export interface RuleResult {
 export interface RuleResultMetadata {
   drugName?: string
   drugClass?: string
+  /**
+   * Full set of drug names for rules that match more than one med (e.g. a
+   * pregnant patient on multiple ACE/ARBs). `drugName` keeps the first
+   * match for back-compat; `drugNames` is the joined list rendered in
+   * physician messages.
+   */
+  drugNames?: string[]
   conditionLabel?: string
   thresholdValue?: number
   /** Used for physician-only pulse-pressure annotations riding on another rule. */

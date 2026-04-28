@@ -25,10 +25,14 @@ import {
   type UpsertPracticePayload,
 } from '@/lib/services/practice.service';
 import { useAuth } from '@/lib/auth-context';
+import { canManagePractices } from '@/lib/roleGates';
 
 export default function PracticesPage() {
   const router = useRouter();
   const { user, isLoading: authLoading } = useAuth();
+  // Create practice is a write — SUPER_ADMIN, MED_DIR, OPS only.
+  // PROVIDER sees the list but no "Add practice" CTA anywhere on the page.
+  const canManage = canManagePractices(user);
 
   const [practices, setPractices] = useState<Practice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,10 +80,12 @@ export default function PracticesPage() {
               </p>
             </div>
           </div>
-          <button type="button" onClick={() => setShowCreate(true)} className="btn-admin-primary">
-            <Plus className="w-3.5 h-3.5" />
-            Add practice
-          </button>
+          {canManage && (
+            <button type="button" onClick={() => setShowCreate(true)} className="btn-admin-primary">
+              <Plus className="w-3.5 h-3.5" />
+              Add practice
+            </button>
+          )}
         </div>
 
         {/* List card */}
@@ -101,12 +107,16 @@ export default function PracticesPage() {
                 No practices yet
               </p>
               <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
-                Add your first practice to start onboarding clinicians and patients.
+                {canManage
+                  ? 'Add your first practice to start onboarding clinicians and patients.'
+                  : 'Practices will appear here once an administrator adds them.'}
               </p>
-              <button type="button" onClick={() => setShowCreate(true)} className="btn-admin-primary mt-4">
-                <Plus className="w-3.5 h-3.5" />
-                Add practice
-              </button>
+              {canManage && (
+                <button type="button" onClick={() => setShowCreate(true)} className="btn-admin-primary mt-4">
+                  <Plus className="w-3.5 h-3.5" />
+                  Add practice
+                </button>
+              )}
             </div>
           ) : (
             <ul>

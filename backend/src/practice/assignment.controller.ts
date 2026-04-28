@@ -14,13 +14,26 @@ import { AssignmentService } from './assignment.service.js'
 import { CreateAssignmentDto } from './dto/create-assignment.dto.js'
 import { UpdateAssignmentDto } from './dto/update-assignment.dto.js'
 
+// Patient ↔ care-team assignment.
+//   • READ — open to all four admin roles. PROVIDER needs to see who the
+//     primary / backup / medical director are on the patient detail
+//     screen, even though they can't reassign.
+//   • WRITE — SUPER_ADMIN, MEDICAL_DIRECTOR, HEALPLACE_OPS. PROVIDER
+//     is excluded; they don't reassign their own care team.
+// Method-level @Roles() overrides the controller-level decorator.
 @Controller('admin/patients/:userId/assignment')
-@Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.HEALPLACE_OPS)
+@Roles(
+  UserRole.SUPER_ADMIN,
+  UserRole.MEDICAL_DIRECTOR,
+  UserRole.HEALPLACE_OPS,
+  UserRole.PROVIDER,
+)
 export class AssignmentController {
   constructor(private readonly service: AssignmentService) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.HEALPLACE_OPS)
   create(
     @Param('userId') patientUserId: string,
     @Body() dto: CreateAssignmentDto,
@@ -34,6 +47,7 @@ export class AssignmentController {
   }
 
   @Patch()
+  @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.HEALPLACE_OPS)
   update(
     @Param('userId') patientUserId: string,
     @Body() dto: UpdateAssignmentDto,

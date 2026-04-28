@@ -11,6 +11,10 @@ import type {
   PatientProfile,
 } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import {
+  pickDisplayName,
+  resolveUserDisplays,
+} from '../common/user-name-resolver.js'
 import type { PrismaClient } from '../generated/prisma/client.js'
 import type {
   CorrectProfileDto,
@@ -650,10 +654,17 @@ export class IntakeService {
       orderBy: { createdAt: 'desc' },
       take: 100,
     })
+    const names = await resolveUserDisplays(
+      this.prisma,
+      logs.map((l) => l.changedBy),
+    )
     return {
       statusCode: 200,
       message: 'Verification logs retrieved',
-      data: logs,
+      data: logs.map((l) => ({
+        ...l,
+        changedByName: pickDisplayName(l.changedBy, names),
+      })),
     }
   }
 

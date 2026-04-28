@@ -347,6 +347,34 @@ export class AlertEngineService {
       `Alert fired: ${result.ruleId} (${result.tier}) for user ${session.userId} — ${result.reason}`,
     )
 
+    // Patient-facing in-app dashboard notification. Independent of the
+    // EscalationService ladder (which only pages PROVIDER/MD/OPS for most
+    // tiers per CLINICAL_SPEC §V2-D). This row is what populates the
+    // patient's /notifications inbox so they see "Important medication
+    // alert" cards alongside their dashboard alerts banner. Idempotent via
+    // the @@unique([alertId, escalationEventId, userId, channel]) index —
+    // re-evaluation of the same entry won't double-write.
+    if (messages.patientMessage) {
+      const patientTitle = patientNotificationTitle(result.tier)
+      await this.prisma.notification
+        .create({
+          data: {
+            userId: session.userId,
+            alertId: upserted.id,
+            escalationEventId: null,
+            channel: 'DASHBOARD',
+            title: patientTitle,
+            body: messages.patientMessage,
+            tips: [],
+          },
+        })
+        .catch((err: unknown) => {
+          // P2002 = duplicate (re-evaluation of same entry). Safe to ignore.
+          const code = (err as { code?: string })?.code
+          if (code !== 'P2002') throw err
+        })
+    }
+
     // Phase/7 — renamed from ANOMALY_TRACKED and enriched with tier + ruleId so
     // the escalation service can route by tier without re-fetching the alert.
     this.eventEmitter.emit(JOURNAL_EVENTS.ALERT_CREATED, {
@@ -426,4 +454,29 @@ function isNonDismissableTier(tier: RuleResult['tier']): boolean {
     tier === 'BP_LEVEL_2' ||
     tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
   )
+}
+
+/**
+ * Title shown on the patient's in-app notification card. Mirrors what the
+ * patient sees in the dashboard banner — derived from the alert tier so the
+ * notifications inbox can't drift away from the alert's actual severity.
+ */
+function patientNotificationTitle(tier: RuleResult['tier']): string {
+  switch (tier) {
+    case 'BP_LEVEL_2':
+    case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
+      return 'Urgent Blood Pressure Alert'
+    case 'TIER_1_CONTRAINDICATION':
+      return 'Important medication alert'
+    case 'TIER_2_DISCREPANCY':
+      return 'Medication check-in needed'
+    case 'BP_LEVEL_1_HIGH':
+      return 'Elevated blood pressure'
+    case 'BP_LEVEL_1_LOW':
+      return 'Low blood pressure'
+    case 'TIER_3_INFO':
+      return 'Care team update'
+    default:
+      return 'Cardioplace Alert'
+  }
 }

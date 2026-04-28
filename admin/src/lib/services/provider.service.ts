@@ -15,11 +15,15 @@ export async function getProviderStats() {
 export async function getPatients(filters?: {
   riskTier?: string
   hasActiveAlerts?: boolean
+  /** PROVIDER privacy scope. Backend force-scopes PROVIDER-only callers
+   *  regardless, so passing this from the UI is mainly for clarity. */
+  scope?: 'all' | 'assigned'
 }) {
   const qs = new URLSearchParams()
   if (filters?.riskTier) qs.append('riskTier', filters.riskTier)
   if (filters?.hasActiveAlerts !== undefined)
     qs.append('hasActiveAlerts', String(filters.hasActiveAlerts))
+  if (filters?.scope) qs.append('scope', filters.scope)
   const query = qs.toString()
   const res = await fetchWithAuth(`${API}/api/provider/patients${query ? `?${query}` : ''}`)
   if (!res.ok) {
@@ -70,10 +74,13 @@ export async function getPatientBpTrend(userId: string, startDate: string, endDa
 export async function getProviderAlerts(filters?: {
   severity?: string
   escalated?: boolean
+  /** PROVIDER privacy scope — see getPatients. */
+  scope?: 'all' | 'assigned'
 }) {
   const qs = new URLSearchParams()
   if (filters?.severity) qs.append('severity', filters.severity)
   if (filters?.escalated !== undefined) qs.append('escalated', String(filters.escalated))
+  if (filters?.scope) qs.append('scope', filters.scope)
   const query = qs.toString()
   const res = await fetchWithAuth(`${API}/api/provider/alerts${query ? `?${query}` : ''}`)
   if (!res.ok) {
