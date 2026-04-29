@@ -40,6 +40,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import MicButton from '@/components/intake/MicButton';
+import AudioButton from '@/components/intake/AudioButton';
 import { formatHeightFtIn } from '@/lib/units';
 import {
   getMyPatientProfile,
@@ -190,6 +191,7 @@ function SectionCard({
   editHref,
   onEdit,
   scrollable = false,
+  audioText,
   children,
 }: {
   title: string;
@@ -204,6 +206,10 @@ function SectionCard({
       INSIDE the card (below the title + Edit chrome) using the thin
       purple scrollbar. The title row stays pinned. */
   scrollable?: boolean;
+  /** Phase/26 silent-literacy — when provided, renders an AudioButton in
+      the header that reads this composed summary aloud. Defaults to the
+      title alone if omitted. */
+  audioText?: string;
   children: React.ReactNode;
 }) {
   const { t } = useLanguage();
@@ -240,6 +246,7 @@ function SectionCard({
           >
             {title}
           </h2>
+          <AudioButton size="sm" text={audioText ?? title} />
         </div>
         {editHref && (
           <Link
@@ -442,9 +449,12 @@ function PersonalInfoModal({
           className="shrink-0 flex items-center justify-between px-5 py-4"
           style={{ borderBottom: '1px solid var(--brand-border)' }}
         >
-          <h2 className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-            {t('profile.editPersonalInfo')}
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+              {t('profile.editPersonalInfo')}
+            </h2>
+            <AudioButton size="sm" text={t('profile.editPersonalInfo')} />
+          </div>
           <button
             type="button"
             onClick={onClose}
@@ -706,12 +716,18 @@ export default function ProfilePage() {
               {initialsFor(user?.name, user?.email)}
             </div>
             <div className="min-w-0">
-              <h1
-                className="text-[20px] sm:text-[22px] font-bold leading-tight truncate"
-                style={{ color: 'var(--brand-text-primary)' }}
-              >
-                {user?.name ?? t('profile.yourProfile')}
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1
+                  className="text-[20px] sm:text-[22px] font-bold leading-tight truncate"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  {user?.name ?? t('profile.yourProfile')}
+                </h1>
+                <AudioButton
+                  size="sm"
+                  text={`${user?.name ?? t('profile.yourProfile')}. ${user?.email ?? ''}`}
+                />
+              </div>
               <p className="text-[12.5px] truncate" style={{ color: 'var(--brand-text-muted)' }}>
                 {user?.email ?? '—'}
               </p>
@@ -766,7 +782,21 @@ export default function ProfilePage() {
         {/* Care team — outside the flexible grid so it always takes its
             natural height, then the grid below fills the remaining viewport
             on md+ (and stacks naturally on mobile). */}
-        <SectionCard title={t('profile.careTeam')} icon={<Users className="w-4 h-4" />}>
+        <SectionCard
+          title={t('profile.careTeam')}
+          icon={<Users className="w-4 h-4" />}
+          audioText={
+            careTeam
+              ? [
+                  `${t('profile.careTeam')}.`,
+                  `${t('profile.practice')}: ${careTeam.practice?.name ?? '—'}.`,
+                  `${t('profile.primaryProvider')}: ${careTeam.primaryProvider?.name ?? careTeam.primaryProvider?.email ?? '—'}.`,
+                  `${t('profile.backupProvider')}: ${careTeam.backupProvider?.name ?? careTeam.backupProvider?.email ?? '—'}.`,
+                  `${t('profile.medicalDirector')}: ${careTeam.medicalDirector?.name ?? careTeam.medicalDirector?.email ?? '—'}.`,
+                ].join(' ')
+              : `${t('profile.careTeam')}. ${t('profile.noCareTeam')}`
+          }
+        >
           {careTeam ? (
             <div className="space-y-2">
               <Row label={t('profile.practice')} value={careTeam.practice?.name ?? '—'} />
@@ -807,6 +837,13 @@ export default function ProfilePage() {
               title={t('profile.personalInfoSection')}
               icon={<UserIcon className="w-4 h-4" />}
               onEdit={authProfile ? () => setShowPersonalEdit(true) : undefined}
+              audioText={[
+                `${t('profile.personalInfoSection')}.`,
+                `${t('profile.nameLabel')}: ${authProfile?.name || t('profile.notSet')}.`,
+                `${t('profile.email')}: ${authProfile?.email ?? '—'}.`,
+                `${t('profile.dobLabel')}: ${authProfile?.dateOfBirth ? formatDate(authProfile.dateOfBirth) : t('profile.notSet')}.`,
+                `${t('profile.commPrefLabel')}: ${commPrefLabel(authProfile?.communicationPreference ?? null, t)}.`,
+              ].join(' ')}
             >
               <Row label={t('profile.nameLabel')} value={authProfile?.name || t('profile.notSet')} />
               <Row label={t('profile.email')} value={authProfile?.email ?? '—'} />
@@ -823,6 +860,11 @@ export default function ProfilePage() {
               title={t('profile.aboutYou')}
               icon={<Info className="w-4 h-4" />}
               editHref={profile ? '/clinical-intake?step=A1' : undefined}
+              audioText={[
+                `${t('profile.aboutYou')}.`,
+                `${t('profile.gender')}: ${genderLabel(profile?.gender, t)}.`,
+                `${t('profile.heightLabel')}: ${profile?.heightCm ? formatHeightFtIn(profile.heightCm) : t('profile.notSet')}.`,
+              ].join(' ')}
             >
               <Row label={t('profile.gender')} value={genderLabel(profile?.gender, t)} />
               <Row
