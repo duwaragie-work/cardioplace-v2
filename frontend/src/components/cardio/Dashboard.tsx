@@ -412,6 +412,42 @@ export default function Dashboard() {
     ? [Math.max(0, Math.min(...visibleChartData.map((d) => d.systolic)) - 15), Math.max(...visibleChartData.map((d) => d.systolic)) + 15]
     : [100, 180];
 
+  // Phase/26 TTS pass 2 — single humanised overview that replaces the 5
+  // per-card audio buttons. Composes greeting + latest BP + medication
+  // streak + check-in count + top alert into one flowing summary so the
+  // patient hears the dashboard state from one tap. Conditional pieces
+  // drop out cleanly when not applicable.
+  const dashboardOverview = (() => {
+    const parts: string[] = [];
+    parts.push(`${greeting}${userName ? `, ${userName}` : ''}.`);
+    if (latestEntry?.systolicBP != null && latestEntry?.diastolicBP != null) {
+      const bpSentence =
+        `Your ${todayHasEntry ? "today's" : 'latest'} blood pressure is ` +
+        `${latestEntry.systolicBP} over ${latestEntry.diastolicBP}` +
+        (latestEntry.pulse != null ? `, with a pulse of ${latestEntry.pulse}` : '') +
+        `, ${bpVsTargetStyle.label.toLowerCase()}.`;
+      parts.push(bpSentence);
+    } else {
+      parts.push('No blood pressure readings yet — tap New check-in to log your first one.');
+    }
+    if (streak > 0) {
+      parts.push(
+        `You're on a ${streak}-day medication streak with ${totalEntries} ${totalEntries === 1 ? 'check-in' : 'check-ins'} logged.`,
+      );
+    } else if (totalEntries > 0) {
+      parts.push(`You've logged ${totalEntries} ${totalEntries === 1 ? 'check-in' : 'check-ins'} so far.`);
+    }
+    if (topAlert && topAlertVariant) {
+      parts.push(`You have an active alert: ${topAlertVariant.title}`);
+    } else {
+      parts.push('No active alerts — your care team is monitoring.');
+    }
+    if (intakeUi.kind === 'fresh' || intakeUi.kind === 'resume') {
+      parts.push('Action required: please complete your clinical intake.');
+    }
+    return parts.join(' ');
+  })();
+
   return (
     <div className="relative overflow-auto" style={{ height: 'calc(100vh - 4rem)', backgroundColor: '#FAFBFF' }}>
 
@@ -435,12 +471,6 @@ export default function Dashboard() {
             the Flow C alert detail. Hidden when no open alerts. */}
         {topAlert && topAlertVariant && (
           <div className="relative mb-3 md:mb-4">
-            <div className="absolute top-3 right-3 z-10">
-              <AudioButton
-                size="sm"
-                text={`${t('dashboard.activeAlert')}. ${topAlertVariant.title}. ${topAlertVariant.body}`}
-              />
-            </div>
           <button
             type="button"
             onClick={() => router.push(`/alerts/${topAlert.id}`)}
@@ -509,6 +539,18 @@ export default function Dashboard() {
           />
         )}
 
+        {/* Phase/26 TTS pass 2 — single overview audio button replaces the
+            5 per-card buttons. One tap reads greeting + latest BP + streak +
+            alerts in flowing English. */}
+        {!loading && (
+          <div className="mb-3 md:mb-4 flex items-center gap-2">
+            <AudioButton size="sm" text={dashboardOverview} />
+            <span className="text-[12px] font-medium" style={{ color: 'var(--brand-text-secondary)' }}>
+              {t('dashboard.hearSummary')}
+            </span>
+          </div>
+        )}
+
         {/* ROW 1 — Greeting + Stat cards */}
         <div className="grid grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4 mb-3 md:mb-4">
 
@@ -520,15 +562,6 @@ export default function Dashboard() {
             {/* decorative circle inside card */}
             <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 bg-white" />
             <div className="absolute -bottom-8 -right-4 w-20 h-20 rounded-full opacity-10 bg-white" />
-
-            {!loading && (
-              <div className="absolute top-3 right-3 z-10">
-                <AudioButton
-                  size="sm"
-                  text={`${greeting} ${userName ? userName : t('dashboard.welcomeBack')}. ${t('dashboard.careTeamMonitoring')}`}
-                />
-              </div>
-            )}
 
             <p className="text-white/70 text-xs font-medium mb-1">{greeting}</p>
             {loading ? (
@@ -570,12 +603,6 @@ export default function Dashboard() {
               <span className="block text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
                 {loading ? <Bone w={60} h={9} r={5} /> : (todayHasEntry ? t('dashboard.todaysBp') : t('dashboard.latestBp'))}
               </span>
-              {!loading && latestEntry && (
-                <AudioButton
-                  size="sm"
-                  text={`${todayHasEntry ? t('dashboard.todaysBp') : t('dashboard.latestBp')}: ${latestBP} mmHg${latestEntry.pulse != null ? `, pulse ${latestEntry.pulse}` : ''}. ${bpVsTargetStyle.label}.`}
-                />
-              )}
             </div>
             {loading ? (
               <Bone w={88} h={28} />
@@ -606,9 +633,6 @@ export default function Dashboard() {
           <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl relative" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
             <div className="flex items-start justify-between gap-2 mb-2">
               <Flame className="w-5 h-5" style={{ color: 'var(--brand-warning-amber)' }} />
-              {!loading && (
-                <AudioButton size="sm" text={`${streak} ${t('dashboard.day')} ${t('dashboard.medicationStreak')}`} />
-              )}
             </div>
             {loading ? (
               <Bone w={64} h={28} />
@@ -628,9 +652,6 @@ export default function Dashboard() {
               <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('dashboard.checkIns')}
               </p>
-              {!loading && (
-                <AudioButton size="sm" text={`${totalEntries} ${t('dashboard.totalLogged')}`} />
-              )}
             </div>
             {loading ? (
               <Bone w={52} h={28} />

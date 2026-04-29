@@ -241,11 +241,16 @@ function ChecklistRow({
   text,
   checked,
   onToggle,
+  audioText,
 }: {
   icon: React.ReactNode;
   text: string;
   checked: boolean;
   onToggle: () => void;
+  /** Phase/26 TTS pass 2 — optional spoken label. When set, renders a small
+   *  AudioButton next to the row so a non-reader can hear the option before
+   *  toggling. Defaults to undefined (no audio button) for backwards compat. */
+  audioText?: string;
 }) {
   return (
     <motion.div
@@ -253,6 +258,11 @@ function ChecklistRow({
       tabIndex={0}
       onClick={onToggle}
       onKeyDown={(e) => {
+        // Only toggle when the keypress targeted the row itself — not when
+        // the user keyboard-activated the nested AudioButton (whose Enter
+        // event still bubbles up because button.click() doesn't stop the
+        // keydown event itself).
+        if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           onToggle();
@@ -280,6 +290,14 @@ function ChecklistRow({
       <p className="flex-1 text-[13.5px]" style={{ color: 'var(--brand-text-primary)' }}>
         {text}
       </p>
+      {audioText && (
+        // AudioButton already calls e.stopPropagation() on its onClick so
+        // tapping it doesn't also fire the row's onClick toggle. No
+        // additional wrapper handlers needed.
+        <span className="shrink-0">
+          <AudioButton size="sm" text={audioText} />
+        </span>
+      )}
       <div
         className="shrink-0 rounded-full flex items-center justify-center transition-all"
         style={{
@@ -344,6 +362,7 @@ function B1Checklist({ form, setField }: StepProps) {
             key={it.key}
             icon={it.icon}
             text={it.text}
+            audioText={it.text}
             checked={Boolean(form[it.key])}
             onToggle={() => setField(it.key, !form[it.key] as FormData[typeof it.key])}
           />
@@ -757,6 +776,13 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                       {med.drugClass.replace(/_/g, ' ').toLowerCase()}
                     </p>
                   </div>
+                  {/* Phase/26 TTS pass 2 — per-medication audio so a non-reader
+                      hears "Lisinopril, ace inhibitor" before choosing yes / no
+                      / not due yet. */}
+                  <AudioButton
+                    size="sm"
+                    text={`${med.drugName}, ${med.drugClass.replace(/_/g, ' ').toLowerCase()}`}
+                  />
                 </div>
 
                 <div className="grid grid-cols-3 gap-2">
@@ -782,7 +808,22 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                       <motion.button
                         key={opt.value}
                         type="button"
-                        onClick={() => setTaken(med.id, opt.value)}
+                        onClick={() => {
+                          // Phase/26 TTS pass 2 — speak the option label as
+                          // it's selected so non-readers hear what they tapped.
+                          if (
+                            typeof window !== 'undefined' &&
+                            'speechSynthesis' in window
+                          ) {
+                            const synth = window.speechSynthesis;
+                            synth.cancel();
+                            const u = new SpeechSynthesisUtterance(opt.label);
+                            u.lang = 'en-US';
+                            u.rate = 0.95;
+                            synth.speak(u);
+                          }
+                          setTaken(med.id, opt.value);
+                        }}
                         className="h-11 rounded-xl text-[12px] font-semibold border-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                         style={{
                           backgroundColor: active ? opt.accent : 'white',
@@ -932,6 +973,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
             key={s.key}
             icon={s.icon}
             text={s.text}
+            audioText={s.text}
             checked={Boolean(form[s.key])}
             onToggle={() => setField(s.key, !form[s.key] as FormData[typeof s.key])}
           />
@@ -957,6 +999,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
                 key={s.key}
                 icon={s.icon}
                 text={s.text}
+                audioText={s.text}
                 checked={Boolean(form[s.key])}
                 onToggle={() => setField(s.key, !form[s.key] as FormData[typeof s.key])}
               />
@@ -1031,6 +1074,46 @@ function ConfirmationScreen({
   // shown on the patient app per Niva — clinically too easy to misread.
   const bmi = getBMI(heightCm, lastReading.weightKg);
 
+  // Phase/26 TTS pass 2 — humanised overview reading the whole confirmation
+  // screen, not just the BP. Built from the existing variables; conditional
+  // pieces drop out cleanly when not applicable.
+  const overviewAudio = (() => {
+    const parts: string[] = [];
+    parts.push(
+      total > 1
+        ? `All set. You logged ${total} readings this session.`
+        : 'All set. Your reading was saved.',
+    );
+    if (lastReading.systolicBP != null && lastReading.diastolicBP != null) {
+      const bpSentence =
+        `Your blood pressure was ${lastReading.systolicBP} over ${lastReading.diastolicBP} mmHg` +
+        (lastReading.pulse != null ? `, with a pulse of ${lastReading.pulse} beats per minute.` : '.');
+      parts.push(bpSentence);
+    }
+    if (lastReading.weightKg != null) {
+      const lbs = Math.round(lastReading.weightKg * 2.20462 * 10) / 10;
+      parts.push(
+        bmi != null
+          ? `You weighed ${lbs} pounds today, with a BMI of ${bmi.toFixed(1)}.`
+          : `You weighed ${lbs} pounds today.`,
+      );
+    }
+    if (missedMedNames.length > 0) {
+      parts.push(
+        `We noted you missed ${missedMedNames.join(' and ')} today — your care team will see this.`,
+      );
+    }
+    if (hasAFib) {
+      parts.push(
+        aFibSatisfied
+          ? `That's enough readings for your atrial fibrillation monitoring.`
+          : `For atrial fibrillation monitoring, please log at least three readings in this session — you have ${total} so far.`,
+      );
+    }
+    parts.push('Tap Add another to log more, or Back to dashboard when you are done.');
+    return parts.join(' ');
+  })();
+
   return (
     // Compacted to fit a typical phone viewport (~700px) without scrolling.
     // Tighter checkmark, smaller summary card, and the "what happens next"
@@ -1046,9 +1129,12 @@ function ConfirmationScreen({
         <Check className="w-9 h-9" style={{ color: 'var(--brand-success-green)' }} strokeWidth={3} />
       </motion.div>
 
-      <h2 className="text-[20px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
-        {total > 1 ? t('checkin.confirm.titleMulti').replace('{n}', String(total)) : t('checkin.confirm.title')}
-      </h2>
+      <div className="flex items-center gap-2">
+        <h2 className="text-[20px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
+          {total > 1 ? t('checkin.confirm.titleMulti').replace('{n}', String(total)) : t('checkin.confirm.title')}
+        </h2>
+        <AudioButton text={overviewAudio} size="sm" />
+      </div>
       <p className="text-[13px] mt-0.5 mb-4" style={{ color: 'var(--brand-text-muted)' }}>
         {t('checkin.confirm.subtitle')}
       </p>
@@ -1062,15 +1148,6 @@ function ConfirmationScreen({
           <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
             {t('checkin.confirm.thisReading')}
           </span>
-          <AudioButton
-            text={(lastReading.pulse != null
-              ? t('checkin.confirm.readingAudioPulse').replace('{pulse}', String(lastReading.pulse))
-              : t('checkin.confirm.readingAudio')
-            )
-              .replace('{sys}', String(lastReading.systolicBP ?? ''))
-              .replace('{dia}', String(lastReading.diastolicBP ?? ''))}
-            size="sm"
-          />
         </div>
         <div className="flex items-baseline gap-2 justify-center">
           <span className="text-[30px] font-bold leading-none" style={{ color: 'var(--brand-primary-purple)' }}>

@@ -173,6 +173,83 @@ function formatDate(dateStr: string) {
   }
 }
 
+// Phase/26 TTS pass 2 — humanise the reading audio summary into a single
+// flowing paragraph rather than period-separated fragments. Reused by
+// EntryCard and the EditModal's audio button so the patient hears the
+// same prose style on the list and the edit sheet.
+type ReadingShape = {
+  measuredAt: string;
+  systolicBP: number | null | undefined;
+  diastolicBP: number | null | undefined;
+  pulse: number | null | undefined;
+  position: 'SITTING' | 'STANDING' | 'LYING' | '' | null | undefined;
+  weight: number | null | undefined;
+  bmi: number | null | undefined;
+  medicationTaken: boolean | null | undefined;
+  symptomCount: number;
+  notes: string | null | undefined;
+};
+
+function humanizeReading(r: ReadingShape, t: TFn): string {
+  try {
+    const parts: string[] = [];
+    const dt = new Date(r.measuredAt);
+    const day = formatDate(r.measuredAt);
+    const time = !Number.isNaN(dt.getTime())
+      ? dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      : '';
+    const opener = time
+      ? `On ${day} at ${time}, you logged a reading.`
+      : `On ${day}, you logged a reading.`;
+    parts.push(opener);
+
+    if (r.systolicBP != null && r.diastolicBP != null) {
+      let bp = `Your blood pressure was ${r.systolicBP} over ${r.diastolicBP}`;
+      if (r.pulse != null) bp += `, with a pulse of ${r.pulse} beats per minute`;
+      bp += '.';
+      parts.push(bp);
+    } else if (r.pulse != null) {
+      parts.push(`Your pulse was ${r.pulse} beats per minute.`);
+    }
+
+    const positionLabel =
+      r.position === 'SITTING'
+        ? t('checkin.b2.positionSitting').toLowerCase()
+        : r.position === 'STANDING'
+          ? t('checkin.b2.positionStanding').toLowerCase()
+          : r.position === 'LYING'
+            ? t('checkin.b2.positionLying').toLowerCase()
+            : null;
+
+    const weightSentencePieces: string[] = [];
+    if (positionLabel) weightSentencePieces.push(`You were ${positionLabel}`);
+    if (r.weight != null) weightSentencePieces.push(`weighing ${kgToLbs(r.weight)} pounds`);
+    if (r.bmi != null) weightSentencePieces.push(`with a BMI of ${r.bmi.toFixed(1)}`);
+    if (weightSentencePieces.length > 0) {
+      parts.push(`${weightSentencePieces.join(', ')}.`);
+    }
+
+    if (r.medicationTaken === true) parts.push('You took your medications.');
+    else if (r.medicationTaken === false) parts.push('You missed at least one medication.');
+
+    if (r.symptomCount > 0) {
+      parts.push(
+        `You reported ${r.symptomCount} symptom${r.symptomCount > 1 ? 's' : ''}.`,
+      );
+    } else {
+      parts.push('You reported no symptoms.');
+    }
+
+    if (r.notes?.trim()) {
+      parts.push(`You noted: ${r.notes.trim()}.`);
+    }
+
+    return parts.join(' ');
+  } catch {
+    return formatDate(r.measuredAt);
+  }
+}
+
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 function Bone({ w, h, rounded = 'rounded-lg' }: { w: number | string; h: number; rounded?: string }) {
   return (
@@ -231,40 +308,29 @@ function EntryCard({
   // Niva — patients shouldn't see clinical signals they can't action.
   const bmi = getBMI(heightCm, entry.weight);
 
-  // Phase/26 silent-literacy — compose a spoken summary so a non-reader
-  // can hear the entry without parsing chips. Only emits the parts that
-  // are actually present so the read-aloud doesn't say "weight none" etc.
-  const audioSummary = (() => {
-    const parts: string[] = [formatDate(entry.measuredAt)];
-    const dt = new Date(entry.measuredAt);
-    if (!Number.isNaN(dt.getTime())) {
-      const hh = String(dt.getHours()).padStart(2, '0');
-      const mi = String(dt.getMinutes()).padStart(2, '0');
-      parts.push(`at ${hh}:${mi}`);
-    }
-    if (entry.systolicBP && entry.diastolicBP) {
-      parts.push(`Blood pressure ${entry.systolicBP} over ${entry.diastolicBP} mmHg.`);
-    }
-    if (entry.pulse != null) parts.push(`Pulse ${entry.pulse} bpm.`);
-    if (entry.position) {
-      const posLabel =
-        entry.position === 'SITTING'
-          ? t('checkin.b2.positionSitting')
-          : entry.position === 'STANDING'
-            ? t('checkin.b2.positionStanding')
-            : t('checkin.b2.positionLying');
-      parts.push(`${posLabel}.`);
-    }
-    if (entry.weight != null) parts.push(`Weight ${kgToLbs(entry.weight)} pounds.`);
-    if (bmi != null) parts.push(`BMI ${bmi.toFixed(1)}.`);
-    if (entry.medicationTaken === true) parts.push('Medication taken.');
-    if (entry.medicationTaken === false) parts.push('Medication missed.');
-    if (entry.symptoms && entry.symptoms.length > 0) {
-      parts.push(`${entry.symptoms.length} symptom${entry.symptoms.length > 1 ? 's' : ''} reported.`);
-    }
-    if (entry.notes) parts.push(`Note: ${entry.notes}.`);
-    return parts.join(' ');
-  })();
+  // Phase/26 TTS pass 2 — single humanised paragraph, composed via the
+  // shared `humanizeReading` helper so EntryCard and EditModal speak in
+  // the same prose style.
+  const structuredSymptomCount = SYMPTOM_KEYS.reduce(
+    (n, k) => (entry[k] ? n + 1 : n),
+    0,
+  );
+  const legacySymptomCount = entry.symptoms?.length ?? 0;
+  const audioSummary = humanizeReading(
+    {
+      measuredAt: entry.measuredAt,
+      systolicBP: entry.systolicBP ?? null,
+      diastolicBP: entry.diastolicBP ?? null,
+      pulse: entry.pulse ?? null,
+      position: entry.position ?? null,
+      weight: entry.weight ?? null,
+      bmi,
+      medicationTaken: entry.medicationTaken ?? null,
+      symptomCount: structuredSymptomCount + legacySymptomCount,
+      notes: entry.notes ?? null,
+    },
+    t,
+  );
 
   return (
     <motion.div
@@ -577,6 +643,7 @@ function EditModal({
   saving,
   error,
   isDirty,
+  heightCm,
   onChange,
   onSave,
   onClose,
@@ -586,11 +653,45 @@ function EditModal({
   error: string;
   /** True when at least one field differs from the original entry. */
   isDirty: boolean;
+  /** From PatientProfile.heightCm — used to compute BMI in the audio summary. */
+  heightCm: number | null;
   onChange: (key: keyof EditForm, val: string | boolean) => void;
   onSave: () => void;
   onClose: () => void;
 }) {
   const { t } = useLanguage();
+
+  // Phase/26 TTS pass 2 — compose a humanised summary of the in-progress
+  // form so the patient can hear what they're about to save. Reuses the
+  // same helper as EntryCard so the prose style matches across the page.
+  const formMeasuredAt = (() => {
+    if (!form.measuredDate) return new Date().toISOString();
+    const ts = `${form.measuredDate}T${form.measuredTime || '00:00'}`;
+    const d = new Date(ts);
+    return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+  })();
+  const formSys = form.systolic ? parseInt(form.systolic, 10) : null;
+  const formDia = form.diastolic ? parseInt(form.diastolic, 10) : null;
+  const formPulse = form.pulse ? parseInt(form.pulse, 10) : null;
+  const formWeightKg = form.weight ? parseFloat(form.weight) : null;
+  const formBmi = getBMI(heightCm, formWeightKg ?? undefined);
+  const formSymptomCount = SYMPTOM_KEYS.reduce((n, k) => (form[k] ? n + 1 : n), 0);
+  const editAudio = humanizeReading(
+    {
+      measuredAt: formMeasuredAt,
+      systolicBP: Number.isFinite(formSys) ? formSys : null,
+      diastolicBP: Number.isFinite(formDia) ? formDia : null,
+      pulse: Number.isFinite(formPulse) ? formPulse : null,
+      position: form.position || null,
+      weight: Number.isFinite(formWeightKg) ? formWeightKg : null,
+      bmi: formBmi,
+      medicationTaken:
+        form.medication === 'yes' ? true : form.medication === 'no' ? false : null,
+      symptomCount: formSymptomCount,
+      notes: form.notes,
+    },
+    t,
+  );
 
   return (
     <motion.div
@@ -619,15 +720,20 @@ function EditModal({
       >
         {/* Header — shrink-0 so it never scrolls */}
         <div
-          className="shrink-0 bg-white flex items-center justify-between px-5 py-4"
+          className="shrink-0 bg-white flex items-center justify-between px-5 py-4 gap-3"
           style={{ borderBottom: '1px solid var(--brand-border)' }}
         >
-          <h2 className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-            {t('readings.editReading')}
-          </h2>
+          <div className="flex items-center gap-2 min-w-0">
+            <h2 className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+              {t('readings.editReading')}
+            </h2>
+            {/* Phase/26 TTS pass 2 — humanised summary of the in-progress
+                form so the patient can hear what they'll save. */}
+            <AudioButton size="sm" text={editAudio} />
+          </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-70 cursor-pointer"
+            className="w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-70 cursor-pointer shrink-0"
             style={{ backgroundColor: 'var(--brand-background)' }}
             aria-label={t('common.close')}
           >
@@ -1425,6 +1531,7 @@ export default function ReadingsPage() {
             form={editForm}
             saving={editSaving}
             error={editError}
+            heightCm={heightCm}
             // JSON.stringify is fine here — EditForm is small + flat. Returns
             // false when the user reopens the modal without touching anything.
             isDirty={

@@ -789,10 +789,10 @@ export default function ProfilePage() {
             careTeam
               ? [
                   `${t('profile.careTeam')}.`,
-                  `${t('profile.practice')}: ${careTeam.practice?.name ?? '—'}.`,
-                  `${t('profile.primaryProvider')}: ${careTeam.primaryProvider?.name ?? careTeam.primaryProvider?.email ?? '—'}.`,
-                  `${t('profile.backupProvider')}: ${careTeam.backupProvider?.name ?? careTeam.backupProvider?.email ?? '—'}.`,
-                  `${t('profile.medicalDirector')}: ${careTeam.medicalDirector?.name ?? careTeam.medicalDirector?.email ?? '—'}.`,
+                  `${t('profile.practice')}: ${careTeam.practice?.name ?? t('profile.notAssigned')}.`,
+                  `${t('profile.primaryProvider')}: ${careTeam.primaryProvider?.name ?? t('profile.notAssigned')}.`,
+                  `${t('profile.backupProvider')}: ${careTeam.backupProvider?.name ?? t('profile.notAssigned')}.`,
+                  `${t('profile.medicalDirector')}: ${careTeam.medicalDirector?.name ?? t('profile.notAssigned')}.`,
                 ].join(' ')
               : `${t('profile.careTeam')}. ${t('profile.noCareTeam')}`
           }
@@ -878,6 +878,23 @@ export default function ProfilePage() {
                 title={t('profile.pregnancySection')}
                 icon={<Baby className="w-4 h-4" />}
                 editHref="/clinical-intake?step=A2"
+                audioText={(() => {
+                  const parts: string[] = [`${t('profile.pregnancySection')}.`];
+                  parts.push(
+                    profile?.isPregnant === true
+                      ? `${t('profile.currentlyPregnant')}: ${t('common.yes')}.`
+                      : profile?.isPregnant === false
+                        ? `${t('profile.currentlyPregnant')}: ${t('common.no')}.`
+                        : `${t('profile.currentlyPregnant')}: ${t('profile.notSpecified')}.`,
+                  );
+                  if (profile?.isPregnant && profile?.pregnancyDueDate) {
+                    parts.push(`${t('profile.dueDate')}: ${formatDate(profile.pregnancyDueDate)}.`);
+                  }
+                  if (profile?.historyPreeclampsia) {
+                    parts.push(`${t('intake.a2.preeclampsiaTitle')}: ${t('common.yes')}.`);
+                  }
+                  return parts.join(' ');
+                })()}
               >
                 <Row
                   label={t('profile.currentlyPregnant')}
@@ -905,6 +922,23 @@ export default function ProfilePage() {
               title={t('profile.conditionsSection')}
               icon={<Heart className="w-4 h-4" />}
               editHref={profile ? '/clinical-intake?step=A3' : undefined}
+              audioText={(() => {
+                const parts: string[] = [`${t('profile.conditionsSection')}.`];
+                if (onConditions.length === 0 && !profile?.diagnosedHypertension) {
+                  parts.push(t('profile.noConditions'));
+                  return parts.join(' ');
+                }
+                if (onConditions.length > 0) {
+                  parts.push(`${onConditions.map((c) => c.label).join(', ')}.`);
+                }
+                if (profile?.hasHeartFailure && profile?.heartFailureType && profile.heartFailureType !== 'NOT_APPLICABLE') {
+                  parts.push(`${t('profile.hfTypeLabel')}: ${hfTypeLabel(profile.heartFailureType, t)}.`);
+                }
+                if (profile?.diagnosedHypertension) {
+                  parts.push(`${t('profile.diagnosedHtn')}.`);
+                }
+                return parts.join(' ');
+              })()}
             >
               {onConditions.length === 0 && !profile?.diagnosedHypertension ? (
                 <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
@@ -969,6 +1003,19 @@ export default function ProfilePage() {
             icon={<Pill className="w-4 h-4" />}
             editHref={profile ? '/clinical-intake?step=A5' : undefined}
             scrollable
+            audioText={(() => {
+              const parts: string[] = [`${t('profile.medicationsSection')}.`];
+              if (activeMeds.length === 0) {
+                parts.push(t('profile.noMedications'));
+                return parts.join(' ');
+              }
+              const medSentences = activeMeds.map((m) => {
+                const combo = m.isCombination ? ` (${t('profile.combinationPill')})` : '';
+                return `${m.drugName}${combo}, ${frequencyLabel(m.frequency, t)}`;
+              });
+              parts.push(`${medSentences.join('. ')}.`);
+              return parts.join(' ');
+            })()}
           >
             {activeMeds.length === 0 ? (
               <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
