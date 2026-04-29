@@ -104,6 +104,18 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+// Window event the bell + this page both speak. Any local mutation that
+// changes alert/notification state broadcasts so siblings can refresh on
+// the same tick without waiting for the 30s poll. Same convention as the
+// patient app.
+const NOTIF_CHANGE_EVENT = 'cardio:notifications-changed';
+
+function broadcastChange() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(NOTIF_CHANGE_EVENT));
+  }
+}
+
 export default function NotificationsScreen() {
   const router = useRouter();
   // ?tab=notifications opens directly on the personal-inbox tab — used by
@@ -127,8 +139,11 @@ export default function NotificationsScreen() {
   const [notifFilter, setNotifFilter] = useState<NotifFilter>('all');
   const [markingAll, setMarkingAll] = useState(false);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  // First mount sets `loading` so the skeleton shows; subsequent
+  // event-driven refreshes pass `silent` so the page doesn't flash a
+  // skeleton every time the bell fires a change event.
+  const refresh = useCallback(async (opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) setLoading(true);
     try {
       const [alertData, notifData] = await Promise.all([
         getProviderAlerts().catch(() => []),
@@ -141,12 +156,24 @@ export default function NotificationsScreen() {
           : [],
       );
     } finally {
-      setLoading(false);
+      if (!opts.silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void refresh();
+    // Mutations from the top-bar bell (mark-read, mark-all-read) broadcast
+    // a window event so the page picks up the new state on the same tick
+    // — keeps both surfaces consistent without polling.
+    const onChange = () => { void refresh({ silent: true }); };
+    if (typeof window !== 'undefined') {
+      window.addEventListener(NOTIF_CHANGE_EVENT, onChange);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener(NOTIF_CHANGE_EVENT, onChange);
+      }
+    };
   }, [refresh]);
 
   // Per-tier counts drive the filter chips (always show even tier-empty
@@ -209,7 +236,7 @@ export default function NotificationsScreen() {
       });
       try {
         await acknowledgeProviderAlert(alertId);
-        await refresh();
+        await refresh({ silent: true });
       } catch {
         // Soft-fail — the next refresh will reveal the true server state.
       } finally {
@@ -218,17 +245,27 @@ export default function NotificationsScreen() {
           next.delete(alertId);
           return next;
         });
+        broadcastChange();
       }
     },
     [refresh],
   );
 
   const handleMarkRead = useCallback(async (id: string) => {
-    setNotifs((prev) => prev.map((n) => (n.id === id ? { ...n, watched: true } : n)));
+    let didFlip = false;
+    setNotifs((prev) => {
+      const target = prev.find((n) => n.id === id);
+      if (!target || target.watched) return prev;
+      didFlip = true;
+      return prev.map((n) => (n.id === id ? { ...n, watched: true } : n));
+    });
+    if (!didFlip) return;
     try {
       await markAdminNotificationRead(id);
     } catch {
       // Optimistic update stands — next refresh reconciles.
+    } finally {
+      broadcastChange();
     }
   }, []);
 
@@ -243,6 +280,7 @@ export default function NotificationsScreen() {
       // Optimistic update stands.
     } finally {
       setMarkingAll(false);
+      broadcastChange();
     }
   }, [notifs]);
 
@@ -465,7 +503,10 @@ export default function NotificationsScreen() {
         onClose={() => setResolving(null)}
         onResolved={() => {
           setResolving(null);
-          void refresh();
+          void refresh({ silent: true });
+          // Tell the bell + any other listening surface that an alert
+          // resolved so their badges drop without waiting for the poll.
+          broadcastChange();
         }}
       />
     </div>

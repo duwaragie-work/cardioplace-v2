@@ -2,8 +2,15 @@
 
 // Top-bar notification bell with badge + dropdown.
 //
-// Polls the unread count every 30s for the badge — short enough to feel
-// near-real-time for a clinical workflow, long enough to stay cheap.
+// Badge shows the SUM of (open clinical alerts) + (unread notifications) so
+// the admin sees a single "things to deal with" number — same pattern as
+// the patient-app navbar bell. A 30s silent poll keeps the count current
+// without a visible refresh; mutations on /notifications (acknowledge,
+// resolve, mark-read) broadcast a window event so the bell refetches on
+// the same tick instead of waiting for the next poll. Mutations from
+// inside this dropdown re-broadcast so any open /notifications page
+// updates in lockstep.
+//
 // Clicking the bell opens a dropdown with the 10 most-recent notifications
 // (any channel except EMAIL). Each unread row exposes a "✓" pill so the
 // admin can dismiss without navigating away; the header carries a
@@ -17,6 +24,7 @@ import { Bell, Check, CheckCheck, Loader2 } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/services/token';
 import {
   getAdminNotifications,
+  getProviderAlerts,
   markAdminNotificationRead,
   markAdminNotificationsReadBulk,
   type AdminNotificationDto,
@@ -25,6 +33,13 @@ import {
 const POLL_INTERVAL_MS = 30_000;
 const DROPDOWN_LIMIT = 10;
 const API = process.env.NEXT_PUBLIC_API_URL;
+const NOTIF_CHANGE_EVENT = 'cardio:notifications-changed';
+
+function broadcastChange() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(NOTIF_CHANGE_EVENT));
+  }
+}
 
 function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -48,13 +63,24 @@ export default function NotificationBell() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
 
+  // Combined badge = open alerts + unread notifications. Two parallel
+  // fetches: the lightweight unread-count endpoint plus the alerts list
+  // (which the provider endpoint already filters to status=OPEN). State
+  // only updates when the value actually changes so React skips no-op
+  // re-renders — no visible blink while the user is mid-page.
   const refreshCount = useCallback(async () => {
     try {
-      const res = await fetchWithAuth(`${API}/api/daily-journal/notifications/unread-count`);
-      if (!res.ok) return;
-      const json = await res.json();
-      const next = Number(json?.data?.unread ?? 0);
-      if (mountedRef.current && Number.isFinite(next)) setCount(next);
+      const [alertData, unreadJson] = await Promise.all([
+        getProviderAlerts().catch(() => [] as unknown[]),
+        fetchWithAuth(`${API}/api/daily-journal/notifications/unread-count`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+      ]);
+      if (!mountedRef.current) return;
+      const openAlertCount = Array.isArray(alertData) ? alertData.length : 0;
+      const unreadNotifCount = Number(unreadJson?.data?.unread ?? 0);
+      const next = openAlertCount + (Number.isFinite(unreadNotifCount) ? unreadNotifCount : 0);
+      setCount((prev) => (prev === next ? prev : next));
     } catch {
       // Silent — bell shouldn't surface network noise. Next tick retries.
     }
@@ -70,17 +96,30 @@ export default function NotificationBell() {
     }
   }, []);
 
-  // Poll the unread count regardless of dropdown state — the badge must
-  // stay current so the user knows something arrived without opening.
+  // Poll the badge regardless of dropdown state — must stay current so the
+  // admin knows something arrived without opening. Also listen for the
+  // window-level change event so /notifications mutations refresh us on
+  // the same tick (no 30s lag) and re-fetch the dropdown items if open
+  // (otherwise the items list goes stale while the badge updates).
   useEffect(() => {
     mountedRef.current = true;
     void refreshCount();
     const id = setInterval(() => void refreshCount(), POLL_INTERVAL_MS);
+    const onChange = () => {
+      void refreshCount();
+      if (open) void refreshItems();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener(NOTIF_CHANGE_EVENT, onChange);
+    }
     return () => {
       mountedRef.current = false;
       clearInterval(id);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener(NOTIF_CHANGE_EVENT, onChange);
+      }
     };
-  }, [refreshCount]);
+  }, [refreshCount, refreshItems, open]);
 
   // Close the dropdown on outside click. Pointerdown beats click so
   // clicking another button doesn't get swallowed by a closing overlay.
@@ -104,17 +143,23 @@ export default function NotificationBell() {
 
   // Optimistically flip a row to read + decrement the badge. Used by both
   // the row tap (navigates) and the per-row "✓" button (stays in dropdown).
+  // Broadcasts so any open /notifications page updates in lockstep.
   const markOne = useCallback(async (id: string) => {
+    let didFlip = false;
     setItems((prev) => {
       const target = prev.find((x) => x.id === id);
       if (!target || target.watched) return prev;
+      didFlip = true;
       return prev.map((x) => (x.id === id ? { ...x, watched: true } : x));
     });
+    if (!didFlip) return;
     setCount((prev) => Math.max(0, prev - 1));
     try {
       await markAdminNotificationRead(id);
     } catch {
       // Optimistic update stands; refreshCount tick reconciles.
+    } finally {
+      broadcastChange();
     }
   }, []);
 
@@ -132,13 +177,17 @@ export default function NotificationBell() {
     if (ids.length === 0) return;
     setMarkingAll(true);
     setItems((prev) => prev.map((x) => ({ ...x, watched: true })));
-    setCount(0);
+    // Badge is alerts + unread notifs combined — only the notification
+    // slice is going to zero, so decrement by exactly the flipped count
+    // and let the next poll reconcile if anything raced.
+    setCount((prev) => Math.max(0, prev - ids.length));
     try {
       await markAdminNotificationsReadBulk(ids);
     } catch {
       // Optimistic update stands; next refresh reconciles.
     } finally {
       if (mountedRef.current) setMarkingAll(false);
+      broadcastChange();
     }
   }
 
