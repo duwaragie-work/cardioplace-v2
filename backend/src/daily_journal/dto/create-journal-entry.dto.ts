@@ -128,6 +128,16 @@ export class CreateJournalEntryDto {
   @IsBoolean()
   medicationTaken?: boolean
 
+  // Phase/26 silent-literacy — patient flagged ANY medication as "not due yet"
+  // on this entry. Distinct from `medicationTaken` so the rule engine knows
+  // the gap is intentional rather than a missed dose. Adherence rule
+  // (engine/adherence.ts) only fires on `medicationTaken === false`, so a
+  // scheduledLater entry with medicationTaken=undefined is silently ignored
+  // by the rule pipeline — exactly the desired behaviour.
+  @IsOptional()
+  @IsBoolean()
+  medicationScheduledLater?: boolean
+
   @IsOptional()
   @IsInt()
   @Min(0)

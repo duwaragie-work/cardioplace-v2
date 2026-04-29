@@ -281,12 +281,15 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
           className="rounded-2xl p-4 sm:p-5"
           style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)' }}
         >
-          <p
-            className="text-[12px] font-bold uppercase tracking-wider mb-1.5"
-            style={{ color: 'var(--brand-primary-purple)' }}
-          >
-            {t('alerts.tier.whatNext')}
-          </p>
+          <div className="flex items-start justify-between gap-3 mb-1.5">
+            <p
+              className="text-[12px] font-bold uppercase tracking-wider"
+              style={{ color: 'var(--brand-primary-purple)' }}
+            >
+              {t('alerts.tier.whatNext')}
+            </p>
+            <AudioButton size="sm" text={v.followUp} lang="en-US" />
+          </div>
           <p
             lang="en"
             className="text-[13.5px] leading-relaxed"

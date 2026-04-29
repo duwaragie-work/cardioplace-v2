@@ -36,6 +36,10 @@ export interface JournalEntryPayload {
   /** Pre-measurement 8-item checklist captured as a JSON object. */
   measurementConditions?: Record<string, unknown>
   medicationTaken?: boolean
+  /** Phase/26 — patient explicitly flagged ANY medication as not-due-yet on
+   * this entry. Distinct from `medicationTaken` so the rule engine knows
+   * the gap is intentional, not a missed dose. */
+  medicationScheduledLater?: boolean
   missedDoses?: number
   /** Per-medication miss detail. Submitted when the patient taps "Missed"
    * and checks off specific drugs in CheckIn.tsx. */

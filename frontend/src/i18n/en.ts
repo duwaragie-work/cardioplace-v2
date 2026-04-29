@@ -89,6 +89,7 @@ const en = {
   'dashboard.viewDetails': 'View details',
   'dashboard.viewDetailsAria': '{title} — view details',
   'dashboard.awaitingVerification': 'Awaiting provider verification',
+  'dashboard.hearSummary': 'Hear summary',
   'dashboard.yourGoal': 'Your goal',
   'dashboard.belowTarget': 'Below {target} mmHg',
   'dashboard.setByCareTeam': '· set by your care team',
@@ -335,6 +336,7 @@ const en = {
   'profile.textChat': 'Text / Chat',
   'profile.audioVoice': 'Audio / Voice',
   'profile.notSet': 'Not set',
+  'profile.notAssigned': 'not assigned',
   'profile.accountInfo': 'Account Info',
   'profile.accountCreated': 'Account Created',
   'profile.emailStatus': 'Email Status',
@@ -394,9 +396,9 @@ const en = {
   'profile.dueDate': 'Due date',
   'profile.hfTypeLabel': 'Heart failure type',
   'profile.diagnosedHtn': 'Diagnosed high blood pressure',
-  'profile.freqOnceDaily': 'Once a day',
-  'profile.freqTwiceDaily': 'Twice a day',
-  'profile.freqThreeTimesDaily': '3 times a day',
+  'profile.freqOnceDaily': 'One time a day',
+  'profile.freqTwiceDaily': 'Two times a day',
+  'profile.freqThreeTimesDaily': 'Three times a day',
   'profile.freqUnknown': 'Frequency unknown',
   'profile.hfHfrEf': 'HFrEF (reduced ejection fraction)',
   'profile.hfHfpEf': 'HFpEF (preserved ejection fraction)',
@@ -956,7 +958,7 @@ const en = {
   'intake.a8.categoryOther': 'Other medicine not listed',
   'intake.a8.audioSGLT2': 'Diabetes medicine that also helps the heart',
   'intake.a8.otherBlurb': 'Tell us the name of the medicine. Speak it (your phone will type it for you) or take a photo of the label.',
-  'intake.a8.otherSpeakLabel': 'Speak the medicine name',
+  'intake.a8.otherSpeakLabel': 'Type or say the medicine name',
   'intake.a8.otherSpeakPlaceholder': 'e.g. Hydralazine',
   'intake.a8.otherAdd': 'Add',
   'intake.a8.otherPhotoLabel': 'Or describe what the bottle says',
@@ -973,9 +975,9 @@ const en = {
   'intake.a9.title': 'How often each day?',
   'intake.a9.subtitle': 'Just the count — your care team will fill in the dose.',
   'intake.a9.audio': 'How often do you take each one each day? Just the count — your care team will fill in the dose.',
-  'intake.a9.freqOnce': 'Once',
-  'intake.a9.freqTwice': 'Twice',
-  'intake.a9.freqThree': 'Three',
+  'intake.a9.freqOnce': 'One time',
+  'intake.a9.freqTwice': 'Two times',
+  'intake.a9.freqThree': 'Three times',
   'intake.a9.freqUnsure': 'Not sure',
   'intake.a9.medAudio': 'How many times a day do you take {name}?',
 
@@ -1044,9 +1046,9 @@ const en = {
   'intake.nav.errorSubmit': 'Something went wrong submitting your profile.',
 
   // Frequency labels (used in review)
-  'intake.freq.once': 'Once a day',
-  'intake.freq.twice': 'Twice a day',
-  'intake.freq.three': '3 times a day',
+  'intake.freq.once': 'One time a day',
+  'intake.freq.twice': 'Two times a day',
+  'intake.freq.three': 'Three times a day',
   'intake.freq.unsure': 'Not sure',
   'intake.freq.unset': 'Set frequency',
 
@@ -1058,6 +1060,12 @@ const en = {
   // AudioButton aria labels
   'intake.audio.listen': 'Listen',
   'intake.audio.stop': 'Stop',
+
+  // MicButton aria labels + listening / error states (phase/26)
+  'intake.audio.dictate': 'Speak to fill this field',
+  'intake.audio.dictateStop': 'Stop listening',
+  'intake.audio.dictateListening': 'Listening...',
+  'intake.audio.dictateError': "Couldn't hear that. Tap the mic to try again.",
 
   // MonthlyMedReask modal (E4)
   'intake.reask.ariaLabel': 'Monthly medication check',

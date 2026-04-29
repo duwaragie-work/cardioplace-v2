@@ -68,6 +68,7 @@ export class DailyJournalService {
           sessionId: dto.sessionId ?? null,
           measurementConditions: (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull,
           medicationTaken: dto.medicationTaken ?? null,
+          medicationScheduledLater: dto.medicationScheduledLater ?? false,
           missedDoses: dto.missedDoses ?? null,
           missedMedications: (dto.missedMedications as unknown as JsonValue) ?? Prisma.JsonNull,
           // V2 structured Level-2 symptom triggers (Flow B). Prefer the
@@ -155,6 +156,8 @@ export class DailyJournalService {
         data.measurementConditions =
           (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull
       if (dto.medicationTaken !== undefined) data.medicationTaken = dto.medicationTaken
+      if (dto.medicationScheduledLater !== undefined)
+        data.medicationScheduledLater = dto.medicationScheduledLater
       if (dto.missedDoses !== undefined) data.missedDoses = dto.missedDoses
       if (dto.missedMedications !== undefined) {
         data.missedMedications =

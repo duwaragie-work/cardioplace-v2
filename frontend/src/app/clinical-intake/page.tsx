@@ -72,6 +72,8 @@ import {
 import { EMPTY_INTAKE_STATE, type IntakeFormState, type IntakeStepKey, type SelectedMedication } from '@/lib/intake/types';
 
 import AudioButton from '@/components/intake/AudioButton';
+import MicButton from '@/components/intake/MicButton';
+import { cmToFtIn, ftInToCm } from '@/lib/units';
 import StepDots from '@/components/intake/StepDots';
 import ChoiceCard from '@/components/intake/ChoiceCard';
 import MedicationCard from '@/components/intake/MedicationCard';
@@ -324,26 +326,92 @@ function A1Demographics({ state, setState }: StepProps) {
 
       <div>
         <SectionLabel text={t('intake.a1.heightQuestion')} audio={t('intake.a1.heightAudio')} />
-        <input
-          type="number"
-          inputMode="numeric"
-          min={100}
-          max={250}
-          value={state.heightCm ?? ''}
-          onChange={(e) => {
-            const v = e.target.value;
-            setState((p) => ({ ...p, heightCm: v ? parseInt(v, 10) : undefined }));
-          }}
-          placeholder="170"
-          className="w-full h-14 px-5 rounded-xl text-[18px] outline-none transition box-border"
-          style={{
-            border: '2px solid var(--brand-border)',
-            color: 'var(--brand-text-primary)',
-            backgroundColor: 'white',
-          }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
-        />
+        {(() => {
+          // Phase/26 — patients enter height in feet+inches; we convert to
+          // cm for storage. Existing patients with cm values keep working —
+          // cmToFtIn renders their stored value back into the dual fields.
+          const { feet: storedFeet, inches: storedInches } = cmToFtIn(state.heightCm ?? 0);
+          const updateHeight = (feet: number, inches: number) => {
+            const cm = ftInToCm(feet, inches);
+            setState((p) => ({ ...p, heightCm: cm > 0 ? cm : undefined }));
+          };
+          return (
+            <div className="flex items-end gap-3">
+              <div className="flex-1">
+                <label htmlFor="intake-a1-height-ft" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+                  Feet
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="intake-a1-height-ft"
+                    type="number"
+                    inputMode="numeric"
+                    min={3}
+                    max={8}
+                    value={storedFeet || ''}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      updateHeight(Number.isFinite(v) ? v : 0, storedInches);
+                    }}
+                    placeholder="5"
+                    className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
+                    style={{
+                      border: '2px solid var(--brand-border)',
+                      color: 'var(--brand-text-primary)',
+                      backgroundColor: 'white',
+                    }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+                  />
+                  <MicButton
+                    inputId="intake-a1-height-ft"
+                    numeric
+                    onTranscript={(text) => {
+                      const n = parseInt(text, 10);
+                      if (Number.isFinite(n)) updateHeight(n, storedInches);
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="flex-1">
+                <label htmlFor="intake-a1-height-in" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+                  Inches
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="intake-a1-height-in"
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    max={11}
+                    value={storedInches || (storedFeet ? '0' : '')}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      updateHeight(storedFeet, Number.isFinite(v) ? v : 0);
+                    }}
+                    placeholder="9"
+                    className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
+                    style={{
+                      border: '2px solid var(--brand-border)',
+                      color: 'var(--brand-text-primary)',
+                      backgroundColor: 'white',
+                    }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+                  />
+                  <MicButton
+                    inputId="intake-a1-height-in"
+                    numeric
+                    onTranscript={(text) => {
+                      const n = parseInt(text, 10);
+                      if (Number.isFinite(n)) updateHeight(storedFeet, n);
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         <p className="text-[12px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
           {t('intake.a1.heightHint')}
         </p>
@@ -921,27 +989,37 @@ function A8Categories({ state, setState }: StepProps) {
                   <Mic className="w-5 h-5" />
                 </div>
                 <div className="flex-1">
-                  <label className="block text-[12px] font-semibold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
+                  <label htmlFor="intake-a8-other" className="block text-[12px] font-semibold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
                     {t('intake.a8.otherSpeakLabel')}
                   </label>
-                  <input
-                    type="text"
-                    value={otherText}
-                    onChange={(e) => {
-                      setOtherText(e.target.value);
-                      // Clear stale dedup error as soon as the patient
-                      // edits the input — they're correcting it.
-                      if (dupError) setDupError(null);
-                    }}
-                    placeholder={t('intake.a8.otherSpeakPlaceholder')}
-                    className="w-full h-11 px-4 rounded-lg text-[14px] outline-none transition box-border bg-white"
-                    style={{
-                      border: dupError
-                        ? '2px solid #b91c1c'
-                        : '2px solid var(--brand-border)',
-                      color: 'var(--brand-text-primary)',
-                    }}
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="intake-a8-other"
+                      type="text"
+                      value={otherText}
+                      onChange={(e) => {
+                        setOtherText(e.target.value);
+                        // Clear stale dedup error as soon as the patient
+                        // edits the input — they're correcting it.
+                        if (dupError) setDupError(null);
+                      }}
+                      placeholder={t('intake.a8.otherSpeakPlaceholder')}
+                      className="flex-1 h-11 px-4 rounded-lg text-[14px] outline-none transition box-border bg-white"
+                      style={{
+                        border: dupError
+                          ? '2px solid #b91c1c'
+                          : '2px solid var(--brand-border)',
+                        color: 'var(--brand-text-primary)',
+                      }}
+                    />
+                    <MicButton
+                      inputId="intake-a8-other"
+                      onTranscript={(text) => {
+                        setOtherText(text);
+                        if (dupError) setDupError(null);
+                      }}
+                    />
+                  </div>
                   {dupError && (
                     <p
                       role="alert"
@@ -1126,7 +1204,17 @@ function A10Review({ state, goTo }: StepProps) {
 
       <ReviewSection title={t('intake.a10.sectionAbout')} onEdit={() => goTo?.('A1')}>
         <ReviewRow label={t('intake.a10.rowGender')} value={genderLabel(state.gender)} />
-        <ReviewRow label={t('intake.a10.rowHeight')} value={state.heightCm ? `${state.heightCm} cm` : '—'} />
+        <ReviewRow
+          label={t('intake.a10.rowHeight')}
+          value={
+            state.heightCm
+              ? (() => {
+                  const { feet, inches } = cmToFtIn(state.heightCm);
+                  return `${feet}' ${inches}"`;
+                })()
+              : '—'
+          }
+        />
         {state.gender === 'FEMALE' && (
           <ReviewRow
             label={t('intake.a10.rowPregnancy')}

@@ -166,6 +166,11 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       journalEntry: {
         findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
       },
+      notification: {
+        // alert-engine writes a patient-facing dashboard Notification per alert
+        // (idempotent on @@unique([alertId, escalationEventId, userId, channel])).
+        create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
+      },
     }
     eventEmitter = { emit: jest.fn() }
     profileResolver = { resolve: jest.fn() as jest.Mock<any> }
@@ -1313,5 +1318,46 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(result?.ruleId).toBe('RULE_BRADY_HR_ASYMPTOMATIC')
     expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
     expect(createArgs.data.physicianMessage).toContain('asymptomatic bradycardia')
+  })
+
+  it('Scenario 64 — 65+ CAD + 95/65 → TWO rows (RULE_AGE_65_LOW + RULE_CAD_DBP_CRITICAL)', async () => {
+    // Phase/26 multi-axis fix: SBP 95 violates the §1.1 65+ raised lower
+    // bound (SBP <100 — orthostatic / fall-risk concern), and DBP 65
+    // violates the §4.3 CAD critical lower bound (DBP <70 — J-curve /
+    // coronary perfusion concern). The two rules drive different
+    // remediation paths so both must persist as distinct alerts.
+    // Pre-fix behavior: only RULE_CAD_DBP_CRITICAL was written because the
+    // BP/HR pipeline short-circuited on first match.
+    await run(
+      buildSession({
+        systolicBP: 95,
+        diastolicBP: 65,
+        pulse: 70,
+      }),
+      buildCtx({
+        ageGroup: '65+',
+        profile: { hasCAD: true, diagnosedHypertension: true },
+      }),
+    )
+
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(2)
+
+    // Persist order: AXIS_PRIORITY puts sbp-low before dbp-low, so the
+    // bucket-derived rule lands at calls[0]. Both rows are BP_LEVEL_1_LOW
+    // but on independent clinical axes.
+    const firstCall = prisma.deviationAlert.create.mock.calls[0][0]
+    expect(firstCall.data.ruleId).toBe('RULE_AGE_65_LOW')
+    expect(firstCall.data.tier).toBe('BP_LEVEL_1_LOW')
+    expect(firstCall.data.type).toBe('SYSTOLIC_BP')
+
+    const secondCall = prisma.deviationAlert.create.mock.calls[1][0]
+    expect(secondCall.data.ruleId).toBe('RULE_CAD_DBP_CRITICAL')
+    expect(secondCall.data.tier).toBe('BP_LEVEL_1_LOW')
+    expect(secondCall.data.type).toBe('DIASTOLIC_BP')
+
+    // Distinct ALERT_CREATED events fire per row so EscalationService
+    // instantiates two independent ladders (verified per design — no
+    // assertion on count here because eventEmitter is shared with the
+    // patient-notification pipeline; existing scenarios hold that contract).
   })
 })

@@ -26,9 +26,12 @@ import {
   pregnancyL2Rule,
 } from '../engine/pregnancy-thresholds.js'
 import {
-  cadRule,
+  cadDbpRule,
+  cadHighRule,
   dcmRule,
+  getCadHtnUncontrolledAnnotation,
   hcmRule,
+  hcmVasodilatorRule,
   hfpefRule,
   hfrefRule,
 } from '../engine/condition-branches.js'
@@ -44,6 +47,7 @@ import {
   afibHrRule,
   bradyRule,
   buildTachyRule,
+  getHrContextAnnotation,
 } from '../engine/hr-branches.js'
 import {
   getWidePulsePressureAnnotation,
@@ -58,26 +62,70 @@ import { medicationMissedRule } from '../engine/adherence.js'
 /**
  * Phase/5 AlertEngineService — the single owner of rule evaluation.
  *
- * Pipeline (short-circuits on first match):
- *   1. Pregnancy + ACE/ARB (Tier 1)                ← runs even for AFib <3 readings
- *   2. NDHP-CCB + HFrEF (Tier 1)                   ← runs even for AFib <3 readings
- *   3. Symptom override (general + pregnancy)      ← runs even for AFib <3 readings
- *      → BP Level 2
- *  ── AFib ≥3-reading gate (CLINICAL_SPEC §4.4) — bails here if AFib patient
- *     has fewer than 3 readings in the session. Contraindications + symptom
- *     overrides above are NOT gated (they don't depend on averaged vitals).
- *   4. Absolute emergency (SBP≥180 / DBP≥120) → BP Level 2
- *   5. Pregnancy L2 → L1 High (if isPregnant)
- *   6. Condition branches: HFrEF / HFpEF / CAD / HCM / DCM
- *   7. Personalized high / low (threshold + ≥7 readings)
- *   8. Standard L1 High / L1 Low
- *   9. HR branches: AFib / Tachy / Brady
- *  10. Pulse pressure wide / loop-diuretic sensitivity (physician-only)
+ * Pipeline (multi-axis emission — phase/26 fix to §1.1+§4.3 co-fire bug):
  *
- * Writes at most one DeviationAlert row per call — annotations from pulse-
- * pressure + loop-diuretic ride on the primary result's metadata rather than
- * creating additional rows. Three-tier messages come from OutputGenerator.
+ *   Stage A — pre-gate (terminal, single alert):
+ *     pregnancyAceArb / ndhpHfref / symptomOverridePregnancy / symptomOverrideGeneral
+ *     ← these run even for AFib <3 readings (don't depend on averaged vitals)
+ *
+ *   AFib ≥3-reading gate (CLINICAL_SPEC §4.4) — bails here if AFib patient
+ *   has fewer than 3 readings in the session.
+ *
+ *   Stage B — emergency (terminal, single alert):
+ *     absoluteEmergency / pregnancyL2
+ *
+ *   Stage C — multi-axis accumulation (one alert per axis):
+ *     bp-high  : pregnancyL1High, dcm/hfref/hfpef/hcm (high arm), cadHigh,
+ *                personalizedHigh, standardL1High
+ *     sbp-low  : dcm/hfref/hfpef/hcm (low arm), personalizedLow, standardL1Low
+ *                (suppressed by HF/HCM/DCM if those rules already claimed sbp-low —
+ *                they iterate first per spec: condition rules REPLACE standard)
+ *     dbp-low  : cadDbp (the only DBP-axis rule per CLINICAL_SPEC §4.3)
+ *     info     : hcm vasodilator branch (Tier 3)
+ *     hr       : afib / tachy / brady
+ *
+ *   Stage D — info fallback (only if Stage C empty):
+ *     loopDiureticHypotension / pulsePressureWide
+ *
+ *   Multiple DeviationAlert rows can be written per call — phase/7 dropped the
+ *   @@unique([journalEntryId, type]) and dedup is now (journalEntryId, ruleId).
+ *   Pulse-pressure + loop-diuretic ride as annotations on the highest-tier
+ *   primary result when not standalone (preserves Scenario 15). Three-tier
+ *   messages come from OutputGenerator (per-result, stateless).
  */
+type Axis = 'contraindication' | 'emergency' | 'bp-high' | 'sbp-low' | 'dbp-low' | 'hr' | 'info'
+
+const AXIS_PRIORITY: Axis[] = [
+  'emergency',
+  'contraindication',
+  'bp-high',
+  'sbp-low',
+  'dbp-low',
+  'hr',
+  'info',
+]
+
+function axisFor(r: RuleResult): Axis {
+  if (r.tier === 'TIER_1_CONTRAINDICATION') return 'contraindication'
+  if (r.tier === 'BP_LEVEL_2' || r.tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'emergency'
+  // HCM vasodilator is Tier 3, not a high/low axis claimant — let HCM_LOW
+  // still fire on sbp-low for the same patient (§4.6).
+  if (r.ruleId === 'RULE_HCM_VASODILATOR') return 'info'
+  if (r.ruleId === 'RULE_CAD_DBP_CRITICAL') return 'dbp-low'
+  // HR rules emit BP_LEVEL_1_HIGH / LOW tiers but represent a different axis.
+  if (
+    r.ruleId === 'RULE_AFIB_HR_HIGH' ||
+    r.ruleId === 'RULE_AFIB_HR_LOW' ||
+    r.ruleId === 'RULE_TACHY_HR' ||
+    r.ruleId === 'RULE_BRADY_HR_SYMPTOMATIC' ||
+    r.ruleId === 'RULE_BRADY_HR_ASYMPTOMATIC'
+  ) {
+    return 'hr'
+  }
+  if (r.tier === 'BP_LEVEL_1_LOW') return 'sbp-low'
+  if (r.tier === 'BP_LEVEL_1_HIGH') return 'bp-high'
+  return 'info'
+}
 @Injectable()
 export class AlertEngineService {
   private readonly logger = new Logger(AlertEngineService.name)
@@ -111,16 +159,19 @@ export class AlertEngineService {
    * Evaluate a single JournalEntry. Public so tests + ops tooling can call.
    *
    * Runs two independent passes against the same session:
-   *   Pass 1 — BP/HR rule pipeline (short-circuits on first match, one alert).
+   *   Pass 1 — Multi-axis BP/HR pipeline (one alert per clinical axis).
    *   Pass 2 — Medication-adherence rule (fires if the session reports any
-   *            missed dose). Runs regardless of Pass 1's outcome, so a single
-   *            entry can persist up to TWO DeviationAlert rows (different
-   *            ruleIds; dedup key is `journalEntryId + ruleId`).
+   *            missed dose). Runs regardless of Pass 1.
+   *
+   * Both passes can persist multiple DeviationAlert rows on one entry; dedup
+   * is keyed on `(journalEntryId, ruleId)` (phase/7 dropped the legacy type-
+   * uniqueness constraint).
    *
    * The return value preserves the legacy "primary result" shape for callers
-   * that expect one RuleResult — BP/HR wins if fired, else adherence, else
-   * null. Tests that assert on `prisma.deviationAlert.create.mock.calls[0]`
-   * stay stable because BP is persisted before adherence.
+   * that expect one RuleResult — highest-tier BP/HR wins if fired, else
+   * adherence, else null. The persist order is sorted by AXIS_PRIORITY so
+   * `prisma.deviationAlert.create.mock.calls[0]` stays the highest-tier row,
+   * keeping Scenario 62-style positional assertions stable.
    */
   async evaluate(entryId: string): Promise<RuleResult | null> {
     const session = await this.sessionAverager.averageForEntry(entryId)
@@ -139,11 +190,17 @@ export class AlertEngineService {
       throw err
     }
 
-    // Pass 1 — BP/HR pipeline
-    const bpResult = await this.runPipeline(session, ctx)
-    if (bpResult) {
-      this.addPhysicianAnnotations(bpResult, session, ctx)
-      await this.persistAlert(session, ctx, bpResult)
+    // Cross-session "prior reading pulse elevated" flag — used by tachyRule
+    // (Stage C) AND by the HR-context annotation when terminal-stage rules
+    // preempt Stage C. Computed once here so we don't re-query the DB.
+    const priorElevated = await this.wasPriorReadingPulseElevated(session, ctx)
+
+    // Pass 1 — multi-axis BP/HR pipeline
+    const bpResults = await this.runPipeline(session, ctx, priorElevated)
+    const primary = bpResults[0] ?? null
+    if (primary) this.addPhysicianAnnotations(primary, session, ctx, priorElevated)
+    for (const r of bpResults) {
+      await this.persistAlert(session, ctx, r)
     }
 
     // Pass 2 — Adherence pipeline (independent of Pass 1)
@@ -155,11 +212,11 @@ export class AlertEngineService {
     // Only run the BP-L1 resolve-sweep when NEITHER pipeline fired. This
     // preserves Bug 2 fix scope (sweep is scoped to BP L1 tiers only) and
     // avoids auto-resolving adherence alerts on an unrelated benign BP entry.
-    if (!bpResult && !adherenceResult) {
+    if (bpResults.length === 0 && !adherenceResult) {
       await this.resolveOpenAlerts(session.userId)
     }
 
-    return bpResult ?? adherenceResult
+    return primary ?? adherenceResult
   }
 
   // ─── pipeline ──────────────────────────────────────────────────────────
@@ -167,10 +224,12 @@ export class AlertEngineService {
   private async runPipeline(
     session: SessionAverage,
     ctx: ResolvedContext,
-  ): Promise<RuleResult | null> {
-    // Stage A — rules that don't depend on averaged vitals. Must run even for
-    // AFib patients with <3 readings (the gate below blocks BP/HR rules but
-    // must not block med contraindications / symptom overrides).
+    priorElevated: boolean,
+  ): Promise<RuleResult[]> {
+    // Stage A — pre-gate rules that don't depend on averaged vitals. Must run
+    // even for AFib patients with <3 readings (the gate below blocks BP/HR
+    // rules but must not block med contraindications / symptom overrides).
+    // Terminal: first match wins, no further rules evaluate.
     const preGateRules: RuleFunction[] = [
       pregnancyAceArbRule,
       ndhpHfrefRule,
@@ -179,7 +238,7 @@ export class AlertEngineService {
     ]
     for (const rule of preGateRules) {
       const r = rule(session, ctx)
-      if (r) return r
+      if (r) return [r]
     }
 
     // AFib ≥3-reading gate — stops BP/HR-dependent rules when session sample
@@ -188,16 +247,33 @@ export class AlertEngineService {
       this.logger.log(
         `AFib gate: skipping BP/HR rules for entry ${session.entryId} — session has ${session.readingCount}/${AlertEngineService.AFIB_MIN_READINGS} readings.`,
       )
-      return null
+      return []
     }
 
-    // Stage B — BP/HR pipeline. Tachycardia needs cross-session state.
-    const priorTachyElevated = await this.wasPriorReadingPulseElevated(session, ctx)
-    const tachyRule = buildTachyRule(priorTachyElevated)
-
-    const bpHrRules: RuleFunction[] = [
+    // Stage B — emergency rules. Terminal: a Level 2 emergency dominates
+    // every other axis (by spec, the patient gets the 911 message and the
+    // BP Level 2 ladder fires immediately — nothing else adds value).
+    const emergencyRules: RuleFunction[] = [
       absoluteEmergencyRule,
       pregnancyL2Rule,
+    ]
+    for (const rule of emergencyRules) {
+      const r = rule(session, ctx)
+      if (r) return [r]
+    }
+
+    // Stage C — multi-axis accumulation. Tachycardia uses the cross-session
+    // priorElevated flag computed once in evaluate() (used here + by the
+    // HR-context annotation when terminal stages preempt Stage C).
+    const tachyRule = buildTachyRule(priorElevated)
+
+    // Order matters for the suppression invariant: HFrEF/HFpEF/HCM/DCM rules
+    // (which REPLACE standard SBP-low per §4.2/4.6/4.7/4.8) must iterate
+    // BEFORE personalizedLowRule + standardL1LowRule, so condition rules
+    // claim sbp-low first and bucket-derived rules are skipped. CAD does not
+    // claim sbp-low (only dbp-low), so a CAD-only patient at SBP <100 (65+)
+    // still fires AGE_65_LOW alongside CAD_DBP_CRITICAL. This is the bug fix.
+    const axisRules: RuleFunction[] = [
       pregnancyL1HighRule,
       // dcmRule must precede hfrefRule: both apply to `resolvedHFType=HFREF`,
       // but dcmRule bails when hasHeartFailure=true, so putting it first lets
@@ -206,8 +282,14 @@ export class AlertEngineService {
       dcmRule,
       hfrefRule,
       hfpefRule,
-      cadRule,
+      cadDbpRule,
+      cadHighRule,
       hcmRule,
+      // HCM vasodilator is split from hcmRule so it claims the info axis
+      // independently — an HCM patient on a DHP-CCB with low SBP fires both
+      // RULE_HCM_VASODILATOR (Tier 3, physician-only) AND RULE_HCM_LOW
+      // (BP_LEVEL_1_LOW, patient-facing) per §4.6.
+      hcmVasodilatorRule,
       personalizedHighRule,
       personalizedLowRule,
       standardL1HighRule,
@@ -215,15 +297,41 @@ export class AlertEngineService {
       afibHrRule,
       tachyRule,
       bradyRule,
-      loopDiureticHypotensionRule,
-      pulsePressureWideRule,
     ]
 
-    for (const rule of bpHrRules) {
+    const claimed = new Map<Axis, RuleResult>()
+    for (const rule of axisRules) {
       const r = rule(session, ctx)
-      if (r) return r
+      if (!r) continue
+      const axis = axisFor(r)
+      if (claimed.has(axis)) continue
+      claimed.set(axis, r)
     }
-    return null
+
+    // Stage D — info fallback. Pulse-pressure-wide and loop-diuretic-
+    // hypotension are physician-only Tier 3 hints. They fire as standalone
+    // rows ONLY when nothing else fired; otherwise they ride as annotations
+    // on the highest-tier primary via addPhysicianAnnotations() (preserves
+    // Scenario 15: PP-wide co-occurring with L1-High becomes an annotation,
+    // not a second row).
+    if (claimed.size === 0) {
+      const fallbackRules: RuleFunction[] = [
+        loopDiureticHypotensionRule,
+        pulsePressureWideRule,
+      ]
+      for (const rule of fallbackRules) {
+        const r = rule(session, ctx)
+        if (r) return [r]
+      }
+      return []
+    }
+
+    // Sort by AXIS_PRIORITY so the highest-tier row persists first — keeps
+    // `prisma.deviationAlert.create.mock.calls[0]` pointing at the highest-
+    // tier alert (preserves Scenario 62's positional assertion shape).
+    return AXIS_PRIORITY
+      .map((axis) => claimed.get(axis))
+      .filter((r): r is RuleResult => r !== undefined)
   }
 
   /**
@@ -256,6 +364,7 @@ export class AlertEngineService {
     result: RuleResult,
     session: SessionAverage,
     ctx: ResolvedContext,
+    priorElevated: boolean,
   ) {
     const annotations: string[] = result.metadata.physicianAnnotations ?? []
 
@@ -271,6 +380,37 @@ export class AlertEngineService {
     if (result.ruleId !== 'RULE_LOOP_DIURETIC_HYPOTENSION') {
       const loopNote = getLoopDiureticAnnotation(ctx.contextMeds, session.systolicBP)
       if (loopNote) annotations.push(loopNote)
+    }
+
+    // Phase/26 round-3 fix — bidirectional BP context. Surfaces "SBP also
+    // above CAD goal" framing alongside the J-curve framing when both are
+    // true on the same reading (Reading 3: 155/65). Without this, provider
+    // sees only the dose-reduction recommendation and may miss that SBP is
+    // uncontrolled (per §4.3 treatment target 130/80).
+    if (result.ruleId === 'RULE_CAD_DBP_CRITICAL') {
+      const htnNote = getCadHtnUncontrolledAnnotation(
+        session.systolicBP ?? null,
+        ctx.profile.hasCAD,
+      )
+      if (htnNote) annotations.push(htnNote)
+    }
+
+    // Phase/26 Reading 5b fix — HR context annotation. When a terminal-stage
+    // rule (symptom override or absolute emergency) preempts Stage C, the
+    // HR-axis rule that would have fired never gets a chance. Surface that
+    // finding here so the physician sees both framings (BP-emergency AND
+    // HR-specific remediation, e.g. heart-block / Stokes-Adams suspicion).
+    // Open clinical question (pending Manisha): should this co-fire as a
+    // separate row + ladder? Annotation is the reversible interim answer.
+    const TERMINAL_RULE_IDS = [
+      'RULE_SYMPTOM_OVERRIDE_GENERAL',
+      'RULE_SYMPTOM_OVERRIDE_PREGNANCY',
+      'RULE_ABSOLUTE_EMERGENCY',
+      'RULE_PREGNANCY_L2',
+    ] as const
+    if ((TERMINAL_RULE_IDS as readonly string[]).includes(result.ruleId)) {
+      const hrNote = getHrContextAnnotation(session, ctx, priorElevated)
+      if (hrNote) annotations.push(hrNote)
     }
 
     if (annotations.length > 0) {
