@@ -51,12 +51,14 @@ import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { ClinicalIntakeRequiredError, createJournalEntry } from '@/lib/services/journal.service';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
+import { hasDraft, loadDraft } from '@/lib/intake/draft';
 import {
   listMyMedications,
   type PatientMedication,
 } from '@/lib/services/patient-medications.service';
 import { getBMI } from '@cardioplace/shared';
 import AudioButton from '@/components/intake/AudioButton';
+import MicButton from '@/components/intake/MicButton';
 import ChoiceCard from '@/components/intake/ChoiceCard';
 import StepDots from '@/components/intake/StepDots';
 
@@ -91,10 +93,12 @@ interface FormData {
   // lazily as the patient taps toggles; unanswered meds simply stay absent
   // from the map. The combined `medicationTaken` bool + `missedMedications`
   // array the backend expects are derived at submit time from this map.
+  // Phase/26 — `scheduledLater` lets the patient flag "not due yet" so the
+  // adherence rule doesn't fire and the gap-alert cron knows it's intentional.
   medicationStatus: Record<
     string, // medicationId
     {
-      taken: 'yes' | 'no' | null;
+      taken: 'yes' | 'no' | 'scheduledLater' | null;
       reason:
         | 'FORGOT'
         | 'SIDE_EFFECTS'
@@ -238,11 +242,16 @@ function ChecklistRow({
   text,
   checked,
   onToggle,
+  audioText,
 }: {
   icon: React.ReactNode;
   text: string;
   checked: boolean;
   onToggle: () => void;
+  /** Phase/26 TTS pass 2 — optional spoken label. When set, renders a small
+   *  AudioButton next to the row so a non-reader can hear the option before
+   *  toggling. Defaults to undefined (no audio button) for backwards compat. */
+  audioText?: string;
 }) {
   return (
     <motion.div
@@ -250,6 +259,11 @@ function ChecklistRow({
       tabIndex={0}
       onClick={onToggle}
       onKeyDown={(e) => {
+        // Only toggle when the keypress targeted the row itself — not when
+        // the user keyboard-activated the nested AudioButton (whose Enter
+        // event still bubbles up because button.click() doesn't stop the
+        // keydown event itself).
+        if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           onToggle();
@@ -277,6 +291,14 @@ function ChecklistRow({
       <p className="flex-1 text-[13.5px]" style={{ color: 'var(--brand-text-primary)' }}>
         {text}
       </p>
+      {audioText && (
+        // AudioButton already calls e.stopPropagation() on its onClick so
+        // tapping it doesn't also fire the row's onClick toggle. No
+        // additional wrapper handlers needed.
+        <span className="shrink-0">
+          <AudioButton size="sm" text={audioText} />
+        </span>
+      )}
       <div
         className="shrink-0 rounded-full flex items-center justify-center transition-all"
         style={{
@@ -341,6 +363,7 @@ function B1Checklist({ form, setField }: StepProps) {
             key={it.key}
             icon={it.icon}
             text={it.text}
+            audioText={it.text}
             checked={Boolean(form[it.key])}
             onToggle={() => setField(it.key, !form[it.key] as FormData[typeof it.key])}
           />
@@ -444,13 +467,14 @@ function B2Reading({ form, setField }: StepProps) {
 
       {/* BP */}
       <div>
-        <label className="flex items-center justify-between text-[13px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
+        <label htmlFor="checkin-systolic" className="flex items-center justify-between text-[13px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
           <span>{t('checkin.b2.bpLabel')}</span>
           <AudioButton text={t('checkin.b2.bpAudio')} size="sm" />
         </label>
         <div className="flex items-end gap-3">
           <div className="flex-1">
             <input
+              id="checkin-systolic"
               type="number"
               inputMode="numeric"
               min={60}
@@ -468,11 +492,19 @@ function B2Reading({ form, setField }: StepProps) {
                 backgroundColor: 'white',
               }}
             />
-            <p className="text-[11px] text-center mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpTopLabel')}</p>
+            <div className="mt-1.5 flex items-center justify-center gap-2">
+              <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpTopLabel')}</p>
+              <MicButton
+                inputId="checkin-systolic"
+                numeric
+                onTranscript={(text) => setField('systolicBP', text)}
+              />
+            </div>
           </div>
           <div className="pb-7 text-[32px] font-light" style={{ color: 'var(--brand-text-muted)' }}>/</div>
           <div className="flex-1">
             <input
+              id="checkin-diastolic"
               type="number"
               inputMode="numeric"
               min={40}
@@ -490,7 +522,14 @@ function B2Reading({ form, setField }: StepProps) {
                 backgroundColor: 'white',
               }}
             />
-            <p className="text-[11px] text-center mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpBottomLabel')}</p>
+            <div className="mt-1.5 flex items-center justify-center gap-2">
+              <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpBottomLabel')}</p>
+              <MicButton
+                inputId="checkin-diastolic"
+                numeric
+                onTranscript={(text) => setField('diastolicBP', text)}
+              />
+            </div>
           </div>
         </div>
 
@@ -498,26 +537,34 @@ function B2Reading({ form, setField }: StepProps) {
 
       {/* Pulse */}
       <div>
-        <label className="flex items-center justify-between text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+        <label htmlFor="checkin-pulse" className="flex items-center justify-between text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
           <span className="flex items-center gap-2"><Heart className="w-4 h-4" /> {t('checkin.b2.pulseLabel')}</span>
           <AudioButton text={t('checkin.b2.pulseAudio')} size="sm" />
         </label>
-        <input
-          type="number"
-          inputMode="numeric"
-          min={30}
-          max={220}
-          value={form.pulse}
-          onChange={(e) => setField('pulse', e.target.value)}
-          placeholder="72"
-          className="w-full h-12 px-4 rounded-xl text-center outline-none transition box-border"
-          style={{
-            border: '2px solid var(--brand-border)',
-            color: form.pulse ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
-            backgroundColor: 'white',
-            fontSize: 18,
-          }}
-        />
+        <div className="flex items-center gap-2">
+          <input
+            id="checkin-pulse"
+            type="number"
+            inputMode="numeric"
+            min={30}
+            max={220}
+            value={form.pulse}
+            onChange={(e) => setField('pulse', e.target.value)}
+            placeholder="72"
+            className="flex-1 h-12 px-4 rounded-xl text-center outline-none transition box-border"
+            style={{
+              border: '2px solid var(--brand-border)',
+              color: form.pulse ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
+              backgroundColor: 'white',
+              fontSize: 18,
+            }}
+          />
+          <MicButton
+            inputId="checkin-pulse"
+            numeric
+            onTranscript={(text) => setField('pulse', text)}
+          />
+        </div>
       </div>
     </div>
   );
@@ -559,29 +606,37 @@ function StepWeight({ form, setField }: StepProps) {
       </div>
 
       <div>
-        <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+        <label htmlFor="checkin-weight" className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
           {t('checkin.weight.weightLabel').replace('{unit}', form.weightUnit)}
         </label>
-        <div className="relative">
-          <input
-            type="number"
-            inputMode="decimal"
-            value={form.weight}
-            onChange={(e) => setField('weight', e.target.value)}
-            placeholder={form.weightUnit === 'lbs' ? '185' : '84'}
-            className="w-full outline-none transition text-center"
-            style={{
-              height: 72,
-              borderRadius: 'var(--brand-radius-input)',
-              border: '2px solid var(--brand-border)',
-              fontSize: 32,
-              color: form.weight ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
-              backgroundColor: 'white',
-            }}
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <input
+              id="checkin-weight"
+              type="number"
+              inputMode="decimal"
+              value={form.weight}
+              onChange={(e) => setField('weight', e.target.value)}
+              placeholder={form.weightUnit === 'lbs' ? '185' : '84'}
+              className="w-full outline-none transition text-center"
+              style={{
+                height: 72,
+                borderRadius: 'var(--brand-radius-input)',
+                border: '2px solid var(--brand-border)',
+                fontSize: 32,
+                color: form.weight ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
+                backgroundColor: 'white',
+              }}
+            />
+            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[16px]" style={{ color: 'var(--brand-text-muted)' }}>
+              {form.weightUnit}
+            </span>
+          </div>
+          <MicButton
+            inputId="checkin-weight"
+            numeric
+            onTranscript={(text) => setField('weight', text)}
           />
-          <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[16px]" style={{ color: 'var(--brand-text-muted)' }}>
-            {form.weightUnit}
-          </span>
         </div>
       </div>
 
@@ -632,14 +687,14 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
     });
   };
 
-  const setTaken = (medId: string, value: 'yes' | 'no') => {
+  const setTaken = (medId: string, value: 'yes' | 'no' | 'scheduledLater') => {
     const current = getEntry(medId);
-    // Flipping back to "yes" clears any captured miss detail so a stale
-    // reason doesn't leak into the submit payload.
+    // Flipping back to "yes" / "scheduledLater" clears any captured miss
+    // detail so a stale reason doesn't leak into the submit payload.
     const next: MedicationEntry =
-      value === 'yes'
-        ? { taken: 'yes', reason: null, missedDoses: 1 }
-        : { ...current, taken: 'no' };
+      value === 'no'
+        ? { ...current, taken: 'no' }
+        : { taken: value, reason: null, missedDoses: 1 };
     setField('medicationStatus', {
       ...form.medicationStatus,
       [medId]: next,
@@ -722,19 +777,31 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                       {med.drugClass.replace(/_/g, ' ').toLowerCase()}
                     </p>
                   </div>
+                  {/* Phase/26 TTS pass 2 — per-medication audio so a non-reader
+                      hears "Lisinopril, ace inhibitor" before choosing yes / no
+                      / not due yet. */}
+                  <AudioButton
+                    size="sm"
+                    text={`${med.drugName}, ${med.drugClass.replace(/_/g, ' ').toLowerCase()}`}
+                  />
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {[
                     {
                       value: 'yes' as const,
-                      label: 'Took',
+                      label: 'Yes',
                       accent: 'var(--brand-success-green)',
                     },
                     {
                       value: 'no' as const,
-                      label: 'Missed',
+                      label: 'No',
                       accent: 'var(--brand-warning-amber)',
+                    },
+                    {
+                      value: 'scheduledLater' as const,
+                      label: 'Not due yet',
+                      accent: 'var(--brand-primary-purple)',
                     },
                   ].map((opt) => {
                     const active = entry.taken === opt.value;
@@ -742,8 +809,23 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                       <motion.button
                         key={opt.value}
                         type="button"
-                        onClick={() => setTaken(med.id, opt.value)}
-                        className="h-11 rounded-xl text-[13px] font-semibold border-2 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        onClick={() => {
+                          // Phase/26 TTS pass 2 — speak the option label as
+                          // it's selected so non-readers hear what they tapped.
+                          if (
+                            typeof window !== 'undefined' &&
+                            'speechSynthesis' in window
+                          ) {
+                            const synth = window.speechSynthesis;
+                            synth.cancel();
+                            const u = new SpeechSynthesisUtterance(opt.label);
+                            u.lang = 'en-US';
+                            u.rate = 0.95;
+                            synth.speak(u);
+                          }
+                          setTaken(med.id, opt.value);
+                        }}
+                        className="h-11 rounded-xl text-[12px] font-semibold border-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                         style={{
                           backgroundColor: active ? opt.accent : 'white',
                           borderColor: active ? opt.accent : 'var(--brand-border)',
@@ -892,6 +974,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
             key={s.key}
             icon={s.icon}
             text={s.text}
+            audioText={s.text}
             checked={Boolean(form[s.key])}
             onToggle={() => setField(s.key, !form[s.key] as FormData[typeof s.key])}
           />
@@ -917,6 +1000,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
                 key={s.key}
                 icon={s.icon}
                 text={s.text}
+                audioText={s.text}
                 checked={Boolean(form[s.key])}
                 onToggle={() => setField(s.key, !form[s.key] as FormData[typeof s.key])}
               />
@@ -926,10 +1010,24 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
       </AnimatePresence>
 
       <div>
-        <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-          {t('checkin.b3.otherLabel')}
-        </label>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <label htmlFor="checkin-other-symptoms" className="block text-[13px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+            {t('checkin.b3.otherLabel')}
+          </label>
+          <MicButton
+            inputId="checkin-other-symptoms"
+            onTranscript={(text) =>
+              setField(
+                'otherSymptomsText',
+                form.otherSymptomsText
+                  ? `${form.otherSymptomsText} ${text}`.trim()
+                  : text,
+              )
+            }
+          />
+        </div>
         <textarea
+          id="checkin-other-symptoms"
           rows={3}
           value={form.otherSymptomsText}
           onChange={(e) => setField('otherSymptomsText', e.target.value)}
@@ -977,6 +1075,46 @@ function ConfirmationScreen({
   // shown on the patient app per Niva — clinically too easy to misread.
   const bmi = getBMI(heightCm, lastReading.weightKg);
 
+  // Phase/26 TTS pass 2 — humanised overview reading the whole confirmation
+  // screen, not just the BP. Built from the existing variables; conditional
+  // pieces drop out cleanly when not applicable.
+  const overviewAudio = (() => {
+    const parts: string[] = [];
+    parts.push(
+      total > 1
+        ? `All set. You logged ${total} readings this session.`
+        : 'All set. Your reading was saved.',
+    );
+    if (lastReading.systolicBP != null && lastReading.diastolicBP != null) {
+      const bpSentence =
+        `Your blood pressure was ${lastReading.systolicBP} over ${lastReading.diastolicBP} mmHg` +
+        (lastReading.pulse != null ? `, with a pulse of ${lastReading.pulse} beats per minute.` : '.');
+      parts.push(bpSentence);
+    }
+    if (lastReading.weightKg != null) {
+      const lbs = Math.round(lastReading.weightKg * 2.20462 * 10) / 10;
+      parts.push(
+        bmi != null
+          ? `You weighed ${lbs} pounds today, with a BMI of ${bmi.toFixed(1)}.`
+          : `You weighed ${lbs} pounds today.`,
+      );
+    }
+    if (missedMedNames.length > 0) {
+      parts.push(
+        `We noted you missed ${missedMedNames.join(' and ')} today — your care team will see this.`,
+      );
+    }
+    if (hasAFib) {
+      parts.push(
+        aFibSatisfied
+          ? `That's enough readings for your atrial fibrillation monitoring.`
+          : `For atrial fibrillation monitoring, please log at least three readings in this session — you have ${total} so far.`,
+      );
+    }
+    parts.push('Tap Add another to log more, or Back to dashboard when you are done.');
+    return parts.join(' ');
+  })();
+
   return (
     // Compacted to fit a typical phone viewport (~700px) without scrolling.
     // Tighter checkmark, smaller summary card, and the "what happens next"
@@ -992,9 +1130,12 @@ function ConfirmationScreen({
         <Check className="w-9 h-9" style={{ color: 'var(--brand-success-green)' }} strokeWidth={3} />
       </motion.div>
 
-      <h2 className="text-[20px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
-        {total > 1 ? t('checkin.confirm.titleMulti').replace('{n}', String(total)) : t('checkin.confirm.title')}
-      </h2>
+      <div className="flex items-center gap-2">
+        <h2 className="text-[20px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
+          {total > 1 ? t('checkin.confirm.titleMulti').replace('{n}', String(total)) : t('checkin.confirm.title')}
+        </h2>
+        <AudioButton text={overviewAudio} size="sm" />
+      </div>
       <p className="text-[13px] mt-0.5 mb-4" style={{ color: 'var(--brand-text-muted)' }}>
         {t('checkin.confirm.subtitle')}
       </p>
@@ -1008,15 +1149,6 @@ function ConfirmationScreen({
           <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
             {t('checkin.confirm.thisReading')}
           </span>
-          <AudioButton
-            text={(lastReading.pulse != null
-              ? t('checkin.confirm.readingAudioPulse').replace('{pulse}', String(lastReading.pulse))
-              : t('checkin.confirm.readingAudio')
-            )
-              .replace('{sys}', String(lastReading.systolicBP ?? ''))
-              .replace('{dia}', String(lastReading.diastolicBP ?? ''))}
-            size="sm"
-          />
         </div>
         <div className="flex items-baseline gap-2 justify-center">
           <span className="text-[30px] font-bold leading-none" style={{ color: 'var(--brand-primary-purple)' }}>
@@ -1136,11 +1268,25 @@ const SECOND_READING_FLOW: StepKey[] = ['B2', 'WEIGHT', 'MEDICATION', 'B3'];
 
 export default function CheckIn() {
   const router = useRouter();
-  const { isLoading, isAuthenticated } = useAuth();
+  const { user, isLoading, isAuthenticated } = useAuth();
   const { t } = useLanguage();
 
   const [profile, setProfile] = useState<PatientProfileDto | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  // Intake-still-in-progress sentinel — mirrors Dashboard.tsx logic. The
+  // localStorage draft persists across partial saves (handleExitSave does
+  // not clear it) and is only wiped by handleSubmit on the final A10→A11
+  // submit. So a draft with currentStep ≠ 'A11' means the patient hasn't
+  // finished clinical intake, regardless of whether a partial profile is
+  // already on the server. Block check-ins in that case so the rule
+  // engine doesn't evaluate readings against an incomplete profile.
+  const [intakeIncomplete, setIntakeIncomplete] = useState(false);
+  useEffect(() => {
+    if (!user?.id) return;
+    if (!hasDraft(user.id)) { setIntakeIncomplete(false); return; }
+    const draft = loadDraft(user.id);
+    setIntakeIncomplete(!!draft?.currentStep && draft.currentStep !== 'A11');
+  }, [user?.id]);
   const [medications, setMedications] = useState<PatientMedication[]>([]);
   const [medsLoading, setMedsLoading] = useState(true);
 
@@ -1280,18 +1426,28 @@ export default function CheckIn() {
     // Derive rollup from the per-medication map. The backend wants a single
     // `medicationTaken` bool + an optional `missedMedications` array; we
     // compute them here instead of tracking both in FormData.
+    // Phase/26 — `scheduledLater` answers count as "answered" for the
+    // wizard but are excluded from the took/missed rollup. The new
+    // `medicationScheduledLater` boolean tells the backend whether ANY med
+    // was flagged not-due-yet so the gap-alert cron knows it's intentional.
     const medEntries = medications.map((m) => ({
       med: m,
       state: form.medicationStatus[m.id] ?? { taken: null, reason: null, missedDoses: 1 },
     }));
     const allAnswered = medEntries.every((e) => e.state.taken !== null);
     const anyMissed = medEntries.some((e) => e.state.taken === 'no');
+    const anyExplicitYesNo = medEntries.some(
+      (e) => e.state.taken === 'yes' || e.state.taken === 'no',
+    );
+    const medicationScheduledLater = medEntries.some(
+      (e) => e.state.taken === 'scheduledLater',
+    );
     const medicationTaken =
-      medications.length === 0
+      medications.length === 0 || !allAnswered
         ? undefined
-        : allAnswered
-          ? !anyMissed
-          : undefined;
+        : !anyExplicitYesNo
+          ? undefined // every answer was scheduledLater — no signal either way
+          : !anyMissed;
     const missedMedications = medEntries
       .filter((e) => e.state.taken === 'no' && e.state.reason !== null)
       .map((e) => ({
@@ -1314,6 +1470,7 @@ export default function CheckIn() {
         sessionId,
         measurementConditions,
         medicationTaken,
+        medicationScheduledLater: medicationScheduledLater ? true : undefined,
         missedMedications: missedMedications.length > 0 ? missedMedications : undefined,
         severeHeadache: form.severeHeadache,
         visualChanges: form.visualChanges,
@@ -1406,7 +1563,10 @@ export default function CheckIn() {
   // a PatientProfile, the rule engine has no clinical context, so the backend
   // silently drops any reading. Block the wizard entirely + send the user to
   // /clinical-intake instead of letting them fill out a form that won't save.
-  if (!profile) {
+  // Also block when intake is partially saved but not yet submitted —
+  // a partial profile (gender + height only, no conditions/meds) gives
+  // the rule engine an incomplete picture and is unsafe to evaluate.
+  if (!profile || intakeIncomplete) {
     return (
       <div
         className="min-h-screen flex flex-col"

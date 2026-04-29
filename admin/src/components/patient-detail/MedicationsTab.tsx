@@ -104,9 +104,9 @@ const DRUG_CLASS_LABELS: Record<string, string> = {
 };
 
 const FREQ_LABELS: Record<string, string> = {
-  ONCE_DAILY: 'Once daily',
-  TWICE_DAILY: 'Twice daily',
-  THREE_TIMES_DAILY: '3× daily',
+  ONCE_DAILY: 'One time daily',
+  TWICE_DAILY: 'Two times daily',
+  THREE_TIMES_DAILY: 'Three times daily',
   UNSURE: 'Unsure',
 };
 

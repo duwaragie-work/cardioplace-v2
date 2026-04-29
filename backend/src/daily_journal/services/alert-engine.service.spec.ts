@@ -106,6 +106,11 @@ describe('AlertEngineService (orchestrator)', () => {
       journalEntry: {
         findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
       },
+      notification: {
+        // alert-engine writes a patient-facing dashboard Notification per alert
+        // (idempotent on @@unique([alertId, escalationEventId, userId, channel])).
+        create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
+      },
     }
     eventEmitter = { emit: jest.fn() }
     profileResolver = {

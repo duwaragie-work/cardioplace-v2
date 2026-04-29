@@ -5,16 +5,14 @@
 // footer pinned to the bottom. Active nav item gets a subtle purple tint
 // + left accent border. Designed to read as "tool" not "patient app".
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
   Users,
-  Phone,
-  Activity,
   LogOut,
   Bell,
-  Settings,
   X,
   Building2,
 } from 'lucide-react';
@@ -32,12 +30,10 @@ const PRIMARY_NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/patients', label: 'Patients', icon: Users, matchPrefix: true },
   { href: '/practices', label: 'Practices', icon: Building2, matchPrefix: true },
-  { href: '/scheduled-calls', label: 'Calls', icon: Phone },
 ];
 
 const SECONDARY_NAV: NavItem[] = [
   { href: '/notifications', label: 'Alerts', icon: Bell },
-  { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
 interface Props {
@@ -116,17 +112,21 @@ export default function AdminSidebar({ withCloseButton, onClose }: Props) {
       >
         <Link
           href="/dashboard"
-          className="flex items-center gap-2 min-w-0 group"
+          className="flex items-center gap-2.5 min-w-0 group"
         >
-          <div
-            className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-transform duration-200 group-hover:scale-105"
-            style={{
-              background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
-              boxShadow: '0 2px 8px rgba(123,0,224,0.25)',
-            }}
-          >
-            <Activity className="w-4 h-4 text-white" />
-          </div>
+          {/* Cardioplace icon stands on its own — the SVG already includes
+              the purple disk + heart, so no wrapper background or shadow
+              is needed. Sized at 28px so it visually balances the 13px
+              + 10px two-line text and leaves the "Cardioplace" wordmark
+              full breathing room (icon's square frame has transparent
+              corners that would otherwise crowd the text). */}
+          <Image
+            src="/cardioplace-icon.svg"
+            alt=""
+            width={28}
+            height={28}
+            className="shrink-0 w-7 h-7 transition-transform duration-200 group-hover:scale-105"
+          />
           <div className="min-w-0">
             <p
               className="text-[13px] font-bold leading-none truncate"

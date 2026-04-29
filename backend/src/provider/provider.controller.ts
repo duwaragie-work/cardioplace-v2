@@ -77,7 +77,9 @@ export class ProviderController {
     @Query('limit') limit?: string,
   ) {
     const p = Math.max(1, parseInt(page ?? '1', 10) || 1)
-    const l = Math.min(50, Math.max(1, parseInt(limit ?? '10', 10) || 10))
+    // Cap raised from 50 → 200 so the patient-detail Readings tab can
+    // render a longer history in one page without paging UI.
+    const l = Math.min(200, Math.max(1, parseInt(limit ?? '50', 10) || 50))
     return this.providerService.getPatientJournal(userId, p, l)
   }
 

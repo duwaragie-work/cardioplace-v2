@@ -44,17 +44,41 @@ export default function ChoiceCard({
     ? 'var(--brand-alert-red-light)'
     : 'var(--brand-primary-purple-light)';
 
+  // Phase/26 TTS pass 2 — when the card is in compact mode (no inline
+  // AudioButton renders), tapping or keyboard-activating the card also
+  // speaks its `audioText` so non-readers hear what they just selected.
+  // Cancel any in-flight utterance so rapid taps don't queue.
+  const speakIfCompact = () => {
+    if (
+      audioText &&
+      compact &&
+      typeof window !== 'undefined' &&
+      'speechSynthesis' in window
+    ) {
+      const synth = window.speechSynthesis;
+      synth.cancel();
+      const u = new SpeechSynthesisUtterance(audioText);
+      u.lang = audioLang ?? 'en-US';
+      u.rate = 0.95;
+      synth.speak(u);
+    }
+  };
+  const handleSelect = () => {
+    speakIfCompact();
+    onClick();
+  };
+
   return (
     // div+role=button (not <button>) so the nested AudioButton doesn't
     // produce <button>-inside-<button> hydration warnings.
     <motion.div
       role="button"
       tabIndex={0}
-      onClick={onClick}
+      onClick={handleSelect}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onClick();
+          handleSelect();
         }
       }}
       className={`relative w-full rounded-2xl transition-all cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary-purple)] ${className ?? ''}`}

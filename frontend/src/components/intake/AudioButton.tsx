@@ -84,8 +84,10 @@ export default function AudioButton({
   // Render nothing until mounted (matches SSR) or when TTS isn't available.
   if (!mounted || !supported) return null;
 
-  const dim = size === 'sm' ? 28 : 36;
-  const icon = size === 'sm' ? 14 : 18;
+  // WCAG 2.2 AA Task 3 — 44 × 44 px minimum tap target. The visible icon
+  // stays small for compact placement, but the button hit-box is full size.
+  const dim = 44;
+  const icon = size === 'sm' ? 16 : 20;
 
   return (
     <motion.button
@@ -93,7 +95,7 @@ export default function AudioButton({
       onClick={handleClick}
       aria-label={speaking ? stopLabel : effectiveLabel}
       aria-pressed={speaking}
-      className={`flex items-center justify-center rounded-full transition-colors cursor-pointer ${className ?? ''}`}
+      className={`flex items-center justify-center rounded-full transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--brand-primary-purple)] ${className ?? ''}`}
       style={{
         width: dim,
         height: dim,

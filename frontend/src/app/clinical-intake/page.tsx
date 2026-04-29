@@ -6,10 +6,15 @@
 //
 // Step flow (conditional skips applied):
 //   A0b intro → A1 demographics → [A2 pregnancy if female] → A3 conditions
-//     → [A4 HF type if HF] → A5 core meds → A6 combos → A8 categories
+//     → [A4 HF type if HF] → A5 core meds → A8 categories → A6 combos
 //     → A9 frequency → A10 review → A11 complete
 //
-// A7 dedup is a modal interrupt when transitioning from A6 (combos) to A8.
+// A7 dedup is a modal interrupt when transitioning OUT of A6 (combos —
+// the last medication screen) to A9, so the dedup pass can compare the
+// patient's combo selections against everything they picked on A5
+// (core) and A8 (categories) per CLINICAL_SPEC §V2-B. COMBO must be
+// last for this to work — see shared/src/medications.ts (Screen 1/2/3
+// comments).
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -67,6 +72,8 @@ import {
 import { EMPTY_INTAKE_STATE, type IntakeFormState, type IntakeStepKey, type SelectedMedication } from '@/lib/intake/types';
 
 import AudioButton from '@/components/intake/AudioButton';
+import MicButton from '@/components/intake/MicButton';
+import { cmToFtIn, ftInToCm } from '@/lib/units';
 import StepDots from '@/components/intake/StepDots';
 import ChoiceCard from '@/components/intake/ChoiceCard';
 import MedicationCard from '@/components/intake/MedicationCard';
@@ -81,7 +88,7 @@ function computeFlow(state: IntakeFormState): IntakeStepKey[] {
   if (state.gender === 'FEMALE') flow.push('A2');
   flow.push('A3');
   if (state.hasHeartFailure) flow.push('A4');
-  flow.push('A5', 'A6', 'A8', 'A9', 'A10', 'A11');
+  flow.push('A5', 'A8', 'A6', 'A9', 'A10', 'A11');
   return flow;
 }
 
@@ -319,26 +326,92 @@ function A1Demographics({ state, setState }: StepProps) {
 
       <div>
         <SectionLabel text={t('intake.a1.heightQuestion')} audio={t('intake.a1.heightAudio')} />
-        <input
-          type="number"
-          inputMode="numeric"
-          min={100}
-          max={250}
-          value={state.heightCm ?? ''}
-          onChange={(e) => {
-            const v = e.target.value;
-            setState((p) => ({ ...p, heightCm: v ? parseInt(v, 10) : undefined }));
-          }}
-          placeholder="170"
-          className="w-full h-14 px-5 rounded-xl text-[18px] outline-none transition box-border"
-          style={{
-            border: '2px solid var(--brand-border)',
-            color: 'var(--brand-text-primary)',
-            backgroundColor: 'white',
-          }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
-        />
+        {(() => {
+          // Phase/26 — patients enter height in feet+inches; we convert to
+          // cm for storage. Existing patients with cm values keep working —
+          // cmToFtIn renders their stored value back into the dual fields.
+          const { feet: storedFeet, inches: storedInches } = cmToFtIn(state.heightCm ?? 0);
+          const updateHeight = (feet: number, inches: number) => {
+            const cm = ftInToCm(feet, inches);
+            setState((p) => ({ ...p, heightCm: cm > 0 ? cm : undefined }));
+          };
+          return (
+            <div className="flex items-end gap-3">
+              <div className="flex-1">
+                <label htmlFor="intake-a1-height-ft" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+                  Feet
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="intake-a1-height-ft"
+                    type="number"
+                    inputMode="numeric"
+                    min={3}
+                    max={8}
+                    value={storedFeet || ''}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      updateHeight(Number.isFinite(v) ? v : 0, storedInches);
+                    }}
+                    placeholder="5"
+                    className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
+                    style={{
+                      border: '2px solid var(--brand-border)',
+                      color: 'var(--brand-text-primary)',
+                      backgroundColor: 'white',
+                    }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+                  />
+                  <MicButton
+                    inputId="intake-a1-height-ft"
+                    numeric
+                    onTranscript={(text) => {
+                      const n = parseInt(text, 10);
+                      if (Number.isFinite(n)) updateHeight(n, storedInches);
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="flex-1">
+                <label htmlFor="intake-a1-height-in" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+                  Inches
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="intake-a1-height-in"
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    max={11}
+                    value={storedInches || (storedFeet ? '0' : '')}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      updateHeight(storedFeet, Number.isFinite(v) ? v : 0);
+                    }}
+                    placeholder="9"
+                    className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
+                    style={{
+                      border: '2px solid var(--brand-border)',
+                      color: 'var(--brand-text-primary)',
+                      backgroundColor: 'white',
+                    }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+                  />
+                  <MicButton
+                    inputId="intake-a1-height-in"
+                    numeric
+                    onTranscript={(text) => {
+                      const n = parseInt(text, 10);
+                      if (Number.isFinite(n)) updateHeight(storedFeet, n);
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         <p className="text-[12px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
           {t('intake.a1.heightHint')}
         </p>
@@ -916,27 +989,37 @@ function A8Categories({ state, setState }: StepProps) {
                   <Mic className="w-5 h-5" />
                 </div>
                 <div className="flex-1">
-                  <label className="block text-[12px] font-semibold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
+                  <label htmlFor="intake-a8-other" className="block text-[12px] font-semibold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
                     {t('intake.a8.otherSpeakLabel')}
                   </label>
-                  <input
-                    type="text"
-                    value={otherText}
-                    onChange={(e) => {
-                      setOtherText(e.target.value);
-                      // Clear stale dedup error as soon as the patient
-                      // edits the input — they're correcting it.
-                      if (dupError) setDupError(null);
-                    }}
-                    placeholder={t('intake.a8.otherSpeakPlaceholder')}
-                    className="w-full h-11 px-4 rounded-lg text-[14px] outline-none transition box-border bg-white"
-                    style={{
-                      border: dupError
-                        ? '2px solid #b91c1c'
-                        : '2px solid var(--brand-border)',
-                      color: 'var(--brand-text-primary)',
-                    }}
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="intake-a8-other"
+                      type="text"
+                      value={otherText}
+                      onChange={(e) => {
+                        setOtherText(e.target.value);
+                        // Clear stale dedup error as soon as the patient
+                        // edits the input — they're correcting it.
+                        if (dupError) setDupError(null);
+                      }}
+                      placeholder={t('intake.a8.otherSpeakPlaceholder')}
+                      className="flex-1 h-11 px-4 rounded-lg text-[14px] outline-none transition box-border bg-white"
+                      style={{
+                        border: dupError
+                          ? '2px solid #b91c1c'
+                          : '2px solid var(--brand-border)',
+                        color: 'var(--brand-text-primary)',
+                      }}
+                    />
+                    <MicButton
+                      inputId="intake-a8-other"
+                      onTranscript={(text) => {
+                        setOtherText(text);
+                        if (dupError) setDupError(null);
+                      }}
+                    />
+                  </div>
                   {dupError && (
                     <p
                       role="alert"
@@ -1121,7 +1204,17 @@ function A10Review({ state, goTo }: StepProps) {
 
       <ReviewSection title={t('intake.a10.sectionAbout')} onEdit={() => goTo?.('A1')}>
         <ReviewRow label={t('intake.a10.rowGender')} value={genderLabel(state.gender)} />
-        <ReviewRow label={t('intake.a10.rowHeight')} value={state.heightCm ? `${state.heightCm} cm` : '—'} />
+        <ReviewRow
+          label={t('intake.a10.rowHeight')}
+          value={
+            state.heightCm
+              ? (() => {
+                  const { feet, inches } = cmToFtIn(state.heightCm);
+                  return `${feet}' ${inches}"`;
+                })()
+              : '—'
+          }
+        />
         {state.gender === 'FEMALE' && (
           <ReviewRow
             label={t('intake.a10.rowPregnancy')}
@@ -1438,7 +1531,7 @@ function ExitSaveModal({
 // Main wizard
 // ─────────────────────────────────────────────────────────────────────────────
 
-const VALID_DEEP_LINK_STEPS: IntakeStepKey[] = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A8', 'A9', 'A10'];
+const VALID_DEEP_LINK_STEPS: IntakeStepKey[] = ['A1', 'A2', 'A3', 'A4', 'A5', 'A8', 'A6', 'A9', 'A10'];
 
 // Next 16 requires components that read useSearchParams() to be wrapped in
 // a Suspense boundary so prerendering can bail out cleanly. Default export
@@ -1511,8 +1604,15 @@ function ClinicalIntakeWizard() {
         ]);
         if (cancelled) return;
 
-        if (profile && !isEdit) {
-          // Branch 3 — show the all-set page.
+        // Branch 3 — show the all-set page only when the patient is truly
+        // done (profile in DB AND no in-progress localStorage draft).
+        // A draft mid-flow signals partial save → fall through to Branch
+        // 1 so they can resume instead of being told they're done.
+        // Without a server-side completion field this is our gate.
+        const draftSnapshot = loadDraft(user.id);
+        const draftMidFlow =
+          !!draftSnapshot && draftSnapshot.currentStep && draftSnapshot.currentStep !== 'A11';
+        if (profile && !isEdit && !draftMidFlow) {
           setProfileExists(true);
           setBootstrapping(false);
           return;
@@ -1569,7 +1669,11 @@ function ClinicalIntakeWizard() {
           return;
         }
 
-        // Branch 1 — no profile yet. Resume from draft or start fresh.
+        // Branch 1 — no completed intake yet. Resume from draft or start
+        // fresh. (When a partial profile exists in DB but no draft on this
+        // device, we accept that the patient re-enters their answers; the
+        // backend diff will be a no-op so it's just a small UX pinch, not
+        // data loss.)
         const draft = loadDraft(user.id);
         if (draft) {
           // A draft pointing at the completion screen is stale — submit must
@@ -1658,7 +1762,9 @@ function ClinicalIntakeWizard() {
     }
     setSubmitError('');
 
-    // A6 → A8 transition: surface dedup conflicts before letting the user proceed.
+    // A6 (combos — the last med screen) → A9 transition: surface dedup
+    // conflicts before letting the user proceed, so combo entries can be
+    // compared against everything they picked on A5 (core) + A8 (categories).
     if (step === 'A6') {
       const conflicts = detectDedupConflicts(state.selectedMedications);
       if (conflicts.length > 0) {
@@ -1748,10 +1854,13 @@ function ClinicalIntakeWizard() {
         saveIntakeProfile(buildProfilePayload(state)),
         replaceIntakeMedications(buildMedsPayload(state)),
       ]);
-      // Profile is now persisted — drop the local draft so the dashboard
-      // sees a "done" intake state and stops showing the Action Required
-      // card. (Edit mode never had a draft, but the call is harmless.)
-      if (user?.id) clearDraft(user.id);
+      // Keep the local draft on partial save — without a server-side
+      // intakeCompletedAt field the dashboard's Action-Required card uses
+      // the draft's presence + currentStep as the "still in progress"
+      // sentinel. Clearing it here would prematurely flip the card to
+      // "done" even though the patient hasn't submitted A10 → A11. The
+      // draft is only cleared by handleSubmit on final submit. Edit mode
+      // never had a draft to begin with, so this no-op for edits.
       router.push('/dashboard');
     } catch (e) {
       setExitError(e instanceof Error ? e.message : t('intake.exitSave.errorFallback'));
@@ -1772,7 +1881,8 @@ function ClinicalIntakeWizard() {
     const remaining = pendingDedup.slice(1);
     setPendingDedup(remaining);
     if (remaining.length === 0) {
-      // Continue to A8 after all conflicts handled.
+      // Continue to A9 (the screen after A6 in the new ordering) once
+      // all conflicts have been resolved.
       const nextIdx = flow.indexOf('A6') + 1;
       if (nextIdx < flow.length) {
         setDirection(1);

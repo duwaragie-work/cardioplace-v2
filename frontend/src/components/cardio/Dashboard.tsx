@@ -22,6 +22,7 @@ import { getMyThreshold, type PatientThresholdDto } from '@/lib/services/thresho
 import { loadDraft, hasDraft, stepProgress } from '@/lib/intake/draft';
 import ActionRequiredCard from '@/components/intake/ActionRequiredCard';
 import MonthlyMedReask from '@/components/intake/MonthlyMedReask';
+import AudioButton from '@/components/intake/AudioButton';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function getDateLabel(dateStr: string): string {
@@ -144,33 +145,41 @@ export default function Dashboard() {
         setThreshold(t);
         setHasMeds(Array.isArray(m) && m.some((med) => !med.discontinuedAt));
 
-        if (p) { setIntakeUi({ kind: 'done' }); return; }
-        if (hasDraft(user.id)) {
-          const draft = loadDraft(user.id);
-          // A draft pointing at A11 is stale (submit succeeded but the DB
-          // row was later removed). Show the fresh card instead.
-          if (draft?.currentStep === 'A11') {
-            setIntakeUi({ kind: 'fresh' });
-            return;
-          }
+        // Without a server-side completion field, the localStorage draft
+        // doubles as the "still in progress" sentinel: handleSubmit's
+        // clearDraft() runs ONLY at the final A10 → A11 submit, so if a
+        // draft is still in progress on this device the patient hasn't
+        // finished, regardless of whether a partial profile is on the
+        // server. (Cross-device limitation: a patient who saved partial
+        // and switched devices will see "done" — accepted trade-off for
+        // not changing the schema.)
+        const draft = hasDraft(user.id) ? loadDraft(user.id) : null;
+        const draftMidFlow =
+          !!draft && !!draft.currentStep && draft.currentStep !== 'A11';
+        if (p && !draftMidFlow) { setIntakeUi({ kind: 'done' }); return; }
+        const labels: Record<string, string> = {
+          A1: 'About you',
+          A2: 'Pregnancy',
+          A3: 'Conditions',
+          A4: 'Heart failure type',
+          A5: 'Medications',
+          A6: 'Combination pills',
+          A8: 'Other medicines',
+          A9: 'How often',
+          A10: 'Review',
+        };
+        if (draftMidFlow) {
           const { index, total } = stepProgress(draft?.currentStep);
-          const labels: Record<string, string> = {
-            A1: 'About you',
-            A2: 'Pregnancy',
-            A3: 'Conditions',
-            A4: 'Heart failure type',
-            A5: 'Medications',
-            A6: 'Combination pills',
-            A8: 'Other medicines',
-            A9: 'How often',
-            A10: 'Review',
-          };
           setIntakeUi({
             kind: 'resume',
             stepIndex: index,
             total,
             stepLabel: labels[draft?.currentStep ?? 'A1'] ?? 'Continuing',
           });
+        } else if (draft?.currentStep === 'A11') {
+          // A draft pointing at A11 is stale (submit succeeded but the DB
+          // row was later removed). Show the fresh card instead.
+          setIntakeUi({ kind: 'fresh' });
         } else {
           setIntakeUi({ kind: 'fresh' });
         }
@@ -411,6 +420,42 @@ export default function Dashboard() {
     ? [Math.max(0, Math.min(...visibleChartData.map((d) => d.systolic)) - 15), Math.max(...visibleChartData.map((d) => d.systolic)) + 15]
     : [100, 180];
 
+  // Phase/26 TTS pass 2 — single humanised overview that replaces the 5
+  // per-card audio buttons. Composes greeting + latest BP + medication
+  // streak + check-in count + top alert into one flowing summary so the
+  // patient hears the dashboard state from one tap. Conditional pieces
+  // drop out cleanly when not applicable.
+  const dashboardOverview = (() => {
+    const parts: string[] = [];
+    parts.push(`${greeting}${userName ? `, ${userName}` : ''}.`);
+    if (latestEntry?.systolicBP != null && latestEntry?.diastolicBP != null) {
+      const bpSentence =
+        `Your ${todayHasEntry ? "today's" : 'latest'} blood pressure is ` +
+        `${latestEntry.systolicBP} over ${latestEntry.diastolicBP}` +
+        (latestEntry.pulse != null ? `, with a pulse of ${latestEntry.pulse}` : '') +
+        `, ${bpVsTargetStyle.label.toLowerCase()}.`;
+      parts.push(bpSentence);
+    } else {
+      parts.push('No blood pressure readings yet — tap New check-in to log your first one.');
+    }
+    if (streak > 0) {
+      parts.push(
+        `You're on a ${streak}-day medication streak with ${totalEntries} ${totalEntries === 1 ? 'check-in' : 'check-ins'} logged.`,
+      );
+    } else if (totalEntries > 0) {
+      parts.push(`You've logged ${totalEntries} ${totalEntries === 1 ? 'check-in' : 'check-ins'} so far.`);
+    }
+    if (topAlert && topAlertVariant) {
+      parts.push(`You have an active alert: ${topAlertVariant.title}`);
+    } else {
+      parts.push('No active alerts — your care team is monitoring.');
+    }
+    if (intakeUi.kind === 'fresh' || intakeUi.kind === 'resume') {
+      parts.push('Action required: please complete your clinical intake.');
+    }
+    return parts.join(' ');
+  })();
+
   return (
     <div className="relative overflow-auto" style={{ height: 'calc(100vh - 4rem)', backgroundColor: '#FAFBFF' }}>
 
@@ -433,10 +478,11 @@ export default function Dashboard() {
         {/* D3 — Active alert card (top priority; tier-colored). Tap to open
             the Flow C alert detail. Hidden when no open alerts. */}
         {topAlert && topAlertVariant && (
+          <div className="relative mb-3 md:mb-4">
           <button
             type="button"
             onClick={() => router.push(`/alerts/${topAlert.id}`)}
-            className="w-full text-left rounded-2xl p-4 mb-3 md:mb-4 cursor-pointer transition-all flex items-center gap-3 active:scale-[0.99]"
+            className="w-full text-left rounded-2xl p-4 cursor-pointer transition-all flex items-center gap-3 active:scale-[0.99]"
             style={{
               backgroundColor: topAlertVariant.accentLight,
               border: `1.5px solid ${topAlertVariant.accent}`,
@@ -485,6 +531,7 @@ export default function Dashboard() {
               style={{ color: topAlertVariant.accent }}
             />
           </button>
+          </div>
         )}
 
         {/* D0 — Clinical Intake Action Required (above stats, below D3) */}
@@ -498,6 +545,18 @@ export default function Dashboard() {
               stepLabel: intakeUi.stepLabel,
             }}
           />
+        )}
+
+        {/* Phase/26 TTS pass 2 — single overview audio button replaces the
+            5 per-card buttons. One tap reads greeting + latest BP + streak +
+            alerts in flowing English. */}
+        {!loading && (
+          <div className="mb-3 md:mb-4 flex items-center gap-2">
+            <AudioButton size="sm" text={dashboardOverview} />
+            <span className="text-[12px] font-medium" style={{ color: 'var(--brand-text-secondary)' }}>
+              {t('dashboard.hearSummary')}
+            </span>
+          </div>
         )}
 
         {/* ROW 1 — Greeting + Stat cards */}
@@ -547,10 +606,12 @@ export default function Dashboard() {
           {/* D4 — BP stat card. Status pill is colored vs the patient's
               PatientThreshold (or AHA defaults if no threshold set). Pulse
               renders below the BP when present on the latest entry. */}
-          <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
-            <span className="block text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--brand-text-muted)' }}>
-              {loading ? <Bone w={60} h={9} r={5} /> : (todayHasEntry ? t('dashboard.todaysBp') : t('dashboard.latestBp'))}
-            </span>
+          <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl relative" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <span className="block text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
+                {loading ? <Bone w={60} h={9} r={5} /> : (todayHasEntry ? t('dashboard.todaysBp') : t('dashboard.latestBp'))}
+              </span>
+            </div>
             {loading ? (
               <Bone w={88} h={28} />
             ) : (
@@ -577,8 +638,10 @@ export default function Dashboard() {
           </div>
 
           {/* Streak Stat Card */}
-          <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
-            <Flame className="w-5 h-5 mb-2" style={{ color: 'var(--brand-warning-amber)' }} />
+          <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl relative" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <Flame className="w-5 h-5" style={{ color: 'var(--brand-warning-amber)' }} />
+            </div>
             {loading ? (
               <Bone w={64} h={28} />
             ) : (
@@ -592,10 +655,12 @@ export default function Dashboard() {
           </div>
 
           {/* Total Check-ins Card */}
-          <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--brand-text-muted)' }}>
-              {t('dashboard.checkIns')}
-            </p>
+          <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl relative" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
+                {t('dashboard.checkIns')}
+              </p>
+            </div>
             {loading ? (
               <Bone w={52} h={28} />
             ) : (
@@ -773,12 +838,21 @@ export default function Dashboard() {
               </div>
 
               <div>
+                {/* Check-in is gated on intake being fully complete —
+                    routes to /clinical-intake instead so the patient
+                    finishes onboarding before logging readings the rule
+                    engine can't safely evaluate against a partial profile. */}
                 <button
-                  onClick={() => router.push('/check-in')}
-                  className="w-full h-10 bg-white flex items-center justify-center gap-1.5 rounded-full text-[#7B00E0] font-bold text-[13px] transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                  onClick={() =>
+                    router.push(intakeUi.kind === 'done' ? '/check-in' : '/clinical-intake')
+                  }
+                  disabled={intakeUi.kind === 'unknown'}
+                  className="w-full h-10 bg-white flex items-center justify-center gap-1.5 rounded-full text-[#7B00E0] font-bold text-[13px] transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
                 >
                   {loading ? (
                     <Bone w={120} h={12} color="#7B00E0" />
+                  ) : intakeUi.kind !== 'done' ? (
+                    <>Finish intake first <ArrowRight className="w-4 h-4" /></>
                   ) : (
                     <>{todayHasEntry ? t('dashboard.logAnother') : t('dashboard.startCheckin')} <ArrowRight className="w-4 h-4" /></>
                   )}

@@ -1,23 +1,20 @@
 import Image from "next/image";
 import Link from "next/link";
 
+// Combined Cardioplace wordmark — icon + "Cardioplace" baked into a single
+// SVG. The 4.5:1 viewBox (288×64) means we set the height and let width
+// flow with `w-auto` so the wordmark stays crisp at every breakpoint.
 export default function Logo() {
   return (
-    <Link href="/" className="flex items-center gap-2.5 justify-center lg:justify-start">
+    <Link href="/" className="flex items-center justify-center lg:justify-start">
       <Image
-        src="/logo.svg"
-        alt="Cardioplace logo"
-        width={40}
+        src="/cardioplace-logo.svg"
+        alt="Cardioplace"
+        width={180}
         height={40}
-        className="h-10 w-10 lg:h-12 lg:w-12"
+        className="h-7 w-auto lg:h-9"
         priority
       />
-      <span
-        className="font-bold text-xl lg:text-2xl"
-        style={{ color: 'var(--brand-primary-purple)' }}
-      >
-        Cardioplace
-      </span>
     </Link>
   );
 }

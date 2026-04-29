@@ -2,26 +2,49 @@
 
 // Top-bar notification bell with badge + dropdown.
 //
-// Polls the unread count every 30s for the badge — short enough to feel
-// near-real-time for a clinical workflow, long enough to stay cheap.
+// Badge shows the SUM of (open clinical alerts) + (unread notifications) so
+// the admin sees a single "things to deal with" number — same pattern as
+// the patient-app navbar bell. A 30s silent poll keeps the count current
+// without a visible refresh; mutations on /notifications (acknowledge,
+// resolve, mark-read) broadcast a window event so the bell refetches on
+// the same tick instead of waiting for the next poll. Mutations from
+// inside this dropdown re-broadcast so any open /notifications page
+// updates in lockstep.
+//
 // Clicking the bell opens a dropdown with the 10 most-recent notifications
-// (any channel except EMAIL); clicking "View all" jumps to the full
-// /admin/notifications page (which is also where the dashboard's
+// (any channel except EMAIL). Each unread row exposes a "✓" pill so the
+// admin can dismiss without navigating away; the header carries a
+// "Mark all read" action that hits the bulk endpoint. "View all" jumps
+// to the full /admin/notifications page (which is also where the dashboard's
 // "Action required → View all" link lands — single shared inbox).
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, Loader2 } from 'lucide-react';
-import { fetchWithAuth } from '@/lib/services/token';
+import { Bell, Check, CheckCheck, Loader2 } from 'lucide-react';
 import {
   getAdminNotifications,
-  markAdminNotificationRead,
+  getProviderAlerts,
+  markAdminNotificationsReadBulk,
   type AdminNotificationDto,
 } from '@/lib/services/provider.service';
 
 const POLL_INTERVAL_MS = 30_000;
 const DROPDOWN_LIMIT = 10;
-const API = process.env.NEXT_PUBLIC_API_URL;
+const NOTIF_CHANGE_EVENT = 'cardio:notifications-changed';
+
+// Mirrors the NotifChangeDetail shape on /notifications. When the source
+// of a mutation includes a delta in `detail`, the bell can update its
+// badge instantly without a fetch round-trip.
+type NotifChangeDetail = {
+  unreadDelta?: number;
+  alertDelta?: number;
+};
+
+function broadcastChange() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent<NotifChangeDetail>(NOTIF_CHANGE_EVENT));
+  }
+}
 
 function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -41,16 +64,28 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<AdminNotificationDto[]>([]);
   const [itemsLoading, setItemsLoading] = useState(false);
+  const [markingAll, setMarkingAll] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
 
+  // Combined badge = open alerts + unread notifications. The notifications
+  // count is taken from the deduplicated list (one entry per logical event)
+  // rather than the server's unread-count endpoint, which over-counts when
+  // a single escalation step fans out to multiple channels (PUSH +
+  // DASHBOARD share an escalationEventId but each have their own row).
+  // State only updates when the value actually changes so React skips
+  // no-op re-renders — no visible blink while the user is mid-page.
   const refreshCount = useCallback(async () => {
     try {
-      const res = await fetchWithAuth(`${API}/api/daily-journal/notifications/unread-count`);
-      if (!res.ok) return;
-      const json = await res.json();
-      const next = Number(json?.data?.unread ?? 0);
-      if (mountedRef.current && Number.isFinite(next)) setCount(next);
+      const [alertData, unreadList] = await Promise.all([
+        getProviderAlerts().catch(() => [] as unknown[]),
+        getAdminNotifications({ status: 'unread' }).catch(() => [] as AdminNotificationDto[]),
+      ]);
+      if (!mountedRef.current) return;
+      const openAlertCount = Array.isArray(alertData) ? alertData.length : 0;
+      const unreadNotifCount = unreadList.length;
+      const next = openAlertCount + unreadNotifCount;
+      setCount((prev) => (prev === next ? prev : next));
     } catch {
       // Silent — bell shouldn't surface network noise. Next tick retries.
     }
@@ -66,17 +101,43 @@ export default function NotificationBell() {
     }
   }, []);
 
-  // Poll the unread count regardless of dropdown state — the badge must
-  // stay current so the user knows something arrived without opening.
+  // Poll the badge regardless of dropdown state — must stay current so the
+  // admin knows something arrived without opening. Also listen for the
+  // window-level change event so /notifications mutations refresh us on
+  // the same tick (no 30s lag).
+  //
+  // When the broadcast carries a delta, apply it instantly to the badge
+  // and SKIP the reconciliation fetch — the page broadcasts before its
+  // own PATCH completes, so a fetch here would race the PATCH and snap
+  // the badge back to the old server value. The next 30s poll picks up
+  // the truth either way. When there's no delta (background events,
+  // bell's own mutations) we fall through to a fetch.
   useEffect(() => {
     mountedRef.current = true;
     void refreshCount();
     const id = setInterval(() => void refreshCount(), POLL_INTERVAL_MS);
+    const onChange = (e: Event) => {
+      const detail = (e as CustomEvent<NotifChangeDetail>).detail;
+      const delta = (detail?.unreadDelta ?? 0) + (detail?.alertDelta ?? 0);
+      if (delta !== 0) {
+        setCount((prev) => Math.max(0, prev + delta));
+        if (open) void refreshItems();
+        return;
+      }
+      void refreshCount();
+      if (open) void refreshItems();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener(NOTIF_CHANGE_EVENT, onChange);
+    }
     return () => {
       mountedRef.current = false;
       clearInterval(id);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener(NOTIF_CHANGE_EVENT, onChange);
+      }
     };
-  }, [refreshCount]);
+  }, [refreshCount, refreshItems, open]);
 
   // Close the dropdown on outside click. Pointerdown beats click so
   // clicking another button doesn't get swallowed by a closing overlay.
@@ -98,24 +159,64 @@ export default function NotificationBell() {
     if (next) void refreshItems();
   }
 
-  async function handleItemClick(n: AdminNotificationDto) {
-    if (!n.watched) {
-      await markAdminNotificationRead(n.id).catch(() => null);
-      setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, watched: true } : x)));
-      // Optimistically decrement the badge so the user sees instant feedback.
-      setCount((prev) => Math.max(0, prev - 1));
+  // Optimistically flip a row to read + decrement the badge. Used by both
+  // the row tap (navigates) and the per-row "✓" button (stays in dropdown).
+  // Bulk-PATCHes every channel sibling so the row stays read after refetch
+  // (a single-id PATCH would leave the DASHBOARD twin unread and re-show
+  // the entry on next poll). Broadcasts so any open /notifications page
+  // updates in lockstep.
+  const markOne = useCallback(async (notif: AdminNotificationDto) => {
+    setItems((prev) => prev.map((x) => (x.id === notif.id ? { ...x, watched: true } : x)));
+    setCount((prev) => Math.max(0, prev - 1));
+    try {
+      await markAdminNotificationsReadBulk(notif.siblingIds);
+    } catch {
+      // Optimistic update stands; refreshCount tick reconciles.
+    } finally {
+      broadcastChange();
     }
+  }, []);
+
+  async function handleItemClick(n: AdminNotificationDto) {
+    if (!n.watched) await markOne(n);
     setOpen(false);
-    if (n.alertId) router.push(`/notifications`);
+    // The bell is the entry point for the personal notification inbox, so
+    // route to the Notifications tab — alert-linked rows still land users
+    // there first; the page itself lets them switch to the Alerts tab.
+    if (n.alertId) router.push(`/notifications?tab=notifications`);
+  }
+
+  async function handleMarkAll() {
+    const unread = items.filter((n) => !n.watched);
+    if (unread.length === 0) return;
+    // Flatten channel siblings so the bulk PATCH covers every underlying
+    // row, not just the canonical one we display.
+    const ids = unread.flatMap((n) => n.siblingIds);
+    setMarkingAll(true);
+    setItems((prev) => prev.map((x) => ({ ...x, watched: true })));
+    // Badge is alerts + unread notifs combined — only the notification
+    // slice is going to zero, so decrement by exactly the displayed entry
+    // count (NOT the flattened sibling count) and let the next poll
+    // reconcile if anything raced.
+    setCount((prev) => Math.max(0, prev - unread.length));
+    try {
+      await markAdminNotificationsReadBulk(ids);
+    } catch {
+      // Optimistic update stands; next refresh reconciles.
+    } finally {
+      if (mountedRef.current) setMarkingAll(false);
+      broadcastChange();
+    }
   }
 
   function handleViewAll() {
     setOpen(false);
-    router.push('/notifications');
+    router.push('/notifications?tab=notifications');
   }
 
   const display = count > 9 ? '9+' : String(count);
   const hasUnread = count > 0;
+  const dropdownHasUnread = items.some((n) => !n.watched);
 
   return (
     <div ref={containerRef} className="relative">
@@ -150,24 +251,42 @@ export default function NotificationBell() {
           role="dialog"
           aria-label="Notifications"
         >
-          {/* Header */}
+          {/* Header — title + unread badge + Mark all read action */}
           <div
-            className="px-4 py-2.5 flex items-center justify-between"
+            className="px-4 py-2.5 flex items-center justify-between gap-2"
             style={{ borderBottom: '1px solid var(--brand-border)' }}
           >
-            <p className="text-[12px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-              Notifications
-            </p>
-            {hasUnread && (
-              <span
-                className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+            <div className="flex items-center gap-2 min-w-0">
+              <p className="text-[12px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                Notifications
+              </p>
+              {hasUnread && (
+                <span
+                  className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0"
+                  style={{
+                    backgroundColor: 'var(--brand-alert-red-light)',
+                    color: 'var(--brand-alert-red)',
+                  }}
+                >
+                  {count} unread
+                </span>
+              )}
+            </div>
+            {dropdownHasUnread && (
+              <button
+                type="button"
+                onClick={handleMarkAll}
+                disabled={markingAll}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 h-6 rounded-full cursor-pointer transition hover:opacity-80 disabled:opacity-50 shrink-0"
                 style={{
-                  backgroundColor: 'var(--brand-alert-red-light)',
-                  color: 'var(--brand-alert-red)',
+                  color: 'var(--brand-primary-purple)',
+                  backgroundColor: 'var(--brand-primary-purple-light)',
                 }}
+                aria-label="Mark all notifications as read"
               >
-                {count} unread
-              </span>
+                <CheckCheck className="w-3 h-3" />
+                {markingAll ? 'Marking…' : 'Mark all read'}
+              </button>
             )}
           </div>
 
@@ -186,11 +305,21 @@ export default function NotificationBell() {
               </div>
             ) : (
               items.map((n, idx) => (
-                <button
+                // Outer is a div (not a button) so the per-row "✓" pill is a
+                // valid descendant — nested <button>s break HTML semantics
+                // and trigger React's hydration error.
+                <div
                   key={n.id}
-                  type="button"
-                  onClick={() => handleItemClick(n)}
-                  className="w-full text-left px-4 py-2.5 flex items-start gap-2.5 transition-colors hover:bg-gray-50 cursor-pointer"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => void handleItemClick(n)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      void handleItemClick(n);
+                    }
+                  }}
+                  className="w-full text-left px-4 py-2.5 flex items-start gap-2.5 transition-colors hover:bg-gray-50 cursor-pointer focus:outline-none focus-visible:bg-gray-50"
                   style={{ borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none' }}
                 >
                   <span
@@ -222,7 +351,27 @@ export default function NotificationBell() {
                       {timeAgo(n.sentAt)}
                     </p>
                   </div>
-                </button>
+                  {/* Per-row mark-read affordance — only on unread rows. Stops
+                      propagation so it doesn't trigger the row's navigate. */}
+                  {!n.watched && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void markOne(n);
+                      }}
+                      className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition cursor-pointer hover:opacity-80 mt-0.5"
+                      style={{
+                        color: 'var(--brand-primary-purple)',
+                        backgroundColor: 'var(--brand-primary-purple-light)',
+                      }}
+                      aria-label="Mark as read"
+                      title="Mark as read"
+                    >
+                      <Check className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               ))
             )}
           </div>

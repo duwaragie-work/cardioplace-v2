@@ -96,6 +96,7 @@ const am: Record<TranslationKey, string> = {
   'dashboard.viewDetails': 'ዝርዝር ይመልከቱ',
   'dashboard.viewDetailsAria': '{title} — ዝርዝር ይመልከቱ',
   'dashboard.awaitingVerification': 'የተንከባካቢ ቡድን ማረጋገጫ በመጠበቅ ላይ',
+  'dashboard.hearSummary': 'ማጠቃለያውን ያዳምጡ',
   'dashboard.yourGoal': 'ግብዎ',
   'dashboard.belowTarget': 'ከ{target} mmHg በታች',
   'dashboard.setByCareTeam': '· በተንከባካቢ ቡድንዎ የተዘጋጀ',
@@ -345,6 +346,7 @@ const am: Record<TranslationKey, string> = {
   'profile.textChat': 'ጽሁፍ / ውይይት',
   'profile.audioVoice': 'ኦዲዮ / ድምጽ',
   'profile.notSet': 'አልተቀመጠም',
+  'profile.notAssigned': 'አልተመደበም',
   'profile.accountInfo': 'የመለያ መረጃ',
   'profile.accountCreated': 'መለያ ተፈጥሯል',
   'profile.emailStatus': 'የኢሜይል ሁኔታ',
@@ -404,7 +406,7 @@ const am: Record<TranslationKey, string> = {
   'profile.diagnosedHtn': 'የተረጋገጠ ከፍተኛ የደም ግፊት',
   'profile.freqOnceDaily': 'በቀን አንድ ጊዜ',
   'profile.freqTwiceDaily': 'በቀን ሁለት ጊዜ',
-  'profile.freqThreeTimesDaily': 'በቀን 3 ጊዜ',
+  'profile.freqThreeTimesDaily': 'በቀን ሶስት ጊዜ',
   'profile.freqUnknown': 'ድግግሞሹ አይታወቅም',
   'profile.hfHfrEf': 'HFrEF (የተቀነሰ የልብ መግፋት አቅም)',
   'profile.hfHfpEf': 'HFpEF (የተጠበቀ የልብ መግፋት አቅም)',
@@ -961,7 +963,7 @@ const am: Record<TranslationKey, string> = {
   'intake.a8.categoryOther': 'ያልተዘረዘረ ሌላ መድሃኒት',
   'intake.a8.audioSGLT2': 'ለልብ ደግሞ የሚረዳ የስኳር በሽታ መድሃኒት',
   'intake.a8.otherBlurb': 'የመድሃኒቱን ስም ንገሩን። ተናገሩት (ስልክዎ ለእርስዎ ይጽፋል) ወይም የስያሜውን ፎቶ ይንሱ።',
-  'intake.a8.otherSpeakLabel': 'የመድሃኒቱን ስም ይናገሩ',
+  'intake.a8.otherSpeakLabel': 'የመድሃኒቱን ስም ይጻፉ ወይም ይናገሩ',
   'intake.a8.otherSpeakPlaceholder': 'ለምሳሌ Hydralazine',
   'intake.a8.otherAdd': 'አክል',
   'intake.a8.otherPhotoLabel': 'ወይም ጠርሙሱ ላይ ያለውን ይግለጹ',
@@ -1051,7 +1053,7 @@ const am: Record<TranslationKey, string> = {
   // Frequency labels (used in review)
   'intake.freq.once': 'በቀን አንድ ጊዜ',
   'intake.freq.twice': 'በቀን ሁለት ጊዜ',
-  'intake.freq.three': 'በቀን 3 ጊዜ',
+  'intake.freq.three': 'በቀን ሶስት ጊዜ',
   'intake.freq.unsure': 'እርግጠኛ አይደለሁም',
   'intake.freq.unset': 'የድግግሞሽ ማዋቀር',
 
@@ -1063,6 +1065,10 @@ const am: Record<TranslationKey, string> = {
   // AudioButton aria labels
   'intake.audio.listen': 'አዳምጥ',
   'intake.audio.stop': 'አቁም',
+  'intake.audio.dictate': 'ይህን መስክ ለመሙላት ይናገሩ',
+  'intake.audio.dictateStop': 'ማዳመጥ አቁም',
+  'intake.audio.dictateListening': 'በማዳመጥ ላይ...',
+  'intake.audio.dictateError': 'መስማት አልቻልኩም። እንደገና ለመሞከር ማይክሮፎኑን ይንኩ።',
 
   // MonthlyMedReask modal (E4)
   'intake.reask.ariaLabel': 'ወርሃዊ የመድሃኒት ምርመራ',

@@ -94,6 +94,7 @@ const es: Record<TranslationKey, string> = {
   'dashboard.viewDetails': 'Ver detalles',
   'dashboard.viewDetailsAria': '{title} — ver detalles',
   'dashboard.awaitingVerification': 'Esperando verificación del proveedor',
+  'dashboard.hearSummary': 'Escuchar resumen',
   'dashboard.yourGoal': 'Su objetivo',
   'dashboard.belowTarget': 'Por debajo de {target} mmHg',
   'dashboard.setByCareTeam': '· establecido por su equipo de atención',
@@ -342,6 +343,7 @@ const es: Record<TranslationKey, string> = {
   'profile.textChat': 'Texto / Chat',
   'profile.audioVoice': 'Audio / Voz',
   'profile.notSet': 'No configurado',
+  'profile.notAssigned': 'no asignado',
   'profile.accountInfo': 'Información de la Cuenta',
   'profile.accountCreated': 'Cuenta Creada',
   'profile.emailStatus': 'Estado del Correo',
@@ -401,7 +403,7 @@ const es: Record<TranslationKey, string> = {
   'profile.diagnosedHtn': 'Presión alta diagnosticada',
   'profile.freqOnceDaily': 'Una vez al día',
   'profile.freqTwiceDaily': 'Dos veces al día',
-  'profile.freqThreeTimesDaily': '3 veces al día',
+  'profile.freqThreeTimesDaily': 'Tres veces al día',
   'profile.freqUnknown': 'Frecuencia desconocida',
   'profile.hfHfrEf': 'HFrEF (fracción de eyección reducida)',
   'profile.hfHfpEf': 'HFpEF (fracción de eyección preservada)',
@@ -958,7 +960,7 @@ const es: Record<TranslationKey, string> = {
   'intake.a8.categoryOther': 'Otro medicamento no listado',
   'intake.a8.audioSGLT2': 'Medicamento para diabetes que también ayuda al corazón',
   'intake.a8.otherBlurb': 'Díganos el nombre del medicamento. Hable (su teléfono lo escribirá por usted) o tome una foto de la etiqueta.',
-  'intake.a8.otherSpeakLabel': 'Hable el nombre del medicamento',
+  'intake.a8.otherSpeakLabel': 'Escriba o diga el nombre del medicamento',
   'intake.a8.otherSpeakPlaceholder': 'ej. Hidralazina',
   'intake.a8.otherAdd': 'Agregar',
   'intake.a8.otherPhotoLabel': 'O describa lo que dice el frasco',
@@ -975,9 +977,9 @@ const es: Record<TranslationKey, string> = {
   'intake.a9.title': '¿Con qué frecuencia cada día?',
   'intake.a9.subtitle': 'Solo el número — su equipo de atención completará la dosis.',
   'intake.a9.audio': '¿Con qué frecuencia toma cada uno cada día? Solo el número — su equipo de atención completará la dosis.',
-  'intake.a9.freqOnce': 'Una',
-  'intake.a9.freqTwice': 'Dos',
-  'intake.a9.freqThree': 'Tres',
+  'intake.a9.freqOnce': 'Una vez',
+  'intake.a9.freqTwice': 'Dos veces',
+  'intake.a9.freqThree': 'Tres veces',
   'intake.a9.freqUnsure': 'No sé',
   'intake.a9.medAudio': '¿Cuántas veces al día toma {name}?',
 
@@ -1048,7 +1050,7 @@ const es: Record<TranslationKey, string> = {
   // Frequency labels (used in review)
   'intake.freq.once': 'Una vez al día',
   'intake.freq.twice': 'Dos veces al día',
-  'intake.freq.three': '3 veces al día',
+  'intake.freq.three': 'Tres veces al día',
   'intake.freq.unsure': 'No sé',
   'intake.freq.unset': 'Establecer frecuencia',
 
@@ -1060,6 +1062,10 @@ const es: Record<TranslationKey, string> = {
   // AudioButton aria labels
   'intake.audio.listen': 'Escuchar',
   'intake.audio.stop': 'Parar',
+  'intake.audio.dictate': 'Habla para llenar este campo',
+  'intake.audio.dictateStop': 'Dejar de escuchar',
+  'intake.audio.dictateListening': 'Escuchando...',
+  'intake.audio.dictateError': 'No te escuché. Toca el micrófono para intentarlo de nuevo.',
 
   // MonthlyMedReask modal (E4)
   'intake.reask.ariaLabel': 'Revisión mensual de medicamentos',

@@ -1,21 +1,21 @@
 'use client';
 
-// Flow F — Admin 3-layer dashboard.
+// Flow F — Admin dashboard.
 //
-// Layer 1 (top, always visible): tier-aware alert banners.
-//   • BP Level 2 emergency cards (pulsing red) — one per open BP_LEVEL_2 /
-//     BP_LEVEL_2_SYMPTOM_OVERRIDE alert. Resolve button opens the
-//     AlertResolutionModal in BP_LEVEL_2 variant.
-//   • Tier 1 contraindication banners stacked (red, non-dismissable).
-//   • Tier 2 discrepancy summary chip (numbered, click to expand inline).
+// Triage-only surface per CLINICAL_SPEC V2-C Layer 1. The dashboard
+// answers "what needs attention right now" — it does NOT carry
+// resolution actions. Action surfaces live elsewhere:
+//   • Patients → patient detail → Alerts tab — full v2 alert UI
+//   • /admin/notifications — inline-expand inbox with Resolve / Acknowledge
 //
-// Layer 2 (middle): tier-filterable alert queue with BP trend on the right.
-//   Row click → side panel (reuses AlertPanel for review UX). Resolve button
-//   in the side panel opens AlertResolutionModal with the matching variant.
-//
-// Layer 3 (bottom): stat cards. Reuses provider stats endpoint plus a tier
-//   breakdown derived from the alerts list, so the numbers always match
-//   what's visible in Layer 1 / Layer 2.
+// Top: stat cards (totals + per-tier counts derived from the alerts list,
+//   so the numbers always match the queue below).
+// Middle: tier-filterable alert queue with BP trend on the right.
+//   Hovering or clicking a row loads that patient's BP trend chart in
+//   the right column — that's the only interaction on the queue itself.
+//   No Review, no Resolve, no side panel — those were v1 carry-overs
+//   that exposed clinically misleading content (fake AI claims,
+//   non-existent baselines, v1 Schedule-call action).
 
 import {
   AreaChart,
@@ -46,21 +46,21 @@ import {
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/auth-context';
 import { hasAdminRole, isProviderOnly } from '@/lib/roleGates';
 import { useLanguage } from '@/contexts/LanguageContext';
-import AlertPanel, { type Alert, type AlertDetail } from './AlertPanel';
-import ScheduleModal, { type ScheduleDetails } from './ScheduleModal';
-import AlertResolutionModal, { type ResolvableAlert } from './AlertResolutionModal';
+// Type-only — the v1 AlertPanel side panel was removed (it surfaced
+// fake AI claims, made-up baselines, and v1 "Schedule call" actions per
+// CLINICAL_SPEC V2-C). The Alert/AlertDetail shapes still describe the
+// trend-panel state on the right column, so we keep the types.
+import type { Alert, AlertDetail } from './AlertPanel';
 import {
   getProviderStats,
   getProviderAlerts,
   getAlertDetail,
   getPatientBpTrend,
-  acknowledgeProviderAlert,
-  scheduleCall,
-  resolutionTierFor,
   type AlertTier,
 } from '@/lib/services/provider.service';
 
@@ -249,6 +249,7 @@ function BPTrendSkeleton() {
 export default function AdminDashboard() {
   const { user, isLoading } = useAuth();
   const { t } = useLanguage();
+  const router = useRouter();
 
   // Data
   const [rawAlerts, setRawAlerts] = useState<RawAlert[]>([]);
@@ -261,20 +262,9 @@ export default function AdminDashboard() {
   });
   const [dataLoading, setDataLoading] = useState(true);
 
-  // Layer 1 UI state
-  const [bpL2Resolving, setBpL2Resolving] = useState<RawAlert | null>(null);
-  const [tier1Resolving, setTier1Resolving] = useState<RawAlert | null>(null);
-  const [tier2Resolving, setTier2Resolving] = useState<RawAlert | null>(null);
-
   // Layer 2 queue state
   const [tierFilter, setTierFilter] = useState<TierFilter>('ALL');
   const [alertSearch, setAlertSearch] = useState('');
-  const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
-
-  // Side panel (review)
-  const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
-  const [selectedAlertDetail, setSelectedAlertDetail] = useState<AlertDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
 
   // BP trend
   const [trendAlert, setTrendAlert] = useState<Alert | null>(null);
@@ -291,10 +281,6 @@ export default function AdminDashboard() {
   const [trendEndDate, setTrendEndDate] = useState(() => new Date().toISOString().slice(0, 10));
   type BpPoint = { day: string; systolic: number | null; diastolic: number | null; date: string; time: string | null };
   const [bpTrendData, setBpTrendData] = useState<BpPoint[]>([]);
-
-  // Schedule modal
-  const [scheduleAlert, setScheduleAlert] = useState<Alert | null>(null);
-  const [scheduleError, setScheduleError] = useState<string | null>(null);
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
   // PROVIDER-only callers get the assigned-only scope. Other admin roles
@@ -335,11 +321,8 @@ export default function AdminDashboard() {
   // row in the patient detail Medications tab + in the Physician notes
   // section of the patient Alerts tab instead.
   const visibleAlerts = useMemo(
-    () =>
-      rawAlerts.filter(
-        (a) => !reviewedIds.has(a.id) && tierBucket(a) !== 'TIER_3',
-      ),
-    [rawAlerts, reviewedIds],
+    () => rawAlerts.filter((a) => tierBucket(a) !== 'TIER_3'),
+    [rawAlerts],
   );
 
   const bpL2Alerts = useMemo(() => visibleAlerts.filter((a) => tierBucket(a) === 'BP_L2'), [visibleAlerts]);
@@ -364,21 +347,6 @@ export default function AdminDashboard() {
   }, [visibleAlerts, tierFilter, alertSearch]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
-  const handleSelectForReview = useCallback(async (a: RawAlert) => {
-    const adapted = toAlertPanelShape(a);
-    setSelectedAlert(adapted);
-    setSelectedAlertDetail(null);
-    setDetailLoading(true);
-    try {
-      const detail = await getAlertDetail(a.id);
-      setSelectedAlertDetail(detail);
-    } catch {
-      // Panel will fall back to summary data
-    } finally {
-      setDetailLoading(false);
-    }
-  }, []);
-
   const fetchBpTrend = useCallback(async (patientId: string, start: string, end: string) => {
     try {
       const data = await getPatientBpTrend(patientId, start, end);
@@ -423,79 +391,6 @@ export default function AdminDashboard() {
     if (!trendAlert?.patientId) return;
     fetchBpTrend(trendAlert.patientId, trendStartDate, trendEndDate);
   }, [trendStartDate, trendEndDate, trendAlert?.patientId, fetchBpTrend]);
-
-  const handleReview = async (id: string) => {
-    try {
-      await acknowledgeProviderAlert(id);
-    } catch {
-      // best-effort — still remove from local view
-    }
-    setReviewedIds((prev) => new Set([...prev, id]));
-    setSelectedAlert(null);
-    setSelectedAlertDetail(null);
-  };
-
-  const handleSchedule = (alert: Alert) => {
-    setScheduleAlert(alert);
-    setScheduleError(null);
-  };
-
-  const handleScheduleConfirm = async (details: ScheduleDetails) => {
-    const alert = scheduleAlert;
-    if (!alert) return;
-    try {
-      await scheduleCall({
-        patientUserId: alert.patientId,
-        alertId: alert.id,
-        callDate: details.date,
-        callTime: details.time,
-        callType: details.callType,
-        notes: details.notes || undefined,
-      });
-      setScheduleError(null);
-      const now = new Date().toISOString();
-      setRawAlerts((prev) =>
-        prev.map((a) => (a.id === alert.id ? { ...a, followUpScheduledAt: now } : a)),
-      );
-      if (selectedAlert?.id === alert.id) {
-        setSelectedAlert((prev) => (prev ? { ...prev, followUpScheduledAt: now } : prev));
-      }
-      setTimeout(() => setScheduleAlert(null), 1600);
-    } catch (err) {
-      setScheduleError(err instanceof Error ? err.message : t('provider.failedSchedule'));
-    }
-  };
-
-  /** Resolution modal callback — alert was resolved (or marked OPEN+retry). */
-  const handleResolved = (id: string, result: { status: 'RESOLVED' | 'OPEN' }) => {
-    if (result.status === 'RESOLVED') {
-      setRawAlerts((prev) => prev.filter((a) => a.id !== id));
-    } else {
-      // OPEN (BP_L2 retry) — keep it but force a refresh so escalation/audit
-      // fields stay accurate.
-      refreshData();
-    }
-    // Close any side-panels referencing this alert.
-    if (selectedAlert?.id === id) {
-      setSelectedAlert(null);
-      setSelectedAlertDetail(null);
-    }
-  };
-
-  // Build a ResolvableAlert shape for the modal from the currently-open
-  // raw alert (whichever resolve slot is active).
-  const resolvableForModal: ResolvableAlert | null = useMemo(() => {
-    const a = bpL2Resolving ?? tier1Resolving ?? tier2Resolving;
-    if (!a) return null;
-    return {
-      id: a.id,
-      tier: a.tier,
-      patient: { name: a.patient?.name ?? null },
-      patientMessage: a.patientMessage,
-      journalEntry: a.journalEntry,
-      createdAt: a.createdAt,
-    };
-  }, [bpL2Resolving, tier1Resolving, tier2Resolving]);
 
   // ── Loading / access gates ────────────────────────────────────────────────
   if (isLoading) {
@@ -553,43 +448,38 @@ export default function AdminDashboard() {
 
   return (
     <div className="h-full" style={{ backgroundColor: 'var(--brand-background)' }}>
-      {/* Row-level emphasis effects — INNER glows so the effect lives
-          inside the row's rounded rectangle. Doesn't bleed into adjacent
-          rows or push outside the queue card.
-          • BP L2 — inset glow that "breathes" in/out: a feathered red
-            wash from the row's edges + a thin red ring just inside the
-            border. Slow 3s ease so it feels alive, not twitchy.
-          • Tier 1 — static inner glow (no animation) so it reads as
-            urgent but doesn't compete with the L2 breathing.
-          Respects prefers-reduced-motion: animations stop, L2 falls
-          back to a steady soft inner glow so the safety signal stays. */}
+      {/* BP L2 sonar dot — a small red beacon on the right edge of every
+          BP L2 row. A sharp 2px red ring stays bright for definition
+          while a second ring expands outward from the dot and fades to
+          nothing, restarting every 1.8s. Same pattern as iOS / Android
+          "active / urgent" indicators so the meaning reads instantly.
+          Reserved for BP L2 only — Tier 1 stays distinguished by its
+          tier badge + red value + thicker left bar so the beacon means
+          exactly one thing: time-critical, look here first.
+          Respects prefers-reduced-motion: animation stops, falls back to
+          a steady double ring so the safety signal stays. */}
       <style>{`
-        @keyframes adminBpL2InnerBreathe {
-          0%, 100% {
+        @keyframes adminBpL2Sonar {
+          0% {
             box-shadow:
-              inset 0 0 0 2px rgba(220,38,38,0.35),
-              inset 0 0 12px 0 rgba(220,38,38,0.18);
+              0 0 0 2px rgba(220,38,38,0.95),
+              0 0 0 2px rgba(220,38,38,0.65);
           }
-          50% {
+          100% {
             box-shadow:
-              inset 0 0 0 2px rgba(220,38,38,0.85),
-              inset 0 0 32px 0 rgba(220,38,38,0.50);
+              0 0 0 2px rgba(220,38,38,0.95),
+              0 0 0 14px rgba(220,38,38,0);
           }
         }
         .admin-bp-l2-pulse {
-          animation: adminBpL2InnerBreathe 2.2s cubic-bezier(0.4, 0, 0.4, 1) infinite;
-        }
-        .admin-tier1-emphasis {
-          box-shadow:
-            inset 0 0 0 2px rgba(220,38,38,0.55),
-            inset 0 0 18px 0 rgba(220,38,38,0.22);
+          animation: adminBpL2Sonar 1.8s ease-out infinite;
         }
         @media (prefers-reduced-motion: reduce) {
           .admin-bp-l2-pulse {
             animation: none;
             box-shadow:
-              inset 0 0 0 2px rgba(220,38,38,0.75),
-              inset 0 0 24px 0 rgba(220,38,38,0.35);
+              0 0 0 2px rgba(220,38,38,0.95),
+              0 0 0 6px rgba(220,38,38,0.30);
           }
         }
 
@@ -837,28 +727,23 @@ export default function AdminDashboard() {
                   {queueAlerts.map((a) => {
                     const bucket = tierBucket(a);
                     const chrome = bucketChrome(bucket);
-                    const adapted = toAlertPanelShape(a);
-                    const isSelected = trendAlert?.id === adapted.id;
-                    const canResolve = resolutionTierFor(a.tier) != null;
-                    // Highlight critical tiers — BP L2 breathes (soft glow
-                    // that fades in/out, much smoother than the old hard
-                    // pulse). Tier 1 gets a static red glow + heavier left
-                    // bar so it reads as urgent but doesn't compete with
-                    // the L2 motion. Other tiers stay flat.
+                    const isSelected = trendAlert?.id === a.id;
+                    // Urgency beacon — BP L2 ONLY. A small red sonar dot
+                    // on the right edge means exactly one thing: this is
+                    // time-critical, look here first. Tier 1 is still
+                    // visually distinct via tier badge, red BP value, and
+                    // thicker red left bar; reserving the dot for BP L2
+                    // keeps the signal unambiguous.
                     const isBpL2 = bucket === 'BP_L2';
                     const isTier1 = bucket === 'TIER_1';
-                    const highlightClass = isBpL2
-                      ? 'admin-bp-l2-pulse'
-                      : isTier1
-                        ? 'admin-tier1-emphasis'
-                        : '';
+                    const showDot = isBpL2;
                     const borderLeftWidth = isBpL2 ? 6 : isTier1 ? 5 : 4;
                     return (
                       <li key={a.id}>
                         <div
-                          className={`group rounded-xl p-3 flex items-center gap-3 cursor-pointer transition-all ${
-                            isSelected ? 'ring-2 ring-purple-300' : 'hover:brightness-[0.98]'
-                          } ${highlightClass}`}
+                          className={`group rounded-xl p-3 flex items-center gap-3 cursor-pointer transition-[filter] duration-150 ${
+                            isSelected ? 'brightness-[0.92]' : 'hover:brightness-[0.96]'
+                          }`}
                           style={{
                             backgroundColor: chrome.light,
                             borderLeft: `${borderLeftWidth}px solid ${chrome.accent}`,
@@ -866,17 +751,37 @@ export default function AdminDashboard() {
                           onMouseEnter={() => handleRowHover(a)}
                           onClick={() => handleRowHover(a)}
                         >
-                          <div
-                            className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-[10.5px] shrink-0"
+                          {/* Avatar — click navigates to the patient
+                              detail page (where the full alert UI +
+                              actions live). stopPropagation so the row's
+                              BP-trend onClick doesn't also fire. */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (a.patient?.id) router.push(`/patients/${a.patient.id}`);
+                            }}
+                            className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-[10.5px] shrink-0 cursor-pointer transition-transform hover:scale-105"
                             style={{ backgroundColor: chrome.accent }}
+                            aria-label={`Open ${a.patient?.name ?? 'patient'} detail`}
                           >
                             {initialsOf(a.patient?.name)}
-                          </div>
+                          </button>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-[13px] font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>
+                              {/* Name — same target as avatar; underline
+                                  on hover to signal it's a link. */}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (a.patient?.id) router.push(`/patients/${a.patient.id}`);
+                                }}
+                                className="text-[13px] font-bold truncate cursor-pointer hover:underline text-left"
+                                style={{ color: 'var(--brand-text-primary)' }}
+                              >
                                 {a.patient?.name ?? 'Unknown'}
-                              </span>
+                              </button>
                               <span
                                 className="inline-flex items-center gap-1 text-[9.5px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
                                 style={{ backgroundColor: 'white', color: chrome.accent }}
@@ -903,38 +808,24 @@ export default function AdminDashboard() {
                               </span>
                             </div>
                           </div>
-                          <div className="flex gap-1.5 shrink-0">
-                            <button
-                              type="button"
-                              className="h-7 px-2.5 rounded-lg text-[11px] font-semibold transition-all hover:brightness-95 cursor-pointer"
-                              style={{
-                                backgroundColor: 'white',
-                                color: chrome.accent,
-                                border: `1.5px solid ${chrome.accent}`,
-                              }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleSelectForReview(a);
-                              }}
+                          {/* Right-edge urgency beacon — small red dot
+                              with a sonar ripple (BP L2) or static halo
+                              (Tier 1). Other tiers render nothing here
+                              so the right edge stays clean.
+                              Triage-only — no action buttons. To act on
+                              an alert, navigate via Patients → patient →
+                              Alerts tab, or /admin/notifications. */}
+                          {showDot && (
+                            <div
+                              className="shrink-0 mr-2 flex items-center justify-center"
+                              aria-hidden
                             >
-                              Review
-                            </button>
-                            {canResolve && (
-                              <button
-                                type="button"
-                                className="h-7 px-2.5 rounded-lg text-[11px] font-semibold text-white transition-all hover:brightness-95 cursor-pointer"
+                              <span
+                                className="block w-2.5 h-2.5 rounded-full admin-bp-l2-pulse"
                                 style={{ backgroundColor: chrome.accent }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (bucket === 'BP_L2') setBpL2Resolving(a);
-                                  else if (bucket === 'TIER_1') setTier1Resolving(a);
-                                  else if (bucket === 'TIER_2') setTier2Resolving(a);
-                                }}
-                              >
-                                Resolve
-                              </button>
-                            )}
-                          </div>
+                              />
+                            </div>
+                          )}
                         </div>
                       </li>
                     );
@@ -1165,49 +1056,10 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* ── Side panel — review ───────────────────────────────────────────── */}
-      <AnimatePresence>
-        {selectedAlert && (
-          <AlertPanel
-            alert={selectedAlert}
-            detail={selectedAlertDetail}
-            detailLoading={detailLoading}
-            onClose={() => {
-              setSelectedAlert(null);
-              setSelectedAlertDetail(null);
-            }}
-            onReview={handleReview}
-            onSchedule={handleSchedule}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* ── Schedule modal ────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {scheduleAlert && (
-          <ScheduleModal
-            alert={scheduleAlert}
-            onClose={() => {
-              setScheduleAlert(null);
-              setScheduleError(null);
-            }}
-            onConfirm={handleScheduleConfirm}
-            error={scheduleError}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* ── Resolution modal (Flow G) ─────────────────────────────────────── */}
-      <AlertResolutionModal
-        alert={resolvableForModal}
-        open={!!resolvableForModal}
-        onClose={() => {
-          setBpL2Resolving(null);
-          setTier1Resolving(null);
-          setTier2Resolving(null);
-        }}
-        onResolved={handleResolved}
-      />
+      {/* The v1 AlertPanel side panel, the v1 Schedule-call modal, and
+          the per-alert resolution modal were all removed — their actions
+          now live on the patient-detail Alerts tab and on
+          /admin/notifications. The dashboard stays triage-only. */}
     </div>
   );
 }
