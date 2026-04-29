@@ -21,7 +21,7 @@ export const metadata: Metadata = {
   title: "Cardioplace",
   description: "Cardiovascular patient monitoring and care coordination platform",
   icons: {
-    icon: "/favicon-32x32.png",
+    icon: "/cardioplace-icon.svg",
   },
 };
 

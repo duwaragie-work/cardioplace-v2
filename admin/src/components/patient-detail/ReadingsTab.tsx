@@ -8,8 +8,7 @@
 // review/triage; edits are patient-side only.
 //
 // Layout:
-//   • Filter row — date range (7d / 30d / 90d / custom), tier filter,
-//     suboptimal-only toggle.
+//   • Filter row — date range (7d / 30d / 90d / custom) and tier filter.
 //   • One card per entry, newest first. Card surfaces date/time +
 //     vitals + position/weight up top; symptoms, missed-med detail,
 //     measurement-flags, notes, and any linked-alert tier badges below.
@@ -121,7 +120,6 @@ export default function ReadingsTab({ patientId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<DateFilter>('30D');
   const [tierFilter, setTierFilter] = useState<TierFilter>('ALL');
-  const [suboptimalOnly, setSuboptimalOnly] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -146,22 +144,15 @@ export default function ReadingsTab({ patientId }: Props) {
     const cutoff = dateFilterCutoff(dateFilter);
     return entries.filter((e) => {
       if (cutoff && new Date(e.measuredAt) < cutoff) return false;
-      if (suboptimalOnly && !e.suboptimalMeasurement) return false;
       if (tierFilter !== 'ALL') {
         const hit = e.deviations.some((d) => tierBucket(d.tier) === tierFilter);
         if (!hit) return false;
       }
       return true;
     });
-  }, [entries, dateFilter, tierFilter, suboptimalOnly]);
+  }, [entries, dateFilter, tierFilter]);
 
-  const counts = useMemo(() => {
-    const acc = { ALL: entries.length, suboptimal: 0 };
-    for (const e of entries) {
-      if (e.suboptimalMeasurement) acc.suboptimal++;
-    }
-    return acc;
-  }, [entries]);
+  const counts = useMemo(() => ({ ALL: entries.length }), [entries]);
 
   return (
     <div className="space-y-4">
@@ -239,42 +230,12 @@ export default function ReadingsTab({ patientId }: Props) {
             </div>
           </div>
 
-          {/* Suboptimal toggle */}
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
-              Quality
-            </span>
-            <button
-              type="button"
-              onClick={() => setSuboptimalOnly((v) => !v)}
-              className="px-2.5 h-7 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 cursor-pointer"
-              style={{
-                backgroundColor: suboptimalOnly ? 'var(--brand-warning-amber)' : 'var(--brand-warning-amber-light)',
-                color: suboptimalOnly ? 'white' : 'var(--brand-warning-amber)',
-                border: `1.5px solid ${suboptimalOnly ? 'var(--brand-warning-amber)' : 'transparent'}`,
-              }}
-            >
-              <AlertTriangle className="w-3 h-3" />
-              Suboptimal only
-              <span
-                className="text-[10px] font-bold px-1.5 rounded-full"
-                style={{
-                  backgroundColor: suboptimalOnly ? 'rgba(255,255,255,0.25)' : 'white',
-                  color: suboptimalOnly ? 'white' : 'var(--brand-warning-amber)',
-                  minWidth: 18, textAlign: 'center',
-                }}
-              >
-                {counts.suboptimal}
-              </span>
-            </button>
-          </div>
         </div>
 
         <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
           Showing {filtered.length} of {counts.ALL} {counts.ALL === 1 ? 'reading' : 'readings'}
           {dateFilter !== 'ALL' && <> · {dateFilter === '7D' ? 'last 7 days' : dateFilter === '30D' ? 'last 30 days' : 'last 90 days'}</>}
           {tierFilter !== 'ALL' && <> · {tierChrome(tierFilter).label} alerts only</>}
-          {suboptimalOnly && <> · suboptimal only</>}
         </p>
       </div>
 
@@ -637,7 +598,7 @@ function EmptyCard({ hasReadings }: { hasReadings: boolean }) {
       </p>
       <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
         {hasReadings
-          ? 'Widen the date range or clear the tier / suboptimal filter.'
+          ? 'Widen the date range or clear the tier filter.'
           : "This patient hasn't logged any blood-pressure readings."}
       </p>
     </div>

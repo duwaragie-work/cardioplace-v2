@@ -83,7 +83,7 @@ export default function Homepage() {
                   className="w-full backdrop-blur-md bg-white/10 border-2 border-[rgba(92,0,169,0.2)] rounded-full p-1.5 sm:p-2.5 flex items-center shadow-2xl"
                 >
                   <div className="pl-2 sm:pl-4 shrink-0">
-                    <Image src="/logo.svg" alt="" width={36} height={36} className="md:w-[42px] md:h-[42px]" />
+                    <Image src="/cardioplace-icon.svg" alt="" width={36} height={36} className="md:w-[42px] md:h-[42px]" />
                   </div>
                   <input
                     type="text"

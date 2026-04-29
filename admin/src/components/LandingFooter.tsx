@@ -42,11 +42,16 @@ export default function LandingFooter() {
       <div className="max-w-[1280px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-10 px-4 sm:px-6 md:px-8 lg:px-12 pt-10 md:pt-16 pb-8 md:pb-12">
         {/* Col 1 - Brand */}
         <div className="flex flex-col gap-6">
-          <div className="flex items-center gap-1">
-            <Image src="/logo2.png" alt="Cardioplace" width={42} height={42} />
-            <span className="font-bold text-white text-2xl tracking-tight">
-              Cardioplace
-            </span>
+          <div className="flex items-center">
+            {/* Dark-background variant — purpose-designed wordmark with
+                white paths baked in, so no CSS filter is needed. */}
+            <Image
+              src="/cardioplace-dark.svg"
+              alt="Cardioplace"
+              width={180}
+              height={40}
+              className="h-8 w-auto"
+            />
           </div>
           <div className="flex items-center gap-3">
             <div className="bg-white rounded-lg px-2 py-1.5 shrink-0">

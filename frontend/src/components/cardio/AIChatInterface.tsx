@@ -132,9 +132,9 @@ function TypingIndicator() {
     <div className="flex items-end gap-2.5">
       <div
         className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
-        style={{ background: 'linear-gradient(135deg, #7b00e017, #9233ea43)', boxShadow: '0 2px 8px rgba(123,0,224,0.3)' }}
+        style={{ boxShadow: '0 2px 8px rgba(123,0,224,0.3)' }}
       >
-        <Image src="/logo.svg" alt="Cardioplace" width={30} height={30} />
+        <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
       </div>
       <div
         className="flex items-center gap-1.5 px-4 py-3.5"
@@ -193,8 +193,8 @@ function MessageBubble({ msg }: { msg: Message }) {
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.2 }}
       >
-        <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: 'linear-gradient(135deg, #7b00e017, #9233ea43)' }}>
-          <Image src="/logo.svg" alt="Cardioplace" width={30} height={30} />
+        <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0">
+          <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
         </div>
         <div
           className="max-w-[75%] sm:max-w-[65%] px-4 py-3.5"
@@ -220,8 +220,8 @@ function MessageBubble({ msg }: { msg: Message }) {
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.2 }}
     >
-      <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: 'linear-gradient(135deg, #7b00e017, #9233ea43)', boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
-        <Image src="/logo.svg" alt="Cardioplace" width={30} height={30} />
+      <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
+        <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
       </div>
       <div
         className="max-w-[80%] sm:max-w-[70%] px-4 py-3.5"
@@ -732,8 +732,8 @@ function LiveTranscriptBubbles({ lines }: { lines: TranscriptLine[] }) {
           transition={{ duration: 0.15 }}
         >
           {group.speaker === 'agent' && (
-            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: 'linear-gradient(135deg, #7b00e017, #9233ea43)' }}>
-              <Image src="/logo.svg" alt="Cardioplace" width={30} height={30} />
+            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0">
+              <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
             </div>
           )}
           <div
@@ -1645,8 +1645,8 @@ export default function AIChatInterface() {
             <Menu className="w-5 h-5" style={{ color: 'var(--brand-text-muted)' }} />
           </button>
           <div className="flex items-center gap-3 flex-1 min-w-0">
-            <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: 'linear-gradient(135deg, #7b00e017, #9233ea43)', boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
-              <Image src="/logo.svg" alt="Cardioplace" width={30} height={30} />
+            <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
+              <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
             </div>
             <div>
               <p className="text-[14px] font-semibold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.title')}</p>
@@ -1712,8 +1712,8 @@ export default function AIChatInterface() {
           {messages.length === 0 && transcript.length === 0 && !isTyping && !isLoadingHistory && !voiceSummaryLoading && (
             <div className="flex items-center justify-center h-full">
               <div className="text-center max-w-xs mx-auto">
-                <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'linear-gradient(135deg, #7b00e017, #9233ea43)', boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
-                  <Image src="/logo.svg" alt="Cardioplace" width={50} height={50} />
+                <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
+                  <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={50} height={50} />
                 </div>
                 <p className="text-[16px] font-bold mb-1.5" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.howCanIHelp')}</p>
                 <p className="text-[13px] leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
