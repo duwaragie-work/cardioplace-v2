@@ -139,7 +139,16 @@ export default function MicButton({
         }
         const first = ev.results[0]?.[0]?.transcript ?? ''
         const cleaned = numeric ? wordsToDigits(first) : first.trim()
-        if (cleaned) onTranscript(cleaned)
+        if (cleaned) {
+          onTranscript(cleaned)
+        } else if (first.trim()) {
+          // The recognizer heard something but our parser couldn't extract a
+          // usable value (e.g., "Pulse seems normal" → no digits). Surface
+          // an error instead of silently swallowing — this was the pulse
+          // field's failure mode for short hyphenated dictations like
+          // "seventy-two" before wordsToDigits handled the hyphen case.
+          setErrorMsg(t('intake.audio.dictateError'))
+        }
       } catch {
         setErrorMsg(t('intake.audio.dictateError'))
       }

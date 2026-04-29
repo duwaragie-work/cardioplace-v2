@@ -71,25 +71,48 @@ const TENS: Record<string, number> = {
  *   "one forty two"   → "142"   (informal — patients say "one forty two")
  *   "one hundred forty two" → "142"
  *   "ninety eight"    → "98"
+ *   "seventy-two"     → "72"    (hyphenated — Chrome Android frequently)
+ *   "98 bpm"          → "98"    (recognizer adds a unit suffix)
  *   "142"             → "142"   (passes through if already digits)
- *   "120 over 80"     → "120 80" (caller can split on space if needed)
+ *   "120 over 80"     → "120 80"
  *
- * Returns the input untouched if no recognisable number words are present
- * — keeps the helper safe for callers that don't know if STT yielded
- * digits or words.
+ * Returns an empty string if nothing parseable is in the input. Callers
+ * should treat that as "couldn't hear the number — ask the user to retry."
  */
 export function wordsToDigits(input: string): string {
   if (!input) return ''
-  const trimmed = input.trim().toLowerCase()
+  // Normalise: lowercase, strip leading/trailing whitespace, fold hyphens
+  // between letters into spaces ("seventy-two" → "seventy two"). The fold
+  // happens before the digit-only fast-path so 120-80 style strings still
+  // parse cleanly via the digit regex below.
+  const trimmed = input
+    .trim()
+    .toLowerCase()
+    .replace(/(?<=[a-z])-(?=[a-z])/g, ' ')
   if (!trimmed) return ''
 
-  // Fast path: already digits + spaces + "over" / "/" / "-".
-  if (/^[\d\s/.,\-]+$/.test(trimmed)) return trimmed
+  // Fast path: already digits + spaces + "/" / "." / ",". If the input is
+  // mostly digits with a unit suffix like "98 bpm", strip the non-digit
+  // tail and return what remains.
+  if (/^[\d\s/.,]+$/.test(trimmed)) return trimmed
+  const digitsOnly = trimmed.match(/^\s*(\d[\d\s/.]*)/)
+  if (digitsOnly) {
+    const head = digitsOnly[1].trim()
+    // Only short-circuit when the tail is plainly a unit/filler word —
+    // protects against accidentally truncating "120 over 80" which has
+    // meaningful tokens after the leading digits.
+    const tail = trimmed.slice(digitsOnly[0].length).trim()
+    if (!tail || /^(bpm|beats|per|minute|min|mmhg)\b/.test(tail)) {
+      return head
+    }
+  }
 
-  // Tokenise on whitespace + the common BP filler "over".
+  // Tokenise on whitespace + the common BP filler "over". Strip "and"
+  // ("one hundred and twenty") since it's grammatical filler, not a number.
   const tokens = trimmed
     .replace(/[,]/g, ' ')
     .replace(/\bover\b/g, ' ')
+    .replace(/\band\b/g, ' ')
     .split(/\s+/)
     .filter(Boolean)
 
