@@ -651,9 +651,14 @@ export class ProviderService {
         take: limit,
         include: {
           deviationAlerts: {
+            // Tier is required so the admin Readings tab can render the
+            // tier badge per linked alert (V2-C). Severity stays for
+            // backward compatibility with the dashboard BP-trend panel
+            // that already consumes this endpoint.
             select: {
               id: true,
               type: true,
+              tier: true,
               severity: true,
               magnitude: true,
               baselineValue: true,
@@ -670,35 +675,76 @@ export class ProviderService {
     return {
       statusCode: 200,
       message: 'Journal history retrieved successfully',
-      data: entries.map((entry) => ({
-        id: entry.id,
-        entryDate: entry.measuredAt,
-        measurementTime: null,
-        systolicBP: entry.systolicBP,
-        diastolicBP: entry.diastolicBP,
-        weight: entry.weight != null ? Number(entry.weight) : null,
-        medicationTaken: entry.medicationTaken,
-        missedDoses: entry.missedDoses,
-        symptoms: entry.otherSymptoms,
-        teachBackAnswer: entry.teachBackAnswer,
-        teachBackCorrect: entry.teachBackCorrect,
-        notes: entry.notes,
-        source: entry.source.toLowerCase(),
-        sourceMetadata: entry.sourceMetadata,
-        baseline: null,
-        deviations: entry.deviationAlerts.map((a) => ({
-          id: a.id,
-          type: a.type,
-          severity: a.severity,
-          magnitude: a.magnitude != null ? Number(a.magnitude) : null,
-          baselineValue: a.baselineValue ? Number(a.baselineValue) : null,
-          actualValue: a.actualValue ? Number(a.actualValue) : null,
-          escalated: a.escalated,
-          status: a.status,
-        })),
-        createdAt: entry.createdAt,
-        updatedAt: entry.updatedAt,
-      })),
+      data: entries.map((entry) => {
+        // Suboptimal = ANY checklist key in measurementConditions is false.
+        // Mirrors session-averager.service.ts hasAnyFalseChecklistItem so
+        // the admin Readings tab shows the same flag the rule engine
+        // attached when it evaluated the session.
+        const conditions = (entry.measurementConditions ?? null) as
+          | Record<string, unknown>
+          | null
+        const failedConditions: string[] = conditions
+          ? Object.entries(conditions)
+              .filter(([, v]) => v === false)
+              .map(([k]) => k)
+          : []
+        const suboptimalMeasurement = failedConditions.length > 0
+        const pulsePressure =
+          entry.systolicBP != null && entry.diastolicBP != null
+            ? entry.systolicBP - entry.diastolicBP
+            : null
+        return {
+          id: entry.id,
+          entryDate: entry.measuredAt,
+          measurementTime: null,
+          measuredAt: entry.measuredAt,
+          sessionId: entry.sessionId,
+          systolicBP: entry.systolicBP,
+          diastolicBP: entry.diastolicBP,
+          pulse: entry.pulse,
+          pulsePressure,
+          position: entry.position,
+          weight: entry.weight != null ? Number(entry.weight) : null,
+          medicationTaken: entry.medicationTaken,
+          missedDoses: entry.missedDoses,
+          missedMedications: entry.missedMedications,
+          // Structured Level-2 symptom booleans (the Readings tab renders
+          // these as chips; only true ones are shown).
+          severeHeadache: entry.severeHeadache,
+          visualChanges: entry.visualChanges,
+          alteredMentalStatus: entry.alteredMentalStatus,
+          chestPainOrDyspnea: entry.chestPainOrDyspnea,
+          focalNeuroDeficit: entry.focalNeuroDeficit,
+          severeEpigastricPain: entry.severeEpigastricPain,
+          newOnsetHeadache: entry.newOnsetHeadache,
+          ruqPain: entry.ruqPain,
+          edema: entry.edema,
+          symptoms: entry.otherSymptoms,
+          otherSymptoms: entry.otherSymptoms,
+          measurementConditions: conditions,
+          suboptimalMeasurement,
+          failedConditions,
+          teachBackAnswer: entry.teachBackAnswer,
+          teachBackCorrect: entry.teachBackCorrect,
+          notes: entry.notes,
+          source: entry.source.toLowerCase(),
+          sourceMetadata: entry.sourceMetadata,
+          baseline: null,
+          deviations: entry.deviationAlerts.map((a) => ({
+            id: a.id,
+            type: a.type,
+            tier: a.tier,
+            severity: a.severity,
+            magnitude: a.magnitude != null ? Number(a.magnitude) : null,
+            baselineValue: a.baselineValue ? Number(a.baselineValue) : null,
+            actualValue: a.actualValue ? Number(a.actualValue) : null,
+            escalated: a.escalated,
+            status: a.status,
+          })),
+          createdAt: entry.createdAt,
+          updatedAt: entry.updatedAt,
+        }
+      }),
       pagination: {
         page,
         limit,

@@ -60,6 +60,69 @@ export async function getPatientJournal(userId: string, page?: number, limit?: n
   return json.data ?? json
 }
 
+// ─── Patient Detail Readings tab ────────────────────────────────────────────
+//
+// Typed wrapper around getPatientJournal for the ReadingsTab. Mirrors the
+// shape produced by ProviderService.getPatientJournal in the backend (see
+// provider.service.ts). Read-only — the admin doesn't edit patient
+// readings here; that's a patient-side action only.
+
+export interface PatientJournalEntry {
+  id: string
+  measuredAt: string
+  sessionId: string | null
+  systolicBP: number | null
+  diastolicBP: number | null
+  pulse: number | null
+  pulsePressure: number | null
+  position: 'SITTING' | 'STANDING' | 'LYING' | null
+  weight: number | null
+  medicationTaken: boolean | null
+  missedDoses: number | null
+  /** Per-medication miss detail snapshot at entry time. */
+  missedMedications: Array<{
+    medicationId?: string | null
+    drugName: string
+    drugClass?: string | null
+    reason?: string | null
+    missedDoses?: number | null
+  }> | unknown
+  // Structured Level-2 symptom booleans
+  severeHeadache: boolean
+  visualChanges: boolean
+  alteredMentalStatus: boolean
+  chestPainOrDyspnea: boolean
+  focalNeuroDeficit: boolean
+  severeEpigastricPain: boolean
+  newOnsetHeadache: boolean
+  ruqPain: boolean
+  edema: boolean
+  otherSymptoms: string[]
+  measurementConditions: Record<string, unknown> | null
+  suboptimalMeasurement: boolean
+  failedConditions: string[]
+  notes: string | null
+  source: string
+  deviations: Array<{
+    id: string
+    type: string | null
+    tier: string | null
+    severity: string | null
+    status: string
+    escalated: boolean
+  }>
+  createdAt: string
+  updatedAt: string
+}
+
+export async function getPatientJournalEntries(
+  userId: string,
+  opts?: { limit?: number },
+): Promise<PatientJournalEntry[]> {
+  const data = await getPatientJournal(userId, 1, opts?.limit ?? 200)
+  return Array.isArray(data) ? (data as PatientJournalEntry[]) : []
+}
+
 export async function getPatientBpTrend(userId: string, startDate: string, endDate: string) {
   const qs = new URLSearchParams({ startDate, endDate })
   const res = await fetchWithAuth(`${API}/api/provider/patients/${userId}/bp-trend?${qs}`)

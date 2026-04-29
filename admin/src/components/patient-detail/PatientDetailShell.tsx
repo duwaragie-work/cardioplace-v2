@@ -23,6 +23,7 @@ import {
   AlertTriangle,
   RefreshCw,
   Heart,
+  Activity,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getPatientSummary } from '@/lib/services/provider.service';
@@ -42,11 +43,12 @@ import {
 import ProfileTab from './ProfileTab';
 import MedicationsTab from './MedicationsTab';
 import AlertsTab from './AlertsTab';
+import ReadingsTab from './ReadingsTab';
 import ThresholdsTab from './ThresholdsTab';
 import TimelineTab from './TimelineTab';
 import CareTeamTab from './CareTeamTab';
 
-type TabKey = 'profile' | 'medications' | 'alerts' | 'thresholds' | 'careteam' | 'timeline';
+type TabKey = 'profile' | 'medications' | 'alerts' | 'readings' | 'thresholds' | 'careteam' | 'timeline';
 
 interface PatientHeader {
   id: string;
@@ -308,6 +310,11 @@ export default function PatientDetailShell({ patientId }: Props) {
     { key: 'profile', label: 'Profile', icon: <UserIcon className="w-3.5 h-3.5" /> },
     { key: 'medications', label: 'Medications', icon: <Pill className="w-3.5 h-3.5" />, count: medications.length || undefined },
     { key: 'alerts', label: 'Alerts', icon: <Bell className="w-3.5 h-3.5" />, count: header?.activeAlertsCount },
+    // Readings sits between Alerts and Thresholds — provider triages alerts
+    // first, then drills into the underlying journal entries for context
+    // (BP trend + symptoms + notes + suboptimal flags), then adjusts
+    // thresholds. Mirrors the natural review workflow.
+    { key: 'readings', label: 'Readings', icon: <Activity className="w-3.5 h-3.5" /> },
     { key: 'thresholds', label: 'Thresholds', icon: <Sliders className="w-3.5 h-3.5" /> },
     { key: 'careteam', label: 'Care team', icon: <UsersIcon className="w-3.5 h-3.5" /> },
     { key: 'timeline', label: 'Timeline', icon: <Clock className="w-3.5 h-3.5" /> },
@@ -615,6 +622,7 @@ export default function PatientDetailShell({ patientId }: Props) {
                 />
               </>
             )}
+            {tab === 'readings' && <ReadingsTab patientId={patientId} />}
             {tab === 'thresholds' && (
               <>
                 {thresholdError && <LoadErrorBanner message={thresholdError} onRetry={loadThreshold} />}
