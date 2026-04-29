@@ -14,7 +14,7 @@ const ROUTE_TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/patients': 'Patients',
   '/scheduled-calls': 'Scheduled calls',
-  '/notifications': 'Alerts',
+  '/notifications': 'Alerts & Notifications',
   '/settings': 'Settings',
 };
 

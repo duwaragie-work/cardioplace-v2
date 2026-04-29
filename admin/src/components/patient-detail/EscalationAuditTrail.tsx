@@ -199,14 +199,12 @@ export default function EscalationAuditTrail({ alert, heightCm }: Props) {
 
   return (
     <div className="rounded-lg p-4 bg-white" style={{ border: '1px solid var(--brand-border)' }}>
-      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-        <p className="text-[10.5px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
-          Escalation audit trail
-        </p>
-        <p className="text-[10.5px] font-mono" style={{ color: 'var(--brand-text-muted)' }}>
-          alert {alert.id.slice(0, 8)}…
-        </p>
-      </div>
+      <p
+        className="text-[10.5px] font-bold uppercase tracking-wider mb-3"
+        style={{ color: 'var(--brand-text-muted)' }}
+      >
+        Escalation audit trail
+      </p>
 
       {/* Vertical timeline. Tier 3 (and any tier with no escalation ladder)
           short-circuits to an informational placeholder instead of an empty

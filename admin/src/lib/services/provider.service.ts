@@ -384,6 +384,15 @@ export async function markAdminNotificationRead(id: string): Promise<void> {
   })
 }
 
+export async function markAdminNotificationsReadBulk(ids: string[]): Promise<void> {
+  if (ids.length === 0) return
+  await fetchWithAuth(`${API}/api/daily-journal/notifications/bulk-status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids, watched: true }),
+  })
+}
+
 /**
  * Resolve an alert via the admin endpoint. The endpoint validates that
  * `action` matches the alert's tier and that `rationale` is provided when

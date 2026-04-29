@@ -5,17 +5,20 @@
 // Polls the unread count every 30s for the badge — short enough to feel
 // near-real-time for a clinical workflow, long enough to stay cheap.
 // Clicking the bell opens a dropdown with the 10 most-recent notifications
-// (any channel except EMAIL); clicking "View all" jumps to the full
-// /admin/notifications page (which is also where the dashboard's
+// (any channel except EMAIL). Each unread row exposes a "✓" pill so the
+// admin can dismiss without navigating away; the header carries a
+// "Mark all read" action that hits the bulk endpoint. "View all" jumps
+// to the full /admin/notifications page (which is also where the dashboard's
 // "Action required → View all" link lands — single shared inbox).
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, Loader2 } from 'lucide-react';
+import { Bell, Check, CheckCheck, Loader2 } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/services/token';
 import {
   getAdminNotifications,
   markAdminNotificationRead,
+  markAdminNotificationsReadBulk,
   type AdminNotificationDto,
 } from '@/lib/services/provider.service';
 
@@ -41,6 +44,7 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<AdminNotificationDto[]>([]);
   const [itemsLoading, setItemsLoading] = useState(false);
+  const [markingAll, setMarkingAll] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
 
@@ -98,24 +102,54 @@ export default function NotificationBell() {
     if (next) void refreshItems();
   }
 
-  async function handleItemClick(n: AdminNotificationDto) {
-    if (!n.watched) {
-      await markAdminNotificationRead(n.id).catch(() => null);
-      setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, watched: true } : x)));
-      // Optimistically decrement the badge so the user sees instant feedback.
-      setCount((prev) => Math.max(0, prev - 1));
+  // Optimistically flip a row to read + decrement the badge. Used by both
+  // the row tap (navigates) and the per-row "✓" button (stays in dropdown).
+  const markOne = useCallback(async (id: string) => {
+    setItems((prev) => {
+      const target = prev.find((x) => x.id === id);
+      if (!target || target.watched) return prev;
+      return prev.map((x) => (x.id === id ? { ...x, watched: true } : x));
+    });
+    setCount((prev) => Math.max(0, prev - 1));
+    try {
+      await markAdminNotificationRead(id);
+    } catch {
+      // Optimistic update stands; refreshCount tick reconciles.
     }
+  }, []);
+
+  async function handleItemClick(n: AdminNotificationDto) {
+    if (!n.watched) await markOne(n.id);
     setOpen(false);
-    if (n.alertId) router.push(`/notifications`);
+    // The bell is the entry point for the personal notification inbox, so
+    // route to the Notifications tab — alert-linked rows still land users
+    // there first; the page itself lets them switch to the Alerts tab.
+    if (n.alertId) router.push(`/notifications?tab=notifications`);
+  }
+
+  async function handleMarkAll() {
+    const ids = items.filter((n) => !n.watched).map((n) => n.id);
+    if (ids.length === 0) return;
+    setMarkingAll(true);
+    setItems((prev) => prev.map((x) => ({ ...x, watched: true })));
+    setCount(0);
+    try {
+      await markAdminNotificationsReadBulk(ids);
+    } catch {
+      // Optimistic update stands; next refresh reconciles.
+    } finally {
+      if (mountedRef.current) setMarkingAll(false);
+    }
   }
 
   function handleViewAll() {
     setOpen(false);
-    router.push('/notifications');
+    router.push('/notifications?tab=notifications');
   }
 
   const display = count > 9 ? '9+' : String(count);
   const hasUnread = count > 0;
+  const dropdownHasUnread = items.some((n) => !n.watched);
 
   return (
     <div ref={containerRef} className="relative">
@@ -150,24 +184,42 @@ export default function NotificationBell() {
           role="dialog"
           aria-label="Notifications"
         >
-          {/* Header */}
+          {/* Header — title + unread badge + Mark all read action */}
           <div
-            className="px-4 py-2.5 flex items-center justify-between"
+            className="px-4 py-2.5 flex items-center justify-between gap-2"
             style={{ borderBottom: '1px solid var(--brand-border)' }}
           >
-            <p className="text-[12px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-              Notifications
-            </p>
-            {hasUnread && (
-              <span
-                className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+            <div className="flex items-center gap-2 min-w-0">
+              <p className="text-[12px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                Notifications
+              </p>
+              {hasUnread && (
+                <span
+                  className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0"
+                  style={{
+                    backgroundColor: 'var(--brand-alert-red-light)',
+                    color: 'var(--brand-alert-red)',
+                  }}
+                >
+                  {count} unread
+                </span>
+              )}
+            </div>
+            {dropdownHasUnread && (
+              <button
+                type="button"
+                onClick={handleMarkAll}
+                disabled={markingAll}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 h-6 rounded-full cursor-pointer transition hover:opacity-80 disabled:opacity-50 shrink-0"
                 style={{
-                  backgroundColor: 'var(--brand-alert-red-light)',
-                  color: 'var(--brand-alert-red)',
+                  color: 'var(--brand-primary-purple)',
+                  backgroundColor: 'var(--brand-primary-purple-light)',
                 }}
+                aria-label="Mark all notifications as read"
               >
-                {count} unread
-              </span>
+                <CheckCheck className="w-3 h-3" />
+                {markingAll ? 'Marking…' : 'Mark all read'}
+              </button>
             )}
           </div>
 
@@ -186,11 +238,21 @@ export default function NotificationBell() {
               </div>
             ) : (
               items.map((n, idx) => (
-                <button
+                // Outer is a div (not a button) so the per-row "✓" pill is a
+                // valid descendant — nested <button>s break HTML semantics
+                // and trigger React's hydration error.
+                <div
                   key={n.id}
-                  type="button"
-                  onClick={() => handleItemClick(n)}
-                  className="w-full text-left px-4 py-2.5 flex items-start gap-2.5 transition-colors hover:bg-gray-50 cursor-pointer"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => void handleItemClick(n)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      void handleItemClick(n);
+                    }
+                  }}
+                  className="w-full text-left px-4 py-2.5 flex items-start gap-2.5 transition-colors hover:bg-gray-50 cursor-pointer focus:outline-none focus-visible:bg-gray-50"
                   style={{ borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none' }}
                 >
                   <span
@@ -222,7 +284,27 @@ export default function NotificationBell() {
                       {timeAgo(n.sentAt)}
                     </p>
                   </div>
-                </button>
+                  {/* Per-row mark-read affordance — only on unread rows. Stops
+                      propagation so it doesn't trigger the row's navigate. */}
+                  {!n.watched && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void markOne(n.id);
+                      }}
+                      className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition cursor-pointer hover:opacity-80 mt-0.5"
+                      style={{
+                        color: 'var(--brand-primary-purple)',
+                        backgroundColor: 'var(--brand-primary-purple-light)',
+                      }}
+                      aria-label="Mark as read"
+                      title="Mark as read"
+                    >
+                      <Check className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               ))
             )}
           </div>
