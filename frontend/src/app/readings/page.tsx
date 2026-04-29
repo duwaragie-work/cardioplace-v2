@@ -231,6 +231,41 @@ function EntryCard({
   // Niva — patients shouldn't see clinical signals they can't action.
   const bmi = getBMI(heightCm, entry.weight);
 
+  // Phase/26 silent-literacy — compose a spoken summary so a non-reader
+  // can hear the entry without parsing chips. Only emits the parts that
+  // are actually present so the read-aloud doesn't say "weight none" etc.
+  const audioSummary = (() => {
+    const parts: string[] = [formatDate(entry.measuredAt)];
+    const dt = new Date(entry.measuredAt);
+    if (!Number.isNaN(dt.getTime())) {
+      const hh = String(dt.getHours()).padStart(2, '0');
+      const mi = String(dt.getMinutes()).padStart(2, '0');
+      parts.push(`at ${hh}:${mi}`);
+    }
+    if (entry.systolicBP && entry.diastolicBP) {
+      parts.push(`Blood pressure ${entry.systolicBP} over ${entry.diastolicBP} mmHg.`);
+    }
+    if (entry.pulse != null) parts.push(`Pulse ${entry.pulse} bpm.`);
+    if (entry.position) {
+      const posLabel =
+        entry.position === 'SITTING'
+          ? t('checkin.b2.positionSitting')
+          : entry.position === 'STANDING'
+            ? t('checkin.b2.positionStanding')
+            : t('checkin.b2.positionLying');
+      parts.push(`${posLabel}.`);
+    }
+    if (entry.weight != null) parts.push(`Weight ${kgToLbs(entry.weight)} pounds.`);
+    if (bmi != null) parts.push(`BMI ${bmi.toFixed(1)}.`);
+    if (entry.medicationTaken === true) parts.push('Medication taken.');
+    if (entry.medicationTaken === false) parts.push('Medication missed.');
+    if (entry.symptoms && entry.symptoms.length > 0) {
+      parts.push(`${entry.symptoms.length} symptom${entry.symptoms.length > 1 ? 's' : ''} reported.`);
+    }
+    if (entry.notes) parts.push(`Note: ${entry.notes}.`);
+    return parts.join(' ');
+  })();
+
   return (
     <motion.div
       className="bg-white rounded-2xl p-5"
@@ -393,7 +428,8 @@ function EntryCard({
         </div>
 
         {/* Actions */}
-        <div className="flex gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
+          <AudioButton size="sm" text={audioSummary} />
           <button
             onClick={onEdit}
             className="w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-75"
@@ -1242,13 +1278,21 @@ export default function ReadingsPage() {
             >
               <Activity className="w-5 h-5 text-white" />
             </div>
-            <div className="min-w-0">
-              <h1
-                className="text-xl font-bold truncate"
-                style={{ color: 'var(--brand-text-primary)' }}
-              >
-                {t('readings.title')}
-              </h1>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h1
+                  className="text-xl font-bold truncate"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  {t('readings.title')}
+                </h1>
+                {!loading && (
+                  <AudioButton
+                    size="sm"
+                    text={`${t('readings.title')}. ${entries.length} ${entries.length === 1 ? t('readings.totalEntry') : t('readings.totalEntries')}.`}
+                  />
+                )}
+              </div>
               {loading ? (
                 <div className="mt-1">
                   <Bone w={90} h={10} rounded="rounded-md" />
