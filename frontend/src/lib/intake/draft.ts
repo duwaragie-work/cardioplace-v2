@@ -52,7 +52,10 @@ export function hasDraft(userId: string): boolean {
   }
 }
 
-/** Step ordering used to render "Step X of N" hints + the Resume CTA. */
+/** Step ordering used to render "Step X of N" hints + the Resume CTA.
+ *  Must match computeFlow() in clinical-intake/page.tsx — A8 (categories)
+ *  comes before A6 (combos) per CLINICAL_SPEC §V2-B so the dedup pass on
+ *  A6 → A9 can compare combos against everything else. */
 export const STEP_ORDER: IntakeStepKey[] = [
   'A0b',
   'A1',
@@ -60,8 +63,8 @@ export const STEP_ORDER: IntakeStepKey[] = [
   'A3',
   'A4',
   'A5',
-  'A6',
   'A8',
+  'A6',
   'A9',
   'A10',
   'A11',

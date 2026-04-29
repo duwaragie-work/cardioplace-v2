@@ -51,6 +51,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { ClinicalIntakeRequiredError, createJournalEntry } from '@/lib/services/journal.service';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
+import { hasDraft, loadDraft } from '@/lib/intake/draft';
 import {
   listMyMedications,
   type PatientMedication,
@@ -1136,11 +1137,25 @@ const SECOND_READING_FLOW: StepKey[] = ['B2', 'WEIGHT', 'MEDICATION', 'B3'];
 
 export default function CheckIn() {
   const router = useRouter();
-  const { isLoading, isAuthenticated } = useAuth();
+  const { user, isLoading, isAuthenticated } = useAuth();
   const { t } = useLanguage();
 
   const [profile, setProfile] = useState<PatientProfileDto | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  // Intake-still-in-progress sentinel — mirrors Dashboard.tsx logic. The
+  // localStorage draft persists across partial saves (handleExitSave does
+  // not clear it) and is only wiped by handleSubmit on the final A10→A11
+  // submit. So a draft with currentStep ≠ 'A11' means the patient hasn't
+  // finished clinical intake, regardless of whether a partial profile is
+  // already on the server. Block check-ins in that case so the rule
+  // engine doesn't evaluate readings against an incomplete profile.
+  const [intakeIncomplete, setIntakeIncomplete] = useState(false);
+  useEffect(() => {
+    if (!user?.id) return;
+    if (!hasDraft(user.id)) { setIntakeIncomplete(false); return; }
+    const draft = loadDraft(user.id);
+    setIntakeIncomplete(!!draft?.currentStep && draft.currentStep !== 'A11');
+  }, [user?.id]);
   const [medications, setMedications] = useState<PatientMedication[]>([]);
   const [medsLoading, setMedsLoading] = useState(true);
 
@@ -1406,7 +1421,10 @@ export default function CheckIn() {
   // a PatientProfile, the rule engine has no clinical context, so the backend
   // silently drops any reading. Block the wizard entirely + send the user to
   // /clinical-intake instead of letting them fill out a form that won't save.
-  if (!profile) {
+  // Also block when intake is partially saved but not yet submitted —
+  // a partial profile (gender + height only, no conditions/meds) gives
+  // the rule engine an incomplete picture and is unsafe to evaluate.
+  if (!profile || intakeIncomplete) {
     return (
       <div
         className="min-h-screen flex flex-col"

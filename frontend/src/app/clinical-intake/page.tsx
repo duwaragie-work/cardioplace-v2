@@ -6,10 +6,15 @@
 //
 // Step flow (conditional skips applied):
 //   A0b intro → A1 demographics → [A2 pregnancy if female] → A3 conditions
-//     → [A4 HF type if HF] → A5 core meds → A6 combos → A8 categories
+//     → [A4 HF type if HF] → A5 core meds → A8 categories → A6 combos
 //     → A9 frequency → A10 review → A11 complete
 //
-// A7 dedup is a modal interrupt when transitioning from A6 (combos) to A8.
+// A7 dedup is a modal interrupt when transitioning OUT of A6 (combos —
+// the last medication screen) to A9, so the dedup pass can compare the
+// patient's combo selections against everything they picked on A5
+// (core) and A8 (categories) per CLINICAL_SPEC §V2-B. COMBO must be
+// last for this to work — see shared/src/medications.ts (Screen 1/2/3
+// comments).
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -81,7 +86,7 @@ function computeFlow(state: IntakeFormState): IntakeStepKey[] {
   if (state.gender === 'FEMALE') flow.push('A2');
   flow.push('A3');
   if (state.hasHeartFailure) flow.push('A4');
-  flow.push('A5', 'A6', 'A8', 'A9', 'A10', 'A11');
+  flow.push('A5', 'A8', 'A6', 'A9', 'A10', 'A11');
   return flow;
 }
 
@@ -1438,7 +1443,7 @@ function ExitSaveModal({
 // Main wizard
 // ─────────────────────────────────────────────────────────────────────────────
 
-const VALID_DEEP_LINK_STEPS: IntakeStepKey[] = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A8', 'A9', 'A10'];
+const VALID_DEEP_LINK_STEPS: IntakeStepKey[] = ['A1', 'A2', 'A3', 'A4', 'A5', 'A8', 'A6', 'A9', 'A10'];
 
 // Next 16 requires components that read useSearchParams() to be wrapped in
 // a Suspense boundary so prerendering can bail out cleanly. Default export
@@ -1511,8 +1516,15 @@ function ClinicalIntakeWizard() {
         ]);
         if (cancelled) return;
 
-        if (profile && !isEdit) {
-          // Branch 3 — show the all-set page.
+        // Branch 3 — show the all-set page only when the patient is truly
+        // done (profile in DB AND no in-progress localStorage draft).
+        // A draft mid-flow signals partial save → fall through to Branch
+        // 1 so they can resume instead of being told they're done.
+        // Without a server-side completion field this is our gate.
+        const draftSnapshot = loadDraft(user.id);
+        const draftMidFlow =
+          !!draftSnapshot && draftSnapshot.currentStep && draftSnapshot.currentStep !== 'A11';
+        if (profile && !isEdit && !draftMidFlow) {
           setProfileExists(true);
           setBootstrapping(false);
           return;
@@ -1569,7 +1581,11 @@ function ClinicalIntakeWizard() {
           return;
         }
 
-        // Branch 1 — no profile yet. Resume from draft or start fresh.
+        // Branch 1 — no completed intake yet. Resume from draft or start
+        // fresh. (When a partial profile exists in DB but no draft on this
+        // device, we accept that the patient re-enters their answers; the
+        // backend diff will be a no-op so it's just a small UX pinch, not
+        // data loss.)
         const draft = loadDraft(user.id);
         if (draft) {
           // A draft pointing at the completion screen is stale — submit must
@@ -1658,7 +1674,9 @@ function ClinicalIntakeWizard() {
     }
     setSubmitError('');
 
-    // A6 → A8 transition: surface dedup conflicts before letting the user proceed.
+    // A6 (combos — the last med screen) → A9 transition: surface dedup
+    // conflicts before letting the user proceed, so combo entries can be
+    // compared against everything they picked on A5 (core) + A8 (categories).
     if (step === 'A6') {
       const conflicts = detectDedupConflicts(state.selectedMedications);
       if (conflicts.length > 0) {
@@ -1748,10 +1766,13 @@ function ClinicalIntakeWizard() {
         saveIntakeProfile(buildProfilePayload(state)),
         replaceIntakeMedications(buildMedsPayload(state)),
       ]);
-      // Profile is now persisted — drop the local draft so the dashboard
-      // sees a "done" intake state and stops showing the Action Required
-      // card. (Edit mode never had a draft, but the call is harmless.)
-      if (user?.id) clearDraft(user.id);
+      // Keep the local draft on partial save — without a server-side
+      // intakeCompletedAt field the dashboard's Action-Required card uses
+      // the draft's presence + currentStep as the "still in progress"
+      // sentinel. Clearing it here would prematurely flip the card to
+      // "done" even though the patient hasn't submitted A10 → A11. The
+      // draft is only cleared by handleSubmit on final submit. Edit mode
+      // never had a draft to begin with, so this no-op for edits.
       router.push('/dashboard');
     } catch (e) {
       setExitError(e instanceof Error ? e.message : t('intake.exitSave.errorFallback'));
@@ -1772,7 +1793,8 @@ function ClinicalIntakeWizard() {
     const remaining = pendingDedup.slice(1);
     setPendingDedup(remaining);
     if (remaining.length === 0) {
-      // Continue to A8 after all conflicts handled.
+      // Continue to A9 (the screen after A6 in the new ordering) once
+      // all conflicts have been resolved.
       const nextIdx = flow.indexOf('A6') + 1;
       if (nextIdx < flow.length) {
         setDirection(1);
