@@ -55,63 +55,73 @@ export const hfpefRule: RuleFunction = (session, ctx) => {
 }
 
 // ─── CAD ────────────────────────────────────────────────────────────────────
+// Split into two single-axis rules so the multi-axis orchestrator can fire
+// both for SBP 165 + DBP 65. Each rule is on its own clinical axis:
+//   • cadDbpRule  → dbp-low axis (J-curve / coronary perfusion, §4.3)
+//   • cadHighRule → bp-high axis (standard ≥160 upper bound, §4.3)
 
-export const cadRule: RuleFunction = (session, ctx) => {
+export const cadDbpRule: RuleFunction = (session, ctx) => {
   if (!ctx.profile.hasCAD) return null
   const { systolicBP: sbp, diastolicBP: dbp } = session
+  if (dbp == null || dbp >= CAD_DBP_CRITICAL) return null
 
-  // CRITICAL: DBP <70 regardless of SBP (CLINICAL_SPEC §4.3).
-  if (dbp != null && dbp < CAD_DBP_CRITICAL) {
-    return {
-      ruleId: RULE_IDS.CAD_DBP_CRITICAL,
-      tier: 'BP_LEVEL_1_LOW',
-      mode: ctx.personalizedEligible ? 'PERSONALIZED' : 'STANDARD',
-      pulsePressure: getPulsePressure(sbp, dbp),
-      suboptimalMeasurement: session.suboptimalMeasurement,
-      actualValue: dbp,
-      reason: `CAD DBP <${CAD_DBP_CRITICAL}: ${dbp}.`,
-      metadata: { conditionLabel: 'CAD', thresholdValue: CAD_DBP_CRITICAL },
-    }
+  return {
+    ruleId: RULE_IDS.CAD_DBP_CRITICAL,
+    tier: 'BP_LEVEL_1_LOW',
+    mode: ctx.personalizedEligible ? 'PERSONALIZED' : 'STANDARD',
+    pulsePressure: getPulsePressure(sbp, dbp),
+    suboptimalMeasurement: session.suboptimalMeasurement,
+    actualValue: dbp,
+    reason: `CAD DBP <${CAD_DBP_CRITICAL}: ${dbp}.`,
+    metadata: { conditionLabel: 'CAD', thresholdValue: CAD_DBP_CRITICAL },
   }
+}
 
-  // Upper bound — standard ≥160.
+export const cadHighRule: RuleFunction = (session, ctx) => {
+  if (!ctx.profile.hasCAD) return null
+  const { systolicBP: sbp } = session
   const upper = ctx.threshold?.sbpUpperTarget ?? CAD_DEFAULT_UPPER
-  if (sbp != null && sbp >= upper) {
-    return highAlert(session, ctx, RULE_IDS.CAD_HIGH, 'CAD', upper)
-  }
-  return null
+  if (sbp == null || sbp < upper) return null
+  return highAlert(session, ctx, RULE_IDS.CAD_HIGH, 'CAD', upper)
 }
 
 // ─── HCM ────────────────────────────────────────────────────────────────────
+// Split into two single-axis rules so the multi-axis orchestrator can fire
+// the vasodilator safety flag (Tier 3 info) AND a BP-axis alert on the same
+// reading. Pre-split, the vasodilator branch returned early and dropped
+// HCM_LOW even when SBP <100. Per CLINICAL_SPEC §4.6 the patient's clinical
+// hypotension is a real concern independent of the medication safety flag.
 
-export const hcmRule: RuleFunction = (session, ctx) => {
+export const hcmVasodilatorRule: RuleFunction = (session, ctx) => {
   if (!ctx.profile.hasHCM) return null
-  const { systolicBP: sbp } = session
-
-  // HCM vasodilator / nitrate / high-dose loop diuretic safety flag (Tier 3).
   const risky = ctx.contextMeds.find((m) =>
     m.drugClass === 'VASODILATOR_NITRATE' ||
     m.drugClass === 'DHP_CCB' ||
     m.drugClass === 'LOOP_DIURETIC',
   )
-  if (risky) {
-    return {
-      ruleId: RULE_IDS.HCM_VASODILATOR,
-      tier: 'TIER_3_INFO',
-      mode: 'STANDARD',
-      pulsePressure: getPulsePressure(sbp, session.diastolicBP),
-      suboptimalMeasurement: session.suboptimalMeasurement,
-      actualValue: sbp,
-      reason: `HCM + ${risky.drugClass} (${risky.drugName}) — may worsen LVOT obstruction.`,
-      metadata: {
-        conditionLabel: 'HCM',
-        drugName: risky.drugName,
-        drugClass: risky.drugClass,
-      },
-    }
-  }
+  if (!risky) return null
 
+  return {
+    ruleId: RULE_IDS.HCM_VASODILATOR,
+    tier: 'TIER_3_INFO',
+    mode: 'STANDARD',
+    pulsePressure: getPulsePressure(session.systolicBP, session.diastolicBP),
+    suboptimalMeasurement: session.suboptimalMeasurement,
+    actualValue: session.systolicBP,
+    reason: `HCM + ${risky.drugClass} (${risky.drugName}) — may worsen LVOT obstruction.`,
+    metadata: {
+      conditionLabel: 'HCM',
+      drugName: risky.drugName,
+      drugClass: risky.drugClass,
+    },
+  }
+}
+
+export const hcmRule: RuleFunction = (session, ctx) => {
+  if (!ctx.profile.hasHCM) return null
+  const { systolicBP: sbp } = session
   if (sbp == null) return null
+
   const lower = ctx.threshold?.sbpLowerTarget ?? HCM_DEFAULT_LOWER
   const upper = ctx.threshold?.sbpUpperTarget ?? HCM_DEFAULT_UPPER
 

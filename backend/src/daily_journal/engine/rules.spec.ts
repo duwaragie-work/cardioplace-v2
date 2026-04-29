@@ -22,9 +22,11 @@ import {
   pregnancyL2Rule,
 } from './pregnancy-thresholds.js'
 import {
-  cadRule,
+  cadDbpRule,
+  cadHighRule,
   dcmRule,
   hcmRule,
+  hcmVasodilatorRule,
   hfpefRule,
   hfrefRule,
 } from './condition-branches.js'
@@ -554,34 +556,62 @@ describe('hfpefRule (I)', () => {
 })
 
 // ─── J. CAD ─────────────────────────────────────────────────────────────────
-describe('cadRule (J)', () => {
+// Split into two single-axis rules (cadDbpRule + cadHighRule) so the multi-
+// axis orchestrator can fire both for SBP 165 + DBP 65. Each rule is tested
+// in isolation; the orchestrator-level co-fire case lives in axis-pipeline.spec.ts.
+describe('cadDbpRule (J — DBP axis)', () => {
   const cadctx = ctx({ profile: { hasCAD: true } })
 
   it('CAD + DBP=69 → DBP-Critical Low', () => {
-    const r = cadRule(session({ systolicBP: 140, diastolicBP: 69 }), cadctx)
+    const r = cadDbpRule(session({ systolicBP: 140, diastolicBP: 69 }), cadctx)
     expect(r?.tier).toBe('BP_LEVEL_1_LOW')
     expect(r?.ruleId).toBe('RULE_CAD_DBP_CRITICAL')
   })
 
   it('CAD + DBP=70 → no alert (boundary)', () => {
     expect(
-      cadRule(session({ systolicBP: 140, diastolicBP: 70 }), cadctx),
+      cadDbpRule(session({ systolicBP: 140, diastolicBP: 70 }), cadctx),
     ).toBeNull()
   })
 
   it('CAD + DBP=60 + SBP=105 → DBP-Critical (regardless of SBP)', () => {
-    const r = cadRule(session({ systolicBP: 105, diastolicBP: 60 }), cadctx)
+    const r = cadDbpRule(session({ systolicBP: 105, diastolicBP: 60 }), cadctx)
     expect(r?.ruleId).toBe('RULE_CAD_DBP_CRITICAL')
   })
 
+  it('CAD + SBP=160 DBP=85 → no DBP alert (DBP normal)', () => {
+    expect(
+      cadDbpRule(session({ systolicBP: 160, diastolicBP: 85 }), cadctx),
+    ).toBeNull()
+  })
+})
+
+describe('cadHighRule (J — SBP-high axis)', () => {
+  const cadctx = ctx({ profile: { hasCAD: true } })
+
   it('CAD + SBP=160 DBP=85 → L1 High', () => {
-    const r = cadRule(session({ systolicBP: 160, diastolicBP: 85 }), cadctx)
+    const r = cadHighRule(session({ systolicBP: 160, diastolicBP: 85 }), cadctx)
     expect(r?.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(r?.ruleId).toBe('RULE_CAD_HIGH')
+  })
+
+  it('CAD + SBP=159 → no alert (boundary)', () => {
+    expect(
+      cadHighRule(session({ systolicBP: 159, diastolicBP: 85 }), cadctx),
+    ).toBeNull()
+  })
+
+  it('CAD + SBP=140 → no alert', () => {
+    expect(
+      cadHighRule(session({ systolicBP: 140, diastolicBP: 85 }), cadctx),
+    ).toBeNull()
   })
 })
 
 // ─── K. HCM ─────────────────────────────────────────────────────────────────
-describe('hcmRule (K)', () => {
+// Split into two single-axis rules so the multi-axis orchestrator can fire
+// the vasodilator safety flag AND a BP-axis alert on the same reading.
+describe('hcmRule (K — BP axis)', () => {
   const hcmctx = ctx({ profile: { hasHCM: true } })
 
   it('SBP=99 → L1 Low (<100)', () => {
@@ -594,8 +624,27 @@ describe('hcmRule (K)', () => {
     expect(hcmRule(session({ systolicBP: 100 }), hcmctx)).toBeNull()
   })
 
+  it('HCM + vasodilator nitrate + SBP=120 → no BP alert (BP normal)', () => {
+    // Vasodilator no longer suppresses the BP arm — they're independent
+    // rules now. With SBP=120 (in band), BP-axis stays null. The Tier 3
+    // safety flag fires via hcmVasodilatorRule (tested below).
+    expect(
+      hcmRule(
+        session({ systolicBP: 120 }),
+        ctx({
+          profile: { hasHCM: true },
+          contextMeds: [
+            med({ drugName: 'Nitroglycerin', drugClass: 'VASODILATOR_NITRATE' }),
+          ],
+        }),
+      ),
+    ).toBeNull()
+  })
+})
+
+describe('hcmVasodilatorRule (K — info axis)', () => {
   it('HCM + vasodilator nitrate → Tier 3 safety flag', () => {
-    const r = hcmRule(
+    const r = hcmVasodilatorRule(
       session({ systolicBP: 120 }),
       ctx({
         profile: { hasHCM: true },
@@ -609,7 +658,7 @@ describe('hcmRule (K)', () => {
   })
 
   it('HCM + DHP-CCB → Tier 3', () => {
-    const r = hcmRule(
+    const r = hcmVasodilatorRule(
       session({ systolicBP: 120 }),
       ctx({
         profile: { hasHCM: true },
@@ -617,6 +666,18 @@ describe('hcmRule (K)', () => {
       }),
     )
     expect(r?.tier).toBe('TIER_3_INFO')
+  })
+
+  it('HCM + safe meds → no info alert', () => {
+    expect(
+      hcmVasodilatorRule(
+        session({ systolicBP: 120 }),
+        ctx({
+          profile: { hasHCM: true },
+          contextMeds: [med({ drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR' })],
+        }),
+      ),
+    ).toBeNull()
   })
 })
 
