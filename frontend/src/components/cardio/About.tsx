@@ -68,7 +68,7 @@ export default function About() {
                   <div className="bg-[#f3f4f5] rounded-[24px] sm:rounded-[32px] p-4 sm:p-6 min-h-[320px] sm:min-h-[400px] md:min-h-[500px] flex flex-col">
                     <div className="flex items-center gap-3 pb-4 border-b border-[rgba(207,194,216,0.1)]">
                       <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundImage: 'linear-gradient(135deg, #7b00e0 0%, #5c00a9 100%)' }}>
-                        <Image src="/logo2.png" alt="" width={22} height={22} />
+                        <Image src="/cardioplace-icon.svg" alt="" width={22} height={22} className="brightness-0 invert" />
                       </div>
                       <div>
                         <p className="font-bold text-[#191c1d] text-sm">{t('about.assistantName')}</p>
@@ -302,7 +302,7 @@ export default function About() {
             <div className="bg-white rounded-[24px] sm:rounded-[32px] p-6 sm:p-8 md:p-10 border border-[#eedbff] shadow-sm">
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6 mb-4 sm:mb-6">
                 <div className="bg-[#eedbff] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shrink-0 border-2 border-[#7b00e0]/20">
-                  <Image src="/logo.svg" alt="Cardioplace" width={32} height={32} className="w-7 h-7 sm:w-8 sm:h-8" />
+                  <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={32} height={32} className="w-7 h-7 sm:w-8 sm:h-8" />
                 </div>
                 <div>
                   <h3 className="text-[#1f1924] text-lg sm:text-xl font-semibold">{t('about.engTeamTitle')}</h3>

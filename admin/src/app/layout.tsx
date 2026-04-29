@@ -7,6 +7,9 @@ import AdminShell from "@/components/AdminShell";
 export const metadata: Metadata = {
   title: "Cardioplace Admin",
   description: "Cardioplace provider and care-team admin console",
+  icons: {
+    icon: "/cardioplace-icon.svg",
+  },
 };
 
 export default function RootLayout({

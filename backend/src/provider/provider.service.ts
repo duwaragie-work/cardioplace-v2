@@ -651,9 +651,14 @@ export class ProviderService {
         take: limit,
         include: {
           deviationAlerts: {
+            // Tier is required so the admin Readings tab can render the
+            // tier badge per linked alert (V2-C). Severity stays for
+            // backward compatibility with the dashboard BP-trend panel
+            // that already consumes this endpoint.
             select: {
               id: true,
               type: true,
+              tier: true,
               severity: true,
               magnitude: true,
               baselineValue: true,
@@ -670,35 +675,76 @@ export class ProviderService {
     return {
       statusCode: 200,
       message: 'Journal history retrieved successfully',
-      data: entries.map((entry) => ({
-        id: entry.id,
-        entryDate: entry.measuredAt,
-        measurementTime: null,
-        systolicBP: entry.systolicBP,
-        diastolicBP: entry.diastolicBP,
-        weight: entry.weight != null ? Number(entry.weight) : null,
-        medicationTaken: entry.medicationTaken,
-        missedDoses: entry.missedDoses,
-        symptoms: entry.otherSymptoms,
-        teachBackAnswer: entry.teachBackAnswer,
-        teachBackCorrect: entry.teachBackCorrect,
-        notes: entry.notes,
-        source: entry.source.toLowerCase(),
-        sourceMetadata: entry.sourceMetadata,
-        baseline: null,
-        deviations: entry.deviationAlerts.map((a) => ({
-          id: a.id,
-          type: a.type,
-          severity: a.severity,
-          magnitude: a.magnitude != null ? Number(a.magnitude) : null,
-          baselineValue: a.baselineValue ? Number(a.baselineValue) : null,
-          actualValue: a.actualValue ? Number(a.actualValue) : null,
-          escalated: a.escalated,
-          status: a.status,
-        })),
-        createdAt: entry.createdAt,
-        updatedAt: entry.updatedAt,
-      })),
+      data: entries.map((entry) => {
+        // Suboptimal = ANY checklist key in measurementConditions is false.
+        // Mirrors session-averager.service.ts hasAnyFalseChecklistItem so
+        // the admin Readings tab shows the same flag the rule engine
+        // attached when it evaluated the session.
+        const conditions = (entry.measurementConditions ?? null) as
+          | Record<string, unknown>
+          | null
+        const failedConditions: string[] = conditions
+          ? Object.entries(conditions)
+              .filter(([, v]) => v === false)
+              .map(([k]) => k)
+          : []
+        const suboptimalMeasurement = failedConditions.length > 0
+        const pulsePressure =
+          entry.systolicBP != null && entry.diastolicBP != null
+            ? entry.systolicBP - entry.diastolicBP
+            : null
+        return {
+          id: entry.id,
+          entryDate: entry.measuredAt,
+          measurementTime: null,
+          measuredAt: entry.measuredAt,
+          sessionId: entry.sessionId,
+          systolicBP: entry.systolicBP,
+          diastolicBP: entry.diastolicBP,
+          pulse: entry.pulse,
+          pulsePressure,
+          position: entry.position,
+          weight: entry.weight != null ? Number(entry.weight) : null,
+          medicationTaken: entry.medicationTaken,
+          missedDoses: entry.missedDoses,
+          missedMedications: entry.missedMedications,
+          // Structured Level-2 symptom booleans (the Readings tab renders
+          // these as chips; only true ones are shown).
+          severeHeadache: entry.severeHeadache,
+          visualChanges: entry.visualChanges,
+          alteredMentalStatus: entry.alteredMentalStatus,
+          chestPainOrDyspnea: entry.chestPainOrDyspnea,
+          focalNeuroDeficit: entry.focalNeuroDeficit,
+          severeEpigastricPain: entry.severeEpigastricPain,
+          newOnsetHeadache: entry.newOnsetHeadache,
+          ruqPain: entry.ruqPain,
+          edema: entry.edema,
+          symptoms: entry.otherSymptoms,
+          otherSymptoms: entry.otherSymptoms,
+          measurementConditions: conditions,
+          suboptimalMeasurement,
+          failedConditions,
+          teachBackAnswer: entry.teachBackAnswer,
+          teachBackCorrect: entry.teachBackCorrect,
+          notes: entry.notes,
+          source: entry.source.toLowerCase(),
+          sourceMetadata: entry.sourceMetadata,
+          baseline: null,
+          deviations: entry.deviationAlerts.map((a) => ({
+            id: a.id,
+            type: a.type,
+            tier: a.tier,
+            severity: a.severity,
+            magnitude: a.magnitude != null ? Number(a.magnitude) : null,
+            baselineValue: a.baselineValue ? Number(a.baselineValue) : null,
+            actualValue: a.actualValue ? Number(a.actualValue) : null,
+            escalated: a.escalated,
+            status: a.status,
+          })),
+          createdAt: entry.createdAt,
+          updatedAt: entry.updatedAt,
+        }
+      }),
       pagination: {
         page,
         limit,
@@ -802,6 +848,45 @@ export class ProviderService {
             measuredAt: true,
             systolicBP: true,
             diastolicBP: true,
+            // Weight feeds the BMI computation in the resolution audit
+            // footer when an alert is expanded inline on /admin/notifications.
+            weight: true,
+          },
+        },
+        // CLINICAL_SPEC V2-C Layer 1 — /admin/notifications expands each
+        // alert inline with the full escalation audit trail. Mirror the
+        // per-patient endpoint's shape so the same AlertCard component
+        // works across both surfaces.
+        escalationEvents: {
+          orderBy: { triggeredAt: 'asc' },
+          select: {
+            id: true,
+            escalationLevel: true,
+            ladderStep: true,
+            reason: true,
+            triggeredAt: true,
+            scheduledFor: true,
+            notificationSentAt: true,
+            notificationChannel: true,
+            recipientIds: true,
+            recipientRoles: true,
+            acknowledgedAt: true,
+            acknowledgedBy: true,
+            resolvedAt: true,
+            resolvedBy: true,
+            afterHours: true,
+            triggeredByResolution: true,
+            notifications: {
+              orderBy: { sentAt: 'asc' },
+              select: {
+                id: true,
+                userId: true,
+                channel: true,
+                title: true,
+                sentAt: true,
+                readAt: true,
+              },
+            },
           },
         },
       },
@@ -836,6 +921,19 @@ export class ProviderService {
       }
     }
 
+    // Resolve every "by" UUID into a display name in one batched lookup so
+    // the audit footer + escalation timeline can render "Resolved by Dr.
+    // Singal" instead of a truncated UUID. Mirrors getPatientAlerts above.
+    const idsToResolve: string[] = []
+    for (const a of alerts) {
+      if (a.resolvedBy) idsToResolve.push(a.resolvedBy)
+      for (const e of a.escalationEvents) {
+        if (e.acknowledgedBy) idsToResolve.push(e.acknowledgedBy)
+        if (e.resolvedBy) idsToResolve.push(e.resolvedBy)
+      }
+    }
+    const names = await resolveUserDisplays(this.prisma, idsToResolve)
+
     return {
       statusCode: 200,
       data: alerts.map((a) => {
@@ -857,8 +955,20 @@ export class ProviderService {
           ruleId: a.ruleId,
           mode: a.mode,
           pulsePressure: a.pulsePressure,
+          suboptimalMeasurement: a.suboptimalMeasurement,
           patientMessage: a.patientMessage,
+          // Three-tier messages — V2-C Layer 1 mandates inline rendering
+          // on the alert detail surface (PATIENT / CAREGIVER / PHYSICIAN).
+          caregiverMessage: a.caregiverMessage,
+          physicianMessage: a.physicianMessage,
           dismissible: a.dismissible,
+          // 15-field Joint-Commission audit fields. Most are null on OPEN
+          // alerts but the shape stays consistent so the AlertCard's
+          // expanded body / footer renders the same on both surfaces.
+          resolutionAction: a.resolutionAction,
+          resolutionRationale: a.resolutionRationale,
+          resolvedBy: a.resolvedBy,
+          resolvedByName: pickDisplayName(a.resolvedBy, names),
           createdAt: a.createdAt,
           acknowledgedAt: a.acknowledgedAt,
           followUpScheduledAt: followUp?.createdAt ?? null,
@@ -876,11 +986,25 @@ export class ProviderService {
             : null,
           journalEntry: a.journalEntry
             ? {
+                // entryDate is the legacy field name — kept so the
+                // dashboard AlertPanel + scheduled-calls page keep working.
+                // measuredAt mirrors the per-patient endpoint shape so
+                // AlertCard + EscalationAuditTrail consume the same field.
                 entryDate: a.journalEntry.measuredAt,
+                measuredAt: a.journalEntry.measuredAt,
                 systolicBP: a.journalEntry.systolicBP,
                 diastolicBP: a.journalEntry.diastolicBP,
+                weight:
+                  a.journalEntry.weight != null
+                    ? Number(a.journalEntry.weight)
+                    : null,
               }
             : null,
+          escalationEvents: a.escalationEvents.map((e) => ({
+            ...e,
+            acknowledgedByName: pickDisplayName(e.acknowledgedBy, names),
+            resolvedByName: pickDisplayName(e.resolvedBy, names),
+          })),
         }
       }),
     }

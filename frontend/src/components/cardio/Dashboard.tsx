@@ -144,33 +144,41 @@ export default function Dashboard() {
         setThreshold(t);
         setHasMeds(Array.isArray(m) && m.some((med) => !med.discontinuedAt));
 
-        if (p) { setIntakeUi({ kind: 'done' }); return; }
-        if (hasDraft(user.id)) {
-          const draft = loadDraft(user.id);
-          // A draft pointing at A11 is stale (submit succeeded but the DB
-          // row was later removed). Show the fresh card instead.
-          if (draft?.currentStep === 'A11') {
-            setIntakeUi({ kind: 'fresh' });
-            return;
-          }
+        // Without a server-side completion field, the localStorage draft
+        // doubles as the "still in progress" sentinel: handleSubmit's
+        // clearDraft() runs ONLY at the final A10 → A11 submit, so if a
+        // draft is still in progress on this device the patient hasn't
+        // finished, regardless of whether a partial profile is on the
+        // server. (Cross-device limitation: a patient who saved partial
+        // and switched devices will see "done" — accepted trade-off for
+        // not changing the schema.)
+        const draft = hasDraft(user.id) ? loadDraft(user.id) : null;
+        const draftMidFlow =
+          !!draft && !!draft.currentStep && draft.currentStep !== 'A11';
+        if (p && !draftMidFlow) { setIntakeUi({ kind: 'done' }); return; }
+        const labels: Record<string, string> = {
+          A1: 'About you',
+          A2: 'Pregnancy',
+          A3: 'Conditions',
+          A4: 'Heart failure type',
+          A5: 'Medications',
+          A6: 'Combination pills',
+          A8: 'Other medicines',
+          A9: 'How often',
+          A10: 'Review',
+        };
+        if (draftMidFlow) {
           const { index, total } = stepProgress(draft?.currentStep);
-          const labels: Record<string, string> = {
-            A1: 'About you',
-            A2: 'Pregnancy',
-            A3: 'Conditions',
-            A4: 'Heart failure type',
-            A5: 'Medications',
-            A6: 'Combination pills',
-            A8: 'Other medicines',
-            A9: 'How often',
-            A10: 'Review',
-          };
           setIntakeUi({
             kind: 'resume',
             stepIndex: index,
             total,
             stepLabel: labels[draft?.currentStep ?? 'A1'] ?? 'Continuing',
           });
+        } else if (draft?.currentStep === 'A11') {
+          // A draft pointing at A11 is stale (submit succeeded but the DB
+          // row was later removed). Show the fresh card instead.
+          setIntakeUi({ kind: 'fresh' });
         } else {
           setIntakeUi({ kind: 'fresh' });
         }
@@ -773,12 +781,21 @@ export default function Dashboard() {
               </div>
 
               <div>
+                {/* Check-in is gated on intake being fully complete —
+                    routes to /clinical-intake instead so the patient
+                    finishes onboarding before logging readings the rule
+                    engine can't safely evaluate against a partial profile. */}
                 <button
-                  onClick={() => router.push('/check-in')}
-                  className="w-full h-10 bg-white flex items-center justify-center gap-1.5 rounded-full text-[#7B00E0] font-bold text-[13px] transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                  onClick={() =>
+                    router.push(intakeUi.kind === 'done' ? '/check-in' : '/clinical-intake')
+                  }
+                  disabled={intakeUi.kind === 'unknown'}
+                  className="w-full h-10 bg-white flex items-center justify-center gap-1.5 rounded-full text-[#7B00E0] font-bold text-[13px] transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
                 >
                   {loading ? (
                     <Bone w={120} h={12} color="#7B00E0" />
+                  ) : intakeUi.kind !== 'done' ? (
+                    <>Finish intake first <ArrowRight className="w-4 h-4" /></>
                   ) : (
                     <>{todayHasEntry ? t('dashboard.logAnother') : t('dashboard.startCheckin')} <ArrowRight className="w-4 h-4" /></>
                   )}

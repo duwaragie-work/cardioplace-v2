@@ -119,20 +119,18 @@ export default function Navbar() {
           boxShadow: '0 2px 12px rgba(123,0,224,0.2)',
         }}
       >
-        {/* Logo */}
-        <Link href="/" className="flex items-center gap-1.5 shrink-0">
+        {/* Logo — dark-background variant of the wordmark (white paths
+            baked into the SVG, no CSS filter needed). The SVG already
+            includes "Cardioplace" so no separate text span. */}
+        <Link href="/" className="flex items-center shrink-0">
           <Image
-            src="/logo.svg"
-            alt="Cardioplace logo"
-            width={32}
-            height={32}
-            className="w-8 h-8 brightness-0 invert"
+            src="/cardioplace-dark.svg"
+            alt="Cardioplace"
+            width={126}
+            height={28}
+            className="h-6 w-auto sm:h-7"
+            priority
           />
-          <span
-            className="font-bold text-[14px] sm:text-base text-white"
-          >
-            Cardioplace
-          </span>
         </Link>
 
         {/* Desktop Links */}

@@ -101,8 +101,8 @@ export default function MedicationCard({
           </p>
           {genericName && (
             <p
-              className="text-[12px] leading-tight"
-              style={{ color: 'var(--brand-text-muted)', wordBreak: 'break-word' }}
+              className="text-[13px] font-semibold leading-tight mt-0.5"
+              style={{ color: 'var(--brand-primary-purple)', wordBreak: 'break-word' }}
             >
               {genericName}
             </p>

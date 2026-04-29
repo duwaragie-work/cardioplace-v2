@@ -60,6 +60,69 @@ export async function getPatientJournal(userId: string, page?: number, limit?: n
   return json.data ?? json
 }
 
+// ─── Patient Detail Readings tab ────────────────────────────────────────────
+//
+// Typed wrapper around getPatientJournal for the ReadingsTab. Mirrors the
+// shape produced by ProviderService.getPatientJournal in the backend (see
+// provider.service.ts). Read-only — the admin doesn't edit patient
+// readings here; that's a patient-side action only.
+
+export interface PatientJournalEntry {
+  id: string
+  measuredAt: string
+  sessionId: string | null
+  systolicBP: number | null
+  diastolicBP: number | null
+  pulse: number | null
+  pulsePressure: number | null
+  position: 'SITTING' | 'STANDING' | 'LYING' | null
+  weight: number | null
+  medicationTaken: boolean | null
+  missedDoses: number | null
+  /** Per-medication miss detail snapshot at entry time. */
+  missedMedications: Array<{
+    medicationId?: string | null
+    drugName: string
+    drugClass?: string | null
+    reason?: string | null
+    missedDoses?: number | null
+  }> | unknown
+  // Structured Level-2 symptom booleans
+  severeHeadache: boolean
+  visualChanges: boolean
+  alteredMentalStatus: boolean
+  chestPainOrDyspnea: boolean
+  focalNeuroDeficit: boolean
+  severeEpigastricPain: boolean
+  newOnsetHeadache: boolean
+  ruqPain: boolean
+  edema: boolean
+  otherSymptoms: string[]
+  measurementConditions: Record<string, unknown> | null
+  suboptimalMeasurement: boolean
+  failedConditions: string[]
+  notes: string | null
+  source: string
+  deviations: Array<{
+    id: string
+    type: string | null
+    tier: string | null
+    severity: string | null
+    status: string
+    escalated: boolean
+  }>
+  createdAt: string
+  updatedAt: string
+}
+
+export async function getPatientJournalEntries(
+  userId: string,
+  opts?: { limit?: number },
+): Promise<PatientJournalEntry[]> {
+  const data = await getPatientJournal(userId, 1, opts?.limit ?? 200)
+  return Array.isArray(data) ? (data as PatientJournalEntry[]) : []
+}
+
 export async function getPatientBpTrend(userId: string, startDate: string, endDate: string) {
   const qs = new URLSearchParams({ startDate, endDate })
   const res = await fetchWithAuth(`${API}/api/provider/patients/${userId}/bp-trend?${qs}`)
@@ -347,10 +410,23 @@ export function actionsForTier(tier: AlertTier | string | null): ResolutionActio
 // notifications — escalation pings, dashboard pushes, etc.). Filters
 // EMAIL-channel rows by default since those are tracking-only and don't
 // represent in-app state the admin can act on.
+//
+// Multi-channel dedupe: each escalation step writes one Notification row
+// per channel (e.g. Tier 1 T+0 fans out PUSH + EMAIL + DASHBOARD), so the
+// raw API returns multiple rows for the same logical event. We collapse
+// rows that share an `escalationEventId` into a single canonical entry
+// (preferring PUSH > DASHBOARD > PHONE for display) and stash every
+// underlying row id on `siblingIds` so mark-read can flip all of them in
+// one bulk PATCH. Rows without an escalation event id (alert-engine
+// dashboard pushes, resolution pings) stand alone.
 
 export interface AdminNotificationDto {
   id: string
   alertId: string | null
+  /** Set when the row originated from the escalation ladder. Used for
+   *  multi-channel dedupe so the same step doesn't appear twice in the
+   *  inbox. */
+  escalationEventId: string | null
   channel: 'PUSH' | 'EMAIL' | 'PHONE' | 'DASHBOARD'
   title: string
   body: string
@@ -358,22 +434,63 @@ export interface AdminNotificationDto {
   sentAt: string
   readAt: string | null
   watched: boolean
+  /** Every Notification row id that merged into this canonical entry
+   *  (always at least `[id]`). Mark-read flows pass this to the bulk
+   *  endpoint so all channel siblings flip together. */
+  siblingIds: string[]
+}
+
+const CHANNEL_RANK: Record<string, number> = {
+  PUSH: 0,
+  DASHBOARD: 1,
+  PHONE: 2,
+  EMAIL: 3,
 }
 
 export async function getAdminNotifications(opts?: {
   status?: 'all' | 'unread' | 'read'
-  /** Soft cap on returned rows (the bell needs ~10, the page wants more). */
+  /** Soft cap on returned rows (the bell needs ~10, the page wants more).
+   *  Applied AFTER dedupe so the cap counts logical entries, not raw rows. */
   limit?: number
 }): Promise<AdminNotificationDto[]> {
   const status = opts?.status ?? 'all'
   const res = await fetchWithAuth(`${API}/api/daily-journal/notifications?status=${status}`)
   if (!res.ok) return []
   const json = await res.json()
-  const data: AdminNotificationDto[] = Array.isArray(json?.data) ? json.data : []
-  // EMAIL rows are SMTP receipts, not in-app surface — exclude from
-  // the bell + admin notifications page.
+  type RawRow = Omit<AdminNotificationDto, 'siblingIds'>
+  const data: RawRow[] = Array.isArray(json?.data) ? json.data : []
+  // EMAIL rows are SMTP receipts, not in-app surface — drop before grouping
+  // so they can't end up as the canonical row of a group.
   const filtered = data.filter((n) => n.channel !== 'EMAIL')
-  return opts?.limit ? filtered.slice(0, opts.limit) : filtered
+  // Group by escalation event when present; standalone rows keep their own
+  // group so unrelated notifications never collapse into each other.
+  const groups = new Map<string, RawRow[]>()
+  for (const n of filtered) {
+    const key = n.escalationEventId ? `evt:${n.escalationEventId}` : `solo:${n.id}`
+    const bucket = groups.get(key)
+    if (bucket) bucket.push(n)
+    else groups.set(key, [n])
+  }
+  const merged: AdminNotificationDto[] = []
+  for (const siblings of groups.values()) {
+    const sorted = [...siblings].sort(
+      (a, b) => (CHANNEL_RANK[a.channel] ?? 99) - (CHANNEL_RANK[b.channel] ?? 99),
+    )
+    const rep = sorted[0]
+    // The merged row is unread iff ANY sibling row is unread — closes the
+    // gap where the user marks the PUSH row read but DASHBOARD stays unread
+    // and re-shows the entry on next fetch.
+    const watched = siblings.every((s) => s.watched)
+    merged.push({
+      ...rep,
+      watched,
+      siblingIds: siblings.map((s) => s.id),
+    })
+  }
+  // Server already orders by sentAt desc, but dedupe scrambles iteration
+  // order — re-sort so the inbox stays chronological.
+  merged.sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime())
+  return opts?.limit ? merged.slice(0, opts.limit) : merged
 }
 
 export async function markAdminNotificationRead(id: string): Promise<void> {
@@ -381,6 +498,15 @@ export async function markAdminNotificationRead(id: string): Promise<void> {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ watched: true }),
+  })
+}
+
+export async function markAdminNotificationsReadBulk(ids: string[]): Promise<void> {
+  if (ids.length === 0) return
+  await fetchWithAuth(`${API}/api/daily-journal/notifications/bulk-status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids, watched: true }),
   })
 }
 
