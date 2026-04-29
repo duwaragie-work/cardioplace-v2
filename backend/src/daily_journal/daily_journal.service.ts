@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -389,6 +390,19 @@ export class DailyJournalService {
 
     if (!alert) {
       throw new NotFoundException('Alert not found')
+    }
+
+    // CLINICAL_SPEC §V2-C — Tier 1 contraindications + BP Level 2 emergencies
+    // are non-dismissable: only a clinician closes them out via the resolve
+    // endpoint. Setting acknowledgedAt would stop the escalation cron from
+    // paging providers (see escalation.service.ts advanceOverdueLadders),
+    // creating a clinical-safety hole. Reject patient acks here even if the
+    // UI happens to surface the button (defense-in-depth against stale
+    // builds and direct API calls).
+    if (alert.dismissible === false) {
+      throw new BadRequestException(
+        'This alert is non-dismissable and must be resolved by your care team.',
+      )
     }
 
     if (alert.status === 'ACKNOWLEDGED') {

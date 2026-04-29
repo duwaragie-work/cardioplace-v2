@@ -262,6 +262,8 @@ const fr: Record<TranslationKey, string> = {
 
   // ─── Notifications ─────────────────────────────────────────────────────────
   'notifications.title': 'Notifications',
+  'notifications.topTab.alerts': 'Alertes',
+  'notifications.topTab.notifications': 'Notifications',
   'notifications.actionNeeded': 'Action Requise',
   'notifications.messages': 'Messages',
   'notifications.allTab': 'Tous',
@@ -277,6 +279,8 @@ const fr: Record<TranslationKey, string> = {
   'notifications.actionsNeededPlural': 'actions requises',
   'notifications.unread': 'non lu(s)',
   'notifications.tapToRead': 'Appuyez pour marquer comme lu',
+  'notifications.viewAlert': 'Voir l\'alerte',
+  'notifications.markRead': 'Marquer lu',
   'notifications.hideTips': 'Masquer les conseils',
   'notifications.careTip': 'conseil de santé',
   'notifications.careTips': 'conseils de santé',
@@ -1090,9 +1094,11 @@ const fr: Record<TranslationKey, string> = {
   'alerts.emergency.followupBody': "Deux heures se sont écoulées. Nous voulons nous assurer que vous êtes en sécurité.",
   'alerts.emergency.followupYes': 'Oui',
   'alerts.emergency.followupNotYet': 'Pas encore',
-  'alerts.tier.back': 'Tableau de bord',
+  'alerts.tier.back': 'Retour',
   'alerts.tier.whatNext': 'Prochaines étapes',
   'alerts.tier.seenResolved': 'Vous avez vu ceci. Votre équipe soignante a été informée.',
+  'alerts.tier.resolvedAction': 'Votre équipe soignante a examiné cela et a pris des mesures.',
+  'alerts.reviewedByCareTeam': 'Examiné',
   'alerts.tier.saving': 'Enregistrement…',
   'alerts.tier.ackButton': 'Je l\'ai vu',
 
