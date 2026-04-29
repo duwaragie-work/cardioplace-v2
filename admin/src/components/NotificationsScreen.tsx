@@ -34,7 +34,6 @@ import {
   acknowledgeProviderAlert,
   getAdminNotifications,
   getProviderAlerts,
-  markAdminNotificationRead,
   markAdminNotificationsReadBulk,
   type AdminNotificationDto,
   type AlertTier,
@@ -108,11 +107,26 @@ function timeAgo(iso: string): string {
 // changes alert/notification state broadcasts so siblings can refresh on
 // the same tick without waiting for the 30s poll. Same convention as the
 // patient app.
+//
+// `detail` is an OPTIONAL delta hint: when the source already knows how
+// the count changed (e.g. "marked 3 notifications read"), it includes the
+// delta so listeners can update their badges instantly without a server
+// round-trip. Listeners that receive a delta should skip the reconciliation
+// fetch — applying the delta + re-fetching simultaneously races against
+// the source's PATCH and can overwrite the optimistic value with stale
+// server data.
 const NOTIF_CHANGE_EVENT = 'cardio:notifications-changed';
 
-function broadcastChange() {
+type NotifChangeDetail = {
+  /** Change in unread-notification count. Negative = mark-read. */
+  unreadDelta?: number;
+  /** Change in open-alert count. Negative = acknowledged/resolved. */
+  alertDelta?: number;
+};
+
+function broadcastChange(detail?: NotifChangeDetail) {
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event(NOTIF_CHANGE_EVENT));
+    window.dispatchEvent(new CustomEvent<NotifChangeDetail>(NOTIF_CHANGE_EVENT, { detail }));
   }
 }
 
@@ -164,12 +178,17 @@ export default function NotificationsScreen() {
     void refresh();
     // Mutations from the top-bar bell (mark-read, mark-all-read) broadcast
     // a window event so the page picks up the new state on the same tick
-    // — keeps both surfaces consistent without polling.
+    // — keeps both surfaces consistent without waiting on the poll.
     const onChange = () => { void refresh({ silent: true }); };
+    // Background poll catches everything else: new alerts arriving from the
+    // backend, escalation events being fired, other admins resolving alerts
+    // on patients we share. Silent so the skeleton doesn't flash every 30s.
+    const interval = setInterval(() => { void refresh({ silent: true }); }, 30_000);
     if (typeof window !== 'undefined') {
       window.addEventListener(NOTIF_CHANGE_EVENT, onChange);
     }
     return () => {
+      clearInterval(interval);
       if (typeof window !== 'undefined') {
         window.removeEventListener(NOTIF_CHANGE_EVENT, onChange);
       }
@@ -236,6 +255,10 @@ export default function NotificationsScreen() {
       });
       try {
         await acknowledgeProviderAlert(alertId);
+        // Tell the bell instantly that one alert came off the queue, then
+        // sync our own state from the server. The delta event drops the
+        // bell badge without it having to re-fetch.
+        broadcastChange({ alertDelta: -1 });
         await refresh({ silent: true });
       } catch {
         // Soft-fail — the next refresh will reveal the true server state.
@@ -245,42 +268,47 @@ export default function NotificationsScreen() {
           next.delete(alertId);
           return next;
         });
-        broadcastChange();
       }
     },
     [refresh],
   );
 
-  const handleMarkRead = useCallback(async (id: string) => {
-    let didFlip = false;
-    setNotifs((prev) => {
-      const target = prev.find((n) => n.id === id);
-      if (!target || target.watched) return prev;
-      didFlip = true;
-      return prev.map((n) => (n.id === id ? { ...n, watched: true } : n));
-    });
-    if (!didFlip) return;
+  // Caller (NotifCard's "Mark read" pill) only renders on unread rows, so
+  // we don't need an internal "did the row actually change?" guard — and
+  // putting one inside the setNotifs updater would race with React's
+  // deferred batching and silently swallow the broadcast that the bell +
+  // any other sibling listener depend on for live sync.
+  //
+  // Broadcast goes out IMMEDIATELY (before awaiting the PATCH) with the
+  // delta so the bell badge drops instantly — no PATCH-round-trip wait.
+  // Bulk-PATCHes every channel sibling so the row stays read after refetch
+  // (single-id PATCH would leave its DASHBOARD twin unread and re-show the
+  // entry on next poll).
+  const handleMarkRead = useCallback(async (notif: AdminNotificationDto) => {
+    setNotifs((prev) => prev.map((n) => (n.id === notif.id ? { ...n, watched: true } : n)));
+    broadcastChange({ unreadDelta: -1 });
     try {
-      await markAdminNotificationRead(id);
+      await markAdminNotificationsReadBulk(notif.siblingIds);
     } catch {
       // Optimistic update stands — next refresh reconciles.
-    } finally {
-      broadcastChange();
     }
   }, []);
 
   const handleMarkAllRead = useCallback(async () => {
-    const ids = notifs.filter((n) => !n.watched).map((n) => n.id);
-    if (ids.length === 0) return;
+    const unread = notifs.filter((n) => !n.watched);
+    if (unread.length === 0) return;
+    // Flatten channel siblings so the bulk PATCH covers every underlying
+    // row; the displayed delta is the entry count, not the sibling count.
+    const ids = unread.flatMap((n) => n.siblingIds);
     setMarkingAll(true);
     setNotifs((prev) => prev.map((n) => ({ ...n, watched: true })));
+    broadcastChange({ unreadDelta: -unread.length });
     try {
       await markAdminNotificationsReadBulk(ids);
     } catch {
       // Optimistic update stands.
     } finally {
       setMarkingAll(false);
-      broadcastChange();
     }
   }, [notifs]);
 
@@ -480,9 +508,9 @@ export default function NotificationsScreen() {
                   >
                     <NotifCard
                       notif={n}
-                      onRead={() => void handleMarkRead(n.id)}
+                      onRead={() => void handleMarkRead(n)}
                       onOpen={() => {
-                        if (!n.watched) void handleMarkRead(n.id);
+                        if (!n.watched) void handleMarkRead(n);
                         // Alert-linked notification → switch to Alerts tab so
                         // the user can act on it; bare notifications just
                         // mark-read on tap.
@@ -503,10 +531,9 @@ export default function NotificationsScreen() {
         onClose={() => setResolving(null)}
         onResolved={() => {
           setResolving(null);
+          // Drop the bell badge instantly, then silently re-sync our list.
+          broadcastChange({ alertDelta: -1 });
           void refresh({ silent: true });
-          // Tell the bell + any other listening surface that an alert
-          // resolved so their badges drop without waiting for the poll.
-          broadcastChange();
         }}
       />
     </div>

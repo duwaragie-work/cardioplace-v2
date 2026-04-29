@@ -21,23 +21,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Bell, Check, CheckCheck, Loader2 } from 'lucide-react';
-import { fetchWithAuth } from '@/lib/services/token';
 import {
   getAdminNotifications,
   getProviderAlerts,
-  markAdminNotificationRead,
   markAdminNotificationsReadBulk,
   type AdminNotificationDto,
 } from '@/lib/services/provider.service';
 
 const POLL_INTERVAL_MS = 30_000;
 const DROPDOWN_LIMIT = 10;
-const API = process.env.NEXT_PUBLIC_API_URL;
 const NOTIF_CHANGE_EVENT = 'cardio:notifications-changed';
+
+// Mirrors the NotifChangeDetail shape on /notifications. When the source
+// of a mutation includes a delta in `detail`, the bell can update its
+// badge instantly without a fetch round-trip.
+type NotifChangeDetail = {
+  unreadDelta?: number;
+  alertDelta?: number;
+};
 
 function broadcastChange() {
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event(NOTIF_CHANGE_EVENT));
+    window.dispatchEvent(new CustomEvent<NotifChangeDetail>(NOTIF_CHANGE_EVENT));
   }
 }
 
@@ -63,23 +68,23 @@ export default function NotificationBell() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
 
-  // Combined badge = open alerts + unread notifications. Two parallel
-  // fetches: the lightweight unread-count endpoint plus the alerts list
-  // (which the provider endpoint already filters to status=OPEN). State
-  // only updates when the value actually changes so React skips no-op
-  // re-renders — no visible blink while the user is mid-page.
+  // Combined badge = open alerts + unread notifications. The notifications
+  // count is taken from the deduplicated list (one entry per logical event)
+  // rather than the server's unread-count endpoint, which over-counts when
+  // a single escalation step fans out to multiple channels (PUSH +
+  // DASHBOARD share an escalationEventId but each have their own row).
+  // State only updates when the value actually changes so React skips
+  // no-op re-renders — no visible blink while the user is mid-page.
   const refreshCount = useCallback(async () => {
     try {
-      const [alertData, unreadJson] = await Promise.all([
+      const [alertData, unreadList] = await Promise.all([
         getProviderAlerts().catch(() => [] as unknown[]),
-        fetchWithAuth(`${API}/api/daily-journal/notifications/unread-count`)
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null),
+        getAdminNotifications({ status: 'unread' }).catch(() => [] as AdminNotificationDto[]),
       ]);
       if (!mountedRef.current) return;
       const openAlertCount = Array.isArray(alertData) ? alertData.length : 0;
-      const unreadNotifCount = Number(unreadJson?.data?.unread ?? 0);
-      const next = openAlertCount + (Number.isFinite(unreadNotifCount) ? unreadNotifCount : 0);
+      const unreadNotifCount = unreadList.length;
+      const next = openAlertCount + unreadNotifCount;
       setCount((prev) => (prev === next ? prev : next));
     } catch {
       // Silent — bell shouldn't surface network noise. Next tick retries.
@@ -99,13 +104,26 @@ export default function NotificationBell() {
   // Poll the badge regardless of dropdown state — must stay current so the
   // admin knows something arrived without opening. Also listen for the
   // window-level change event so /notifications mutations refresh us on
-  // the same tick (no 30s lag) and re-fetch the dropdown items if open
-  // (otherwise the items list goes stale while the badge updates).
+  // the same tick (no 30s lag).
+  //
+  // When the broadcast carries a delta, apply it instantly to the badge
+  // and SKIP the reconciliation fetch — the page broadcasts before its
+  // own PATCH completes, so a fetch here would race the PATCH and snap
+  // the badge back to the old server value. The next 30s poll picks up
+  // the truth either way. When there's no delta (background events,
+  // bell's own mutations) we fall through to a fetch.
   useEffect(() => {
     mountedRef.current = true;
     void refreshCount();
     const id = setInterval(() => void refreshCount(), POLL_INTERVAL_MS);
-    const onChange = () => {
+    const onChange = (e: Event) => {
+      const detail = (e as CustomEvent<NotifChangeDetail>).detail;
+      const delta = (detail?.unreadDelta ?? 0) + (detail?.alertDelta ?? 0);
+      if (delta !== 0) {
+        setCount((prev) => Math.max(0, prev + delta));
+        if (open) void refreshItems();
+        return;
+      }
       void refreshCount();
       if (open) void refreshItems();
     };
@@ -143,19 +161,15 @@ export default function NotificationBell() {
 
   // Optimistically flip a row to read + decrement the badge. Used by both
   // the row tap (navigates) and the per-row "✓" button (stays in dropdown).
-  // Broadcasts so any open /notifications page updates in lockstep.
-  const markOne = useCallback(async (id: string) => {
-    let didFlip = false;
-    setItems((prev) => {
-      const target = prev.find((x) => x.id === id);
-      if (!target || target.watched) return prev;
-      didFlip = true;
-      return prev.map((x) => (x.id === id ? { ...x, watched: true } : x));
-    });
-    if (!didFlip) return;
+  // Bulk-PATCHes every channel sibling so the row stays read after refetch
+  // (a single-id PATCH would leave the DASHBOARD twin unread and re-show
+  // the entry on next poll). Broadcasts so any open /notifications page
+  // updates in lockstep.
+  const markOne = useCallback(async (notif: AdminNotificationDto) => {
+    setItems((prev) => prev.map((x) => (x.id === notif.id ? { ...x, watched: true } : x)));
     setCount((prev) => Math.max(0, prev - 1));
     try {
-      await markAdminNotificationRead(id);
+      await markAdminNotificationsReadBulk(notif.siblingIds);
     } catch {
       // Optimistic update stands; refreshCount tick reconciles.
     } finally {
@@ -164,7 +178,7 @@ export default function NotificationBell() {
   }, []);
 
   async function handleItemClick(n: AdminNotificationDto) {
-    if (!n.watched) await markOne(n.id);
+    if (!n.watched) await markOne(n);
     setOpen(false);
     // The bell is the entry point for the personal notification inbox, so
     // route to the Notifications tab — alert-linked rows still land users
@@ -173,14 +187,18 @@ export default function NotificationBell() {
   }
 
   async function handleMarkAll() {
-    const ids = items.filter((n) => !n.watched).map((n) => n.id);
-    if (ids.length === 0) return;
+    const unread = items.filter((n) => !n.watched);
+    if (unread.length === 0) return;
+    // Flatten channel siblings so the bulk PATCH covers every underlying
+    // row, not just the canonical one we display.
+    const ids = unread.flatMap((n) => n.siblingIds);
     setMarkingAll(true);
     setItems((prev) => prev.map((x) => ({ ...x, watched: true })));
     // Badge is alerts + unread notifs combined — only the notification
-    // slice is going to zero, so decrement by exactly the flipped count
-    // and let the next poll reconcile if anything raced.
-    setCount((prev) => Math.max(0, prev - ids.length));
+    // slice is going to zero, so decrement by exactly the displayed entry
+    // count (NOT the flattened sibling count) and let the next poll
+    // reconcile if anything raced.
+    setCount((prev) => Math.max(0, prev - unread.length));
     try {
       await markAdminNotificationsReadBulk(ids);
     } catch {
@@ -340,7 +358,7 @@ export default function NotificationBell() {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        void markOne(n.id);
+                        void markOne(n);
                       }}
                       className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition cursor-pointer hover:opacity-80 mt-0.5"
                       style={{
