@@ -2,15 +2,22 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common'
 import { EnrollmentStatus } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { EscalationService } from '../daily_journal/services/escalation.service.js'
 import { canCompleteOnboarding } from './enrollment-gate.js'
 
 @Injectable()
 export class EnrollmentService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(EnrollmentService.name)
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly escalation: EscalationService,
+  ) {}
 
   async completeOnboarding(adminId: string, patientUserId: string) {
     const user = await this.prisma.user.findUnique({
@@ -51,6 +58,25 @@ export class EnrollmentService {
       select: { id: true, enrollmentStatus: true },
     })
 
+    // Catch-up: alerts that fired while this patient was un-enrolled were
+    // deferred (DeviationAlert row written, no EscalationEvent). Now that
+    // enrollment + provider assignment are in place, re-fire T+0 for any
+    // such alert from the last 7 days. Best-effort: any failure is logged
+    // but does not block the enrollment response — admins still get a 200
+    // and can manually nudge stale alerts via Resolve if needed.
+    let catchUp: { dispatched: number; skipped: number } = {
+      dispatched: 0,
+      skipped: 0,
+    }
+    try {
+      catchUp = await this.escalation.dispatchDeferredForUser(patientUserId)
+    } catch (err) {
+      this.logger.error(
+        `Catch-up dispatch failed for newly enrolled user ${patientUserId}`,
+        err instanceof Error ? err.stack : err,
+      )
+    }
+
     return {
       statusCode: 200,
       message: 'Patient enrolled',
@@ -58,6 +84,8 @@ export class EnrollmentService {
         userId: updated.id,
         enrollmentStatus: updated.enrollmentStatus,
         completedBy: adminId,
+        catchUpDispatched: catchUp.dispatched,
+        catchUpSkipped: catchUp.skipped,
       },
     }
   }

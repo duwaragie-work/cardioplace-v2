@@ -130,6 +130,87 @@ export class EscalationService {
     )
   }
 
+  // ─── catch-up: dispatch alerts deferred while patient was un-enrolled ──
+  //
+  // CLINICAL_SPEC V2-D enrollment gate — when a patient isn't enrolled at
+  // the moment an alert fires, fireT0 returns early (line ~156) and writes
+  // no EscalationEvent. The DeviationAlert row stays visible to admins but
+  // the ladder never starts. Without a catch-up, those alerts stay
+  // un-escalated forever even after enrollment completes.
+  //
+  // EnrollmentService.completeOnboarding calls this immediately after
+  // flipping a patient to ENROLLED. We re-fire T+0 for any open alert with
+  // zero EscalationEvents, capped to the last 7 days so a long-deferred
+  // patient doesn't trigger a flood of stale notifications on enrollment
+  // day. Alerts older than 7 days stay visible in the dashboard but never
+  // escalate — admins can resolve them manually.
+  async dispatchDeferredForUser(
+    userId: string,
+    now: Date = new Date(),
+  ): Promise<{ dispatched: number; skipped: number }> {
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+    const alerts = await this.prisma.deviationAlert.findMany({
+      where: {
+        userId,
+        status: 'OPEN',
+        createdAt: { gte: sevenDaysAgo },
+        // The signature of "deferred at T+0" — DeviationAlert exists but no
+        // EscalationEvent was ever written. Alerts that dispatched normally
+        // have at least the T+0 row, so they're filtered out here.
+        escalationEvents: { none: {} },
+      },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        userId: true,
+        type: true,
+        severity: true,
+        escalated: true,
+        tier: true,
+        ruleId: true,
+      },
+    })
+
+    if (alerts.length === 0) return { dispatched: 0, skipped: 0 }
+
+    this.logger.log(
+      `Catch-up dispatch for user ${userId}: ${alerts.length} deferred alert(s) within 7d`,
+    )
+
+    let dispatched = 0
+    let skipped = 0
+    for (const a of alerts) {
+      // Tier 3 / unknown tiers have no ladder — fireT0 will log + return,
+      // count those as skipped here so the caller's metrics are honest.
+      if (!ladderForTier(a.tier)) {
+        skipped++
+        continue
+      }
+      try {
+        await this.fireT0(
+          {
+            alertId: a.id,
+            userId: a.userId,
+            type: a.type ?? '',
+            severity: a.severity ?? '',
+            escalated: a.escalated,
+            tier: a.tier,
+            ruleId: a.ruleId,
+          },
+          now,
+        )
+        dispatched++
+      } catch (err) {
+        this.logger.error(
+          `Catch-up T+0 failed for alert ${a.id}`,
+          err instanceof Error ? err.stack : err,
+        )
+        skipped++
+      }
+    }
+    return { dispatched, skipped }
+  }
+
   // ─── T+0 on alert creation ──────────────────────────────────────────────
 
   private async fireT0(payload: AlertCreatedEvent, now: Date): Promise<void> {
