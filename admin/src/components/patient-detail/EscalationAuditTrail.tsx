@@ -32,8 +32,17 @@ import type {
 import { getBMI } from '@cardioplace/shared';
 
 // ─── Canonical ladder ────────────────────────────────────────────────────────
-// Mirrors the EscalationLevel + LadderStep enums from
-// /backend/prisma/schema/escalation_event.prisma (BP / Tier 1 ladder).
+// Mirrors the LadderStep enum from
+// /backend/prisma/schema/escalation_event.prisma and the per-tier ladders
+// declared in /backend/src/daily_journal/escalation/ladder-defs.ts. Each
+// alert tier has its OWN ladder shape — what we render here must match
+// what the backend cron actually fires, otherwise rows sit "Not yet
+// triggered" forever (canonical phantom-row bug). Hint text mirrors the
+// backend's recipientRoles per step so the timeline reads accurately.
+//
+// Drift-prevention note: if these ladders change, update both this file
+// AND /backend/src/daily_journal/escalation/ladder-defs.ts. Centralizing
+// the step-shape constants in /shared is a follow-up.
 
 interface LadderStep {
   code: string;
@@ -42,24 +51,63 @@ interface LadderStep {
   hint: string;
 }
 
-const BP_LADDER: LadderStep[] = [
-  { code: 'T0', label: 'T+0', hint: 'Initial dispatch' },
-  { code: 'T2H', label: 'T+2h', hint: 'Patient + caregiver reminder' },
-  { code: 'T4H', label: 'T+4h', hint: 'Provider on-call' },
-  { code: 'T8H', label: 'T+8h', hint: 'Provider + medical director' },
-  { code: 'T24H', label: 'T+24h', hint: 'Care team escalation' },
-  { code: 'T48H', label: 'T+48h', hint: 'Final escalation tier' },
+// Tier 1 — contraindications / non-BP safety. T0 → T4H → T8H → T24H → T48H.
+const TIER_1_LADDER: LadderStep[] = [
+  { code: 'T0', label: 'T+0', hint: 'Primary provider notified' },
+  { code: 'T4H', label: 'T+4h', hint: 'Primary + backup re-notified' },
+  { code: 'T8H', label: 'T+8h', hint: 'Medical director paged' },
+  { code: 'T24H', label: 'T+24h', hint: 'Healplace ops escalation' },
+  { code: 'T48H', label: 'T+48h', hint: 'Final compliance review' },
 ];
 
-const TIER2_LADDER: LadderStep[] = [
-  { code: 'T0', label: 'T+0', hint: 'Initial dispatch' },
+// Tier 2 — medication discrepancies. Slow ladder, weeks not hours.
+const TIER_2_LADDER: LadderStep[] = [
+  { code: 'T0', label: 'T+0', hint: 'Dashboard badge' },
   { code: 'TIER2_48H', label: 'T+48h', hint: 'First Tier 2 reminder' },
-  { code: 'TIER2_7D', label: 'T+7d', hint: 'One-week follow-up' },
-  { code: 'TIER2_14D', label: 'T+14d', hint: 'Two-week escalation' },
+  { code: 'TIER2_7D', label: 'T+7d', hint: 'Backup provider follow-up' },
+  { code: 'TIER2_14D', label: 'T+14d', hint: 'Healplace ops compliance' },
+];
+
+// BP Level 1 — non-emergent stage-2 HTN / hypotension. T0 → T24H → T72H → T7D.
+// Backend ALSO fires a separate patient-side T+0 row (BP_LEVEL_1_PATIENT_T0);
+// that event has step='T0' so it buckets into the T+0 row alongside the
+// provider event and renders as a second event card under the same step.
+const BP_LEVEL_1_LADDER: LadderStep[] = [
+  { code: 'T0', label: 'T+0', hint: 'Primary provider + patient' },
+  { code: 'T24H', label: 'T+24h', hint: 'Primary + backup notified' },
+  { code: 'T72H', label: 'T+72h', hint: 'Medical director' },
+  { code: 'T7D', label: 'T+7d', hint: 'Healplace ops compliance' },
+];
+
+// BP Level 2 — emergency. Fires regardless of business hours. T0 → T2H → T4H.
+// BP_LEVEL_2_SYMPTOM_OVERRIDE shares this shape — the only difference is
+// the T+2h recipients (which include PATIENT for the "Have you called 911?"
+// follow-up). Rendered identically since recipient detail comes from the
+// EscalationEvent rows, not the ladder shape.
+const BP_LEVEL_2_LADDER: LadderStep[] = [
+  { code: 'T0', label: 'T+0', hint: 'Primary + backup + patient' },
+  { code: 'T2H', label: 'T+2h', hint: 'Medical director' },
+  { code: 'T4H', label: 'T+4h', hint: 'Healplace ops phone' },
 ];
 
 function ladderFor(tier: string | null): LadderStep[] {
-  return tier === 'TIER_2_DISCREPANCY' ? TIER2_LADDER : BP_LADDER;
+  switch (tier) {
+    case 'TIER_1_CONTRAINDICATION':
+      return TIER_1_LADDER;
+    case 'TIER_2_DISCREPANCY':
+      return TIER_2_LADDER;
+    case 'BP_LEVEL_1_HIGH':
+    case 'BP_LEVEL_1_LOW':
+      return BP_LEVEL_1_LADDER;
+    case 'BP_LEVEL_2':
+    case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
+      return BP_LEVEL_2_LADDER;
+    // Tier 3 / unknown — informational only, no escalation. Caller checks
+    // for empty array and renders the no-ladder placeholder instead of an
+    // empty timeline.
+    default:
+      return [];
+  }
 }
 
 // ─── Channel chrome ──────────────────────────────────────────────────────────
@@ -160,34 +208,45 @@ export default function EscalationAuditTrail({ alert, heightCm }: Props) {
         </p>
       </div>
 
-      {/* Vertical timeline */}
-      <ol className="relative space-y-0">
-        {ladder.map((step, i) => {
-          const events = eventsByStep.get(step.code) ?? [];
-          const last = i === ladder.length - 1;
-          return (
+      {/* Vertical timeline. Tier 3 (and any tier with no escalation ladder)
+          short-circuits to an informational placeholder instead of an empty
+          <ol>, which would look like a render bug. */}
+      {ladder.length === 0 && extras.length === 0 ? (
+        <p
+          className="text-[11.5px] italic"
+          style={{ color: 'var(--brand-text-muted)' }}
+        >
+          Informational alert — no escalation ladder for this tier.
+        </p>
+      ) : (
+        <ol className="relative space-y-0">
+          {ladder.map((step, i) => {
+            const events = eventsByStep.get(step.code) ?? [];
+            const last = i === ladder.length - 1;
+            return (
+              <Step
+                key={step.code}
+                step={step}
+                events={events}
+                isLast={last && extras.length === 0}
+              />
+            );
+          })}
+          {/* Extra (off-ladder) events — usually BP_L2 retry escalations */}
+          {extras.map((e, i) => (
             <Step
-              key={step.code}
-              step={step}
-              events={events}
-              isLast={last && extras.length === 0}
+              key={`extra-${e.id}`}
+              step={{
+                code: e.ladderStep ?? e.escalationLevel,
+                label: e.ladderStep ?? e.escalationLevel,
+                hint: e.triggeredByResolution ? 'Retry triggered by resolution' : 'Off-ladder escalation',
+              }}
+              events={[e]}
+              isLast={i === extras.length - 1}
             />
-          );
-        })}
-        {/* Extra (off-ladder) events — usually BP_L2 retry escalations */}
-        {extras.map((e, i) => (
-          <Step
-            key={`extra-${e.id}`}
-            step={{
-              code: e.ladderStep ?? e.escalationLevel,
-              label: e.ladderStep ?? e.escalationLevel,
-              hint: e.triggeredByResolution ? 'Retry triggered by resolution' : 'Off-ladder escalation',
-            }}
-            events={[e]}
-            isLast={i === extras.length - 1}
-          />
-        ))}
-      </ol>
+          ))}
+        </ol>
+      )}
 
       {/* Resolution + 15-field audit footer */}
       {alert.status === 'RESOLVED' && <ResolutionAuditFooter alert={alert} heightCm={heightCm} />}
