@@ -802,6 +802,45 @@ export class ProviderService {
             measuredAt: true,
             systolicBP: true,
             diastolicBP: true,
+            // Weight feeds the BMI computation in the resolution audit
+            // footer when an alert is expanded inline on /admin/notifications.
+            weight: true,
+          },
+        },
+        // CLINICAL_SPEC V2-C Layer 1 — /admin/notifications expands each
+        // alert inline with the full escalation audit trail. Mirror the
+        // per-patient endpoint's shape so the same AlertCard component
+        // works across both surfaces.
+        escalationEvents: {
+          orderBy: { triggeredAt: 'asc' },
+          select: {
+            id: true,
+            escalationLevel: true,
+            ladderStep: true,
+            reason: true,
+            triggeredAt: true,
+            scheduledFor: true,
+            notificationSentAt: true,
+            notificationChannel: true,
+            recipientIds: true,
+            recipientRoles: true,
+            acknowledgedAt: true,
+            acknowledgedBy: true,
+            resolvedAt: true,
+            resolvedBy: true,
+            afterHours: true,
+            triggeredByResolution: true,
+            notifications: {
+              orderBy: { sentAt: 'asc' },
+              select: {
+                id: true,
+                userId: true,
+                channel: true,
+                title: true,
+                sentAt: true,
+                readAt: true,
+              },
+            },
           },
         },
       },
@@ -836,6 +875,19 @@ export class ProviderService {
       }
     }
 
+    // Resolve every "by" UUID into a display name in one batched lookup so
+    // the audit footer + escalation timeline can render "Resolved by Dr.
+    // Singal" instead of a truncated UUID. Mirrors getPatientAlerts above.
+    const idsToResolve: string[] = []
+    for (const a of alerts) {
+      if (a.resolvedBy) idsToResolve.push(a.resolvedBy)
+      for (const e of a.escalationEvents) {
+        if (e.acknowledgedBy) idsToResolve.push(e.acknowledgedBy)
+        if (e.resolvedBy) idsToResolve.push(e.resolvedBy)
+      }
+    }
+    const names = await resolveUserDisplays(this.prisma, idsToResolve)
+
     return {
       statusCode: 200,
       data: alerts.map((a) => {
@@ -857,8 +909,20 @@ export class ProviderService {
           ruleId: a.ruleId,
           mode: a.mode,
           pulsePressure: a.pulsePressure,
+          suboptimalMeasurement: a.suboptimalMeasurement,
           patientMessage: a.patientMessage,
+          // Three-tier messages — V2-C Layer 1 mandates inline rendering
+          // on the alert detail surface (PATIENT / CAREGIVER / PHYSICIAN).
+          caregiverMessage: a.caregiverMessage,
+          physicianMessage: a.physicianMessage,
           dismissible: a.dismissible,
+          // 15-field Joint-Commission audit fields. Most are null on OPEN
+          // alerts but the shape stays consistent so the AlertCard's
+          // expanded body / footer renders the same on both surfaces.
+          resolutionAction: a.resolutionAction,
+          resolutionRationale: a.resolutionRationale,
+          resolvedBy: a.resolvedBy,
+          resolvedByName: pickDisplayName(a.resolvedBy, names),
           createdAt: a.createdAt,
           acknowledgedAt: a.acknowledgedAt,
           followUpScheduledAt: followUp?.createdAt ?? null,
@@ -876,11 +940,25 @@ export class ProviderService {
             : null,
           journalEntry: a.journalEntry
             ? {
+                // entryDate is the legacy field name — kept so the
+                // dashboard AlertPanel + scheduled-calls page keep working.
+                // measuredAt mirrors the per-patient endpoint shape so
+                // AlertCard + EscalationAuditTrail consume the same field.
                 entryDate: a.journalEntry.measuredAt,
+                measuredAt: a.journalEntry.measuredAt,
                 systolicBP: a.journalEntry.systolicBP,
                 diastolicBP: a.journalEntry.diastolicBP,
+                weight:
+                  a.journalEntry.weight != null
+                    ? Number(a.journalEntry.weight)
+                    : null,
               }
             : null,
+          escalationEvents: a.escalationEvents.map((e) => ({
+            ...e,
+            acknowledgedByName: pickDisplayName(e.acknowledgedBy, names),
+            resolvedByName: pickDisplayName(e.resolvedBy, names),
+          })),
         }
       }),
     }

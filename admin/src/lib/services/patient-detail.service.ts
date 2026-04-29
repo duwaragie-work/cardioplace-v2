@@ -198,7 +198,7 @@ export interface PatientAlert {
   physicianMessage: string | null
   dismissible: boolean | null
   escalated: boolean
-  status: 'OPEN' | 'RESOLVED'
+  status: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
   resolutionAction: string | null
   resolutionRationale: string | null
   resolvedBy: string | null

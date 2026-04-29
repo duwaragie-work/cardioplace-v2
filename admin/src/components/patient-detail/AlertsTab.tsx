@@ -4,31 +4,21 @@
 //
 // • Tier filter chips (All / BP L2 / Tier 1 / Tier 2 / BP L1 / Tier 3)
 // • Status filter (All / Open / Resolved)
-// • Each row expands to show three-tier messages (patient / caregiver /
-//   physician) and the escalation ladder for that alert.
-// • Resolve button (only on OPEN alerts whose tier maps to a catalog group)
-//   opens the Flow G AlertResolutionModal.
+// • Each row uses the shared AlertCard (extracted Nov 2026 so the same
+//   inline expand + three-tier + Resolve / Acknowledge surface is reused
+//   on /admin/notifications per CLINICAL_SPEC V2-C Layer 1).
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Bell,
-  ChevronDown,
-  ChevronUp,
   CheckCircle2,
-  Clock as ClockIcon,
-  Pill,
-  ArrowUp,
-  ShieldAlert,
-  Activity,
-  AlertTriangle,
-  User as UserIcon,
-  Users,
   Stethoscope,
+  Clock as ClockIcon,
 } from 'lucide-react';
 import AlertResolutionModal, { type ResolvableAlert } from '@/components/AlertResolutionModal';
-import EscalationAuditTrail from './EscalationAuditTrail';
+import AlertCard from '@/components/AlertCard';
 import {
-  resolutionTierFor,
+  acknowledgeProviderAlert,
   type AlertTier,
 } from '@/lib/services/provider.service';
 import type {
@@ -56,14 +46,14 @@ function tierBucket(t: string | null): TierBucket {
   return 'OTHER';
 }
 
-function bucketChrome(b: TierBucket) {
+function bucketChromeFilter(b: TierBucket): { color: string; bg: string } {
   switch (b) {
-    case 'BP_L2': return { label: 'BP Level 2', color: 'var(--brand-alert-red)', bg: 'var(--brand-alert-red-light)', icon: <ShieldAlert className="w-3 h-3" /> };
-    case 'TIER_1': return { label: 'Tier 1', color: 'var(--brand-alert-red)', bg: 'var(--brand-alert-red-light)', icon: <Pill className="w-3 h-3" /> };
-    case 'TIER_2': return { label: 'Tier 2', color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)', icon: <ArrowUp className="w-3 h-3" /> };
-    case 'BP_L1': return { label: 'BP Level 1', color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)', icon: <Activity className="w-3 h-3" /> };
-    case 'TIER_3': return { label: 'Tier 3', color: 'var(--brand-accent-teal)', bg: 'var(--brand-accent-teal-light)', icon: <Bell className="w-3 h-3" /> };
-    default: return { label: 'Other', color: 'var(--brand-text-muted)', bg: 'var(--brand-background)', icon: <AlertTriangle className="w-3 h-3" /> };
+    case 'BP_L2': return { color: 'var(--brand-alert-red)', bg: 'var(--brand-alert-red-light)' };
+    case 'TIER_1': return { color: 'var(--brand-alert-red)', bg: 'var(--brand-alert-red-light)' };
+    case 'TIER_2': return { color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)' };
+    case 'BP_L1': return { color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)' };
+    case 'TIER_3': return { color: 'var(--brand-accent-teal)', bg: 'var(--brand-accent-teal-light)' };
+    default: return { color: 'var(--brand-text-muted)', bg: 'var(--brand-background)' };
   }
 }
 
@@ -79,12 +69,15 @@ function timeAgo(iso: string): string {
   return `${d}d ago`;
 }
 
-
 export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Props) {
   const [tierFilter, setTierFilter] = useState<TierBucket>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('OPEN');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [resolving, setResolving] = useState<PatientAlert | null>(null);
+  // Per-alert ack-in-flight set so the button disables while the request
+  // is pending. A Set rather than a boolean so two simultaneous BP L1 acks
+  // don't collide visually.
+  const [acking, setAcking] = useState<Set<string>>(new Set());
 
   // Tier 3 (TIER_3_INFO) is informational physician-only context per
   // CLINICAL_SPEC V2-C Layer 1 — it should NOT mix with safety-critical
@@ -134,6 +127,30 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
       createdAt: resolving.createdAt,
     };
   }, [resolving]);
+
+  const handleAcknowledge = useCallback(
+    async (alertId: string) => {
+      setAcking((prev) => {
+        const next = new Set(prev);
+        next.add(alertId);
+        return next;
+      });
+      try {
+        await acknowledgeProviderAlert(alertId);
+        onResolved();
+      } catch {
+        // Soft-fail — caller's onResolved refetch will reveal the true
+        // server state. Surface error toasts via the parent if desired.
+      } finally {
+        setAcking((prev) => {
+          const next = new Set(prev);
+          next.delete(alertId);
+          return next;
+        });
+      }
+    },
+    [onResolved],
+  );
 
   if (loading && alerts.length === 0) {
     return (
@@ -195,7 +212,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
             const active = tierFilter === key;
             const chrome = key === 'ALL'
               ? { color: 'var(--brand-primary-purple)', bg: 'var(--brand-primary-purple-light)' }
-              : bucketChrome(key);
+              : bucketChromeFilter(key);
             const count = counts[key];
             return (
               <button
@@ -241,10 +258,8 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
       ) : (
         <div className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
           {filtered.map((a, idx) => {
-            const bucket = tierBucket(a.tier);
-            const chrome = bucketChrome(bucket);
             const expanded = expandedId === a.id;
-            const canResolve = a.status === 'OPEN' && resolutionTierFor(a.tier) != null;
+            const toggle = () => setExpandedId(expanded ? null : a.id);
             return (
               <div
                 key={a.id}
@@ -252,141 +267,19 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
                   borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none',
                 }}
               >
-                {/* Row */}
-                <button
-                  type="button"
-                  onClick={() => setExpandedId(expanded ? null : a.id)}
-                  className="w-full text-left px-4 md:px-5 py-3 flex items-center gap-3 transition-colors hover:bg-gray-50 cursor-pointer"
-                >
-                  <div
-                    className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-white"
-                    style={{ backgroundColor: chrome.color }}
-                    aria-hidden
-                  >
-                    {chrome.icon}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center flex-wrap gap-2">
-                      <span
-                        className="text-[10px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
-                        style={{ backgroundColor: chrome.bg, color: chrome.color }}
-                      >
-                        {chrome.label}
-                      </span>
-                      {a.status === 'RESOLVED' && (
-                        <span
-                          className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                          style={{ backgroundColor: 'var(--brand-success-green-light)', color: 'var(--brand-success-green)' }}
-                        >
-                          <CheckCircle2 className="w-2.5 h-2.5" />
-                          Resolved
-                        </span>
-                      )}
-                      {a.escalated && (
-                        <span
-                          className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                          style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)' }}
-                        >
-                          Escalated
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[12.5px] mt-0.5 line-clamp-1" style={{ color: 'var(--brand-text-primary)' }}>
-                      {a.patientMessage ?? a.type ?? 'Alert'}
-                      {a.journalEntry?.systolicBP != null && a.journalEntry?.diastolicBP != null && (
-                        <>
-                          <span className="ml-2 font-bold" style={{ color: chrome.color }}>
-                            {a.journalEntry.systolicBP}/{a.journalEntry.diastolicBP}
-                          </span>
-                          {/* Pulse pressure inline — clinical signal admins
-                              scan for at a glance. Not shown to patients. */}
-                          <span
-                            className="ml-1.5 text-[10px] font-semibold px-1 py-0.5 rounded"
-                            style={{
-                              backgroundColor:
-                                a.journalEntry.systolicBP - a.journalEntry.diastolicBP > 60
-                                  ? 'var(--brand-warning-amber-light)'
-                                  : 'var(--brand-background)',
-                              color:
-                                a.journalEntry.systolicBP - a.journalEntry.diastolicBP > 60
-                                  ? 'var(--brand-warning-amber)'
-                                  : 'var(--brand-text-secondary)',
-                            }}
-                            title="Pulse pressure (SBP − DBP)"
-                          >
-                            PP {a.journalEntry.systolicBP - a.journalEntry.diastolicBP}
-                          </span>
-                        </>
-                      )}
-                    </p>
-                    <p className="text-[10.5px] mt-0.5 inline-flex items-center gap-1" style={{ color: 'var(--brand-text-muted)' }}>
-                      <ClockIcon className="w-2.5 h-2.5" />
-                      {timeAgo(a.createdAt)} · {a.ruleId ?? '—'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {canResolve && (
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setResolving(a);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setResolving(a);
-                          }
-                        }}
-                        className="h-7 px-2.5 rounded-lg text-[11px] font-semibold text-white transition-all hover:brightness-95 cursor-pointer inline-flex items-center"
-                        style={{ backgroundColor: chrome.color }}
-                      >
-                        Resolve
-                      </span>
-                    )}
-                    {expanded ? (
-                      <ChevronUp className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
-                    ) : (
-                      <ChevronDown className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
-                    )}
-                  </div>
-                </button>
-
-                {/* Expanded body */}
-                {expanded && (
-                  <div className="px-4 md:px-5 pb-4 pt-1 space-y-3" style={{ backgroundColor: 'var(--brand-background)' }}>
-                    {/* Three-tier messages */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-3">
-                      <ThreeTierMessageCard
-                        title="Patient"
-                        icon={<UserIcon className="w-3 h-3" />}
-                        message={a.patientMessage}
-                        color="var(--brand-primary-purple)"
-                      />
-                      <ThreeTierMessageCard
-                        title="Caregiver"
-                        icon={<Users className="w-3 h-3" />}
-                        message={a.caregiverMessage}
-                        color="var(--brand-accent-teal)"
-                      />
-                      <ThreeTierMessageCard
-                        title="Physician"
-                        icon={<Stethoscope className="w-3 h-3" />}
-                        message={a.physicianMessage}
-                        color="var(--brand-text-secondary)"
-                      />
-                    </div>
-
-                    {/* Flow I — vertical escalation audit trail (T+0 → T+48h)
-                        with per-step recipients, channels, ack timestamps,
-                        and the 15-field resolution audit footer. Replaces
-                        the prior horizontal pill ladder + standalone
-                        resolution receipt. */}
-                    <EscalationAuditTrail alert={a} heightCm={heightCm} />
-                  </div>
-                )}
+                <AlertCard
+                  alert={a}
+                  expanded={expanded}
+                  // On the per-patient tab the row IS the toggle — clicking
+                  // anywhere in the row body expands/collapses, matching the
+                  // pre-extract behavior. The chevron mirrors that handler.
+                  onRowClick={toggle}
+                  onToggleExpand={toggle}
+                  onResolve={() => setResolving(a)}
+                  onAcknowledge={() => void handleAcknowledge(a.id)}
+                  ackInFlight={acking.has(a.id)}
+                  heightCm={heightCm}
+                />
               </div>
             );
           })}
@@ -445,7 +338,8 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
                   <Bell className="w-3 h-3" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[10.5px] mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+                  <p className="text-[10.5px] mb-0.5 inline-flex items-center gap-1" style={{ color: 'var(--brand-text-muted)' }}>
+                    <ClockIcon className="w-2.5 h-2.5" />
                     {a.ruleId ?? '—'} · {timeAgo(a.createdAt)}
                   </p>
                   <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
@@ -471,48 +365,3 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
     </div>
   );
 }
-
-function ThreeTierMessageCard({
-  title,
-  icon,
-  message,
-  color,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  message: string | null;
-  color: string;
-}) {
-  return (
-    <div
-      className="rounded-lg p-3"
-      style={{
-        backgroundColor: 'white',
-        border: '1px solid var(--brand-border)',
-      }}
-    >
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <span
-          className="w-5 h-5 rounded-md flex items-center justify-center text-white"
-          style={{ backgroundColor: color }}
-          aria-hidden
-        >
-          {icon}
-        </span>
-        <p className="text-[10.5px] font-bold uppercase tracking-wider" style={{ color }}>
-          {title}
-        </p>
-      </div>
-      <p
-        className="text-[12px] leading-relaxed"
-        style={{
-          color: message ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
-          fontStyle: message ? 'normal' : 'italic',
-        }}
-      >
-        {message ?? 'No message generated for this audience.'}
-      </p>
-    </div>
-  );
-}
-

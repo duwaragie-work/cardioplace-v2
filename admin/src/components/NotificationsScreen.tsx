@@ -2,10 +2,15 @@
 
 // /admin/notifications — full-page alerts inbox.
 //
-// Mirrors the dashboard's Alert queue: filterable list of open alerts
-// with inline Review + Resolve buttons, no animations. The dashboard's
-// Layer 2 queue is the dashboard-side preview; this page is the
-// stand-alone surface the bell dropdown's "View all" lands on.
+// CLINICAL_SPEC V2-C Layer 1 — this is the provider's command center for
+// handling alerts in place: each card expands inline to show the three-tier
+// messages (PATIENT / CAREGIVER / PHYSICIAN) and the escalation audit
+// trail; Resolve / Acknowledge act on the alert without leaving the page;
+// clicking the row body navigates to the patient profile.
+//
+// Implementation: reuses the shared AlertCard so /admin/notifications and
+// the per-patient AlertsTab render from one source of truth. The Review
+// button (v1 legacy) was removed in favor of row-as-nav per spec.
 //
 // Back button uses router.back() so a user who came in from a patient
 // detail returns there.
@@ -18,29 +23,27 @@ import {
   ArrowUp,
   Bell,
   CheckCircle2,
-  Clock,
   Pill,
   Search,
   ShieldAlert,
   X,
 } from 'lucide-react';
 import {
+  acknowledgeProviderAlert,
   getProviderAlerts,
-  resolutionTierFor,
   type AlertTier,
 } from '@/lib/services/provider.service';
+import type { PatientAlert } from '@/lib/services/patient-detail.service';
+import AlertCard from './AlertCard';
 import AlertResolutionModal, { type ResolvableAlert } from './AlertResolutionModal';
 
-interface RawAlert {
-  id: string;
-  tier?: string | null;
-  ruleId?: string | null;
-  patientMessage?: string | null;
-  createdAt: string;
-  patient?: { id: string; name: string | null } | null;
-  journalEntry?: { systolicBP: number | null; diastolicBP: number | null } | null;
-  followUpScheduledAt?: string | null;
-}
+// PatientAlert with the provider-wide endpoint's extra fields. The shared
+// AlertCard accepts a PatientAlert structurally — this superset is still
+// assignable.
+type ProviderAlert = PatientAlert & {
+  patient: { id: string; name: string | null } | null;
+  followUpScheduledAt: string | null;
+};
 
 type TierFilter = 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'OTHER';
 
@@ -72,7 +75,7 @@ function bucketChrome(b: TierFilter): {
   }
 }
 
-function readingOf(a: RawAlert): string {
+function readingOf(a: ProviderAlert): string {
   if (a.journalEntry?.systolicBP != null && a.journalEntry?.diastolicBP != null) {
     return `${a.journalEntry.systolicBP}/${a.journalEntry.diastolicBP} mmHg`;
   }
@@ -80,39 +83,23 @@ function readingOf(a: RawAlert): string {
   return '—';
 }
 
-function initialsOf(name: string | null | undefined): string {
-  if (!name) return '?';
-  const parts = name.trim().split(/\s+/);
-  return parts.length >= 2
-    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-    : name.slice(0, 2).toUpperCase();
-}
-
-function timeAgo(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  if (ms < 0) return 'just now';
-  const m = Math.floor(ms / 60_000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  return `${d}d ago`;
-}
-
 export default function NotificationsScreen() {
   const router = useRouter();
-  const [alerts, setAlerts] = useState<RawAlert[]>([]);
+  const [alerts, setAlerts] = useState<ProviderAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [tierFilter, setTierFilter] = useState<TierFilter>('ALL');
   const [search, setSearch] = useState('');
-  const [resolving, setResolving] = useState<RawAlert | null>(null);
+  const [resolving, setResolving] = useState<ProviderAlert | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Per-alert ack-in-flight set so the button disables individually (two
+  // simultaneous BP L1 acks don't conflate visually).
+  const [acking, setAcking] = useState<Set<string>>(new Set());
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const data = await getProviderAlerts().catch(() => []);
-      setAlerts(Array.isArray(data) ? data : []);
+      setAlerts(Array.isArray(data) ? (data as ProviderAlert[]) : []);
     } finally {
       setLoading(false);
     }
@@ -164,6 +151,29 @@ export default function NotificationsScreen() {
       createdAt: resolving.createdAt,
     };
   }, [resolving]);
+
+  const handleAcknowledge = useCallback(
+    async (alertId: string) => {
+      setAcking((prev) => {
+        const next = new Set(prev);
+        next.add(alertId);
+        return next;
+      });
+      try {
+        await acknowledgeProviderAlert(alertId);
+        await refresh();
+      } catch {
+        // Soft-fail — the next refresh will reveal the true server state.
+      } finally {
+        setAcking((prev) => {
+          const next = new Set(prev);
+          next.delete(alertId);
+          return next;
+        });
+      }
+    },
+    [refresh],
+  );
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--brand-background)' }}>
@@ -259,105 +269,46 @@ export default function NotificationsScreen() {
           </div>
         </div>
 
-        {/* Alert list — mirror of Layer 2 queue rows. No animation. */}
+        {/* Alert list — V2-C Layer 1 expandable cards. Row click navigates
+            to the patient profile; chevron expands inline; Resolve /
+            Acknowledge are inline buttons that stop event propagation. */}
         {loading && alerts.length === 0 ? (
           <ListSkeleton />
         ) : filtered.length === 0 ? (
           <EmptyCard hasAlerts={alerts.length > 0} />
         ) : (
           <div
-            className="bg-white rounded-2xl p-3 md:p-4"
+            className="bg-white rounded-2xl overflow-hidden"
             style={{ boxShadow: 'var(--brand-shadow-card)' }}
           >
-            <ul className="space-y-2">
-              {filtered.map((a) => {
-                const bucket = tierBucket(a.tier);
-                const chrome = bucketChrome(bucket);
-                const canResolve = resolutionTierFor(a.tier ?? null) != null;
-                return (
-                  <li key={a.id}>
-                    <div
-                      className="rounded-xl p-3 flex items-center gap-3 transition-all hover:brightness-[0.98]"
-                      style={{
-                        backgroundColor: chrome.light,
-                        borderLeft: `4px solid ${chrome.accent}`,
-                      }}
-                    >
-                      <div
-                        className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-[10.5px] shrink-0"
-                        style={{ backgroundColor: chrome.accent }}
-                      >
-                        {initialsOf(a.patient?.name)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[13px] font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>
-                            {a.patient?.name ?? 'Unknown'}
-                          </span>
-                          <span
-                            className="inline-flex items-center gap-1 text-[9.5px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
-                            style={{ backgroundColor: 'white', color: chrome.accent }}
-                          >
-                            {chrome.icon}
-                            {chrome.label}
-                          </span>
-                          {a.followUpScheduledAt && (
-                            <span
-                              className="text-[9.5px] font-bold px-1.5 py-0.5 rounded-full"
-                              style={{ backgroundColor: '#CCFBF1', color: '#0D9488' }}
-                            >
-                              Call scheduled
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[11.5px] font-bold" style={{ color: chrome.accent }}>
-                            {readingOf(a)}
-                          </span>
-                          <span className="text-[10.5px] inline-flex items-center gap-1" style={{ color: 'var(--brand-text-muted)' }}>
-                            <Clock className="w-2.5 h-2.5" />
-                            {timeAgo(a.createdAt)}
-                          </span>
-                        </div>
-                        {a.patientMessage && (
-                          <p className="text-[11.5px] mt-0.5 leading-snug line-clamp-2" style={{ color: 'var(--brand-text-secondary)' }}>
-                            {a.patientMessage}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          className="h-7 px-2.5 rounded-lg text-[11px] font-semibold transition-all hover:brightness-95 cursor-pointer"
-                          style={{
-                            backgroundColor: 'white',
-                            color: chrome.accent,
-                            border: `1.5px solid ${chrome.accent}`,
-                          }}
-                          onClick={() => {
-                            if (a.patient?.id) router.push(`/patients/${a.patient.id}`);
-                          }}
-                          disabled={!a.patient?.id}
-                        >
-                          Review
-                        </button>
-                        {canResolve && (
-                          <button
-                            type="button"
-                            className="h-7 px-2.5 rounded-lg text-[11px] font-semibold text-white transition-all hover:brightness-95 cursor-pointer inline-flex items-center gap-1"
-                            style={{ backgroundColor: chrome.accent }}
-                            onClick={() => setResolving(a)}
-                          >
-                            {bucket === 'BP_L2' && <CheckCircle2 className="w-3 h-3" />}
-                            Resolve
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+            {filtered.map((a, idx) => {
+              const expanded = expandedId === a.id;
+              return (
+                <div
+                  key={a.id}
+                  style={{ borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none' }}
+                >
+                  <AlertCard
+                    alert={a}
+                    expanded={expanded}
+                    // Row click navigates — replaces the v1 "Review" button.
+                    // Falls back to expand-toggle if patient.id is missing
+                    // (rare — orphaned alert) so the card still does
+                    // something.
+                    onRowClick={() => {
+                      if (a.patient?.id) router.push(`/patients/${a.patient.id}`);
+                      else setExpandedId(expanded ? null : a.id);
+                    }}
+                    onToggleExpand={() => setExpandedId(expanded ? null : a.id)}
+                    onResolve={() => setResolving(a)}
+                    onAcknowledge={() => void handleAcknowledge(a.id)}
+                    ackInFlight={acking.has(a.id)}
+                    patientName={a.patient?.name ?? 'Unknown'}
+                    followUpScheduledAt={a.followUpScheduledAt}
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
