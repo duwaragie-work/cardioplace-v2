@@ -47,6 +47,7 @@ import {
   afibHrRule,
   bradyRule,
   buildTachyRule,
+  getHrContextAnnotation,
 } from '../engine/hr-branches.js'
 import {
   getWidePulsePressureAnnotation,
@@ -189,10 +190,15 @@ export class AlertEngineService {
       throw err
     }
 
+    // Cross-session "prior reading pulse elevated" flag — used by tachyRule
+    // (Stage C) AND by the HR-context annotation when terminal-stage rules
+    // preempt Stage C. Computed once here so we don't re-query the DB.
+    const priorElevated = await this.wasPriorReadingPulseElevated(session, ctx)
+
     // Pass 1 — multi-axis BP/HR pipeline
-    const bpResults = await this.runPipeline(session, ctx)
+    const bpResults = await this.runPipeline(session, ctx, priorElevated)
     const primary = bpResults[0] ?? null
-    if (primary) this.addPhysicianAnnotations(primary, session, ctx)
+    if (primary) this.addPhysicianAnnotations(primary, session, ctx, priorElevated)
     for (const r of bpResults) {
       await this.persistAlert(session, ctx, r)
     }
@@ -218,6 +224,7 @@ export class AlertEngineService {
   private async runPipeline(
     session: SessionAverage,
     ctx: ResolvedContext,
+    priorElevated: boolean,
   ): Promise<RuleResult[]> {
     // Stage A — pre-gate rules that don't depend on averaged vitals. Must run
     // even for AFib patients with <3 readings (the gate below blocks BP/HR
@@ -255,9 +262,10 @@ export class AlertEngineService {
       if (r) return [r]
     }
 
-    // Stage C — multi-axis accumulation. Tachycardia needs cross-session state.
-    const priorTachyElevated = await this.wasPriorReadingPulseElevated(session, ctx)
-    const tachyRule = buildTachyRule(priorTachyElevated)
+    // Stage C — multi-axis accumulation. Tachycardia uses the cross-session
+    // priorElevated flag computed once in evaluate() (used here + by the
+    // HR-context annotation when terminal stages preempt Stage C).
+    const tachyRule = buildTachyRule(priorElevated)
 
     // Order matters for the suppression invariant: HFrEF/HFpEF/HCM/DCM rules
     // (which REPLACE standard SBP-low per §4.2/4.6/4.7/4.8) must iterate
@@ -356,6 +364,7 @@ export class AlertEngineService {
     result: RuleResult,
     session: SessionAverage,
     ctx: ResolvedContext,
+    priorElevated: boolean,
   ) {
     const annotations: string[] = result.metadata.physicianAnnotations ?? []
 
@@ -384,6 +393,24 @@ export class AlertEngineService {
         ctx.profile.hasCAD,
       )
       if (htnNote) annotations.push(htnNote)
+    }
+
+    // Phase/26 Reading 5b fix — HR context annotation. When a terminal-stage
+    // rule (symptom override or absolute emergency) preempts Stage C, the
+    // HR-axis rule that would have fired never gets a chance. Surface that
+    // finding here so the physician sees both framings (BP-emergency AND
+    // HR-specific remediation, e.g. heart-block / Stokes-Adams suspicion).
+    // Open clinical question (pending Manisha): should this co-fire as a
+    // separate row + ladder? Annotation is the reversible interim answer.
+    const TERMINAL_RULE_IDS = [
+      'RULE_SYMPTOM_OVERRIDE_GENERAL',
+      'RULE_SYMPTOM_OVERRIDE_PREGNANCY',
+      'RULE_ABSOLUTE_EMERGENCY',
+      'RULE_PREGNANCY_L2',
+    ] as const
+    if ((TERMINAL_RULE_IDS as readonly string[]).includes(result.ruleId)) {
+      const hrNote = getHrContextAnnotation(session, ctx, priorElevated)
+      if (hrNote) annotations.push(hrNote)
     }
 
     if (annotations.length > 0) {

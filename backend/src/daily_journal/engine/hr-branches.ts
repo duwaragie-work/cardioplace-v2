@@ -11,6 +11,7 @@
 // doesn't trigger any HR rule. No explicit suppression check is required.
 
 import { RULE_IDS, getPulsePressure } from '@cardioplace/shared'
+import type { ResolvedContext } from '@cardioplace/shared'
 import type { RuleFunction, RuleResult, SessionAverage } from './types.js'
 
 const AFIB_HR_HIGH = 110
@@ -114,6 +115,58 @@ export const bradyRule: RuleFunction = (session, ctx) => {
         'symptomatic',
       )
     }
+  }
+
+  return null
+}
+
+// ─── HR context annotation ──────────────────────────────────────────────────
+// Phase/26 Reading 5b fix — surfaces an HR concern when a terminal-stage rule
+// (symptom override or absolute emergency) preempts Stage C and the HR rule
+// that would have fired never gets a chance. Mirrors the exact threshold +
+// flag guards as the rules above so the annotation only fires when the
+// patient's clinical profile explicitly flags HR as a monitored signal.
+//
+// Open clinical question (raise with Manisha): should the HR finding instead
+// produce a separate DeviationAlert row + ladder? Annotation is the interim
+// reversible answer. If she signs off on co-firing, promote later.
+export function getHrContextAnnotation(
+  session: SessionAverage,
+  ctx: ResolvedContext,
+  priorElevated: boolean,
+): string | null {
+  const pulse = session.pulse
+  if (pulse == null) return null
+
+  // AFib HR — only when the patient is flagged hasAFib.
+  if (ctx.profile.hasAFib) {
+    if (pulse > AFIB_HR_HIGH) {
+      return `HR ${pulse} + AFib — rate-uncontrolled AFib (>${AFIB_HR_HIGH}); review rate-control regimen.`
+    }
+    if (pulse < AFIB_HR_LOW) {
+      return `HR ${pulse} + AFib — bradycardia (<${AFIB_HR_LOW}); review rate-control regimen.`
+    }
+  }
+
+  // Bradycardia — only when the patient is flagged hasBradycardia.
+  if (ctx.profile.hasBradycardia) {
+    if (pulse < BRADY_ASYMPTOMATIC) {
+      return `HR ${pulse} — asymptomatic bradycardia (<${BRADY_ASYMPTOMATIC}); ECG and pacemaker eval regardless of symptoms.`
+    }
+    if (pulse < BRADY_SYMPTOMATIC) {
+      const symptomatic =
+        session.symptoms.alteredMentalStatus ||
+        session.symptoms.chestPainOrDyspnea ||
+        session.symptoms.focalNeuroDeficit
+      if (symptomatic) {
+        return `HR ${pulse} + brady-relevant symptoms — symptomatic bradycardia (heart-block / Stokes-Adams suspicion); ECG and pacemaker eval, consider holding beta-blocker.`
+      }
+    }
+  }
+
+  // Tachycardia — only when flagged AND prior reading also elevated.
+  if (ctx.profile.hasTachycardia && pulse > TACHY_HR && priorElevated) {
+    return `HR ${pulse} — sustained tachycardia (≥2 consecutive readings >${TACHY_HR}); rule out causes.`
   }
 
   return null

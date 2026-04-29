@@ -505,4 +505,151 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
     // SBP=165, DBP=100 → PP=65. Column must carry the numeric value.
     expect(calls[0].data.pulsePressure).toBe(65)
   })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Reading 5b — HR context annotation when terminal-stage rules preempt.
+  // Symptom override (Stage A) and absolute emergency (Stage B) are terminal:
+  // first match returns immediately and Stage C never runs. Without this
+  // annotation, an HR concern that would have fired in Stage C is silently
+  // dropped (e.g., HR 48 + AMS = heart-block / Stokes-Adams pattern needing
+  // ECG + pacemaker eval, distinct from the BP-emergency framing).
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('Reading 5b — symptom override + HR 48 + AMS + brady → BP L2 row + brady annotation', async () => {
+    const { calls } = await run(
+      buildSession({
+        systolicBP: 130,
+        diastolicBP: 80,
+        pulse: 48,
+        symptoms: { ...noSymptoms(), alteredMentalStatus: true },
+      }),
+      buildCtx({ profile: { hasBradycardia: true } }),
+    )
+    expect(calls).toHaveLength(1)
+    expect(calls[0].data.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
+    expect(calls[0].data.physicianMessage).toContain('BP Level 2')
+    expect(calls[0].data.physicianMessage).toContain('symptomatic bradycardia')
+    expect(calls[0].data.physicianMessage).toContain('heart-block / Stokes-Adams')
+  })
+
+  it('Absolute emergency + brady-asymptomatic — HR <40 annotated regardless of symptoms', async () => {
+    const { calls } = await run(
+      buildSession({
+        systolicBP: 185,
+        diastolicBP: 105,
+        pulse: 38,
+        symptoms: noSymptoms(), // no symptom triggers — only the absolute BP threshold
+      }),
+      buildCtx({ profile: { hasBradycardia: true } }),
+    )
+    expect(calls).toHaveLength(1)
+    expect(calls[0].data.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+    expect(calls[0].data.physicianMessage).toContain('asymptomatic bradycardia')
+  })
+
+  it('Symptom override + AFib HR-high — rate-uncontrolled AFib annotated', async () => {
+    const { calls } = await run(
+      buildSession({
+        systolicBP: 140,
+        diastolicBP: 88,
+        pulse: 115,
+        readingCount: 3, // AFib gate requires ≥3 readings
+        symptoms: { ...noSymptoms(), chestPainOrDyspnea: true },
+      }),
+      buildCtx({ profile: { hasAFib: true } }),
+    )
+    expect(calls).toHaveLength(1)
+    expect(calls[0].data.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
+    expect(calls[0].data.physicianMessage).toContain('rate-uncontrolled AFib')
+  })
+
+  it('Pregnancy L2 + brady-symptomatic — annotation surfaces both framings', async () => {
+    const { calls } = await run(
+      buildSession({
+        systolicBP: 165,
+        diastolicBP: 110,
+        pulse: 48,
+        symptoms: { ...noSymptoms(), alteredMentalStatus: true },
+      }),
+      buildCtx({
+        isPregnant: true,
+        profile: { hasBradycardia: true },
+      }),
+    )
+    expect(calls).toHaveLength(1)
+    // Pregnancy symptom override fires before pregnancyL2 (both terminal in
+    // Stage A vs B respectively). With AMS, symptomOverrideGeneral fires.
+    expect(calls[0].data.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+    expect(calls[0].data.physicianMessage).toContain('symptomatic bradycardia')
+  })
+
+  it('NEGATIVE — symptom override + normal HR → no HR annotation', async () => {
+    const { calls } = await run(
+      buildSession({
+        systolicBP: 130,
+        diastolicBP: 80,
+        pulse: 72,
+        symptoms: { ...noSymptoms(), alteredMentalStatus: true },
+      }),
+      buildCtx({ profile: { hasBradycardia: true } }),
+    )
+    expect(calls).toHaveLength(1)
+    expect(calls[0].data.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
+    // HR 72 is in normal range — no rule would have fired, no annotation.
+    expect(calls[0].data.physicianMessage).not.toContain('bradycardia')
+    expect(calls[0].data.physicianMessage).not.toContain('AFib')
+    expect(calls[0].data.physicianMessage).not.toContain('tachycardia')
+  })
+
+  it('NEGATIVE — symptom override + HR 48 + non-flagged patient → no HR annotation', async () => {
+    const { calls } = await run(
+      buildSession({
+        systolicBP: 130,
+        diastolicBP: 80,
+        pulse: 48,
+        symptoms: { ...noSymptoms(), alteredMentalStatus: true },
+      }),
+      buildCtx({ profile: { hasBradycardia: false, hasAFib: false } }),
+    )
+    expect(calls).toHaveLength(1)
+    expect(calls[0].data.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
+    // Without hasBradycardia, HR 48 is just a low pulse — no clinical action,
+    // no annotation. Avoids surfacing noise on patients without that flag.
+    expect(calls[0].data.physicianMessage).not.toContain('bradycardia')
+  })
+
+  it('DO NOT REGRESS — Stage C standalone brady-asymptomatic fires its own row', async () => {
+    // No symptom override → Stage C runs. HR 38 < 40 → bradyAsymptomatic
+    // fires regardless of symptoms.
+    const { calls } = await run(
+      buildSession({
+        systolicBP: 130,
+        diastolicBP: 80,
+        pulse: 38,
+        symptoms: noSymptoms(),
+      }),
+      buildCtx({ profile: { hasBradycardia: true } }),
+    )
+    expect(calls).toHaveLength(1)
+    expect(calls[0].data.ruleId).toBe('RULE_BRADY_HR_ASYMPTOMATIC')
+  })
+
+  it('DO NOT REGRESS — Stage C BP+brady co-fire with no terminal preempt', async () => {
+    const { calls } = await run(
+      buildSession({
+        systolicBP: 165,
+        diastolicBP: 95,
+        pulse: 38,
+        symptoms: noSymptoms(), // no symptom override → Stage C runs
+      }),
+      buildCtx({
+        profile: { hasCAD: true, hasBradycardia: true },
+      }),
+    )
+    // Two rows: bp-high (CAD_HIGH) + hr (BRADY_HR_ASYMPTOMATIC).
+    expect(calls).toHaveLength(2)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_CAD_HIGH')
+    expect(ids).toContain('RULE_BRADY_HR_ASYMPTOMATIC')
+  })
 })
