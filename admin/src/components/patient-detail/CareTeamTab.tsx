@@ -41,6 +41,11 @@ import { canAssignCareTeam } from '@/lib/roleGates';
 
 interface Props {
   patientId: string;
+  /** Fired after a successful create/update of the patient assignment.
+   *  The shell uses this to re-run the enrollment-gate check — adding the
+   *  care team often unblocks the Enroll button, and the user shouldn't
+   *  have to refresh the page to see that. */
+  onChanged?: () => void;
 }
 
 interface FormState {
@@ -67,7 +72,7 @@ function toForm(a: PatientAssignment | null): FormState {
   };
 }
 
-export default function CareTeamTab({ patientId }: Props) {
+export default function CareTeamTab({ patientId, onChanged }: Props) {
   const { user } = useAuth();
   // Editor surfaces (form, dropdowns, save button) only render for roles
   // that can actually write — SUPER_ADMIN, MEDICAL_DIRECTOR, HEALPLACE_OPS.
@@ -163,6 +168,10 @@ export default function CareTeamTab({ patientId }: Props) {
       setAssignment(updated);
       setForm(toForm(updated));
       setSuccess(assignment ? 'Care team updated.' : 'Care team assigned.');
+      // Notify the shell so the enrollment-gate check re-runs — adding
+      // the care team typically clears the "no-assignment" reason and
+      // un-blocks the Enroll button without a page refresh.
+      onChanged?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save assignment.');
     } finally {

@@ -47,6 +47,7 @@ import ReadingsTab from './ReadingsTab';
 import ThresholdsTab from './ThresholdsTab';
 import TimelineTab from './TimelineTab';
 import CareTeamTab from './CareTeamTab';
+import EnrollmentCard from './EnrollmentCard';
 
 type TabKey = 'profile' | 'medications' | 'alerts' | 'readings' | 'thresholds' | 'careteam' | 'timeline';
 
@@ -60,6 +61,10 @@ interface PatientHeader {
   activeAlertsCount: number;
   latestBP: { systolicBP: number | null; diastolicBP: number | null; weight: number | null; entryDate: string | null } | null;
   lastEntryDate: string | null;
+  /** Admin-owned clinical activation flag — drives the EnrollmentCard
+   *  between the header and the tab nav. Pulled from getPatientSummary
+   *  (which already returns it). */
+  enrollmentStatus: string | null;
 }
 
 interface Props {
@@ -74,6 +79,15 @@ export default function PatientDetailShell({ patientId }: Props) {
   const [header, setHeader] = useState<PatientHeader | null>(null);
   const [headerLoading, setHeaderLoading] = useState(true);
   const [headerError, setHeaderError] = useState<string | null>(null);
+  // Bumped to force a fresh getPatientSummary fetch — used by the
+  // EnrollmentCard's onEnrolled callback so the activation pill /
+  // enrollment card reflect the new state without a manual refresh.
+  const [headerRefreshTick, setHeaderRefreshTick] = useState(0);
+  // Bumped whenever something that could affect the enrollment gate
+  // changes (care-team save, threshold save, profile edit). The
+  // EnrollmentCard re-runs its prerequisite check on every bump, so
+  // "Blocked" → "Enroll patient" flips live without a page refresh.
+  const [enrollmentCheckTick, setEnrollmentCheckTick] = useState(0);
 
   // Per-tab data (loaded on demand)
   const [profile, setProfile] = useState<PatientProfile | null>(null);
@@ -131,6 +145,7 @@ export default function PatientDetailShell({ patientId }: Props) {
           activeAlertsCount: p?.activeAlertsCount ?? 0,
           latestBP: p?.latestBP ?? null,
           lastEntryDate: p?.lastEntryDate ?? null,
+          enrollmentStatus: p?.enrollmentStatus ?? null,
         });
       })
       .catch((e) => {
@@ -143,7 +158,10 @@ export default function PatientDetailShell({ patientId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [patientId]);
+    // headerRefreshTick is intentionally a dep — bumping it re-runs the
+    // fetch (e.g. after enrollment succeeds) so the activation state
+    // reflects the new server-side value.
+  }, [patientId, headerRefreshTick]);
 
   // ── Per-tab loaders ───────────────────────────────────────────────────────
   // Every loader has a `catch` so a transient network blip (dev backend
@@ -221,9 +239,21 @@ export default function PatientDetailShell({ patientId }: Props) {
   // Per-tab change handlers. Each one reloads its own slice AND invalidates
   // the timeline + header so newly-created audit rows / counts surface
   // without a manual page refresh.
+  //
+  // Profile + threshold + care-team changes also bump enrollmentCheckTick
+  // so the EnrollmentCard re-checks its gate. Care team is the most
+  // common reason the Enroll button is blocked ("no-assignment"); without
+  // a re-check the button would stay "Blocked" until the user reloaded
+  // the whole page.
+  const bumpEnrollmentCheck = useCallback(
+    () => setEnrollmentCheckTick((t) => t + 1),
+    [],
+  );
+
   const onProfileChanged = useCallback(async () => {
     await Promise.all([loadProfile(), loadLogs()]);
-  }, [loadProfile, loadLogs]);
+    bumpEnrollmentCheck();
+  }, [loadProfile, loadLogs, bumpEnrollmentCheck]);
 
   const onMedicationsChanged = useCallback(async () => {
     await Promise.all([loadMedications(), loadLogs()]);
@@ -235,7 +265,12 @@ export default function PatientDetailShell({ patientId }: Props) {
 
   const onThresholdChanged = useCallback(async () => {
     await Promise.all([loadThreshold(), loadLogs()]);
-  }, [loadThreshold, loadLogs]);
+    bumpEnrollmentCheck();
+  }, [loadThreshold, loadLogs, bumpEnrollmentCheck]);
+
+  const onCareTeamChanged = useCallback(() => {
+    bumpEnrollmentCheck();
+  }, [bumpEnrollmentCheck]);
 
   // ── On tab change, fire the matching loader ──────────────────────────────
   // Most tabs lazy-load on first visit. Timeline ALWAYS refetches on entry
@@ -539,6 +574,28 @@ export default function PatientDetailShell({ patientId }: Props) {
           ) : null}
         </div>
 
+        {/* ── Enrollment CTA ─────────────────────────────────────────────────
+            Hidden once the patient is ENROLLED (the card returns null).
+            Lives between the header and the tab nav so the action stays
+            visible across every tab — admin doesn't have to back out to the
+            patient list to flip a newly-set-up patient to active. */}
+        {header && header.enrollmentStatus !== 'ENROLLED' && (
+          <EnrollmentCard
+            patientId={patientId}
+            enrollmentStatus={header.enrollmentStatus}
+            // Each bump tells the card to re-run getEnrollmentCheck —
+            // bumped on care-team / threshold / profile changes so the
+            // button flips from Blocked → Enroll without a page refresh.
+            refreshTrigger={enrollmentCheckTick}
+            onEnrolled={() => {
+              setHeaderRefreshTick((t) => t + 1);
+              // Verification logs pick up the enrollment audit row — keep
+              // the timeline tab fresh too if it's been visited.
+              loadLogs();
+            }}
+          />
+        )}
+
         {/* ── Tab nav ──────────────────────────────────────────────────────── */}
         <div
           className="bg-white rounded-2xl p-1.5 inline-flex flex-wrap gap-1"
@@ -635,7 +692,9 @@ export default function PatientDetailShell({ patientId }: Props) {
                 />
               </>
             )}
-            {tab === 'careteam' && <CareTeamTab patientId={patientId} />}
+            {tab === 'careteam' && (
+              <CareTeamTab patientId={patientId} onChanged={onCareTeamChanged} />
+            )}
             {tab === 'timeline' && (
               <>
                 {logsError && <LoadErrorBanner message={logsError} onRetry={loadLogs} />}
