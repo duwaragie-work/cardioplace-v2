@@ -29,6 +29,7 @@ import {
   cadDbpRule,
   cadHighRule,
   dcmRule,
+  getCadHtnUncontrolledAnnotation,
   hcmRule,
   hcmVasodilatorRule,
   hfpefRule,
@@ -370,6 +371,19 @@ export class AlertEngineService {
     if (result.ruleId !== 'RULE_LOOP_DIURETIC_HYPOTENSION') {
       const loopNote = getLoopDiureticAnnotation(ctx.contextMeds, session.systolicBP)
       if (loopNote) annotations.push(loopNote)
+    }
+
+    // Phase/26 round-3 fix — bidirectional BP context. Surfaces "SBP also
+    // above CAD goal" framing alongside the J-curve framing when both are
+    // true on the same reading (Reading 3: 155/65). Without this, provider
+    // sees only the dose-reduction recommendation and may miss that SBP is
+    // uncontrolled (per §4.3 treatment target 130/80).
+    if (result.ruleId === 'RULE_CAD_DBP_CRITICAL') {
+      const htnNote = getCadHtnUncontrolledAnnotation(
+        session.systolicBP ?? null,
+        ctx.profile.hasCAD,
+      )
+      if (htnNote) annotations.push(htnNote)
     }
 
     if (annotations.length > 0) {

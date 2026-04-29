@@ -85,6 +85,30 @@ export const cadHighRule: RuleFunction = (session, ctx) => {
   return highAlert(session, ctx, RULE_IDS.CAD_HIGH, 'CAD', upper)
 }
 
+// Phase/26 round-3 fix — bidirectional BP context annotation. When a CAD
+// patient's reading triggers RULE_CAD_DBP_CRITICAL (J-curve / DBP-low) AND
+// SBP is in the (140, 160) "above-goal-but-below-alert-threshold" range,
+// surface the SBP framing alongside the J-curve framing so the physician
+// sees both concerns. Without this annotation, the dominant alert reads as
+// "drop the dose" — risking SBP rebound when the patient actually needs a
+// class switch (per §4.3 treatment target 130/80).
+//
+// Floor 140: AHA Stage 2 boundary — natural breakpoint for "uncontrolled".
+// Ceiling 160: at ≥160 the cadHighRule fires its own bp-high row, so the
+// annotation would duplicate.
+const CAD_HTN_UNCONTROLLED_FLOOR = 140
+const CAD_HTN_UNCONTROLLED_CEILING = 160
+
+export function getCadHtnUncontrolledAnnotation(
+  sbp: number | null,
+  hasCAD: boolean,
+): string | null {
+  if (!hasCAD || sbp == null) return null
+  if (sbp <= CAD_HTN_UNCONTROLLED_FLOOR) return null
+  if (sbp >= CAD_HTN_UNCONTROLLED_CEILING) return null
+  return `SBP ${sbp} also above CAD goal of 130/80 — consider switching antihypertensive class rather than dose reduction.`
+}
+
 // ─── HCM ────────────────────────────────────────────────────────────────────
 // Split into two single-axis rules so the multi-axis orchestrator can fire
 // the vasodilator safety flag (Tier 3 info) AND a BP-axis alert on the same

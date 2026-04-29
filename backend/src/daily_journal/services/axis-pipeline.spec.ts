@@ -384,4 +384,125 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0].data.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
   })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Reading 3 — bidirectional BP context annotation. CAD patient with DBP <70
+  // (J-curve) AND SBP above the §4.3 treatment target (130/80) but below the
+  // alert threshold (≥160). The annotation surfaces the SBP framing alongside
+  // the J-curve framing so the physician sees both concerns and doesn't
+  // over-correct (drop dose → SBP rebounds higher).
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('Reading 3 — CAD + 155/65 fires CAD_DBP_CRITICAL with bidirectional annotation', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 155, diastolicBP: 65, pulse: 70 }),
+      buildCtx({ profile: { hasCAD: true } }),
+    )
+    expect(calls).toHaveLength(1)
+    expect(calls[0].data.ruleId).toBe('RULE_CAD_DBP_CRITICAL')
+    // Both framings must appear in the physicianMessage.
+    expect(calls[0].data.physicianMessage).toMatch(/J-curve/i)
+    expect(calls[0].data.physicianMessage).toContain('SBP 155 also above CAD goal of 130/80')
+  })
+
+  it('CAD + 145/65 — annotation present (just above 140 floor)', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 145, diastolicBP: 65, pulse: 70 }),
+      buildCtx({ profile: { hasCAD: true } }),
+    )
+    expect(calls).toHaveLength(1)
+    expect(calls[0].data.ruleId).toBe('RULE_CAD_DBP_CRITICAL')
+    expect(calls[0].data.physicianMessage).toContain('SBP 145 also above CAD goal')
+  })
+
+  it('CAD + 140/65 — NO uncontrolled-HTN annotation (boundary at floor)', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 140, diastolicBP: 65, pulse: 70 }),
+      buildCtx({ profile: { hasCAD: true } }),
+    )
+    expect(calls).toHaveLength(1)
+    expect(calls[0].data.ruleId).toBe('RULE_CAD_DBP_CRITICAL')
+    expect(calls[0].data.physicianMessage).not.toContain('also above CAD goal')
+  })
+
+  it('CAD + 165/65 — TWO rows; CAD_HIGH covers SBP, no duplicate annotation', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 165, diastolicBP: 65, pulse: 70 }),
+      buildCtx({ profile: { hasCAD: true } }),
+    )
+    // Two-axis fire: bp-high (CAD_HIGH) + dbp-low (CAD_DBP_CRITICAL).
+    expect(calls).toHaveLength(2)
+    const dbpAlert = calls.find(
+      (c: any) => c.data.ruleId === 'RULE_CAD_DBP_CRITICAL',
+    )
+    // CAD_HIGH already conveys "SBP ≥160" — annotation would duplicate.
+    expect(dbpAlert?.data.physicianMessage).not.toContain('also above CAD goal')
+  })
+
+  it('Non-CAD + 155/65 — no annotation (helper bails on hasCAD=false)', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 155, diastolicBP: 65, pulse: 70 }),
+      buildCtx({ profile: { hasCAD: false } }),
+    )
+    // Without CAD, DBP 65 doesn't fire any rule. PP=90 → wide-PP fallback.
+    expect(calls).toHaveLength(1)
+    expect(calls[0].data.ruleId).toBe('RULE_PULSE_PRESSURE_WIDE')
+    expect(calls[0].data.physicianMessage).not.toContain('also above CAD goal')
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // DO-NOT-REGRESS — explicit guards from Reading 4 evidence + bug report.
+  // These behaviors were confirmed working pre-multi-axis-refactor; lock them
+  // in so future refactors don't silently break them.
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('DO NOT REGRESS — BB HR 50–60 suppression: HR 58 + Metoprolol → 0 alerts', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 118, diastolicBP: 72, pulse: 58 }),
+      buildCtx({
+        profile: { hasBradycardia: true },
+        contextMeds: [
+          buildMed({ drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER' }),
+        ],
+      }),
+    )
+    // HR 58 sits in [50, 60) — bradyRule returns null regardless of BB.
+    // No BP/HR axis claims; no info-fallback fires (PP=46, not wide).
+    expect(calls).toHaveLength(0)
+  })
+
+  it('DO NOT REGRESS — pregnancy rule sex-gating: male + 165/100 → no PREGNANCY rule', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 165, diastolicBP: 100, pulse: 78 }),
+      buildCtx({
+        profile: { gender: 'MALE', diagnosedHypertension: true },
+      }),
+    )
+    // Standard L1 High fires (SBP ≥160 / DBP ≥100), but no pregnancy rule.
+    const ids = ruleIds(calls)
+    expect(ids.some((id) => id.startsWith('RULE_PREGNANCY_'))).toBe(false)
+    expect(ids).toContain('RULE_STANDARD_L1_HIGH')
+  })
+
+  it('DO NOT REGRESS — PP annotation folding: 165/100 + PP 65 → 1 row, PP in physicianMessage', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 165, diastolicBP: 100, pulse: 72 }),
+      buildCtx({ profile: { diagnosedHypertension: true } }),
+    )
+    expect(calls).toHaveLength(1)
+    expect(calls[0].data.ruleId).toBe('RULE_STANDARD_L1_HIGH')
+    expect(calls[0].data.physicianMessage).toContain('Wide pulse pressure')
+    // No separate PULSE_PRESSURE_WIDE row.
+    expect(ruleIds(calls)).not.toContain('RULE_PULSE_PRESSURE_WIDE')
+  })
+
+  it('DO NOT REGRESS — pulsePressure column populated on every BP alert row', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 165, diastolicBP: 100, pulse: 72 }),
+      buildCtx({ profile: { diagnosedHypertension: true } }),
+    )
+    expect(calls).toHaveLength(1)
+    // SBP=165, DBP=100 → PP=65. Column must carry the numeric value.
+    expect(calls[0].data.pulsePressure).toBe(65)
+  })
 })
