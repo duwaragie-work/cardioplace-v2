@@ -400,7 +400,7 @@ const am: Record<TranslationKey, string> = {
   'profile.diagnosedHtn': 'የተረጋገጠ ከፍተኛ የደም ግፊት',
   'profile.freqOnceDaily': 'በቀን አንድ ጊዜ',
   'profile.freqTwiceDaily': 'በቀን ሁለት ጊዜ',
-  'profile.freqThreeTimesDaily': 'በቀን 3 ጊዜ',
+  'profile.freqThreeTimesDaily': 'በቀን ሶስት ጊዜ',
   'profile.freqUnknown': 'ድግግሞሹ አይታወቅም',
   'profile.hfHfrEf': 'HFrEF (የተቀነሰ የልብ መግፋት አቅም)',
   'profile.hfHfpEf': 'HFpEF (የተጠበቀ የልብ መግፋት አቅም)',
@@ -1047,7 +1047,7 @@ const am: Record<TranslationKey, string> = {
   // Frequency labels (used in review)
   'intake.freq.once': 'በቀን አንድ ጊዜ',
   'intake.freq.twice': 'በቀን ሁለት ጊዜ',
-  'intake.freq.three': 'በቀን 3 ጊዜ',
+  'intake.freq.three': 'በቀን ሶስት ጊዜ',
   'intake.freq.unsure': 'እርግጠኛ አይደለሁም',
   'intake.freq.unset': 'የድግግሞሽ ማዋቀር',
 
@@ -1059,6 +1059,10 @@ const am: Record<TranslationKey, string> = {
   // AudioButton aria labels
   'intake.audio.listen': 'አዳምጥ',
   'intake.audio.stop': 'አቁም',
+  'intake.audio.dictate': 'ይህን መስክ ለመሙላት ይናገሩ',
+  'intake.audio.dictateStop': 'ማዳመጥ አቁም',
+  'intake.audio.dictateListening': 'በማዳመጥ ላይ...',
+  'intake.audio.dictateError': 'መስማት አልቻልኩም። እንደገና ለመሞከር ማይክሮፎኑን ይንኩ።',
 
   // MonthlyMedReask modal (E4)
   'intake.reask.ariaLabel': 'ወርሃዊ የመድሃኒት ምርመራ',

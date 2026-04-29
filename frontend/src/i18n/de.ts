@@ -397,7 +397,7 @@ const de: Record<TranslationKey, string> = {
   'profile.diagnosedHtn': 'Diagnostizierter Bluthochdruck',
   'profile.freqOnceDaily': 'Einmal täglich',
   'profile.freqTwiceDaily': 'Zweimal täglich',
-  'profile.freqThreeTimesDaily': '3-mal täglich',
+  'profile.freqThreeTimesDaily': 'Dreimal täglich',
   'profile.freqUnknown': 'Häufigkeit unbekannt',
   'profile.hfHfrEf': 'HFrEF (reduzierte Ejektionsfraktion)',
   'profile.hfHfpEf': 'HFpEF (erhaltene Ejektionsfraktion)',
@@ -1044,7 +1044,7 @@ const de: Record<TranslationKey, string> = {
   // Frequency labels (used in review)
   'intake.freq.once': 'Einmal täglich',
   'intake.freq.twice': 'Zweimal täglich',
-  'intake.freq.three': '3-mal täglich',
+  'intake.freq.three': 'Dreimal täglich',
   'intake.freq.unsure': 'Unsicher',
   'intake.freq.unset': 'Häufigkeit festlegen',
 
@@ -1056,6 +1056,10 @@ const de: Record<TranslationKey, string> = {
   // AudioButton aria labels
   'intake.audio.listen': 'Anhören',
   'intake.audio.stop': 'Stopp',
+  'intake.audio.dictate': 'Sprechen Sie, um dieses Feld auszufüllen',
+  'intake.audio.dictateStop': 'Aufnahme stoppen',
+  'intake.audio.dictateListening': 'Hört zu...',
+  'intake.audio.dictateError': 'Konnte nichts hören. Tippen Sie auf das Mikrofon, um es erneut zu versuchen.',
 
   // MonthlyMedReask modal (E4)
   'intake.reask.ariaLabel': 'Monatliche Medikamentenprüfung',

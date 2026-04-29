@@ -397,7 +397,7 @@ const fr: Record<TranslationKey, string> = {
   'profile.diagnosedHtn': 'Hypertension diagnostiquée',
   'profile.freqOnceDaily': 'Une fois par jour',
   'profile.freqTwiceDaily': 'Deux fois par jour',
-  'profile.freqThreeTimesDaily': '3 fois par jour',
+  'profile.freqThreeTimesDaily': 'Trois fois par jour',
   'profile.freqUnknown': 'Fréquence inconnue',
   'profile.hfHfrEf': "HFrEF (fraction d'éjection réduite)",
   'profile.hfHfpEf': "HFpEF (fraction d'éjection préservée)",
@@ -971,9 +971,9 @@ const fr: Record<TranslationKey, string> = {
   'intake.a9.title': 'Combien de fois par jour ?',
   'intake.a9.subtitle': 'Juste le nombre — votre équipe soignante remplira la dose.',
   'intake.a9.audio': 'Combien de fois par jour prenez-vous chaque médicament ? Juste le nombre — votre équipe soignante remplira la dose.',
-  'intake.a9.freqOnce': 'Une',
-  'intake.a9.freqTwice': 'Deux',
-  'intake.a9.freqThree': 'Trois',
+  'intake.a9.freqOnce': 'Une fois',
+  'intake.a9.freqTwice': 'Deux fois',
+  'intake.a9.freqThree': 'Trois fois',
   'intake.a9.freqUnsure': 'Je ne sais pas',
   'intake.a9.medAudio': 'Combien de fois par jour prenez-vous {name} ?',
 
@@ -1044,7 +1044,7 @@ const fr: Record<TranslationKey, string> = {
   // Frequency labels (used in review)
   'intake.freq.once': 'Une fois par jour',
   'intake.freq.twice': 'Deux fois par jour',
-  'intake.freq.three': '3 fois par jour',
+  'intake.freq.three': 'Trois fois par jour',
   'intake.freq.unsure': 'Je ne sais pas',
   'intake.freq.unset': 'Définir la fréquence',
 
@@ -1056,6 +1056,10 @@ const fr: Record<TranslationKey, string> = {
   // AudioButton aria labels
   'intake.audio.listen': 'Écouter',
   'intake.audio.stop': 'Arrêter',
+  'intake.audio.dictate': 'Parlez pour remplir ce champ',
+  'intake.audio.dictateStop': 'Arrêter l\'écoute',
+  'intake.audio.dictateListening': 'Écoute en cours...',
+  'intake.audio.dictateError': 'Je n\'ai pas entendu. Appuyez sur le micro pour réessayer.',
 
   // MonthlyMedReask modal (E4)
   'intake.reask.ariaLabel': 'Vérification mensuelle des médicaments',

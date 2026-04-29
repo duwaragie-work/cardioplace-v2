@@ -39,6 +39,7 @@ import {
 import { afibHrRule, bradyRule, buildTachyRule } from './hr-branches.js'
 import { pulsePressureWideRule } from './pulse-pressure.js'
 import { loopDiureticHypotensionRule } from './loop-diuretic.js'
+import { medicationMissedRule } from './adherence.js'
 import type { SessionAverage, SessionSymptoms } from './types.js'
 
 // ─── fixtures ───────────────────────────────────────────────────────────────
@@ -1059,6 +1060,64 @@ describe('afibHrRule + beta-blocker precedence (P gap)', () => {
 })
 
 // Unverified known-class beta-blocker — spec §V2-A keeps suppression active.
+describe('medicationMissedRule — Phase/26 scheduledLater regression', () => {
+  // Phase/26 silent-literacy added a "Not Due Yet" option in the CheckIn
+  // medication step. The wizard submits `medicationTaken: undefined` and
+  // the new `medicationScheduledLater: true` flag for scheduledLater. The
+  // adherence rule must NOT fire on that — only on an explicit "missed".
+  // The rule looks at session.medicationTaken; the new flag rides on the
+  // JournalEntry row but is intentionally not part of the SessionAverage
+  // (no rule logic depends on it), so we just assert the existing strict
+  // equality check stays correct.
+
+  it('medicationTaken=undefined (scheduledLater path) → null', () => {
+    const r = medicationMissedRule(
+      session({ medicationTaken: null, missedMedications: [] }),
+      // ctx is only used for AFib gating in some rules; this rule ignores it.
+      { profile: {}, contextMeds: [], thresholds: {}, preDay3Mode: false } as unknown as ResolvedContext,
+    )
+    expect(r).toBeNull()
+  })
+
+  it('medicationTaken=true → null (took everything)', () => {
+    const r = medicationMissedRule(
+      session({ medicationTaken: true, missedMedications: [] }),
+      { profile: {}, contextMeds: [], thresholds: {}, preDay3Mode: false } as unknown as ResolvedContext,
+    )
+    expect(r).toBeNull()
+  })
+
+  it('medicationTaken=false → fires RULE_MEDICATION_MISSED', () => {
+    const r = medicationMissedRule(
+      session({ medicationTaken: false, missedMedications: [] }),
+      { profile: {}, contextMeds: [], thresholds: {}, preDay3Mode: false } as unknown as ResolvedContext,
+    )
+    expect(r).not.toBeNull()
+    expect(r?.ruleId).toBe('RULE_MEDICATION_MISSED')
+    expect(r?.tier).toBe('TIER_2_DISCREPANCY')
+  })
+
+  it('per-med detail with non-empty list also fires', () => {
+    const r = medicationMissedRule(
+      session({
+        medicationTaken: null,
+        missedMedications: [
+          {
+            medicationId: 'm1',
+            drugName: 'Lisinopril',
+            drugClass: 'ACE_INHIBITOR',
+            reason: 'FORGOT',
+            missedDoses: 1,
+          },
+        ],
+      }),
+      { profile: {}, contextMeds: [], thresholds: {}, preDay3Mode: false } as unknown as ResolvedContext,
+    )
+    expect(r).not.toBeNull()
+    expect(r?.ruleId).toBe('RULE_MEDICATION_MISSED')
+  })
+})
+
 describe('bradyRule unverified beta-blocker suppression (P gap)', () => {
   it('UNVERIFIED beta-blocker + HR=55 + symptoms → still suppressed', () => {
     const r = bradyRule(

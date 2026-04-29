@@ -24,6 +24,9 @@ import { getMyPatientProfile } from '@/lib/services/intake.service';
 import { getBMI } from '@cardioplace/shared';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
+import AudioButton from '@/components/intake/AudioButton';
+import MicButton from '@/components/intake/MicButton';
+import { kgToLbs } from '@/lib/units';
 
 type TFn = (key: TranslationKey) => string;
 
@@ -326,7 +329,7 @@ function EntryCard({
                   color: 'var(--brand-primary-purple)',
                 }}
               >
-                {entry.weight} {t('readings.lbs')}
+                {kgToLbs(entry.weight)} {t('readings.lbs')}
               </span>
             )}
             {bmi != null && (
@@ -677,14 +680,19 @@ function EditModal({
 
             {/* BP */}
             <div>
-              <label
-                className="block text-[12px] font-semibold mb-1.5"
-                style={{ color: 'var(--brand-text-secondary)' }}
-              >
-                {t('readings.bloodPressure')}
-              </label>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <label
+                  htmlFor="readings-edit-systolic"
+                  className="block text-[12px] font-semibold"
+                  style={{ color: 'var(--brand-text-secondary)' }}
+                >
+                  {t('readings.bloodPressure')}
+                </label>
+                <AudioButton size="sm" text={t('readings.bloodPressure')} />
+              </div>
               <div className="flex gap-3 items-center">
                 <input
+                  id="readings-edit-systolic"
                   type="number"
                   placeholder={t('checkin.systolic')}
                   value={form.systolic}
@@ -697,10 +705,16 @@ function EditModal({
                     color: 'var(--brand-text-primary)',
                   }}
                 />
+                <MicButton
+                  inputId="readings-edit-systolic"
+                  numeric
+                  onTranscript={(text) => onChange('systolic', text)}
+                />
                 <span className="text-[18px] font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
                   /
                 </span>
                 <input
+                  id="readings-edit-diastolic"
                   type="number"
                   placeholder={t('checkin.diastolic')}
                   value={form.diastolic}
@@ -713,53 +727,82 @@ function EditModal({
                     color: 'var(--brand-text-primary)',
                   }}
                 />
+                <MicButton
+                  inputId="readings-edit-diastolic"
+                  numeric
+                  onTranscript={(text) => onChange('diastolic', text)}
+                />
               </div>
             </div>
 
             {/* Pulse */}
             <div>
-              <label
-                className="block text-[12px] font-semibold mb-1.5"
-                style={{ color: 'var(--brand-text-secondary)' }}
-              >
-                {t('readings.pulseLabel')}
-              </label>
-              <input
-                type="number"
-                placeholder={t('readings.pulsePlaceholder')}
-                value={form.pulse}
-                onChange={(e) => onChange('pulse', e.target.value)}
-                min={30}
-                max={220}
-                className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
-                style={{
-                  borderColor: 'var(--brand-border)',
-                  color: 'var(--brand-text-primary)',
-                }}
-              />
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <label
+                  htmlFor="readings-edit-pulse"
+                  className="block text-[12px] font-semibold"
+                  style={{ color: 'var(--brand-text-secondary)' }}
+                >
+                  {t('readings.pulseLabel')}
+                </label>
+                <AudioButton size="sm" text={t('readings.pulseLabel')} />
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="readings-edit-pulse"
+                  type="number"
+                  placeholder={t('readings.pulsePlaceholder')}
+                  value={form.pulse}
+                  onChange={(e) => onChange('pulse', e.target.value)}
+                  min={30}
+                  max={220}
+                  className="flex-1 h-11 px-3 rounded-xl border text-[14px] outline-none"
+                  style={{
+                    borderColor: 'var(--brand-border)',
+                    color: 'var(--brand-text-primary)',
+                  }}
+                />
+                <MicButton
+                  inputId="readings-edit-pulse"
+                  numeric
+                  onTranscript={(text) => onChange('pulse', text)}
+                />
+              </div>
             </div>
 
             {/* Weight */}
             <div>
-              <label
-                className="block text-[12px] font-semibold mb-1.5"
-                style={{ color: 'var(--brand-text-secondary)' }}
-              >
-                {t('readings.weightLbs')}
-              </label>
-              <input
-                type="number"
-                placeholder="e.g. 165"
-                value={form.weight}
-                onChange={(e) => onChange('weight', e.target.value)}
-                min={20}
-                max={600}
-                className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
-                style={{
-                  borderColor: 'var(--brand-border)',
-                  color: 'var(--brand-text-primary)',
-                }}
-              />
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <label
+                  htmlFor="readings-edit-weight"
+                  className="block text-[12px] font-semibold"
+                  style={{ color: 'var(--brand-text-secondary)' }}
+                >
+                  {t('readings.weightLbs')}
+                </label>
+                <AudioButton size="sm" text={t('readings.weightLbs')} />
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="readings-edit-weight"
+                  type="number"
+                  placeholder="e.g. 165"
+                  value={form.weight}
+                  onChange={(e) => onChange('weight', e.target.value)}
+                  min={20}
+                  max={600}
+                  className="flex-1 h-11 px-3 rounded-xl border text-[14px] outline-none"
+                  style={{
+                    borderColor: 'var(--brand-border)',
+                    color: 'var(--brand-text-primary)',
+                  }}
+                />
+                <MicButton
+                  inputId="readings-edit-weight"
+                  numeric
+                  onTranscript={(text) => onChange('weight', text)}
+                />
+              </div>
             </div>
 
             {/* Medication */}
@@ -866,13 +909,23 @@ function EditModal({
 
             {/* Notes */}
             <div>
-              <label
-                className="block text-[12px] font-semibold mb-1.5"
-                style={{ color: 'var(--brand-text-secondary)' }}
-              >
-                {t('readings.notes')}
-              </label>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <label
+                  htmlFor="readings-edit-notes"
+                  className="block text-[12px] font-semibold"
+                  style={{ color: 'var(--brand-text-secondary)' }}
+                >
+                  {t('readings.notes')}
+                </label>
+                <MicButton
+                  inputId="readings-edit-notes"
+                  onTranscript={(text) =>
+                    onChange('notes', form.notes ? `${form.notes} ${text}`.trim() : text)
+                  }
+                />
+              </div>
               <textarea
+                id="readings-edit-notes"
                 value={form.notes}
                 onChange={(e) => onChange('notes', e.target.value)}
                 placeholder={t('readings.notesPlaceholder')}

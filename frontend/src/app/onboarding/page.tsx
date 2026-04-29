@@ -14,6 +14,8 @@ import SpinnerIndicator from "@/components/ui/SpinnerIndicator";
 import { useLanguage } from "@/contexts/LanguageContext";
 import LandingHeader from "@/components/cardio/LandingHeader";
 import LandingFooter from "@/components/cardio/LandingFooter";
+import AudioButton from "@/components/intake/AudioButton";
+import MicButton from "@/components/intake/MicButton";
 
 function getBrowserTimezone(): string | undefined {
   if (typeof Intl === "undefined" || typeof Intl.DateTimeFormat === "undefined") return undefined;
@@ -213,24 +215,38 @@ export default function OnboardingPage() {
             <div className="space-y-6 w-full">
               {/* Name */}
               <div className="w-full max-w-105">
-                <label className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
-                  {t('onboarding.nameQuestion')}
-                </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder={t('onboarding.namePlaceholder')}
-                  className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
-                />
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <label htmlFor="onboarding-name" className="block font-semibold text-[#171717] text-xs lg:text-sm">
+                    {t('onboarding.nameQuestion')}
+                  </label>
+                  <AudioButton text={t('onboarding.nameQuestion')} size="sm" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="onboarding-name"
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder={t('onboarding.namePlaceholder')}
+                    className="flex-1 h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                  />
+                  <MicButton
+                    inputId="onboarding-name"
+                    onTranscript={(text) => setName(text)}
+                  />
+                </div>
               </div>
 
               {/* Date of Birth */}
               <div className="w-full max-w-105">
-                <label className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
-                  {t('onboarding.dob')}
-                </label>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <label htmlFor="onboarding-dob" className="block font-semibold text-[#171717] text-xs lg:text-sm">
+                    {t('onboarding.dob')}
+                  </label>
+                  <AudioButton text={t('onboarding.dob')} size="sm" />
+                </div>
                 <input
+                  id="onboarding-dob"
                   type="date"
                   value={dateOfBirth}
                   max={maxDobIso}
@@ -242,10 +258,14 @@ export default function OnboardingPage() {
 
               {/* Communication Preference */}
               <div className="w-full max-w-105">
-                <label className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
-                  {t('onboarding.commPref')}
-                </label>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <label htmlFor="onboarding-comm-pref" className="block font-semibold text-[#171717] text-xs lg:text-sm">
+                    {t('onboarding.commPref')}
+                  </label>
+                  <AudioButton text={t('onboarding.commPref')} size="sm" />
+                </div>
                 <select
+                  id="onboarding-comm-pref"
                   value={communicationPreference}
                   onChange={(e) => setCommunicationPreference(e.target.value)}
                   className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%228%22%20viewBox%3D%220%200%2012%208%22%3E%3cpath%20fill%3D%22%23171717%22%20d%3D%22M6%208L0%200h12z%22%2F%3E%3c%2Fsvg%3E')] bg-size-[12px] bg-position-[center_right_1rem] bg-no-repeat"

@@ -39,6 +39,8 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
+import MicButton from '@/components/intake/MicButton';
+import { formatHeightFtIn } from '@/lib/units';
 import {
   getMyPatientProfile,
   getMyMedications,
@@ -456,17 +458,24 @@ function PersonalInfoModal({
 
         <div className="flex-1 overflow-y-auto thin-scrollbar p-5 space-y-4">
           <div>
-            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
+            <label htmlFor="profile-edit-name" className="block text-[12px] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
               {t('profile.nameLabel')}
             </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t('profile.namePlaceholder')}
-              className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
-              style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
-            />
+            <div className="flex items-center gap-2">
+              <input
+                id="profile-edit-name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={t('profile.namePlaceholder')}
+                className="flex-1 h-11 px-3 rounded-xl border text-[14px] outline-none"
+                style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+              />
+              <MicButton
+                inputId="profile-edit-name"
+                onTranscript={(text) => setName(text)}
+              />
+            </div>
           </div>
 
           <div>
@@ -818,7 +827,7 @@ export default function ProfilePage() {
               <Row label={t('profile.gender')} value={genderLabel(profile?.gender, t)} />
               <Row
                 label={t('profile.heightLabel')}
-                value={profile?.heightCm ? `${profile.heightCm} cm` : t('profile.notSet')}
+                value={profile?.heightCm ? formatHeightFtIn(profile.heightCm) : t('profile.notSet')}
               />
             </SectionCard>
 

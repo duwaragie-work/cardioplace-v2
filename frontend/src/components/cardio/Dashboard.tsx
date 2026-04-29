@@ -22,6 +22,7 @@ import { getMyThreshold, type PatientThresholdDto } from '@/lib/services/thresho
 import { loadDraft, hasDraft, stepProgress } from '@/lib/intake/draft';
 import ActionRequiredCard from '@/components/intake/ActionRequiredCard';
 import MonthlyMedReask from '@/components/intake/MonthlyMedReask';
+import AudioButton from '@/components/intake/AudioButton';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function getDateLabel(dateStr: string): string {
@@ -433,10 +434,17 @@ export default function Dashboard() {
         {/* D3 — Active alert card (top priority; tier-colored). Tap to open
             the Flow C alert detail. Hidden when no open alerts. */}
         {topAlert && topAlertVariant && (
+          <div className="relative mb-3 md:mb-4">
+            <div className="absolute top-3 right-3 z-10">
+              <AudioButton
+                size="sm"
+                text={`${t('dashboard.activeAlert')}. ${topAlertVariant.title}. ${topAlertVariant.body}`}
+              />
+            </div>
           <button
             type="button"
             onClick={() => router.push(`/alerts/${topAlert.id}`)}
-            className="w-full text-left rounded-2xl p-4 mb-3 md:mb-4 cursor-pointer transition-all flex items-center gap-3 active:scale-[0.99]"
+            className="w-full text-left rounded-2xl p-4 cursor-pointer transition-all flex items-center gap-3 active:scale-[0.99]"
             style={{
               backgroundColor: topAlertVariant.accentLight,
               border: `1.5px solid ${topAlertVariant.accent}`,
@@ -485,6 +493,7 @@ export default function Dashboard() {
               style={{ color: topAlertVariant.accent }}
             />
           </button>
+          </div>
         )}
 
         {/* D0 — Clinical Intake Action Required (above stats, below D3) */}
@@ -511,6 +520,15 @@ export default function Dashboard() {
             {/* decorative circle inside card */}
             <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 bg-white" />
             <div className="absolute -bottom-8 -right-4 w-20 h-20 rounded-full opacity-10 bg-white" />
+
+            {!loading && (
+              <div className="absolute top-3 right-3 z-10">
+                <AudioButton
+                  size="sm"
+                  text={`${greeting} ${userName ? userName : t('dashboard.welcomeBack')}. ${t('dashboard.careTeamMonitoring')}`}
+                />
+              </div>
+            )}
 
             <p className="text-white/70 text-xs font-medium mb-1">{greeting}</p>
             {loading ? (
@@ -547,10 +565,18 @@ export default function Dashboard() {
           {/* D4 — BP stat card. Status pill is colored vs the patient's
               PatientThreshold (or AHA defaults if no threshold set). Pulse
               renders below the BP when present on the latest entry. */}
-          <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
-            <span className="block text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--brand-text-muted)' }}>
-              {loading ? <Bone w={60} h={9} r={5} /> : (todayHasEntry ? t('dashboard.todaysBp') : t('dashboard.latestBp'))}
-            </span>
+          <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl relative" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <span className="block text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
+                {loading ? <Bone w={60} h={9} r={5} /> : (todayHasEntry ? t('dashboard.todaysBp') : t('dashboard.latestBp'))}
+              </span>
+              {!loading && latestEntry && (
+                <AudioButton
+                  size="sm"
+                  text={`${todayHasEntry ? t('dashboard.todaysBp') : t('dashboard.latestBp')}: ${latestBP} mmHg${latestEntry.pulse != null ? `, pulse ${latestEntry.pulse}` : ''}. ${bpVsTargetStyle.label}.`}
+                />
+              )}
+            </div>
             {loading ? (
               <Bone w={88} h={28} />
             ) : (
@@ -577,8 +603,13 @@ export default function Dashboard() {
           </div>
 
           {/* Streak Stat Card */}
-          <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
-            <Flame className="w-5 h-5 mb-2" style={{ color: 'var(--brand-warning-amber)' }} />
+          <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl relative" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <Flame className="w-5 h-5" style={{ color: 'var(--brand-warning-amber)' }} />
+              {!loading && (
+                <AudioButton size="sm" text={`${streak} ${t('dashboard.day')} ${t('dashboard.medicationStreak')}`} />
+              )}
+            </div>
             {loading ? (
               <Bone w={64} h={28} />
             ) : (
@@ -592,10 +623,15 @@ export default function Dashboard() {
           </div>
 
           {/* Total Check-ins Card */}
-          <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--brand-text-muted)' }}>
-              {t('dashboard.checkIns')}
-            </p>
+          <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl relative" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
+                {t('dashboard.checkIns')}
+              </p>
+              {!loading && (
+                <AudioButton size="sm" text={`${totalEntries} ${t('dashboard.totalLogged')}`} />
+              )}
+            </div>
             {loading ? (
               <Bone w={52} h={28} />
             ) : (
