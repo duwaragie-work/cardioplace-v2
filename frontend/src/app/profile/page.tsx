@@ -492,10 +492,11 @@ function PersonalInfoModal({
           </div>
 
           <div>
-            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
+            <label htmlFor="profile-edit-email" className="block text-[12px] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
               {t('profile.email')} <span className="font-normal" style={{ color: 'var(--brand-text-muted)' }}>{t('profile.emailCannotChange')}</span>
             </label>
             <input
+              id="profile-edit-email"
               type="email"
               value={current.email ?? ''}
               readOnly
@@ -509,10 +510,11 @@ function PersonalInfoModal({
           </div>
 
           <div>
-            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
+            <label htmlFor="profile-edit-dob" className="block text-[12px] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
               {t('profile.dobLabel')}
             </label>
             <input
+              id="profile-edit-dob"
               type="date"
               value={dateOfBirth}
               onChange={(e) => setDateOfBirth(e.target.value)}

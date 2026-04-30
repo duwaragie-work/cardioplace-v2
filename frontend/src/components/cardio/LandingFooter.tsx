@@ -109,6 +109,7 @@ export default function LandingFooter() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder={t('landing.yourEmail')}
+                aria-label={t('landing.yourEmail')}
                 required
                 className="w-full h-11 px-4 rounded-xl text-sm outline-none bg-white/15 backdrop-blur-sm text-white placeholder-white/60 border border-white/40 focus:border-white/60 transition"
               />
@@ -116,6 +117,7 @@ export default function LandingFooter() {
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder={t('landing.yourMessage')}
+                aria-label={t('landing.yourMessage')}
                 required
                 rows={3}
                 className="w-full px-4 py-2.5 rounded-xl text-sm outline-none bg-white/15 backdrop-blur-sm text-white placeholder-white/60 border border-white/40 focus:border-white/60 transition resize-none"

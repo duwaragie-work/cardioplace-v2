@@ -752,12 +752,14 @@ function EditModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
                 <label
+                  htmlFor="readings-edit-date"
                   className="block text-[12px] font-semibold mb-1.5"
                   style={{ color: 'var(--brand-text-secondary)' }}
                 >
                   {t('checkin.date')}
                 </label>
                 <input
+                  id="readings-edit-date"
                   type="date"
                   value={form.measuredDate}
                   onChange={(e) => onChange('measuredDate', e.target.value)}
@@ -771,12 +773,14 @@ function EditModal({
               </div>
               <div>
                 <label
+                  htmlFor="readings-edit-time"
                   className="block text-[12px] font-semibold mb-1.5"
                   style={{ color: 'var(--brand-text-secondary)' }}
                 >
                   {t('checkin.time')}
                 </label>
                 <input
+                  id="readings-edit-time"
                   type="time"
                   value={form.measuredTime}
                   onChange={(e) => onChange('measuredTime', e.target.value)}
@@ -1046,12 +1050,14 @@ function EditModal({
             {/* Other / freeform symptoms */}
             <div>
               <label
+                htmlFor="readings-edit-other-symptoms"
                 className="block text-[12px] font-semibold mb-1.5"
                 style={{ color: 'var(--brand-text-secondary)' }}
               >
                 {t('checkin.b3.otherLabel')}
               </label>
               <input
+                id="readings-edit-other-symptoms"
                 type="text"
                 value={form.otherSymptomsText}
                 onChange={(e) => onChange('otherSymptomsText', e.target.value)}

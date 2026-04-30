@@ -465,6 +465,7 @@ function A2Pregnancy({ state, setState }: StepProps) {
               <SectionLabel text={t('intake.a2.dueDateLabel')} audio={t('intake.a2.dueDateAudio')} />
               <input
                 type="date"
+                aria-label={t('intake.a2.dueDateLabel')}
                 value={state.pregnancyDueDate ?? ''}
                 onChange={(e) => setState((p) => ({ ...p, pregnancyDueDate: e.target.value || undefined }))}
                 className="w-full h-14 px-5 rounded-xl text-[15px] outline-none transition box-border"

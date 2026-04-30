@@ -90,6 +90,7 @@ export default function Homepage() {
                     readOnly
                     onFocus={handleChatClick}
                     placeholder={t('home.aiPlaceholder')}
+                    aria-label={t('home.aiPlaceholder')}
                     className="flex-1 px-2 sm:px-4 py-2 sm:py-3 text-sm sm:text-base bg-transparent outline-none text-black placeholder-white min-w-0 cursor-text"
                   />
                   <button

@@ -270,10 +270,11 @@ export default function RegisterPage() {
 
               {/* Email input (shared) */}
               <div className="w-full max-w-105">
-                <label className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
+                <label htmlFor="signin-email" className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
                   {t('register.emailAddress')}
                 </label>
                 <input
+                  id="signin-email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -305,7 +306,7 @@ export default function RegisterPage() {
                     {otpSent && (
                       <>
                         <div className="flex items-center justify-between mb-2">
-                          <label className="font-semibold text-[#171717] text-xs lg:text-sm">
+                          <label htmlFor="signin-otp" className="font-semibold text-[#171717] text-xs lg:text-sm">
                             {t('register.enterOtp')}
                           </label>
                           <button
@@ -322,6 +323,7 @@ export default function RegisterPage() {
                           </button>
                         </div>
                         <input
+                          id="signin-otp"
                           type="text"
                           inputMode="numeric"
                           value={otp}
