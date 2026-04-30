@@ -398,7 +398,7 @@ function B2Reading({ form, setField }: StepProps) {
           <CalendarClock className="w-4 h-4" />
           {t('checkin.b2.whenLabel')}
         </label>
-        <div className="grid grid-cols-2 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           <input
             type="date"
             aria-label={t('checkin.b2.dateAria')}
@@ -1582,7 +1582,7 @@ export default function CheckIn() {
   if (!profile || intakeIncomplete) {
     return (
       <div
-        className="min-h-screen flex flex-col"
+        className="h-[calc(100dvh-4rem)] flex flex-col overflow-hidden"
         style={{ backgroundColor: 'var(--brand-background)' }}
       >
         <main id="main" className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-8">
@@ -1635,7 +1635,7 @@ export default function CheckIn() {
     const last = sessionReadings[sessionReadings.length - 1];
     return (
       <div
-        className="min-h-screen flex flex-col"
+        className="min-h-[calc(100dvh-4rem)] flex flex-col"
         style={{ backgroundColor: 'var(--brand-background)' }}
       >
         <main id="main" className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-4">
@@ -1658,7 +1658,7 @@ export default function CheckIn() {
   const stepProps: StepProps = { form, setField };
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: 'var(--brand-background)' }}>
+    <div className="min-h-[calc(100dvh-4rem)] flex flex-col" style={{ backgroundColor: 'var(--brand-background)' }}>
       {/* Top bar */}
       <header className="sticky top-0 z-20 bg-white" style={{ borderBottom: '1px solid var(--brand-border)' }}>
         <div className="max-w-3xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
@@ -1787,7 +1787,7 @@ function SkelDots() {
 
 function CheckInSkeleton() {
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: 'var(--brand-background)' }}>
+    <div className="min-h-[calc(100dvh-4rem)] flex flex-col" style={{ backgroundColor: 'var(--brand-background)' }}>
       {/* Top bar */}
       <header className="sticky top-0 z-20 bg-white" style={{ borderBottom: '1px solid var(--brand-border)' }}>
         <div className="max-w-3xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">

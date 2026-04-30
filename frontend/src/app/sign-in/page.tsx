@@ -280,7 +280,7 @@ export default function RegisterPage() {
                   placeholder={t('register.emailPlaceholder')}
                   autoComplete="email"
                   aria-invalid={showEmailError}
-                  className={`w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] rounded-lg text-sm lg:text-base text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all border ${
+                  className={`w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] rounded-lg text-base text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all border ${
                     showEmailError ? 'border-red-400' : 'border-[#e5d9f2]'
                   }`}
                 />

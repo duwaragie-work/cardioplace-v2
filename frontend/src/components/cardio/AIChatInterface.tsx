@@ -1193,6 +1193,7 @@ export default function AIChatInterface() {
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const justCreatedSessionRef = useRef(false);
 
   const userInitials = getUserInitials(user?.name);
@@ -1345,6 +1346,17 @@ export default function AIChatInterface() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping, transcript]);
+
+  // Auto-resize the chat input textarea up to 3 lines, then scroll internally.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20;
+    const paddingY = 16; // py-2 → 8px top + 8px bottom
+    const max = lineHeight * 3 + paddingY;
+    el.style.height = Math.min(el.scrollHeight, max) + 'px';
+  }, [inputValue]);
 
   // ── Pre-fill input from query param (e.g. /chat?q=My%20BP%20readings) ────
   const qParamHandled = useRef(false);
@@ -1603,7 +1615,7 @@ export default function AIChatInterface() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="flex" style={{ height: 'calc(100vh - 4rem)', backgroundColor: 'var(--brand-background)' }}>
+    <div className="flex overflow-hidden" style={{ height: 'calc(100dvh - 4rem)', backgroundColor: 'var(--brand-background)' }}>
       {/* ── Desktop Sidebar ───────────────────────────────────────────────── */}
       <div className="hidden lg:flex flex-col w-72 shrink-0 h-full" style={{ backgroundColor: 'white', borderRight: '1px solid var(--brand-border)' }}>
         <SidebarContent
@@ -1701,7 +1713,7 @@ export default function AIChatInterface() {
             actionType={voiceActionType}
           />
         ) : (
-        <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5 space-y-4 min-h-0" style={{ backgroundColor: 'var(--brand-background)' }}>
+        <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5 min-h-0 flex flex-col gap-4" style={{ backgroundColor: 'var(--brand-background)' }}>
           {isLoadingHistory && (
             <div className="space-y-4 py-4">
               <div className="flex justify-end"><div className="animate-pulse rounded-2xl px-4 py-3" style={{ backgroundColor: 'var(--brand-primary-purple-light)', width: '65%' }}><div className="h-3 rounded-full mb-2" style={{ backgroundColor: '#E9D5FF', width: '80%', marginLeft: 'auto' }} /><div className="h-3 rounded-full" style={{ backgroundColor: '#E9D5FF', width: '50%', marginLeft: 'auto' }} /></div></div>
@@ -1710,7 +1722,7 @@ export default function AIChatInterface() {
           )}
 
           {messages.length === 0 && transcript.length === 0 && !isTyping && !isLoadingHistory && !voiceSummaryLoading && (
-            <div className="flex items-center justify-center h-full">
+            <div className="flex-1 flex items-center justify-center">
               <div className="text-center max-w-xs mx-auto">
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
                   <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={50} height={50} />
@@ -1796,23 +1808,26 @@ export default function AIChatInterface() {
         {/* Input bar */}
         <div className="shrink-0 bg-white px-4 lg:px-6 pt-3 pb-4" style={{ borderTop: '1px solid var(--brand-border)' }}>
           <div
-            className="flex items-center gap-2 px-4 py-1.5 transition-all"
+            className="flex items-end gap-2 px-4 py-1.5 transition-all"
             style={{
               border: isVoiceActive ? '1.5px solid var(--brand-primary-purple)' : '1.5px solid var(--brand-border)',
               borderRadius: '28px',
               backgroundColor: 'var(--brand-background)',
             }}
           >
-            <input
-              type="text"
+            <textarea
+              ref={inputRef}
+              rows={1}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={isVoiceActive ? 'End voice call to type…' : 'Type a message…'}
-              className="flex-1 bg-transparent text-[14px] outline-none min-w-0 py-2"
+              className="flex-1 bg-transparent text-[14px] outline-none min-w-0 py-2 resize-none leading-[1.4] thin-scrollbar"
               style={{
                 color: 'var(--brand-text-primary)',
                 opacity: isVoiceActive ? 0.4 : 1,
+                maxHeight: 'calc(1.4em * 3)',
+                overflowY: 'auto',
               }}
               disabled={isSending || isVoiceActive || isVoiceConnecting}
             />
