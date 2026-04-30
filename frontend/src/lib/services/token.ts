@@ -63,8 +63,13 @@ export async function fetchWithAuth(
     return fetch(url, options);
   }
 
+  // FormData bodies must NOT have Content-Type forced to application/json —
+  // the browser sets multipart/form-data with the boundary itself, and any
+  // explicit override prevents Multer (server) from parsing the parts.
+  const isFormData =
+    typeof FormData !== 'undefined' && options.body instanceof FormData;
   const buildHeaders = (token: string | null): Record<string, string> => ({
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers as Record<string, string>),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   });

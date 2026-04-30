@@ -473,7 +473,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── Content ── */}
-      <main className="relative flex flex-col px-4 md:px-8 py-4 md:py-5 pb-20 md:pb-16 max-w-7xl mx-auto">
+      <main id="main" className="relative flex flex-col px-4 md:px-8 py-4 md:py-5 pb-20 md:pb-16 max-w-7xl mx-auto">
 
         {/* D3 — Active alert card (top priority; tier-colored). Tap to open
             the Flow C alert detail. Hidden when no open alerts. */}
@@ -835,7 +835,7 @@ export default function Dashboard() {
                     router.push(intakeUi.kind === 'done' ? '/check-in' : '/clinical-intake')
                   }
                   disabled={intakeUi.kind === 'unknown'}
-                  className="w-full h-10 bg-white flex items-center justify-center gap-1.5 rounded-full text-[#7B00E0] font-bold text-[13px] transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
+                  className="w-full h-11 bg-white flex items-center justify-center gap-1.5 rounded-full text-[#7B00E0] font-bold text-[13px] transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
                 >
                   {loading ? (
                     <Bone w={120} h={12} color="#7B00E0" />
@@ -856,7 +856,13 @@ export default function Dashboard() {
             </div>
 
             {/* Recent Alerts */}
-            <div className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
+            <div
+              className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col"
+              style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}
+              aria-live="polite"
+              aria-relevant="additions"
+              aria-label={t('accessibility.alertsRegion')}
+            >
               <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
                 {t('dashboard.recentAlerts')}
               </h3>

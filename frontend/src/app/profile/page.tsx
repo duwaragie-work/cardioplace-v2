@@ -435,6 +435,9 @@ function PersonalInfoModal({
     >
       <div className="absolute inset-0" onClick={onClose} />
       <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="personal-info-title"
         initial={{ y: 60, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: 60, opacity: 0 }}
@@ -450,7 +453,7 @@ function PersonalInfoModal({
           style={{ borderBottom: '1px solid var(--brand-border)' }}
         >
           <div className="flex items-center gap-2">
-            <h2 className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+            <h2 id="personal-info-title" className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
               {t('profile.editPersonalInfo')}
             </h2>
             <AudioButton size="sm" text={t('profile.editPersonalInfo')} />
@@ -458,9 +461,9 @@ function PersonalInfoModal({
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center cursor-pointer"
+            className="w-11 h-11 rounded-full flex items-center justify-center cursor-pointer"
             style={{ backgroundColor: 'var(--brand-background)' }}
-            aria-label={t('common.close')}
+            aria-label={t('accessibility.closeDialog')}
           >
             <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
           </button>
@@ -698,7 +701,7 @@ export default function ProfilePage() {
     // page grows if it needs to. The right column (Medications) stretches
     // to match the left column's height via CSS grid `align-items: stretch`,
     // and scrolls inside its card if the medication list exceeds that.
-    <div className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
+    <main id="main" className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
       <div className="max-w-5xl mx-auto px-4 md:px-8 py-6 space-y-4">
         {/* Page header — avatar + name + email on the left, sign-out CTA top right */}
         <div className="flex items-center justify-between gap-3 mb-4">
@@ -1094,6 +1097,6 @@ export default function ProfilePage() {
           />
         )}
       </AnimatePresence>
-    </div>
+    </main>
   );
 }

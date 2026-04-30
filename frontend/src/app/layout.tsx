@@ -6,6 +6,7 @@ import { LanguageProvider } from "@/contexts/LanguageContext";
 import NavbarWrapper from "@/components/NavbarWrapper";
 import ScrollToTop from "@/components/ScrollToTop";
 import PoweredByFooter from "@/components/PoweredByFooter";
+import SkipLink from "@/components/SkipLink";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -38,6 +39,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <AuthProvider>
           <LanguageProvider>
+            <SkipLink />
             <ScrollToTop />
             <NavbarWrapper>{children}</NavbarWrapper>
             <PoweredByFooter />
