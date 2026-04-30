@@ -1572,7 +1572,7 @@ export default function CheckIn() {
         className="min-h-screen flex flex-col"
         style={{ backgroundColor: 'var(--brand-background)' }}
       >
-        <main className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-8">
+        <main id="main" className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-8">
           <div
             className="w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 text-center"
             style={{ boxShadow: '0 4px 24px rgba(123,0,224,0.08)' }}
@@ -1625,7 +1625,7 @@ export default function CheckIn() {
         className="min-h-screen flex flex-col"
         style={{ backgroundColor: 'var(--brand-background)' }}
       >
-        <main className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-4">
+        <main id="main" className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-4">
           <ConfirmationScreen
             lastReading={last}
             sessionReadings={sessionReadings}
@@ -1675,6 +1675,7 @@ export default function CheckIn() {
       {/* Main content with safe-area bottom padding sized just enough to clear
           the sticky CTA (~72px tall) plus the iOS home indicator. */}
       <main
+        id="main"
         className="flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-5 sm:py-8"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 7rem)' }}
       >
@@ -1785,6 +1786,7 @@ function CheckInSkeleton() {
 
       {/* Body */}
       <main
+        id="main"
         className="flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-5 sm:py-8"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 7rem)' }}
       >

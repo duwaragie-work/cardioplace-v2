@@ -1996,6 +1996,7 @@ function ClinicalIntakeWizard() {
           Padding goes via inline style because Tailwind arbitrary values
           containing env() + calc() were getting stripped on some builds. */}
       <main
+        id="main"
         className={
           'flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 ' +
           (isIntro || isComplete

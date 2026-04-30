@@ -697,6 +697,8 @@ const en = {
 
   // ─── Homepage ─────────────────────────────────────────────────────────────
   'home.heroBadge': 'AI-POWERED CARDIOVASCULAR PATIENT SAFETY',
+  'home.heroImageAlt': 'A grandmother using her phone at home, supported by AI cardiac monitoring',
+  'home.cardioplaceLogoAlt': 'Cardioplace logo',
   'home.heroTitle1': 'The Gap Between Visits',
   'home.heroTitle2': 'Is Where We Work',
   'home.heroDesc': 'Every day, by voice or by text, and in your language, we check in. When something needs attention, the care team knows. Not next week. Now.',
@@ -1116,6 +1118,13 @@ const en = {
   'lang.ar': 'العربية',
   'lang.ko': '한국어',
   'lang.ht': 'Kreyòl Ayisyen',
+
+  // Accessibility (Rengan WCAG 2.2 AA — Tasks 3, 10, 11)
+  'accessibility.skipToMain': 'Skip to main content',
+  'accessibility.editReading': 'Edit reading',
+  'accessibility.deleteReading': 'Delete reading',
+  'accessibility.alertsRegion': 'Active alerts',
+  'accessibility.closeDialog': 'Close dialog',
 } as const;
 
 export type TranslationKey = keyof typeof en;

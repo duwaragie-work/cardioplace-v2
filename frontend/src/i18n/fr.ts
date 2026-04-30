@@ -699,6 +699,8 @@ const fr: Record<TranslationKey, string> = {
 
   // ─── Homepage ─────────────────────────────────────────────────────────────
   'home.heroBadge': 'SUIVI CARDIAQUE PAR IA',
+  'home.heroImageAlt': 'Une grand-mère utilisant son téléphone à la maison, soutenue par un suivi cardiaque par IA',
+  'home.cardioplaceLogoAlt': 'Logo Cardioplace',
   'home.heroTitle1': 'Votre Santé Cardiaque,',
   'home.heroTitle2': 'Surveillée Entre Chaque Visite',
   'home.heroDesc': 'Chaque jour, par la voix ou par texto, et dans votre langue, nous prenons des nouvelles. Quand quelque chose nécessite une attention, l\'équipe soignante le sait. Pas la semaine prochaine. Maintenant.',
@@ -1117,7 +1119,12 @@ const fr: Record<TranslationKey, string> = {
   'lang.ko': '한국어',
   'lang.ht': 'Kreyòl Ayisyen',
 
-
+  // Accessibility (Rengan WCAG 2.2 AA — Tasks 3, 10, 11)
+  'accessibility.skipToMain': 'Passer au contenu principal',
+  'accessibility.editReading': 'Modifier la mesure',
+  'accessibility.deleteReading': 'Supprimer la mesure',
+  'accessibility.alertsRegion': 'Alertes actives',
+  'accessibility.closeDialog': 'Fermer la boîte de dialogue',
 };
 
 export default fr;

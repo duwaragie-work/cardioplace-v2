@@ -699,6 +699,8 @@ const es: Record<TranslationKey, string> = {
 
   // ─── Homepage ─────────────────────────────────────────────────────────────
   'home.heroBadge': 'MONITOREO CARDÍACO CON IA',
+  'home.heroImageAlt': 'Una abuela usando su teléfono en casa, con apoyo de monitoreo cardíaco con IA',
+  'home.cardioplaceLogoAlt': 'Logotipo de Cardioplace',
   'home.heroTitle1': 'Tu Salud Cardíaca,',
   'home.heroTitle2': 'Monitoreada Entre Cada Visita',
   'home.heroDesc': 'Cada día, por voz o por texto, y en tu idioma, nos comunicamos. Cuando algo necesita atención, el equipo de atención lo sabe. No la próxima semana. Ahora.',
@@ -1117,7 +1119,12 @@ const es: Record<TranslationKey, string> = {
   'lang.ko': '한국어',
   'lang.ht': 'Kreyòl Ayisyen',
 
-
+  // Accessibility (Rengan WCAG 2.2 AA — Tasks 3, 10, 11)
+  'accessibility.skipToMain': 'Saltar al contenido principal',
+  'accessibility.editReading': 'Editar lectura',
+  'accessibility.deleteReading': 'Eliminar lectura',
+  'accessibility.alertsRegion': 'Alertas activas',
+  'accessibility.closeDialog': 'Cerrar diálogo',
 };
 
 export default es;

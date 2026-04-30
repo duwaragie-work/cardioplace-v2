@@ -27,6 +27,31 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* ── Skip-to-main link (Rengan WCAG Task 11) ─────────────────────────────
+   First focusable element on every page. Hidden offscreen until focused;
+   becomes visible when a keyboard user presses Tab. Pressing Enter jumps
+   to <main id="main"> on each page, skipping navigation. */
+.skip-link {
+  position: absolute;
+  top: -48px;
+  left: 0;
+  background: var(--brand-primary-purple, #7B00E0);
+  color: white;
+  padding: 12px 20px;
+  font-weight: 700;
+  font-size: 14px;
+  border-radius: 0 0 8px 0;
+  z-index: 1000;
+  transition: top 120ms ease-out;
+  text-decoration: none;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  top: 0;
+  outline: 3px solid #ffffff;
+  outline-offset: -3px;
+}
+
 /* ── Thin brand scrollbar utility ─────────────────────────────────────────
    Apply via `className="thin-scrollbar"` to any element that owns its own
    overflow (e.g. modal body, scrollable list). Uses the brand primary

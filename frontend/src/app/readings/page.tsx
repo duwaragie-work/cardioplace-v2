@@ -498,17 +498,17 @@ function EntryCard({
           <AudioButton size="sm" text={audioSummary} />
           <button
             onClick={onEdit}
-            className="w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-75"
+            className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
             style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
-            aria-label="Edit"
+            aria-label={t('accessibility.editReading')}
           >
             <Pencil className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
           </button>
           <button
             onClick={onDelete}
-            className="w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-75"
+            className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
             style={{ backgroundColor: '#FEE2E2' }}
-            aria-label="Delete"
+            aria-label={t('accessibility.deleteReading')}
           >
             <Trash2 className="w-3.5 h-3.5 text-red-500" />
           </button>
@@ -708,6 +708,9 @@ function EditModal({
 
       {/* Sheet — flex column so header / scroll body / footer can share height */}
       <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-reading-title"
         className="relative w-full sm:max-w-lg bg-white sm:rounded-2xl rounded-t-2xl flex flex-col overflow-hidden"
         style={{
           maxHeight: '90dvh',
@@ -724,7 +727,7 @@ function EditModal({
           style={{ borderBottom: '1px solid var(--brand-border)' }}
         >
           <div className="flex items-center gap-2 min-w-0">
-            <h2 className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+            <h2 id="edit-reading-title" className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
               {t('readings.editReading')}
             </h2>
             {/* Phase/26 TTS pass 2 — humanised summary of the in-progress
@@ -733,9 +736,9 @@ function EditModal({
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-70 cursor-pointer shrink-0"
+            className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-70 cursor-pointer shrink-0"
             style={{ backgroundColor: 'var(--brand-background)' }}
-            aria-label={t('common.close')}
+            aria-label={t('accessibility.closeDialog')}
           >
             <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
           </button>
@@ -1373,7 +1376,7 @@ export default function ReadingsPage() {
     // Default browser page scroll — no custom scroll container or fixed
     // height wrapper. The thin-scrollbar utility is reserved for the edit
     // modal body where scroll is genuinely contained.
-    <div className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
+    <main id="main" className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
       <div className="max-w-2xl mx-auto px-4 md:px-8 py-6">
         {/* Page header */}
         <div className="flex items-center justify-between gap-3 mb-6">
@@ -1558,6 +1561,6 @@ export default function ReadingsPage() {
           />
         )}
       </AnimatePresence>
-    </div>
+    </main>
   );
 }

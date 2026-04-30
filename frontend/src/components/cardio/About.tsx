@@ -68,7 +68,7 @@ export default function About() {
                   <div className="bg-[#f3f4f5] rounded-[24px] sm:rounded-[32px] p-4 sm:p-6 min-h-[320px] sm:min-h-[400px] md:min-h-[500px] flex flex-col">
                     <div className="flex items-center gap-3 pb-4 border-b border-[rgba(207,194,216,0.1)]">
                       <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundImage: 'linear-gradient(135deg, #7b00e0 0%, #5c00a9 100%)' }}>
-                        <Image src="/cardioplace-icon.svg" alt="" width={22} height={22} className="brightness-0 invert" />
+                        <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={22} height={22} className="brightness-0 invert" />
                       </div>
                       <div>
                         <p className="font-bold text-[#191c1d] text-sm">{t('about.assistantName')}</p>
