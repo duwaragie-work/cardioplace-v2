@@ -457,7 +457,7 @@ export default function Dashboard() {
   })();
 
   return (
-    <div className="relative overflow-auto" style={{ height: 'calc(100vh - 4rem)', backgroundColor: '#FAFBFF' }}>
+    <div className="relative min-h-[calc(100dvh-4rem)]" style={{ backgroundColor: '#FAFBFF' }}>
 
       {/* ── Decorative background blobs ── */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -473,7 +473,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── Content ── */}
-      <main className="relative h-full flex flex-col px-4 md:px-8 py-4 md:py-5 max-w-7xl mx-auto">
+      <main className="relative flex flex-col px-4 md:px-8 py-4 md:py-5 pb-20 md:pb-16 max-w-7xl mx-auto">
 
         {/* D3 — Active alert card (top priority; tier-colored). Tap to open
             the Flow C alert detail. Hidden when no open alerts. */}
@@ -545,18 +545,6 @@ export default function Dashboard() {
               stepLabel: intakeUi.stepLabel,
             }}
           />
-        )}
-
-        {/* Phase/26 TTS pass 2 — single overview audio button replaces the
-            5 per-card buttons. One tap reads greeting + latest BP + streak +
-            alerts in flowing English. */}
-        {!loading && (
-          <div className="mb-3 md:mb-4 flex items-center gap-2">
-            <AudioButton size="sm" text={dashboardOverview} />
-            <span className="text-[12px] font-medium" style={{ color: 'var(--brand-text-secondary)' }}>
-              {t('dashboard.hearSummary')}
-            </span>
-          </div>
         )}
 
         {/* ROW 1 — Greeting + Stat cards */}
@@ -943,6 +931,28 @@ export default function Dashboard() {
           </div>
         </div>
       </main>
+
+      {/* Phase/26 TTS pass 2 — floating overview audio pill. Anchored to the
+          dashboard's bottom-right (absolute, inside the relative+overflow-auto
+          wrapper) so it stays in view regardless of scroll, doesn't bleed onto
+          other routes, and doesn't crowd the cards above. */}
+      {!loading && (
+        <div
+          className="fixed bottom-3 right-3 md:bottom-6 md:right-6 z-30 flex items-center gap-1 md:gap-2 bg-white rounded-full pl-1.5 pr-2 py-1 md:pl-2 md:pr-3 md:py-1.5"
+          style={{
+            boxShadow: '0 8px 24px rgba(123,0,224,0.18)',
+            border: '1px solid var(--brand-border)',
+          }}
+        >
+          <AudioButton size="sm" text={dashboardOverview} />
+          <span
+            className="text-[10px] md:text-[12px] font-semibold whitespace-nowrap"
+            style={{ color: 'var(--brand-text-secondary)' }}
+          >
+            {t('dashboard.hearSummary')}
+          </span>
+        </div>
+      )}
 
       {/* E4 — Monthly medication re-check modal. Self-managed (timestamp in
           localStorage); only fires for patients who have completed intake
