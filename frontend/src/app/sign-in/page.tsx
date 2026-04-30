@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Mail, KeyRound } from "lucide-react";
+import { CheckCircle2, Mail, KeyRound, Eye, EyeOff } from "lucide-react";
 import { useAuth, type OtpVerifyResponse } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import Logo from "@/components/Logo";
@@ -59,6 +59,7 @@ export default function RegisterPage() {
   const [magicLinkSent, setMagicLinkSent] = useState(false);
   const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
 
+  const [showOtp, setShowOtp] = useState(false);
   const [mounted, setMounted] = useState(false);
   const emailTrimmed = email.trim();
   const emailIsValid = useMemo(() => isEmailValid(emailTrimmed), [emailTrimmed]);
@@ -132,10 +133,9 @@ export default function RegisterPage() {
     setStatusMessage("");
     setIsRequestingOtp(true);
     try {
-      const data = await sendOtpRequest(email.trim());
+      await sendOtpRequest(email.trim());
       setOtpSent(true);
       setOtp("");
-      setStatusMessage(translateBackendMsg(data.message) || t('register.otpSent'));
       startResendCooldown();
     } catch (err) {
       setErrorMessage(translateBackendMsg(err instanceof Error ? err.message : '') || t('register.failedOtp'));
@@ -181,7 +181,6 @@ export default function RegisterPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Something went wrong.");
       setMagicLinkSent(true);
-      setStatusMessage(t('register.magicLinkSent') || "Magic link sent! Check your email.");
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Failed to send magic link.");
     } finally {
@@ -241,11 +240,13 @@ export default function RegisterPage() {
               </h2>
             </div>
 
-            <div className="mb-6 md:mb-10 w-full">
-              <p className="font-normal leading-relaxed text-[#4b5563] text-sm sm:text-base lg:text-[18px] text-center md:text-left">
-                {t('register.enterEmail')}
-              </p>
-            </div>
+            {!otpSent && !magicLinkSent && (
+              <div className="mb-6 md:mb-10 w-full">
+                <p className="font-normal leading-relaxed text-[#4b5563] text-sm sm:text-base lg:text-[18px] text-center md:text-left">
+                  {t('register.enterEmail')}
+                </p>
+              </div>
+            )}
 
 
             {/* Form */}
@@ -277,7 +278,13 @@ export default function RegisterPage() {
                   id="signin-email"
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (magicLinkSent) setMagicLinkSent(false);
+                    if (otpSent) { setOtpSent(false); setOtp(""); }
+                    if (statusMessage) setStatusMessage("");
+                    if (errorMessage) setErrorMessage("");
+                  }}
                   placeholder={t('register.emailPlaceholder')}
                   autoComplete="email"
                   aria-invalid={showEmailError}
@@ -288,7 +295,7 @@ export default function RegisterPage() {
                 {/* Inline email format error — quiet until user has typed */}
                 {showEmailError && (
                   <p className="mt-1.5 text-[11px] lg:text-xs text-red-500">
-                    Please enter a valid email address.
+                    {t('register.invalidEmail')}
                   </p>
                 )}
 
@@ -322,16 +329,31 @@ export default function RegisterPage() {
                                 : t('register.resendCode')}
                           </button>
                         </div>
-                        <input
-                          id="signin-otp"
-                          type="text"
-                          inputMode="numeric"
-                          value={otp}
-                          onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH))}
-                          placeholder="••••••"
-                          maxLength={OTP_LENGTH}
-                          className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-base lg:text-lg text-center tracking-[8px] text-[#171717] placeholder:text-[#737373] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all mb-1"
-                        />
+                        <div className="relative mb-1">
+                          <input
+                            id="signin-otp"
+                            type={showOtp ? "text" : "password"}
+                            inputMode="numeric"
+                            autoComplete="one-time-code"
+                            value={otp}
+                            onChange={(e) => {
+                              setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH));
+                              if (statusMessage) setStatusMessage("");
+                              if (errorMessage) setErrorMessage("");
+                            }}
+                            placeholder="••••••"
+                            maxLength={OTP_LENGTH}
+                            className="w-full h-11 lg:h-12 pl-4 lg:pl-5 pr-11 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-base lg:text-lg text-center tracking-[8px] text-[#171717] placeholder:text-[#737373] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowOtp((s) => !s)}
+                            aria-label={showOtp ? t('register.hideOtp') : t('register.showOtp')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#737373] hover:text-[#7B00E0] transition-colors cursor-pointer"
+                          >
+                            {showOtp ? <EyeOff aria-hidden="true" className="w-4 h-4" /> : <Eye aria-hidden="true" className="w-4 h-4" />}
+                          </button>
+                        </div>
                         {/* OTP-length hint: only while user is mid-typing */}
                         {showOtpLengthHint && (
                           <p className="text-[11px] lg:text-xs text-[#a16207] mb-2">

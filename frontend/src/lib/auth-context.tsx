@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
-import { REFRESH_TOKEN_KEY } from '@/lib/services/token';
+import { REFRESH_TOKEN_KEY, fetchWithAuth } from '@/lib/services/token';
 
 const REFRESH_ENDPOINT = '/api/v2/auth/refresh';
 
@@ -202,6 +202,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     });
   }, []);
+
+  // Keep in-memory token in sync with localStorage when fetchWithAuth silently
+  // refreshes. Without this, context consumers (e.g. voice realtime) keep
+  // using the stale token until the user hard-reloads the page.
+  useEffect(() => {
+    function handleTokenRefreshed(e: Event) {
+      const detail = (e as CustomEvent<{ accessToken?: string }>).detail;
+      if (detail?.accessToken) {
+        setToken(detail.accessToken);
+        setAuthCookie(detail.accessToken);
+      }
+    }
+    function handleSessionExpired() {
+      setToken(null);
+      setUser(null);
+    }
+    window.addEventListener('auth:token-refreshed', handleTokenRefreshed);
+    window.addEventListener('auth:session-expired', handleSessionExpired);
+    return () => {
+      window.removeEventListener('auth:token-refreshed', handleTokenRefreshed);
+      window.removeEventListener('auth:session-expired', handleSessionExpired);
+    };
+  }, []);
+
+  // Proactively refresh when the user returns to the tab after being idle.
+  // fetchWithAuth handles the 401 -> refresh -> retry flow, and the
+  // auth:token-refreshed event above keeps context state in sync.
+  useEffect(() => {
+    if (!token) return;
+    let inFlight = false;
+    async function pingSession() {
+      if (inFlight || document.visibilityState !== 'visible') return;
+      inFlight = true;
+      try {
+        await fetchWithAuth(`${API_URL}/api/v2/auth/profile`);
+      } catch {
+        // ignore — any real auth failure triggers auth:session-expired above
+      } finally {
+        inFlight = false;
+      }
+    }
+    document.addEventListener('visibilitychange', pingSession);
+    window.addEventListener('focus', pingSession);
+    return () => {
+      document.removeEventListener('visibilitychange', pingSession);
+      window.removeEventListener('focus', pingSession);
+    };
+  }, [token]);
 
   const login = (response: OtpVerifyResponse) => {
     const newToken = response.access_token || response.accessToken || null;
