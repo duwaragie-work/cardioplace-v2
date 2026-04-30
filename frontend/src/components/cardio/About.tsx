@@ -4,11 +4,14 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { Mic, Send, Users, ShieldCheck, HeartHandshake, Eye } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useAuth } from '@/lib/auth-context';
 import LandingHeader from './LandingHeader';
 import LandingFooter from './LandingFooter';
 
 export default function About() {
   const { t } = useLanguage();
+  const { isAuthenticated, isLoading } = useAuth();
+  const closingHref = !isLoading && isAuthenticated ? '/dashboard' : '/sign-in';
 
   const principles = [
     { num: '01', title: t('about.principle1Title'), desc: t('about.principle1Desc') },
@@ -323,7 +326,7 @@ export default function About() {
                 <p key={i} className={i > 0 ? 'mt-4' : ''}>{p}</p>
               ))}
             </div>
-            <Link href="#contact" className="bg-white text-[#5c00a9] font-bold text-base md:text-lg px-8 md:px-12 py-3 md:py-3.5 rounded-full hover:bg-[#f5eafa] transition-colors mt-2">
+            <Link href={closingHref} className="bg-white text-[#5c00a9] font-bold text-base md:text-lg px-8 md:px-12 py-3 md:py-3.5 rounded-full hover:bg-[#f5eafa] transition-colors mt-2">
               {t('about.closingButton')}
             </Link>
             <p className="text-white/50 text-xs sm:text-sm mt-2 sm:mt-4 text-center">{t('about.closingFooter')}</p>

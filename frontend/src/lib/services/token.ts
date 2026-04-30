@@ -38,6 +38,11 @@ async function attemptTokenRefresh(): Promise<string | null> {
         localStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
       }
 
+      // Notify AuthProvider so the in-memory `token` state stays in sync with
+      // localStorage — otherwise components that read `token` from context
+      // (e.g. voice realtime) keep using the stale one until a page reload.
+      window.dispatchEvent(new CustomEvent('auth:token-refreshed', { detail: { accessToken: newAccess } }));
+
       return newAccess;
     } catch {
       return null;
@@ -97,6 +102,7 @@ export async function fetchWithAuth(
 
   // Refresh failed — session is truly expired
   clearAuthStorage();
+  window.dispatchEvent(new CustomEvent('auth:session-expired'));
   window.location.href = '/';
   return response; // unreachable but satisfies return type
 }

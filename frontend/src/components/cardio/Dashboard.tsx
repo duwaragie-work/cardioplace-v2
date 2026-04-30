@@ -61,7 +61,7 @@ interface JournalEntry {
   systolicBP?: number;
   diastolicBP?: number;
   pulse?: number | null;
-  medicationTaken?: boolean;
+  medicationTaken?: boolean | null;
 }
 interface Baseline {
   baselineSystolic?: number | string;
@@ -421,13 +421,37 @@ export default function Dashboard() {
     : [100, 180];
 
   // Phase/26 TTS pass 2 — single humanised overview that replaces the 5
-  // per-card audio buttons. Composes greeting + latest BP + medication
-  // streak + check-in count + top alert into one flowing summary so the
-  // patient hears the dashboard state from one tap. Conditional pieces
-  // drop out cleanly when not applicable.
+  // per-card audio buttons. Composes greeting + latest BP + personal goal +
+  // BP-trend summary + medication streak + check-in count + top alert into
+  // one flowing summary so the patient hears the dashboard state from one
+  // tap. Conditional pieces drop out cleanly when not applicable.
   const dashboardOverview = (() => {
     const parts: string[] = [];
     parts.push(`${greeting}${userName ? `, ${userName}` : ''}.`);
+
+    // Intake CTA gate — if the patient hasn't finished (or hasn't started)
+    // clinical intake, every downstream metric is empty (no readings, no
+    // alerts, no goal, no streak), so reading them out is just noise.
+    // Read the action and stop.
+    if (intakeUi.kind === 'fresh' || intakeUi.kind === 'resume') {
+      parts.push(
+        intakeUi.kind === 'fresh'
+          ? 'Before anything else, please complete your clinical intake. Your dashboard fills in once that\'s done.'
+          : 'Please pick up where you left off on your clinical intake. Your dashboard fills in once that\'s done.',
+      );
+      return parts.join(' ');
+    }
+
+    // Active alert — read first when present so the patient hears the most
+    // urgent thing before the rest of the summary. Include the variant body
+    // so they know WHAT to do, not just that something is wrong.
+    if (topAlert && topAlertVariant) {
+      const alertSentence =
+        `Heads up, there's an active alert: ${topAlertVariant.title}.` +
+        (topAlertVariant.body ? ` ${topAlertVariant.body}` : '');
+      parts.push(alertSentence);
+    }
+
     if (latestEntry?.systolicBP != null && latestEntry?.diastolicBP != null) {
       const bpSentence =
         `Your ${todayHasEntry ? "today's" : 'latest'} blood pressure is ` +
@@ -436,8 +460,46 @@ export default function Dashboard() {
         `, ${bpVsTargetStyle.label.toLowerCase()}.`;
       parts.push(bpSentence);
     } else {
-      parts.push('No blood pressure readings yet — tap New check-in to log your first one.');
+      parts.push('No blood pressure readings yet. Tap New check-in to log your first one.');
     }
+
+    // Personal threshold (D2 banner). Read it right after the latest BP so
+    // the patient hears the goal in the same breath as where they currently
+    // stand against it.
+    if (hasBpThreshold && thresholdTargetText) {
+      parts.push(
+        `Your care team's goal for you is to stay below ${thresholdTargetText}.`,
+      );
+    }
+
+    // BP trend chart — summarise the visible range with an average and a
+    // direction read (rising / falling / steady) so the patient gets a
+    // sense of where things are heading without having to read the chart.
+    if (visibleChartData.length >= 2) {
+      const sysAvg = Math.round(
+        visibleChartData.reduce((s, d) => s + d.systolic, 0) / visibleChartData.length,
+      );
+      const diaAvg = Math.round(
+        visibleChartData.reduce((s, d) => s + d.diastolic, 0) / visibleChartData.length,
+      );
+      // Compare first half vs second half — a simple, robust trend read
+      // without a regression library. ≤3 mmHg drift is "steady".
+      const mid = Math.floor(visibleChartData.length / 2);
+      const firstHalf = visibleChartData.slice(0, mid);
+      const secondHalf = visibleChartData.slice(mid);
+      const firstAvg =
+        firstHalf.reduce((s, d) => s + d.systolic, 0) / firstHalf.length;
+      const secondAvg =
+        secondHalf.reduce((s, d) => s + d.systolic, 0) / secondHalf.length;
+      const diff = secondAvg - firstAvg;
+      const direction =
+        diff > 3 ? 'trending upward' : diff < -3 ? 'trending downward' : 'holding steady';
+      const window = chartRange === 7 ? 'past week' : 'past three months';
+      parts.push(
+        `Looking at the ${window}, your readings are averaging ${sysAvg} over ${diaAvg}, ${direction}.`,
+      );
+    }
+
     if (streak > 0) {
       parts.push(
         `You're on a ${streak}-day medication streak with ${totalEntries} ${totalEntries === 1 ? 'check-in' : 'check-ins'} logged.`,
@@ -445,13 +507,9 @@ export default function Dashboard() {
     } else if (totalEntries > 0) {
       parts.push(`You've logged ${totalEntries} ${totalEntries === 1 ? 'check-in' : 'check-ins'} so far.`);
     }
-    if (topAlert && topAlertVariant) {
-      parts.push(`You have an active alert: ${topAlertVariant.title}`);
-    } else {
-      parts.push('No active alerts — your care team is monitoring.');
-    }
-    if (intakeUi.kind === 'fresh' || intakeUi.kind === 'resume') {
-      parts.push('Action required: please complete your clinical intake.');
+
+    if (!topAlert) {
+      parts.push('No active alerts. Your care team is monitoring.');
     }
     return parts.join(' ');
   })();
@@ -896,15 +954,9 @@ export default function Dashboard() {
                           backgroundColor: alert.severity === 'HIGH' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
                           borderLeft: `3px solid ${alert.severity === 'HIGH' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)'}`,
                         }}>
-                        <div className="flex items-start justify-between">
-                          <p className="text-[11px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                            {formatAlertType(alert.type, t)}
-                          </p>
-                          <span className="text-[10px] font-semibold"
-                            style={{ color: alert.severity === 'HIGH' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}>
-                            {t('dashboard.open')}
-                          </span>
-                        </div>
+                        <p className="text-[11px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                          {formatAlertType(alert.type, t)}
+                        </p>
                         <p className="text-[10px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
                           {formatAlertDate(alert.journalEntry?.measuredAt ?? alert.createdAt ?? '')} {'· ' + t('dashboard.careTeamNotified')}
                         </p>

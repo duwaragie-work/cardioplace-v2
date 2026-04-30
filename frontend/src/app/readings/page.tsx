@@ -44,6 +44,16 @@ type Entry = {
   weight?: number;
   position?: 'SITTING' | 'STANDING' | 'LYING' | null;
   medicationTaken?: boolean | null;
+  medicationScheduledLater?: boolean;
+  missedDoses?: number | null;
+  /** Per-medication miss detail. Stored as JSON on the journal entry. */
+  missedMedications?: Array<{
+    medicationId?: string;
+    drugName?: string;
+    drugClass?: string;
+    reason?: 'FORGOT' | 'SIDE_EFFECTS' | 'RAN_OUT' | 'COST' | 'INTENTIONAL' | 'OTHER' | null;
+    missedDoses?: number;
+  }> | null;
   // V2 structured Level-2 symptom booleans (mirror backend serializeEntry).
   severeHeadache?: boolean;
   visualChanges?: boolean;
@@ -81,7 +91,11 @@ type EditForm = {
   diastolic: string;
   pulse: string;
   weight: string;
-  medication: 'yes' | 'no' | '';
+  medication: 'yes' | 'no' | 'scheduledLater' | '';
+  /** Why the patient missed at least one med — only meaningful when medication==='no'. */
+  missedReason: 'FORGOT' | 'SIDE_EFFECTS' | 'RAN_OUT' | 'COST' | 'INTENTIONAL' | 'OTHER' | '';
+  /** Count of missed doses — only meaningful when medication==='no'. */
+  missedDosesCount: number;
   // V2 structured symptoms — checkbox grid in the modal
   severeHeadache: boolean;
   visualChanges: boolean;
@@ -656,7 +670,7 @@ function EditModal({
   isDirty: boolean;
   /** From PatientProfile.heightCm — used to compute BMI in the audio summary. */
   heightCm: number | null;
-  onChange: (key: keyof EditForm, val: string | boolean) => void;
+  onChange: (key: keyof EditForm, val: string | boolean | number) => void;
   onSave: () => void;
   onClose: () => void;
 }) {
@@ -821,7 +835,11 @@ function EditModal({
                           : 'var(--brand-text-muted)',
                       }}
                     >
-                      {p === 'SITTING' ? 'Sitting' : p === 'STANDING' ? 'Standing' : 'Lying'}
+                      {p === 'SITTING'
+                        ? t('checkin.b2.positionSitting')
+                        : p === 'STANDING'
+                          ? t('checkin.b2.positionStanding')
+                          : t('checkin.b2.positionLying')}
                     </button>
                   );
                 })}
@@ -966,7 +984,8 @@ function EditModal({
               </div>
             </div>
 
-            {/* Medication */}
+            {/* Medication — mirrors CheckIn StepMedication: yes / no / not due yet,
+                with reason + missed-dose counter revealed when the patient picks "no". */}
             <div>
               <label
                 className="block text-[12px] font-semibold mb-2"
@@ -974,13 +993,13 @@ function EditModal({
               >
                 {t('readings.medicationTaken')}
               </label>
-              <div className="flex gap-3">
-                {(['yes', 'no', ''] as const).map((val) => (
+              <div className="grid grid-cols-3 gap-2">
+                {(['yes', 'no', 'scheduledLater'] as const).map((val) => (
                   <button
-                    key={val || 'na'}
+                    key={val}
                     type="button"
                     onClick={() => onChange('medication', val)}
-                    className="flex-1 h-10 rounded-xl border-2 text-[13px] font-semibold transition cursor-pointer"
+                    className="h-10 rounded-xl border-2 text-[12px] font-semibold transition cursor-pointer"
                     style={{
                       borderColor:
                         form.medication === val
@@ -996,10 +1015,78 @@ function EditModal({
                           : 'var(--brand-text-muted)',
                     }}
                   >
-                    {val === '' ? t('common.na') : val === 'yes' ? t('common.yes') : t('common.no')}
+                    {val === 'yes'
+                      ? t('common.yes')
+                      : val === 'no'
+                        ? t('common.no')
+                        : t('readings.notDueYet')}
                   </button>
                 ))}
               </div>
+
+              {form.medication === 'no' && (
+                <div className="mt-3 space-y-3 p-3 rounded-xl" style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}>
+                  <div>
+                    <label
+                      htmlFor="edit-missed-reason"
+                      className="block text-[11px] font-semibold uppercase tracking-wide mb-1"
+                      style={{ color: 'var(--brand-text-muted)' }}
+                    >
+                      {t('readings.whyMissed')}
+                    </label>
+                    <select
+                      id="edit-missed-reason"
+                      value={form.missedReason}
+                      onChange={(e) => onChange('missedReason', e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border text-[14px] bg-white"
+                      style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+                    >
+                      <option value="">{t('readings.selectReason')}</option>
+                      <option value="FORGOT">{t('readings.reasonForgot')}</option>
+                      <option value="SIDE_EFFECTS">{t('readings.reasonSideEffects')}</option>
+                      <option value="RAN_OUT">{t('readings.reasonRanOut')}</option>
+                      <option value="COST">{t('readings.reasonCost')}</option>
+                      <option value="INTENTIONAL">{t('readings.reasonIntentional')}</option>
+                      <option value="OTHER">{t('readings.reasonOther')}</option>
+                    </select>
+                  </div>
+
+                  <fieldset className="border-0 p-0 m-0">
+                    <legend
+                      className="text-[11px] font-semibold uppercase tracking-wide"
+                      style={{ color: 'var(--brand-text-muted)' }}
+                    >
+                      {t('readings.howManyDoses')}
+                    </legend>
+                    <div className="mt-1 flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => onChange('missedDosesCount', Math.max(1, form.missedDosesCount - 1))}
+                        className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer bg-white"
+                        style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                        aria-label={t('readings.decreaseDoses')}
+                      >
+                        −
+                      </button>
+                      <span
+                        className="text-[16px] font-bold w-6 text-center"
+                        style={{ color: 'var(--brand-text-primary)' }}
+                      >
+                        {form.missedDosesCount}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onChange('missedDosesCount', Math.min(10, form.missedDosesCount + 1))}
+                        className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer bg-white"
+                        style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                        aria-label={t('readings.increaseDoses')}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </fieldset>
+                </div>
+              )}
             </div>
 
             {/* Symptoms — V2 structured booleans (matches CheckIn B3) */}
@@ -1295,7 +1382,14 @@ export default function ReadingsPage() {
           ? 'yes'
           : entry.medicationTaken === false
             ? 'no'
-            : '',
+            : entry.medicationScheduledLater
+              ? 'scheduledLater'
+              : '',
+      // Pull reason from the first per-med entry (the EditModal collects a
+      // single representative answer for the whole reading; CheckIn's
+      // per-med detail is preserved on submit but collapsed for the editor).
+      missedReason: (entry.missedMedications?.[0]?.reason as EditForm['missedReason']) ?? '',
+      missedDosesCount: entry.missedDoses ?? 1,
       severeHeadache: entry.severeHeadache ?? false,
       visualChanges: entry.visualChanges ?? false,
       alteredMentalStatus: entry.alteredMentalStatus ?? false,
@@ -1346,8 +1440,42 @@ export default function ReadingsPage() {
       if (editForm.diastolic) payload.diastolicBP = parseInt(editForm.diastolic, 10);
       if (editForm.pulse) payload.pulse = parseInt(editForm.pulse, 10);
       if (editForm.weight) payload.weight = parseFloat(editForm.weight);
-      if (editForm.medication === 'yes') payload.medicationTaken = true;
-      else if (editForm.medication === 'no') payload.medicationTaken = false;
+      // Mirror CheckIn's submit shape: yes → taken=true, no → taken=false
+      // (with a single representative reason + dose count), scheduledLater
+      // → scheduledLater=true so the rule engine treats the gap as
+      // intentional rather than a missed dose.
+      if (editForm.medication === 'yes') {
+        payload.medicationTaken = true;
+        payload.medicationScheduledLater = false;
+        payload.missedDoses = 0;
+        payload.missedMedications = [];
+      } else if (editForm.medication === 'no') {
+        payload.medicationTaken = false;
+        payload.medicationScheduledLater = false;
+        payload.missedDoses = editForm.missedDosesCount;
+        // The editor collects ONE representative reason for the whole reading
+        // (we don't have per-medication context here). Ship a sentinel
+        // missedMedications entry only when a reason was picked, so the
+        // backend's adherence engine still has the metadata.
+        payload.missedMedications = editForm.missedReason
+          ? [{
+              medicationId: 'edit-rollup',
+              drugName: 'Edit rollup',
+              drugClass: 'OTHER',
+              reason: editForm.missedReason,
+              missedDoses: editForm.missedDosesCount,
+            }]
+          : [];
+      } else if (editForm.medication === 'scheduledLater') {
+        // Clear medicationTaken so the adherence rule (engine/adherence.ts)
+        // doesn't fire — it triggers on `medicationTaken === false`. The
+        // separate scheduledLater flag tells downstream consumers the gap
+        // was intentional rather than a missed dose.
+        payload.medicationTaken = null;
+        payload.medicationScheduledLater = true;
+        payload.missedDoses = 0;
+        payload.missedMedications = [];
+      }
       // Structured V2 symptoms — always send so toggling off is persisted.
       payload.severeHeadache = editForm.severeHeadache;
       payload.visualChanges = editForm.visualChanges;
