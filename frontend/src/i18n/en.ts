@@ -176,6 +176,29 @@ const en = {
   'checkin.b3.otherLabel': 'Anything else? (optional)',
   'checkin.b3.otherPlaceholder': 'In your own words…',
 
+  // B4 — per-medication step (Yes / No / Not due yet for each med on file)
+  'checkin.b4.title': 'Medications today',
+  'checkin.b4.subtitle': 'Tap each one to tell us if you took it.',
+  'checkin.b4.audio': 'Medications today. Tap each one to tell us if you took it.',
+  'checkin.b4.noMeds': "We don't have any medications on file for you yet. Add your medications in settings for better follow-up.",
+  // Drug-class labels — patient-facing descriptive terms shown under the
+  // drug name. Clinical abbreviations (ARB, MRA, SGLT2, ARNI) stay as-is.
+  'checkin.b4.classAceInhibitor': 'ace inhibitor',
+  'checkin.b4.classArb': 'ARB',
+  'checkin.b4.classBetaBlocker': 'beta blocker',
+  'checkin.b4.classDhpCcb': 'calcium channel blocker',
+  'checkin.b4.classNdhpCcb': 'calcium channel blocker',
+  'checkin.b4.classLoopDiuretic': 'loop diuretic',
+  'checkin.b4.classThiazide': 'thiazide',
+  'checkin.b4.classMra': 'MRA',
+  'checkin.b4.classSglt2': 'SGLT2 inhibitor',
+  'checkin.b4.classAnticoagulant': 'anticoagulant',
+  'checkin.b4.classStatin': 'statin',
+  'checkin.b4.classAntiarrhythmic': 'antiarrhythmic',
+  'checkin.b4.classVasodilatorNitrate': 'vasodilator / nitrate',
+  'checkin.b4.classArni': 'ARNI',
+  'checkin.b4.classOtherUnverified': 'other',
+
   // B5 — confirmation screen
   'checkin.confirm.title': 'Reading sent',
   'checkin.confirm.titleMulti': 'Reading {n} sent',

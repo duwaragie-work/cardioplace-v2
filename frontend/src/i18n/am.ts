@@ -183,6 +183,27 @@ const am: Record<TranslationKey, string> = {
   'checkin.b3.otherLabel': 'ሌላ ነገር? (አማራጭ)',
   'checkin.b3.otherPlaceholder': 'በራስዎ ቃላት…',
 
+  // B4 — per-medication step
+  'checkin.b4.title': 'ዛሬ የወሰዷቸው መድሃኒቶች',
+  'checkin.b4.subtitle': 'ሁሉንም ነክተው ወሰዱት ወይም አለመውሰዱን ይንገሩን።',
+  'checkin.b4.audio': 'ዛሬ የወሰዷቸው መድሃኒቶች። ሁሉንም ነክተው ወሰዱት ወይም አለመውሰዱን ይንገሩን።',
+  'checkin.b4.noMeds': 'ለእርስዎ የተመዘገቡ መድሃኒቶች የሉም። ለተሻለ ክትትል በቅንብሮች ውስጥ መድሃኒቶችዎን ይጨምሩ።',
+  'checkin.b4.classAceInhibitor': 'ACE ኢንሂቢተር',
+  'checkin.b4.classArb': 'ARB',
+  'checkin.b4.classBetaBlocker': 'ቤታ ብሎከር',
+  'checkin.b4.classDhpCcb': 'ካልሲየም ቻነል ብሎከር',
+  'checkin.b4.classNdhpCcb': 'ካልሲየም ቻነል ብሎከር',
+  'checkin.b4.classLoopDiuretic': 'ሉፕ ዳዩሬቲክ',
+  'checkin.b4.classThiazide': 'ታያዛይድ',
+  'checkin.b4.classMra': 'MRA',
+  'checkin.b4.classSglt2': 'SGLT2 ኢንሂቢተር',
+  'checkin.b4.classAnticoagulant': 'ደም መጠንከር መከላከያ',
+  'checkin.b4.classStatin': 'ስታቲን',
+  'checkin.b4.classAntiarrhythmic': 'የልብ ምት ማስተካከያ',
+  'checkin.b4.classVasodilatorNitrate': 'ቫዞዳይሌተር / ናይትሬት',
+  'checkin.b4.classArni': 'ARNI',
+  'checkin.b4.classOtherUnverified': 'ሌላ',
+
   // B5 — confirmation
   'checkin.confirm.title': 'ንባብ ተልኳል',
   'checkin.confirm.titleMulti': 'ንባብ {n} ተልኳል',

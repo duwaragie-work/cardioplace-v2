@@ -181,6 +181,27 @@ const de: Record<TranslationKey, string> = {
   'checkin.b3.otherLabel': 'Noch etwas? (optional)',
   'checkin.b3.otherPlaceholder': 'In Ihren eigenen Worten…',
 
+  // B4 — per-medication step
+  'checkin.b4.title': 'Medikamente heute',
+  'checkin.b4.subtitle': 'Tippen Sie auf jedes, um uns mitzuteilen, ob Sie es eingenommen haben.',
+  'checkin.b4.audio': 'Medikamente heute. Tippen Sie auf jedes, um uns mitzuteilen, ob Sie es eingenommen haben.',
+  'checkin.b4.noMeds': 'Wir haben noch keine Medikamente für Sie hinterlegt. Fügen Sie Ihre Medikamente in den Einstellungen hinzu, damit wir Sie besser begleiten können.',
+  'checkin.b4.classAceInhibitor': 'ACE-Hemmer',
+  'checkin.b4.classArb': 'ARB',
+  'checkin.b4.classBetaBlocker': 'Betablocker',
+  'checkin.b4.classDhpCcb': 'Kalziumkanalblocker',
+  'checkin.b4.classNdhpCcb': 'Kalziumkanalblocker',
+  'checkin.b4.classLoopDiuretic': 'Schleifendiuretikum',
+  'checkin.b4.classThiazide': 'Thiazid',
+  'checkin.b4.classMra': 'MRA',
+  'checkin.b4.classSglt2': 'SGLT2-Hemmer',
+  'checkin.b4.classAnticoagulant': 'Gerinnungshemmer',
+  'checkin.b4.classStatin': 'Statin',
+  'checkin.b4.classAntiarrhythmic': 'Antiarrhythmikum',
+  'checkin.b4.classVasodilatorNitrate': 'Vasodilatator / Nitrat',
+  'checkin.b4.classArni': 'ARNI',
+  'checkin.b4.classOtherUnverified': 'Sonstiges',
+
   // B5 — confirmation
   'checkin.confirm.title': 'Messung gesendet',
   'checkin.confirm.titleMulti': 'Messung {n} gesendet',

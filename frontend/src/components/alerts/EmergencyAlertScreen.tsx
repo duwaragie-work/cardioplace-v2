@@ -18,6 +18,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, Phone, Check, X } from 'lucide-react';
 import type { DeviationAlertDto } from '@/lib/services/journal.service';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { applyFriendlyVoice } from '@/lib/tts-voice';
 
 interface Props {
   alert: DeviationAlertDto;
@@ -44,6 +45,7 @@ function speak(text: string, lang = 'en-US'): boolean {
     const u = new SpeechSynthesisUtterance(text);
     u.lang = lang;
     u.rate = 0.92;
+    applyFriendlyVoice(u);
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
     return true;
