@@ -745,7 +745,7 @@ function EditModal({
         <div className="flex-1 overflow-y-auto thin-scrollbar">
           <div className="p-5 space-y-5">
             {/* When — split date and time pickers (cleaner on small screens). */}
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
                 <label
                   className="block text-[12px] font-semibold mb-1.5"
