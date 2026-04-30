@@ -465,7 +465,7 @@ function EntryCard({
                 className="text-[11px] px-2 py-0.5 rounded-md font-medium flex items-center gap-1"
                 style={{ backgroundColor: '#FEE2E2', color: '#DC2626' }}
               >
-                <AlertTriangle className="w-3 h-3" />
+                <AlertTriangle aria-hidden="true" className="w-3 h-3" />
                 {entry.symptoms.length} symptom{entry.symptoms.length > 1 ? 's' : ''}
               </span>
             )}
@@ -604,7 +604,7 @@ function SessionCard({
           </p>
         </div>
         <div className="shrink-0" style={{ color: 'var(--brand-primary-purple)' }}>
-          {expanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+          {expanded ? <ChevronUp aria-hidden="true" className="w-5 h-5" /> : <ChevronDown aria-hidden="true" className="w-5 h-5" />}
         </div>
       </button>
 
@@ -1157,7 +1157,7 @@ function DeleteConfirm({
           className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4"
           style={{ backgroundColor: '#FEE2E2' }}
         >
-          <Trash2 className="w-5 h-5 text-red-500" />
+          <Trash2 aria-hidden="true" className="w-5 h-5 text-red-500" />
         </div>
         <h3 className="text-[16px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
           {t('readings.deleteReading')}
@@ -1382,7 +1382,7 @@ export default function ReadingsPage() {
               className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
               style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}
             >
-              <Activity className="w-5 h-5 text-white" />
+              <Activity aria-hidden="true" className="w-5 h-5 text-white" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
@@ -1416,7 +1416,7 @@ export default function ReadingsPage() {
             className="h-9 px-4 rounded-full flex items-center gap-1.5 text-[13px] font-semibold text-white transition hover:opacity-85 shrink-0"
             style={{ backgroundColor: 'var(--brand-primary-purple)' }}
           >
-            <Plus className="w-4 h-4" />
+            <Plus aria-hidden="true" className="w-4 h-4" />
             <span className="hidden sm:inline">{t('readings.newCheckin')}</span>
           </Link>
         </div>
@@ -1432,6 +1432,7 @@ export default function ReadingsPage() {
               style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
             >
               <Activity
+                aria-hidden="true"
                 className="w-8 h-8"
                 style={{ color: 'var(--brand-primary-purple)' }}
               />
@@ -1450,7 +1451,7 @@ export default function ReadingsPage() {
               className="inline-flex items-center gap-2 h-11 px-6 rounded-full text-sm font-bold text-white"
               style={{ backgroundColor: 'var(--brand-primary-purple)' }}
             >
-              <Plus className="w-4 h-4" />
+              <Plus aria-hidden="true" className="w-4 h-4" />
               {t('readings.startCheckin')}
             </Link>
           </div>

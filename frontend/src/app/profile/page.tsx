@@ -299,7 +299,7 @@ function VerifiedBadge({ status }: { status?: string | null }) {
           color: 'var(--brand-success-green)',
         }}
       >
-        <CheckCircle2 className="w-3 h-3" />
+        <CheckCircle2 aria-hidden="true" className="w-3 h-3" />
         {t('profile.verified')}
       </span>
     );
@@ -313,7 +313,7 @@ function VerifiedBadge({ status }: { status?: string | null }) {
           color: 'var(--brand-accent-teal)',
         }}
       >
-        <ShieldCheck className="w-3 h-3" />
+        <ShieldCheck aria-hidden="true" className="w-3 h-3" />
         {t('profile.correctedByTeam')}
       </span>
     );
@@ -326,7 +326,7 @@ function VerifiedBadge({ status }: { status?: string | null }) {
         color: 'var(--brand-warning-amber)',
       }}
     >
-      <Clock className="w-3 h-3" />
+      <Clock aria-hidden="true" className="w-3 h-3" />
       {t('profile.awaitingVerification')}
     </span>
   );
@@ -341,7 +341,7 @@ function MedVerifiedBadge({ status }: { status: PatientMedicationDto['verificati
         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
         style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)' }}
       >
-        <ShieldAlert className="w-3 h-3" />
+        <ShieldAlert aria-hidden="true" className="w-3 h-3" />
         {t('profile.rejectedByTeam')}
       </span>
     );

@@ -94,9 +94,10 @@ export default function Homepage() {
                   />
                   <button
                     type="submit"
+                    aria-label="Send message"
                     className="bg-[#7b00e0] rounded-full w-10 h-10 sm:w-14 sm:h-14 flex items-center justify-center shrink-0 shadow-lg hover:bg-[#6600bc] transition-colors"
                   >
-                    <Send className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                    <Send aria-hidden="true" className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                   </button>
                 </form>
                 {/* Prompt chips — single row */}

@@ -95,6 +95,7 @@ function CareTeamOnly() {
           style={{ backgroundColor: 'var(--brand-success-green-light)' }}
         >
           <ShieldCheck
+            aria-hidden="true"
             className="w-8 h-8"
             style={{ color: 'var(--brand-success-green)' }}
           />
@@ -120,7 +121,7 @@ function CareTeamOnly() {
             boxShadow: 'var(--brand-shadow-button)',
           }}
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft aria-hidden="true" className="w-4 h-4" />
           {t('alerts.notFound.backToDashboard')}
         </button>
       </div>
@@ -142,6 +143,7 @@ function NotFound({ reason }: { reason: string }) {
           style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}
         >
           <AlertCircle
+            aria-hidden="true"
             className="w-8 h-8"
             style={{ color: 'var(--brand-warning-amber)' }}
           />
@@ -167,7 +169,7 @@ function NotFound({ reason }: { reason: string }) {
             boxShadow: 'var(--brand-shadow-button)',
           }}
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft aria-hidden="true" className="w-4 h-4" />
           {t('alerts.notFound.backToDashboard')}
         </button>
       </div>

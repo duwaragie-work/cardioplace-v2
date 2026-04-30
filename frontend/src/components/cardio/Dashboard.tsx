@@ -524,7 +524,7 @@ export default function Dashboard() {
               style={{ backgroundColor: topAlertVariant.accent }}
             >
               {t('dashboard.viewDetails')}
-              <ArrowRight className="w-3.5 h-3.5" />
+              <ArrowRight aria-hidden="true" className="w-3.5 h-3.5" />
             </div>
             <ArrowRight
               className="w-4 h-4 shrink-0 sm:hidden"
@@ -840,9 +840,9 @@ export default function Dashboard() {
                   {loading ? (
                     <Bone w={120} h={12} color="#7B00E0" />
                   ) : intakeUi.kind !== 'done' ? (
-                    <>Finish intake first <ArrowRight className="w-4 h-4" /></>
+                    <>Finish intake first <ArrowRight aria-hidden="true" className="w-4 h-4" /></>
                   ) : (
-                    <>{todayHasEntry ? t('dashboard.logAnother') : t('dashboard.startCheckin')} <ArrowRight className="w-4 h-4" /></>
+                    <>{todayHasEntry ? t('dashboard.logAnother') : t('dashboard.startCheckin')} <ArrowRight aria-hidden="true" className="w-4 h-4" /></>
                   )}
                 </button>
                 <span className="block text-[10px] mt-3 text-center text-white">
@@ -922,7 +922,7 @@ export default function Dashboard() {
                       className="mt-2 w-full flex items-center justify-center gap-1 py-1.5 rounded-full text-[11px] font-semibold transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                       style={{ color: 'var(--brand-primary-purple)', backgroundColor: 'var(--brand-primary-purple-light)' }}
                     >
-                      {t('dashboard.viewAllAlerts')} <ArrowRight className="w-3 h-3" />
+                      {t('dashboard.viewAllAlerts')} <ArrowRight aria-hidden="true" className="w-3 h-3" />
                     </button>
                   ) : null}
                 </>

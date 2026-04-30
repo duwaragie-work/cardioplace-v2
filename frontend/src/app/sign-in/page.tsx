@@ -433,7 +433,7 @@ export default function RegisterPage() {
                 <div className="bg-white/60 rounded-2xl p-4 space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="bg-[#7B00E0] size-8 rounded-lg flex items-center justify-center">
-                      <Mail className="w-4 h-4 text-white" strokeWidth={2.5} />
+                      <Mail aria-hidden="true" className="w-4 h-4 text-white" strokeWidth={2.5} />
                     </div>
                     <h4 className="font-bold text-[#170c1d] text-sm lg:text-base">
                       {t('register.magicLinkTitle') || 'Magic Link'}
@@ -448,7 +448,7 @@ export default function RegisterPage() {
                 <div className="bg-white/60 rounded-2xl p-4 space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="bg-[#7B00E0] size-8 rounded-lg flex items-center justify-center">
-                      <KeyRound className="w-4 h-4 text-white" strokeWidth={2.5} />
+                      <KeyRound aria-hidden="true" className="w-4 h-4 text-white" strokeWidth={2.5} />
                     </div>
                     <h4 className="font-bold text-[#170c1d] text-sm lg:text-base">
                       {t('register.otpTitle') || 'OTP Code'}
@@ -461,7 +461,7 @@ export default function RegisterPage() {
 
                 {/* Shared security note */}
                 <div className="flex items-center gap-2 pt-1">
-                  <CheckCircle2 className="w-4 h-4 text-[#7B00E0] shrink-0" strokeWidth={2.5} />
+                  <CheckCircle2 aria-hidden="true" className="w-4 h-4 text-[#7B00E0] shrink-0" strokeWidth={2.5} />
                   <p className="text-[#4b3b55] text-xs lg:text-sm">
                     {t('register.noPassword')}
                   </p>

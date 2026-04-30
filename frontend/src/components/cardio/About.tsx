@@ -91,11 +91,11 @@ export default function About() {
                     </div>
                     <div className="bg-white rounded-full p-2 flex items-center gap-3 mt-4 sm:mt-6" style={{ boxShadow: '0 0 0 2px rgba(92,0,169,0.2), inset 0 2px 4px rgba(0,0,0,0.05)' }}>
                       <div className="bg-[#edeeef] w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0">
-                        <Mic className="w-3 h-3 sm:w-4 sm:h-4 text-[#4c4355]" />
+                        <Mic aria-hidden="true" className="w-3 h-3 sm:w-4 sm:h-4 text-[#4c4355]" />
                       </div>
                       <span className="text-[#4c4355]/60 text-[10px] sm:text-xs flex-1">{t('about.chatPlaceholder')}</span>
                       <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 shadow-md" style={{ backgroundImage: 'linear-gradient(135deg, #7b00e0 0%, #5c00a9 100%)' }}>
-                        <Send className="w-3 h-3 text-white" />
+                        <Send aria-hidden="true" className="w-3 h-3 text-white" />
                       </div>
                     </div>
                   </div>
