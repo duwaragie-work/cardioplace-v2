@@ -24,7 +24,7 @@ export default function Homepage() {
     <div className="bg-[#fef7ff] flex flex-col min-h-screen overflow-x-hidden">
       <LandingHeader activeLink="Home" />
 
-      <main className="flex flex-col items-center pt-[64px] w-full overflow-x-hidden">
+      <main id="main" className="flex flex-col items-center pt-[64px] w-full overflow-x-hidden">
         {/* ============ HERO SECTION ============ */}
         <section className="relative w-full min-h-[calc(100vh-64px)] flex items-end lg:items-center justify-center overflow-hidden px-4 sm:px-6 md:px-8 pb-4 sm:pb-6 lg:pb-0">
           <div className="absolute inset-0">

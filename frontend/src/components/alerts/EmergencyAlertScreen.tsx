@@ -204,7 +204,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
 
       {/* Main message — vertically centered, with room above for the audio
           hint and below for the action buttons. */}
-      <main className="flex-1 flex flex-col items-center justify-center text-center px-6 sm:px-8 py-6 max-w-xl mx-auto w-full">
+      <main id="main" className="flex-1 flex flex-col items-center justify-center text-center px-6 sm:px-8 py-6 max-w-xl mx-auto w-full">
         <motion.div
           initial={{ scale: 0.6, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
