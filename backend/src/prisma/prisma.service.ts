@@ -15,7 +15,29 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
     if (isAccelerate) {
       super({ accelerateUrl: dbUrl })
     } else {
-      const pool = new pg.Pool({ connectionString: dbUrl })
+      // Pool tuning for managed Prisma Postgres (db.prisma.io):
+      //   • max=20 — headroom for concurrent intake transactions; default 10
+      //     was triggering P2028 (transaction-acquire timeout) under burst.
+      //   • idleTimeoutMillis=30s — recycle connections before the managed
+      //     proxy kills them server-side. Default 10s should also work but
+      //     this gives breathing room without holding stale connections.
+      //   • keepAlive=true — OS-level TCP keepalive probes idle sockets so
+      //     the proxy doesn't silently close them, surfacing as "Server has
+      //     closed the connection" on the next query.
+      const pool = new pg.Pool({
+        connectionString: dbUrl,
+        max: 20,
+        idleTimeoutMillis: 30_000,
+        keepAlive: true,
+        keepAliveInitialDelayMillis: 10_000,
+      })
+      // Surface late-stage pool errors instead of crashing the process —
+      // node-postgres emits 'error' on the pool when an idle client throws
+      // (e.g. server-side disconnect). Logging here makes the next failure
+      // diagnosable rather than silent.
+      pool.on('error', (err: Error) => {
+        console.error('⚠️  pg.Pool error on idle client:', err.message)
+      })
       const adapter = new PrismaPg(pool)
       super({ adapter })
     }

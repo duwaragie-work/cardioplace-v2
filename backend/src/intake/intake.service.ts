@@ -35,8 +35,11 @@ type PrismaTx = Omit<
 
 // Prisma Postgres (managed, network-latency) needs more than the default 5 s
 // interactive-transaction budget once we fan out 10+ log rows. Generous
-// timeout + reasonable maxWait keeps local-dev behaviour unchanged.
-const TX_OPTIONS = { timeout: 20_000, maxWait: 5_000 } as const
+// timeout + maxWait keeps local-dev behaviour unchanged. maxWait was bumped
+// from 5s → 15s after seeing P2028 ("Unable to start a transaction") on
+// burst load — proxy round-trips can eat past 5s when the pool needs a
+// fresh connection.
+const TX_OPTIONS = { timeout: 20_000, maxWait: 15_000 } as const
 
 // Clinical fields on PatientProfile that participate in verification logs.
 // Any change to one of these fields produces a ProfileVerificationLog row.
