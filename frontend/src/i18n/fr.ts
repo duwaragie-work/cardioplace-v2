@@ -699,6 +699,8 @@ const fr: Record<TranslationKey, string> = {
 
   // ─── Homepage ─────────────────────────────────────────────────────────────
   'home.heroBadge': 'SUIVI CARDIAQUE PAR IA',
+  'home.heroImageAlt': 'Une grand-mère utilisant son téléphone à la maison, soutenue par un suivi cardiaque par IA',
+  'home.cardioplaceLogoAlt': 'Logo Cardioplace',
   'home.heroTitle1': 'Votre Santé Cardiaque,',
   'home.heroTitle2': 'Surveillée Entre Chaque Visite',
   'home.heroDesc': 'Chaque jour, par la voix ou par texto, et dans votre langue, nous prenons des nouvelles. Quand quelque chose nécessite une attention, l\'équipe soignante le sait. Pas la semaine prochaine. Maintenant.',
@@ -1117,7 +1119,27 @@ const fr: Record<TranslationKey, string> = {
   'lang.ko': '한국어',
   'lang.ht': 'Kreyòl Ayisyen',
 
+  // Accessibility (Rengan WCAG 2.2 AA — Tasks 3, 10, 11)
+  'accessibility.skipToMain': 'Passer au contenu principal',
+  'accessibility.editReading': 'Modifier la mesure',
+  'accessibility.deleteReading': 'Supprimer la mesure',
+  'accessibility.alertsRegion': 'Alertes actives',
+  'accessibility.closeDialog': 'Fermer la boîte de dialogue',
 
+  // ─── BP photo OCR (NIVA_SILENT_LITERACY_PLAN §3) — MT, needs review ────────
+  'ocr.bp.cameraLabel': 'Prenez une photo de votre brassard',
+  'ocr.bp.uploading': 'Lecture de votre photo…',
+  'ocr.bp.confirmTitle': 'Est-ce correct ?',
+  'ocr.bp.helpText': 'Nous avons lu ces chiffres sur votre photo. Confirmez seulement s\'ils correspondent à votre brassard.',
+  'ocr.bp.audioTemplate': 'Nous avons lu {sbp} sur {dbp}{pulsePart}. Est-ce correct ?',
+  'ocr.bp.audioPulsePart': ', pouls {pulse}',
+  'ocr.bp.confirm': 'Confirmer',
+  'ocr.bp.edit': 'Modifier',
+  'ocr.bp.retake': 'Reprendre',
+  'ocr.bp.errLowConfidence': 'Impossible de lire le brassard clairement. Veuillez taper les chiffres.',
+  'ocr.bp.errRateLimited': 'Trop de tentatives photo aujourd\'hui. Veuillez taper les chiffres.',
+  'ocr.bp.errNetwork': 'Problème de connexion. Veuillez taper les chiffres.',
+  'ocr.bp.errTooLarge': 'La photo est trop grande. Essayez une image plus petite.',
 };
 
 export default fr;

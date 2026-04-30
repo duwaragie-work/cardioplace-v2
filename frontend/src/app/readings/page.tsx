@@ -26,6 +26,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
+import BpPhotoButton from '@/components/intake/BpPhotoButton';
 import { kgToLbs } from '@/lib/units';
 
 type TFn = (key: TranslationKey) => string;
@@ -465,7 +466,7 @@ function EntryCard({
                 className="text-[11px] px-2 py-0.5 rounded-md font-medium flex items-center gap-1"
                 style={{ backgroundColor: '#FEE2E2', color: '#DC2626' }}
               >
-                <AlertTriangle className="w-3 h-3" />
+                <AlertTriangle aria-hidden="true" className="w-3 h-3" />
                 {entry.symptoms.length} symptom{entry.symptoms.length > 1 ? 's' : ''}
               </span>
             )}
@@ -498,17 +499,17 @@ function EntryCard({
           <AudioButton size="sm" text={audioSummary} />
           <button
             onClick={onEdit}
-            className="w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-75"
+            className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
             style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
-            aria-label="Edit"
+            aria-label={t('accessibility.editReading')}
           >
             <Pencil className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
           </button>
           <button
             onClick={onDelete}
-            className="w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-75"
+            className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
             style={{ backgroundColor: '#FEE2E2' }}
-            aria-label="Delete"
+            aria-label={t('accessibility.deleteReading')}
           >
             <Trash2 className="w-3.5 h-3.5 text-red-500" />
           </button>
@@ -604,7 +605,7 @@ function SessionCard({
           </p>
         </div>
         <div className="shrink-0" style={{ color: 'var(--brand-primary-purple)' }}>
-          {expanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+          {expanded ? <ChevronUp aria-hidden="true" className="w-5 h-5" /> : <ChevronDown aria-hidden="true" className="w-5 h-5" />}
         </div>
       </button>
 
@@ -708,6 +709,9 @@ function EditModal({
 
       {/* Sheet — flex column so header / scroll body / footer can share height */}
       <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-reading-title"
         className="relative w-full sm:max-w-lg bg-white sm:rounded-2xl rounded-t-2xl flex flex-col overflow-hidden"
         style={{
           maxHeight: '90dvh',
@@ -724,7 +728,7 @@ function EditModal({
           style={{ borderBottom: '1px solid var(--brand-border)' }}
         >
           <div className="flex items-center gap-2 min-w-0">
-            <h2 className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+            <h2 id="edit-reading-title" className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
               {t('readings.editReading')}
             </h2>
             {/* Phase/26 TTS pass 2 — humanised summary of the in-progress
@@ -733,9 +737,9 @@ function EditModal({
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-70 cursor-pointer shrink-0"
+            className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-70 cursor-pointer shrink-0"
             style={{ backgroundColor: 'var(--brand-background)' }}
-            aria-label={t('common.close')}
+            aria-label={t('accessibility.closeDialog')}
           >
             <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
           </button>
@@ -745,15 +749,17 @@ function EditModal({
         <div className="flex-1 overflow-y-auto thin-scrollbar">
           <div className="p-5 space-y-5">
             {/* When — split date and time pickers (cleaner on small screens). */}
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
                 <label
+                  htmlFor="readings-edit-date"
                   className="block text-[12px] font-semibold mb-1.5"
                   style={{ color: 'var(--brand-text-secondary)' }}
                 >
                   {t('checkin.date')}
                 </label>
                 <input
+                  id="readings-edit-date"
                   type="date"
                   value={form.measuredDate}
                   onChange={(e) => onChange('measuredDate', e.target.value)}
@@ -767,12 +773,14 @@ function EditModal({
               </div>
               <div>
                 <label
+                  htmlFor="readings-edit-time"
                   className="block text-[12px] font-semibold mb-1.5"
                   style={{ color: 'var(--brand-text-secondary)' }}
                 >
                   {t('checkin.time')}
                 </label>
                 <input
+                  id="readings-edit-time"
                   type="time"
                   value={form.measuredTime}
                   onChange={(e) => onChange('measuredTime', e.target.value)}
@@ -830,7 +838,18 @@ function EditModal({
                 >
                   {t('readings.bloodPressure')}
                 </label>
-                <AudioButton size="sm" text={t('readings.bloodPressure')} />
+                <span className="flex items-center gap-2">
+                  {/* Phase/27 BP photo OCR — re-edit path. Patient who realises
+                      they typed the wrong number can re-snap and overwrite. */}
+                  <BpPhotoButton
+                    onConfirm={(r) => {
+                      onChange('systolic', String(r.sbp));
+                      onChange('diastolic', String(r.dbp));
+                      if (r.pulse != null) onChange('pulse', String(r.pulse));
+                    }}
+                  />
+                  <AudioButton size="sm" text={t('readings.bloodPressure')} />
+                </span>
               </div>
               <div className="flex gap-3 items-center">
                 <input
@@ -1031,12 +1050,14 @@ function EditModal({
             {/* Other / freeform symptoms */}
             <div>
               <label
+                htmlFor="readings-edit-other-symptoms"
                 className="block text-[12px] font-semibold mb-1.5"
                 style={{ color: 'var(--brand-text-secondary)' }}
               >
                 {t('checkin.b3.otherLabel')}
               </label>
               <input
+                id="readings-edit-other-symptoms"
                 type="text"
                 value={form.otherSymptomsText}
                 onChange={(e) => onChange('otherSymptomsText', e.target.value)}
@@ -1157,7 +1178,7 @@ function DeleteConfirm({
           className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4"
           style={{ backgroundColor: '#FEE2E2' }}
         >
-          <Trash2 className="w-5 h-5 text-red-500" />
+          <Trash2 aria-hidden="true" className="w-5 h-5 text-red-500" />
         </div>
         <h3 className="text-[16px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
           {t('readings.deleteReading')}
@@ -1373,7 +1394,7 @@ export default function ReadingsPage() {
     // Default browser page scroll — no custom scroll container or fixed
     // height wrapper. The thin-scrollbar utility is reserved for the edit
     // modal body where scroll is genuinely contained.
-    <div className="min-h-[calc(100dvh-4rem)]" style={{ backgroundColor: '#FAFBFF' }}>
+    <main id="main" className="min-h-[calc(100dvh-4rem)]" style={{ backgroundColor: '#FAFBFF' }}>
       <div className="max-w-2xl mx-auto px-4 md:px-8 py-6">
         {/* Page header */}
         <div className="flex items-center justify-between gap-3 mb-6">
@@ -1382,7 +1403,7 @@ export default function ReadingsPage() {
               className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
               style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}
             >
-              <Activity className="w-5 h-5 text-white" />
+              <Activity aria-hidden="true" className="w-5 h-5 text-white" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
@@ -1416,7 +1437,7 @@ export default function ReadingsPage() {
             className="h-9 px-4 rounded-full flex items-center gap-1.5 text-[13px] font-semibold text-white transition hover:opacity-85 shrink-0"
             style={{ backgroundColor: 'var(--brand-primary-purple)' }}
           >
-            <Plus className="w-4 h-4" />
+            <Plus aria-hidden="true" className="w-4 h-4" />
             <span className="hidden sm:inline">{t('readings.newCheckin')}</span>
           </Link>
         </div>
@@ -1432,6 +1453,7 @@ export default function ReadingsPage() {
               style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
             >
               <Activity
+                aria-hidden="true"
                 className="w-8 h-8"
                 style={{ color: 'var(--brand-primary-purple)' }}
               />
@@ -1450,7 +1472,7 @@ export default function ReadingsPage() {
               className="inline-flex items-center gap-2 h-11 px-6 rounded-full text-sm font-bold text-white"
               style={{ backgroundColor: 'var(--brand-primary-purple)' }}
             >
-              <Plus className="w-4 h-4" />
+              <Plus aria-hidden="true" className="w-4 h-4" />
               {t('readings.startCheckin')}
             </Link>
           </div>
@@ -1558,6 +1580,6 @@ export default function ReadingsPage() {
           />
         )}
       </AnimatePresence>
-    </div>
+    </main>
   );
 }

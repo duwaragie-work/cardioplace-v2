@@ -39,7 +39,7 @@ export default function About() {
     <div className="bg-[#fef7ff] flex flex-col min-h-screen overflow-x-hidden">
       <LandingHeader activeLink="About" />
 
-      <main className="flex flex-col items-center pt-[64px] w-full overflow-x-hidden">
+      <main id="main" className="flex flex-col items-center pt-[64px] w-full overflow-x-hidden">
         {/* ============ HERO SECTION ============ */}
         <section className="w-full bg-[#fef7ff] flex items-start lg:items-center justify-center min-h-[calc(100vh-64px)] px-4 sm:px-6 md:px-8 py-10 md:py-16 overflow-hidden">
           <div className="max-w-[1280px] w-full grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
@@ -68,7 +68,7 @@ export default function About() {
                   <div className="bg-[#f3f4f5] rounded-[24px] sm:rounded-[32px] p-4 sm:p-6 min-h-[320px] sm:min-h-[400px] md:min-h-[500px] flex flex-col">
                     <div className="flex items-center gap-3 pb-4 border-b border-[rgba(207,194,216,0.1)]">
                       <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundImage: 'linear-gradient(135deg, #7b00e0 0%, #5c00a9 100%)' }}>
-                        <Image src="/cardioplace-icon.svg" alt="" width={22} height={22} className="brightness-0 invert" />
+                        <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={22} height={22} className="brightness-0 invert" />
                       </div>
                       <div>
                         <p className="font-bold text-[#191c1d] text-sm">{t('about.assistantName')}</p>
@@ -91,11 +91,11 @@ export default function About() {
                     </div>
                     <div className="bg-white rounded-full p-2 flex items-center gap-3 mt-4 sm:mt-6" style={{ boxShadow: '0 0 0 2px rgba(92,0,169,0.2), inset 0 2px 4px rgba(0,0,0,0.05)' }}>
                       <div className="bg-[#edeeef] w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0">
-                        <Mic className="w-3 h-3 sm:w-4 sm:h-4 text-[#4c4355]" />
+                        <Mic aria-hidden="true" className="w-3 h-3 sm:w-4 sm:h-4 text-[#4c4355]" />
                       </div>
                       <span className="text-[#4c4355]/60 text-[10px] sm:text-xs flex-1">{t('about.chatPlaceholder')}</span>
                       <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 shadow-md" style={{ backgroundImage: 'linear-gradient(135deg, #7b00e0 0%, #5c00a9 100%)' }}>
-                        <Send className="w-3 h-3 text-white" />
+                        <Send aria-hidden="true" className="w-3 h-3 text-white" />
                       </div>
                     </div>
                   </div>

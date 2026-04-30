@@ -702,6 +702,8 @@ const am: Record<TranslationKey, string> = {
 
   // ─── Homepage ─────────────────────────────────────────────────────────────
   'home.heroBadge': 'AI-ተኮር የልብ ክትትል',
+  'home.heroImageAlt': 'አንድ አያት በቤት ውስጥ ስልኳን ስትጠቀም፣ በAI-ተኮር የልብ ክትትል የተደገፈች',
+  'home.cardioplaceLogoAlt': 'የካርዲዮፕሌስ አርማ',
   'home.heroTitle1': 'የልብ ጤናዎ፣',
   'home.heroTitle2': 'በእያንዳንዱ ጉብኝት መካከል ይከታተላል',
   'home.heroDesc': 'በየቀኑ፣ በድምጽ ወይም በጽሁፍ፣ እና በእርስዎ ቋንቋ፣ እንጠይቃለን። አንድ ነገር ትኩረት ሲያስፈልገው የእንክብካቤ ቡድኑ ያውቃል። ቀጣዩ ሳምንት አይደለም። አሁን።',
@@ -1121,7 +1123,27 @@ const am: Record<TranslationKey, string> = {
   'lang.ko': '한국어',
   'lang.ht': 'Kreyòl Ayisyen',
 
+  // Accessibility (Rengan WCAG 2.2 AA — Tasks 3, 10, 11)
+  'accessibility.skipToMain': 'ወደ ዋናው ይዘት ይዝለሉ',
+  'accessibility.editReading': 'መለኪያን ያስተካክሉ',
+  'accessibility.deleteReading': 'መለኪያን ይሰርዙ',
+  'accessibility.alertsRegion': 'የነቁ ማንቂያዎች',
+  'accessibility.closeDialog': 'መገናኛውን ይዝጉ',
 
+  // ─── BP photo OCR (NIVA_SILENT_LITERACY_PLAN §3) — MT AMHARIC, needs review ─
+  'ocr.bp.cameraLabel': 'የካፍዎን ፎቶ ያንሱ',
+  'ocr.bp.uploading': 'ፎቶዎ በመነበብ ላይ…',
+  'ocr.bp.confirmTitle': 'ይህ ትክክል ነው?',
+  'ocr.bp.helpText': 'እነዚህን ቁጥሮች ከፎቶዎ አንብበናል። ከካፍዎ ጋር ሲመሳሰል ብቻ ያረጋግጡ።',
+  'ocr.bp.audioTemplate': '{sbp} በ{dbp}{pulsePart} አንብበናል። ይህ ትክክል ነው?',
+  'ocr.bp.audioPulsePart': '፣ የልብ ምት {pulse}',
+  'ocr.bp.confirm': 'አረጋግጥ',
+  'ocr.bp.edit': 'አርም',
+  'ocr.bp.retake': 'እንደገና ያንሱ',
+  'ocr.bp.errLowConfidence': 'ካፉን በግልጽ ማንበብ አልቻልንም። እባክዎ ቁጥሮቹን ይጻፉ።',
+  'ocr.bp.errRateLimited': 'ዛሬ በጣም ብዙ የፎቶ ሙከራዎች። እባክዎ ቁጥሮቹን ይጻፉ።',
+  'ocr.bp.errNetwork': 'የግንኙነት ችግር። እባክዎ ቁጥሮቹን ይጻፉ።',
+  'ocr.bp.errTooLarge': 'ፎቶው በጣም ትልቅ ነው። ትንሽ ፎቶ ይሞክሩ።',
 };
 
 export default am;

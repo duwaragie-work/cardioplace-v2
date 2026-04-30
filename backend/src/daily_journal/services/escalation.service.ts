@@ -81,12 +81,37 @@ export class EscalationService {
 
   @Cron('*/15 * * * *')
   async handleCron(): Promise<void> {
-    await this.runScan(new Date()).catch((err) =>
+    // Managed Prisma Postgres occasionally hands the pool a stale connection
+    // (server hung up while idle) — first query throws "Server has closed
+    // the connection" / P1017. node-postgres evicts the bad socket on that
+    // error, so an immediate retry picks up a healthy connection. One-shot
+    // retry only — anything beyond that is a real outage and should surface.
+    try {
+      await this.runScan(new Date())
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      const isStaleConnection =
+        message.includes('Server has closed the connection') ||
+        message.includes('P1017') ||
+        message.includes('Connection terminated')
+      if (isStaleConnection) {
+        this.logger.warn('Escalation cron — stale connection, retrying once')
+        try {
+          await this.runScan(new Date())
+          return
+        } catch (retryErr) {
+          this.logger.error(
+            'Escalation cron scan failed after retry',
+            retryErr instanceof Error ? retryErr.stack : retryErr,
+          )
+          return
+        }
+      }
       this.logger.error(
         'Escalation cron scan failed',
         err instanceof Error ? err.stack : err,
-      ),
-    )
+      )
+    }
   }
 
   /** Public sync entry for tests + ops tooling. */

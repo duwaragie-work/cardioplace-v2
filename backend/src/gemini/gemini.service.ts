@@ -7,6 +7,63 @@ import { LangSmithService } from '../common/langsmith.service.js'
 const MAX_RETRIES = 5
 const BASE_DELAY_MS = 2000
 
+// ─── BP OCR (NIVA_SILENT_LITERACY_PLAN §3) ──────────────────────────────────
+
+export interface BpOcrResult {
+  /** Systolic (top number on the cuff). null when Gemini couldn't read it. */
+  sbp: number | null
+  /** Diastolic (middle number on the cuff). null when Gemini couldn't read it. */
+  dbp: number | null
+  /** Pulse (bottom number / heart icon). Optional — many cuffs hide it. */
+  pulse: number | null
+  /** Gemini's self-reported confidence 0..1. 0 = explicit "couldn't read it". */
+  confidence: number
+  /** Raw Gemini JSON for debugging + audit. */
+  raw: string
+}
+
+const BP_OCR_PROMPT = `You are reading a home blood pressure cuff display.
+Extract these three numbers from the image, in this exact order:
+1. Systolic (SYS, top number, usually largest, range 60-250)
+2. Diastolic (DIA, middle number, range 40-150)
+3. Pulse (PUL or heart icon, bottom number, range 30-220, optional)
+
+Respond with strict JSON only, no prose, no markdown:
+{ "sbp": <number>, "dbp": <number>, "pulse": <number|null>, "confidence": <0..1> }
+
+confidence reflects how clearly the digits were visible. If you cannot
+identify both sbp and dbp, return:
+{ "sbp": null, "dbp": null, "pulse": null, "confidence": 0 }
+Never guess. Never return values outside the ranges above.`
+
+/**
+ * Parse Gemini's JSON-mode response for BP OCR. Strict shape check; throws
+ * on missing keys or non-numeric values so the controller can return 502 to
+ * the caller. The OcrService applies clinical range validation downstream.
+ */
+function parseBpOcrResponse(raw: string): BpOcrResult {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error(`BP OCR — non-JSON response from Gemini: ${raw.slice(0, 200)}`)
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('BP OCR — Gemini response is not an object')
+  }
+  const obj = parsed as Record<string, unknown>
+  const sbp = numericOrNull(obj.sbp)
+  const dbp = numericOrNull(obj.dbp)
+  const pulse = numericOrNull(obj.pulse)
+  const confidence = typeof obj.confidence === 'number' ? obj.confidence : 0
+  return { sbp, dbp, pulse, confidence, raw }
+}
+
+function numericOrNull(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  return null
+}
+
 @Injectable()
 export class GeminiService implements OnModuleInit {
   private readonly logger = new Logger(GeminiService.name)
@@ -105,6 +162,49 @@ export class GeminiService implements OnModuleInit {
       return {
         choices: [{ message: { content: text, role: 'assistant' as const } }],
       }
+    })
+  }
+
+  /**
+   * Extract systolic/diastolic/pulse numbers from a photo of a home BP cuff
+   * display (NIVA_SILENT_LITERACY_PLAN §3). Mirrors the transcribeAudio
+   * pattern: inlineData part + structured prompt + JSON-mode output. Caller
+   * is responsible for range-validating the returned numbers — this method
+   * trusts Gemini's response shape but not its values.
+   *
+   * Throws on unparseable JSON or missing required fields. Returns
+   * confidence=0 + null numbers when Gemini explicitly couldn't read the
+   * display (acceptable, distinguished from a parse failure).
+   */
+  async extractBpFromImage(
+    imageBase64: string,
+    mimeType: string,
+  ): Promise<BpOcrResult> {
+    return this.withRetry('extractBpFromImage', async () => {
+      const response = await this.client.models.generateContent({
+        model: this.chatModel,
+        contents: [{
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: imageBase64 } },
+            { text: BP_OCR_PROMPT },
+          ],
+        }],
+        config: { responseMimeType: 'application/json' },
+      })
+      const raw = response.text?.trim() ?? ''
+
+      const usage = response.usageMetadata
+      this.langsmith?.traceRun('extractBpFromImage', {
+        model: this.chatModel,
+        inputTokens: usage?.promptTokenCount,
+        outputTokens: usage?.candidatesTokenCount,
+        totalTokens: usage?.totalTokenCount,
+        latencyMs: 0,
+        source: 'text',
+      })
+
+      return parseBpOcrResponse(raw)
     })
   }
 

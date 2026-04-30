@@ -229,7 +229,7 @@ export default function RegisterPage() {
     <Suspense>
     <div className="bg-white">
       <LandingHeader activeLink="" />
-      <div className="lg:min-h-screen pt-24 lg:pt-[64px] pb-10 lg:pb-0 flex items-start lg:items-center justify-center px-4 sm:px-6 lg:px-12">
+      <main id="main" className="lg:min-h-screen pt-[64px] pb-10 lg:pb-0 flex items-start lg:items-center justify-center px-4 sm:px-6 lg:px-12">
       <div className="w-full max-w-300 mx-auto">
         <div className="flex flex-col items-center md:items-center md:flex-row gap-8 lg:gap-20">
           {/* Left side - Form */}
@@ -270,17 +270,18 @@ export default function RegisterPage() {
 
               {/* Email input (shared) */}
               <div className="w-full max-w-105">
-                <label className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
+                <label htmlFor="signin-email" className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
                   {t('register.emailAddress')}
                 </label>
                 <input
+                  id="signin-email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder={t('register.emailPlaceholder')}
                   autoComplete="email"
                   aria-invalid={showEmailError}
-                  className={`w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] rounded-lg text-base text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all border ${
+                  className={`w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] rounded-lg text-base text-[#171717] placeholder:text-[#737373] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all border ${
                     showEmailError ? 'border-red-400' : 'border-[#e5d9f2]'
                   }`}
                 />
@@ -305,7 +306,7 @@ export default function RegisterPage() {
                     {otpSent && (
                       <>
                         <div className="flex items-center justify-between mb-2">
-                          <label className="font-semibold text-[#171717] text-xs lg:text-sm">
+                          <label htmlFor="signin-otp" className="font-semibold text-[#171717] text-xs lg:text-sm">
                             {t('register.enterOtp')}
                           </label>
                           <button
@@ -322,13 +323,14 @@ export default function RegisterPage() {
                           </button>
                         </div>
                         <input
+                          id="signin-otp"
                           type="text"
                           inputMode="numeric"
                           value={otp}
                           onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH))}
                           placeholder="••••••"
                           maxLength={OTP_LENGTH}
-                          className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-base lg:text-lg text-center tracking-[8px] text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all mb-1"
+                          className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-base lg:text-lg text-center tracking-[8px] text-[#171717] placeholder:text-[#737373] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all mb-1"
                         />
                         {/* OTP-length hint: only while user is mid-typing */}
                         {showOtpLengthHint && (
@@ -433,7 +435,7 @@ export default function RegisterPage() {
                 <div className="bg-white/60 rounded-2xl p-4 space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="bg-[#7B00E0] size-8 rounded-lg flex items-center justify-center">
-                      <Mail className="w-4 h-4 text-white" strokeWidth={2.5} />
+                      <Mail aria-hidden="true" className="w-4 h-4 text-white" strokeWidth={2.5} />
                     </div>
                     <h4 className="font-bold text-[#170c1d] text-sm lg:text-base">
                       {t('register.magicLinkTitle') || 'Magic Link'}
@@ -448,7 +450,7 @@ export default function RegisterPage() {
                 <div className="bg-white/60 rounded-2xl p-4 space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="bg-[#7B00E0] size-8 rounded-lg flex items-center justify-center">
-                      <KeyRound className="w-4 h-4 text-white" strokeWidth={2.5} />
+                      <KeyRound aria-hidden="true" className="w-4 h-4 text-white" strokeWidth={2.5} />
                     </div>
                     <h4 className="font-bold text-[#170c1d] text-sm lg:text-base">
                       {t('register.otpTitle') || 'OTP Code'}
@@ -461,7 +463,7 @@ export default function RegisterPage() {
 
                 {/* Shared security note */}
                 <div className="flex items-center gap-2 pt-1">
-                  <CheckCircle2 className="w-4 h-4 text-[#7B00E0] shrink-0" strokeWidth={2.5} />
+                  <CheckCircle2 aria-hidden="true" className="w-4 h-4 text-[#7B00E0] shrink-0" strokeWidth={2.5} />
                   <p className="text-[#4b3b55] text-xs lg:text-sm">
                     {t('register.noPassword')}
                   </p>
@@ -471,7 +473,7 @@ export default function RegisterPage() {
           </div>
         </div>
       </div>
-      </div>
+      </main>
       <LandingFooter />
     </div>
     </Suspense>

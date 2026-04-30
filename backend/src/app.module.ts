@@ -21,6 +21,7 @@ import { ProviderModule } from './provider/provider.module.js'
 import { EmailModule } from './email/email.module.js'
 import { VoiceModule } from './voice/voice.module.js'
 import { CommonModule } from './common/common.module.js'
+import { OcrModule } from './ocr/ocr.module.js'
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -60,6 +61,7 @@ import { CommonModule } from './common/common.module.js'
     ContentModule,
     ProviderModule,
     VoiceModule,
+    OcrModule,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],

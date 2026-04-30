@@ -473,7 +473,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── Content ── */}
-      <main className="relative flex flex-col px-4 md:px-8 py-4 md:py-5 pb-20 md:pb-16 max-w-7xl mx-auto">
+      <main id="main" className="relative flex flex-col px-4 md:px-8 py-4 md:py-5 pb-20 md:pb-16 max-w-7xl mx-auto">
 
         {/* D3 — Active alert card (top priority; tier-colored). Tap to open
             the Flow C alert detail. Hidden when no open alerts. */}
@@ -524,7 +524,7 @@ export default function Dashboard() {
               style={{ backgroundColor: topAlertVariant.accent }}
             >
               {t('dashboard.viewDetails')}
-              <ArrowRight className="w-3.5 h-3.5" />
+              <ArrowRight aria-hidden="true" className="w-3.5 h-3.5" />
             </div>
             <ArrowRight
               className="w-4 h-4 shrink-0 sm:hidden"
@@ -835,14 +835,14 @@ export default function Dashboard() {
                     router.push(intakeUi.kind === 'done' ? '/check-in' : '/clinical-intake')
                   }
                   disabled={intakeUi.kind === 'unknown'}
-                  className="w-full h-10 bg-white flex items-center justify-center gap-1.5 rounded-full text-[#7B00E0] font-bold text-[13px] transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
+                  className="w-full h-11 bg-white flex items-center justify-center gap-1.5 rounded-full text-[#7B00E0] font-bold text-[13px] transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
                 >
                   {loading ? (
                     <Bone w={120} h={12} color="#7B00E0" />
                   ) : intakeUi.kind !== 'done' ? (
-                    <>Finish intake first <ArrowRight className="w-4 h-4" /></>
+                    <>Finish intake first <ArrowRight aria-hidden="true" className="w-4 h-4" /></>
                   ) : (
-                    <>{todayHasEntry ? t('dashboard.logAnother') : t('dashboard.startCheckin')} <ArrowRight className="w-4 h-4" /></>
+                    <>{todayHasEntry ? t('dashboard.logAnother') : t('dashboard.startCheckin')} <ArrowRight aria-hidden="true" className="w-4 h-4" /></>
                   )}
                 </button>
                 <span className="block text-[10px] mt-3 text-center text-white">
@@ -856,7 +856,13 @@ export default function Dashboard() {
             </div>
 
             {/* Recent Alerts */}
-            <div className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
+            <div
+              className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col"
+              style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}
+              aria-live="polite"
+              aria-relevant="additions"
+              aria-label={t('accessibility.alertsRegion')}
+            >
               <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
                 {t('dashboard.recentAlerts')}
               </h3>
@@ -922,7 +928,7 @@ export default function Dashboard() {
                       className="mt-2 w-full flex items-center justify-center gap-1 py-1.5 rounded-full text-[11px] font-semibold transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                       style={{ color: 'var(--brand-primary-purple)', backgroundColor: 'var(--brand-primary-purple-light)' }}
                     >
-                      {t('dashboard.viewAllAlerts')} <ArrowRight className="w-3 h-3" />
+                      {t('dashboard.viewAllAlerts')} <ArrowRight aria-hidden="true" className="w-3 h-3" />
                     </button>
                   ) : null}
                 </>

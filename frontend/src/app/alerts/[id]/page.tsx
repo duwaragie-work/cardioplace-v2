@@ -31,7 +31,7 @@ interface PageProps {
 
 function AlertSkeleton() {
   return (
-    <div className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
+    <main id="main" className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
       <div className="max-w-2xl mx-auto px-4 md:px-8 py-6 space-y-5">
         <div
           className="rounded-2xl p-5 sm:p-6"
@@ -71,7 +71,7 @@ function AlertSkeleton() {
           style={{ height: 48, backgroundColor: '#EDE9F6' }}
         />
       </div>
-    </div>
+    </main>
   );
 }
 
@@ -85,7 +85,8 @@ function CareTeamOnly() {
   const router = useRouter();
   const { t } = useLanguage();
   return (
-    <div
+    <main
+      id="main"
       className="min-h-screen flex items-center justify-center px-4"
       style={{ backgroundColor: '#FAFBFF' }}
     >
@@ -95,6 +96,7 @@ function CareTeamOnly() {
           style={{ backgroundColor: 'var(--brand-success-green-light)' }}
         >
           <ShieldCheck
+            aria-hidden="true"
             className="w-8 h-8"
             style={{ color: 'var(--brand-success-green)' }}
           />
@@ -120,11 +122,11 @@ function CareTeamOnly() {
             boxShadow: 'var(--brand-shadow-button)',
           }}
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft aria-hidden="true" className="w-4 h-4" />
           {t('alerts.notFound.backToDashboard')}
         </button>
       </div>
-    </div>
+    </main>
   );
 }
 
@@ -132,7 +134,8 @@ function NotFound({ reason }: { reason: string }) {
   const router = useRouter();
   const { t } = useLanguage();
   return (
-    <div
+    <main
+      id="main"
       className="min-h-screen flex items-center justify-center px-4"
       style={{ backgroundColor: '#FAFBFF' }}
     >
@@ -142,6 +145,7 @@ function NotFound({ reason }: { reason: string }) {
           style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}
         >
           <AlertCircle
+            aria-hidden="true"
             className="w-8 h-8"
             style={{ color: 'var(--brand-warning-amber)' }}
           />
@@ -167,11 +171,11 @@ function NotFound({ reason }: { reason: string }) {
             boxShadow: 'var(--brand-shadow-button)',
           }}
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft aria-hidden="true" className="w-4 h-4" />
           {t('alerts.notFound.backToDashboard')}
         </button>
       </div>
-    </div>
+    </main>
   );
 }
 

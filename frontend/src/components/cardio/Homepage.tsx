@@ -24,11 +24,11 @@ export default function Homepage() {
     <div className="bg-[#fef7ff] flex flex-col min-h-screen overflow-x-hidden">
       <LandingHeader activeLink="Home" />
 
-      <main className="flex flex-col items-center pt-[64px] w-full overflow-x-hidden">
+      <main id="main" className="flex flex-col items-center pt-[64px] w-full overflow-x-hidden">
         {/* ============ HERO SECTION ============ */}
         <section className="relative w-full min-h-[calc(100vh-64px)] flex items-end lg:items-center justify-center overflow-hidden px-4 sm:px-6 md:px-8 pb-4 sm:pb-6 lg:pb-0">
           <div className="absolute inset-0">
-            <Image src="/ai-healthcare.png" alt="" fill sizes="100vw" quality={500} unoptimized className="object-cover object-[center_20%] sm:object-[center_30%] md:object-center" priority />
+            <Image src="/ai-healthcare.png" alt={t('home.heroImageAlt')} fill sizes="100vw" quality={500} unoptimized className="object-cover object-[center_20%] sm:object-[center_30%] md:object-center" priority />
           </div>
           {/* Dark overlay — stronger on mobile so text is readable on light image */}
           <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/50 to-black/20 md:from-black/60 md:via-black/30 md:to-transparent" />
@@ -83,20 +83,22 @@ export default function Homepage() {
                   className="w-full backdrop-blur-md bg-white/10 border-2 border-[rgba(92,0,169,0.2)] rounded-full p-1.5 sm:p-2.5 flex items-center shadow-2xl"
                 >
                   <div className="pl-2 sm:pl-4 shrink-0">
-                    <Image src="/cardioplace-icon.svg" alt="" width={36} height={36} className="md:w-[42px] md:h-[42px]" />
+                    <Image src="/cardioplace-icon.svg" alt={t('home.cardioplaceLogoAlt')} width={36} height={36} className="md:w-[42px] md:h-[42px]" />
                   </div>
                   <input
                     type="text"
                     readOnly
                     onFocus={handleChatClick}
                     placeholder={t('home.aiPlaceholder')}
+                    aria-label={t('home.aiPlaceholder')}
                     className="flex-1 px-2 sm:px-4 py-2 sm:py-3 text-sm sm:text-base bg-transparent outline-none text-black placeholder-white min-w-0 cursor-text"
                   />
                   <button
                     type="submit"
+                    aria-label="Send message"
                     className="bg-[#7b00e0] rounded-full w-10 h-10 sm:w-14 sm:h-14 flex items-center justify-center shrink-0 shadow-lg hover:bg-[#6600bc] transition-colors"
                   >
-                    <Send className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                    <Send aria-hidden="true" className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                   </button>
                 </form>
                 {/* Prompt chips — single row */}

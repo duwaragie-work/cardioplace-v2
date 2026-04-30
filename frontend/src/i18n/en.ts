@@ -697,6 +697,8 @@ const en = {
 
   // ─── Homepage ─────────────────────────────────────────────────────────────
   'home.heroBadge': 'AI-POWERED CARDIOVASCULAR PATIENT SAFETY',
+  'home.heroImageAlt': 'A grandmother using her phone at home, supported by AI cardiac monitoring',
+  'home.cardioplaceLogoAlt': 'Cardioplace logo',
   'home.heroTitle1': 'The Gap Between Visits',
   'home.heroTitle2': 'Is Where We Work',
   'home.heroDesc': 'Every day, by voice or by text, and in your language, we check in. When something needs attention, the care team knows. Not next week. Now.',
@@ -1116,6 +1118,28 @@ const en = {
   'lang.ar': 'العربية',
   'lang.ko': '한국어',
   'lang.ht': 'Kreyòl Ayisyen',
+
+  // Accessibility (Rengan WCAG 2.2 AA — Tasks 3, 10, 11)
+  'accessibility.skipToMain': 'Skip to main content',
+  'accessibility.editReading': 'Edit reading',
+  'accessibility.deleteReading': 'Delete reading',
+  'accessibility.alertsRegion': 'Active alerts',
+  'accessibility.closeDialog': 'Close dialog',
+
+  // ─── BP photo OCR (NIVA_SILENT_LITERACY_PLAN §3) ───────────────────────────
+  'ocr.bp.cameraLabel': 'Take a photo of your cuff',
+  'ocr.bp.uploading': 'Reading your photo…',
+  'ocr.bp.confirmTitle': 'Is this right?',
+  'ocr.bp.helpText': 'We read these numbers from your photo. Confirm only if they match your cuff.',
+  'ocr.bp.audioTemplate': 'We read {sbp} over {dbp}{pulsePart}. Is that right?',
+  'ocr.bp.audioPulsePart': ', pulse {pulse}',
+  'ocr.bp.confirm': 'Confirm',
+  'ocr.bp.edit': 'Edit',
+  'ocr.bp.retake': 'Re-take',
+  'ocr.bp.errLowConfidence': "Couldn't read the cuff clearly. Please type the numbers.",
+  'ocr.bp.errRateLimited': 'Too many photo attempts today. Please type the numbers.',
+  'ocr.bp.errNetwork': 'Connection problem. Please type the numbers.',
+  'ocr.bp.errTooLarge': 'Photo is too big. Try a smaller picture.',
 } as const;
 
 export type TranslationKey = keyof typeof en;

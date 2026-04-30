@@ -59,6 +59,7 @@ import {
 import { getBMI } from '@cardioplace/shared';
 import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
+import BpPhotoButton from '@/components/intake/BpPhotoButton';
 import ChoiceCard from '@/components/intake/ChoiceCard';
 import StepDots from '@/components/intake/StepDots';
 
@@ -469,7 +470,19 @@ function B2Reading({ form, setField }: StepProps) {
       <div>
         <label htmlFor="checkin-systolic" className="flex items-center justify-between text-[13px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
           <span>{t('checkin.b2.bpLabel')}</span>
-          <AudioButton text={t('checkin.b2.bpAudio')} size="sm" />
+          <span className="flex items-center gap-2">
+            {/* Phase/27 BP photo OCR — patient snaps cuff display, confirms numbers
+                in modal, then values flow into systolicBP/diastolicBP/pulse like a
+                manual entry. Hidden when NEXT_PUBLIC_BP_OCR_ENABLED !== 'true'. */}
+            <BpPhotoButton
+              onConfirm={(r) => {
+                setField('systolicBP', String(r.sbp));
+                setField('diastolicBP', String(r.dbp));
+                if (r.pulse != null) setField('pulse', String(r.pulse));
+              }}
+            />
+            <AudioButton text={t('checkin.b2.bpAudio')} size="sm" />
+          </span>
         </label>
         <div className="flex items-end gap-3">
           <div className="flex-1">
@@ -1572,7 +1585,7 @@ export default function CheckIn() {
         className="h-[calc(100dvh-4rem)] flex flex-col overflow-hidden"
         style={{ backgroundColor: 'var(--brand-background)' }}
       >
-        <main className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-8">
+        <main id="main" className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-8">
           <div
             className="w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 text-center"
             style={{ boxShadow: '0 4px 24px rgba(123,0,224,0.08)' }}
@@ -1625,7 +1638,7 @@ export default function CheckIn() {
         className="min-h-[calc(100dvh-4rem)] flex flex-col"
         style={{ backgroundColor: 'var(--brand-background)' }}
       >
-        <main className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-4">
+        <main id="main" className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-4">
           <ConfirmationScreen
             lastReading={last}
             sessionReadings={sessionReadings}
@@ -1675,6 +1688,7 @@ export default function CheckIn() {
       {/* Main content with safe-area bottom padding sized just enough to clear
           the sticky CTA (~72px tall) plus the iOS home indicator. */}
       <main
+        id="main"
         className="flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-5 sm:py-8"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 7rem)' }}
       >
@@ -1785,6 +1799,7 @@ function CheckInSkeleton() {
 
       {/* Body */}
       <main
+        id="main"
         className="flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-5 sm:py-8"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 7rem)' }}
       >

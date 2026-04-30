@@ -927,7 +927,7 @@ export default function NotificationsPage() {
         : notifs;
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
+    <main id="main" className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
       <div className="max-w-2xl mx-auto px-4 md:px-8 py-6">
         {/* Page header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
@@ -1118,7 +1118,7 @@ export default function NotificationsPage() {
         )}
       </div>
       </div>
-    </div>
+    </main>
   );
 }
 
