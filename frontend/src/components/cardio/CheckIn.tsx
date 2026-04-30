@@ -59,6 +59,7 @@ import {
 import { getBMI } from '@cardioplace/shared';
 import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
+import BpPhotoButton from '@/components/intake/BpPhotoButton';
 import ChoiceCard from '@/components/intake/ChoiceCard';
 import StepDots from '@/components/intake/StepDots';
 
@@ -469,7 +470,19 @@ function B2Reading({ form, setField }: StepProps) {
       <div>
         <label htmlFor="checkin-systolic" className="flex items-center justify-between text-[13px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
           <span>{t('checkin.b2.bpLabel')}</span>
-          <AudioButton text={t('checkin.b2.bpAudio')} size="sm" />
+          <span className="flex items-center gap-2">
+            {/* Phase/27 BP photo OCR — patient snaps cuff display, confirms numbers
+                in modal, then values flow into systolicBP/diastolicBP/pulse like a
+                manual entry. Hidden when NEXT_PUBLIC_BP_OCR_ENABLED !== 'true'. */}
+            <BpPhotoButton
+              onConfirm={(r) => {
+                setField('systolicBP', String(r.sbp));
+                setField('diastolicBP', String(r.dbp));
+                if (r.pulse != null) setField('pulse', String(r.pulse));
+              }}
+            />
+            <AudioButton text={t('checkin.b2.bpAudio')} size="sm" />
+          </span>
         </label>
         <div className="flex items-end gap-3">
           <div className="flex-1">

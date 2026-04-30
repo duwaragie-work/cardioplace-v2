@@ -1125,6 +1125,21 @@ const es: Record<TranslationKey, string> = {
   'accessibility.deleteReading': 'Eliminar lectura',
   'accessibility.alertsRegion': 'Alertas activas',
   'accessibility.closeDialog': 'Cerrar diálogo',
+
+  // ─── BP photo OCR (NIVA_SILENT_LITERACY_PLAN §3) — MT, needs review ────────
+  'ocr.bp.cameraLabel': 'Tome una foto de su brazalete',
+  'ocr.bp.uploading': 'Leyendo su foto…',
+  'ocr.bp.confirmTitle': '¿Es esto correcto?',
+  'ocr.bp.helpText': 'Leímos estos números de su foto. Confirme solo si coinciden con su brazalete.',
+  'ocr.bp.audioTemplate': 'Leímos {sbp} sobre {dbp}{pulsePart}. ¿Es correcto?',
+  'ocr.bp.audioPulsePart': ', pulso {pulse}',
+  'ocr.bp.confirm': 'Confirmar',
+  'ocr.bp.edit': 'Editar',
+  'ocr.bp.retake': 'Tomar de nuevo',
+  'ocr.bp.errLowConfidence': 'No se pudo leer el brazalete con claridad. Por favor escriba los números.',
+  'ocr.bp.errRateLimited': 'Demasiados intentos hoy. Por favor escriba los números.',
+  'ocr.bp.errNetwork': 'Problema de conexión. Por favor escriba los números.',
+  'ocr.bp.errTooLarge': 'La foto es demasiado grande. Pruebe una imagen más pequeña.',
 };
 
 export default es;

@@ -1125,6 +1125,21 @@ const fr: Record<TranslationKey, string> = {
   'accessibility.deleteReading': 'Supprimer la mesure',
   'accessibility.alertsRegion': 'Alertes actives',
   'accessibility.closeDialog': 'Fermer la boîte de dialogue',
+
+  // ─── BP photo OCR (NIVA_SILENT_LITERACY_PLAN §3) — MT, needs review ────────
+  'ocr.bp.cameraLabel': 'Prenez une photo de votre brassard',
+  'ocr.bp.uploading': 'Lecture de votre photo…',
+  'ocr.bp.confirmTitle': 'Est-ce correct ?',
+  'ocr.bp.helpText': 'Nous avons lu ces chiffres sur votre photo. Confirmez seulement s\'ils correspondent à votre brassard.',
+  'ocr.bp.audioTemplate': 'Nous avons lu {sbp} sur {dbp}{pulsePart}. Est-ce correct ?',
+  'ocr.bp.audioPulsePart': ', pouls {pulse}',
+  'ocr.bp.confirm': 'Confirmer',
+  'ocr.bp.edit': 'Modifier',
+  'ocr.bp.retake': 'Reprendre',
+  'ocr.bp.errLowConfidence': 'Impossible de lire le brassard clairement. Veuillez taper les chiffres.',
+  'ocr.bp.errRateLimited': 'Trop de tentatives photo aujourd\'hui. Veuillez taper les chiffres.',
+  'ocr.bp.errNetwork': 'Problème de connexion. Veuillez taper les chiffres.',
+  'ocr.bp.errTooLarge': 'La photo est trop grande. Essayez une image plus petite.',
 };
 
 export default fr;

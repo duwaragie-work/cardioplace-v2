@@ -26,6 +26,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
+import BpPhotoButton from '@/components/intake/BpPhotoButton';
 import { kgToLbs } from '@/lib/units';
 
 type TFn = (key: TranslationKey) => string;
@@ -833,7 +834,18 @@ function EditModal({
                 >
                   {t('readings.bloodPressure')}
                 </label>
-                <AudioButton size="sm" text={t('readings.bloodPressure')} />
+                <span className="flex items-center gap-2">
+                  {/* Phase/27 BP photo OCR — re-edit path. Patient who realises
+                      they typed the wrong number can re-snap and overwrite. */}
+                  <BpPhotoButton
+                    onConfirm={(r) => {
+                      onChange('systolic', String(r.sbp));
+                      onChange('diastolic', String(r.dbp));
+                      if (r.pulse != null) onChange('pulse', String(r.pulse));
+                    }}
+                  />
+                  <AudioButton size="sm" text={t('readings.bloodPressure')} />
+                </span>
               </div>
               <div className="flex gap-3 items-center">
                 <input

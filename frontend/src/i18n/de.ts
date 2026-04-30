@@ -1125,6 +1125,21 @@ const de: Record<TranslationKey, string> = {
   'accessibility.deleteReading': 'Messung löschen',
   'accessibility.alertsRegion': 'Aktive Warnungen',
   'accessibility.closeDialog': 'Dialog schließen',
+
+  // ─── BP photo OCR (NIVA_SILENT_LITERACY_PLAN §3) — MT, needs review ────────
+  'ocr.bp.cameraLabel': 'Foto Ihrer Manschette aufnehmen',
+  'ocr.bp.uploading': 'Foto wird gelesen…',
+  'ocr.bp.confirmTitle': 'Ist das richtig?',
+  'ocr.bp.helpText': 'Wir haben diese Zahlen von Ihrem Foto gelesen. Bestätigen Sie nur, wenn sie mit Ihrer Manschette übereinstimmen.',
+  'ocr.bp.audioTemplate': 'Wir haben {sbp} zu {dbp}{pulsePart} gelesen. Ist das richtig?',
+  'ocr.bp.audioPulsePart': ', Puls {pulse}',
+  'ocr.bp.confirm': 'Bestätigen',
+  'ocr.bp.edit': 'Bearbeiten',
+  'ocr.bp.retake': 'Erneut aufnehmen',
+  'ocr.bp.errLowConfidence': 'Manschette konnte nicht klar gelesen werden. Bitte tippen Sie die Zahlen ein.',
+  'ocr.bp.errRateLimited': 'Heute zu viele Fotoversuche. Bitte tippen Sie die Zahlen ein.',
+  'ocr.bp.errNetwork': 'Verbindungsproblem. Bitte tippen Sie die Zahlen ein.',
+  'ocr.bp.errTooLarge': 'Foto ist zu groß. Versuchen Sie ein kleineres Bild.',
 };
 
 export default de;

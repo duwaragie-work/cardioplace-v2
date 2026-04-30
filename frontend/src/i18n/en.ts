@@ -1125,6 +1125,21 @@ const en = {
   'accessibility.deleteReading': 'Delete reading',
   'accessibility.alertsRegion': 'Active alerts',
   'accessibility.closeDialog': 'Close dialog',
+
+  // ─── BP photo OCR (NIVA_SILENT_LITERACY_PLAN §3) ───────────────────────────
+  'ocr.bp.cameraLabel': 'Take a photo of your cuff',
+  'ocr.bp.uploading': 'Reading your photo…',
+  'ocr.bp.confirmTitle': 'Is this right?',
+  'ocr.bp.helpText': 'We read these numbers from your photo. Confirm only if they match your cuff.',
+  'ocr.bp.audioTemplate': 'We read {sbp} over {dbp}{pulsePart}. Is that right?',
+  'ocr.bp.audioPulsePart': ', pulse {pulse}',
+  'ocr.bp.confirm': 'Confirm',
+  'ocr.bp.edit': 'Edit',
+  'ocr.bp.retake': 'Re-take',
+  'ocr.bp.errLowConfidence': "Couldn't read the cuff clearly. Please type the numbers.",
+  'ocr.bp.errRateLimited': 'Too many photo attempts today. Please type the numbers.',
+  'ocr.bp.errNetwork': 'Connection problem. Please type the numbers.',
+  'ocr.bp.errTooLarge': 'Photo is too big. Try a smaller picture.',
 } as const;
 
 export type TranslationKey = keyof typeof en;

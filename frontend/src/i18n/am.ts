@@ -1129,6 +1129,21 @@ const am: Record<TranslationKey, string> = {
   'accessibility.deleteReading': 'መለኪያን ይሰርዙ',
   'accessibility.alertsRegion': 'የነቁ ማንቂያዎች',
   'accessibility.closeDialog': 'መገናኛውን ይዝጉ',
+
+  // ─── BP photo OCR (NIVA_SILENT_LITERACY_PLAN §3) — MT AMHARIC, needs review ─
+  'ocr.bp.cameraLabel': 'የካፍዎን ፎቶ ያንሱ',
+  'ocr.bp.uploading': 'ፎቶዎ በመነበብ ላይ…',
+  'ocr.bp.confirmTitle': 'ይህ ትክክል ነው?',
+  'ocr.bp.helpText': 'እነዚህን ቁጥሮች ከፎቶዎ አንብበናል። ከካፍዎ ጋር ሲመሳሰል ብቻ ያረጋግጡ።',
+  'ocr.bp.audioTemplate': '{sbp} በ{dbp}{pulsePart} አንብበናል። ይህ ትክክል ነው?',
+  'ocr.bp.audioPulsePart': '፣ የልብ ምት {pulse}',
+  'ocr.bp.confirm': 'አረጋግጥ',
+  'ocr.bp.edit': 'አርም',
+  'ocr.bp.retake': 'እንደገና ያንሱ',
+  'ocr.bp.errLowConfidence': 'ካፉን በግልጽ ማንበብ አልቻልንም። እባክዎ ቁጥሮቹን ይጻፉ።',
+  'ocr.bp.errRateLimited': 'ዛሬ በጣም ብዙ የፎቶ ሙከራዎች። እባክዎ ቁጥሮቹን ይጻፉ።',
+  'ocr.bp.errNetwork': 'የግንኙነት ችግር። እባክዎ ቁጥሮቹን ይጻፉ።',
+  'ocr.bp.errTooLarge': 'ፎቶው በጣም ትልቅ ነው። ትንሽ ፎቶ ይሞክሩ።',
 };
 
 export default am;
