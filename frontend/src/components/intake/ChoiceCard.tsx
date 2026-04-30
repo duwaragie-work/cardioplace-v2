@@ -9,6 +9,7 @@ import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { Check } from 'lucide-react';
 import AudioButton from './AudioButton';
+import { applyFriendlyVoice } from '@/lib/tts-voice';
 
 interface Props {
   icon: ReactNode;
@@ -60,6 +61,7 @@ export default function ChoiceCard({
       const u = new SpeechSynthesisUtterance(audioText);
       u.lang = audioLang ?? 'en-US';
       u.rate = 0.95;
+      applyFriendlyVoice(u);
       synth.speak(u);
     }
   };

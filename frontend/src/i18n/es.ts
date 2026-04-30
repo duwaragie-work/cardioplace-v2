@@ -181,6 +181,27 @@ const es: Record<TranslationKey, string> = {
   'checkin.b3.otherLabel': '¿Algo más? (opcional)',
   'checkin.b3.otherPlaceholder': 'En sus propias palabras…',
 
+  // B4 — paso por medicamento
+  'checkin.b4.title': 'Medicamentos de hoy',
+  'checkin.b4.subtitle': 'Toca cada uno para decirnos si lo tomaste.',
+  'checkin.b4.audio': 'Medicamentos de hoy. Toca cada uno para decirnos si lo tomaste.',
+  'checkin.b4.noMeds': 'Aún no tenemos medicamentos registrados para ti. Agrégalos en ajustes para un mejor seguimiento.',
+  'checkin.b4.classAceInhibitor': 'inhibidor de la ECA',
+  'checkin.b4.classArb': 'ARA II',
+  'checkin.b4.classBetaBlocker': 'betabloqueante',
+  'checkin.b4.classDhpCcb': 'bloqueador del canal de calcio',
+  'checkin.b4.classNdhpCcb': 'bloqueador del canal de calcio',
+  'checkin.b4.classLoopDiuretic': 'diurético de asa',
+  'checkin.b4.classThiazide': 'tiazida',
+  'checkin.b4.classMra': 'MRA',
+  'checkin.b4.classSglt2': 'inhibidor SGLT2',
+  'checkin.b4.classAnticoagulant': 'anticoagulante',
+  'checkin.b4.classStatin': 'estatina',
+  'checkin.b4.classAntiarrhythmic': 'antiarrítmico',
+  'checkin.b4.classVasodilatorNitrate': 'vasodilatador / nitrato',
+  'checkin.b4.classArni': 'ARNI',
+  'checkin.b4.classOtherUnverified': 'otro',
+
   // B5 — confirmation
   'checkin.confirm.title': 'Lectura enviada',
   'checkin.confirm.titleMulti': 'Lectura {n} enviada',

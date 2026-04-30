@@ -49,6 +49,8 @@ import {
 
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
+import type { TranslationKey } from '@/i18n';
+import { applyFriendlyVoice } from '@/lib/tts-voice';
 import { ClinicalIntakeRequiredError, createJournalEntry } from '@/lib/services/journal.service';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
 import { hasDraft, loadDraft } from '@/lib/intake/draft';
@@ -668,18 +670,6 @@ interface MedicationStepProps extends StepProps {
   medsLoading: boolean;
 }
 
-const MISSED_REASONS: Array<{
-  value: 'FORGOT' | 'SIDE_EFFECTS' | 'RAN_OUT' | 'COST' | 'INTENTIONAL' | 'OTHER';
-  label: string;
-}> = [
-  { value: 'FORGOT', label: 'Forgot' },
-  { value: 'SIDE_EFFECTS', label: 'Side effects' },
-  { value: 'RAN_OUT', label: 'Ran out' },
-  { value: 'COST', label: 'Cost' },
-  { value: 'INTENTIONAL', label: 'Chose to skip' },
-  { value: 'OTHER', label: 'Other' },
-];
-
 type MedicationEntry = FormData['medicationStatus'][string];
 
 const DEFAULT_MED_ENTRY: MedicationEntry = {
@@ -688,7 +678,38 @@ const DEFAULT_MED_ENTRY: MedicationEntry = {
   missedDoses: 1,
 };
 
+// Maps the DrugClass prisma enum to a translation key. Patient-facing labels
+// (e.g. "beta blocker") for clinical descriptors; abbreviations (ARB, MRA,
+// SGLT2, ARNI) stay as-is across locales because that's how they appear on
+// patient handouts internationally.
+const DRUG_CLASS_LABEL_KEYS: Record<string, TranslationKey> = {
+  ACE_INHIBITOR: 'checkin.b4.classAceInhibitor',
+  ARB: 'checkin.b4.classArb',
+  BETA_BLOCKER: 'checkin.b4.classBetaBlocker',
+  DHP_CCB: 'checkin.b4.classDhpCcb',
+  NDHP_CCB: 'checkin.b4.classNdhpCcb',
+  LOOP_DIURETIC: 'checkin.b4.classLoopDiuretic',
+  THIAZIDE: 'checkin.b4.classThiazide',
+  MRA: 'checkin.b4.classMra',
+  SGLT2: 'checkin.b4.classSglt2',
+  ANTICOAGULANT: 'checkin.b4.classAnticoagulant',
+  STATIN: 'checkin.b4.classStatin',
+  ANTIARRHYTHMIC: 'checkin.b4.classAntiarrhythmic',
+  VASODILATOR_NITRATE: 'checkin.b4.classVasodilatorNitrate',
+  ARNI: 'checkin.b4.classArni',
+  OTHER_UNVERIFIED: 'checkin.b4.classOtherUnverified',
+};
+
 function StepMedication({ form, setField, medications, medsLoading }: MedicationStepProps) {
+  const { t, locale } = useLanguage();
+  // Resolve a drug-class label, falling back to the prisma value humanised
+  // (e.g. UNKNOWN_NEW_CLASS → "unknown new class") so a freshly-added enum
+  // value still renders something legible until translations catch up.
+  const drugClassLabel = (cls: string): string => {
+    const key = DRUG_CLASS_LABEL_KEYS[cls];
+    return key ? t(key) : cls.replace(/_/g, ' ').toLowerCase();
+  };
+
   const getEntry = (medId: string): MedicationEntry =>
     form.medicationStatus[medId] ?? DEFAULT_MED_ENTRY;
 
@@ -717,9 +738,9 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
   return (
     <div className="space-y-6">
       <StepHeader
-        title="Medications today"
-        subtitle="Tap each one to tell us if you took it."
-        audio="Medications today. Tap each one to tell us if you took it."
+        title={t('checkin.b4.title')}
+        subtitle={t('checkin.b4.subtitle')}
+        audio={t('checkin.b4.audio')}
         step={4}
         total={5}
       />
@@ -747,7 +768,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
           className="rounded-xl p-3 text-[13px] leading-relaxed"
           style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-text-primary)' }}
         >
-          We don&apos;t have any medications on file for you yet. Add your medications in settings for better follow-up.
+          {t('checkin.b4.noMeds')}
         </div>
       )}
 
@@ -787,7 +808,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                       className="text-[11px]"
                       style={{ color: 'var(--brand-text-muted)' }}
                     >
-                      {med.drugClass.replace(/_/g, ' ').toLowerCase()}
+                      {drugClassLabel(med.drugClass)}
                     </p>
                   </div>
                   {/* Phase/26 TTS pass 2 — per-medication audio so a non-reader
@@ -795,7 +816,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                       / not due yet. */}
                   <AudioButton
                     size="sm"
-                    text={`${med.drugName}, ${med.drugClass.replace(/_/g, ' ').toLowerCase()}`}
+                    text={`${med.drugName}, ${drugClassLabel(med.drugClass)}`}
                   />
                 </div>
 
@@ -803,17 +824,17 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                   {[
                     {
                       value: 'yes' as const,
-                      label: 'Yes',
+                      label: t('common.yes'),
                       accent: 'var(--brand-success-green)',
                     },
                     {
                       value: 'no' as const,
-                      label: 'No',
+                      label: t('common.no'),
                       accent: 'var(--brand-warning-amber)',
                     },
                     {
                       value: 'scheduledLater' as const,
-                      label: 'Not due yet',
+                      label: t('readings.notDueYet'),
                       accent: 'var(--brand-primary-purple)',
                     },
                   ].map((opt) => {
@@ -832,8 +853,11 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                             const synth = window.speechSynthesis;
                             synth.cancel();
                             const u = new SpeechSynthesisUtterance(opt.label);
-                            u.lang = 'en-US';
+                            // Match the user's selected locale so the option
+                            // label is read with the right pronunciation.
+                            u.lang = ({ en: 'en-US', es: 'es-ES', fr: 'fr-FR', de: 'de-DE', am: 'am-ET' } as Record<string, string>)[locale] ?? 'en-US';
                             u.rate = 0.95;
+                            applyFriendlyVoice(u);
                             synth.speak(u);
                           }
                           setTaken(med.id, opt.value);
@@ -863,7 +887,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                       className="text-[11px] font-semibold uppercase tracking-wide"
                       style={{ color: 'var(--brand-text-muted)' }}
                     >
-                      Why did you miss it?
+                      {t('readings.whyMissed')}
                     </label>
                     <select
                       id={`reason-${med.id}`}
@@ -879,12 +903,13 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                         color: 'var(--brand-text-primary)',
                       }}
                     >
-                      <option value="">Select a reason…</option>
-                      {MISSED_REASONS.map((r) => (
-                        <option key={r.value} value={r.value}>
-                          {r.label}
-                        </option>
-                      ))}
+                      <option value="">{t('readings.selectReason')}</option>
+                      <option value="FORGOT">{t('readings.reasonForgot')}</option>
+                      <option value="SIDE_EFFECTS">{t('readings.reasonSideEffects')}</option>
+                      <option value="RAN_OUT">{t('readings.reasonRanOut')}</option>
+                      <option value="COST">{t('readings.reasonCost')}</option>
+                      <option value="INTENTIONAL">{t('readings.reasonIntentional')}</option>
+                      <option value="OTHER">{t('readings.reasonOther')}</option>
                     </select>
                   </div>
 
@@ -893,7 +918,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                       className="text-[11px] font-semibold uppercase tracking-wide"
                       style={{ color: 'var(--brand-text-muted)' }}
                     >
-                      How many doses?
+                      {t('readings.howManyDoses')}
                     </legend>
                     <div className="mt-1 flex items-center gap-3">
                       <button
@@ -903,6 +928,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                             missedDoses: Math.max(1, entry.missedDoses - 1),
                           })
                         }
+                        aria-label={t('readings.decreaseDoses')}
                         className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer"
                         style={{
                           borderColor: 'var(--brand-border)',
@@ -924,6 +950,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                             missedDoses: Math.min(10, entry.missedDoses + 1),
                           })
                         }
+                        aria-label={t('readings.increaseDoses')}
                         className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer"
                         style={{
                           borderColor: 'var(--brand-border)',
