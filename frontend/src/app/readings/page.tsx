@@ -1373,7 +1373,7 @@ export default function ReadingsPage() {
     // Default browser page scroll — no custom scroll container or fixed
     // height wrapper. The thin-scrollbar utility is reserved for the edit
     // modal body where scroll is genuinely contained.
-    <div className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
+    <div className="min-h-[calc(100dvh-4rem)]" style={{ backgroundColor: '#FAFBFF' }}>
       <div className="max-w-2xl mx-auto px-4 md:px-8 py-6">
         {/* Page header */}
         <div className="flex items-center justify-between gap-3 mb-6">
