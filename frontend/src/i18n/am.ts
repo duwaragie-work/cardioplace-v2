@@ -1205,6 +1205,32 @@ const am: Record<TranslationKey, string> = {
   'ocr.bp.errRateLimited': 'ዛሬ በጣም ብዙ የፎቶ ሙከራዎች። እባክዎ ቁጥሮቹን ይጻፉ።',
   'ocr.bp.errNetwork': 'የግንኙነት ችግር። እባክዎ ቁጥሮቹን ይጻፉ።',
   'ocr.bp.errTooLarge': 'ፎቶው በጣም ትልቅ ነው። ትንሽ ፎቶ ይሞክሩ።',
+
+  // ─── Medication-list OCR (Phase/27) — MT AMHARIC, needs review ─────────────
+  'ocr.med.cameraLabel': 'መድሃኒት ማዘዣ ይቅረጹ',
+  'ocr.med.uploading': 'ፎቶዎ በመነበብ ላይ…',
+  'ocr.med.confirmTitle': 'ይህ የመድሃኒት ዝርዝርዎ ነው?',
+  'ocr.med.helpText': '{count} መድሃኒቶች ከፎቶዎ አንብቤያለሁ። ከመጨመርዎ በፊት እያንዳንዱን ይንኩ።',
+  'ocr.med.lowConfidenceWarning': 'አንዳንድ ፊደላት ለማንበብ አስቸጋሪ ነበሩ — እያንዳንዱን ስም ይፈትሹ።',
+  'ocr.med.rowDrugNameLabel': 'የመድሃኒት ስም',
+  'ocr.med.rowFrequencyLabel': 'ስንት ጊዜ',
+  'ocr.med.badgeInCatalog': 'በካታሎግ',
+  'ocr.med.badgeFreeform': 'ነጻ ጽሑፍ',
+  'ocr.med.skip': 'ዝለል',
+  'ocr.med.unskip': 'መልሰው ይጨምሩ',
+  'ocr.med.addAll': '{count} ይጨምሩ',
+  'ocr.med.addAllEmpty': 'መድሃኒቶችን ይጨምሩ',
+  'ocr.med.cancel': 'ይቅር',
+  'ocr.med.retake': 'እንደገና ያንሱ',
+  'ocr.med.freqOnce': 'በቀን አንድ ጊዜ',
+  'ocr.med.freqTwice': 'በቀን ሁለት ጊዜ',
+  'ocr.med.freqThrice': 'በቀን ሶስት ጊዜ',
+  'ocr.med.freqUnsure': 'እርግጠኛ አይደለሁም',
+  'ocr.med.errLowConfidence': 'ፎቶውን በግልጽ ማንበብ አልተቻለም። ይሞክሩ በተሻለ ብርሃን።',
+  'ocr.med.errEmpty': 'በዚያ ፎቶ ውስጥ መድሃኒት አላገኘሁም። እንደገና ይሞክሩ።',
+  'ocr.med.errRateLimited': 'ዛሬ በጣም ብዙ ሙከራዎች። እባክዎ መድሃኒቶችን በእጅ ይጨምሩ።',
+  'ocr.med.errNetwork': 'የግንኙነት ችግር። እባክዎ መድሃኒቶችን በእጅ ይጨምሩ።',
+  'ocr.med.errTooLarge': 'ፎቶው በጣም ትልቅ ነው። ትንሽ ፎቶ ይሞክሩ።',
 };
 
 export default am;

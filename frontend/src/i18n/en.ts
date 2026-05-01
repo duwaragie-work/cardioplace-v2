@@ -1203,6 +1203,32 @@ const en = {
   'ocr.bp.errRateLimited': 'Too many photo attempts today. Please type the numbers.',
   'ocr.bp.errNetwork': 'Connection problem. Please type the numbers.',
   'ocr.bp.errTooLarge': 'Photo is too big. Try a smaller picture.',
+
+  // ─── Medication-list OCR (Phase/27 follow-up) ──────────────────────────────
+  'ocr.med.cameraLabel': 'Scan my prescription',
+  'ocr.med.uploading': 'Reading your photo…',
+  'ocr.med.confirmTitle': 'Is this your medication list?',
+  'ocr.med.helpText': 'I read {count} medications from your photo. Tap each to verify before adding.',
+  'ocr.med.lowConfidenceWarning': 'Some letters were hard to read — please check each name.',
+  'ocr.med.rowDrugNameLabel': 'Medication name',
+  'ocr.med.rowFrequencyLabel': 'How often',
+  'ocr.med.badgeInCatalog': 'In catalog',
+  'ocr.med.badgeFreeform': 'Freeform',
+  'ocr.med.skip': 'Skip',
+  'ocr.med.unskip': 'Add back',
+  'ocr.med.addAll': 'Add {count}',
+  'ocr.med.addAllEmpty': 'Add medications',
+  'ocr.med.cancel': 'Cancel',
+  'ocr.med.retake': 'Re-take',
+  'ocr.med.freqOnce': 'Once a day',
+  'ocr.med.freqTwice': 'Twice a day',
+  'ocr.med.freqThrice': 'Three times a day',
+  'ocr.med.freqUnsure': "I'm not sure",
+  'ocr.med.errLowConfidence': "Couldn't read the photo clearly. Try better lighting or a closer shot.",
+  'ocr.med.errEmpty': "I didn't find any medications in that photo. Try again with the label fully visible.",
+  'ocr.med.errRateLimited': 'Too many photo attempts today. Please add medications manually.',
+  'ocr.med.errNetwork': 'Connection problem. Please add medications manually.',
+  'ocr.med.errTooLarge': 'Photo is too big. Try a smaller picture.',
 } as const;
 
 export type TranslationKey = keyof typeof en;

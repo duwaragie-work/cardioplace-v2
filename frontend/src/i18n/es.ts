@@ -1201,6 +1201,32 @@ const es: Record<TranslationKey, string> = {
   'ocr.bp.errRateLimited': 'Demasiados intentos hoy. Por favor escriba los números.',
   'ocr.bp.errNetwork': 'Problema de conexión. Por favor escriba los números.',
   'ocr.bp.errTooLarge': 'La foto es demasiado grande. Pruebe una imagen más pequeña.',
+
+  // ─── Medication-list OCR (Phase/27) — MT, needs review ─────────────────────
+  'ocr.med.cameraLabel': 'Escanear mi receta',
+  'ocr.med.uploading': 'Leyendo su foto…',
+  'ocr.med.confirmTitle': '¿Es esta su lista de medicamentos?',
+  'ocr.med.helpText': 'Leí {count} medicamentos de su foto. Toque cada uno para verificar antes de agregar.',
+  'ocr.med.lowConfidenceWarning': 'Algunas letras eran difíciles de leer — revise cada nombre.',
+  'ocr.med.rowDrugNameLabel': 'Nombre del medicamento',
+  'ocr.med.rowFrequencyLabel': 'Con qué frecuencia',
+  'ocr.med.badgeInCatalog': 'En catálogo',
+  'ocr.med.badgeFreeform': 'Libre',
+  'ocr.med.skip': 'Omitir',
+  'ocr.med.unskip': 'Agregar de nuevo',
+  'ocr.med.addAll': 'Agregar {count}',
+  'ocr.med.addAllEmpty': 'Agregar medicamentos',
+  'ocr.med.cancel': 'Cancelar',
+  'ocr.med.retake': 'Tomar de nuevo',
+  'ocr.med.freqOnce': 'Una vez al día',
+  'ocr.med.freqTwice': 'Dos veces al día',
+  'ocr.med.freqThrice': 'Tres veces al día',
+  'ocr.med.freqUnsure': 'No estoy seguro',
+  'ocr.med.errLowConfidence': 'No se pudo leer la foto claramente. Pruebe con mejor iluminación.',
+  'ocr.med.errEmpty': 'No encontré medicamentos en esa foto. Inténtelo de nuevo.',
+  'ocr.med.errRateLimited': 'Demasiados intentos hoy. Agregue medicamentos manualmente.',
+  'ocr.med.errNetwork': 'Problema de conexión. Agregue medicamentos manualmente.',
+  'ocr.med.errTooLarge': 'La foto es demasiado grande. Pruebe una imagen más pequeña.',
 };
 
 export default es;

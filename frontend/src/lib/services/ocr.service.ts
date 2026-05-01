@@ -77,3 +77,79 @@ export async function uploadBpPhoto(file: File): Promise<BpOcrSuccess> {
       throw new BpOcrError('NETWORK', `Server returned ${res.status}`);
   }
 }
+
+// ─── Medication-list OCR (Phase/27 follow-up) ───────────────────────────────
+
+export interface MedOcrItem {
+  drugName: string;
+  /** Free-text frequency from the label — caller normalises via normaliseFrequency(). */
+  frequency: string;
+  /** Dose as printed (e.g. "10 mg"). Informational. */
+  doseText: string;
+  /** Exact text snippet Gemini extracted; persisted on PatientMedication.rawInputText. */
+  raw: string;
+}
+
+export interface MedOcrSuccess {
+  medications: MedOcrItem[];
+  confidence: number;
+}
+
+export type MedOcrErrorCode =
+  | 'LOW_CONFIDENCE'
+  | 'EMPTY_EXTRACTION'
+  | 'GEMINI_ERROR'
+  | 'RATE_LIMITED'
+  | 'TOO_LARGE'
+  | 'WRONG_TYPE'
+  | 'NETWORK';
+
+export class MedOcrError extends Error {
+  constructor(public readonly code: MedOcrErrorCode, message: string) {
+    super(message);
+    this.name = 'MedOcrError';
+  }
+}
+
+export async function uploadMedicationPhoto(file: File): Promise<MedOcrSuccess> {
+  if (file.size > MAX_BYTES) {
+    throw new MedOcrError('TOO_LARGE', 'Image exceeds 4 MB');
+  }
+
+  const formData = new FormData();
+  formData.append('image', file);
+
+  let res: Response;
+  try {
+    res = await fetchWithAuth(`${API}/api/v2/ocr/medications`, {
+      method: 'POST',
+      body: formData,
+    });
+  } catch {
+    throw new MedOcrError('NETWORK', 'Network error');
+  }
+
+  if (res.ok) {
+    return (await res.json()) as MedOcrSuccess;
+  }
+
+  const body = await res.json().catch(() => ({}) as Record<string, unknown>);
+  const code = (body as { code?: string }).code;
+  switch (res.status) {
+    case 422:
+      throw new MedOcrError(
+        code === 'EMPTY_EXTRACTION' ? 'EMPTY_EXTRACTION' : 'LOW_CONFIDENCE',
+        (body as { error?: string }).error ?? 'Could not read the photo',
+      );
+    case 429:
+      throw new MedOcrError('RATE_LIMITED', 'Daily OCR limit reached');
+    case 415:
+      throw new MedOcrError('WRONG_TYPE', 'Unsupported image type');
+    case 413:
+      throw new MedOcrError('TOO_LARGE', 'Image too large');
+    case 502:
+      throw new MedOcrError('GEMINI_ERROR', 'OCR provider unavailable');
+    default:
+      throw new MedOcrError('NETWORK', `Server returned ${res.status}`);
+  }
+}

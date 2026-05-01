@@ -64,6 +64,94 @@ function numericOrNull(v: unknown): number | null {
   return null
 }
 
+// ─── Medication OCR (Phase/27 Niva plan §3 — prescription scan) ─────────────
+
+export interface MedicationOcrItem {
+  /** Drug name as printed (Gemini extracts brand or generic verbatim). */
+  drugName: string
+  /** Free-text frequency from the label (e.g. "once daily", "BID",
+   *  "every 8 hours"). Empty string when not stated. Caller normalises. */
+  frequency: string
+  /** Dose as printed (e.g. "10 mg"). Informational — not persisted today. */
+  doseText: string
+  /** Exact text snippet Gemini extracted, stored on PatientMedication.rawInputText. */
+  raw: string
+}
+
+export interface MedicationOcrResult {
+  medications: MedicationOcrItem[]
+  /** Gemini's self-reported confidence 0..1. 0 = explicit "couldn't read it". */
+  confidence: number
+  /** Raw Gemini JSON for debugging + audit. */
+  rawJson: string
+}
+
+const MED_OCR_PROMPT = `You are reading a prescription, pharmacy printout, or pill-bottle label.
+Extract every medication you can see, in the order they appear.
+
+For each medication, return:
+- drugName: brand or generic name as printed (e.g., "Lisinopril", "Norvasc")
+- frequency: free text from the label (e.g., "once daily", "twice a day",
+  "BID", "every 8 hours", "as needed"). Pass through whatever you read —
+  the system will normalise it. Empty string if not stated.
+- doseText: dose as printed (e.g., "10 mg", "25 mg twice"). Empty string
+  if not stated.
+- raw: the exact text snippet you extracted this from, for audit.
+
+Respond with strict JSON only, no prose, no markdown:
+{
+  "medications": [
+    { "drugName": <string>, "frequency": <string>, "doseText": <string>, "raw": <string> }
+  ],
+  "confidence": <0..1>
+}
+
+confidence reflects how clearly the print was visible. If the image is
+unreadable, return:
+{ "medications": [], "confidence": 0 }
+Never invent drug names. If unsure of a single character, mark the whole
+drugName empty rather than guessing.`
+
+/**
+ * Strict-shape parser for Gemini's JSON-mode med-OCR response. Throws on
+ * malformed JSON or missing top-level keys so the OcrService layer can map
+ * to a friendly 502. Item-level garbage (missing drugName) is filtered, not
+ * thrown — patient gets the readable rows without a hard error.
+ */
+function parseMedicationOcrResponse(raw: string): MedicationOcrResult {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error(
+      `Medication OCR — non-JSON response from Gemini: ${raw.slice(0, 200)}`,
+    )
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Medication OCR — Gemini response is not an object')
+  }
+  const obj = parsed as Record<string, unknown>
+  const confidence =
+    typeof obj.confidence === 'number' && Number.isFinite(obj.confidence)
+      ? obj.confidence
+      : 0
+  const arr = Array.isArray(obj.medications) ? obj.medications : []
+  const medications: MedicationOcrItem[] = []
+  for (const row of arr) {
+    if (!row || typeof row !== 'object') continue
+    const r = row as Record<string, unknown>
+    const drugName = typeof r.drugName === 'string' ? r.drugName.trim() : ''
+    if (!drugName) continue // drop empty-name rows so the patient doesn't see junk
+    medications.push({
+      drugName,
+      frequency: typeof r.frequency === 'string' ? r.frequency.trim() : '',
+      doseText: typeof r.doseText === 'string' ? r.doseText.trim() : '',
+      raw: typeof r.raw === 'string' ? r.raw.trim() : drugName,
+    })
+  }
+  return { medications, confidence, rawJson: raw }
+}
+
 @Injectable()
 export class GeminiService implements OnModuleInit {
   private readonly logger = new Logger(GeminiService.name)
@@ -121,6 +209,45 @@ export class GeminiService implements OnModuleInit {
 
   get chatModelName(): string {
     return this.chatModel
+  }
+
+  /**
+   * Extract a medication list from a photo of a prescription, pharmacy
+   * printout, or pill-bottle label (NIVA_SILENT_LITERACY_PLAN §3 follow-up).
+   * Mirrors extractBpFromImage: same retry helper, same inlineData part,
+   * JSON-mode response. Caller (OcrService) is responsible for catalog
+   * matching, frequency normalisation, and persisting to PatientMedication.
+   */
+  async extractMedicationsFromImage(
+    imageBase64: string,
+    mimeType: string,
+  ): Promise<MedicationOcrResult> {
+    return this.withRetry('extractMedicationsFromImage', async () => {
+      const response = await this.client.models.generateContent({
+        model: this.chatModel,
+        contents: [{
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: imageBase64 } },
+            { text: MED_OCR_PROMPT },
+          ],
+        }],
+        config: { responseMimeType: 'application/json' },
+      })
+      const raw = response.text?.trim() ?? ''
+
+      const usage = response.usageMetadata
+      this.langsmith?.traceRun('extractMedicationsFromImage', {
+        model: this.chatModel,
+        inputTokens: usage?.promptTokenCount,
+        outputTokens: usage?.candidatesTokenCount,
+        totalTokens: usage?.totalTokenCount,
+        latencyMs: 0,
+        source: 'text',
+      })
+
+      return parseMedicationOcrResponse(raw)
+    })
   }
 
   /**

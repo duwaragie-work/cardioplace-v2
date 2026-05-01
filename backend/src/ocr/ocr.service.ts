@@ -6,7 +6,11 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { GeminiService } from '../gemini/gemini.service.js'
-import type { BpOcrResult } from '../gemini/gemini.service.js'
+import type {
+  BpOcrResult,
+  MedicationOcrResult,
+  MedicationOcrItem,
+} from '../gemini/gemini.service.js'
 
 // Clinical ranges — match the rule engine's bounds in
 // backend/src/daily_journal/engine/standard.ts so OCR can never seed values
@@ -40,21 +44,56 @@ export interface BpOcrSuccess {
   confidence: number
 }
 
+// ─── Medication OCR (Phase/27 follow-up) ────────────────────────────────────
+
+export type MedOcrFailureCode =
+  | 'LOW_CONFIDENCE'
+  | 'EMPTY_EXTRACTION'
+  | 'GEMINI_ERROR'
+  | 'RATE_LIMITED'
+
+export class MedOcrFailure extends Error {
+  constructor(public readonly code: MedOcrFailureCode, message: string) {
+    super(message)
+    this.name = 'MedOcrFailure'
+  }
+}
+
+export interface MedOcrSuccess {
+  medications: MedicationOcrItem[]
+  confidence: number
+}
+
+/**
+ * In-memory rate-limit counter key — kind isolates BP scans from med scans
+ * so a busy day on one doesn't lock out the other.
+ */
+type CounterKind = 'bp' | 'med'
+
 @Injectable()
 export class OcrService {
   private readonly logger = new Logger(OcrService.name)
-  private readonly maxPerDay: number
+  private readonly maxPerDay: Record<CounterKind, number>
 
-  // userId → { date: 'YYYY-MM-DD', count }. UTC midnight reset.
+  // `${kind}:${userId}` → { date: 'YYYY-MM-DD', count }. UTC midnight reset.
+  // Kinds isolated so a heavy BP scan day doesn't block a med scan and vice
+  // versa.
   private readonly counters = new Map<string, { date: string; count: number }>()
 
   constructor(
     private readonly gemini: GeminiService,
     private readonly config: ConfigService,
   ) {
-    const raw = this.config.get<string>('OCR_BP_MAX_PER_DAY')
-    const parsed = raw ? parseInt(raw, 10) : 20
-    this.maxPerDay = Number.isFinite(parsed) && parsed > 0 ? parsed : 20
+    this.maxPerDay = {
+      bp: this.readEnvLimit('OCR_BP_MAX_PER_DAY', 20),
+      med: this.readEnvLimit('OCR_MED_MAX_PER_DAY', 10),
+    }
+  }
+
+  private readEnvLimit(key: string, fallback: number): number {
+    const raw = this.config.get<string>(key)
+    const parsed = raw ? parseInt(raw, 10) : fallback
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
   }
 
   async extractBp(
@@ -62,7 +101,7 @@ export class OcrService {
     imageBuffer: Buffer,
     mimeType: string,
   ): Promise<BpOcrSuccess> {
-    this.checkRateLimit(userId)
+    this.checkRateLimit('bp', userId)
 
     const base64 = imageBuffer.toString('base64')
     let result: BpOcrResult
@@ -77,7 +116,7 @@ export class OcrService {
 
     // Increment counter only after a successful round-trip — failed Gemini
     // calls (5xx) shouldn't burn a quota slot.
-    this.bumpCounter(userId)
+    this.bumpCounter('bp', userId)
 
     if (result.confidence === 0 || result.sbp == null || result.dbp == null) {
       this.logger.log(
@@ -123,22 +162,82 @@ export class OcrService {
     }
   }
 
-  private checkRateLimit(userId: string) {
-    const today = new Date().toISOString().slice(0, 10)
-    const entry = this.counters.get(userId)
-    if (entry && entry.date === today && entry.count >= this.maxPerDay) {
-      throw new BpOcrFailure(
-        'RATE_LIMITED',
-        `Daily OCR limit (${this.maxPerDay}) reached`,
+  /**
+   * Phase/27 medication-list OCR. Same shape as extractBp: rate-limit →
+   * Gemini call → confidence gate → throw a typed failure for the controller
+   * to map to HTTP status. No clinical range validation here — the catalog
+   * matching + provider-verification flow happen on the frontend / on submit.
+   */
+  async extractMedications(
+    userId: string,
+    imageBuffer: Buffer,
+    mimeType: string,
+  ): Promise<MedOcrSuccess> {
+    this.checkRateLimit('med', userId)
+
+    const base64 = imageBuffer.toString('base64')
+    let result: MedicationOcrResult
+    try {
+      result = await this.gemini.extractMedicationsFromImage(base64, mimeType)
+    } catch (err) {
+      this.logger.error(
+        `Med OCR — Gemini call failed for user ${userId}: ${(err as Error).message}`,
       )
+      throw new MedOcrFailure('GEMINI_ERROR', 'OCR provider failed')
+    }
+
+    // Successful round-trip burns a quota slot regardless of how many meds
+    // came back — the cost is the API call, not the number of items.
+    this.bumpCounter('med', userId)
+
+    if (result.confidence === 0 || result.medications.length === 0) {
+      this.logger.log(
+        `Med OCR — empty extraction for user ${userId} (confidence=${result.confidence})`,
+      )
+      throw new MedOcrFailure(
+        'EMPTY_EXTRACTION',
+        'No medications detected in the photo',
+      )
+    }
+
+    if (result.confidence < MIN_CONFIDENCE) {
+      this.logger.log(
+        `Med OCR — confidence ${result.confidence} below threshold for user ${userId}`,
+      )
+      throw new MedOcrFailure('LOW_CONFIDENCE', 'Confidence too low')
+    }
+
+    this.logger.log(
+      `Med OCR success for user ${userId}: ${result.medications.length} meds, confidence=${result.confidence.toFixed(2)}`,
+    )
+
+    return {
+      medications: result.medications,
+      confidence: result.confidence,
     }
   }
 
-  private bumpCounter(userId: string) {
+  private checkRateLimit(kind: CounterKind, userId: string) {
     const today = new Date().toISOString().slice(0, 10)
-    const entry = this.counters.get(userId)
+    const key = `${kind}:${userId}`
+    const entry = this.counters.get(key)
+    const limit = this.maxPerDay[kind]
+    if (entry && entry.date === today && entry.count >= limit) {
+      // Surface the matching failure type so the controller can return the
+      // right HTTP status without sniffing the error class.
+      if (kind === 'bp') {
+        throw new BpOcrFailure('RATE_LIMITED', `Daily OCR limit (${limit}) reached`)
+      }
+      throw new MedOcrFailure('RATE_LIMITED', `Daily OCR limit (${limit}) reached`)
+    }
+  }
+
+  private bumpCounter(kind: CounterKind, userId: string) {
+    const today = new Date().toISOString().slice(0, 10)
+    const key = `${kind}:${userId}`
+    const entry = this.counters.get(key)
     if (!entry || entry.date !== today) {
-      this.counters.set(userId, { date: today, count: 1 })
+      this.counters.set(key, { date: today, count: 1 })
     } else {
       entry.count += 1
     }
