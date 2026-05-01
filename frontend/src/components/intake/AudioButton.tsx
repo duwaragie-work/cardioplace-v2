@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Volume2, VolumeX } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { applyFriendlyVoice } from '@/lib/tts-voice';
 
 // Maps our app locale codes to BCP-47 tags the browser's SpeechSynthesis
 // engine recognises. Values picked to match the voices most commonly
@@ -52,13 +53,19 @@ export default function AudioButton({
 
   useEffect(() => {
     setMounted(true);
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      setSupported(true);
-    }
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    setSupported(true);
+
+    // Voice list loads asynchronously on Chrome — getVoices() returns []
+    // until the engine populates the list and fires onvoiceschanged. Force
+    // an early read here so applyFriendlyVoice has voices on first click.
+    const synth = window.speechSynthesis;
+    synth.getVoices();
+    const onVoicesChanged = () => synth.getVoices();
+    synth.addEventListener('voiceschanged', onVoicesChanged);
     return () => {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
+      synth.removeEventListener('voiceschanged', onVoicesChanged);
+      synth.cancel();
     };
   }, []);
 
@@ -75,6 +82,10 @@ export default function AudioButton({
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = effectiveLang;
     utterance.rate = 0.95;
+    // Pick a warmer female voice + slight pitch lift via the shared helper
+    // so AudioButton, EmergencyAlertScreen, ChoiceCard, and the inline TTS
+    // in CheckIn all sound consistent.
+    applyFriendlyVoice(utterance);
     utterance.onend = () => setSpeaking(false);
     utterance.onerror = () => setSpeaking(false);
     synth.speak(utterance);

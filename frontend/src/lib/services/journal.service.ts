@@ -35,7 +35,7 @@ export interface JournalEntryPayload {
   sessionId?: string
   /** Pre-measurement 8-item checklist captured as a JSON object. */
   measurementConditions?: Record<string, unknown>
-  medicationTaken?: boolean
+  medicationTaken?: boolean | null
   /** Phase/26 — patient explicitly flagged ANY medication as not-due-yet on
    * this entry. Distinct from `medicationTaken` so the rule engine knows
    * the gap is intentional, not a missed dose. */

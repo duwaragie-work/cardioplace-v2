@@ -152,7 +152,7 @@ export default function Welcome() {
     >
       <LandingHeader />
 
-      <div className="flex-1 flex items-start lg:items-center max-w-300 mx-auto px-4 md:px-8 pt-20 lg:pt-0">
+      <main id="main" className="flex-1 flex items-start lg:items-center max-w-300 mx-auto px-4 md:px-8 pt-20 lg:pt-0">
         <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-16 lg:items-center overflow-visible">
           {/* LEFT COLUMN */}
           <div className="flex flex-col space-y-8">
@@ -244,7 +244,7 @@ export default function Welcome() {
             <BPCardIllustration t={t} />
           </div>
         </div>
-      </div>
+      </main>
 
       <LandingFooter />
     </div>

@@ -883,7 +883,9 @@ export class DailyJournalService {
     position: string | null
     sessionId: string | null
     medicationTaken: boolean | null
+    medicationScheduledLater?: boolean
     missedDoses: number | null
+    missedMedications?: JsonValue
     severeHeadache?: boolean
     visualChanges?: boolean
     alteredMentalStatus?: boolean
@@ -913,7 +915,9 @@ export class DailyJournalService {
       position: entry.position,
       sessionId: entry.sessionId,
       medicationTaken: entry.medicationTaken,
+      medicationScheduledLater: entry.medicationScheduledLater ?? false,
       missedDoses: entry.missedDoses,
+      missedMedications: entry.missedMedications ?? null,
       severeHeadache: entry.severeHeadache ?? false,
       visualChanges: entry.visualChanges ?? false,
       alteredMentalStatus: entry.alteredMentalStatus ?? false,

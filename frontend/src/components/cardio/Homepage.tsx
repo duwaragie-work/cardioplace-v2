@@ -24,7 +24,7 @@ export default function Homepage() {
     <div className="bg-[#fef7ff] flex flex-col min-h-screen overflow-x-hidden">
       <LandingHeader activeLink="Home" />
 
-      <main className="flex flex-col items-center pt-[64px] w-full overflow-x-hidden">
+      <main id="main" className="flex flex-col items-center pt-[64px] w-full overflow-x-hidden">
         {/* ============ HERO SECTION ============ */}
         <section className="relative w-full min-h-[calc(100vh-64px)] flex items-end lg:items-center justify-center overflow-hidden px-4 sm:px-6 md:px-8 pb-4 sm:pb-6 lg:pb-0">
           <div className="absolute inset-0">
@@ -90,13 +90,15 @@ export default function Homepage() {
                     readOnly
                     onFocus={handleChatClick}
                     placeholder={t('home.aiPlaceholder')}
+                    aria-label={t('home.aiPlaceholder')}
                     className="flex-1 px-2 sm:px-4 py-2 sm:py-3 text-sm sm:text-base bg-transparent outline-none text-black placeholder-white min-w-0 cursor-text"
                   />
                   <button
                     type="submit"
+                    aria-label="Send message"
                     className="bg-[#7b00e0] rounded-full w-10 h-10 sm:w-14 sm:h-14 flex items-center justify-center shrink-0 shadow-lg hover:bg-[#6600bc] transition-colors"
                   >
-                    <Send className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                    <Send aria-hidden="true" className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                   </button>
                 </form>
                 {/* Prompt chips — single row */}

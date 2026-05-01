@@ -25,7 +25,36 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  /* WCAG 2.2 AA — Cedar Hill / BridgePoint patients are mostly 50+ with
+     reduced contrast sensitivity. 18px baseline ensures any unstyled
+     <p>/<div> reads at "large text" size; explicit Tailwind text-* classes
+     still override when smaller copy is intentional (badges, captions). */
+  font-size: 18px;
+  line-height: 1.5;
 }
+
+/* ── Tap-target minimum (Rengan WCAG Task 3) ─────────────────────────────
+   Every actionable control must be at least 44×44 CSS pixels so older
+   patients (mostly 50+, often shaky-handed) can tap reliably without
+   mis-hitting neighbouring elements.
+
+   `:where()` keeps the selector at specificity 0, so any deliberate
+   override (e.g. a one-off `min-w-0` utility or an `[data-compact]`
+   exception) wins without `!important`. We exclude:
+   - icons used inside buttons (`button > svg`) — only the parent button
+     needs to meet the rule;
+   - native `summary` markers (collapsed/expanded chevrons render their
+     own visual without expanding;
+   - elements explicitly opted out via `data-no-min-target`. */
+:where(button, a[role="button"], [role="button"], input[type="checkbox"], input[type="radio"]):not([data-no-min-target]) {
+  min-width: 44px;
+  min-height: 44px;
+}
+/* Fully-static label-shaped buttons inside dense pickers (e.g. the toggle
+   pills in CheckIn/Readings) already exceed 44px via padding — the rule
+   above is a no-op for them. Buttons that previously rendered as 32×32
+   icon circles (edit/delete in EntryCard, modal close X, chat new-conv
+   button, etc.) now grow to 44×44, which is the intended outcome. */
 
 /* ── Skip-to-main link (Rengan WCAG Task 11) ─────────────────────────────
    First focusable element on every page. Hidden offscreen until focused;
