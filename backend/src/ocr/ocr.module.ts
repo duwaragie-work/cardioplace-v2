@@ -8,5 +8,6 @@ import { OcrService } from './ocr.service.js'
   imports: [ConfigModule, GeminiModule],
   controllers: [OcrController],
   providers: [OcrService],
+  exports: [OcrService],
 })
 export class OcrModule {}

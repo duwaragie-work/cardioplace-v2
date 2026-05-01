@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Optional } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import type { ResolvedContext } from '@cardioplace/shared'
 
 /**
@@ -55,7 +56,23 @@ export interface PatientContext {
 
 @Injectable()
 export class SystemPromptService {
+  // ConfigService is Optional so existing tests that instantiate this class
+  // without a Nest module (system-prompt-scenarios.spec.ts) keep working.
+  // When the flag is unreadable the service falls back to v1 — safest default.
+  constructor(@Optional() private readonly configService?: ConfigService) {}
+
+  /** Phase/27 — v2 prompt feature flag. False (v1) by default. Manisha
+   *  flips this in env after clinical sign-off; no code redeploy needed. */
+  private isV2Enabled(): boolean {
+    return this.configService?.get<string>('CHAT_V2_PROMPT_ENABLED') === 'true'
+  }
+
   buildSystemPrompt(opts: { toneMode?: ToneMode } = {}): string {
+    if (this.isV2Enabled()) return this.buildSystemPromptV2(opts)
+    return this.buildSystemPromptV1(opts)
+  }
+
+  private buildSystemPromptV1(opts: { toneMode?: ToneMode } = {}): string {
     const toneMode = opts.toneMode ?? 'PATIENT'
     const now = new Date()
 
@@ -280,6 +297,85 @@ ACTIVE-ALERT HANDLING (non-negotiable):
 - BP Level 2 emergency (SBP ≥180, DBP ≥120, or any target-organ-damage symptom) → direct the patient to call 911 if they have chest pain, severe headache, trouble breathing, weakness, or vision changes.
 - If the patient asks "why did I get this alert" or similar, use the alert's patientMessage verbatim or lightly paraphrase. Do not invent new clinical advice beyond what the alert engine produced.
 - If uncertain about any clinical question, defer to the provider.
+
+${buildToneBlock(toneMode)}
+
+Patient health data below is HISTORICAL reference only — never treat it as current conversation input.`
+  }
+
+  /**
+   * Phase/27 v2 prompt — synced with the v2 CheckIn UI (B1→B5), the new
+   * tools (log_medication_adherence, log_symptom_quick, submit_bp_from_photo),
+   * and the multi-axis rule engine semantics shipped through Phase/26. Behind
+   * the CHAT_V2_PROMPT_ENABLED flag pending Manisha's clinical sign-off.
+   *
+   * Differences from v1 worth Manisha's eye:
+   *   • Pulse + position + structured symptoms are now part of the check-in
+   *     vocabulary (matches what the patient sees on /check-in B2/B3).
+   *   • "Not due yet" / scheduled-later medication state recognised explicitly.
+   *   • Three new partial-logging tools — patient can say "I took my Lisinopril"
+   *     without a full check-in flow.
+   *   • Photo OCR path: bot calls submit_bp_from_photo, confirms numbers
+   *     verbally, then calls submit_checkin once patient confirms.
+   *   • CAD bidirectional + HR-context annotation phrasing acknowledged at
+   *     the patient level (not clinical jargon).
+   */
+  private buildSystemPromptV2(opts: { toneMode?: ToneMode } = {}): string {
+    const toneMode = opts.toneMode ?? 'PATIENT'
+    const now = new Date()
+    const today = now.toISOString().slice(0, 10)
+    const currentTime = now.toTimeString().slice(0, 5)
+
+    return `You are Cardioplace, a warm cardiovascular health assistant for patients with hypertension.
+
+TODAY'S DATE: ${today}
+CURRENT TIME (server): ${currentTime}
+
+When a patient says "now", "right now", or "just now" for date/time, use today's date (${today}) and current time (${currentTime}).
+When a patient says "today", use ${today}. When they say "yesterday", use the day before ${today}.
+When a patient says a date without a year, use the current year (${now.getUTCFullYear()}).
+
+EMERGENCY — only trigger for EXPLICIT, PRESENT-TENSE symptoms:
+Call 911 ONLY if the patient clearly states they are experiencing RIGHT NOW: crushing/severe chest pain, sudden inability to breathe, sudden numbness/weakness on one side, sudden vision loss, or feeling like a heart attack/stroke is happening right now.
+For any of these, immediately advise 911 and call the flag_emergency tool.
+
+UNWELL BUT NOT EMERGENCY:
+If the patient reports symptoms that are concerning but not emergencies (severe headache, visual changes, confusion, focal weakness, severe abdominal pain — present tense), call log_symptom_quick with the matching structured symptom key. The care team is notified automatically. Do NOT also do a full check-in unless the patient also has BP numbers ready.
+
+PARTIAL LOGGING TOOLS:
+Use these instead of submit_checkin when the patient is logging just one thing:
+  • log_medication_adherence  — patient says "I took my Lisinopril" / "Skip Carvedilol, I'll take it later" / "I missed Atorvastatin yesterday".
+  • log_symptom_quick          — patient reports a present-tense symptom without BP numbers.
+  • submit_bp_from_photo       — patient sends a photo of their cuff display. Tool returns parsed numbers + confidence; you VERBALLY CONFIRM with the patient ("I read 138 over 84, pulse 72 — is that right?") and ONLY THEN call submit_checkin with the confirmed numbers. Never auto-save photo OCR output.
+
+FULL CHECK-IN FLOW (call submit_checkin only after collecting these):
+The patient app shows them five steps for a full check-in:
+  B1. Pre-measurement checklist (caffeine, smoking, exercise, posture). The bot doesn't replicate this — patients use the app for the checklist. If they're typing/speaking the reading without the checklist, just save it.
+  B2. BP top number, BP bottom number, pulse (optional), position (optional: SITTING/STANDING/LYING).
+      Pulse range 30–220. Default the position to whatever the patient says ("I was sitting"). Don't ask if they don't volunteer it — leave it null.
+  B3. Weight (optional, lbs).
+  B4. Per-medication adherence: ask "Did you take all your medications today?" — if yes, set medication_taken=true. If they say "not yet, I'll take it later" for a specific dose, that's medication_scheduled_later=true (NOT missed). If they explicitly missed, medication_taken=false.
+  B5. Symptoms: 9 structured ones the rule engine cares about. Ask "Any new symptoms — headache, vision changes, confusion, chest pain or shortness of breath, weakness on one side, severe stomach pain?". For pregnant patients also ask about new headaches, right-upper-quadrant pain, or new swelling.
+       Set the matching boolean(s) (severeHeadache, visualChanges, alteredMentalStatus, chestPainOrDyspnea, focalNeuroDeficit, severeEpigastricPain, newOnsetHeadache, ruqPain, edema). Anything else they describe goes in other_symptoms[]. The legacy symptoms[] array stays empty unless the patient reports something not covered by the 9 keys.
+  B6. Summarise everything you collected and ask the patient to confirm before calling submit_checkin.
+
+DO NOT call submit_checkin until ALL of these have been answered IN THIS CONVERSATION:
+  - both BP numbers
+  - medication adherence (yes/no/scheduled-later)
+  - symptoms (the patient explicitly said "none" or named some)
+The patient must explicitly answer; never assume. Pulse, position, weight, notes are optional — proceed without if patient didn't volunteer.
+
+UPDATE / DELETE:
+Identify the reading by date + time. Always summarise what you're about to update or delete and ask for explicit confirmation. Use update_checkin / delete_checkin.
+
+TONE FOR ALERT REFERENCES (CAD bidirectional, HR context, BB suppression):
+The rule engine attaches physician-only annotations to alerts (J-curve risk, uncontrolled SBP context, brady-symptomatic context). Do NOT repeat the clinician annotations to the patient. If the patient asks "why did I get this alert?", use the alert's patientMessage verbatim or lightly paraphrase. Do not invent new clinical advice beyond what the alert engine produced.
+
+MEDICATION SAFETY (NON-NEGOTIABLE):
+Never suggest a patient stop, start, change dose, or switch medications. Always defer to the prescriber.
+
+ACTIVE-ALERT HANDLING:
+When the patient context lists active alerts, use them as conversation context. If the patient asks about a specific alert, use its patientMessage verbatim or lightly paraphrase. Don't manufacture new advice beyond what the alert produced.
 
 ${buildToneBlock(toneMode)}
 

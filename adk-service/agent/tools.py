@@ -55,31 +55,69 @@ def make_tools(
         notes: str = "",
         entry_date: str = "",
         measurement_time: str = "",
+        # ── Phase/27 v2 fields ───────────────────────────────────────────────
+        pulse: int = 0,
+        position: str = "",
+        medication_scheduled_later: bool = False,
+        severe_headache: bool = False,
+        visual_changes: bool = False,
+        altered_mental_status: bool = False,
+        chest_pain_or_dyspnea: bool = False,
+        focal_neuro_deficit: bool = False,
+        severe_epigastric_pain: bool = False,
+        new_onset_headache: bool = False,
+        ruq_pain: bool = False,
+        edema: bool = False,
+        other_symptoms: list[str] = [],
     ) -> dict:
         """
         Submit the patient's health check-in after all values have been
         confirmed with the patient. Call this only once the patient has said yes
         to saving.
 
+        Phase/27 — supports sparse entries: pass 0 for systolic_bp + diastolic_bp
+        when the patient is logging just a symptom or just medication adherence
+        (the v2 rule engine handles sparse entries correctly via symptom-override
+        and adherence Pass 2). Pass the matching structured-symptom boolean when
+        the patient describes a Level-2 trigger symptom; rule engine fires the
+        alert from the boolean alone, BP can be absent.
+
         Args:
-            systolic_bp:      Systolic blood pressure — the top number (60–250).
-            diastolic_bp:     Diastolic blood pressure — the bottom number (40–150).
-            medication_taken: Whether the patient took all their medications today.
-            weight:           Weight in lbs (0 means not provided).
-            symptoms:         List of symptoms the patient reported. ALWAYS in English
-                              regardless of conversation language (e.g. "headache" not "dolor de cabeza").
-            notes:            Any extra notes. ALWAYS in English regardless of conversation language.
-            entry_date:       Date of the reading in YYYY-MM-DD format. Defaults
-                              to today if not provided or blank.
-            measurement_time: Time the reading was taken in HH:mm 24-hour format
-                              (e.g. "08:30", "14:15"). Defaults to current time if
-                              not provided or blank.
+            systolic_bp:      Top number (60–250). Pass 0 for sparse logs (no BP).
+            diastolic_bp:     Bottom number (40–150). Pass 0 for sparse logs (no BP).
+            medication_taken: Whether the patient took all their medications.
+            weight:           Weight in lbs (0 = not provided).
+            symptoms:         Legacy freeform symptom list. Prefer the structured
+                              booleans below for the 9 known clinical symptoms.
+            notes:            Extra notes. ALWAYS in English.
+            entry_date:       YYYY-MM-DD or "" for today.
+            measurement_time: HH:mm 24-hour or "" / "now" for current time.
+            pulse:            Pulse / heart rate (30–220). 0 = not provided.
+            position:         "SITTING" / "STANDING" / "LYING" / "" = not provided.
+            medication_scheduled_later:
+                              True when patient says the dose is "not due yet" /
+                              scheduled for later. Treats as neutral (no missed-dose
+                              alert), distinct from medication_taken=False.
+            severe_headache, visual_changes, altered_mental_status,
+            chest_pain_or_dyspnea, focal_neuro_deficit, severe_epigastric_pain:
+                              Phase/26 Level-2 symptom triggers. Set the matching
+                              boolean(s) to True when the patient reports them.
+            new_onset_headache, ruq_pain, edema:
+                              Pregnancy-only symptom triggers. The rule engine
+                              gates these on PatientProfile.isPregnant; passing
+                              True for non-pregnant patients is safely ignored.
+            other_symptoms:   "Anything else" the patient said that doesn't map
+                              to a structured boolean. ALWAYS in English.
 
         Returns:
             dict with 'saved' (bool) and 'message' (str).
         """
-        # Validate BP ranges before submitting
-        if not (60 <= systolic_bp <= 250) or not (40 <= diastolic_bp <= 150):
+        # Validate BP ranges only when BP was provided. 0/0 is the explicit
+        # sparse-log sentinel — leave BP fields unset on the payload.
+        bp_provided = systolic_bp > 0 or diastolic_bp > 0
+        if bp_provided and (
+            not (60 <= systolic_bp <= 250) or not (40 <= diastolic_bp <= 150)
+        ):
             logger.warning("BP out of range: %d/%d — rejecting", systolic_bp, diastolic_bp)
             return {
                 "saved": False,
@@ -123,16 +161,41 @@ def make_tools(
 
         payload: dict[str, Any] = {
             "entryDate": resolved_date,
-            "systolicBP": systolic_bp,
-            "diastolicBP": diastolic_bp,
             "medicationTaken": medication_taken,
             "symptoms": symptoms or [],
             "notes": notes or "",
         }
+        # BP only when provided (sparse-log sentinel is 0/0)
+        if bp_provided:
+            payload["systolicBP"] = systolic_bp
+            payload["diastolicBP"] = diastolic_bp
         if resolved_time:
             payload["measurementTime"] = resolved_time
         if weight and weight > 0:
             payload["weight"] = weight
+        # Phase/27 v2 optional fields — only send when populated so existing
+        # JournalEntry rows don't get clobbered with implicit defaults.
+        if pulse and pulse > 0:
+            payload["pulse"] = pulse
+        if position:
+            normalised = position.strip().upper()
+            if normalised in ("SITTING", "STANDING", "LYING"):
+                payload["position"] = normalised
+        if medication_scheduled_later:
+            payload["medicationScheduledLater"] = True
+        # Structured Level-2 symptom booleans — always send so the rule
+        # engine sees a complete vector. False is the rule-engine default.
+        payload["severeHeadache"] = bool(severe_headache)
+        payload["visualChanges"] = bool(visual_changes)
+        payload["alteredMentalStatus"] = bool(altered_mental_status)
+        payload["chestPainOrDyspnea"] = bool(chest_pain_or_dyspnea)
+        payload["focalNeuroDeficit"] = bool(focal_neuro_deficit)
+        payload["severeEpigastricPain"] = bool(severe_epigastric_pain)
+        payload["newOnsetHeadache"] = bool(new_onset_headache)
+        payload["ruqPain"] = bool(ruq_pain)
+        payload["edema"] = bool(edema)
+        if other_symptoms:
+            payload["otherSymptoms"] = other_symptoms
 
         saved = False
         try:
@@ -544,4 +607,93 @@ def make_tools(
         logger.info("[VOICE tools] delete_checkin RETURN deleted=%d failed=%d → Gemini", deleted_count, failed_count)
         return {"deleted_count": deleted_count, "failed_count": failed_count, "message": msg}
 
-    return [submit_checkin, get_recent_readings, update_checkin, delete_checkin]
+    # ── Tool 5: BP photo OCR (Phase/27) ───────────────────────────────────────
+
+    def submit_bp_from_photo(image_base64: str, mime_type: str) -> dict:
+        """
+        Run OCR on a cuff-display photo. Returns parsed SBP/DBP/pulse with a
+        confidence score. The voice agent MUST verbally confirm the numbers
+        with the patient before calling submit_checkin — this tool does not
+        persist anything by itself.
+
+        Args:
+            image_base64: Base64-encoded photo of the cuff display, no data:
+                          prefix.
+            mime_type:    Image MIME type — image/jpeg, image/png, image/webp,
+                          or image/heic.
+
+        Returns:
+            dict with 'parsed' (bool), 'sbp', 'dbp', 'pulse' (when parsed=True),
+            'confidence' (0..1), and 'message' (str).
+        """
+        if not image_base64 or not mime_type:
+            return {
+                "parsed": False,
+                "message": "Missing image or mime type. Ask the patient to send the photo again.",
+            }
+
+        # Convert base64 to a file part for multipart upload to /api/v2/ocr/bp.
+        # The OCR controller expects multipart/form-data with field name 'image'.
+        import base64 as _b64
+        try:
+            image_bytes = _b64.b64decode(image_base64)
+        except Exception as exc:
+            logger.warning("Bad base64 from voice: %s", exc)
+            return {
+                "parsed": False,
+                "message": "Could not decode the photo. Ask the patient to retry.",
+            }
+
+        try:
+            _t = _time.time()
+            resp = requests.post(
+                f"{NESTJS_URL}/v2/ocr/bp",
+                headers=headers,
+                files={"image": ("cuff.bin", image_bytes, mime_type)},
+                timeout=REQUEST_TIMEOUT,
+            )
+            logger.info(
+                "[VOICE tools] submit_bp_from_photo HTTP %.0fms status=%s",
+                (_time.time() - _t) * 1000,
+                resp.status_code,
+            )
+        except requests.RequestException as exc:
+            logger.error("Failed to POST /v2/ocr/bp: %s", exc)
+            return {
+                "parsed": False,
+                "message": "Could not reach the OCR service. Ask the patient to read the numbers out loud.",
+            }
+
+        if resp.status_code == 200:
+            body = resp.json()
+            sbp = body.get("sbp")
+            dbp = body.get("dbp")
+            pulse = body.get("pulse")
+            confidence = body.get("confidence", 0)
+            return {
+                "parsed": True,
+                "sbp": sbp,
+                "dbp": dbp,
+                "pulse": pulse,
+                "confidence": confidence,
+                "message": (
+                    f"Read {sbp} over {dbp}"
+                    + (f", pulse {pulse}" if pulse else "")
+                    + " — confirm with the patient before saving."
+                ),
+            }
+        # Map known failure codes to friendly voice prompts.
+        try:
+            err_body = resp.json()
+        except Exception:
+            err_body = {}
+        code = err_body.get("code", "")
+        if resp.status_code == 422 and code in ("LOW_CONFIDENCE", "OUT_OF_RANGE"):
+            msg = "Could not read the cuff clearly. Ask the patient to read the numbers out loud."
+        elif resp.status_code == 429:
+            msg = "Too many photo attempts today. Ask the patient to read the numbers out loud."
+        else:
+            msg = err_body.get("error", "Photo OCR failed. Ask the patient to read the numbers out loud.")
+        return {"parsed": False, "code": code, "message": msg}
+
+    return [submit_checkin, get_recent_readings, update_checkin, delete_checkin, submit_bp_from_photo]

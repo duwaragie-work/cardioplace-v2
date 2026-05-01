@@ -15,7 +15,11 @@ import { PrismaService } from '../prisma/prisma.service.js'
 import { DailyJournalService } from '../daily_journal/daily_journal.service.js'
 import { ProfileResolverService } from '../daily_journal/services/profile-resolver.service.js'
 import { GeminiService } from '../gemini/gemini.service.js'
+import { OcrService } from '../ocr/ocr.service.js'
+import { MedicationAdherenceService } from './services/medication-adherence.service.js'
+import { SymptomQuickLogService } from './services/symptom-quick-log.service.js'
 import { getJournalToolDeclarations, executeJournalTool } from './tools/journal-tools.js'
+import type { JournalToolContext } from './tools/journal-tools.js'
 
 @Injectable()
 export class ChatService {
@@ -28,7 +32,22 @@ export class ChatService {
     private readonly dailyJournalService: DailyJournalService,
     private readonly geminiService: GeminiService,
     private readonly profileResolver: ProfileResolverService,
+    private readonly ocrService: OcrService,
+    private readonly adherenceService: MedicationAdherenceService,
+    private readonly symptomQuickLogService: SymptomQuickLogService,
   ) {}
+
+  /** Phase/27 — bag of services the journal-tools executor needs for the
+   *  new adherence / quick-symptom / photo-OCR tools. Built lazily because
+   *  the constructor wires the deps; this just packages them. */
+  private toolContext(): JournalToolContext {
+    return {
+      journalService: this.dailyJournalService,
+      adherenceService: this.adherenceService,
+      symptomService: this.symptomQuickLogService,
+      ocrService: this.ocrService,
+    }
+  }
 
   /**
    * Record an emergency event in the database (fire-and-forget).
@@ -271,10 +290,10 @@ export class ChatService {
               next_action: `Continue asking. Missing: ${gate.missing[0]}`,
             })
           } else {
-            resultStr = await executeJournalTool(toolName, toolArgs, this.dailyJournalService, userId)
+            resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(), userId)
           }
         } else {
-          resultStr = await executeJournalTool(toolName, toolArgs, this.dailyJournalService, userId)
+          resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(), userId)
         }
 
         console.log(`Tool result [${toolName}]:`, resultStr.slice(0, 200))
@@ -446,10 +465,10 @@ export class ChatService {
                 next_action: `Continue asking. Missing: ${gate.missing[0]}`,
               })
             } else {
-              resultStr = await executeJournalTool(toolName, toolArgs, this.dailyJournalService, userId)
+              resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(), userId)
             }
           } else {
-            resultStr = await executeJournalTool(toolName, toolArgs, this.dailyJournalService, userId)
+            resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(), userId)
           }
 
           console.log(`Tool result [${toolName}]:`, resultStr.slice(0, 200))
