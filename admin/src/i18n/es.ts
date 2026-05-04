@@ -492,6 +492,7 @@ const es: Record<TranslationKey, string> = {
   'register.verificationFailed': 'Verificación fallida.',
   'register.invalidOtp': 'Código inválido. Intenta de nuevo.',
   'register.otpSentSuccess': 'Código enviado exitosamente',
+  'register.otpLengthHint': 'Ingresa los 6 dígitos ({n}/6)',
   'register.pleaseWait': 'Espera 60 segundos antes de solicitar un nuevo código',
   'register.otpTab': 'Codigo OTP',
   'register.magicLinkTab': 'Enlace magico',

@@ -4,9 +4,9 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Mail, KeyRound, Eye, EyeOff } from "lucide-react";
 import { useAuth, type OtpVerifyResponse } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
-import Logo from "@/components/Logo";
 import { getOrCreateDeviceId } from "@/lib/device";
 import { useLanguage } from "@/contexts/LanguageContext";
+import type { TranslationKey } from "@/i18n";
 import LandingHeader from "@/components/cardio/LandingHeader";
 import LandingFooter from "@/components/cardio/LandingFooter";
 
@@ -25,31 +25,39 @@ function isEmailValid(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+// Map known backend English messages to translation keys. Stored at module
+// level so the lookup is independent of language — callers translate the
+// returned key via t() at render time, which re-runs on language switch.
+const BACKEND_MSG_KEY_MAP: Record<string, TranslationKey> = {
+  'OTP sent successfully': 'register.otpSentSuccess',
+  'Please wait 60 seconds before requesting a new OTP': 'register.pleaseWait',
+  'Please wait 60 seconds before requesting a new magic link': 'register.pleaseWaitMagicLink',
+  'Invalid OTP': 'register.invalidOtp',
+  'Verification failed': 'register.verificationFailed',
+};
+
+function backendMsgToKey(msg: string | undefined): TranslationKey | null {
+  if (!msg) return null;
+  for (const [en, key] of Object.entries(BACKEND_MSG_KEY_MAP)) {
+    if (msg.includes(en)) return key;
+  }
+  return null;
+}
+
 export default function RegisterPage() {
   const router = useRouter();
   const { t } = useLanguage();
-
-  // Map known backend English messages to translated versions
-  const backendMsgMap: Record<string, string> = {
-    'OTP sent successfully': t('register.otpSentSuccess'),
-    'Please wait 60 seconds before requesting a new OTP': t('register.pleaseWait'),
-    'Invalid OTP': t('register.invalidOtp'),
-    'Verification failed': t('register.verificationFailed'),
-  };
-  function translateBackendMsg(msg: string | undefined): string {
-    if (!msg) return '';
-    for (const [en, translated] of Object.entries(backendMsgMap)) {
-      if (msg.includes(en)) return translated;
-    }
-    return msg;
-  }
 
   const { user, isLoading, login } = useAuth();
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
-  const [statusMessage, setStatusMessage] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
+  // Status + error both store a translation key (not a resolved string) so
+  // the rendered text re-translates live when the language is switched.
+  const [statusKey, setStatusKey] = useState<TranslationKey | null>(null);
+  const [errorKey, setErrorKey] = useState<TranslationKey | null>(null);
+  const statusMessage = statusKey ? t(statusKey) : "";
+  const errorMessage = errorKey ? t(errorKey) : "";
   const [isRequestingOtp, setIsRequestingOtp] = useState(false);
   const [isResendingOtp, setIsResendingOtp] = useState(false);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
@@ -71,6 +79,7 @@ export default function RegisterPage() {
   // hidden as soon as they hit the full 6 — quiet UI when nothing's wrong.
   const showOtpLengthHint = otp.length > 0 && otp.length < OTP_LENGTH;
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
@@ -129,16 +138,17 @@ export default function RegisterPage() {
 
   async function handleSendOtp() {
     if (!emailIsValid || isRequestingOtp) return;
-    setErrorMessage("");
-    setStatusMessage("");
+    setErrorKey(null);
+    setStatusKey(null);
     setIsRequestingOtp(true);
     try {
       await sendOtpRequest(email.trim());
       setOtpSent(true);
       setOtp("");
+      setStatusKey('register.otpSentSuccess');
       startResendCooldown();
     } catch (err) {
-      setErrorMessage(translateBackendMsg(err instanceof Error ? err.message : '') || t('register.failedOtp'));
+      setErrorKey(backendMsgToKey(err instanceof Error ? err.message : '') ?? 'register.failedOtp');
     } finally {
       setIsRequestingOtp(false);
     }
@@ -146,43 +156,50 @@ export default function RegisterPage() {
 
   async function handleResendOtp() {
     if (!otpSent || resendCooldown > 0 || isResendingOtp) return;
-    setErrorMessage("");
-    setStatusMessage("");
+    setErrorKey(null);
+    setStatusKey(null);
     setIsResendingOtp(true);
     try {
-      const data = await sendOtpRequest(email.trim());
-      setStatusMessage(translateBackendMsg(data.message) || t('register.otpResent'));
+      await sendOtpRequest(email.trim());
+      setStatusKey('register.otpResent');
       startResendCooldown();
     } catch (err) {
-      setErrorMessage(translateBackendMsg(err instanceof Error ? err.message : '') || t('register.failedResend'));
+      setErrorKey(backendMsgToKey(err instanceof Error ? err.message : '') ?? 'register.failedResend');
     } finally {
       setIsResendingOtp(false);
     }
   }
 
+  async function sendMagicLinkRequest(emailToUse: string) {
+    const deviceId = getOrCreateDeviceId();
+    const timezone = getBrowserTimezone();
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v2/auth/magic-link/send`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Device-Id": deviceId,
+        ...(timezone ? { "X-Timezone": timezone } : {}),
+      },
+      body: JSON.stringify({ email: emailToUse }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || "Something went wrong.");
+    return data;
+  }
+
   async function handleSendMagicLink() {
     if (!emailIsValid || isSendingMagicLink) return;
-    setErrorMessage("");
-    setStatusMessage("");
+    setErrorKey(null);
+    setStatusKey(null);
     setIsSendingMagicLink(true);
     try {
-      const deviceId = getOrCreateDeviceId();
-      const timezone = getBrowserTimezone();
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v2/auth/magic-link/send`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Device-Id": deviceId,
-          ...(timezone ? { "X-Timezone": timezone } : {}),
-        },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Something went wrong.");
+      await sendMagicLinkRequest(email.trim());
       setMagicLinkSent(true);
+      setStatusKey('register.magicLinkSent');
+      startResendCooldown();
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Failed to send magic link.");
+      setErrorKey(backendMsgToKey(err instanceof Error ? err.message : '') ?? 'register.failedMagicLink');
     } finally {
       setIsSendingMagicLink(false);
     }
@@ -190,8 +207,8 @@ export default function RegisterPage() {
 
   async function handleVerifyOtp() {
     if (!canVerifyOtp || isVerifyingOtp || !otpSent) return;
-    setErrorMessage("");
-    setStatusMessage("");
+    setErrorKey(null);
+    setStatusKey(null);
     setIsVerifyingOtp(true);
     try {
       const deviceId = getOrCreateDeviceId();
@@ -208,7 +225,7 @@ export default function RegisterPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setErrorMessage(translateBackendMsg(data.message) || t('register.verificationFailed'));
+        setErrorKey(backendMsgToKey(data.message) ?? 'register.verificationFailed');
         throw new Error(data.message || "Verification failed.");
       }
       login(data as OtpVerifyResponse);
@@ -218,7 +235,7 @@ export default function RegisterPage() {
         router.push("/dashboard");
       }
     } catch (err) {
-      setErrorMessage(translateBackendMsg(err instanceof Error ? err.message : '') || t('register.invalidOtp'));
+      setErrorKey(backendMsgToKey(err instanceof Error ? err.message : '') ?? 'register.invalidOtp');
     } finally {
       setIsVerifyingOtp(false);
     }
@@ -255,14 +272,14 @@ export default function RegisterPage() {
               <div className="w-full max-w-105 flex rounded-lg border border-[#e5d9f2] overflow-hidden">
                 <button
                   type="button"
-                  onClick={() => { setAuthMode("magic_link"); setErrorMessage(""); setStatusMessage(""); setOtpSent(false); setOtp(""); }}
+                  onClick={() => { setAuthMode("magic_link"); setErrorKey(null); setStatusKey(null); setOtpSent(false); setOtp(""); }}
                   className={`flex-1 py-2.5 text-sm font-semibold transition-colors cursor-pointer ${authMode === "magic_link" ? "bg-[#7B00E0] text-white" : "bg-white text-[#6B00D1]"}`}
                 >
                   {t('register.magicLinkTab') || 'Magic Link'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setAuthMode("otp"); setErrorMessage(""); setStatusMessage(""); setMagicLinkSent(false); }}
+                  onClick={() => { setAuthMode("otp"); setErrorKey(null); setStatusKey(null); setMagicLinkSent(false); }}
                   className={`flex-1 py-2.5 text-sm font-semibold transition-colors cursor-pointer ${authMode === "otp" ? "bg-[#7B00E0] text-white" : "bg-white text-[#6B00D1]"}`}
                 >
                   {t('register.otpTab') || 'OTP Code'}
@@ -282,8 +299,8 @@ export default function RegisterPage() {
                     setEmail(e.target.value);
                     if (magicLinkSent) setMagicLinkSent(false);
                     if (otpSent) { setOtpSent(false); setOtp(""); }
-                    if (statusMessage) setStatusMessage("");
-                    if (errorMessage) setErrorMessage("");
+                    if (statusKey) setStatusKey(null);
+                    if (errorKey) setErrorKey(null);
                   }}
                   placeholder={t('register.emailPlaceholder')}
                   autoComplete="email"
@@ -299,36 +316,34 @@ export default function RegisterPage() {
                   </p>
                 )}
 
-                {/* OTP flow */}
+                {/* OTP flow — single primary button toggles Send / Resend
+                    so older users see one obvious action target. */}
                 {authMode === "otp" && (
                   <>
                     <button
-                      onClick={handleSendOtp}
-                      disabled={!emailIsValid || isRequestingOtp}
+                      type="button"
+                      onClick={otpSent ? handleResendOtp : handleSendOtp}
+                      disabled={!emailIsValid || isRequestingOtp || isResendingOtp || (otpSent && resendCooldown > 0)}
                       className="w-full h-12 lg:h-14 rounded-lg flex items-center justify-center border border-[#6B00D1] mt-3 mb-7 transition-opacity enabled:cursor-pointer enabled:hover:bg-[#7B00E0]/5 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <span className="font-semibold text-[#6B00D1] text-base lg:text-medium">{isRequestingOtp ? t('register.sendingOtp') : t('register.sendOtp')}</span>
+                      <span className="font-semibold text-[#6B00D1] text-base lg:text-medium">
+                        {isRequestingOtp
+                          ? t('register.sendingOtp')
+                          : isResendingOtp
+                            ? t('register.resending')
+                            : otpSent
+                              ? (resendCooldown > 0
+                                  ? t('register.resendIn').replace('{s}', String(resendCooldown))
+                                  : t('register.resendCode'))
+                              : t('register.sendOtp')}
+                      </span>
                     </button>
 
                     {otpSent && (
                       <>
-                        <div className="flex items-center justify-between mb-2">
-                          <label htmlFor="signin-otp" className="font-semibold text-[#171717] text-xs lg:text-sm">
-                            {t('register.enterOtp')}
-                          </label>
-                          <button
-                            type="button"
-                            onClick={handleResendOtp}
-                            disabled={resendCooldown > 0 || isResendingOtp}
-                            className="font-medium text-[#7B00E0] text-xs lg:text-sm hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {isResendingOtp
-                              ? t('register.resending')
-                              : resendCooldown > 0
-                                ? t('register.resendIn').replace('{s}', String(resendCooldown))
-                                : t('register.resendCode')}
-                          </button>
-                        </div>
+                        <label htmlFor="signin-otp" className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
+                          {t('register.enterOtp')}
+                        </label>
                         <div className="relative mb-1">
                           <input
                             id="signin-otp"
@@ -338,8 +353,8 @@ export default function RegisterPage() {
                             value={otp}
                             onChange={(e) => {
                               setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH));
-                              if (statusMessage) setStatusMessage("");
-                              if (errorMessage) setErrorMessage("");
+                              if (statusKey) setStatusKey(null);
+                              if (errorKey) setErrorKey(null);
                             }}
                             placeholder="••••••"
                             maxLength={OTP_LENGTH}
@@ -357,7 +372,7 @@ export default function RegisterPage() {
                         {/* OTP-length hint: only while user is mid-typing */}
                         {showOtpLengthHint && (
                           <p className="text-[11px] lg:text-xs text-[#a16207] mb-2">
-                            Enter all 6 digits ({otp.length}/6)
+                            {t('register.otpLengthHint').replace('{n}', String(otp.length))}
                           </p>
                         )}
                       </>
@@ -365,41 +380,33 @@ export default function RegisterPage() {
                   </>
                 )}
 
-                {/* Magic link flow */}
+                {/* Magic link flow — single primary button (Send / Resend).
+                    Sent confirmation shown via the shared green status line
+                    below to stay consistent with OTP. */}
                 {authMode === "magic_link" && (
-                  <>
-                    {!magicLinkSent ? (
-                      <button
-                        onClick={handleSendMagicLink}
-                        disabled={!emailIsValid || isSendingMagicLink}
-                        className="w-full h-12 lg:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm lg:text-base hover:bg-[#6600BC] transition-colors enabled:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mt-4"
-                      >
-                        {isSendingMagicLink ? (t('register.sendingMagicLink') || 'Sending...') : (t('register.sendMagicLink') || 'Send magic link')}
-                      </button>
-                    ) : (
-                      <div className="mt-4 p-4 bg-[#f5f3ff] border border-[#e5d9f2] rounded-lg text-center">
-                        <p className="text-[#7B00E0] font-semibold text-sm mb-1">{t('register.checkEmail') || 'Check your email!'}</p>
-                        <p className="text-[#6b7280] text-xs">{t('register.magicLinkDesc') || 'We sent a sign-in link. Tap it to log in.'}</p>
-                        <button
-                          type="button"
-                          onClick={() => { setMagicLinkSent(false); setStatusMessage(""); }}
-                          className="mt-3 text-[#7B00E0] text-xs font-medium hover:underline cursor-pointer"
-                        >
-                          {t('register.sendAnother') || 'Send another link'}
-                        </button>
-                      </div>
-                    )}
-                  </>
+                  <button
+                    type="button"
+                    onClick={handleSendMagicLink}
+                    disabled={!emailIsValid || isSendingMagicLink || (magicLinkSent && resendCooldown > 0)}
+                    className="w-full h-12 lg:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm lg:text-base hover:bg-[#6600BC] transition-colors enabled:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mt-4"
+                  >
+                    {isSendingMagicLink
+                      ? (t('register.sendingMagicLink') || 'Sending...')
+                      : magicLinkSent
+                        ? (resendCooldown > 0
+                            ? t('register.resendIn').replace('{s}', String(resendCooldown))
+                            : (t('register.sendAnother') || 'Send another link'))
+                        : (t('register.sendMagicLink') || 'Send magic link')}
+                  </button>
                 )}
 
-                {/* Feedback messages */}
+                {/* Feedback messages — <output> has implicit role="status". */}
                 {(statusMessage || errorMessage) && (
-                  <p
-                    role="status"
-                    className={`mt-2 text-xs lg:text-sm ${errorMessage ? "text-red-500" : "text-green-500"}`}
+                  <output
+                    className={`block mt-2 text-xs lg:text-sm ${errorMessage ? "text-red-500" : "text-green-500"}`}
                   >
                     {errorMessage || statusMessage}
-                  </p>
+                  </output>
                 )}
                 {authMode === "otp" && otpSent && otp.length === 0 && !statusMessage && !errorMessage && (
                   <p className="mt-2 text-[#737373] text-xs lg:text-sm">
@@ -427,14 +434,14 @@ export default function RegisterPage() {
                 <p className="text-[#737373] text-[11px] lg:text-xs leading-relaxed text-center">
                   {t('register.terms')}{" "}
                   <a
-                    href="#"
+                    href="/terms"
                     className="font-medium text-[#7B00E0] hover:underline"
                   >
                     {t('register.termsOfService')}
                   </a>{" "}
-                  {t('register.and')}{" "} <br />
+                  {t('register.and')}{" "}
                   <a
-                    href="#"
+                    href="/privacy"
                     className="font-medium text-[#7B00E0] hover:underline"
                   >
                     {t('register.privacyPolicy')}

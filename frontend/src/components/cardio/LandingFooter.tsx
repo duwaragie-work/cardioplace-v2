@@ -82,8 +82,8 @@ export default function LandingFooter() {
           </div>
           <div className="flex flex-col gap-3">
             <span className="font-bold text-white text-sm">{t('landing.legal')}</span>
-            <a href="#" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.privacy')}</a>
-            <a href="#" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.terms')}</a>
+            <a href="/privacy" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.privacy')}</a>
+            <a href="/terms" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.terms')}</a>
           </div>
         </div>
 

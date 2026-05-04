@@ -492,6 +492,7 @@ const de: Record<TranslationKey, string> = {
   'register.verificationFailed': 'Überprüfung fehlgeschlagen.',
   'register.invalidOtp': 'Ungültiger Code. Bitte versuchen Sie es erneut.',
   'register.otpSentSuccess': 'Code erfolgreich gesendet',
+  'register.otpLengthHint': 'Geben Sie alle 6 Ziffern ein ({n}/6)',
   'register.pleaseWait': 'Bitte warten Sie 60 Sekunden, bevor Sie einen neuen Code anfordern',
   'register.otpTab': 'OTP-Code',
   'register.magicLinkTab': 'Magic Link',

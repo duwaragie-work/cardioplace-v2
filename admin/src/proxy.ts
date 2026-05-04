@@ -14,6 +14,8 @@ const PUBLIC_PATHS = new Set<string>([
   '/home',
   '/about',
   '/sign-in',
+  '/terms',
+  '/privacy',
   '/auth/magic-link',
   '/auth/callback',
 ]);

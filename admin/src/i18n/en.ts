@@ -490,6 +490,7 @@ const en = {
   'register.verificationFailed': 'Verification failed.',
   'register.invalidOtp': 'Invalid OTP. Please try again.',
   'register.otpSentSuccess': 'OTP sent successfully',
+  'register.otpLengthHint': 'Enter all 6 digits ({n}/6)',
   'register.pleaseWait': 'Please wait 60 seconds before requesting a new OTP',
   'register.otpTab': 'OTP Code',
   'register.magicLinkTab': 'Magic Link',
