@@ -195,14 +195,14 @@ export default function OnboardingPage() {
   return (
     <div className="bg-white">
       <LandingHeader activeLink="" />
-      <main id="main" className="lg:min-h-screen pt-24 lg:pt-[80px] pb-10 lg:pb-0 flex items-start lg:items-center justify-center px-4 sm:px-6 lg:px-12">
+      <main id="main" className="pt-28 pb-10 flex items-start justify-center px-4 sm:px-6 lg:px-12">
       <div className="w-full max-w-300 mx-auto">
         <div className="flex flex-col items-center md:items-center md:flex-row gap-8 lg:gap-20">
           {/* Left side - Form */}
           <div className="flex-1 w-full max-w-[400px] md:max-w-105 lg:max-w-130">
 
             {/* Heading */}
-            <div className="mb-6 md:mb-10">
+            <div className="mb-4 md:mb-6">
               <h1 className="font-semibold text-[#171717] text-2xl sm:text-3xl lg:text-4xl tracking-[-0.04em] mb-2 text-center md:text-left">
                 {t('onboarding.title')}
               </h1>
@@ -325,7 +325,7 @@ export default function OnboardingPage() {
                       />
                     </svg>
                   </div>
-                  <h3 className="font-bold text-[#170c1d] text-base lg:text-2xl whitespace-nowrap">
+                  <h3 className="font-bold text-[#170c1d] text-base lg:text-2xl leading-tight">
                     {t('onboarding.cardTitle')}
                   </h3>
                 </div>
