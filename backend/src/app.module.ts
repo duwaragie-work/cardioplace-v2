@@ -22,6 +22,7 @@ import { EmailModule } from './email/email.module.js'
 import { VoiceModule } from './voice/voice.module.js'
 import { CommonModule } from './common/common.module.js'
 import { OcrModule } from './ocr/ocr.module.js'
+import { DrugEnrichmentModule } from './drug-enrichment/drug-enrichment.module.js'
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -62,6 +63,7 @@ import { OcrModule } from './ocr/ocr.module.js'
     ProviderModule,
     VoiceModule,
     OcrModule,
+    DrugEnrichmentModule,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],

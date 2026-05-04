@@ -1212,6 +1212,8 @@ const es: Record<TranslationKey, string> = {
   'ocr.med.rowFrequencyLabel': 'Con qué frecuencia',
   'ocr.med.badgeInCatalog': 'En catálogo',
   'ocr.med.badgeFreeform': 'Libre',
+  'ocr.med.verifying': 'Verificando…',
+  'ocr.med.useCanonical': 'Usar {name}',
   'ocr.med.skip': 'Omitir',
   'ocr.med.unskip': 'Agregar de nuevo',
   'ocr.med.addAll': 'Agregar {count}',

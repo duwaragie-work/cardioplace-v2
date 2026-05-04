@@ -47,6 +47,12 @@ export interface PatientMedicationDto {
   discontinuedAt?: string | null;
   rawInputText?: string | null;
   notes?: string | null;
+  /** Resolved pill image URL (DailyMed via drug-enrichment service). Null
+   *  for catalog meds and for freeform meds without a DailyMed match. */
+  pillImageUrl?: string | null;
+  /** Plain-language indication simplified by Gemini. Null for catalog meds
+   *  (they carry hand-written `purpose` in the shared catalog instead). */
+  plainLanguageDescription?: string | null;
 }
 
 async function unwrap<T>(res: Response): Promise<T> {

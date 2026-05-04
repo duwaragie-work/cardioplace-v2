@@ -251,6 +251,50 @@ export class GeminiService implements OnModuleInit {
   }
 
   /**
+   * Simplify an FDA drug indication into a 6th-grade-reading-level patient
+   * sentence. Used by DrugEnrichmentService for freeform meds (catalog meds
+   * already carry a hand-written `purpose` string in shared/medications.ts).
+   * Returns null if Gemini fails or returns junk — caller falls back to
+   * showing no description rather than the raw clinical text.
+   */
+  async simplifyDrugIndication(
+    rawIndication: string,
+    locale: string = 'en',
+  ): Promise<string | null> {
+    if (!rawIndication.trim()) return null
+    try {
+      return await this.withRetry('simplifyDrugIndication', async () => {
+        const prompt = `You are simplifying an FDA drug indication for a patient with a 6th-grade reading level.
+Rules:
+- Maximum 2 sentences.
+- Do not recommend changes to the prescription.
+- Pick the primary indication; do not enumerate every condition.
+- Be warm and reassuring, never alarming.
+- Locale: ${locale}. Reply in that language.
+
+Input:
+${rawIndication.slice(0, 2000)}
+
+Reply with strict JSON only:
+{ "plainLanguage": "<your simplified sentence>" }`
+
+        const response = await this.client.models.generateContent({
+          model: this.chatModel,
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          config: { responseMimeType: 'application/json' },
+        })
+        const raw = response.text?.trim() ?? ''
+        const parsed = JSON.parse(raw) as { plainLanguage?: unknown }
+        const out = typeof parsed.plainLanguage === 'string' ? parsed.plainLanguage.trim() : ''
+        return out || null
+      })
+    } catch (err) {
+      this.logger.warn(`simplifyDrugIndication failed: ${(err as Error).message}`)
+      return null
+    }
+  }
+
+  /**
    * Chat completion — returns a normalised shape:
    * { choices: [{ message: { content: string } }] }
    */

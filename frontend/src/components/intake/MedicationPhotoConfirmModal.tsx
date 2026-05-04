@@ -13,9 +13,9 @@
 // @cardioplace/shared, so the patient sees "In catalog" / "Will be added as
 // freeform" badges that adapt as they correct OCR misreads.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, AlertTriangle, Check, Pill } from 'lucide-react';
+import { X, AlertTriangle, Check, Loader2, Pill } from 'lucide-react';
 import {
   matchToCatalog,
   normaliseFrequency,
@@ -23,7 +23,11 @@ import {
 } from '@cardioplace/shared';
 import { useLanguage } from '@/contexts/LanguageContext';
 import AudioButton from './AudioButton';
-import type { MedOcrItem } from '@/lib/services/ocr.service';
+import {
+  enrichDrugName,
+  type DrugEnrichment,
+  type MedOcrItem,
+} from '@/lib/services/ocr.service';
 
 export interface ConfirmedMedication {
   /** What the user finalised in the modal — may differ from the OCR raw. */
@@ -256,8 +260,41 @@ function RowCard({
   row: RowState;
   onChange: (patch: Partial<RowState>) => void;
 }) {
-  const { t } = useLanguage();
+  const { t, locale } = useLanguage();
   const match = useMemo(() => matchToCatalog(row.drugName), [row.drugName]);
+
+  // Enrichment state — runs only when there is no catalog match.
+  // undefined = not yet attempted, null = attempted and failed, value = success.
+  const [enrichment, setEnrichment] = useState<DrugEnrichment | null | undefined>(undefined);
+  const [enriching, setEnriching] = useState(false);
+  const reqIdRef = useRef(0);
+
+  useEffect(() => {
+    if (match) {
+      setEnrichment(undefined);
+      setEnriching(false);
+      return;
+    }
+    const trimmed = row.drugName.trim();
+    if (!trimmed || !row.kept) {
+      setEnrichment(undefined);
+      setEnriching(false);
+      return;
+    }
+    const reqId = ++reqIdRef.current;
+    const timer = setTimeout(async () => {
+      setEnriching(true);
+      const result = await enrichDrugName(trimmed, locale);
+      if (reqId !== reqIdRef.current) return; // superseded by a newer keystroke
+      setEnrichment(result);
+      setEnriching(false);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [row.drugName, row.kept, match, locale]);
+
+  const canonicalDiffers =
+    !!enrichment &&
+    enrichment.canonicalDrugName.toLowerCase() !== row.drugName.trim().toLowerCase();
 
   return (
     <div
@@ -270,11 +307,20 @@ function RowCard({
     >
       {/* Drug name + match badge */}
       <div className="flex items-start gap-2">
-        <Pill
-          className="w-5 h-5 mt-1 shrink-0"
-          style={{ color: 'var(--brand-primary-purple)' }}
-          aria-hidden="true"
-        />
+        {enrichment?.pillImageUrl ? (
+          <img
+            src={enrichment.pillImageUrl}
+            alt={enrichment.canonicalDrugName}
+            className="w-9 h-9 mt-0.5 rounded-md object-cover shrink-0"
+            style={{ border: '1px solid var(--brand-border)' }}
+          />
+        ) : (
+          <Pill
+            className="w-5 h-5 mt-1 shrink-0"
+            style={{ color: 'var(--brand-primary-purple)' }}
+            aria-hidden="true"
+          />
+        )}
         <div className="flex-1 min-w-0">
           <input
             type="text"
@@ -295,8 +341,29 @@ function RowCard({
               {row.doseText}
             </p>
           )}
+          {!match && enrichment?.plainLanguageDescription && (
+            <p
+              className="text-[11px] mt-0.5 leading-snug"
+              style={{ color: 'var(--brand-text-secondary)' }}
+            >
+              {enrichment.plainLanguageDescription}
+            </p>
+          )}
+          {!match && canonicalDiffers && (
+            <button
+              type="button"
+              onClick={() => onChange({ drugName: enrichment!.canonicalDrugName })}
+              className="text-[11px] font-semibold mt-1 underline cursor-pointer"
+              style={{ color: 'var(--brand-primary-purple)' }}
+            >
+              {t('ocr.med.useCanonical').replace(
+                '{name}',
+                enrichment!.canonicalDrugName,
+              )}
+            </button>
+          )}
         </div>
-        <MatchBadge match={match} />
+        <MatchBadge match={match} enriching={enriching && !match} />
       </div>
 
       {/* Frequency + skip toggle */}
@@ -341,7 +408,13 @@ function RowCard({
   );
 }
 
-function MatchBadge({ match }: { match: CatalogMatch | null }) {
+function MatchBadge({
+  match,
+  enriching,
+}: {
+  match: CatalogMatch | null;
+  enriching: boolean;
+}) {
   const { t } = useLanguage();
   if (match) {
     return (
@@ -354,6 +427,20 @@ function MatchBadge({ match }: { match: CatalogMatch | null }) {
       >
         <Check className="w-3 h-3" aria-hidden="true" />
         {t('ocr.med.badgeInCatalog')}
+      </span>
+    );
+  }
+  if (enriching) {
+    return (
+      <span
+        className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
+        style={{
+          backgroundColor: 'var(--brand-background)',
+          color: 'var(--brand-text-muted)',
+        }}
+      >
+        <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+        {t('ocr.med.verifying')}
       </span>
     );
   }

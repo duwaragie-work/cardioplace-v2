@@ -1216,6 +1216,8 @@ const am: Record<TranslationKey, string> = {
   'ocr.med.rowFrequencyLabel': 'ስንት ጊዜ',
   'ocr.med.badgeInCatalog': 'በካታሎግ',
   'ocr.med.badgeFreeform': 'ነጻ ጽሑፍ',
+  'ocr.med.verifying': 'በማረጋገጥ ላይ…',
+  'ocr.med.useCanonical': '{name}ን ተጠቀም',
   'ocr.med.skip': 'ዝለል',
   'ocr.med.unskip': 'መልሰው ይጨምሩ',
   'ocr.med.addAll': '{count} ይጨምሩ',

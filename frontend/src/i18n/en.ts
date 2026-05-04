@@ -1214,6 +1214,8 @@ const en = {
   'ocr.med.rowFrequencyLabel': 'How often',
   'ocr.med.badgeInCatalog': 'In catalog',
   'ocr.med.badgeFreeform': 'Freeform',
+  'ocr.med.verifying': 'Verifying…',
+  'ocr.med.useCanonical': 'Use {name}',
   'ocr.med.skip': 'Skip',
   'ocr.med.unskip': 'Add back',
   'ocr.med.addAll': 'Add {count}',

@@ -1,19 +1,21 @@
 model PatientMedication {
-  id                    String                         @id @default(uuid())
-  userId                String
-  drugName              String
-  drugClass             DrugClass
-  isCombination         Boolean                        @default(false)
-  combinationComponents String[]
-  frequency             MedicationFrequency
-  source                MedicationSource
-  verificationStatus    MedicationVerificationStatus   @default(UNVERIFIED)
-  verifiedByAdminId     String?
-  verifiedAt            DateTime?
-  reportedAt            DateTime                       @default(now())
-  discontinuedAt        DateTime?
-  rawInputText          String?
-  notes                 String?                        @db.Text
+  id                       String                       @id @default(uuid())
+  userId                   String
+  drugName                 String
+  drugClass                DrugClass
+  isCombination            Boolean                      @default(false)
+  combinationComponents    String[]
+  frequency                MedicationFrequency
+  source                   MedicationSource
+  verificationStatus       MedicationVerificationStatus @default(UNVERIFIED)
+  verifiedByAdminId        String?
+  verifiedAt               DateTime?
+  reportedAt               DateTime                     @default(now())
+  discontinuedAt           DateTime?
+  rawInputText             String?
+  notes                    String?                      @db.Text
+  pillImageUrl             String?
+  plainLanguageDescription String?                      @db.Text
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

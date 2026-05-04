@@ -1031,38 +1031,65 @@ export default function ProfilePage() {
                 {activeMeds.map((m) => (
                   <div
                     key={m.id}
-                    className="rounded-xl p-3"
+                    className="rounded-xl p-3 flex gap-3"
                     style={{ backgroundColor: 'var(--brand-background)', border: '1px solid var(--brand-border)' }}
                   >
-                    {/* Row 1: name (truncates to single line) + verified badge */}
-                    <div className="flex items-center justify-between gap-2 min-w-0">
-                      <p
-                        className="text-[13.5px] font-bold leading-tight truncate min-w-0 flex-1"
-                        style={{ color: 'var(--brand-text-primary)' }}
-                        title={m.drugName}
-                      >
-                        {m.drugName}
-                      </p>
-                      <div className="shrink-0">
-                        <MedVerifiedBadge status={m.verificationStatus} />
-                      </div>
-                    </div>
-                    {/* Row 2: optional 2-in-1 badge + frequency */}
-                    <div className="mt-1 flex items-center gap-2 flex-wrap">
-                      {m.isCombination && (
-                        <span
-                          className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider"
-                          style={{ backgroundColor: 'var(--brand-accent-teal)', color: 'white' }}
+                    {/* Pill image — only rendered for freeform meds that
+                        actually got a DailyMed hit; catalog meds keep their
+                        existing layout (no thumb). */}
+                    {m.pillImageUrl && (
+                      <img
+                        src={m.pillImageUrl}
+                        alt=""
+                        aria-hidden="true"
+                        className="w-10 h-10 rounded-md object-cover shrink-0"
+                        style={{ border: '1px solid var(--brand-border)' }}
+                        onError={(e) => {
+                          // DailyMed URL went stale or 404'd — drop the image
+                          (e.currentTarget as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      {/* Row 1: name (truncates to single line) + verified badge */}
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <p
+                          className="text-[13.5px] font-bold leading-tight truncate min-w-0 flex-1"
+                          style={{ color: 'var(--brand-text-primary)' }}
+                          title={m.drugName}
                         >
-                          {t('profile.combinationPill')}
-                        </span>
+                          {m.drugName}
+                        </p>
+                        <div className="shrink-0">
+                          <MedVerifiedBadge status={m.verificationStatus} />
+                        </div>
+                      </div>
+                      {/* Plain-language indication for freeform meds */}
+                      {m.plainLanguageDescription && (
+                        <p
+                          className="text-[11.5px] mt-0.5 leading-snug"
+                          style={{ color: 'var(--brand-text-secondary)' }}
+                        >
+                          {m.plainLanguageDescription}
+                        </p>
                       )}
-                      <p
-                        className="text-[12px]"
-                        style={{ color: 'var(--brand-text-muted)' }}
-                      >
-                        {frequencyLabel(m.frequency, t)}
-                      </p>
+                      {/* Row 2: optional 2-in-1 badge + frequency */}
+                      <div className="mt-1 flex items-center gap-2 flex-wrap">
+                        {m.isCombination && (
+                          <span
+                            className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider"
+                            style={{ backgroundColor: 'var(--brand-accent-teal)', color: 'white' }}
+                          >
+                            {t('profile.combinationPill')}
+                          </span>
+                        )}
+                        <p
+                          className="text-[12px]"
+                          style={{ color: 'var(--brand-text-muted)' }}
+                        >
+                          {frequencyLabel(m.frequency, t)}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 ))}

@@ -1,5 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { DrugEnrichmentService } from '../drug-enrichment/drug-enrichment.service.js'
 import {
+  DrugClass,
   MedicationVerificationStatus,
   Prisma,
   ProfileVerificationStatus,
@@ -64,7 +66,40 @@ type VerifiableField = (typeof VERIFIABLE_PROFILE_FIELDS)[number]
 
 @Injectable()
 export class IntakeService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(IntakeService.name)
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly drugEnrichment: DrugEnrichmentService,
+  ) {}
+
+  /**
+   * Background-enrich freeform medications (drugClass = OTHER_UNVERIFIED) by
+   * resolving canonical name + pill image + plain-language description via
+   * RxNorm/DailyMed/OpenFDA. Fire-and-forget — never blocks intake submit.
+   * Catalog-tapped meds keep their hand-written `purpose` and brand icon and
+   * are skipped here.
+   */
+  private kickOffMedicationEnrichment(meds: PatientMedication[]): void {
+    const freeform = meds.filter((m) => m.drugClass === DrugClass.OTHER_UNVERIFIED)
+    if (!freeform.length) return
+
+    void Promise.allSettled(
+      freeform.map(async (med) => {
+        const enrichment = await this.drugEnrichment.enrich(med.drugName)
+        if (!enrichment) return
+        await this.prisma.patientMedication.update({
+          where: { id: med.id },
+          data: {
+            pillImageUrl: enrichment.pillImageUrl,
+            plainLanguageDescription: enrichment.plainLanguageDescription,
+          },
+        })
+      }),
+    ).catch((err) => {
+      this.logger.warn(`background medication enrichment failed: ${(err as Error).message}`)
+    })
+  }
 
   // ─── Patient: POST /intake/profile ───────────────────────────────────────
 
@@ -228,11 +263,17 @@ export class IntakeService {
         : `${created.length} medication(s) recorded`
 
       return {
-        statusCode: 201,
-        message,
-        data: responseRows.map((m) => this.serializeMedication(m)),
+        result: {
+          statusCode: 201,
+          message,
+          data: responseRows.map((m) => this.serializeMedication(m)),
+        },
+        created,
       }
-    }, TX_OPTIONS)
+    }, TX_OPTIONS).then(({ result, created }) => {
+      this.kickOffMedicationEnrichment(created)
+      return result
+    })
   }
 
   // ─── Patient: PATCH /me/medications/:id ──────────────────────────────────
@@ -363,9 +404,12 @@ export class IntakeService {
 
       if (!toClose.length && !toCreate.length) {
         return {
-          statusCode: 200,
-          message: 'No changes applied',
-          data: current.map((m) => this.serializeMedication(m)),
+          result: {
+            statusCode: 200,
+            message: 'No changes applied',
+            data: current.map((m) => this.serializeMedication(m)),
+          },
+          created: [] as PatientMedication[],
         }
       }
 
@@ -434,11 +478,17 @@ export class IntakeService {
       })
 
       return {
-        statusCode: 200,
-        message: `Medication list replaced (${toClose.length} closed, ${toCreate.length} added)`,
-        data: active.map((m) => this.serializeMedication(m)),
+        result: {
+          statusCode: 200,
+          message: `Medication list replaced (${toClose.length} closed, ${toCreate.length} added)`,
+          data: active.map((m) => this.serializeMedication(m)),
+        },
+        created,
       }
-    }, TX_OPTIONS)
+    }, TX_OPTIONS).then(({ result, created }) => {
+      this.kickOffMedicationEnrichment(created)
+      return result
+    })
   }
 
   // ─── Admin: POST /admin/users/:id/verify-profile ─────────────────────────
