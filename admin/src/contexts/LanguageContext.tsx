@@ -12,8 +12,6 @@ import {
   type TranslationKey,
   type LocaleCode,
   getTranslation,
-  isLocaleSupported,
-  SUPPORTED_LOCALES,
 } from '@/i18n';
 
 const STORAGE_KEY = 'healplace_locale';
@@ -31,40 +29,23 @@ const LanguageContext = createContext<LanguageContextValue>({
 });
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<LocaleCode>('en');
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  // Admin app is English-only — the LanguageSelector is hidden and the locale
+  // is hardcoded here. Any previously-persisted preference (from when the
+  // selector was visible) is wiped on mount so it cannot leak through.
+  const [locale] = useState<LocaleCode>('en');
+  const [toastMsg] = useState<string | null>(null);
 
-  // Read persisted locale on mount
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored && SUPPORTED_LOCALES.includes(stored as LocaleCode)) {
-        setLocaleState(stored as LocaleCode);
-      }
+      localStorage.removeItem(STORAGE_KEY);
     } catch {
       // localStorage unavailable
     }
   }, []);
 
-  const setLocale = useCallback((code: LocaleCode) => {
-    if (isLocaleSupported(code)) {
-      setLocaleState(code);
-      try {
-        localStorage.setItem(STORAGE_KEY, code);
-      } catch {
-        // localStorage unavailable
-      }
-    } else {
-      // Show "coming soon" toast and stay on English
-      setLocaleState('en');
-      try {
-        localStorage.setItem(STORAGE_KEY, 'en');
-      } catch {
-        // localStorage unavailable
-      }
-      setToastMsg(getTranslation('en', 'common.comingSoonMsg'));
-      setTimeout(() => setToastMsg(null), 3000);
-    }
+  const setLocale = useCallback((_code: LocaleCode) => {
+    // No-op: admin is English-only. Defensive — nothing in the UI calls this
+    // now, but a stray caller shouldn't be able to flip the locale.
   }, []);
 
   const t = useCallback(

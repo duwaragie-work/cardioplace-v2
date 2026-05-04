@@ -33,6 +33,11 @@ const BACKEND_MSG_KEY_MAP: Record<string, TranslationKey> = {
   'Please wait 60 seconds before requesting a new OTP': 'register.pleaseWait',
   'Invalid OTP': 'register.invalidOtp',
   'Verification failed': 'register.verificationFailed',
+  // Admin-app gate (auth.service.ts assertAdminAccessAllowed). Both rejection
+  // paths — unknown email and known email without an admin role — collapse
+  // to one friendly "no permission" message.
+  'No admin account exists for this email': 'register.adminAccessDenied',
+  'This account is not authorized to access the admin app': 'register.adminAccessDenied',
 };
 
 function backendMsgToKey(msg: string | undefined): TranslationKey | null {

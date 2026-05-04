@@ -12,6 +12,18 @@ interface LandingHeaderProps {
   activeLink?: string;
 }
 
+// Smooth-scroll to an in-page anchor AND update the URL hash so the
+// address bar reflects the section the user just jumped to (and so the
+// link is shareable / back-button works). Pure scrollIntoView() leaves
+// the URL stale.
+function jumpToAnchor(href: string) {
+  if (typeof window === 'undefined') return;
+  document.querySelector(href)?.scrollIntoView({ behavior: 'smooth' });
+  if (href.startsWith('#')) {
+    window.history.pushState(null, '', href);
+  }
+}
+
 export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProps) {
   const { t } = useLanguage();
   const { isAuthenticated, isLoading } = useAuth();
@@ -45,7 +57,7 @@ export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProp
             link.href.startsWith('#') ? (
               <button
                 key={link.label}
-                onClick={() => document.querySelector(link.href)?.scrollIntoView({ behavior: 'smooth' })}
+                onClick={() => jumpToAnchor(link.href)}
                 className={
                   activeLink === link.label
                     ? 'font-semibold text-[#6d28d9] text-base border-b-2 border-[#6d28d9] pb-0.5'
@@ -110,7 +122,7 @@ export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProp
             link.href.startsWith('#') ? (
               <button
                 key={link.label}
-                onClick={() => { document.querySelector(link.href)?.scrollIntoView({ behavior: 'smooth' }); setMenuOpen(false); }}
+                onClick={() => { jumpToAnchor(link.href); setMenuOpen(false); }}
                 className={`text-left text-base py-2 ${activeLink === link.label ? 'font-semibold text-[#6d28d9]' : 'text-[#475569]'}`}
               >
                 {link.text}
