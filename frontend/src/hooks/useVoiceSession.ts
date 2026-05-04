@@ -52,13 +52,52 @@ export interface TranscriptLine {
   isFinal: boolean;
 }
 
+/**
+ * Phase/27 — extended summaries with v2 fields. Backwards-compat: every new
+ * field is optional so v1 code paths (voice agent that doesn't yet emit them)
+ * keep rendering. Cards fall back gracefully to the v1 shape.
+ */
+export interface StructuredSymptoms {
+  severeHeadache?: boolean;
+  visualChanges?: boolean;
+  alteredMentalStatus?: boolean;
+  chestPainOrDyspnea?: boolean;
+  focalNeuroDeficit?: boolean;
+  severeEpigastricPain?: boolean;
+  newOnsetHeadache?: boolean;
+  ruqPain?: boolean;
+  edema?: boolean;
+}
+
+export interface AlertTierEcho {
+  tier: string;
+  ruleId: string;
+  /** patient-facing message from the alert engine — safe to surface in the card */
+  patientMessage?: string;
+}
+
 export interface CheckinSummary {
   systolicBP?: number;
   diastolicBP?: number;
+  pulse?: number;
+  position?: 'SITTING' | 'STANDING' | 'LYING';
   weight?: number;
+  /** computed BMI from height (intake) + weight (this entry) */
+  bmi?: number;
   medicationTaken?: boolean;
+  medicationScheduledLater?: boolean;
+  /** structured Level-2 booleans set on the entry */
+  structuredSymptoms?: StructuredSymptoms;
+  /** legacy + "anything else" symptoms — both shown in the card */
   symptoms: string[];
+  otherSymptoms?: string[];
   saved: boolean;
+  /** when the entry triggered a rule, the engine's alert echo */
+  alert?: AlertTierEcho | null;
+  /** SBP-DBP > 60 — informational annotation, not its own alert */
+  pulsePressureWide?: boolean;
+  /** ISO measuredAt string — used in card header */
+  measuredAt?: string;
 }
 
 export interface UpdateSummary {
@@ -66,10 +105,17 @@ export interface UpdateSummary {
   entryDate?: string;
   systolicBP?: number;
   diastolicBP?: number;
+  pulse?: number;
+  position?: 'SITTING' | 'STANDING' | 'LYING';
   weight?: number;
+  bmi?: number;
   medicationTaken?: boolean;
+  medicationScheduledLater?: boolean;
+  structuredSymptoms?: StructuredSymptoms;
   symptoms: string[];
+  otherSymptoms?: string[];
   updated: boolean;
+  alert?: AlertTierEcho | null;
 }
 
 export interface DeleteSummary {
@@ -78,6 +124,40 @@ export interface DeleteSummary {
   failedCount: number;
   success: boolean;
   message: string;
+}
+
+export interface MedicationAdherenceSummary {
+  logged: boolean;
+  message: string;
+  medication: { id: string; drugName: string; drugClass: string } | null;
+  status: 'taken' | 'missed' | 'scheduled_later';
+  /** running streak day count (server may include) */
+  streakDays?: number;
+  entryId?: string;
+}
+
+export interface SymptomLogSummary {
+  logged: boolean;
+  message: string;
+  /** structured key the bot logged (e.g. severeHeadache) */
+  symptom: string;
+  /** patient phrasing if the bot saved one */
+  notes?: string;
+  /** alert that fired (symptom-override is BP_LEVEL_2_SYMPTOM_OVERRIDE) */
+  alert?: AlertTierEcho | null;
+  entryId?: string;
+}
+
+export interface BPPhotoSummary {
+  parsed: boolean;
+  sbp?: number;
+  dbp?: number;
+  pulse?: number;
+  /** 0..1 — if <0.6 the bot should ask the patient to type instead */
+  confidence?: number;
+  message: string;
+  /** preview URL of the image the patient just sent (frontend creates this) */
+  previewUrl?: string;
 }
 
 export interface StartOptions {

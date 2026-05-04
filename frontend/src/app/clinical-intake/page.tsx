@@ -73,6 +73,8 @@ import { EMPTY_INTAKE_STATE, type IntakeFormState, type IntakeStepKey, type Sele
 
 import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
+import MedicationPhotoButton from '@/components/intake/MedicationPhotoButton';
+import type { ConfirmedMedication } from '@/components/intake/MedicationPhotoConfirmModal';
 import { cmToFtIn, ftInToCm } from '@/lib/units';
 import StepDots from '@/components/intake/StepDots';
 import ChoiceCard from '@/components/intake/ChoiceCard';
@@ -703,6 +705,55 @@ function A5CoreMeds({ state, setState }: StepProps) {
   };
 
   const { t } = useLanguage();
+
+  // Phase/27 — when the patient scans a prescription, fan the OCR-extracted
+  // medications out into selectedMedications. Catalog matches inherit the
+  // canonical drugName + drugClass; non-matches land as OTHER_UNVERIFIED with
+  // rawInputText preserved for provider review. Existing meds are deduped via
+  // findExistingMedIndex so a re-scan doesn't double-add.
+  const addOcrMedications = (rows: ConfirmedMedication[]) => {
+    setState((prev) => {
+      let next = prev.selectedMedications;
+      for (const row of rows) {
+        const trimmed = row.drugName.trim();
+        if (!trimmed) continue;
+        const existing = findExistingMedIndex(next, trimmed);
+        if (existing >= 0) {
+          // Update frequency on the existing row if the OCR pass found one.
+          if (row.frequency !== 'UNSURE') {
+            next = next.map((m, i) =>
+              i === existing ? { ...m, frequency: row.frequency } : m,
+            );
+          }
+          continue;
+        }
+        const med: SelectedMedication = row.match
+          ? {
+              catalogId: row.match.catalogId,
+              drugName: row.match.drugName,
+              drugClass: row.match.drugClass,
+              isCombination: row.match.isCombination,
+              combinationComponents:
+                row.match.combinationComponents.length > 0
+                  ? row.match.combinationComponents
+                  : undefined,
+              source: 'PATIENT_PHOTO',
+              frequency: row.frequency === 'UNSURE' ? undefined : row.frequency,
+            }
+          : {
+              drugName: trimmed.slice(0, 60),
+              drugClass: 'OTHER_UNVERIFIED',
+              isCombination: false,
+              source: 'PATIENT_PHOTO',
+              rawInputText: row.raw.slice(0, 2000),
+              frequency: row.frequency === 'UNSURE' ? undefined : row.frequency,
+            };
+        next = [...next, med];
+      }
+      return { ...prev, selectedMedications: next };
+    });
+  };
+
   return (
     <div className="space-y-7">
       <StepHeader
@@ -710,6 +761,13 @@ function A5CoreMeds({ state, setState }: StepProps) {
         subtitle={t('intake.a5.subtitle')}
         audio={t('intake.a5.audio')}
       />
+
+      {/* Phase/27 — Gemini Vision OCR for prescriptions. Hidden when
+          NEXT_PUBLIC_MED_OCR_ENABLED !== 'true'. Fans OCR results across
+          A5/A6/A8 + A9 frequency in one shot via addOcrMedications. */}
+      <div className="flex">
+        <MedicationPhotoButton onConfirm={addOcrMedications} />
+      </div>
 
       <MedicationGroup
         title={t('intake.a5.groupAce')}

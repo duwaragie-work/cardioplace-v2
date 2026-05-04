@@ -159,3 +159,117 @@ export function findMedById(id: string): MedCatalogEntry | MedComboEntry | undef
 }
 
 export const DEFAULT_FREQUENCY: MedicationFrequencyInput = 'ONCE_DAILY'
+
+// ─── Phase/27 medication-list OCR helpers ───────────────────────────────────
+
+/**
+ * Result shape for catalog matches. Mirrors enough of MedCatalogEntry +
+ * MedComboEntry that callers can build a SelectedMedication directly from
+ * the match result.
+ */
+export interface CatalogMatch {
+  catalogId: string
+  drugName: string
+  drugClass: DrugClassInput
+  isCombination: boolean
+  combinationComponents: DrugClassInput[]
+  screen: 'CORE' | 'CATEGORY' | 'COMBO'
+}
+
+function comboToMatch(combo: MedComboEntry): CatalogMatch {
+  return {
+    catalogId: combo.id,
+    drugName: combo.brandName,
+    drugClass: combo.registersAs[0] ?? 'OTHER_UNVERIFIED',
+    isCombination: true,
+    combinationComponents: combo.registersAs,
+    screen: 'COMBO',
+  }
+}
+
+function entryToMatch(entry: MedCatalogEntry): CatalogMatch {
+  return {
+    catalogId: entry.id,
+    drugName: entry.genericName,
+    drugClass: entry.drugClass,
+    isCombination: false,
+    combinationComponents: [],
+    screen: entry.screen,
+  }
+}
+
+/**
+ * Best-effort match of an OCR-extracted drug name to the medication catalog.
+ * Strategy:
+ *   1. Exact (case-insensitive) match against generic OR brand name.
+ *   2. Substring fallback — handles "Lisinopril 10mg" → "Lisinopril".
+ *      Only matches when the catalog name is at least 4 chars long, to avoid
+ *      "amol" → "Amlodipine" style false positives.
+ *
+ * Returns null when nothing matches; caller falls back to OTHER_UNVERIFIED
+ * with rawInputText preserved so the provider can verify on review.
+ */
+export function matchToCatalog(raw: string): CatalogMatch | null {
+  if (!raw || typeof raw !== 'string') return null
+  const needle = raw.trim().toLowerCase()
+  if (!needle) return null
+
+  // Combos first — "Caduet" is a brand name shared with no generic, so we
+  // want it to win over a substring match against "Atorvastatin".
+  for (const combo of COMBO_MEDS) {
+    if (combo.brandName.toLowerCase() === needle) return comboToMatch(combo)
+  }
+
+  // Then CORE + CATEGORY exact (generic OR brand)
+  for (const entry of ALL_MEDS) {
+    if (
+      entry.genericName.toLowerCase() === needle ||
+      entry.brandName.toLowerCase() === needle
+    ) {
+      return entryToMatch(entry)
+    }
+  }
+
+  // Substring fallback — patient prescription often has "Lisinopril 10mg".
+  // We require the catalog name to be ≥4 chars to prevent collisions on
+  // short brand names (none currently exist but the guard is cheap).
+  for (const entry of ALL_MEDS) {
+    const generic = entry.genericName.toLowerCase()
+    const brand = entry.brandName.toLowerCase()
+    if (generic.length >= 4 && needle.includes(generic)) return entryToMatch(entry)
+    if (brand.length >= 4 && needle.includes(brand)) return entryToMatch(entry)
+  }
+  for (const combo of COMBO_MEDS) {
+    const brand = combo.brandName.toLowerCase()
+    if (brand.length >= 4 && needle.includes(brand)) return comboToMatch(combo)
+  }
+
+  return null
+}
+
+/**
+ * Map Gemini's free-text frequency output to the 4-value MedicationFrequency
+ * enum. Returns 'UNSURE' on no match — patient confirms on the next wizard
+ * step (A9).
+ */
+export function normaliseFrequency(raw: string): MedicationFrequencyInput {
+  if (!raw || typeof raw !== 'string') return 'UNSURE'
+  const s = raw.trim().toLowerCase()
+  if (!s) return 'UNSURE'
+
+  // Three times daily — check first because "three times" contains "two" via
+  // word-boundary collision risk; explicit checks are safer.
+  if (/\bthree\s*times\b|\b3\s*times\b|\b3x\b|\btid\b|\bt\.i\.d\b|every\s*8\s*(hour|hr)/.test(s)) {
+    return 'THREE_TIMES_DAILY'
+  }
+  // Twice daily
+  if (/\btwice\b|\b2\s*times\b|\btwo\s*times\b|\b2x\b|\bbid\b|\bb\.i\.d\b|every\s*12\s*(hour|hr)/.test(s)) {
+    return 'TWICE_DAILY'
+  }
+  // Once daily — broad catch-all for "once a day", "daily", "qd", "1 time"
+  if (/\bonce\b|\bqd\b|\bq\.d\b|\b1\s*time\b|\bone\s*time\b|\bdaily\b|\bper\s*day\b|every\s*24\s*(hour|hr)/.test(s)) {
+    return 'ONCE_DAILY'
+  }
+
+  return 'UNSURE'
+}

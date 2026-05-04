@@ -34,7 +34,17 @@ import {
   type CheckinSummary,
   type UpdateSummary,
   type DeleteSummary,
+  type MedicationAdherenceSummary,
+  type SymptomLogSummary,
+  type BPPhotoSummary,
 } from '@/hooks/useVoiceSession';
+// Phase/27 chatbot v2 — rich result cards.
+import CheckinCard from '@/components/cardio/cards/CheckinCard';
+import UpdateCard from '@/components/cardio/cards/UpdateCard';
+import DeleteCard from '@/components/cardio/cards/DeleteCard';
+import MedicationAdherenceCard from '@/components/cardio/cards/MedicationAdherenceCard';
+import SymptomLogCard from '@/components/cardio/cards/SymptomLogCard';
+import BPPhotoCard from '@/components/cardio/cards/BPPhotoCard';
 
 // Shape of the delete_checkin tool result from the backend (see journal-tools.ts).
 // Narrower than the voice-side DeleteSummary (text delete is always single-entry).
@@ -246,170 +256,6 @@ function MessageBubble({ msg }: { msg: Message }) {
           <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>{msg.time}</p>
         </div>
       </div>
-    </motion.div>
-  );
-}
-
-// ─── Checkin result card ───────────────────────────────────────────────────────
-function CheckinCard({ summary, onDismiss }: { summary: CheckinSummary; onDismiss: () => void }) {
-  const { t } = useLanguage();
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 16, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      className="mx-auto w-full max-w-sm rounded-2xl p-5 my-2"
-      style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)', boxShadow: '0 4px 20px rgba(0,0,0,0.09)' }}
-    >
-      <div className="flex items-center gap-2 mb-4">
-        {summary.saved
-          ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-success-green)' }} />
-          : <AlertCircle className="w-5 h-5 text-red-500" />}
-        <p className="font-bold text-[15px]" style={{ color: 'var(--brand-text-primary)' }}>
-          {summary.saved ? t('chat.checkinSaved') : t('chat.couldNotSave')}
-        </p>
-      </div>
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        {summary.systolicBP != null && summary.diastolicBP != null && (
-          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Blood Pressure</p>
-            <p className="text-[18px] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{summary.systolicBP}/{summary.diastolicBP}</p>
-            <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>mmHg</p>
-          </div>
-        )}
-        {summary.weight != null && (
-          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-accent-teal-light)' }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Weight</p>
-            <p className="text-[18px] font-bold" style={{ color: 'var(--brand-accent-teal)' }}>{summary.weight}</p>
-            <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>lbs</p>
-          </div>
-        )}
-        <div className="rounded-xl p-3 text-center" style={{ backgroundColor: summary.medicationTaken ? 'var(--brand-success-green-light)' : 'var(--brand-alert-red-light)' }}>
-          <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Medications</p>
-          <p className="text-[14px] font-bold" style={{ color: summary.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red)' }}>
-            {summary.medicationTaken ? 'Taken ✓' : 'Missed'}
-          </p>
-        </div>
-        {summary.symptoms.length > 0 && (
-          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Symptoms</p>
-            <p className="text-[12px] font-medium" style={{ color: 'var(--brand-warning-amber)' }}>
-              {summary.symptoms.slice(0, 2).join(', ')}{summary.symptoms.length > 2 && ` +${summary.symptoms.length - 2}`}
-            </p>
-          </div>
-        )}
-      </div>
-      <button
-        onClick={onDismiss}
-        className="w-full py-2.5 rounded-xl text-[14px] font-semibold transition hover:opacity-90 active:scale-[0.98]"
-        style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)', color: 'white', boxShadow: '0 4px 14px rgba(123,0,224,0.28)' }}
-      >
-        {t('chat.dismiss')}
-      </button>
-    </motion.div>
-  );
-}
-
-// ─── Update result card ────────────────────────────────────────────────────────
-function DeleteCard({ summary, onDismiss }: { summary: DeleteSummary; onDismiss: () => void }) {
-  const successLabel = summary.deletedCount === 1
-    ? 'Reading deleted'
-    : `${summary.deletedCount} readings deleted`;
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 16, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      className="mx-auto w-full max-w-sm rounded-2xl p-5 my-2"
-      style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)', boxShadow: '0 4px 20px rgba(0,0,0,0.09)' }}
-    >
-      <div className="flex items-center gap-2 mb-4">
-        {summary.success
-          ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-alert-red)' }} />
-          : <AlertCircle className="w-5 h-5 text-red-500" />}
-        <p className="font-bold text-[15px]" style={{ color: 'var(--brand-text-primary)' }}>
-          {summary.success ? successLabel : 'Could not delete reading'}
-        </p>
-      </div>
-      <div className="rounded-xl p-3 text-center mb-4" style={{ backgroundColor: 'var(--brand-alert-red-light)' }}>
-        <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Removed</p>
-        <p className="text-[16px] font-bold" style={{ color: 'var(--brand-alert-red)' }}>
-          {summary.deletedCount} entry{summary.deletedCount === 1 ? '' : 'ies'}
-          {summary.failedCount > 0 ? ` (${summary.failedCount} failed)` : ''}
-        </p>
-      </div>
-      {summary.message && (
-        <p className="text-[12px] mb-4 text-center" style={{ color: 'var(--brand-text-muted)' }}>
-          {summary.message}
-        </p>
-      )}
-      <button
-        onClick={onDismiss}
-        className="w-full py-2.5 rounded-xl text-[14px] font-semibold transition hover:opacity-90 active:scale-[0.98]"
-        style={{ background: 'linear-gradient(135deg, #DC2626, #EF4444)', color: 'white', boxShadow: '0 4px 14px rgba(220,38,38,0.28)' }}
-      >
-        Done
-      </button>
-    </motion.div>
-  );
-}
-
-function UpdateCard({ summary, onDismiss }: { summary: UpdateSummary; onDismiss: () => void }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 16, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      className="mx-auto w-full max-w-sm rounded-2xl p-5 my-2"
-      style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)', boxShadow: '0 4px 20px rgba(0,0,0,0.09)' }}
-    >
-      <div className="flex items-center gap-2 mb-4">
-        {summary.updated
-          ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-accent-teal)' }} />
-          : <AlertCircle className="w-5 h-5 text-red-500" />}
-        <p className="font-bold text-[15px]" style={{ color: 'var(--brand-text-primary)' }}>
-          {summary.updated ? 'Reading updated!' : 'Could not update reading'}
-        </p>
-      </div>
-      {summary.entryDate && (
-        <p className="text-[12px] mb-3" style={{ color: 'var(--brand-text-muted)' }}>
-          Entry for {new Date(summary.entryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-        </p>
-      )}
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        {summary.systolicBP != null && summary.diastolicBP != null && (
-          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-accent-teal-light)' }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Blood Pressure</p>
-            <p className="text-[18px] font-bold" style={{ color: 'var(--brand-accent-teal)' }}>{summary.systolicBP}/{summary.diastolicBP}</p>
-            <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>mmHg</p>
-          </div>
-        )}
-        {summary.weight != null && summary.weight > 0 && (
-          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-accent-teal-light)' }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Weight</p>
-            <p className="text-[18px] font-bold" style={{ color: 'var(--brand-accent-teal)' }}>{summary.weight}</p>
-            <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>lbs</p>
-          </div>
-        )}
-        <div className="rounded-xl p-3 text-center" style={{ backgroundColor: summary.medicationTaken ? 'var(--brand-success-green-light)' : 'var(--brand-alert-red-light)' }}>
-          <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Medications</p>
-          <p className="text-[14px] font-bold" style={{ color: summary.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red)' }}>
-            {summary.medicationTaken ? 'Taken ✓' : 'Missed'}
-          </p>
-        </div>
-        {summary.symptoms.length > 0 && (
-          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Symptoms</p>
-            <p className="text-[12px] font-medium" style={{ color: 'var(--brand-warning-amber)' }}>
-              {summary.symptoms.slice(0, 2).join(', ')}{summary.symptoms.length > 2 && ` +${summary.symptoms.length - 2}`}
-            </p>
-          </div>
-        )}
-      </div>
-      <button
-        onClick={onDismiss}
-        className="w-full py-2.5 rounded-xl text-[14px] font-semibold transition hover:opacity-90 active:scale-[0.98]"
-        style={{ background: 'linear-gradient(135deg, #0D9488, #14B8A6)', color: 'white', boxShadow: '0 4px 14px rgba(13,148,136,0.28)' }}
-      >
-        Done
-      </button>
     </motion.div>
   );
 }

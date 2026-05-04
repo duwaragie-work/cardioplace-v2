@@ -6,6 +6,49 @@
 import { Type } from '@google/genai'
 import type { FunctionDeclaration } from '@google/genai'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
+import type { OcrService } from '../../ocr/ocr.service.js'
+import { BpOcrFailure } from '../../ocr/ocr.service.js'
+import type {
+  AdherenceStatus,
+  MedicationAdherenceService,
+} from '../services/medication-adherence.service.js'
+import type {
+  StructuredSymptomKey,
+  SymptomQuickLogService,
+} from '../services/symptom-quick-log.service.js'
+
+/**
+ * Bag of services the executor needs. Phase/27 — added to support
+ * log_medication_adherence, log_symptom_quick, submit_bp_from_photo.
+ * Original signature took only `journalService`; we kept the migration
+ * additive by making the new services optional. Existing callers can
+ * pass just the journal service and the new tools will fail fast with
+ * a clear error.
+ */
+export interface JournalToolContext {
+  journalService: DailyJournalService
+  adherenceService?: MedicationAdherenceService
+  symptomService?: SymptomQuickLogService
+  ocrService?: OcrService
+}
+
+const STRUCTURED_SYMPTOM_KEYS: ReadonlySet<StructuredSymptomKey> = new Set([
+  'severeHeadache',
+  'visualChanges',
+  'alteredMentalStatus',
+  'chestPainOrDyspnea',
+  'focalNeuroDeficit',
+  'severeEpigastricPain',
+  'newOnsetHeadache',
+  'ruqPain',
+  'edema',
+])
+
+const ADHERENCE_STATUSES: ReadonlySet<AdherenceStatus> = new Set([
+  'taken',
+  'missed',
+  'scheduled_later',
+])
 
 /**
  * Normalise a time string to HH:mm 24-hour format.
@@ -50,6 +93,22 @@ export function normaliseTime(raw?: string): string | undefined {
   return undefined
 }
 
+/**
+ * Normalise the model's `position` argument to one of the v2 enum values.
+ * Returns undefined if the input doesn't match — caller should treat that as
+ * "patient didn't specify" rather than guessing.
+ */
+export function normalisePosition(raw: unknown): 'SITTING' | 'STANDING' | 'LYING' | undefined {
+  if (typeof raw !== 'string') return undefined
+  const upper = raw.trim().toUpperCase()
+  if (upper === 'SITTING' || upper === 'STANDING' || upper === 'LYING') return upper
+  // Common synonyms the model might emit
+  if (upper === 'SAT' || upper === 'SEATED') return 'SITTING'
+  if (upper === 'STAND' || upper === 'STOOD') return 'STANDING'
+  if (upper === 'LYING DOWN' || upper === 'LAYING' || upper === 'LAID') return 'LYING'
+  return undefined
+}
+
 // ── Gemini FunctionDeclaration definitions ──────────────────────────────────
 
 export function getJournalToolDeclarations(): FunctionDeclaration[] {
@@ -73,9 +132,22 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
           measurement_time: { type: Type.STRING, description: 'Time in HH:mm 24-hour format (e.g. "08:30", "14:15").' },
           systolic_bp: { type: Type.NUMBER, description: 'Systolic (top number, 60–250). Must come from the patient.' },
           diastolic_bp: { type: Type.NUMBER, description: 'Diastolic (bottom number, 40–150). Must come from the patient.' },
+          pulse: { type: Type.NUMBER, description: 'Pulse / heart rate in bpm (30–220). Optional — omit if not measured.' },
+          position: { type: Type.STRING, description: 'Position during measurement: SITTING, STANDING, or LYING. Optional — omit if not asked.' },
           medication_taken: { type: Type.BOOLEAN, description: 'Did the patient take their meds? Must be explicitly answered by the patient.' },
+          medication_scheduled_later: { type: Type.BOOLEAN, description: 'Set to true when the patient says their medication is "not due yet" / scheduled for later. Treats the dose as a neutral state (no adherence alert) instead of "missed".' },
           weight: { type: Type.NUMBER, description: 'Weight in lbs. Omit if skipped.' },
-          symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Symptoms list in English. Empty array [] if patient said none.' },
+          symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Legacy freeform symptom list in English. Empty array [] if patient said none. Prefer the structured booleans below for the 9 known clinical symptoms.' },
+          severe_headache: { type: Type.BOOLEAN, description: 'Patient reports a severe headache (Level-2 trigger). Default false.' },
+          visual_changes: { type: Type.BOOLEAN, description: 'Patient reports visual changes / blurred / double vision (Level-2 trigger). Default false.' },
+          altered_mental_status: { type: Type.BOOLEAN, description: 'Patient reports confusion, drowsiness, slurred speech, altered mental status (Level-2 trigger). Default false.' },
+          chest_pain_or_dyspnea: { type: Type.BOOLEAN, description: 'Patient reports chest pain or shortness of breath (Level-2 trigger). Default false.' },
+          focal_neuro_deficit: { type: Type.BOOLEAN, description: 'Patient reports one-sided weakness, numbness, facial droop, or other focal neuro deficit (Level-2 trigger). Default false.' },
+          severe_epigastric_pain: { type: Type.BOOLEAN, description: 'Patient reports severe upper-abdominal pain (Level-2 trigger). Default false.' },
+          new_onset_headache: { type: Type.BOOLEAN, description: 'Pregnancy-only: new-onset headache. Set only when patient is pregnant. Default false.' },
+          ruq_pain: { type: Type.BOOLEAN, description: 'Pregnancy-only: right-upper-quadrant abdominal pain. Set only when patient is pregnant. Default false.' },
+          edema: { type: Type.BOOLEAN, description: 'Pregnancy-only: facial / hand / leg swelling. Set only when patient is pregnant. Default false.' },
+          other_symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Patient-reported "anything else" symptoms not covered by the 9 structured booleans above. English. Optional.' },
           notes: { type: Type.STRING, description: 'Extra notes in English. Omit if none.' },
         },
         required: ['entry_date', 'measurement_time', 'systolic_bp', 'diastolic_bp', 'medication_taken', 'symptoms'],
@@ -108,9 +180,22 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
           measurement_time: { type: Type.STRING, description: 'New measurement time in HH:mm 24-hour format.' },
           systolic_bp: { type: Type.NUMBER, description: 'New systolic (top number) BP (60–250).' },
           diastolic_bp: { type: Type.NUMBER, description: 'New diastolic (bottom number) BP (40–150).' },
+          pulse: { type: Type.NUMBER, description: 'New pulse / heart rate (30–220).' },
+          position: { type: Type.STRING, description: 'New position: SITTING, STANDING, or LYING.' },
           medication_taken: { type: Type.BOOLEAN, description: 'New medication status.' },
+          medication_scheduled_later: { type: Type.BOOLEAN, description: 'Set true if patient now says the dose is "not due yet" / scheduled for later (neutralises the missed flag).' },
           weight: { type: Type.NUMBER, description: 'New weight in lbs.' },
-          symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'New symptom list. ALWAYS in English regardless of conversation language.' },
+          symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'New legacy freeform symptom list. ALWAYS in English. Prefer structured booleans below for the 9 known clinical symptoms.' },
+          severe_headache: { type: Type.BOOLEAN, description: 'New severe-headache flag.' },
+          visual_changes: { type: Type.BOOLEAN, description: 'New visual-changes flag.' },
+          altered_mental_status: { type: Type.BOOLEAN, description: 'New altered-mental-status flag.' },
+          chest_pain_or_dyspnea: { type: Type.BOOLEAN, description: 'New chest-pain / shortness-of-breath flag.' },
+          focal_neuro_deficit: { type: Type.BOOLEAN, description: 'New focal-neuro-deficit flag.' },
+          severe_epigastric_pain: { type: Type.BOOLEAN, description: 'New severe-epigastric-pain flag.' },
+          new_onset_headache: { type: Type.BOOLEAN, description: 'New new-onset-headache flag (pregnancy-only).' },
+          ruq_pain: { type: Type.BOOLEAN, description: 'New RUQ-pain flag (pregnancy-only).' },
+          edema: { type: Type.BOOLEAN, description: 'New edema flag (pregnancy-only).' },
+          other_symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'New "anything else" symptom list. English.' },
           notes: { type: Type.STRING, description: 'New notes. ALWAYS in English regardless of conversation language.' },
         },
         required: ['entry_date', 'original_time'],
@@ -130,6 +215,59 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
           entry_id: { type: Type.STRING, description: 'Entry ID from get_recent_readings (optional, used if available).' },
         },
         required: ['entry_date', 'original_time'],
+      },
+    },
+    {
+      name: 'log_medication_adherence',
+      description:
+        'Quick-log a single medication as taken / missed / scheduled-later WITHOUT a full check-in. ' +
+        'Call this when the patient mentions one specific medication ("I took my Lisinopril this morning", ' +
+        '"Skip my Carvedilol, I\'ll take it tonight", "I missed my Atorvastatin yesterday"). ' +
+        'Do NOT call this for full check-ins (use submit_checkin) or generic "I took my meds" without a drug name.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          drug_name: { type: Type.STRING, description: 'Drug name as the patient said it (e.g. "Lisinopril"). Will be matched case-insensitively against the patient\'s active medications.' },
+          medication_id: { type: Type.STRING, description: 'PatientMedication.id if known (e.g. from chat context). Optional — drug_name is enough.' },
+          status: { type: Type.STRING, description: 'One of: "taken", "missed", "scheduled_later".' },
+          missed_doses: { type: Type.NUMBER, description: 'Number of doses missed (only relevant when status=missed). Defaults to 1.' },
+          reason: { type: Type.STRING, description: 'Why the dose was missed: FORGOT, SIDE_EFFECTS, RAN_OUT, COST, INTENTIONAL, OTHER. Only relevant when status=missed.' },
+        },
+        required: ['status'],
+      },
+    },
+    {
+      name: 'log_symptom_quick',
+      description:
+        'Quick-log a single structured symptom RIGHT NOW without requiring a BP measurement. ' +
+        'Use when the patient reports a symptom in the present tense without offering BP numbers ' +
+        '("I have severe headache right now", "I feel dizzy and confused"). ' +
+        'This persists a sparse JournalEntry that fires the symptom-override rule — the patient\'s ' +
+        'care team is notified immediately. Do NOT call for past-tense symptoms or during a full check-in.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          symptom: { type: Type.STRING, description: 'One of the 9 structured symptom keys: severeHeadache, visualChanges, alteredMentalStatus, chestPainOrDyspnea, focalNeuroDeficit, severeEpigastricPain, newOnsetHeadache, ruqPain, edema. The pregnancy-specific ones (newOnsetHeadache, ruqPain, edema) only fire alerts when the patient is pregnant.' },
+          notes: { type: Type.STRING, description: 'Optional patient phrasing of the symptom (e.g. "throbbing pain behind my eyes for an hour"). Stored as otherSymptoms[0].' },
+        },
+        required: ['symptom'],
+      },
+    },
+    {
+      name: 'submit_bp_from_photo',
+      description:
+        'Run OCR on a cuff-display photo the patient just sent in chat. ' +
+        'Returns the extracted SBP/DBP/pulse with a confidence score so you can verbally confirm ' +
+        'with the patient before saving. This tool does NOT persist anything — after the patient ' +
+        'confirms, call submit_checkin with the returned numbers. Decline politely if the result ' +
+        'has confidence below 0.6 or returns no numbers (ask the patient to type the values instead).',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          image_base64: { type: Type.STRING, description: 'Base64-encoded photo of the cuff display, no data: prefix.' },
+          mime_type: { type: Type.STRING, description: 'Image MIME type — one of image/jpeg, image/png, image/webp, image/heic.' },
+        },
+        required: ['image_base64', 'mime_type'],
       },
     },
     {
@@ -154,12 +292,24 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
 
 // ── Tool executor ───────────────────────────────────────────────────────────
 
+/**
+ * Execute a tool the model called. Accepts either the new context-object
+ * shape (preferred) or the legacy positional `journalService` for callers
+ * that haven't migrated yet. New tools (adherence, symptom-quick, photo)
+ * require the context shape — they return a clear failure JSON when called
+ * via the legacy path.
+ */
 export async function executeJournalTool(
   name: string,
   args: Record<string, any>,
-  journalService: DailyJournalService,
+  ctxOrJournal: JournalToolContext | DailyJournalService,
   userId: string,
 ): Promise<string> {
+  const ctx: JournalToolContext =
+    'journalService' in ctxOrJournal
+      ? ctxOrJournal
+      : { journalService: ctxOrJournal as DailyJournalService }
+  const journalService = ctx.journalService
   switch (name) {
     case 'submit_checkin': {
       // Guard: reject if required fields are missing or have placeholder values.
@@ -194,13 +344,30 @@ export async function executeJournalTool(
       try {
         const time = normaliseTime(args.measurement_time) ?? new Date().toISOString().slice(11, 16)
         const measuredAt = new Date(`${entryDate}T${time}:00.000Z`).toISOString()
+        // Position whitelist — Gemini may return lowercase or unexpected values.
+        const position = normalisePosition(args.position)
         const result = await journalService.create(userId, {
           measuredAt,
           systolicBP: args.systolic_bp,
           diastolicBP: args.diastolic_bp,
+          pulse: args.pulse ?? null,
+          position: position ?? undefined,
           medicationTaken: args.medication_taken,
+          medicationScheduledLater: args.medication_scheduled_later === true,
           weight: args.weight,
           symptoms: args.symptoms ?? [],
+          // 9 structured Level-2 symptom booleans — default false when omitted
+          // so the rule engine sees a clean, fully-populated entry.
+          severeHeadache: args.severe_headache === true,
+          visualChanges: args.visual_changes === true,
+          alteredMentalStatus: args.altered_mental_status === true,
+          chestPainOrDyspnea: args.chest_pain_or_dyspnea === true,
+          focalNeuroDeficit: args.focal_neuro_deficit === true,
+          severeEpigastricPain: args.severe_epigastric_pain === true,
+          newOnsetHeadache: args.new_onset_headache === true,
+          ruqPain: args.ruq_pain === true,
+          edema: args.edema === true,
+          otherSymptoms: Array.isArray(args.other_symptoms) ? args.other_symptoms : undefined,
           notes: args.notes ?? '',
         } as any)
         return JSON.stringify({ saved: true, message: 'Check-in saved successfully.', data: result.data })
@@ -254,9 +421,24 @@ export async function executeJournalTool(
         }
         if (args.systolic_bp != null) dto.systolicBP = args.systolic_bp
         if (args.diastolic_bp != null) dto.diastolicBP = args.diastolic_bp
+        if (args.pulse != null) dto.pulse = args.pulse
+        const updPosition = normalisePosition(args.position)
+        if (updPosition) dto.position = updPosition
         if (args.medication_taken != null) dto.medicationTaken = args.medication_taken
+        if (args.medication_scheduled_later != null) dto.medicationScheduledLater = args.medication_scheduled_later === true
         if (args.weight != null) dto.weight = args.weight
         if (args.symptoms != null) dto.symptoms = args.symptoms
+        // Structured Level-2 booleans (only set what the model explicitly sent)
+        if (args.severe_headache != null) dto.severeHeadache = args.severe_headache === true
+        if (args.visual_changes != null) dto.visualChanges = args.visual_changes === true
+        if (args.altered_mental_status != null) dto.alteredMentalStatus = args.altered_mental_status === true
+        if (args.chest_pain_or_dyspnea != null) dto.chestPainOrDyspnea = args.chest_pain_or_dyspnea === true
+        if (args.focal_neuro_deficit != null) dto.focalNeuroDeficit = args.focal_neuro_deficit === true
+        if (args.severe_epigastric_pain != null) dto.severeEpigastricPain = args.severe_epigastric_pain === true
+        if (args.new_onset_headache != null) dto.newOnsetHeadache = args.new_onset_headache === true
+        if (args.ruq_pain != null) dto.ruqPain = args.ruq_pain === true
+        if (args.edema != null) dto.edema = args.edema === true
+        if (Array.isArray(args.other_symptoms)) dto.otherSymptoms = args.other_symptoms
         if (args.notes != null) dto.notes = args.notes
 
         if (Object.keys(dto).length === 0) {
@@ -349,6 +531,106 @@ export async function executeJournalTool(
         return JSON.stringify({ deleted: true, message: 'Reading deleted successfully.' })
       } catch (err: any) {
         return JSON.stringify({ deleted: false, message: err.message ?? 'Failed to delete.' })
+      }
+    }
+
+    case 'log_medication_adherence': {
+      if (!ctx.adherenceService) {
+        return JSON.stringify({
+          logged: false,
+          message: 'Adherence tool not available — please log via /check-in.',
+        })
+      }
+      const status = typeof args.status === 'string' ? args.status.toLowerCase() : ''
+      if (!ADHERENCE_STATUSES.has(status as AdherenceStatus)) {
+        return JSON.stringify({
+          logged: false,
+          message: `Invalid status "${args.status}". Use taken, missed, or scheduled_later.`,
+        })
+      }
+      try {
+        const result = await ctx.adherenceService.log(userId, {
+          medicationId: typeof args.medication_id === 'string' ? args.medication_id : undefined,
+          drugName: typeof args.drug_name === 'string' ? args.drug_name : undefined,
+          status: status as AdherenceStatus,
+          missedDoses: typeof args.missed_doses === 'number' ? args.missed_doses : undefined,
+          reason: typeof args.reason === 'string' ? args.reason : undefined,
+        })
+        return JSON.stringify(result)
+      } catch (err: any) {
+        return JSON.stringify({
+          logged: false,
+          message: err?.message ?? 'Failed to log adherence.',
+        })
+      }
+    }
+
+    case 'log_symptom_quick': {
+      if (!ctx.symptomService) {
+        return JSON.stringify({
+          logged: false,
+          message: 'Quick-symptom tool not available — please log via /check-in.',
+        })
+      }
+      const symptom = typeof args.symptom === 'string' ? args.symptom : ''
+      if (!STRUCTURED_SYMPTOM_KEYS.has(symptom as StructuredSymptomKey)) {
+        return JSON.stringify({
+          logged: false,
+          message: `Unknown symptom key "${args.symptom}". Use one of severeHeadache, visualChanges, alteredMentalStatus, chestPainOrDyspnea, focalNeuroDeficit, severeEpigastricPain, newOnsetHeadache, ruqPain, edema.`,
+        })
+      }
+      try {
+        const result = await ctx.symptomService.log(userId, {
+          symptom: symptom as StructuredSymptomKey,
+          notes: typeof args.notes === 'string' && args.notes.trim() ? args.notes.trim() : undefined,
+        })
+        return JSON.stringify(result)
+      } catch (err: any) {
+        return JSON.stringify({
+          logged: false,
+          message: err?.message ?? 'Failed to log symptom.',
+        })
+      }
+    }
+
+    case 'submit_bp_from_photo': {
+      if (!ctx.ocrService) {
+        return JSON.stringify({
+          parsed: false,
+          message: 'Photo OCR is not enabled in this build.',
+        })
+      }
+      const b64 = typeof args.image_base64 === 'string' ? args.image_base64 : ''
+      const mime = typeof args.mime_type === 'string' ? args.mime_type : ''
+      if (!b64 || !mime) {
+        return JSON.stringify({
+          parsed: false,
+          message: 'Missing image_base64 or mime_type.',
+        })
+      }
+      try {
+        const buffer = Buffer.from(b64, 'base64')
+        const result = await ctx.ocrService.extractBp(userId, buffer, mime)
+        return JSON.stringify({
+          parsed: true,
+          sbp: result.sbp,
+          dbp: result.dbp,
+          pulse: result.pulse,
+          confidence: result.confidence,
+          message: `Read ${result.sbp} over ${result.dbp}${result.pulse != null ? ', pulse ' + result.pulse : ''} — confirm with the patient before saving.`,
+        })
+      } catch (err: any) {
+        if (err instanceof BpOcrFailure) {
+          return JSON.stringify({
+            parsed: false,
+            code: err.code,
+            message: err.message,
+          })
+        }
+        return JSON.stringify({
+          parsed: false,
+          message: err?.message ?? 'OCR failed.',
+        })
       }
     }
 
