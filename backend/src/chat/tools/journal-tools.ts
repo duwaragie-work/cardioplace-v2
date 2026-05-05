@@ -32,6 +32,15 @@ export interface JournalToolContext {
   ocrService?: OcrService
 }
 
+const MISSED_MED_REASONS = new Set([
+  'FORGOT',
+  'SIDE_EFFECTS',
+  'RAN_OUT',
+  'COST',
+  'INTENTIONAL',
+  'OTHER',
+] as const)
+
 const STRUCTURED_SYMPTOM_KEYS: ReadonlySet<StructuredSymptomKey> = new Set([
   'severeHeadache',
   'visualChanges',
@@ -93,6 +102,78 @@ export function normaliseTime(raw?: string): string | undefined {
   return undefined
 }
 
+const MEASUREMENT_CONDITION_KEYS = [
+  'noCaffeine',
+  'noSmoking',
+  'noExercise',
+  'bladderEmpty',
+  'seatedQuietly',
+  'posturalSupport',
+  'notTalking',
+  'cuffOnBareArm',
+] as const
+
+/**
+ * Filter the model's measurement_conditions object down to known keys with
+ * boolean values. Skips unanswered keys entirely (rather than defaulting to
+ * false) so the JSON column reflects only what the patient confirmed.
+ * Returns undefined when nothing was answered so the column stays NULL.
+ */
+export function sanitiseMeasurementConditions(
+  raw: unknown,
+): Record<string, boolean> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const out: Record<string, boolean> = {}
+  for (const key of MEASUREMENT_CONDITION_KEYS) {
+    const v = (raw as Record<string, unknown>)[key]
+    if (typeof v === 'boolean') out[key] = v
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
+/**
+ * Map the model's loose `missed_medications` array (snake_case keys, just
+ * drugName + reason + optional dose count) to the camelCase shape the
+ * DailyJournalService expects on its DTO. The service itself does the
+ * Prisma resolution (drugName → medicationId, drug-class lookup, AS_NEEDED
+ * filter, drop-unmatched) so this helper is purely a key-rename + reason
+ * whitelist.
+ *
+ * Returns undefined when nothing valid came in so the adherence rule
+ * falls back to the medicationTaken rollup.
+ */
+export function normaliseMissedMedications(
+  raw: unknown,
+):
+  | Array<{ drugName: string; reason: string; missedDoses: number }>
+  | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined
+  const out: Array<{ drugName: string; reason: string; missedDoses: number }> = []
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue
+    const r = row as Record<string, unknown>
+    const drugName =
+      typeof r.drug_name === 'string'
+        ? r.drug_name.trim()
+        : typeof r.drugName === 'string'
+          ? r.drugName.trim()
+          : ''
+    if (!drugName) continue
+    const reasonRaw =
+      typeof r.reason === 'string' ? r.reason.trim().toUpperCase() : ''
+    if (!MISSED_MED_REASONS.has(reasonRaw as never)) continue
+    const dosesRaw =
+      typeof r.missed_doses === 'number'
+        ? r.missed_doses
+        : typeof r.missedDoses === 'number'
+          ? r.missedDoses
+          : 1
+    const missedDoses = Math.min(10, Math.max(1, Math.round(dosesRaw)))
+    out.push({ drugName, reason: reasonRaw, missedDoses })
+  }
+  return out.length > 0 ? out : undefined
+}
+
 /**
  * Normalise the model's `position` argument to one of the v2 enum values.
  * Returns undefined if the input doesn't match — caller should treat that as
@@ -119,10 +200,15 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
         'Submit a new blood pressure check-in. ' +
         'BEFORE calling this tool you MUST have asked the patient AND received their answer for ALL of these: ' +
         '1) BP numbers (systolic and diastolic), ' +
-        '2) Did they take their medication? (must be a real yes/no from the patient), ' +
+        '2) Did they take their medication? (must be a real yes/no from the patient). ' +
+        '   If they say "no" or "I forgot some", ASK WHICH medications they missed and why ' +
+        '   (forgot / side effects / ran out / cost / intentional / other) — pass through `missed_medications`. ' +
+        '   Do NOT ask about AS_NEEDED (PRN) medications — those aren\'t on a fixed daily schedule. ' +
         '3) Any symptoms? (must be a real answer from the patient — even "none" counts), ' +
-        '4) Their weight (they can skip). ' +
-        'If ANY of these have not been explicitly answered by the patient in the conversation, ' +
+        '4) Their weight (they can skip), ' +
+        '5) Measurement context (the B1 pre-measurement checklist) — at minimum confirm caffeine + bare arm + ' +
+        '   seated quietly. Pass partials through `measurement_conditions`; omit any flag the patient didn\'t answer. ' +
+        'If ANY of fields 1–3 have not been explicitly answered by the patient in the conversation, ' +
         'DO NOT call this tool — ask the missing question first. ' +
         'After collecting everything, you must summarise and get the patient to confirm before calling.',
       parameters: {
@@ -148,6 +234,40 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
           ruq_pain: { type: Type.BOOLEAN, description: 'Pregnancy-only: right-upper-quadrant abdominal pain. Set only when patient is pregnant. Default false.' },
           edema: { type: Type.BOOLEAN, description: 'Pregnancy-only: facial / hand / leg swelling. Set only when patient is pregnant. Default false.' },
           other_symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Patient-reported "anything else" symptoms not covered by the 9 structured booleans above. English. Optional.' },
+          measurement_conditions: {
+            type: Type.OBJECT,
+            description:
+              'B1 pre-measurement checklist. Each property is a boolean — true = patient confirmed they followed it, false = they explicitly said they didn\'t, omit = not asked. Don\'t default unanswered flags to false.',
+            properties: {
+              noCaffeine: { type: Type.BOOLEAN, description: 'No caffeine in the last ~30 minutes.' },
+              noSmoking: { type: Type.BOOLEAN, description: 'No smoking in the last ~30 minutes.' },
+              noExercise: { type: Type.BOOLEAN, description: 'No exercise in the last ~30 minutes.' },
+              bladderEmpty: { type: Type.BOOLEAN, description: 'Bladder empty before measuring.' },
+              seatedQuietly: { type: Type.BOOLEAN, description: 'Seated quietly for at least 5 minutes before measuring.' },
+              posturalSupport: { type: Type.BOOLEAN, description: 'Back supported, feet flat on floor, arm supported at heart level.' },
+              notTalking: { type: Type.BOOLEAN, description: 'Not talking during measurement.' },
+              cuffOnBareArm: { type: Type.BOOLEAN, description: 'Cuff placed on a bare arm (no clothing under the cuff).' },
+            },
+          },
+          missed_medications: {
+            type: Type.ARRAY,
+            description:
+              'Per-medication miss detail. Use ONLY when patient explicitly said they missed specific medications. ' +
+              'Each item: drug_name (canonical name from the patient\'s med list, e.g. "Lisinopril"), ' +
+              'reason (one of FORGOT / SIDE_EFFECTS / RAN_OUT / COST / INTENTIONAL / OTHER), ' +
+              'missed_doses (1–10 — how many doses they missed today). ' +
+              'AS_NEEDED (PRN) meds will be skipped server-side; you don\'t need to filter them yourself. ' +
+              'Leave empty / omit when patient said they took everything OR said "I missed some" without naming which.',
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                drug_name: { type: Type.STRING, description: 'Drug name as it appears in the patient\'s medication list.' },
+                reason: { type: Type.STRING, description: 'One of: FORGOT, SIDE_EFFECTS, RAN_OUT, COST, INTENTIONAL, OTHER.' },
+                missed_doses: { type: Type.NUMBER, description: 'Number of doses missed today (1–10). Default 1 if patient didn\'t specify.' },
+              },
+              required: ['drug_name', 'reason'],
+            },
+          },
           notes: { type: Type.STRING, description: 'Extra notes in English. Omit if none.' },
         },
         required: ['entry_date', 'measurement_time', 'systolic_bp', 'diastolic_bp', 'medication_taken', 'symptoms'],
@@ -346,14 +466,23 @@ export async function executeJournalTool(
         const measuredAt = new Date(`${entryDate}T${time}:00.000Z`).toISOString()
         // Position whitelist — Gemini may return lowercase or unexpected values.
         const position = normalisePosition(args.position)
+        // B1 pre-measurement checklist — pass through only the booleans the
+        // patient actually answered. Don't default unanswered flags to false.
+        const measurementConditions = sanitiseMeasurementConditions(args.measurement_conditions)
+        // Per-medication miss detail — pass the loose shape through; the
+        // DailyJournalService does the Prisma resolution (drugName →
+        // medicationId), filters AS_NEEDED, and drops unmatched drugs.
+        const missedMedications = normaliseMissedMedications(args.missed_medications)
         const result = await journalService.create(userId, {
           measuredAt,
           systolicBP: args.systolic_bp,
           diastolicBP: args.diastolic_bp,
           pulse: args.pulse ?? null,
           position: position ?? undefined,
+          measurementConditions,
           medicationTaken: args.medication_taken,
           medicationScheduledLater: args.medication_scheduled_later === true,
+          missedMedications,
           weight: args.weight,
           symptoms: args.symptoms ?? [],
           // 9 structured Level-2 symptom booleans — default false when omitted

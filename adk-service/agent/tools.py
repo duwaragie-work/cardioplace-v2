@@ -69,6 +69,9 @@ def make_tools(
         ruq_pain: bool = False,
         edema: bool = False,
         other_symptoms: list[str] = [],
+        # ── Phase/28 v2 fields ───────────────────────────────────────────────
+        measurement_conditions: dict | None = None,
+        missed_medications: list | None = None,
     ) -> dict:
         """
         Submit the patient's health check-in after all values have been
@@ -108,6 +111,20 @@ def make_tools(
                               True for non-pregnant patients is safely ignored.
             other_symptoms:   "Anything else" the patient said that doesn't map
                               to a structured boolean. ALWAYS in English.
+            measurement_conditions:
+                              B1 pre-measurement checklist as a partial dict —
+                              only include keys the patient explicitly answered.
+                              Keys: noCaffeine, noSmoking, noExercise, bladderEmpty,
+                              seatedQuietly, posturalSupport, notTalking, cuffOnBareArm.
+                              Each value is a bool (True = patient confirmed they
+                              followed it, False = explicitly said they didn't).
+                              Pass None when nothing was asked.
+            missed_medications:
+                              List of {"drug_name", "reason", "missed_doses"} dicts
+                              for meds the patient explicitly named as missed today.
+                              reason ∈ FORGOT / SIDE_EFFECTS / RAN_OUT / COST /
+                              INTENTIONAL / OTHER. AS_NEEDED (PRN) drugs are
+                              filtered server-side; you don't need to filter them.
 
         Returns:
             dict with 'saved' (bool) and 'message' (str).
@@ -196,6 +213,53 @@ def make_tools(
         payload["edema"] = bool(edema)
         if other_symptoms:
             payload["otherSymptoms"] = other_symptoms
+
+        # B1 pre-measurement checklist — accept only the 8 known keys with
+        # boolean values; drop everything else. Empty result = omit (don't
+        # default to all-false).
+        if isinstance(measurement_conditions, dict):
+            allowed_keys = {
+                "noCaffeine",
+                "noSmoking",
+                "noExercise",
+                "bladderEmpty",
+                "seatedQuietly",
+                "posturalSupport",
+                "notTalking",
+                "cuffOnBareArm",
+            }
+            cleaned = {
+                k: bool(v)
+                for k, v in measurement_conditions.items()
+                if k in allowed_keys and isinstance(v, bool)
+            }
+            if cleaned:
+                payload["measurementConditions"] = cleaned
+
+        # Per-medication miss detail — backend resolves drug_name → medicationId
+        # and filters AS_NEEDED meds. Pass through as-is; the executor will
+        # validate reason values and drop unmatched drugs.
+        if isinstance(missed_medications, list) and missed_medications:
+            cleaned_misses = []
+            for row in missed_medications:
+                if not isinstance(row, dict):
+                    continue
+                drug_name = str(row.get("drug_name") or "").strip()
+                reason = str(row.get("reason") or "").strip().upper()
+                if not drug_name or not reason:
+                    continue
+                doses_raw = row.get("missed_doses", 1)
+                try:
+                    doses = max(1, min(10, int(doses_raw)))
+                except (TypeError, ValueError):
+                    doses = 1
+                cleaned_misses.append({
+                    "drug_name": drug_name,
+                    "reason": reason,
+                    "missed_doses": doses,
+                })
+            if cleaned_misses:
+                payload["missedMedications"] = cleaned_misses
 
         saved = False
         try:

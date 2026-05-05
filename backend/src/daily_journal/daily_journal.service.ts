@@ -55,6 +55,15 @@ export class DailyJournalService {
       })
     }
 
+    // Resolve any missed-medication rows that came in with only `drugName`
+    // (voice agent / chat tool). Looks up PatientMedication.id by name,
+    // filters out AS_NEEDED (PRN) drugs since they aren't on a daily
+    // schedule, drops unmatched drugs (model hallucination guard).
+    const resolvedMissedMedications = await this.resolveMissedMedications(
+      userId,
+      dto.missedMedications,
+    )
+
     try {
       const entry = await this.prisma.journalEntry.create({
         data: {
@@ -70,7 +79,7 @@ export class DailyJournalService {
           medicationTaken: dto.medicationTaken ?? null,
           medicationScheduledLater: dto.medicationScheduledLater ?? false,
           missedDoses: dto.missedDoses ?? null,
-          missedMedications: (dto.missedMedications as unknown as JsonValue) ?? Prisma.JsonNull,
+          missedMedications: (resolvedMissedMedications as unknown as JsonValue) ?? Prisma.JsonNull,
           // V2 structured Level-2 symptom triggers (Flow B). Prefer the
           // explicit booleans, otherSymptoms goes to the same column. The
           // legacy `symptoms` array (v1 clients) is appended so nothing is
@@ -160,8 +169,11 @@ export class DailyJournalService {
         data.medicationScheduledLater = dto.medicationScheduledLater
       if (dto.missedDoses !== undefined) data.missedDoses = dto.missedDoses
       if (dto.missedMedications !== undefined) {
-        data.missedMedications =
-          (dto.missedMedications as unknown as JsonValue) ?? Prisma.JsonNull
+        const resolved = await this.resolveMissedMedications(
+          userId,
+          dto.missedMedications,
+        )
+        data.missedMedications = (resolved as unknown as JsonValue) ?? Prisma.JsonNull
       }
 
       // Structured V2 symptom booleans (Flow B). Each is independently
@@ -936,5 +948,78 @@ export class DailyJournalService {
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
     }
+  }
+
+  /**
+   * Backfill missing `medicationId` / `drugClass` on missed-medication rows
+   * coming from clients that only know `drugName` (chat tool, ADK voice).
+   * Filters out AS_NEEDED (PRN) drugs since they aren't on a fixed schedule
+   * — the medication-missed rule shouldn't fire on them. Drugs the patient
+   * doesn't actually own (model hallucination) are silently dropped.
+   *
+   * Returns undefined when nothing resolved so the JSON column stays NULL
+   * and the adherence rule falls back to the medicationTaken rollup.
+   *
+   * Form-shape rows that already include medicationId + drugClass pass
+   * through unchanged (still filtered for AS_NEEDED via the lookup).
+   */
+  private async resolveMissedMedications(
+    userId: string,
+    raw: unknown,
+  ): Promise<
+    Array<{
+      medicationId: string
+      drugName: string
+      drugClass: string
+      reason: string
+      missedDoses: number
+    }> | undefined
+  > {
+    if (!Array.isArray(raw) || raw.length === 0) return undefined
+    const resolved: Array<{
+      medicationId: string
+      drugName: string
+      drugClass: string
+      reason: string
+      missedDoses: number
+    }> = []
+    for (const row of raw) {
+      if (!row || typeof row !== 'object') continue
+      const r = row as Record<string, unknown>
+      const drugName = typeof r.drugName === 'string' ? r.drugName.trim() : ''
+      const reason = typeof r.reason === 'string' ? r.reason.trim().toUpperCase() : ''
+      if (!drugName || !reason) continue
+      const dosesRaw = typeof r.missedDoses === 'number' ? r.missedDoses : 1
+      const missedDoses = Math.min(10, Math.max(1, Math.round(dosesRaw)))
+
+      // If the client gave us a medicationId, trust it but still verify it
+      // belongs to the patient + isn't AS_NEEDED.
+      const explicitId = typeof r.medicationId === 'string' ? r.medicationId : null
+      const med = explicitId
+        ? await this.prisma.patientMedication.findFirst({
+            where: { id: explicitId, userId, discontinuedAt: null },
+            select: { id: true, drugName: true, drugClass: true, frequency: true },
+          })
+        : await this.prisma.patientMedication.findFirst({
+            where: {
+              userId,
+              discontinuedAt: null,
+              drugName: { contains: drugName, mode: 'insensitive' },
+            },
+            orderBy: { reportedAt: 'desc' },
+            select: { id: true, drugName: true, drugClass: true, frequency: true },
+          })
+      if (!med) continue
+      if (med.frequency === 'AS_NEEDED') continue
+
+      resolved.push({
+        medicationId: med.id,
+        drugName: med.drugName,
+        drugClass: med.drugClass,
+        reason,
+        missedDoses,
+      })
+    }
+    return resolved.length > 0 ? resolved : undefined
   }
 }

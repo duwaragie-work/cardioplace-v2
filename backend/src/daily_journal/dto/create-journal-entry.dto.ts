@@ -59,19 +59,26 @@ export enum MissedMedicationReason {
  * the MEDICATION step of CheckIn.tsx and then checks off which medications
  * they skipped. Shape persisted as-is into JournalEntry.missedMedications
  * (JSON column) so the snapshot survives PatientMedication renames.
+ *
+ * `medicationId` and `drugClass` are optional on the wire so the voice
+ * agent (which only knows drug names) can submit a loose shape. The
+ * service layer resolves missing fields via Prisma using `drugName` and
+ * filters out AS_NEEDED meds before persisting.
  */
 export class MissedMedicationDto {
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  medicationId!: string
+  medicationId?: string
 
   @IsString()
   @IsNotEmpty()
   drugName!: string
 
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  drugClass!: string
+  drugClass?: string
 
   @IsEnum(MissedMedicationReason)
   reason!: MissedMedicationReason
