@@ -75,6 +75,7 @@ function frequencyLabel(f: PatientMedicationDto['frequency'], t: TFn): string {
     case 'ONCE_DAILY': return t('profile.freqOnceDaily');
     case 'TWICE_DAILY': return t('profile.freqTwiceDaily');
     case 'THREE_TIMES_DAILY': return t('profile.freqThreeTimesDaily');
+    case 'AS_NEEDED': return t('profile.freqAsNeeded');
     case 'UNSURE': return t('profile.freqUnknown');
     default: return '—';
   }

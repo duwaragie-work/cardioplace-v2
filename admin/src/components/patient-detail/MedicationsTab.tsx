@@ -107,6 +107,7 @@ const FREQ_LABELS: Record<string, string> = {
   ONCE_DAILY: 'One time daily',
   TWICE_DAILY: 'Two times daily',
   THREE_TIMES_DAILY: 'Three times daily',
+  AS_NEEDED: 'As needed (PRN)',
   UNSURE: 'Unsure',
 };
 

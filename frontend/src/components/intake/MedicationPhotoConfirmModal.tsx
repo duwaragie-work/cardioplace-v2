@@ -32,18 +32,38 @@ import {
 export interface ConfirmedMedication {
   /** What the user finalised in the modal — may differ from the OCR raw. */
   drugName: string;
-  /** 4-value enum from the dropdown. */
-  frequency: 'ONCE_DAILY' | 'TWICE_DAILY' | 'THREE_TIMES_DAILY' | 'UNSURE';
+  /** 5-value enum from the dropdown. AS_NEEDED for PRN ("when required") meds. */
+  frequency: 'ONCE_DAILY' | 'TWICE_DAILY' | 'THREE_TIMES_DAILY' | 'AS_NEEDED' | 'UNSURE';
   /** Catalog match (or null if patient chose to keep it as freeform). */
   match: CatalogMatch | null;
   /** Original OCR snippet — preserved on PatientMedication.rawInputText. */
   raw: string;
 }
 
+/** Returned by the parent's `findExisting` callback when the OCR-extracted
+ *  drug is already on the patient's medication list. The modal uses this to
+ *  badge the row "Already in your list" and surface frequency-update intent
+ *  before the patient taps Add all. */
+export interface ExistingMedicationMatch {
+  /** Frequency currently stored on the existing row (or null if unset). */
+  currentFrequency:
+    | 'ONCE_DAILY'
+    | 'TWICE_DAILY'
+    | 'THREE_TIMES_DAILY'
+    | 'AS_NEEDED'
+    | 'UNSURE'
+    | null;
+}
+
 interface Props {
   medications: MedOcrItem[];
   confidence: number;
   previewUrl: string;
+  /** Callback used to badge each row "Already in your list" and to surface a
+   *  "frequency will update from X to Y" subtext when the OCR pass disagrees
+   *  with the existing row's frequency. Optional — when omitted, the modal
+   *  behaves as before (just catalog/freeform badges). */
+  findExisting?: (drugName: string) => ExistingMedicationMatch | null;
   onConfirm: (kept: ConfirmedMedication[]) => void;
   onCancel: () => void;
   onRetake: () => void;
@@ -53,7 +73,7 @@ interface Props {
  *  top of the OCR-extracted MedOcrItem. */
 interface RowState {
   drugName: string;
-  frequency: 'ONCE_DAILY' | 'TWICE_DAILY' | 'THREE_TIMES_DAILY' | 'UNSURE';
+  frequency: 'ONCE_DAILY' | 'TWICE_DAILY' | 'THREE_TIMES_DAILY' | 'AS_NEEDED' | 'UNSURE';
   raw: string;
   doseText: string;
   kept: boolean;
@@ -63,6 +83,7 @@ const FREQUENCIES: ReadonlyArray<RowState['frequency']> = [
   'ONCE_DAILY',
   'TWICE_DAILY',
   'THREE_TIMES_DAILY',
+  'AS_NEEDED',
   'UNSURE',
 ];
 
@@ -70,6 +91,7 @@ export default function MedicationPhotoConfirmModal({
   medications,
   confidence,
   previewUrl,
+  findExisting,
   onConfirm,
   onCancel,
   onRetake,
@@ -196,6 +218,7 @@ export default function MedicationPhotoConfirmModal({
                 <RowCard
                   key={i}
                   row={row}
+                  findExisting={findExisting}
                   onChange={(patch) => updateRow(i, patch)}
                 />
               ))}
@@ -255,22 +278,35 @@ export default function MedicationPhotoConfirmModal({
 
 function RowCard({
   row,
+  findExisting,
   onChange,
 }: {
   row: RowState;
+  findExisting?: (drugName: string) => ExistingMedicationMatch | null;
   onChange: (patch: Partial<RowState>) => void;
 }) {
   const { t, locale } = useLanguage();
   const match = useMemo(() => matchToCatalog(row.drugName), [row.drugName]);
 
-  // Enrichment state — runs only when there is no catalog match.
+  // Already-on-the-patient's-list match. When non-null, the row will dedup
+  // into an update on Confirm (handler in clinical-intake) — and we surface
+  // that pre-emptively via the "Already in your list" badge + frequency
+  // diff subtext so the patient knows what's about to happen.
+  const existingMatch = useMemo(
+    () => (findExisting ? findExisting(row.drugName) : null),
+    [findExisting, row.drugName],
+  );
+
+  // Enrichment state — runs only when there is no catalog match AND the drug
+  // isn't already on the patient's list (no point hitting RxNorm for a drug
+  // we already know about).
   // undefined = not yet attempted, null = attempted and failed, value = success.
   const [enrichment, setEnrichment] = useState<DrugEnrichment | null | undefined>(undefined);
   const [enriching, setEnriching] = useState(false);
   const reqIdRef = useRef(0);
 
   useEffect(() => {
-    if (match) {
+    if (match || existingMatch) {
       setEnrichment(undefined);
       setEnriching(false);
       return;
@@ -290,7 +326,16 @@ function RowCard({
       setEnriching(false);
     }, 600);
     return () => clearTimeout(timer);
-  }, [row.drugName, row.kept, match, locale]);
+  }, [row.drugName, row.kept, match, existingMatch, locale]);
+
+  // Frequency-update intent: when the drug is already on the patient's list
+  // and the OCR pass picked up a different (non-UNSURE) frequency, the
+  // existing handler will overwrite. Surface this as "Updating: X → Y".
+  const willUpdateFrequency =
+    !!existingMatch &&
+    row.frequency !== 'UNSURE' &&
+    existingMatch.currentFrequency !== null &&
+    existingMatch.currentFrequency !== row.frequency;
 
   const canonicalDiffers =
     !!enrichment &&
@@ -341,7 +386,7 @@ function RowCard({
               {row.doseText}
             </p>
           )}
-          {!match && enrichment?.plainLanguageDescription && (
+          {!match && !existingMatch && enrichment?.plainLanguageDescription && (
             <p
               className="text-[11px] mt-0.5 leading-snug"
               style={{ color: 'var(--brand-text-secondary)' }}
@@ -349,7 +394,7 @@ function RowCard({
               {enrichment.plainLanguageDescription}
             </p>
           )}
-          {!match && canonicalDiffers && (
+          {!match && !existingMatch && canonicalDiffers && (
             <button
               type="button"
               onClick={() => onChange({ drugName: enrichment!.canonicalDrugName })}
@@ -362,8 +407,22 @@ function RowCard({
               )}
             </button>
           )}
+          {willUpdateFrequency && existingMatch?.currentFrequency && (
+            <p
+              className="text-[11px] mt-1 leading-snug"
+              style={{ color: 'var(--brand-primary-purple)' }}
+            >
+              {t('ocr.med.willUpdateFreq')
+                .replace('{from}', frequencyLabel(existingMatch.currentFrequency, t))
+                .replace('{to}', frequencyLabel(row.frequency, t))}
+            </p>
+          )}
         </div>
-        <MatchBadge match={match} enriching={enriching && !match} />
+        <MatchBadge
+          match={match}
+          existingMatch={existingMatch}
+          enriching={enriching && !match && !existingMatch}
+        />
       </div>
 
       {/* Frequency + skip toggle */}
@@ -410,12 +469,31 @@ function RowCard({
 
 function MatchBadge({
   match,
+  existingMatch,
   enriching,
 }: {
   match: CatalogMatch | null;
+  existingMatch: ExistingMedicationMatch | null;
   enriching: boolean;
 }) {
   const { t } = useLanguage();
+  // "Already in your list" wins over "In catalog" — being on the patient's
+  // existing list is the more specific (and clinically more relevant)
+  // signal. The Add-all handler will dedup-and-update for these rows.
+  if (existingMatch) {
+    return (
+      <span
+        className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
+        style={{
+          backgroundColor: 'var(--brand-primary-purple-light)',
+          color: 'var(--brand-primary-purple)',
+        }}
+      >
+        <Check className="w-3 h-3" aria-hidden="true" />
+        {t('ocr.med.badgeAlready')}
+      </span>
+    );
+  }
   if (match) {
     return (
       <span
@@ -466,6 +544,7 @@ function frequencyLabel(
       | 'ocr.med.freqOnce'
       | 'ocr.med.freqTwice'
       | 'ocr.med.freqThrice'
+      | 'ocr.med.freqAsNeeded'
       | 'ocr.med.freqUnsure',
   ) => string,
 ): string {
@@ -476,6 +555,8 @@ function frequencyLabel(
       return t('ocr.med.freqTwice');
     case 'THREE_TIMES_DAILY':
       return t('ocr.med.freqThrice');
+    case 'AS_NEEDED':
+      return t('ocr.med.freqAsNeeded');
     case 'UNSURE':
       return t('ocr.med.freqUnsure');
   }

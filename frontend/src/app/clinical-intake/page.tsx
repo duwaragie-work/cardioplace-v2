@@ -764,9 +764,20 @@ function A5CoreMeds({ state, setState }: StepProps) {
 
       {/* Phase/27 — Gemini Vision OCR for prescriptions. Hidden when
           NEXT_PUBLIC_MED_OCR_ENABLED !== 'true'. Fans OCR results across
-          A5/A6/A8 + A9 frequency in one shot via addOcrMedications. */}
+          A5/A6/A8 + A9 frequency in one shot via addOcrMedications.
+          findExisting lets the modal badge already-on-list rows pre-Confirm
+          using the same drugName / brandName / genericName logic the handler
+          applies post-Confirm via findExistingMedIndex. */}
       <div className="flex">
-        <MedicationPhotoButton onConfirm={addOcrMedications} />
+        <MedicationPhotoButton
+          onConfirm={addOcrMedications}
+          findExisting={(drugName) => {
+            const idx = findExistingMedIndex(state.selectedMedications, drugName);
+            if (idx < 0) return null;
+            const m = state.selectedMedications[idx];
+            return { currentFrequency: m.frequency ?? null };
+          }}
+        />
       </div>
 
       <MedicationGroup
@@ -1156,6 +1167,7 @@ function A9Frequency({ state, setState }: StepProps) {
     { value: 'ONCE_DAILY', label: t('intake.a9.freqOnce') },
     { value: 'TWICE_DAILY', label: t('intake.a9.freqTwice') },
     { value: 'THREE_TIMES_DAILY', label: t('intake.a9.freqThree') },
+    { value: 'AS_NEEDED', label: t('intake.a9.freqAsNeeded') },
     { value: 'UNSURE', label: t('intake.a9.freqUnsure') },
   ];
 
@@ -1421,6 +1433,7 @@ function frequencyLabel(f: MedicationFrequencyInput | undefined, t: TranslateFn)
     case 'ONCE_DAILY': return t('intake.freq.once');
     case 'TWICE_DAILY': return t('intake.freq.twice');
     case 'THREE_TIMES_DAILY': return t('intake.freq.three');
+    case 'AS_NEEDED': return t('intake.freq.asNeeded');
     case 'UNSURE': return t('intake.freq.unsure');
     default: return t('intake.freq.unset');
   }

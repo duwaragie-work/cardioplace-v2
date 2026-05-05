@@ -40,7 +40,7 @@ export interface PatientMedicationDto {
   drugClass: string;
   isCombination: boolean;
   combinationComponents: string[];
-  frequency: 'ONCE_DAILY' | 'TWICE_DAILY' | 'THREE_TIMES_DAILY' | 'UNSURE';
+  frequency: 'ONCE_DAILY' | 'TWICE_DAILY' | 'THREE_TIMES_DAILY' | 'AS_NEEDED' | 'UNSURE';
   source: 'PATIENT_SELF_REPORT' | 'PROVIDER_ENTERED' | 'PATIENT_VOICE' | 'PATIENT_PHOTO';
   verificationStatus: 'UNVERIFIED' | 'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER';
   reportedAt: string;

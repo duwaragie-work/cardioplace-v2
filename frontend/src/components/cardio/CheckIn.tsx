@@ -1359,14 +1359,16 @@ export default function CheckIn() {
 
   // Fetch active medications — rendered as checkbox list in MEDICATION step.
   // Cheap call; fire on mount so the list is ready before the user reaches
-  // step 4.
+  // step 4. AS_NEEDED (PRN) meds are excluded from the adherence checklist:
+  // they're not on a fixed schedule so "missed today" isn't meaningful, and
+  // letting them through would let the medicationMissedRule fire false alerts.
   useEffect(() => {
     if (isLoading || !isAuthenticated) return;
     let cancelled = false;
     (async () => {
       const meds = await listMyMedications().catch(() => [] as PatientMedication[]);
       if (!cancelled) {
-        setMedications(meds);
+        setMedications(meds.filter((m) => m.frequency !== 'AS_NEEDED'));
         setMedsLoading(false);
       }
     })();

@@ -21,12 +21,18 @@ import {
 } from '@/lib/services/ocr.service';
 import MedicationPhotoConfirmModal, {
   type ConfirmedMedication,
+  type ExistingMedicationMatch,
 } from './MedicationPhotoConfirmModal';
 
 interface Props {
   /** Called with the kept rows AFTER the patient taps "Add all". The handler
    *  is responsible for catalog matching + dedup against existing meds. */
   onConfirm: (medications: ConfirmedMedication[]) => void;
+  /** Optional callback used to badge each row "Already in your list" and
+   *  surface frequency-update intent before the patient taps Add all. Should
+   *  match the same dedup logic the parent uses post-Confirm (drugName +
+   *  catalog brandName/genericName). */
+  findExisting?: (drugName: string) => ExistingMedicationMatch | null;
   /** Optional className for layout overrides. */
   className?: string;
   /** Optional override for the button label. Defaults to the i18n key. */
@@ -37,6 +43,7 @@ const ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif';
 
 export default function MedicationPhotoButton({
   onConfirm,
+  findExisting,
   className,
   label,
 }: Props) {
@@ -140,6 +147,7 @@ export default function MedicationPhotoButton({
           medications={pending.result.medications}
           confidence={pending.result.confidence}
           previewUrl={pending.previewUrl}
+          findExisting={findExisting}
           onConfirm={handleConfirm}
           onCancel={handleCancel}
           onRetake={handleRetake}

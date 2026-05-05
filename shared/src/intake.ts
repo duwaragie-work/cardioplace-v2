@@ -32,6 +32,7 @@ export type MedicationFrequencyInput =
   | 'ONCE_DAILY'
   | 'TWICE_DAILY'
   | 'THREE_TIMES_DAILY'
+  | 'AS_NEEDED'
   | 'UNSURE'
 
 export type MedicationSourceInput =

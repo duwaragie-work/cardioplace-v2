@@ -602,6 +602,8 @@ function formatFrequency(freq: string): string {
       return 'twice daily'
     case 'THREE_TIMES_DAILY':
       return 'three times daily'
+    case 'AS_NEEDED':
+      return 'as needed (PRN — not on a fixed schedule)'
     case 'UNSURE':
     default:
       return 'frequency unsure'
