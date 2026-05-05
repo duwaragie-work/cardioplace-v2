@@ -16,6 +16,7 @@ import LandingHeader from "@/components/cardio/LandingHeader";
 import LandingFooter from "@/components/cardio/LandingFooter";
 import AudioButton from "@/components/intake/AudioButton";
 import MicButton from "@/components/intake/MicButton";
+import { validateDateOfBirth, maxDobIso } from "@/lib/dob-validator";
 
 function getBrowserTimezone(): string | undefined {
   if (typeof Intl === "undefined" || typeof Intl.DateTimeFormat === "undefined") return undefined;
@@ -64,50 +65,9 @@ export default function OnboardingPage() {
     }
   }, [user, isLoading, router]);
 
-  /**
-   * Validate the DOB. Returns null when OK, otherwise the user-facing
-   * error message. Copy is intentionally friendly + actionable — the
-   * patient should always know what to fix and why.
-   */
-  function validateDateOfBirth(raw: string): string | null {
-    if (!raw) {
-      return 'Please pick your date of birth from the calendar.';
-    }
-    const dob = new Date(raw);
-    if (Number.isNaN(dob.getTime())) {
-      return "That doesn't look like a valid date — please pick from the calendar.";
-    }
-    const today = new Date();
-    const dobDay = new Date(dob.getFullYear(), dob.getMonth(), dob.getDate());
-    const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    if (dobDay > todayDay) {
-      return "That date is in the future. Please pick the day you were born.";
-    }
-    if (dobDay.getTime() === todayDay.getTime()) {
-      return "Today can't be your date of birth — please pick the day you were born.";
-    }
-    // 18+ check: compute "18 years ago today" and require dob <= that.
-    const eighteenAgo = new Date(
-      todayDay.getFullYear() - 18,
-      todayDay.getMonth(),
-      todayDay.getDate(),
-    );
-    if (dobDay > eighteenAgo) {
-      return 'Cardioplace is for adults 18 and older. Please double-check your date of birth.';
-    }
-    if (dobDay.getFullYear() < todayDay.getFullYear() - 120) {
-      return "That date doesn't look right — please check the year and try again.";
-    }
-    return null;
-  }
-
-  /** Browser-level cap on the date picker: cannot select a date that
-   *  would make the user under 18. Computed once per render. */
-  const maxDobIso = (() => {
-    const t0 = new Date();
-    const max = new Date(t0.getFullYear() - 18, t0.getMonth(), t0.getDate());
-    return max.toISOString().slice(0, 10);
-  })();
+  // DOB rules (validateDateOfBirth + maxDobIso) live in @/lib/dob-validator
+  // so onboarding and the profile editor stay in lockstep.
+  const dobMax = maxDobIso();
 
   const isFormPartiallyFilled = name.trim() !== "" || dateOfBirth !== "" || communicationPreference !== "";
 
@@ -249,7 +209,7 @@ export default function OnboardingPage() {
                   id="onboarding-dob"
                   type="date"
                   value={dateOfBirth}
-                  max={maxDobIso}
+                  max={dobMax}
                   onChange={(e) => setDateOfBirth(e.target.value)}
                   className="w-full h-12 px-4 lg:px-5 bg-white border border-[#e5d9f2] rounded-lg text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
                   style={{ colorScheme: 'light', minHeight: 48 }}
