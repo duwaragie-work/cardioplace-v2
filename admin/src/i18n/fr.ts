@@ -491,6 +491,8 @@ const fr: Record<TranslationKey, string> = {
   'register.adminAccessDenied': "Vous n'avez pas la permission d'accéder à l'application d'administration. Veuillez contacter votre administrateur.",
   'register.accountSuspended': "Ce compte a été suspendu. Veuillez contacter l'assistance.",
   'register.accountBlocked': "Ce compte a été bloqué. Veuillez contacter l'assistance.",
+  'register.showOtp': 'Afficher le code',
+  'register.hideOtp': 'Masquer le code',
   'register.failedResend': 'Échec du renvoi du code.',
   'register.verificationFailed': 'Vérification échouée.',
   'register.invalidOtp': 'Code invalide. Veuillez réessayer.',

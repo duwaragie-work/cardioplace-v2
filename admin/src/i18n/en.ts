@@ -489,6 +489,8 @@ const en = {
   'register.adminAccessDenied': 'You don\'t have permission to access the admin app. Please contact your administrator.',
   'register.accountSuspended': 'This account has been suspended. Please contact support.',
   'register.accountBlocked': 'This account has been blocked. Please contact support.',
+  'register.showOtp': 'Show code',
+  'register.hideOtp': 'Hide code',
   'register.failedResend': 'Failed to resend OTP.',
   'register.verificationFailed': 'Verification failed.',
   'register.invalidOtp': 'Invalid OTP. Please try again.',

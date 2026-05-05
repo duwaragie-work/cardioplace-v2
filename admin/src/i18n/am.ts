@@ -491,6 +491,8 @@ const am: Record<TranslationKey, string> = {
   'register.adminAccessDenied': 'ለአስተዳዳሪ መተግበሪያ መድረስ ፈቃድ የለዎትም። እባክዎ ከአስተዳዳሪዎ ጋር ይገናኙ።',
   'register.accountSuspended': 'ይህ መለያ ታግዷል። እባክዎ ድጋፍ ያግኙ።',
   'register.accountBlocked': 'ይህ መለያ ተዘግቷል። እባክዎ ድጋፍ ያግኙ።',
+  'register.showOtp': 'ኮድ አሳይ',
+  'register.hideOtp': 'ኮድ ደብቅ',
   'register.failedResend': 'OTP እንደገና መላክ አልተቻለም።',
   'register.verificationFailed': 'ማረጋገጥ አልተሳካም።',
   'register.invalidOtp': 'ልክ ያልሆነ OTP። እባክዎ እንደገና ይሞክሩ።',

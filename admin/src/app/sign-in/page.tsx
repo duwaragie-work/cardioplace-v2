@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, KeyRound } from "lucide-react";
+import { CheckCircle2, KeyRound, Eye, EyeOff } from "lucide-react";
 import { useAuth, type AdminAuthResponse } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import { getOrCreateDeviceId } from "@/lib/device";
@@ -71,6 +71,7 @@ export default function RegisterPage() {
   const resendTimerRef = useRef<number | null>(null);
   // Admin app is OTP-only — magic-link mode was removed.
 
+  const [showOtp, setShowOtp] = useState(false);
   const [mounted, setMounted] = useState(false);
   const emailTrimmed = email.trim();
   const emailIsValid = useMemo(() => isEmailValid(emailTrimmed), [emailTrimmed]);
@@ -283,20 +284,31 @@ export default function RegisterPage() {
                     <label htmlFor="signin-otp" className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
                       {t('register.enterOtp')}
                     </label>
-                    <input
-                      id="signin-otp"
-                      type="text"
-                      inputMode="numeric"
-                      value={otp}
-                      onChange={(e) => {
-                        setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH));
-                        if (statusKey) setStatusKey(null);
-                        if (errorKey) setErrorKey(null);
-                      }}
-                      placeholder="••••••"
-                      maxLength={OTP_LENGTH}
-                      className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-base lg:text-lg text-center tracking-[8px] text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all mb-1"
-                    />
+                    <div className="relative mb-1">
+                      <input
+                        id="signin-otp"
+                        type={showOtp ? "text" : "password"}
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        value={otp}
+                        onChange={(e) => {
+                          setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH));
+                          if (statusKey) setStatusKey(null);
+                          if (errorKey) setErrorKey(null);
+                        }}
+                        placeholder="••••••"
+                        maxLength={OTP_LENGTH}
+                        className="w-full h-11 lg:h-12 pl-4 lg:pl-5 pr-11 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-base lg:text-lg text-center tracking-[8px] text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowOtp((s) => !s)}
+                        aria-label={showOtp ? t('register.hideOtp') : t('register.showOtp')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#737373] hover:text-[#7B00E0] transition-colors cursor-pointer"
+                      >
+                        {showOtp ? <EyeOff aria-hidden="true" className="w-4 h-4" /> : <Eye aria-hidden="true" className="w-4 h-4" />}
+                      </button>
+                    </div>
                     {/* OTP-length hint: only while user is mid-typing */}
                     {showOtpLengthHint && (
                       <p className="text-[11px] lg:text-xs text-[#a16207] mb-2">
