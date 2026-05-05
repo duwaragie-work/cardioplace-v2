@@ -60,6 +60,39 @@ const ADHERENCE_STATUSES: ReadonlySet<AdherenceStatus> = new Set([
 ])
 
 /**
+ * Normalise a date string to YYYY-MM-DD. Accepts:
+ *   - "2026-05-05" (already canonical)
+ *   - "today" / "now" / "right now" / "just now" → today's date
+ *   - "yesterday" → yesterday's date
+ * Returns undefined for any other input — caller should treat that as
+ * "patient didn't actually answer" rather than guessing.
+ *
+ * The system prompt also instructs the model to substitute "today" /
+ * "yesterday" with the injected date; this is the defensive fallback for
+ * when the model passes the word verbatim.
+ */
+export function normaliseDate(raw?: string): string | undefined {
+  if (!raw) return undefined
+  const s = raw.trim()
+  if (!s) return undefined
+
+  // Already canonical YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+
+  const lower = s.toLowerCase()
+  const now = new Date()
+  if (lower === 'today' || lower === 'now' || lower === 'right now' || lower === 'just now') {
+    return now.toISOString().slice(0, 10)
+  }
+  if (lower === 'yesterday') {
+    const y = new Date(now)
+    y.setUTCDate(y.getUTCDate() - 1)
+    return y.toISOString().slice(0, 10)
+  }
+  return undefined
+}
+
+/**
  * Normalise a time string to HH:mm 24-hour format.
  * Handles: "13:00", "1:00 PM", "8:30 am", "2 PM", "14:15", "now", etc.
  * Returns undefined if the input can't be parsed.
@@ -232,7 +265,15 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
       parameters: {
         type: Type.OBJECT,
         properties: {
-          entry_date: { type: Type.STRING, description: 'Date in YYYY-MM-DD format.' },
+          entry_date: {
+            type: Type.STRING,
+            description:
+              'Date the BP was measured in YYYY-MM-DD format. ' +
+              'When the patient says "today" / "now" / "just now", you may pass the literal ' +
+              'string "today" — the system will substitute the injected date. For "yesterday" ' +
+              'either pass "yesterday" or compute the date yourself. NEVER skip asking the ' +
+              'patient this question; NEVER assume today without confirming.',
+          },
           measurement_time: {
             type: Type.STRING,
             description:
@@ -460,6 +501,12 @@ export async function executeJournalTool(
       // Guard: reject if required fields are missing or have placeholder values.
       // This prevents the model from saving before asking all required questions.
       const missing: string[] = []
+      if (!args.entry_date || typeof args.entry_date !== 'string' || !args.entry_date.trim()) {
+        missing.push('entry_date (ask: "What date is this reading for?")')
+      }
+      if (!args.measurement_time || typeof args.measurement_time !== 'string' || !args.measurement_time.trim()) {
+        missing.push('measurement_time (ask: "What time was this reading taken?")')
+      }
       if (args.systolic_bp == null || args.diastolic_bp == null) {
         missing.push('blood pressure (ask for the top number and bottom number)')
       }
@@ -477,8 +524,13 @@ export async function executeJournalTool(
           next_action: `Ask about: ${missing[0]}`,
         })
       }
+      // Resolve the date — accepts "today" / "yesterday" verbatim too in case
+      // the model didn't substitute the injected timestamp. Falls back to
+      // today's UTC date only if the gate above somehow let an empty value
+      // through (defensive — required field is supposed to block this).
+      const entryDate =
+        normaliseDate(args.entry_date) ?? new Date().toISOString().slice(0, 10)
       // Block future dates
-      const entryDate = args.entry_date || new Date().toISOString().slice(0, 10)
       const today = new Date().toISOString().slice(0, 10)
       if (entryDate > today) {
         return JSON.stringify({
