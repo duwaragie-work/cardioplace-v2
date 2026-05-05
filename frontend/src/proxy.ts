@@ -19,11 +19,40 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   }
 }
 
-function isSuperAdmin(token: string): boolean {
+// Any non-patient role belongs on the admin app. Mirrors the role set in
+// admin/src/proxy.ts so a user with any of these is routed there.
+const ADMIN_ROLES = new Set([
+  'SUPER_ADMIN',
+  'MEDICAL_DIRECTOR',
+  'PROVIDER',
+  'HEALPLACE_OPS',
+])
+
+function hasAdminRole(token: string): boolean {
   const payload = decodeJwtPayload(token)
   if (!payload) return false
   const roles = payload.roles
-  return Array.isArray(roles) && roles.includes('SUPER_ADMIN')
+  if (!Array.isArray(roles)) return false
+  return roles.some((r) => typeof r === 'string' && ADMIN_ROLES.has(r))
+}
+
+function buildAdminBridgeUrl(token: string): URL {
+  // Forward the access token + JWT-derived identity to the admin app's
+  // sign-in handler via URL params. A bare cross-origin redirect can't
+  // carry the admin cookie, so admin would re-prompt sign-in. Refresh
+  // token isn't carried (lives in localStorage on the patient origin) —
+  // admin re-auths on access-token expiry.
+  const url = new URL('/auth/magic-link', ADMIN_URL)
+  url.searchParams.set('accessToken', token)
+  const payload = decodeJwtPayload(token)
+  if (payload) {
+    if (payload.sub) url.searchParams.set('userId', String(payload.sub))
+    if (payload.email) url.searchParams.set('email', String(payload.email))
+    if (Array.isArray(payload.roles)) {
+      url.searchParams.set('roles', (payload.roles as string[]).join(','))
+    }
+  }
+  return url
 }
 
 export function proxy(request: NextRequest) {
@@ -34,9 +63,10 @@ export function proxy(request: NextRequest) {
     (r) => path === r || path.startsWith(r + '/'),
   )
 
-  // SUPER_ADMIN users belong on the admin subdomain, not the patient app.
-  if (token && isSuperAdmin(token)) {
-    return NextResponse.redirect(new URL(path + request.nextUrl.search, ADMIN_URL))
+  // Admin-role users (provider, medical director, ops, super admin) belong
+  // on the admin subdomain, not the patient app.
+  if (token && hasAdminRole(token)) {
+    return NextResponse.redirect(buildAdminBridgeUrl(token))
   }
 
   // Not logged in, trying to access protected route

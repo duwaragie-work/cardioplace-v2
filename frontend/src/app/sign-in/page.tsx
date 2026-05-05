@@ -34,6 +34,8 @@ const BACKEND_MSG_KEY_MAP: Record<string, TranslationKey> = {
   'Please wait 60 seconds before requesting a new magic link': 'register.pleaseWaitMagicLink',
   'Invalid OTP': 'register.invalidOtp',
   'Verification failed': 'register.verificationFailed',
+  'Account is suspended': 'register.accountSuspended',
+  'Account is blocked': 'register.accountBlocked',
 };
 
 function backendMsgToKey(msg: string | undefined): TranslationKey | null {
@@ -42,6 +44,14 @@ function backendMsgToKey(msg: string | undefined): TranslationKey | null {
     if (msg.includes(en)) return key;
   }
   return null;
+}
+
+// Mirrors admin/src/proxy.ts ADMIN_ROLES — any of these means the user
+// belongs on the admin app, not the patient app.
+const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER', 'HEALPLACE_OPS']);
+
+function hasAdminRole(roles: unknown): boolean {
+  return Array.isArray(roles) && roles.some((r) => typeof r === 'string' && ADMIN_ROLES.has(r));
 }
 
 export default function RegisterPage() {
@@ -84,6 +94,28 @@ export default function RegisterPage() {
 
   useEffect(() => {
     if (!isLoading && user) {
+      // Admin-role tokens may be present from a prior sign-in or a stale
+      // rehydrate. Bridge to the admin app instead of letting proxy.ts do
+      // a cross-origin redirect that admin can't honor (no cookie there).
+      if (hasAdminRole(user.roles)) {
+        const adminUrl = process.env.NEXT_PUBLIC_ADMIN_URL || 'http://localhost:3001';
+        const accessToken = localStorage.getItem('healplace_token') ?? '';
+        const refreshToken = localStorage.getItem('healplace_refresh_token') ?? '';
+        const params = new URLSearchParams({
+          accessToken,
+          refreshToken,
+          userId: String(user.id ?? ''),
+          email: user.email ?? '',
+          name: user.name ?? '',
+          roles: (user.roles as string[]).join(','),
+        });
+        // Clear patient state so navigating back here doesn't loop.
+        localStorage.removeItem('healplace_token');
+        localStorage.removeItem('healplace_refresh_token');
+        document.cookie = 'access_token=; path=/; max-age=0; SameSite=Lax';
+        window.location.href = `${adminUrl}/auth/magic-link?${params.toString()}`;
+        return;
+      }
       if (user.onboardingRequired) {
         router.replace("/onboarding");
       } else {
@@ -227,6 +259,22 @@ export default function RegisterPage() {
       if (!res.ok) {
         setErrorKey(backendMsgToKey(data.message) ?? 'register.verificationFailed');
         throw new Error(data.message || "Verification failed.");
+      }
+      // Admin-role users belong on the admin subdomain. Bridge tokens via
+      // URL params instead of calling local login() — otherwise the patient
+      // proxy redirects to admin which has no cookie and re-prompts sign-in.
+      if (hasAdminRole(data.roles)) {
+        const adminUrl = process.env.NEXT_PUBLIC_ADMIN_URL || 'http://localhost:3001';
+        const params = new URLSearchParams({
+          accessToken: data.accessToken ?? '',
+          refreshToken: data.refreshToken ?? '',
+          userId: String(data.userId ?? ''),
+          email: data.email ?? '',
+          name: data.name ?? '',
+          roles: (data.roles as string[]).join(','),
+        });
+        window.location.href = `${adminUrl}/auth/magic-link?${params.toString()}`;
+        return;
       }
       login(data as OtpVerifyResponse);
       if (data.onboarding_required) {
