@@ -7,7 +7,6 @@ import {
   useEffect,
   type ReactNode,
 } from 'react';
-import { useRouter } from 'next/navigation';
 import { ADMIN_COOKIE_NAME, ADMIN_TOKEN_KEY, REFRESH_TOKEN_KEY } from '@/lib/services/token';
 
 const REFRESH_ENDPOINT = '/api/v2/auth/refresh';
@@ -63,7 +62,6 @@ function clearAuthCookie() {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AdminUser | null>(null);
   const [isLoading, setIsLoading] = useState(() => {
@@ -157,6 +155,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Browser bfcache restore: if the admin logged out and pressed back, the
+  // browser revives the cached page bypassing proxy.ts. Force a reload when
+  // there's no stored token so proxy.ts can redirect to /sign-in.
+  useEffect(() => {
+    function handlePageShow(event: PageTransitionEvent) {
+      if (event.persisted && !localStorage.getItem(ADMIN_TOKEN_KEY)) {
+        window.location.reload();
+      }
+    }
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, []);
+
   const login = (response: AdminAuthResponse) => {
     const newToken = response.access_token || response.accessToken || null;
 
@@ -195,7 +206,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(ADMIN_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
     clearAuthCookie();
-    router.push('/sign-in');
+    // Hard navigation so cookie/localStorage clears finalize before the
+    // next request hits proxy.ts.
+    window.location.href = '/sign-in';
   };
 
   return (

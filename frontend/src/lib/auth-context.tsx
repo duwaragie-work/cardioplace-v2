@@ -7,7 +7,6 @@ import {
   useEffect,
   type ReactNode,
 } from 'react';
-import { useRouter } from 'next/navigation';
 import { REFRESH_TOKEN_KEY, fetchWithAuth } from '@/lib/services/token';
 
 const REFRESH_ENDPOINT = '/api/v2/auth/refresh';
@@ -93,7 +92,6 @@ function clearAuthCookie() {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   // Start as false when there's nothing to rehydrate; true only when we have a stored token/refresh token
@@ -226,6 +224,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Browser bfcache restore: if the user logged out and pressed back, the
+  // browser revives the cached page bypassing proxy.ts. Force a reload when
+  // there's no stored token so proxy.ts can redirect to /sign-in.
+  useEffect(() => {
+    function handlePageShow(event: PageTransitionEvent) {
+      if (event.persisted && !localStorage.getItem(TOKEN_KEY)) {
+        window.location.reload();
+      }
+    }
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, []);
+
   // Proactively refresh when the user returns to the tab after being idle.
   // fetchWithAuth handles the 401 -> refresh -> retry flow, and the
   // auth:token-refreshed event above keeps context state in sync.
@@ -303,7 +314,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
     clearAuthCookie();
-    router.push('/');
+    // Hard navigation guarantees the cookie clear has settled before the
+    // next request — router.push raced with cookie clearing in production
+    // and proxy.ts kept routing the user back to /dashboard.
+    window.location.href = '/sign-in';
   };
 
   const markOnboardingComplete = () => {

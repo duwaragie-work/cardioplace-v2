@@ -71,7 +71,7 @@ export function proxy(request: NextRequest) {
 
   // Not logged in, trying to access protected route
   if (!token && !isPublic) {
-    return NextResponse.redirect(new URL('/', request.url))
+    return NextResponse.redirect(new URL('/sign-in', request.url))
   }
 
   // Already logged in, trying to access auth pages → redirect to dashboard
@@ -79,7 +79,14 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard', request.url))
   }
 
-  return NextResponse.next()
+  const response = NextResponse.next()
+  // Disqualify protected pages from the browser back/forward cache so a
+  // logged-out user pressing Back gets a fresh request — proxy then
+  // redirects them to /sign-in instead of restoring the stale page.
+  if (!isPublic) {
+    response.headers.set('Cache-Control', 'no-store, must-revalidate')
+  }
+  return response
 }
 
 export const config = {

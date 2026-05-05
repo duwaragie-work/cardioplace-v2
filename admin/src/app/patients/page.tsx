@@ -873,6 +873,9 @@ export default function PatientsPage() {
 
   // ─── Auth guard ───────────────────────────────────────────────────────────
   if (isLoading) return null;
+  // No user (logged out / mid-navigation) — render nothing so the
+  // role-mismatch screen doesn't flash before window.location.href fires.
+  if (!user) return null;
 
   if (!hasAdminRole(user)) {
     return (
