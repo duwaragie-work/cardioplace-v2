@@ -14,7 +14,7 @@ export function shouldShowOnboardingForUser(
   const status =
     typeof params === 'object' ? params.onboardingStatus : undefined;
 
-  if (status === 'COMPLETE') return false;
+  if (status === 'COMPLETED') return false;
 
   if (typeof window === 'undefined') return false;
   const skipped = localStorage.getItem(`${ONBOARDING_SKIPPED_KEY}_${userId}`);

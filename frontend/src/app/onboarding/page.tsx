@@ -71,7 +71,19 @@ export default function OnboardingPage() {
 
   const isFormPartiallyFilled = name.trim() !== "" || dateOfBirth !== "" || communicationPreference !== "";
 
-  if (isLoading || !user || isRedirecting) {
+  // Synchronous "should we redirect?" check — if shouldShowOnboardingForUser
+  // returns false, useEffect will router.replace('/dashboard') on the next
+  // tick. Render the spinner instead of the form so the user never flashes
+  // through the onboarding UI on their way out (AUTH-36).
+  const willRedirectAway =
+    !!user &&
+    !shouldShowOnboardingForUser({
+      userId: user.id,
+      onboardingStatus: user.onboardingStatus,
+      onboardingRequiredHint: user.onboardingRequired,
+    });
+
+  if (isLoading || !user || isRedirecting || willRedirectAway) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <SpinnerIndicator size={40} className="text-[#7B00E0]" />
@@ -138,17 +150,12 @@ export default function OnboardingPage() {
       router.push("/sign-in");
       return;
     }
-    if (typeof window !== "undefined") {
-      // eslint-disable-next-line no-console
-      console.debug("[onboarding] skip clicked", { userId: user.id });
-    }
+    // Skip is a client-only signal. We deliberately do NOT call POST
+    // /v2/auth/profile here — that would mark onboardingStatus=COMPLETED
+    // server-side, conflating "skipped" with "completed" (the admin can no
+    // longer tell them apart). The localStorage flag is enough to suppress
+    // the form on subsequent navigations within this browser.
     markOnboardingSkipped(user.id);
-    // Fire-and-forget: persist skip to backend without blocking navigation
-    fetchWithAuth(`${process.env.NEXT_PUBLIC_API_URL}/api/v2/auth/profile`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: null }),
-    }).catch(() => {});
     router.push("/dashboard");
   }
 

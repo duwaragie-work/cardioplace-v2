@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { getOrCreateDeviceId } from "@/lib/device";
 import { useLanguage } from "@/contexts/LanguageContext";
 import type { TranslationKey } from "@/i18n";
+import { shouldShowOnboardingForUser } from "@/lib/onboarding";
 import LandingHeader from "@/components/cardio/LandingHeader";
 import LandingFooter from "@/components/cardio/LandingFooter";
 
@@ -116,7 +117,11 @@ export default function RegisterPage() {
         window.location.href = `${adminUrl}/auth/magic-link?${params.toString()}`;
         return;
       }
-      if (user.onboardingRequired) {
+      // Honor the localStorage skip flag — a previously-skipped user
+      // shouldn't bounce through /onboarding on every login just to redirect
+      // back out (onboardingStatus stays NOT_COMPLETED after a skip per
+      // ONB-20 — admin needs that to distinguish skipped from completed).
+      if (user.onboardingRequired && shouldShowOnboardingForUser({ userId: user.id })) {
         router.replace("/onboarding");
       } else {
         router.replace("/dashboard");
@@ -277,7 +282,8 @@ export default function RegisterPage() {
         return;
       }
       login(data as OtpVerifyResponse);
-      if (data.onboarding_required) {
+      const userIdForSkip = data.userId !== undefined ? String(data.userId) : '';
+      if (data.onboarding_required && shouldShowOnboardingForUser({ userId: userIdForSkip })) {
         router.push("/onboarding");
       } else {
         router.push("/dashboard");
