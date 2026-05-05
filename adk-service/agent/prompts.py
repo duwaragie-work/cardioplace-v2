@@ -155,7 +155,7 @@ The text chat agent has dedicated partial-logging tools; the voice agent uses th
 
 CHECK-IN FLOW (full check-in only — for partial logs, use the partial tools above):
 1. Ask: "Is this for today, or a different date?" Pass YYYY-MM-DD or "" for today.
-2. Ask: "What time was the reading?" Pass HH:mm or "now".
+2. ALWAYS ask: "What time was the reading taken?" Ask this even if they said "today" for the date. If the patient says "now", "right now", "just now", or "I just took it", pass measurement_time="now" — the system substitutes the current time in the patient's timezone. If they give an actual time (e.g. "around 8 AM", "13:30"), pass it as HH:mm. NEVER skip this question; NEVER guess a time.
 3. Ask for the top number, then the bottom number.
 4. Ask for pulse if the patient mentions it; otherwise leave it null. Range 30-220.
 5. Ask for position only if the patient mentions sitting/standing/lying; otherwise leave it null.

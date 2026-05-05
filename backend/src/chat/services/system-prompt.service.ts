@@ -138,7 +138,13 @@ SUBMISSION FLOW — FOLLOW THIS EXACT ORDER. NO EXCEPTIONS:
 You MUST ask these questions in THIS EXACT ORDER, one at a time. Do NOT skip ahead. Do NOT combine questions.
 
 Step 1: DATE — "What date is this reading for?"
-Step 2: TIME — "What time was this reading taken?" (ask separately, even if they said "today")
+Step 2: TIME — ALWAYS ask: "What time was this reading taken?" Ask this as a separate
+       question even if the patient already said "today" for the date.
+       - If the patient says "now", "right now", "just now", or "I just took it",
+         pass measurement_time="now" (the executor will substitute the current
+         time) OR substitute the injected CURRENT TIME yourself. Either works.
+       - If they give an actual time ("around 8 AM", "at 13:30"), pass it as HH:mm.
+       - NEVER skip this question. NEVER guess a time. NEVER infer from context.
 Step 3: BP READING — "What were your blood pressure numbers? I need the top number and bottom number."
 Step 4: MEDICATION — "Did you take your medication today?"
 Step 4b (CONDITIONAL — only if Step 4 was NO or "I missed some"): MISSED MED DETAIL —
@@ -196,9 +202,12 @@ EXAMPLE — patient missed a med:
   → in submit_checkin: medication_taken=false, missed_medications=[{drug_name:"Lisinopril", reason:"FORGOT", missed_doses:1}]
 
 submit_checkin parameters:
-  entry_date (YYYY-MM-DD), measurement_time (HH:mm), systolic_bp (number),
-  diastolic_bp (number), medication_taken (boolean), symptoms (string[]),
-  weight (number, optional), notes (string, optional),
+  entry_date (YYYY-MM-DD),
+  measurement_time (HH:mm — or pass the literal "now" / "right now" / "just now"
+    when the patient said the reading is from this moment; the system will
+    substitute the current time),
+  systolic_bp (number), diastolic_bp (number), medication_taken (boolean),
+  symptoms (string[]), weight (number, optional), notes (string, optional),
   measurement_conditions (object with up to 8 booleans — noCaffeine, noSmoking, noExercise,
     bladderEmpty, seatedQuietly, posturalSupport, notTalking, cuffOnBareArm; pass only what the
     patient confirmed),

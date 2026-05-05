@@ -94,7 +94,11 @@ def make_tools(
                               booleans below for the 9 known clinical symptoms.
             notes:            Extra notes. ALWAYS in English.
             entry_date:       YYYY-MM-DD or "" for today.
-            measurement_time: HH:mm 24-hour or "" / "now" for current time.
+            measurement_time: HH:mm 24-hour. Pass "now" / "right now" / "just now"
+                              / "current" when the patient said the reading was
+                              taken at this moment — the tool substitutes the
+                              current time in the patient's timezone. Pass "" only
+                              if you genuinely couldn't get a time (last resort).
             pulse:            Pulse / heart rate (30–220). 0 = not provided.
             position:         "SITTING" / "STANDING" / "LYING" / "" = not provided.
             medication_scheduled_later:
@@ -170,7 +174,7 @@ def make_tools(
         resolved_time = patient_now.strftime("%H:%M")
         if measurement_time and measurement_time.strip():
             mt = measurement_time.strip().lower()
-            if mt in ("now", "current", "current time", "right now"):
+            if mt in ("now", "current", "current time", "right now", "just now"):
                 resolved_time = patient_now.strftime("%H:%M")
                 logger.info("Resolved 'now' to %s in timezone %s", resolved_time, patient_timezone)
             else:

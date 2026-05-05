@@ -61,12 +61,30 @@ const ADHERENCE_STATUSES: ReadonlySet<AdherenceStatus> = new Set([
 
 /**
  * Normalise a time string to HH:mm 24-hour format.
- * Handles: "13:00", "1:00 PM", "8:30 am", "2 PM", "14:15", etc.
+ * Handles: "13:00", "1:00 PM", "8:30 am", "2 PM", "14:15", "now", etc.
  * Returns undefined if the input can't be parsed.
+ *
+ * "now" / "right now" / "just now" / "current" / "current time" all resolve
+ * to the current server-time HH:mm. The system prompt also instructs the
+ * model to substitute "now" with the injected timestamp; this is the
+ * defensive fallback for when the model passes the word verbatim.
  */
 export function normaliseTime(raw?: string): string | undefined {
   if (!raw) return undefined
   const s = raw.trim()
+  const lower = s.toLowerCase()
+
+  // "now" / "right now" / "just now" / "current" / "current time"
+  if (
+    lower === 'now' ||
+    lower === 'right now' ||
+    lower === 'just now' ||
+    lower === 'current' ||
+    lower === 'current time'
+  ) {
+    const d = new Date()
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  }
 
   // Already HH:mm
   if (/^([01]\d|2[0-3]):[0-5]\d$/.test(s)) return s
@@ -215,7 +233,14 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
         type: Type.OBJECT,
         properties: {
           entry_date: { type: Type.STRING, description: 'Date in YYYY-MM-DD format.' },
-          measurement_time: { type: Type.STRING, description: 'Time in HH:mm 24-hour format (e.g. "08:30", "14:15").' },
+          measurement_time: {
+            type: Type.STRING,
+            description:
+              'Time the BP was measured in HH:mm 24-hour format (e.g. "08:30", "14:15"). ' +
+              'When the patient says "now", "right now", "just now", or "I just took it", ' +
+              'you may pass the literal string "now" — the system will substitute the current ' +
+              'time. NEVER skip asking the patient this question; NEVER guess a time.',
+          },
           systolic_bp: { type: Type.NUMBER, description: 'Systolic (top number, 60–250). Must come from the patient.' },
           diastolic_bp: { type: Type.NUMBER, description: 'Diastolic (bottom number, 40–150). Must come from the patient.' },
           pulse: { type: Type.NUMBER, description: 'Pulse / heart rate in bpm (30–220). Optional — omit if not measured.' },
