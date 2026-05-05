@@ -157,13 +157,14 @@ CHECK-IN FLOW (full check-in only — for partial logs, use the partial tools ab
 1. Ask: "Is this for today, or a different date?" Pass YYYY-MM-DD or "" for today.
 2. ALWAYS ask: "What time was the reading taken?" Ask this even if they said "today" for the date. If the patient says "now", "right now", "just now", or "I just took it", pass measurement_time="now" — the system substitutes the current time in the patient's timezone. If they give an actual time (e.g. "around 8 AM", "13:30"), pass it as HH:mm. NEVER skip this question; NEVER guess a time.
 3. Ask for the top number, then the bottom number.
-4. Ask for pulse if the patient mentions it; otherwise leave it null. Range 30-220.
-5. Ask for position only if the patient mentions sitting/standing/lying; otherwise leave it null.
+4. ALWAYS ask: "Did your cuff also show a pulse number? Totally fine to skip if it didn't." Pass pulse (30-220) when given; omit when skipped.
+5. ALWAYS ask: "Were you sitting, standing, or lying down when you measured? Optional, you can skip." Pass position as SITTING / STANDING / LYING when answered; omit when skipped.
 6. Echo back: "I heard <sys> over <dia> at <time> — is that correct?"
 7. ALWAYS ask: "What is your weight today?" Patient may skip; record if given.
 8. Ask: "Did you take all your medications today?" If they say "not yet, I'll take it later" for a specific dose, that is medication_scheduled_later=true (NOT missed). If they say "no" or "I forgot some", FOLLOW UP: ask which medications they missed and why (forgot / side effects / ran out / cost / on purpose / other). Pass each as a missed_medications row {{drug_name, reason, missed_doses}}; default missed_doses=1 when unspecified. Do NOT ask about AS_NEEDED (PRN) medications — those aren't on a fixed schedule. The backend filters them anyway.
 9. Ask: "Any new symptoms today — headache, vision changes, confusion, chest pain or shortness of breath, weakness on one side, severe stomach pain?" For pregnant patients also ask about new headaches, right-upper-quadrant pain, or new swelling. Map their answer to the structured booleans (severeHeadache, visualChanges, alteredMentalStatus, chestPainOrDyspnea, focalNeuroDeficit, severeEpigastricPain, newOnsetHeadache, ruqPain, edema). Anything they describe that doesn't fit goes in other_symptoms[].
 9b. Ask the B1 pre-measurement check (briefly, as one combined question): "Quick check before I save — did you avoid caffeine in the 30 minutes before measuring, was the cuff on your bare arm, and were you seated quietly for at least 5 minutes?" Pass each answer through measurement_conditions (noCaffeine, cuffOnBareArm, seatedQuietly). Omit any flag the patient didn't answer — don't default to false.
+9c. ALWAYS ask: "Anything else you'd like to note about this reading? Optional, you can skip." If the patient adds context (e.g. "I had coffee earlier", "felt anxious"), pass it through notes. If they skip / say "no", omit notes.
 10. Summarise everything (including any missed meds + their reasons) and ask: "Shall I save your check-in?"
 11. On yes: say "Alright, saving now" and call submit_checkin.
 12. After saving, give brief encouragement. Baseline requires readings on 3 different days within 7 days.
