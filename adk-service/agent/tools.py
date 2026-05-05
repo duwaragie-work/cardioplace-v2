@@ -176,8 +176,27 @@ def make_tools(
             else:
                 resolved_time = measurement_time.strip()
 
+        # NestJS CreateJournalEntryDto requires a single ISO 8601 measuredAt
+        # field (legacy code emitted entryDate + measurementTime separately,
+        # which ValidationPipe dropped — those rows persisted with the wrong
+        # date/time, or the request 400'd outright). Build measuredAt from
+        # the resolved date+time in the patient's timezone and convert to UTC.
+        try:
+            from zoneinfo import ZoneInfo
+            local_dt = datetime.strptime(
+                f"{resolved_date} {resolved_time}", "%Y-%m-%d %H:%M"
+            ).replace(tzinfo=ZoneInfo(patient_timezone))
+            measured_at_iso = local_dt.astimezone().isoformat()
+        except Exception:
+            # Fall back to naive UTC if zoneinfo / parse fails.
+            measured_at_iso = (
+                datetime.strptime(
+                    f"{resolved_date} {resolved_time}", "%Y-%m-%d %H:%M"
+                ).isoformat() + "Z"
+            )
+
         payload: dict[str, Any] = {
-            "entryDate": resolved_date,
+            "measuredAt": measured_at_iso,
             "medicationTaken": medication_taken,
             "symptoms": symptoms or [],
             "notes": notes or "",
@@ -186,8 +205,6 @@ def make_tools(
         if bp_provided:
             payload["systolicBP"] = systolic_bp
             payload["diastolicBP"] = diastolic_bp
-        if resolved_time:
-            payload["measurementTime"] = resolved_time
         if weight and weight > 0:
             payload["weight"] = weight
         # Phase/27 v2 optional fields — only send when populated so existing
@@ -366,8 +383,16 @@ def make_tools(
                 lines = []
                 for e in entries[:5]:
                     entry_id = e.get("id", "unknown")
-                    d = e.get("entryDate", "unknown")
-                    t = e.get("measurementTime", "")
+                    # Backend serialises measuredAt as an ISO 8601 string;
+                    # split it for the human-readable summary the model echoes
+                    # back to the patient.
+                    measured_at = e.get("measuredAt", "")
+                    if measured_at:
+                        d = measured_at[:10] if len(measured_at) >= 10 else "unknown"
+                        t = measured_at[11:16] if len(measured_at) >= 16 else ""
+                    else:
+                        d = "unknown"
+                        t = ""
                     s = e.get("systolicBP", "?")
                     di = e.get("diastolicBP", "?")
                     med = "yes" if e.get("medicationTaken") else "no"
@@ -427,7 +452,38 @@ def make_tools(
         """
         payload: dict[str, Any] = {}
         if measurement_time:
-            payload["measurementTime"] = measurement_time
+            # Backend stores a single ISO measuredAt — to change just the time
+            # we need the existing date. Fetch the row first.
+            try:
+                existing_resp = requests.get(
+                    f"{NESTJS_URL}/daily-journal/{entry_id}",
+                    headers=headers,
+                    timeout=REQUEST_TIMEOUT,
+                )
+                if existing_resp.status_code == 200:
+                    existing = existing_resp.json()
+                    existing_iso = (existing or {}).get("measuredAt", "")
+                    existing_date = existing_iso[:10] if len(existing_iso) >= 10 else None
+                    if existing_date:
+                        try:
+                            from zoneinfo import ZoneInfo
+                            local_dt = datetime.strptime(
+                                f"{existing_date} {measurement_time.strip()}",
+                                "%Y-%m-%d %H:%M",
+                            ).replace(tzinfo=ZoneInfo(patient_timezone))
+                            payload["measuredAt"] = local_dt.astimezone().isoformat()
+                        except Exception:
+                            logger.warning(
+                                "Could not build measuredAt from existing date %s + time %s",
+                                existing_date, measurement_time,
+                            )
+                else:
+                    logger.warning(
+                        "GET /daily-journal/%s returned %s — skipping time change",
+                        entry_id, existing_resp.status_code,
+                    )
+            except Exception as exc:
+                logger.warning("Failed to fetch existing entry %s: %s", entry_id, exc)
         if systolic_bp and systolic_bp > 0:
             payload["systolicBP"] = systolic_bp
         if diastolic_bp and diastolic_bp > 0:
@@ -513,7 +569,8 @@ def make_tools(
                 )
                 if get_resp.status_code == 200:
                     data = get_resp.json()
-                    entry_date = data.get("entryDate", "")
+                    measured_at = data.get("measuredAt", "")
+                    entry_date = measured_at[:10] if len(measured_at) >= 10 else ""
                     final_systolic = data.get("systolicBP", final_systolic)
                     final_diastolic = data.get("diastolicBP", final_diastolic)
                     final_weight = data.get("weight", final_weight) or 0.0
