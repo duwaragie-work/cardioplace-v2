@@ -489,6 +489,8 @@ const es: Record<TranslationKey, string> = {
   'register.otpResent': 'Código reenviado a tu correo.',
   'register.failedOtp': 'Error al solicitar el código.',
   'register.adminAccessDenied': 'No tienes permiso para acceder a la aplicación de administración. Comunícate con tu administrador.',
+  'register.accountSuspended': 'Esta cuenta ha sido suspendida. Por favor contacta a soporte.',
+  'register.accountBlocked': 'Esta cuenta ha sido bloqueada. Por favor contacta a soporte.',
   'register.failedResend': 'Error al reenviar el código.',
   'register.verificationFailed': 'Verificación fallida.',
   'register.invalidOtp': 'Código inválido. Intenta de nuevo.',

@@ -489,6 +489,8 @@ const am: Record<TranslationKey, string> = {
   'register.otpResent': 'OTP እንደገና ወደ ኢሜይልዎ ተልኳል።',
   'register.failedOtp': 'OTP መጠየቅ አልተቻለም።',
   'register.adminAccessDenied': 'ለአስተዳዳሪ መተግበሪያ መድረስ ፈቃድ የለዎትም። እባክዎ ከአስተዳዳሪዎ ጋር ይገናኙ።',
+  'register.accountSuspended': 'ይህ መለያ ታግዷል። እባክዎ ድጋፍ ያግኙ።',
+  'register.accountBlocked': 'ይህ መለያ ተዘግቷል። እባክዎ ድጋፍ ያግኙ።',
   'register.failedResend': 'OTP እንደገና መላክ አልተቻለም።',
   'register.verificationFailed': 'ማረጋገጥ አልተሳካም።',
   'register.invalidOtp': 'ልክ ያልሆነ OTP። እባክዎ እንደገና ይሞክሩ።',

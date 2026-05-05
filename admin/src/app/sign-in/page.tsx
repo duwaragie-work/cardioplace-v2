@@ -38,6 +38,8 @@ const BACKEND_MSG_KEY_MAP: Record<string, TranslationKey> = {
   // to one friendly "no permission" message.
   'No admin account exists for this email': 'register.adminAccessDenied',
   'This account is not authorized to access the admin app': 'register.adminAccessDenied',
+  'Account is suspended': 'register.accountSuspended',
+  'Account is blocked': 'register.accountBlocked',
 };
 
 function backendMsgToKey(msg: string | undefined): TranslationKey | null {

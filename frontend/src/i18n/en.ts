@@ -710,6 +710,8 @@ const en = {
   'register.magicLinkSent': 'Magic link sent! Check your email.',
   'register.pleaseWaitMagicLink': 'Please wait 60 seconds before requesting a new magic link',
   'register.failedMagicLink': 'Failed to send magic link.',
+  'register.accountSuspended': 'Your account has been suspended. Please contact support.',
+  'register.accountBlocked': 'Your account has been blocked. Please contact support.',
   'register.checkEmail': 'Check your email!',
   'register.magicLinkDesc': 'We sent a sign-in link. Tap it to log in.',
   'register.sendAnother': 'Send another link',

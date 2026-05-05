@@ -489,6 +489,8 @@ const de: Record<TranslationKey, string> = {
   'register.otpResent': 'Code erneut an Ihre E-Mail gesendet.',
   'register.failedOtp': 'Code-Anfrage fehlgeschlagen.',
   'register.adminAccessDenied': 'Sie haben keine Berechtigung für die Admin-App. Bitte wenden Sie sich an Ihren Administrator.',
+  'register.accountSuspended': 'Dieses Konto wurde gesperrt. Bitte wenden Sie sich an den Support.',
+  'register.accountBlocked': 'Dieses Konto wurde blockiert. Bitte wenden Sie sich an den Support.',
   'register.failedResend': 'Erneutes Senden fehlgeschlagen.',
   'register.verificationFailed': 'Überprüfung fehlgeschlagen.',
   'register.invalidOtp': 'Ungültiger Code. Bitte versuchen Sie es erneut.',
