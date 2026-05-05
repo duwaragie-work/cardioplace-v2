@@ -203,11 +203,11 @@ export async function getEnrollmentCheck(patientUserId: string): Promise<Enrollm
  * onboarding — name/DOB, owned by the patient-side /v2/auth/profile). See
  * docs/TESTING_FLOW_GUIDE.md §4.1 / §6.2 for the two-layer model.
  */
-export async function completePatientOnboarding(
+export async function completePatientEnrollment(
   patientUserId: string,
 ): Promise<{ userId: string; enrollmentStatus: string; completedBy?: string }> {
   const res = await fetchWithAuth(
-    `${API}/api/admin/patients/${patientUserId}/complete-onboarding`,
+    `${API}/api/admin/patients/${patientUserId}/complete-enrollment`,
     { method: 'POST' },
   )
   if (!res.ok) {

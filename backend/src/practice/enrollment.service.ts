@@ -8,7 +8,7 @@ import {
 import { EnrollmentStatus } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
-import { canCompleteOnboarding } from './enrollment-gate.js'
+import { canCompleteEnrollment } from './enrollment-gate.js'
 
 @Injectable()
 export class EnrollmentService {
@@ -19,7 +19,7 @@ export class EnrollmentService {
     private readonly escalation: EscalationService,
   ) {}
 
-  async completeOnboarding(adminId: string, patientUserId: string) {
+  async completeEnrollment(adminId: string, patientUserId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: patientUserId },
       select: { id: true, roles: true, enrollmentStatus: true },
@@ -44,7 +44,7 @@ export class EnrollmentService {
       }
     }
 
-    const gate = await canCompleteOnboarding(this.prisma, patientUserId)
+    const gate = await canCompleteEnrollment(this.prisma, patientUserId)
     if (!gate.ok) {
       throw new ConflictException({
         message: 'Enrollment prerequisites missing',
@@ -91,7 +91,7 @@ export class EnrollmentService {
   }
 
   async check(patientUserId: string) {
-    const result = await canCompleteOnboarding(this.prisma, patientUserId)
+    const result = await canCompleteEnrollment(this.prisma, patientUserId)
     return {
       statusCode: 200,
       message: result.ok ? 'Ready to enroll' : 'Prerequisites missing',

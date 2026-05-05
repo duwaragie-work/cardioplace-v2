@@ -50,7 +50,7 @@ import { hasAdminRole, isProviderOnly } from '@/lib/roleGates';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getPatients, getPatientSummary } from '@/lib/services/provider.service';
 import {
-  completePatientOnboarding,
+  completePatientEnrollment,
   ENROLLMENT_REASON_LABELS,
   type EnrollmentGateReason,
 } from '@/lib/services/practice.service';
@@ -1180,7 +1180,7 @@ export default function PatientsPage() {
                         onComplete={async () => {
                           setCompletingId(p.id);
                           try {
-                            await completePatientOnboarding(p.id);
+                            await completePatientEnrollment(p.id);
                             setEnrollmentReasons((prev) => {
                               const { [p.id]: _drop, ...rest } = prev;
                               void _drop;

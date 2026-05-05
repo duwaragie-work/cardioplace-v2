@@ -163,7 +163,7 @@ export class EscalationService {
   // the ladder never starts. Without a catch-up, those alerts stay
   // un-escalated forever even after enrollment completes.
   //
-  // EnrollmentService.completeOnboarding calls this immediately after
+  // EnrollmentService.completeEnrollment calls this immediately after
   // flipping a patient to ENROLLED. We re-fire T+0 for any open alert with
   // zero EscalationEvents, capped to the last 7 days so a long-deferred
   // patient doesn't trigger a flood of stale notifications on enrollment

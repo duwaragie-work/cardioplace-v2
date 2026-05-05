@@ -405,7 +405,7 @@ describe('Practice / Assignment / Threshold / Enrollment (e2e)', () => {
   describe('Enrollment gate + completion', () => {
     it('fails for patient with no profile and no assignment', async () => {
       const res = await request(app.getHttpServer())
-        .post(`/admin/patients/${plainPatientId}/complete-onboarding`)
+        .post(`/admin/patients/${plainPatientId}/complete-enrollment`)
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(409)
       const reasons: string[] = res.body.reasons ?? res.body.message?.reasons
@@ -434,7 +434,7 @@ describe('Practice / Assignment / Threshold / Enrollment (e2e)', () => {
       })
 
       const res = await request(app.getHttpServer())
-        .post(`/admin/patients/${plainPatientId}/complete-onboarding`)
+        .post(`/admin/patients/${plainPatientId}/complete-enrollment`)
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(409)
       const reasons: string[] = res.body.reasons ?? res.body.message?.reasons
@@ -451,7 +451,7 @@ describe('Practice / Assignment / Threshold / Enrollment (e2e)', () => {
         },
       })
       const res = await request(app.getHttpServer())
-        .post(`/admin/patients/${plainPatientId}/complete-onboarding`)
+        .post(`/admin/patients/${plainPatientId}/complete-enrollment`)
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200)
       expect(res.body.data.enrollmentStatus).toBe('ENROLLED')
@@ -488,7 +488,7 @@ describe('Practice / Assignment / Threshold / Enrollment (e2e)', () => {
       })
 
       const res = await request(app.getHttpServer())
-        .post(`/admin/patients/${scratch.id}/complete-onboarding`)
+        .post(`/admin/patients/${scratch.id}/complete-enrollment`)
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200)
       expect(res.body.data.enrollmentStatus).toBe('ENROLLED')
@@ -496,7 +496,7 @@ describe('Practice / Assignment / Threshold / Enrollment (e2e)', () => {
 
     it('re-completion is idempotent (200 no-op)', async () => {
       const res = await request(app.getHttpServer())
-        .post(`/admin/patients/${plainPatientId}/complete-onboarding`)
+        .post(`/admin/patients/${plainPatientId}/complete-enrollment`)
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200)
       expect(res.body.message).toMatch(/already enrolled/i)

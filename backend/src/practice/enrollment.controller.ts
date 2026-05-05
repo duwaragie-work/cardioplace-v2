@@ -19,10 +19,10 @@ type AuthedReq = Request & { user: { id: string } }
 export class EnrollmentController {
   constructor(private readonly service: EnrollmentService) {}
 
-  @Post('complete-onboarding')
+  @Post('complete-enrollment')
   @HttpCode(HttpStatus.OK)
   complete(@Req() req: AuthedReq, @Param('userId') patientUserId: string) {
-    return this.service.completeOnboarding(req.user.id, patientUserId)
+    return this.service.completeEnrollment(req.user.id, patientUserId)
   }
 
   @Get('enrollment-check')
