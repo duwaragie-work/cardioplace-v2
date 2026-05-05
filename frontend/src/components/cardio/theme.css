@@ -18,9 +18,13 @@
   --brand-background: #F8FAFC;
   --brand-surface: #FFFFFF;
   --brand-border: #E2E8F0;
+  /* WCAG 2.2 AA contrast on white background:
+     - primary  #0F172A → 18.7:1  ✓ (normal & large text)
+     - secondary #475569 → 7.55:1 ✓ (was #64748B, 4.6:1 — bumped for headroom)
+     - muted     #64748B → 4.60:1 ✓ (was #94A3B8, 2.84:1 — failed; now passes 4.5:1) */
   --brand-text-primary: #0F172A;
-  --brand-text-secondary: #64748B;
-  --brand-text-muted: #94A3B8;
+  --brand-text-secondary: #475569;
+  --brand-text-muted: #64748B;
 
   /* Shadows */
   --brand-shadow-card: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);

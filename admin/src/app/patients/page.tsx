@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 /* Custom scrollbar styles for patient modal */
@@ -276,27 +276,7 @@ function VerificationBadge({
   );
 }
 
-// ─── Flow K2 — Open-alert count badge with tier color coding ────────────────
-
-/** Highest-severity tier among the patient's open alerts. */
-function highestTier(alertsByTier: Record<string, number> | undefined): string | null {
-  if (!alertsByTier) return null;
-  const order = [
-    'BP_LEVEL_2',
-    'BP_LEVEL_2_SYMPTOM_OVERRIDE',
-    'TIER_1_CONTRAINDICATION',
-    'TIER_2_DISCREPANCY',
-    'BP_LEVEL_1_HIGH',
-    'BP_LEVEL_1_LOW',
-    'TIER_3_INFO',
-  ];
-  for (const t of order) {
-    if ((alertsByTier[t] ?? 0) > 0) return t;
-  }
-  // Fall back to any non-zero key (catches `UNTIERED` legacy alerts).
-  const fallback = Object.entries(alertsByTier).find(([, n]) => n > 0);
-  return fallback ? fallback[0] : null;
-}
+// ─── Flow K2. Open-alert count badge with tier color coding ────────────────
 
 function tierChrome(tier: string | null): {
   bg: string
@@ -524,8 +504,9 @@ function OnboardingCell({
           <Info className="w-3 h-3" />
         </button>
       )}
-      {blocked && showTip && (
+      {blocked && showTip && cachedReasons && (
         <div
+          role="tooltip"
           className="absolute right-0 top-full mt-1.5 z-20 w-64 rounded-lg p-3 text-left"
           style={{
             backgroundColor: '#0F172A',
@@ -533,12 +514,13 @@ function OnboardingCell({
             boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
           }}
           onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
         >
           <p className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{ color: '#FCD34D' }}>
             Cannot complete · prerequisites missing
           </p>
           <ul className="space-y-1.5">
-            {cachedReasons!.map((r) => (
+            {cachedReasons.map((r) => (
               <li key={r} className="text-[11px] leading-relaxed flex gap-1.5">
                 <span style={{ color: '#FCD34D' }}>•</span>
                 <span>{ENROLLMENT_REASON_LABELS[r] ?? r}</span>
@@ -609,6 +591,7 @@ function PatientModal({
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="w-8 h-8 rounded-full flex items-center justify-center transition hover:bg-white/20"
           >
@@ -902,7 +885,7 @@ export default function PatientsPage() {
             <Shield className="w-7 h-7" style={{ color: 'var(--brand-alert-red)' }} />
           </div>
           <h1 className="text-xl font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
-            403 — Access Denied
+            403 Access Denied
           </h1>
           <p className="text-sm mb-4" style={{ color: 'var(--brand-text-muted)' }}>
             Super Admin access required
@@ -965,7 +948,7 @@ export default function PatientsPage() {
                 style={{ color: 'var(--brand-text-primary)' }}
               />
               {search && (
-                <button onClick={() => setSearch('')} className="shrink-0" aria-label="Clear search">
+                <button type="button" onClick={() => setSearch('')} className="shrink-0" aria-label="Clear search">
                   <X className="w-3 h-3" style={{ color: 'var(--brand-text-muted)' }} />
                 </button>
               )}
@@ -1095,6 +1078,7 @@ export default function PatientsPage() {
                   : 'P';
 
                 return (
+                  // biome-ignore lint/a11y/useSemanticElements: row contains block-level children (grid columns), which would be invalid inside a <button>. Keyboard support handled below.
                   <div
                     key={p.id}
                     onClick={() => router.push(`/patients/${p.id}`)}
@@ -1135,8 +1119,9 @@ export default function PatientsPage() {
                               documented history outside pregnancy. */}
                           {p.historyPreeclampsia && !p.isPregnant && (
                             <span
+                              role="img"
                               className="shrink-0 inline-flex items-center"
-                              title="Preeclampsia history — enhanced monitoring recommended outside pregnancy per 2025 AHA/ACC Hypertension Guideline."
+                              title="Preeclampsia history. Enhanced monitoring recommended outside pregnancy per 2025 AHA/ACC Hypertension Guideline."
                               aria-label="Preeclampsia history"
                             >
                               <Heart

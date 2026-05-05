@@ -34,7 +34,17 @@ import {
   type CheckinSummary,
   type UpdateSummary,
   type DeleteSummary,
+  type MedicationAdherenceSummary,
+  type SymptomLogSummary,
+  type BPPhotoSummary,
 } from '@/hooks/useVoiceSession';
+// Phase/27 chatbot v2 — rich result cards.
+import CheckinCard from '@/components/cardio/cards/CheckinCard';
+import UpdateCard from '@/components/cardio/cards/UpdateCard';
+import DeleteCard from '@/components/cardio/cards/DeleteCard';
+import MedicationAdherenceCard from '@/components/cardio/cards/MedicationAdherenceCard';
+import SymptomLogCard from '@/components/cardio/cards/SymptomLogCard';
+import BPPhotoCard from '@/components/cardio/cards/BPPhotoCard';
 
 // Shape of the delete_checkin tool result from the backend (see journal-tools.ts).
 // Narrower than the voice-side DeleteSummary (text delete is always single-entry).
@@ -246,170 +256,6 @@ function MessageBubble({ msg }: { msg: Message }) {
           <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>{msg.time}</p>
         </div>
       </div>
-    </motion.div>
-  );
-}
-
-// ─── Checkin result card ───────────────────────────────────────────────────────
-function CheckinCard({ summary, onDismiss }: { summary: CheckinSummary; onDismiss: () => void }) {
-  const { t } = useLanguage();
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 16, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      className="mx-auto w-full max-w-sm rounded-2xl p-5 my-2"
-      style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)', boxShadow: '0 4px 20px rgba(0,0,0,0.09)' }}
-    >
-      <div className="flex items-center gap-2 mb-4">
-        {summary.saved
-          ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-success-green)' }} />
-          : <AlertCircle className="w-5 h-5 text-red-500" />}
-        <p className="font-bold text-[15px]" style={{ color: 'var(--brand-text-primary)' }}>
-          {summary.saved ? t('chat.checkinSaved') : t('chat.couldNotSave')}
-        </p>
-      </div>
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        {summary.systolicBP != null && summary.diastolicBP != null && (
-          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Blood Pressure</p>
-            <p className="text-[18px] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{summary.systolicBP}/{summary.diastolicBP}</p>
-            <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>mmHg</p>
-          </div>
-        )}
-        {summary.weight != null && (
-          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-accent-teal-light)' }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Weight</p>
-            <p className="text-[18px] font-bold" style={{ color: 'var(--brand-accent-teal)' }}>{summary.weight}</p>
-            <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>lbs</p>
-          </div>
-        )}
-        <div className="rounded-xl p-3 text-center" style={{ backgroundColor: summary.medicationTaken ? 'var(--brand-success-green-light)' : 'var(--brand-alert-red-light)' }}>
-          <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Medications</p>
-          <p className="text-[14px] font-bold" style={{ color: summary.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red)' }}>
-            {summary.medicationTaken ? 'Taken ✓' : 'Missed'}
-          </p>
-        </div>
-        {summary.symptoms.length > 0 && (
-          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Symptoms</p>
-            <p className="text-[12px] font-medium" style={{ color: 'var(--brand-warning-amber)' }}>
-              {summary.symptoms.slice(0, 2).join(', ')}{summary.symptoms.length > 2 && ` +${summary.symptoms.length - 2}`}
-            </p>
-          </div>
-        )}
-      </div>
-      <button
-        onClick={onDismiss}
-        className="w-full py-2.5 rounded-xl text-[14px] font-semibold transition hover:opacity-90 active:scale-[0.98]"
-        style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)', color: 'white', boxShadow: '0 4px 14px rgba(123,0,224,0.28)' }}
-      >
-        {t('chat.dismiss')}
-      </button>
-    </motion.div>
-  );
-}
-
-// ─── Update result card ────────────────────────────────────────────────────────
-function DeleteCard({ summary, onDismiss }: { summary: DeleteSummary; onDismiss: () => void }) {
-  const successLabel = summary.deletedCount === 1
-    ? 'Reading deleted'
-    : `${summary.deletedCount} readings deleted`;
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 16, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      className="mx-auto w-full max-w-sm rounded-2xl p-5 my-2"
-      style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)', boxShadow: '0 4px 20px rgba(0,0,0,0.09)' }}
-    >
-      <div className="flex items-center gap-2 mb-4">
-        {summary.success
-          ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-alert-red)' }} />
-          : <AlertCircle className="w-5 h-5 text-red-500" />}
-        <p className="font-bold text-[15px]" style={{ color: 'var(--brand-text-primary)' }}>
-          {summary.success ? successLabel : 'Could not delete reading'}
-        </p>
-      </div>
-      <div className="rounded-xl p-3 text-center mb-4" style={{ backgroundColor: 'var(--brand-alert-red-light)' }}>
-        <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Removed</p>
-        <p className="text-[16px] font-bold" style={{ color: 'var(--brand-alert-red)' }}>
-          {summary.deletedCount} entry{summary.deletedCount === 1 ? '' : 'ies'}
-          {summary.failedCount > 0 ? ` (${summary.failedCount} failed)` : ''}
-        </p>
-      </div>
-      {summary.message && (
-        <p className="text-[12px] mb-4 text-center" style={{ color: 'var(--brand-text-muted)' }}>
-          {summary.message}
-        </p>
-      )}
-      <button
-        onClick={onDismiss}
-        className="w-full py-2.5 rounded-xl text-[14px] font-semibold transition hover:opacity-90 active:scale-[0.98]"
-        style={{ background: 'linear-gradient(135deg, #DC2626, #EF4444)', color: 'white', boxShadow: '0 4px 14px rgba(220,38,38,0.28)' }}
-      >
-        Done
-      </button>
-    </motion.div>
-  );
-}
-
-function UpdateCard({ summary, onDismiss }: { summary: UpdateSummary; onDismiss: () => void }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 16, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      className="mx-auto w-full max-w-sm rounded-2xl p-5 my-2"
-      style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)', boxShadow: '0 4px 20px rgba(0,0,0,0.09)' }}
-    >
-      <div className="flex items-center gap-2 mb-4">
-        {summary.updated
-          ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-accent-teal)' }} />
-          : <AlertCircle className="w-5 h-5 text-red-500" />}
-        <p className="font-bold text-[15px]" style={{ color: 'var(--brand-text-primary)' }}>
-          {summary.updated ? 'Reading updated!' : 'Could not update reading'}
-        </p>
-      </div>
-      {summary.entryDate && (
-        <p className="text-[12px] mb-3" style={{ color: 'var(--brand-text-muted)' }}>
-          Entry for {new Date(summary.entryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-        </p>
-      )}
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        {summary.systolicBP != null && summary.diastolicBP != null && (
-          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-accent-teal-light)' }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Blood Pressure</p>
-            <p className="text-[18px] font-bold" style={{ color: 'var(--brand-accent-teal)' }}>{summary.systolicBP}/{summary.diastolicBP}</p>
-            <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>mmHg</p>
-          </div>
-        )}
-        {summary.weight != null && summary.weight > 0 && (
-          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-accent-teal-light)' }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Weight</p>
-            <p className="text-[18px] font-bold" style={{ color: 'var(--brand-accent-teal)' }}>{summary.weight}</p>
-            <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>lbs</p>
-          </div>
-        )}
-        <div className="rounded-xl p-3 text-center" style={{ backgroundColor: summary.medicationTaken ? 'var(--brand-success-green-light)' : 'var(--brand-alert-red-light)' }}>
-          <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Medications</p>
-          <p className="text-[14px] font-bold" style={{ color: summary.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red)' }}>
-            {summary.medicationTaken ? 'Taken ✓' : 'Missed'}
-          </p>
-        </div>
-        {summary.symptoms.length > 0 && (
-          <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--brand-text-muted)' }}>Symptoms</p>
-            <p className="text-[12px] font-medium" style={{ color: 'var(--brand-warning-amber)' }}>
-              {summary.symptoms.slice(0, 2).join(', ')}{summary.symptoms.length > 2 && ` +${summary.symptoms.length - 2}`}
-            </p>
-          </div>
-        )}
-      </div>
-      <button
-        onClick={onDismiss}
-        className="w-full py-2.5 rounded-xl text-[14px] font-semibold transition hover:opacity-90 active:scale-[0.98]"
-        style={{ background: 'linear-gradient(135deg, #0D9488, #14B8A6)', color: 'white', boxShadow: '0 4px 14px rgba(13,148,136,0.28)' }}
-      >
-        Done
-      </button>
     </motion.div>
   );
 }
@@ -1193,6 +1039,7 @@ export default function AIChatInterface() {
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const justCreatedSessionRef = useRef(false);
 
   const userInitials = getUserInitials(user?.name);
@@ -1345,6 +1192,17 @@ export default function AIChatInterface() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping, transcript]);
+
+  // Auto-resize the chat input textarea up to 3 lines, then scroll internally.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20;
+    const paddingY = 16; // py-2 → 8px top + 8px bottom
+    const max = lineHeight * 3 + paddingY;
+    el.style.height = Math.min(el.scrollHeight, max) + 'px';
+  }, [inputValue]);
 
   // ── Pre-fill input from query param (e.g. /chat?q=My%20BP%20readings) ────
   const qParamHandled = useRef(false);
@@ -1603,7 +1461,7 @@ export default function AIChatInterface() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="flex" style={{ height: 'calc(100vh - 4rem)', backgroundColor: 'var(--brand-background)' }}>
+    <div className="flex overflow-hidden" style={{ height: 'calc(100dvh - 4rem)', backgroundColor: 'var(--brand-background)' }}>
       {/* ── Desktop Sidebar ───────────────────────────────────────────────── */}
       <div className="hidden lg:flex flex-col w-72 shrink-0 h-full" style={{ backgroundColor: 'white', borderRight: '1px solid var(--brand-border)' }}>
         <SidebarContent
@@ -1701,7 +1559,7 @@ export default function AIChatInterface() {
             actionType={voiceActionType}
           />
         ) : (
-        <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5 space-y-4 min-h-0" style={{ backgroundColor: 'var(--brand-background)' }}>
+        <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5 min-h-0 flex flex-col gap-4" style={{ backgroundColor: 'var(--brand-background)' }}>
           {isLoadingHistory && (
             <div className="space-y-4 py-4">
               <div className="flex justify-end"><div className="animate-pulse rounded-2xl px-4 py-3" style={{ backgroundColor: 'var(--brand-primary-purple-light)', width: '65%' }}><div className="h-3 rounded-full mb-2" style={{ backgroundColor: '#E9D5FF', width: '80%', marginLeft: 'auto' }} /><div className="h-3 rounded-full" style={{ backgroundColor: '#E9D5FF', width: '50%', marginLeft: 'auto' }} /></div></div>
@@ -1710,7 +1568,7 @@ export default function AIChatInterface() {
           )}
 
           {messages.length === 0 && transcript.length === 0 && !isTyping && !isLoadingHistory && !voiceSummaryLoading && (
-            <div className="flex items-center justify-center h-full">
+            <div className="flex-1 flex items-center justify-center">
               <div className="text-center max-w-xs mx-auto">
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
                   <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={50} height={50} />
@@ -1796,23 +1654,27 @@ export default function AIChatInterface() {
         {/* Input bar */}
         <div className="shrink-0 bg-white px-4 lg:px-6 pt-3 pb-4" style={{ borderTop: '1px solid var(--brand-border)' }}>
           <div
-            className="flex items-center gap-2 px-4 py-1.5 transition-all"
+            className="flex items-end gap-2 px-4 py-1.5 transition-all"
             style={{
               border: isVoiceActive ? '1.5px solid var(--brand-primary-purple)' : '1.5px solid var(--brand-border)',
               borderRadius: '28px',
               backgroundColor: 'var(--brand-background)',
             }}
           >
-            <input
-              type="text"
+            <textarea
+              ref={inputRef}
+              rows={1}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={isVoiceActive ? 'End voice call to type…' : 'Type a message…'}
-              className="flex-1 bg-transparent text-[14px] outline-none min-w-0 py-2"
+              aria-label={t('chat.title') ? `${t('chat.title')} message input` : 'Chat message'}
+              className="flex-1 bg-transparent text-[14px] outline-none min-w-0 py-2 resize-none leading-[1.4] thin-scrollbar"
               style={{
                 color: 'var(--brand-text-primary)',
                 opacity: isVoiceActive ? 0.4 : 1,
+                maxHeight: 'calc(1.4em * 3)',
+                overflowY: 'auto',
               }}
               disabled={isSending || isVoiceActive || isVoiceConnecting}
             />

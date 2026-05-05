@@ -195,7 +195,7 @@ export default function OnboardingPage() {
   return (
     <div className="bg-white">
       <LandingHeader activeLink="" />
-      <div className="lg:min-h-screen pt-24 lg:pt-[64px] pb-10 lg:pb-0 flex items-start lg:items-center justify-center px-4 sm:px-6 lg:px-12">
+      <main id="main" className="lg:min-h-screen pt-24 lg:pt-[80px] pb-10 lg:pb-0 flex items-start lg:items-center justify-center px-4 sm:px-6 lg:px-12">
       <div className="w-full max-w-300 mx-auto">
         <div className="flex flex-col items-center md:items-center md:flex-row gap-8 lg:gap-20">
           {/* Left side - Form */}
@@ -228,7 +228,7 @@ export default function OnboardingPage() {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder={t('onboarding.namePlaceholder')}
-                    className="flex-1 h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                    className="flex-1 h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] placeholder:text-[#737373] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
                   />
                   <MicButton
                     inputId="onboarding-name"
@@ -317,7 +317,7 @@ export default function OnboardingPage() {
               <div className="space-y-4 my-auto w-full">
                 <div className="flex items-center gap-3">
                   <div className="bg-[#7B00E0] size-10 lg:size-16 rounded-2xl flex items-center justify-center shrink-0">
-                    <svg className="w-5 h-5 lg:w-8 lg:h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg aria-hidden="true" className="w-5 h-5 lg:w-8 lg:h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -335,19 +335,19 @@ export default function OnboardingPage() {
                 <div className="space-y-3 pt-2">
                   <div className="flex items-center gap-3">
                     <div className="bg-white rounded-full p-1">
-                      <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
+                      <CheckCircle2 aria-hidden="true" className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
                     </div>
                     <p className="text-[#4b3b55] text-xs lg:text-sm">{t('onboarding.benefit1')}</p>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="bg-white rounded-full p-1">
-                      <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
+                      <CheckCircle2 aria-hidden="true" className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
                     </div>
                     <p className="text-[#4b3b55] text-xs lg:text-sm">{t('onboarding.benefit2')}</p>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="bg-white rounded-full p-1">
-                      <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
+                      <CheckCircle2 aria-hidden="true" className="w-3 h-3 lg:w-4 lg:h-4 text-[#7B00E0]" strokeWidth={2.5} />
                     </div>
                     <p className="text-[#4b3b55] text-xs lg:text-sm">{t('onboarding.benefit3')}</p>
                   </div>
@@ -357,7 +357,7 @@ export default function OnboardingPage() {
           </div>
         </div>
       </div>
-      </div>
+      </main>
       <LandingFooter />
     </div>
   );

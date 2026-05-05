@@ -113,7 +113,7 @@ export default function MonthlyMedReask({ userId, hasMedications, intakeComplete
               type="button"
               onClick={handleClose}
               aria-label={t('intake.reask.closeAria')}
-              className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition hover:opacity-70"
+              className="absolute top-4 right-4 w-11 h-11 rounded-full flex items-center justify-center cursor-pointer transition hover:opacity-70"
               style={{ backgroundColor: 'var(--brand-background)' }}
             >
               <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />

@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Mail, KeyRound } from "lucide-react";
+import { CheckCircle2, Mail, KeyRound, Eye, EyeOff } from "lucide-react";
 import { useAuth, type OtpVerifyResponse } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import Logo from "@/components/Logo";
@@ -59,6 +59,7 @@ export default function RegisterPage() {
   const [magicLinkSent, setMagicLinkSent] = useState(false);
   const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
 
+  const [showOtp, setShowOtp] = useState(false);
   const [mounted, setMounted] = useState(false);
   const emailTrimmed = email.trim();
   const emailIsValid = useMemo(() => isEmailValid(emailTrimmed), [emailTrimmed]);
@@ -132,10 +133,9 @@ export default function RegisterPage() {
     setStatusMessage("");
     setIsRequestingOtp(true);
     try {
-      const data = await sendOtpRequest(email.trim());
+      await sendOtpRequest(email.trim());
       setOtpSent(true);
       setOtp("");
-      setStatusMessage(translateBackendMsg(data.message) || t('register.otpSent'));
       startResendCooldown();
     } catch (err) {
       setErrorMessage(translateBackendMsg(err instanceof Error ? err.message : '') || t('register.failedOtp'));
@@ -181,7 +181,6 @@ export default function RegisterPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Something went wrong.");
       setMagicLinkSent(true);
-      setStatusMessage(t('register.magicLinkSent') || "Magic link sent! Check your email.");
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Failed to send magic link.");
     } finally {
@@ -229,7 +228,7 @@ export default function RegisterPage() {
     <Suspense>
     <div className="bg-white">
       <LandingHeader activeLink="" />
-      <div className="lg:min-h-screen pt-24 lg:pt-[64px] pb-10 lg:pb-0 flex items-start lg:items-center justify-center px-4 sm:px-6 lg:px-12">
+      <main id="main" className="lg:min-h-screen pt-[64px] pb-10 lg:pb-0 flex items-start lg:items-center justify-center px-4 sm:px-6 lg:px-12">
       <div className="w-full max-w-300 mx-auto">
         <div className="flex flex-col items-center md:items-center md:flex-row gap-8 lg:gap-20">
           {/* Left side - Form */}
@@ -241,11 +240,13 @@ export default function RegisterPage() {
               </h2>
             </div>
 
-            <div className="mb-6 md:mb-10 w-full">
-              <p className="font-normal leading-relaxed text-[#4b5563] text-sm sm:text-base lg:text-[18px] text-center md:text-left">
-                {t('register.enterEmail')}
-              </p>
-            </div>
+            {!otpSent && !magicLinkSent && (
+              <div className="mb-6 md:mb-10 w-full">
+                <p className="font-normal leading-relaxed text-[#4b5563] text-sm sm:text-base lg:text-[18px] text-center md:text-left">
+                  {t('register.enterEmail')}
+                </p>
+              </div>
+            )}
 
 
             {/* Form */}
@@ -270,24 +271,31 @@ export default function RegisterPage() {
 
               {/* Email input (shared) */}
               <div className="w-full max-w-105">
-                <label className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
+                <label htmlFor="signin-email" className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
                   {t('register.emailAddress')}
                 </label>
                 <input
+                  id="signin-email"
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (magicLinkSent) setMagicLinkSent(false);
+                    if (otpSent) { setOtpSent(false); setOtp(""); }
+                    if (statusMessage) setStatusMessage("");
+                    if (errorMessage) setErrorMessage("");
+                  }}
                   placeholder={t('register.emailPlaceholder')}
                   autoComplete="email"
                   aria-invalid={showEmailError}
-                  className={`w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] rounded-lg text-sm lg:text-base text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all border ${
+                  className={`w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] rounded-lg text-base text-[#171717] placeholder:text-[#737373] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all border ${
                     showEmailError ? 'border-red-400' : 'border-[#e5d9f2]'
                   }`}
                 />
                 {/* Inline email format error — quiet until user has typed */}
                 {showEmailError && (
                   <p className="mt-1.5 text-[11px] lg:text-xs text-red-500">
-                    Please enter a valid email address.
+                    {t('register.invalidEmail')}
                   </p>
                 )}
 
@@ -305,7 +313,7 @@ export default function RegisterPage() {
                     {otpSent && (
                       <>
                         <div className="flex items-center justify-between mb-2">
-                          <label className="font-semibold text-[#171717] text-xs lg:text-sm">
+                          <label htmlFor="signin-otp" className="font-semibold text-[#171717] text-xs lg:text-sm">
                             {t('register.enterOtp')}
                           </label>
                           <button
@@ -321,15 +329,31 @@ export default function RegisterPage() {
                                 : t('register.resendCode')}
                           </button>
                         </div>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          value={otp}
-                          onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH))}
-                          placeholder="••••••"
-                          maxLength={OTP_LENGTH}
-                          className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-base lg:text-lg text-center tracking-[8px] text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all mb-1"
-                        />
+                        <div className="relative mb-1">
+                          <input
+                            id="signin-otp"
+                            type={showOtp ? "text" : "password"}
+                            inputMode="numeric"
+                            autoComplete="one-time-code"
+                            value={otp}
+                            onChange={(e) => {
+                              setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH));
+                              if (statusMessage) setStatusMessage("");
+                              if (errorMessage) setErrorMessage("");
+                            }}
+                            placeholder="••••••"
+                            maxLength={OTP_LENGTH}
+                            className="w-full h-11 lg:h-12 pl-4 lg:pl-5 pr-11 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-base lg:text-lg text-center tracking-[8px] text-[#171717] placeholder:text-[#737373] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowOtp((s) => !s)}
+                            aria-label={showOtp ? t('register.hideOtp') : t('register.showOtp')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#737373] hover:text-[#7B00E0] transition-colors cursor-pointer"
+                          >
+                            {showOtp ? <EyeOff aria-hidden="true" className="w-4 h-4" /> : <Eye aria-hidden="true" className="w-4 h-4" />}
+                          </button>
+                        </div>
                         {/* OTP-length hint: only while user is mid-typing */}
                         {showOtpLengthHint && (
                           <p className="text-[11px] lg:text-xs text-[#a16207] mb-2">
@@ -433,7 +457,7 @@ export default function RegisterPage() {
                 <div className="bg-white/60 rounded-2xl p-4 space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="bg-[#7B00E0] size-8 rounded-lg flex items-center justify-center">
-                      <Mail className="w-4 h-4 text-white" strokeWidth={2.5} />
+                      <Mail aria-hidden="true" className="w-4 h-4 text-white" strokeWidth={2.5} />
                     </div>
                     <h4 className="font-bold text-[#170c1d] text-sm lg:text-base">
                       {t('register.magicLinkTitle') || 'Magic Link'}
@@ -448,7 +472,7 @@ export default function RegisterPage() {
                 <div className="bg-white/60 rounded-2xl p-4 space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="bg-[#7B00E0] size-8 rounded-lg flex items-center justify-center">
-                      <KeyRound className="w-4 h-4 text-white" strokeWidth={2.5} />
+                      <KeyRound aria-hidden="true" className="w-4 h-4 text-white" strokeWidth={2.5} />
                     </div>
                     <h4 className="font-bold text-[#170c1d] text-sm lg:text-base">
                       {t('register.otpTitle') || 'OTP Code'}
@@ -461,7 +485,7 @@ export default function RegisterPage() {
 
                 {/* Shared security note */}
                 <div className="flex items-center gap-2 pt-1">
-                  <CheckCircle2 className="w-4 h-4 text-[#7B00E0] shrink-0" strokeWidth={2.5} />
+                  <CheckCircle2 aria-hidden="true" className="w-4 h-4 text-[#7B00E0] shrink-0" strokeWidth={2.5} />
                   <p className="text-[#4b3b55] text-xs lg:text-sm">
                     {t('register.noPassword')}
                   </p>
@@ -471,7 +495,7 @@ export default function RegisterPage() {
           </div>
         </div>
       </div>
-      </div>
+      </main>
       <LandingFooter />
     </div>
     </Suspense>

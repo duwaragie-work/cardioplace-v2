@@ -38,6 +38,11 @@ async function attemptTokenRefresh(): Promise<string | null> {
         localStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
       }
 
+      // Notify AuthProvider so the in-memory `token` state stays in sync with
+      // localStorage — otherwise components that read `token` from context
+      // (e.g. voice realtime) keep using the stale one until a page reload.
+      window.dispatchEvent(new CustomEvent('auth:token-refreshed', { detail: { accessToken: newAccess } }));
+
       return newAccess;
     } catch {
       return null;
@@ -63,8 +68,13 @@ export async function fetchWithAuth(
     return fetch(url, options);
   }
 
+  // FormData bodies must NOT have Content-Type forced to application/json —
+  // the browser sets multipart/form-data with the boundary itself, and any
+  // explicit override prevents Multer (server) from parsing the parts.
+  const isFormData =
+    typeof FormData !== 'undefined' && options.body instanceof FormData;
   const buildHeaders = (token: string | null): Record<string, string> => ({
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers as Record<string, string>),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   });
@@ -92,6 +102,7 @@ export async function fetchWithAuth(
 
   // Refresh failed — session is truly expired
   clearAuthStorage();
+  window.dispatchEvent(new CustomEvent('auth:session-expired'));
   window.location.href = '/';
   return response; // unreachable but satisfies return type
 }

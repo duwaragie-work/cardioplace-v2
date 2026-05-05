@@ -61,7 +61,7 @@ interface JournalEntry {
   systolicBP?: number;
   diastolicBP?: number;
   pulse?: number | null;
-  medicationTaken?: boolean;
+  medicationTaken?: boolean | null;
 }
 interface Baseline {
   baselineSystolic?: number | string;
@@ -421,13 +421,37 @@ export default function Dashboard() {
     : [100, 180];
 
   // Phase/26 TTS pass 2 — single humanised overview that replaces the 5
-  // per-card audio buttons. Composes greeting + latest BP + medication
-  // streak + check-in count + top alert into one flowing summary so the
-  // patient hears the dashboard state from one tap. Conditional pieces
-  // drop out cleanly when not applicable.
+  // per-card audio buttons. Composes greeting + latest BP + personal goal +
+  // BP-trend summary + medication streak + check-in count + top alert into
+  // one flowing summary so the patient hears the dashboard state from one
+  // tap. Conditional pieces drop out cleanly when not applicable.
   const dashboardOverview = (() => {
     const parts: string[] = [];
     parts.push(`${greeting}${userName ? `, ${userName}` : ''}.`);
+
+    // Intake CTA gate — if the patient hasn't finished (or hasn't started)
+    // clinical intake, every downstream metric is empty (no readings, no
+    // alerts, no goal, no streak), so reading them out is just noise.
+    // Read the action and stop.
+    if (intakeUi.kind === 'fresh' || intakeUi.kind === 'resume') {
+      parts.push(
+        intakeUi.kind === 'fresh'
+          ? 'Before anything else, please complete your clinical intake. Your dashboard fills in once that\'s done.'
+          : 'Please pick up where you left off on your clinical intake. Your dashboard fills in once that\'s done.',
+      );
+      return parts.join(' ');
+    }
+
+    // Active alert — read first when present so the patient hears the most
+    // urgent thing before the rest of the summary. Include the variant body
+    // so they know WHAT to do, not just that something is wrong.
+    if (topAlert && topAlertVariant) {
+      const alertSentence =
+        `Heads up, there's an active alert: ${topAlertVariant.title}.` +
+        (topAlertVariant.body ? ` ${topAlertVariant.body}` : '');
+      parts.push(alertSentence);
+    }
+
     if (latestEntry?.systolicBP != null && latestEntry?.diastolicBP != null) {
       const bpSentence =
         `Your ${todayHasEntry ? "today's" : 'latest'} blood pressure is ` +
@@ -436,8 +460,46 @@ export default function Dashboard() {
         `, ${bpVsTargetStyle.label.toLowerCase()}.`;
       parts.push(bpSentence);
     } else {
-      parts.push('No blood pressure readings yet — tap New check-in to log your first one.');
+      parts.push('No blood pressure readings yet. Tap New check-in to log your first one.');
     }
+
+    // Personal threshold (D2 banner). Read it right after the latest BP so
+    // the patient hears the goal in the same breath as where they currently
+    // stand against it.
+    if (hasBpThreshold && thresholdTargetText) {
+      parts.push(
+        `Your care team's goal for you is to stay below ${thresholdTargetText}.`,
+      );
+    }
+
+    // BP trend chart — summarise the visible range with an average and a
+    // direction read (rising / falling / steady) so the patient gets a
+    // sense of where things are heading without having to read the chart.
+    if (visibleChartData.length >= 2) {
+      const sysAvg = Math.round(
+        visibleChartData.reduce((s, d) => s + d.systolic, 0) / visibleChartData.length,
+      );
+      const diaAvg = Math.round(
+        visibleChartData.reduce((s, d) => s + d.diastolic, 0) / visibleChartData.length,
+      );
+      // Compare first half vs second half — a simple, robust trend read
+      // without a regression library. ≤3 mmHg drift is "steady".
+      const mid = Math.floor(visibleChartData.length / 2);
+      const firstHalf = visibleChartData.slice(0, mid);
+      const secondHalf = visibleChartData.slice(mid);
+      const firstAvg =
+        firstHalf.reduce((s, d) => s + d.systolic, 0) / firstHalf.length;
+      const secondAvg =
+        secondHalf.reduce((s, d) => s + d.systolic, 0) / secondHalf.length;
+      const diff = secondAvg - firstAvg;
+      const direction =
+        diff > 3 ? 'trending upward' : diff < -3 ? 'trending downward' : 'holding steady';
+      const window = chartRange === 7 ? 'past week' : 'past three months';
+      parts.push(
+        `Looking at the ${window}, your readings are averaging ${sysAvg} over ${diaAvg}, ${direction}.`,
+      );
+    }
+
     if (streak > 0) {
       parts.push(
         `You're on a ${streak}-day medication streak with ${totalEntries} ${totalEntries === 1 ? 'check-in' : 'check-ins'} logged.`,
@@ -445,19 +507,15 @@ export default function Dashboard() {
     } else if (totalEntries > 0) {
       parts.push(`You've logged ${totalEntries} ${totalEntries === 1 ? 'check-in' : 'check-ins'} so far.`);
     }
-    if (topAlert && topAlertVariant) {
-      parts.push(`You have an active alert: ${topAlertVariant.title}`);
-    } else {
-      parts.push('No active alerts — your care team is monitoring.');
-    }
-    if (intakeUi.kind === 'fresh' || intakeUi.kind === 'resume') {
-      parts.push('Action required: please complete your clinical intake.');
+
+    if (!topAlert) {
+      parts.push('No active alerts. Your care team is monitoring.');
     }
     return parts.join(' ');
   })();
 
   return (
-    <div className="relative overflow-auto" style={{ height: 'calc(100vh - 4rem)', backgroundColor: '#FAFBFF' }}>
+    <div className="relative min-h-[calc(100dvh-4rem)]" style={{ backgroundColor: '#FAFBFF' }}>
 
       {/* ── Decorative background blobs ── */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -473,7 +531,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── Content ── */}
-      <main className="relative h-full flex flex-col px-4 md:px-8 py-4 md:py-5 max-w-7xl mx-auto">
+      <main id="main" className="relative flex flex-col px-4 md:px-8 py-4 md:py-5 pb-20 md:pb-16 max-w-7xl mx-auto">
 
         {/* D3 — Active alert card (top priority; tier-colored). Tap to open
             the Flow C alert detail. Hidden when no open alerts. */}
@@ -524,7 +582,7 @@ export default function Dashboard() {
               style={{ backgroundColor: topAlertVariant.accent }}
             >
               {t('dashboard.viewDetails')}
-              <ArrowRight className="w-3.5 h-3.5" />
+              <ArrowRight aria-hidden="true" className="w-3.5 h-3.5" />
             </div>
             <ArrowRight
               className="w-4 h-4 shrink-0 sm:hidden"
@@ -545,18 +603,6 @@ export default function Dashboard() {
               stepLabel: intakeUi.stepLabel,
             }}
           />
-        )}
-
-        {/* Phase/26 TTS pass 2 — single overview audio button replaces the
-            5 per-card buttons. One tap reads greeting + latest BP + streak +
-            alerts in flowing English. */}
-        {!loading && (
-          <div className="mb-3 md:mb-4 flex items-center gap-2">
-            <AudioButton size="sm" text={dashboardOverview} />
-            <span className="text-[12px] font-medium" style={{ color: 'var(--brand-text-secondary)' }}>
-              {t('dashboard.hearSummary')}
-            </span>
-          </div>
         )}
 
         {/* ROW 1 — Greeting + Stat cards */}
@@ -847,14 +893,14 @@ export default function Dashboard() {
                     router.push(intakeUi.kind === 'done' ? '/check-in' : '/clinical-intake')
                   }
                   disabled={intakeUi.kind === 'unknown'}
-                  className="w-full h-10 bg-white flex items-center justify-center gap-1.5 rounded-full text-[#7B00E0] font-bold text-[13px] transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
+                  className="w-full h-11 bg-white flex items-center justify-center gap-1.5 rounded-full text-[#7B00E0] font-bold text-[13px] transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
                 >
                   {loading ? (
                     <Bone w={120} h={12} color="#7B00E0" />
                   ) : intakeUi.kind !== 'done' ? (
-                    <>Finish intake first <ArrowRight className="w-4 h-4" /></>
+                    <>Finish intake first <ArrowRight aria-hidden="true" className="w-4 h-4" /></>
                   ) : (
-                    <>{todayHasEntry ? t('dashboard.logAnother') : t('dashboard.startCheckin')} <ArrowRight className="w-4 h-4" /></>
+                    <>{todayHasEntry ? t('dashboard.logAnother') : t('dashboard.startCheckin')} <ArrowRight aria-hidden="true" className="w-4 h-4" /></>
                   )}
                 </button>
                 <span className="block text-[10px] mt-3 text-center text-white">
@@ -868,7 +914,13 @@ export default function Dashboard() {
             </div>
 
             {/* Recent Alerts */}
-            <div className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
+            <div
+              className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col"
+              style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}
+              aria-live="polite"
+              aria-relevant="additions"
+              aria-label={t('accessibility.alertsRegion')}
+            >
               <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
                 {t('dashboard.recentAlerts')}
               </h3>
@@ -902,15 +954,9 @@ export default function Dashboard() {
                           backgroundColor: alert.severity === 'HIGH' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
                           borderLeft: `3px solid ${alert.severity === 'HIGH' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)'}`,
                         }}>
-                        <div className="flex items-start justify-between">
-                          <p className="text-[11px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                            {formatAlertType(alert.type, t)}
-                          </p>
-                          <span className="text-[10px] font-semibold"
-                            style={{ color: alert.severity === 'HIGH' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)' }}>
-                            {t('dashboard.open')}
-                          </span>
-                        </div>
+                        <p className="text-[11px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                          {formatAlertType(alert.type, t)}
+                        </p>
                         <p className="text-[10px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
                           {formatAlertDate(alert.journalEntry?.measuredAt ?? alert.createdAt ?? '')} {'· ' + t('dashboard.careTeamNotified')}
                         </p>
@@ -934,7 +980,7 @@ export default function Dashboard() {
                       className="mt-2 w-full flex items-center justify-center gap-1 py-1.5 rounded-full text-[11px] font-semibold transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                       style={{ color: 'var(--brand-primary-purple)', backgroundColor: 'var(--brand-primary-purple-light)' }}
                     >
-                      {t('dashboard.viewAllAlerts')} <ArrowRight className="w-3 h-3" />
+                      {t('dashboard.viewAllAlerts')} <ArrowRight aria-hidden="true" className="w-3 h-3" />
                     </button>
                   ) : null}
                 </>
@@ -943,6 +989,28 @@ export default function Dashboard() {
           </div>
         </div>
       </main>
+
+      {/* Phase/26 TTS pass 2 — floating overview audio pill. Anchored to the
+          dashboard's bottom-right (absolute, inside the relative+overflow-auto
+          wrapper) so it stays in view regardless of scroll, doesn't bleed onto
+          other routes, and doesn't crowd the cards above. */}
+      {!loading && (
+        <div
+          className="fixed bottom-3 right-3 md:bottom-6 md:right-6 z-30 flex items-center gap-1 md:gap-2 bg-white rounded-full pl-1.5 pr-2 py-1 md:pl-2 md:pr-3 md:py-1.5"
+          style={{
+            boxShadow: '0 8px 24px rgba(123,0,224,0.18)',
+            border: '1px solid var(--brand-border)',
+          }}
+        >
+          <AudioButton size="sm" text={dashboardOverview} />
+          <span
+            className="text-[10px] md:text-[12px] font-semibold whitespace-nowrap"
+            style={{ color: 'var(--brand-text-secondary)' }}
+          >
+            {t('dashboard.hearSummary')}
+          </span>
+        </div>
+      )}
 
       {/* E4 — Monthly medication re-check modal. Self-managed (timestamp in
           localStorage); only fires for patients who have completed intake
