@@ -449,10 +449,14 @@ export class DailyJournalService {
       where.readAt = { not: null }
     }
 
-    const notifications = await this.prisma.notification.findMany({
-      where,
-      orderBy: { sentAt: 'desc' },
-    })
+    const notifications = await this.prisma.withConnectionRetry(
+      () =>
+        this.prisma.notification.findMany({
+          where,
+          orderBy: { sentAt: 'desc' },
+        }),
+      'getNotifications',
+    )
 
     return {
       statusCode: 200,
@@ -471,13 +475,17 @@ export class DailyJournalService {
    * [userId, readAt]).
    */
   async getNotificationsUnreadCount(userId: string) {
-    const count = await this.prisma.notification.count({
-      where: {
-        userId,
-        readAt: null,
-        channel: { not: 'EMAIL' },
-      },
-    })
+    const count = await this.prisma.withConnectionRetry(
+      () =>
+        this.prisma.notification.count({
+          where: {
+            userId,
+            readAt: null,
+            channel: { not: 'EMAIL' },
+          },
+        }),
+      'getNotificationsUnreadCount',
+    )
     return {
       statusCode: 200,
       data: { unread: count },

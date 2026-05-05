@@ -1,11 +1,26 @@
-import { Injectable, OnModuleInit } from '@nestjs/common'
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { PrismaClient } from '../generated/prisma/client.js'
 import { PrismaPg } from '@prisma/adapter-pg'
 import pg from 'pg'
 
+/**
+ * Prisma error codes that indicate a stale or closed connection — usually
+ * recoverable on retry because pg.Pool's 'error' handler evicts the bad
+ * client and the next attempt grabs a fresh one. We do NOT retry on
+ * application-level errors (constraint violations, NotFoundException) —
+ * those would be wrong to retry.
+ */
+const RETRYABLE_PRISMA_CODES: ReadonlySet<string> = new Set([
+  'P1001', // Can't reach database server
+  'P1017', // Server has closed the connection
+  'P2024', // Timed out fetching a connection from the pool
+  'P2028', // Transaction API error / failed to start
+])
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit {
+  private readonly logger = new Logger(PrismaService.name)
   private readonly configService: ConfigService
 
   constructor(configService: ConfigService) {
@@ -77,6 +92,41 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
         '⚠️  Failed to create HNSW index (might already be correct or extension missing):',
         error instanceof Error ? error.message : String(error),
       )
+    }
+  }
+
+  /**
+   * Wrap a read-side Prisma operation in one-shot retry on connection-level
+   * failures. Use for hot read paths (notifications bell, dashboard polling,
+   * page-load queries) where the dev DB's first-after-idle query sometimes
+   * hits a stale TCP connection in the pg.Pool — pool evicts the bad client
+   * via its 'error' handler, second attempt gets a fresh one.
+   *
+   * Do NOT use this for mutations — application-level retries on writes risk
+   * double-execution. Mutations should use `$transaction` (which Prisma
+   * retries internally on serialization failures) or be made idempotent.
+   *
+   * Retries only on RETRYABLE_PRISMA_CODES (P1001 / P1017 / P2024 / P2028)
+   * and on driver-level ConnectionClosed kind. Everything else propagates.
+   */
+  async withConnectionRetry<T>(fn: () => Promise<T>, label = 'query'): Promise<T> {
+    try {
+      return await fn()
+    } catch (err) {
+      const code = (err as { code?: unknown })?.code
+      const driverKind = (err as { meta?: { driverAdapterError?: { cause?: { kind?: string } } } })
+        ?.meta?.driverAdapterError?.cause?.kind
+      const isRetryable =
+        (typeof code === 'string' && RETRYABLE_PRISMA_CODES.has(code)) ||
+        driverKind === 'ConnectionClosed'
+
+      if (!isRetryable) throw err
+
+      this.logger.warn(
+        `Prisma ${label} hit ${code ?? driverKind} — retrying once after 200ms`,
+      )
+      await new Promise((r) => setTimeout(r, 200))
+      return await fn()
     }
   }
 }
