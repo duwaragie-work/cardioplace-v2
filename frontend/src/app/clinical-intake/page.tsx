@@ -1713,11 +1713,23 @@ function ClinicalIntakeWizard() {
               .filter((m) => !m.discontinuedAt)
               .map((m) => {
                 // Resolve the catalog id from drugName so the toggle UI lights up
-                // when the patient revisits.
+                // when the patient revisits. Match against both brandName AND
+                // genericName — the OCR confirm flow saves entryToMatch's
+                // drugName=genericName, so a brand-only lookup misses every
+                // OCR-added catalog row and the tile fails to light up on
+                // reload. Combos only have a brandName so they're brand-only.
                 const lower = m.drugName.toLowerCase();
                 const catEntry =
-                  ALL_CORE_MEDS.find((c) => c.brandName.toLowerCase() === lower) ??
-                  ALL_CATEGORY_MEDS.find((c) => c.brandName.toLowerCase() === lower);
+                  ALL_CORE_MEDS.find(
+                    (c) =>
+                      c.brandName.toLowerCase() === lower ||
+                      c.genericName.toLowerCase() === lower,
+                  ) ??
+                  ALL_CATEGORY_MEDS.find(
+                    (c) =>
+                      c.brandName.toLowerCase() === lower ||
+                      c.genericName.toLowerCase() === lower,
+                  );
                 const comboEntry = ALL_COMBO_MEDS.find((c) => c.brandName.toLowerCase() === lower);
                 return {
                   catalogId: catEntry?.id ?? comboEntry?.id,
