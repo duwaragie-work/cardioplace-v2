@@ -42,6 +42,7 @@ import type { TranslationKey } from '@/i18n';
 import MicButton from '@/components/intake/MicButton';
 import AudioButton from '@/components/intake/AudioButton';
 import { formatHeightFtIn } from '@/lib/units';
+import { matchToCatalog } from '@cardioplace/shared';
 import {
   getMyPatientProfile,
   getMyMedications,
@@ -1015,9 +1016,19 @@ export default function ProfilePage() {
                 parts.push(t('profile.noMedications'));
                 return parts.join(' ');
               }
+              // Silent-literacy: include each med's plain-language purpose in
+              // the audio readout. Freeform meds use the Gemini-simplified
+              // `plainLanguageDescription` from the drug-enrichment service;
+              // catalog meds (which the enrichment service skips) fall back
+              // to the hand-written `purpose` on the shared catalog entry.
               const medSentences = activeMeds.map((m) => {
                 const combo = m.isCombination ? ` (${t('profile.combinationPill')})` : '';
-                return `${m.drugName}${combo}, ${frequencyLabel(m.frequency, t)}`;
+                const catalogPurpose = !m.plainLanguageDescription
+                  ? matchToCatalog(m.drugName)?.purpose
+                  : null;
+                const purposeLine = m.plainLanguageDescription || catalogPurpose;
+                const purpose = purposeLine ? `. ${purposeLine}` : '';
+                return `${m.drugName}${combo}, ${frequencyLabel(m.frequency, t)}${purpose}`;
               });
               parts.push(`${medSentences.join('. ')}.`);
               return parts.join(' ');
@@ -1065,15 +1076,24 @@ export default function ProfilePage() {
                           <MedVerifiedBadge status={m.verificationStatus} />
                         </div>
                       </div>
-                      {/* Plain-language indication for freeform meds */}
-                      {m.plainLanguageDescription && (
-                        <p
-                          className="text-[11.5px] mt-0.5 leading-snug"
-                          style={{ color: 'var(--brand-text-secondary)' }}
-                        >
-                          {m.plainLanguageDescription}
-                        </p>
-                      )}
+                      {/* Plain-language indication. Freeform meds use the
+                          drug-enrichment service's Gemini-simplified text;
+                          catalog meds fall back to the hand-written purpose
+                          string from the shared catalog. Either way every
+                          med shows what it's for in plain language. */}
+                      {(() => {
+                        const purposeLine =
+                          m.plainLanguageDescription ||
+                          matchToCatalog(m.drugName)?.purpose;
+                        return purposeLine ? (
+                          <p
+                            className="text-[11.5px] mt-0.5 leading-snug"
+                            style={{ color: 'var(--brand-text-secondary)' }}
+                          >
+                            {purposeLine}
+                          </p>
+                        ) : null;
+                      })()}
                       {/* Row 2: optional 2-in-1 badge + frequency */}
                       <div className="mt-1 flex items-center gap-2 flex-wrap">
                         {m.isCombination && (

@@ -174,6 +174,11 @@ export interface CatalogMatch {
   isCombination: boolean
   combinationComponents: DrugClassInput[]
   screen: 'CORE' | 'CATEGORY' | 'COMBO'
+  /** Hand-written plain-language purpose from the shared catalog (e.g.
+   *  "Lowers blood pressure."). Always present for catalog meds; the
+   *  drug-enrichment service skips catalog matches and only writes
+   *  PatientMedication.plainLanguageDescription for freeform meds. */
+  purpose: string
 }
 
 function comboToMatch(combo: MedComboEntry): CatalogMatch {
@@ -184,6 +189,7 @@ function comboToMatch(combo: MedComboEntry): CatalogMatch {
     isCombination: true,
     combinationComponents: combo.registersAs,
     screen: 'COMBO',
+    purpose: combo.purpose,
   }
 }
 
@@ -195,6 +201,7 @@ function entryToMatch(entry: MedCatalogEntry): CatalogMatch {
     isCombination: false,
     combinationComponents: [],
     screen: entry.screen,
+    purpose: entry.purpose,
   }
 }
 
