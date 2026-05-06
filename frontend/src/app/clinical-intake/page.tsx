@@ -366,94 +366,169 @@ function A1Demographics({ state, setState }: StepProps) {
       <div>
         <SectionLabel text={t('intake.a1.heightQuestion')} audio={t('intake.a1.heightAudio')} />
         {(() => {
-          // Phase/26 — patients enter height in feet+inches; we convert to
-          // cm for storage. Existing patients with cm values keep working —
-          // cmToFtIn renders their stored value back into the dual fields.
+          // Patients pick a unit (ft/in primary, cm secondary) — same toggle
+          // pattern as weight on the daily check-in. Storage is always cm;
+          // ft/in convert via ftInToCm before persisting.
+          const unit: 'ftin' | 'cm' = state.heightUnit ?? 'ftin';
+          const setUnit = (u: 'ftin' | 'cm') => setState((p) => ({ ...p, heightUnit: u }));
           const { feet: storedFeet, inches: storedInches } = cmToFtIn(state.heightCm ?? 0);
-          const updateHeight = (feet: number, inches: number) => {
+          const updateHeightFromFtIn = (feet: number, inches: number) => {
             const cm = ftInToCm(feet, inches);
             setState((p) => ({ ...p, heightCm: cm > 0 ? cm : undefined }));
           };
+          const updateHeightFromCm = (cm: number) => {
+            setState((p) => ({ ...p, heightCm: cm > 0 ? cm : undefined }));
+          };
           return (
-            <div className="flex items-end gap-3">
-              <div className="flex-1">
-                <label htmlFor="intake-a1-height-ft" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
-                  Feet
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="intake-a1-height-ft"
-                    type="number"
-                    inputMode="numeric"
-                    min={3}
-                    max={8}
-                    value={storedFeet || ''}
-                    onChange={(e) => {
-                      const v = parseInt(e.target.value, 10);
-                      updateHeight(Number.isFinite(v) ? v : 0, storedInches);
-                    }}
-                    placeholder="5"
-                    className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
+            <>
+              <div
+                className="inline-flex rounded-full p-1 gap-1 mb-4"
+                style={{ backgroundColor: 'var(--brand-background)', border: '1px solid var(--brand-border)' }}
+              >
+                {(['ftin', 'cm'] as const).map((u) => (
+                  <button
+                    key={u}
+                    type="button"
+                    onClick={() => setUnit(u)}
+                    className="px-5 py-1.5 rounded-full text-sm font-semibold transition-all cursor-pointer"
                     style={{
-                      border: '2px solid var(--brand-border)',
-                      color: 'var(--brand-text-primary)',
-                      backgroundColor: 'white',
+                      backgroundColor: unit === u ? 'var(--brand-primary-purple)' : 'transparent',
+                      color: unit === u ? 'white' : 'var(--brand-text-secondary)',
                     }}
-                    onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
-                    onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
-                  />
+                  >
+                    {u === 'ftin' ? 'ft / in' : 'cm'}
+                  </button>
+                ))}
+              </div>
+              {unit === 'ftin' ? (
+                <div className="flex items-end gap-3">
+                  <div className="flex-1">
+                    <label htmlFor="intake-a1-height-ft" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+                      {t('intake.a1.heightFeetLabel')}
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="intake-a1-height-ft"
+                        type="number"
+                        inputMode="numeric"
+                        min={3}
+                        max={8}
+                        value={storedFeet || ''}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          updateHeightFromFtIn(Number.isFinite(v) ? v : 0, storedInches);
+                        }}
+                        placeholder="5"
+                        className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
+                        style={{
+                          border: '2px solid var(--brand-border)',
+                          color: 'var(--brand-text-primary)',
+                          backgroundColor: 'white',
+                        }}
+                        onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
+                        onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+                      />
+                      <MicButton
+                        inputId="intake-a1-height-ft"
+                        numeric
+                        onTranscript={(text) => {
+                          const n = parseInt(text, 10);
+                          if (Number.isFinite(n)) updateHeightFromFtIn(n, storedInches);
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <label htmlFor="intake-a1-height-in" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+                      {t('intake.a1.heightInchesLabel')}
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="intake-a1-height-in"
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        max={11}
+                        value={storedInches || (storedFeet ? '0' : '')}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          updateHeightFromFtIn(storedFeet, Number.isFinite(v) ? v : 0);
+                        }}
+                        placeholder="9"
+                        className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
+                        style={{
+                          border: '2px solid var(--brand-border)',
+                          color: 'var(--brand-text-primary)',
+                          backgroundColor: 'white',
+                        }}
+                        onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
+                        onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+                      />
+                      <MicButton
+                        inputId="intake-a1-height-in"
+                        numeric
+                        onTranscript={(text) => {
+                          const n = parseInt(text, 10);
+                          if (Number.isFinite(n)) updateHeightFromFtIn(storedFeet, n);
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 relative">
+                    <input
+                      id="intake-a1-height-cm"
+                      type="number"
+                      inputMode="numeric"
+                      min={100}
+                      max={250}
+                      value={state.heightCm ?? ''}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        updateHeightFromCm(Number.isFinite(v) ? v : 0);
+                      }}
+                      placeholder="165"
+                      className="w-full h-14 pl-4 pr-14 rounded-xl text-[18px] outline-none transition box-border"
+                      style={{
+                        border: '2px solid var(--brand-border)',
+                        color: 'var(--brand-text-primary)',
+                        backgroundColor: 'white',
+                      }}
+                      onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
+                      onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+                    />
+                    <span
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-[16px]"
+                      style={{ color: 'var(--brand-text-muted)' }}
+                    >
+                      cm
+                    </span>
+                  </div>
                   <MicButton
-                    inputId="intake-a1-height-ft"
+                    inputId="intake-a1-height-cm"
                     numeric
                     onTranscript={(text) => {
                       const n = parseInt(text, 10);
-                      if (Number.isFinite(n)) updateHeight(n, storedInches);
+                      if (Number.isFinite(n)) updateHeightFromCm(n);
                     }}
                   />
                 </div>
-              </div>
-              <div className="flex-1">
-                <label htmlFor="intake-a1-height-in" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
-                  Inches
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="intake-a1-height-in"
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    max={11}
-                    value={storedInches || (storedFeet ? '0' : '')}
-                    onChange={(e) => {
-                      const v = parseInt(e.target.value, 10);
-                      updateHeight(storedFeet, Number.isFinite(v) ? v : 0);
-                    }}
-                    placeholder="9"
-                    className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
-                    style={{
-                      border: '2px solid var(--brand-border)',
-                      color: 'var(--brand-text-primary)',
-                      backgroundColor: 'white',
-                    }}
-                    onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
-                    onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
-                  />
-                  <MicButton
-                    inputId="intake-a1-height-in"
-                    numeric
-                    onTranscript={(text) => {
-                      const n = parseInt(text, 10);
-                      if (Number.isFinite(n)) updateHeight(storedFeet, n);
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
+              )}
+              {state.heightCm ? (
+                <p className="text-[13px] mt-3 font-medium" style={{ color: 'var(--brand-primary-purple)' }}>
+                  {unit === 'ftin'
+                    ? `≈ ${state.heightCm} cm`
+                    : `≈ ${cmToFtIn(state.heightCm).feet} ft ${cmToFtIn(state.heightCm).inches} in`}
+                </p>
+              ) : null}
+              <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
+                {t('intake.a1.heightHint')}
+              </p>
+            </>
           );
         })()}
-        <p className="text-[12px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
-          {t('intake.a1.heightHint')}
-        </p>
       </div>
     </div>
   );

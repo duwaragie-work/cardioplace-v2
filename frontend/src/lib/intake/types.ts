@@ -51,6 +51,9 @@ export interface IntakeFormState {
   // A1 demographics
   gender?: GenderInput;
   heightCm?: number;
+  /** UI-only: which unit mode the patient is entering height in. Storage
+   *  is always cm — this just toggles the input(s) shown. */
+  heightUnit?: 'ftin' | 'cm';
   /** Date of birth in YYYY-MM-DD. Stored on User.dateOfBirth via the same
    *  intake.profile submit. Captured at A1 because age is a clinical input
    *  the rule engine needs whenever an alert fires. */
