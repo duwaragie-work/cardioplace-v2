@@ -935,6 +935,8 @@ const en = {
   'intake.a1.heightQuestion': 'How tall are you? (centimeters)',
   'intake.a1.heightAudio': 'How tall are you, in centimeters?',
   'intake.a1.heightHint': 'Roughly 5 ft = 152 cm · 5 ft 5 in = 165 cm · 6 ft = 183 cm',
+  'intake.a1.dobQuestion': 'When were you born?',
+  'intake.a1.dobHint': 'Your date of birth helps us tailor blood-pressure thresholds and alerts to your age.',
 
   // A2 — pregnancy
   'intake.a2.title': 'Pregnancy status',
@@ -1063,6 +1065,7 @@ const en = {
   'intake.a10.sectionConditions': 'Conditions',
   'intake.a10.sectionMedications': 'Medications',
   'intake.a10.rowGender': 'Gender',
+  'intake.a10.rowDob': 'Date of birth',
   'intake.a10.rowHeight': 'Height',
   'intake.a10.rowPregnancy': 'Pregnancy',
   'intake.a10.pregnancyYes': 'Yes',
@@ -1084,8 +1087,8 @@ const en = {
   'intake.a10.edit': 'Edit',
 
   // A11 — complete
-  'intake.a11.title': 'Thank you — we got it',
-  'intake.a11.body': "Your care team will review your profile within 48 to 72 hours. You can use the app normally in the meantime — we'll let you know when review is complete.",
+  'intake.a11.title': "Thank you, we got it",
+  'intake.a11.body': "Your care team will review your profile within 48 to 72 hours. You can use the app normally in the meantime, and we'll let you know when review is complete.",
   'intake.a11.cta': 'Go to dashboard',
 
   // Exit save modal
@@ -1113,6 +1116,7 @@ const en = {
   'intake.nav.submit': 'Submit profile',
   'intake.nav.continue': 'Continue',
   'intake.nav.errorGender': 'Please select a gender.',
+  'intake.nav.errorDob': 'Please enter your date of birth.',
   'intake.nav.errorHeight': 'Please enter a height between 100 and 250 cm.',
   'intake.nav.errorHfType': 'Please pick one — Not sure is OK.',
   'intake.nav.errorFreq': 'Pick how often you take {name}.',

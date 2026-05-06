@@ -108,10 +108,21 @@ export class IntakeService {
       const existing = await tx.patientProfile.findUnique({ where: { userId } })
 
       const patch = this.stripUndefined(dto)
+      // Pull dateOfBirth out — it lives on User, not PatientProfile. Captured
+      // at intake A1 so the rule engine has age before the first check-in.
+      const dobPatch = patch.dateOfBirth
+      delete (patch as Partial<IntakeProfileDto>).dateOfBirth
       this.validatePregnancyShape(patch, existing)
 
       // Diff every verifiable field the DTO touches.
       const changes = this.diffProfile(existing, patch)
+
+      if (dobPatch !== undefined) {
+        await tx.user.update({
+          where: { id: userId },
+          data: { dateOfBirth: dobPatch === null ? null : new Date(dobPatch) },
+        })
+      }
 
       const profile = existing
         ? await tx.patientProfile.update({
@@ -717,13 +728,22 @@ export class IntakeService {
   // ─── Reads (admin dashboards will need these; also used by tests) ────────
 
   async getProfile(userId: string) {
-    const profile = await this.prisma.patientProfile.findUnique({
-      where: { userId },
-    })
+    const [profile, user] = await Promise.all([
+      this.prisma.patientProfile.findUnique({ where: { userId } }),
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { dateOfBirth: true },
+      }),
+    ])
+    const dob = user?.dateOfBirth ? user.dateOfBirth.toISOString().slice(0, 10) : null
     return {
       statusCode: 200,
       message: profile ? 'Profile retrieved' : 'No profile yet',
-      data: profile ? this.serializeProfile(profile) : null,
+      // dateOfBirth lives on User but is surfaced here so the admin
+      // profile tab can show age alongside other demographics without a
+      // second fetch. Read-only — patients edit it via /v2/auth/profile
+      // or via clinical-intake A1.
+      data: profile ? { ...this.serializeProfile(profile), dateOfBirth: dob } : null,
     }
   }
 

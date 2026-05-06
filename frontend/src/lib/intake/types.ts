@@ -40,6 +40,10 @@ export interface IntakeFormState {
   // A1 demographics
   gender?: GenderInput;
   heightCm?: number;
+  /** Date of birth in YYYY-MM-DD. Stored on User.dateOfBirth via the same
+   *  intake.profile submit. Captured at A1 because age is a clinical input
+   *  the rule engine needs whenever an alert fires. */
+  dateOfBirth?: string;
 
   // A2 pregnancy (only relevant if gender === FEMALE)
   isPregnant?: boolean;

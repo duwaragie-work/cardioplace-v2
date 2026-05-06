@@ -935,6 +935,8 @@ const fr: Record<TranslationKey, string> = {
   'intake.a1.heightQuestion': 'Combien mesurez-vous ? (centimètres)',
   'intake.a1.heightAudio': 'Combien mesurez-vous, en centimètres ?',
   'intake.a1.heightHint': 'Environ 5 ft = 152 cm · 5 ft 5 in = 165 cm · 6 ft = 183 cm',
+  'intake.a1.dobQuestion': 'Quand êtes-vous né(e) ?',
+  'intake.a1.dobHint': 'Votre date de naissance nous aide à adapter les seuils et alertes de tension à votre âge.',
 
   // A2 — pregnancy
   'intake.a2.title': 'Statut de grossesse',
@@ -1063,6 +1065,7 @@ const fr: Record<TranslationKey, string> = {
   'intake.a10.sectionConditions': 'Conditions',
   'intake.a10.sectionMedications': 'Médicaments',
   'intake.a10.rowGender': 'Genre',
+  'intake.a10.rowDob': 'Date de naissance',
   'intake.a10.rowHeight': 'Taille',
   'intake.a10.rowPregnancy': 'Grossesse',
   'intake.a10.pregnancyYes': 'Oui',
@@ -1084,8 +1087,8 @@ const fr: Record<TranslationKey, string> = {
   'intake.a10.edit': 'Modifier',
 
   // A11 — complete
-  'intake.a11.title': 'Merci — nous l\'avons reçu',
-  'intake.a11.body': 'Votre équipe soignante examinera votre profil dans 48 à 72 heures. Vous pouvez utiliser l\'application normalement en attendant — nous vous ferons savoir quand la revue sera complète.',
+  'intake.a11.title': "Merci, nous l'avons reçu",
+  'intake.a11.body': "Votre équipe soignante examinera votre profil dans 48 à 72 heures. Vous pouvez utiliser l'application normalement en attendant, et nous vous ferons savoir quand la revue sera complète.",
   'intake.a11.cta': 'Aller au tableau de bord',
 
   // Exit save modal
@@ -1113,6 +1116,7 @@ const fr: Record<TranslationKey, string> = {
   'intake.nav.submit': 'Envoyer le profil',
   'intake.nav.continue': 'Continuer',
   'intake.nav.errorGender': 'Veuillez sélectionner un genre.',
+  'intake.nav.errorDob': 'Veuillez saisir votre date de naissance.',
   'intake.nav.errorHeight': 'Veuillez entrer une taille entre 100 et 250 cm.',
   'intake.nav.errorHfType': 'Veuillez en choisir une — Je ne sais pas convient.',
   'intake.nav.errorFreq': 'Choisissez à quelle fréquence vous prenez {name}.',

@@ -935,6 +935,8 @@ const de: Record<TranslationKey, string> = {
   'intake.a1.heightQuestion': 'Wie groß sind Sie? (Zentimeter)',
   'intake.a1.heightAudio': 'Wie groß sind Sie, in Zentimetern?',
   'intake.a1.heightHint': 'Ungefähr 5 ft = 152 cm · 5 ft 5 in = 165 cm · 6 ft = 183 cm',
+  'intake.a1.dobQuestion': 'Wann sind Sie geboren?',
+  'intake.a1.dobHint': 'Ihr Geburtsdatum hilft uns, Blutdruck-Schwellenwerte und Warnungen an Ihr Alter anzupassen.',
 
   // A2 — pregnancy
   'intake.a2.title': 'Schwangerschaftsstatus',
@@ -1063,6 +1065,7 @@ const de: Record<TranslationKey, string> = {
   'intake.a10.sectionConditions': 'Erkrankungen',
   'intake.a10.sectionMedications': 'Medikamente',
   'intake.a10.rowGender': 'Geschlecht',
+  'intake.a10.rowDob': 'Geburtsdatum',
   'intake.a10.rowHeight': 'Größe',
   'intake.a10.rowPregnancy': 'Schwangerschaft',
   'intake.a10.pregnancyYes': 'Ja',
@@ -1084,8 +1087,8 @@ const de: Record<TranslationKey, string> = {
   'intake.a10.edit': 'Bearbeiten',
 
   // A11 — complete
-  'intake.a11.title': 'Danke — wir haben es',
-  'intake.a11.body': 'Ihr Behandlungsteam überprüft Ihr Profil innerhalb von 48 bis 72 Stunden. Sie können die App in der Zwischenzeit normal nutzen — wir teilen Ihnen mit, wenn die Überprüfung abgeschlossen ist.',
+  'intake.a11.title': 'Danke, wir haben es',
+  'intake.a11.body': 'Ihr Behandlungsteam überprüft Ihr Profil innerhalb von 48 bis 72 Stunden. Sie können die App in der Zwischenzeit normal nutzen, und wir teilen Ihnen mit, wenn die Überprüfung abgeschlossen ist.',
   'intake.a11.cta': 'Zum Dashboard',
 
   // Exit save modal
@@ -1113,6 +1116,7 @@ const de: Record<TranslationKey, string> = {
   'intake.nav.submit': 'Profil senden',
   'intake.nav.continue': 'Weiter',
   'intake.nav.errorGender': 'Bitte wählen Sie ein Geschlecht.',
+  'intake.nav.errorDob': 'Bitte geben Sie Ihr Geburtsdatum ein.',
   'intake.nav.errorHeight': 'Bitte geben Sie eine Größe zwischen 100 und 250 cm ein.',
   'intake.nav.errorHfType': 'Bitte wählen Sie eines — Unsicher ist okay.',
   'intake.nav.errorFreq': 'Wählen Sie, wie oft Sie {name} nehmen.',

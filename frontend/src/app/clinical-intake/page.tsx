@@ -54,6 +54,8 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { shouldShowOnboardingForUser } from '@/lib/onboarding';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { getProfile as getAuthProfile } from '@/lib/services/auth.service';
+import { validateDateOfBirth, maxDobIso } from '@/lib/dob-validator';
 import {
   getMyPatientProfile,
   getMyMedications,
@@ -91,7 +93,12 @@ function computeFlow(state: IntakeFormState): IntakeStepKey[] {
   if (state.gender === 'FEMALE') flow.push('A2');
   flow.push('A3');
   if (state.hasHeartFailure) flow.push('A4');
-  flow.push('A5', 'A8', 'A6', 'A9', 'A10', 'A11');
+  flow.push('A5', 'A8', 'A6');
+  // A9 (frequency) only matters when there's at least one medication. With
+  // an empty list the patient just sees "you can skip ahead" copy and a
+  // disabled Continue — drop the step entirely instead.
+  if (state.selectedMedications.length > 0) flow.push('A9');
+  flow.push('A10', 'A11');
   return flow;
 }
 
@@ -195,6 +202,10 @@ function buildProfilePayload(s: IntakeFormState): IntakeProfilePayload {
   return {
     gender: s.gender,
     heightCm: s.heightCm,
+    // dateOfBirth lives on User but rides the same submit so the rule
+    // engine has age available before any check-in. Backend splits it
+    // back out into User.dateOfBirth.
+    dateOfBirth: s.dateOfBirth || null,
     isPregnant: s.gender === 'FEMALE' ? s.isPregnant ?? false : undefined,
     pregnancyDueDate: s.pregnancyDueDate || null,
     historyPreeclampsia: s.historyPreeclampsia ?? false,
@@ -325,6 +336,29 @@ function A1Demographics({ state, setState }: StepProps) {
             compact
           />
         </div>
+      </div>
+
+      <div>
+        <SectionLabel text={t('intake.a1.dobQuestion')} audio={t('intake.a1.dobQuestion')} />
+        <input
+          id="intake-a1-dob"
+          type="date"
+          value={state.dateOfBirth ?? ''}
+          max={maxDobIso()}
+          onChange={(e) => setState((p) => ({ ...p, dateOfBirth: e.target.value || undefined }))}
+          className="w-full h-14 px-4 rounded-xl text-[18px] outline-none transition box-border"
+          style={{
+            border: '2px solid var(--brand-border)',
+            color: 'var(--brand-text-primary)',
+            backgroundColor: 'white',
+            colorScheme: 'light',
+          }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+        />
+        <p className="text-[12px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
+          {t('intake.a1.dobHint')}
+        </p>
       </div>
 
       <div>
@@ -1277,6 +1311,26 @@ function A10Review({ state, goTo }: StepProps) {
       <ReviewSection title={t('intake.a10.sectionAbout')} onEdit={() => goTo?.('A1')}>
         <ReviewRow label={t('intake.a10.rowGender')} value={genderLabel(state.gender)} />
         <ReviewRow
+          label={t('intake.a10.rowDob')}
+          value={(() => {
+            if (!state.dateOfBirth) return '—';
+            const dob = new Date(state.dateOfBirth);
+            if (Number.isNaN(dob.getTime())) return '—';
+            const today = new Date();
+            let age = today.getFullYear() - dob.getFullYear();
+            const beforeBirthday =
+              today.getMonth() < dob.getMonth() ||
+              (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate());
+            if (beforeBirthday) age -= 1;
+            const formatted = dob.toLocaleDateString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric',
+            });
+            return age >= 0 ? `${formatted} (${age} yrs)` : formatted;
+          })()}
+        />
+        <ReviewRow
           label={t('intake.a10.rowHeight')}
           value={
             state.heightCm
@@ -1675,6 +1729,11 @@ function ClinicalIntakeWizard() {
           getMyPatientProfile().catch(() => null),
           isEdit ? getMyMedications().catch(() => []) : Promise.resolve([]),
         ]);
+        // Pull dateOfBirth off the auth profile so A1 can pre-fill it for
+        // returning users who set DOB during the old onboarding flow before
+        // it moved here. Best-effort — DOB is optional fallback only.
+        const authProfile = await getAuthProfile().catch(() => null);
+        const carriedDob = authProfile?.dateOfBirth ?? undefined;
         if (cancelled) return;
 
         // Branch 3 — show the all-set page only when the patient is truly
@@ -1697,6 +1756,7 @@ function ClinicalIntakeWizard() {
           const seeded: IntakeFormState = {
             gender: profile.gender ?? undefined,
             heightCm: profile.heightCm ?? undefined,
+            dateOfBirth: carriedDob,
             isPregnant: profile.isPregnant ?? undefined,
             pregnancyDueDate: profile.pregnancyDueDate ?? undefined,
             historyPreeclampsia: profile.historyPreeclampsia ?? false,
@@ -1766,9 +1826,13 @@ function ClinicalIntakeWizard() {
           if (draft.currentStep === 'A11') {
             clearDraft(user.id);
           } else {
-            setStateRaw(draft);
+            // Carry user's existing DOB into the draft if the draft predates
+            // the DOB-on-A1 change.
+            setStateRaw({ ...draft, dateOfBirth: draft.dateOfBirth ?? carriedDob });
             if (draft.currentStep) setStep(draft.currentStep);
           }
+        } else if (carriedDob) {
+          setStateRaw((prev) => ({ ...prev, dateOfBirth: carriedDob }));
         }
         // Honor ?step= even on a fresh wizard so deep-links still work.
         if (requestedStep) setStep(requestedStep);
@@ -1834,6 +1898,15 @@ function ClinicalIntakeWizard() {
     // Validation gates.
     if (step === 'A1') {
       if (!state.gender) { setSubmitError(t('intake.nav.errorGender')); return; }
+      if (!state.dateOfBirth) {
+        setSubmitError(t('intake.nav.errorDob'));
+        return;
+      }
+      const dobError = validateDateOfBirth(state.dateOfBirth);
+      if (dobError) {
+        setSubmitError(dobError);
+        return;
+      }
       if (!state.heightCm || state.heightCm < 100 || state.heightCm > 250) {
         setSubmitError(t('intake.nav.errorHeight'));
         return;

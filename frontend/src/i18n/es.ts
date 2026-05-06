@@ -935,6 +935,8 @@ const es: Record<TranslationKey, string> = {
   'intake.a1.heightQuestion': '¿Cuánto mide? (centímetros)',
   'intake.a1.heightAudio': '¿Cuánto mide usted, en centímetros?',
   'intake.a1.heightHint': 'Aproximadamente 5 ft = 152 cm · 5 ft 5 in = 165 cm · 6 ft = 183 cm',
+  'intake.a1.dobQuestion': '¿Cuándo naciste?',
+  'intake.a1.dobHint': 'Tu fecha de nacimiento nos ayuda a ajustar los umbrales y alertas de presión arterial a tu edad.',
 
   // A2 — pregnancy
   'intake.a2.title': 'Estado de embarazo',
@@ -1063,6 +1065,7 @@ const es: Record<TranslationKey, string> = {
   'intake.a10.sectionConditions': 'Condiciones',
   'intake.a10.sectionMedications': 'Medicamentos',
   'intake.a10.rowGender': 'Género',
+  'intake.a10.rowDob': 'Fecha de nacimiento',
   'intake.a10.rowHeight': 'Altura',
   'intake.a10.rowPregnancy': 'Embarazo',
   'intake.a10.pregnancyYes': 'Sí',
@@ -1084,8 +1087,8 @@ const es: Record<TranslationKey, string> = {
   'intake.a10.edit': 'Editar',
 
   // A11 — complete
-  'intake.a11.title': 'Gracias — lo recibimos',
-  'intake.a11.body': 'Su equipo de atención revisará su perfil en 48 a 72 horas. Puede usar la aplicación normalmente mientras tanto — le avisaremos cuando la revisión esté completa.',
+  'intake.a11.title': 'Gracias, lo recibimos',
+  'intake.a11.body': 'Su equipo de atención revisará su perfil en 48 a 72 horas. Puede usar la aplicación normalmente mientras tanto, y le avisaremos cuando la revisión esté completa.',
   'intake.a11.cta': 'Ir al panel',
 
   // Exit save modal
@@ -1113,6 +1116,7 @@ const es: Record<TranslationKey, string> = {
   'intake.nav.submit': 'Enviar perfil',
   'intake.nav.continue': 'Continuar',
   'intake.nav.errorGender': 'Por favor seleccione un género.',
+  'intake.nav.errorDob': 'Por favor ingresa tu fecha de nacimiento.',
   'intake.nav.errorHeight': 'Por favor ingrese una altura entre 100 y 250 cm.',
   'intake.nav.errorHfType': 'Por favor elija una — No sé está bien.',
   'intake.nav.errorFreq': 'Elija con qué frecuencia toma {name}.',

@@ -938,6 +938,8 @@ const am: Record<TranslationKey, string> = {
   'intake.a1.heightQuestion': 'ቁመትዎ ምን ያህል ነው? (ሴንቲሜትር)',
   'intake.a1.heightAudio': 'ቁመትዎ ምን ያህል ነው፣ በሴንቲሜትር?',
   'intake.a1.heightHint': 'በግምት 5 ft = 152 cm · 5 ft 5 in = 165 cm · 6 ft = 183 cm',
+  'intake.a1.dobQuestion': 'መቼ ነው የተወለዱት?',
+  'intake.a1.dobHint': 'የትውልድ ቀንዎ የደም ግፊት ገደቦችን እና ማስጠንቀቂያዎችን ለእድሜዎ ለማስተካከል ይረዳናል።',
 
   // A2 — pregnancy
   'intake.a2.title': 'የእርግዝና ሁኔታ',
@@ -1066,6 +1068,7 @@ const am: Record<TranslationKey, string> = {
   'intake.a10.sectionConditions': 'ሁኔታዎች',
   'intake.a10.sectionMedications': 'መድሃኒቶች',
   'intake.a10.rowGender': 'ፆታ',
+  'intake.a10.rowDob': 'የትውልድ ቀን',
   'intake.a10.rowHeight': 'ቁመት',
   'intake.a10.rowPregnancy': 'እርግዝና',
   'intake.a10.pregnancyYes': 'አዎ',
@@ -1087,8 +1090,8 @@ const am: Record<TranslationKey, string> = {
   'intake.a10.edit': 'አርም',
 
   // A11 — complete
-  'intake.a11.title': 'አመሰግናለሁ — ደርሶናል',
-  'intake.a11.body': 'የተንከባካቢ ቡድንዎ መረጃዎን ከ48 እስከ 72 ሰዓታት ውስጥ ይገመግማል። በዚያ ጊዜ መተግበሪያውን እንደተለመደው መጠቀም ይችላሉ — ግምገማው ሲጠናቀቅ እናሳውቃለን።',
+  'intake.a11.title': 'አመሰግናለሁ፣ ደርሶናል',
+  'intake.a11.body': 'የተንከባካቢ ቡድንዎ መረጃዎን ከ48 እስከ 72 ሰዓታት ውስጥ ይገመግማል። በዚያ ጊዜ መተግበሪያውን እንደተለመደው መጠቀም ይችላሉ፤ ግምገማው ሲጠናቀቅ እናሳውቃለን።',
   'intake.a11.cta': 'ወደ ዳሽቦርድ',
 
   // Exit save modal
@@ -1116,6 +1119,7 @@ const am: Record<TranslationKey, string> = {
   'intake.nav.submit': 'መረጃ ላክ',
   'intake.nav.continue': 'ቀጥል',
   'intake.nav.errorGender': 'እባክዎ ፆታ ይምረጡ።',
+  'intake.nav.errorDob': 'እባክዎ የትውልድ ቀንዎን ያስገቡ።',
   'intake.nav.errorHeight': 'እባክዎ በ100 እና 250 ሴ.ሜ መካከል ቁመት ያስገቡ።',
   'intake.nav.errorHfType': 'እባክዎ አንዱን ይምረጡ — እርግጠኛ አይደለሁም መልካም ነው።',
   'intake.nav.errorFreq': '{name} ምን ያህል ጊዜ እንደሚወስዱ ይምረጡ።',
