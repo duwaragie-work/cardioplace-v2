@@ -43,7 +43,6 @@ import MicButton from '@/components/intake/MicButton';
 import AudioButton from '@/components/intake/AudioButton';
 import { formatHeightFtIn } from '@/lib/units';
 import { matchToCatalog } from '@cardioplace/shared';
-import { validateDateOfBirth, maxDobIso } from '@/lib/dob-validator';
 import {
   getMyPatientProfile,
   getMyMedications,
@@ -397,34 +396,21 @@ function PersonalInfoModal({
 }) {
   const { t } = useLanguage();
   const [name, setName] = useState(current.name ?? '');
-  const [dateOfBirth, setDateOfBirth] = useState(
-    current.dateOfBirth ? current.dateOfBirth.slice(0, 10) : '',
-  );
   const [commPref, setCommPref] = useState<CommPref>(current.communicationPreference);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const dirty =
     (name || '') !== (current.name ?? '') ||
-    dateOfBirth !== (current.dateOfBirth ? current.dateOfBirth.slice(0, 10) : '') ||
     commPref !== current.communicationPreference;
 
   async function save() {
     if (!dirty || saving) return;
-    // Same DOB rules as onboarding — 18+, not future, not today, sane year.
-    if (dateOfBirth) {
-      const dobErrKey = validateDateOfBirth(dateOfBirth);
-      if (dobErrKey) {
-        setError(t(dobErrKey));
-        return;
-      }
-    }
     setSaving(true);
     setError('');
     try {
       const next = await patchAuthProfile({
         name: name.trim() || null,
-        dateOfBirth: dateOfBirth || null,
         communicationPreference: commPref,
       });
       onSaved(next);
@@ -516,28 +502,6 @@ function PersonalInfoModal({
                 borderColor: 'var(--brand-border)',
                 color: 'var(--brand-text-muted)',
                 backgroundColor: 'var(--brand-background)',
-              }}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="profile-edit-dob" className="block text-[12px] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
-              {t('profile.dobLabel')}
-            </label>
-            <input
-              id="profile-edit-dob"
-              type="date"
-              value={dateOfBirth}
-              max={maxDobIso()}
-              onChange={(e) => {
-                setDateOfBirth(e.target.value);
-                if (error) setError('');
-              }}
-              className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
-              style={{
-                borderColor: 'var(--brand-border)',
-                color: 'var(--brand-text-primary)',
-                colorScheme: 'light',
               }}
             />
           </div>
@@ -861,16 +825,11 @@ export default function ProfilePage() {
                 `${t('profile.personalInfoSection')}.`,
                 `${t('profile.nameLabel')}: ${authProfile?.name || t('profile.notSet')}.`,
                 `${t('profile.email')}: ${authProfile?.email ?? '—'}.`,
-                `${t('profile.dobLabel')}: ${authProfile?.dateOfBirth ? formatDate(authProfile.dateOfBirth) : t('profile.notSet')}.`,
                 `${t('profile.commPrefLabel')}: ${commPrefLabel(authProfile?.communicationPreference ?? null, t)}.`,
               ].join(' ')}
             >
               <Row label={t('profile.nameLabel')} value={authProfile?.name || t('profile.notSet')} />
               <Row label={t('profile.email')} value={authProfile?.email ?? '—'} />
-              <Row
-                label={t('profile.dobLabel')}
-                value={authProfile?.dateOfBirth ? formatDate(authProfile.dateOfBirth) : t('profile.notSet')}
-              />
               <Row
                 label={t('profile.commPrefLabel')}
                 value={commPrefLabel(authProfile?.communicationPreference ?? null, t)}
@@ -883,10 +842,15 @@ export default function ProfilePage() {
               audioText={[
                 `${t('profile.aboutYou')}.`,
                 `${t('profile.gender')}: ${genderLabel(profile?.gender, t)}.`,
+                `${t('profile.dobLabel')}: ${authProfile?.dateOfBirth ? formatDate(authProfile.dateOfBirth) : t('profile.notSet')}.`,
                 `${t('profile.heightLabel')}: ${profile?.heightCm ? formatHeightFtIn(profile.heightCm) : t('profile.notSet')}.`,
               ].join(' ')}
             >
               <Row label={t('profile.gender')} value={genderLabel(profile?.gender, t)} />
+              <Row
+                label={t('profile.dobLabel')}
+                value={authProfile?.dateOfBirth ? formatDate(authProfile.dateOfBirth) : t('profile.notSet')}
+              />
               <Row
                 label={t('profile.heightLabel')}
                 value={profile?.heightCm ? formatHeightFtIn(profile.heightCm) : t('profile.notSet')}

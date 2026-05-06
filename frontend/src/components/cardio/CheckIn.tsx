@@ -50,7 +50,6 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
-import { applyFriendlyVoice } from '@/lib/tts-voice';
 import { ClinicalIntakeRequiredError, createJournalEntry } from '@/lib/services/journal.service';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
 import { hasDraft, loadDraft } from '@/lib/intake/draft';
@@ -701,7 +700,7 @@ const DRUG_CLASS_LABEL_KEYS: Record<string, TranslationKey> = {
 };
 
 function StepMedication({ form, setField, medications, medsLoading }: MedicationStepProps) {
-  const { t, locale } = useLanguage();
+  const { t } = useLanguage();
   // Resolve a drug-class label, falling back to the prisma value humanised
   // (e.g. UNKNOWN_NEW_CLASS → "unknown new class") so a freshly-added enum
   // value still renders something legible until translations catch up.
@@ -843,25 +842,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                       <motion.button
                         key={opt.value}
                         type="button"
-                        onClick={() => {
-                          // Phase/26 TTS pass 2 — speak the option label as
-                          // it's selected so non-readers hear what they tapped.
-                          if (
-                            typeof window !== 'undefined' &&
-                            'speechSynthesis' in window
-                          ) {
-                            const synth = window.speechSynthesis;
-                            synth.cancel();
-                            const u = new SpeechSynthesisUtterance(opt.label);
-                            // Match the user's selected locale so the option
-                            // label is read with the right pronunciation.
-                            u.lang = ({ en: 'en-US', es: 'es-ES', fr: 'fr-FR', de: 'de-DE', am: 'am-ET' } as Record<string, string>)[locale] ?? 'en-US';
-                            u.rate = 0.95;
-                            applyFriendlyVoice(u);
-                            synth.speak(u);
-                          }
-                          setTaken(med.id, opt.value);
-                        }}
+                        onClick={() => setTaken(med.id, opt.value)}
                         className="h-11 rounded-xl text-[12px] font-semibold border-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                         style={{
                           backgroundColor: active ? opt.accent : 'white',

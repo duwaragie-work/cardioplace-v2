@@ -72,6 +72,14 @@ export default function MicButton({
   const [listening, setListening] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null)
+  // Hold the latest props in a ref so the recogniser's async callbacks
+  // always fire against the CURRENT handler, not the closure captured at
+  // start() time. Without this, intake forms saw the second-press
+  // transcript routed to the first-press's onTranscript callback (which
+  // had become stale relative to the parent's latest state). Refresh
+  // every render so it never lags more than a render behind.
+  const latestRef = useRef({ onTranscript, numeric, t })
+  latestRef.current = { onTranscript, numeric, t }
 
   useEffect(() => {
     setMounted(true)
@@ -111,6 +119,17 @@ export default function MicButton({
   const start = () => {
     const Ctor = getSpeechRecognition()
     if (!Ctor) return
+
+    // Abort any prior recogniser before spinning a new one. Some browsers
+    // leave a previous recogniser alive past its onend; without this, the
+    // second click would either throw InvalidStateError or silently route
+    // the new transcript through the prior recogniser's callbacks (which
+    // captured stale closures from the FIRST click's render).
+    if (recognitionRef.current) {
+      try { recognitionRef.current.abort() } catch {}
+      recognitionRef.current = null
+    }
+
     setErrorMsg(null)
     const r = new Ctor()
     r.lang = effectiveLang
@@ -128,7 +147,7 @@ export default function MicButton({
       // 'no-speech' / 'aborted' are benign user-facing — silent. Real errors
       // surface a text message so the listening indicator isn't colour-only.
       if (code !== 'no-speech' && code !== 'aborted') {
-        setErrorMsg(t('intake.audio.dictateError'))
+        setErrorMsg(latestRef.current.t('intake.audio.dictateError'))
       }
       setListening(false)
     }
@@ -138,19 +157,18 @@ export default function MicButton({
           results: ArrayLike<ArrayLike<{ transcript: string }>>
         }
         const first = ev.results[0]?.[0]?.transcript ?? ''
-        const cleaned = numeric ? wordsToDigits(first) : first.trim()
+        // Read latest callback / numeric / t from the ref — never the
+        // closures captured at start() time, which can be one or more
+        // renders behind by the time onresult fires asynchronously.
+        const props = latestRef.current
+        const cleaned = props.numeric ? wordsToDigits(first) : first.trim()
         if (cleaned) {
-          onTranscript(cleaned)
+          props.onTranscript(cleaned)
         } else if (first.trim()) {
-          // The recognizer heard something but our parser couldn't extract a
-          // usable value (e.g., "Pulse seems normal" → no digits). Surface
-          // an error instead of silently swallowing — this was the pulse
-          // field's failure mode for short hyphenated dictations like
-          // "seventy-two" before wordsToDigits handled the hyphen case.
-          setErrorMsg(t('intake.audio.dictateError'))
+          setErrorMsg(props.t('intake.audio.dictateError'))
         }
       } catch {
-        setErrorMsg(t('intake.audio.dictateError'))
+        setErrorMsg(latestRef.current.t('intake.audio.dictateError'))
       }
     }
 
