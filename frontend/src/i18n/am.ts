@@ -1138,6 +1138,7 @@ const am: Record<TranslationKey, string> = {
   'intake.nav.errorGender': 'እባክዎ ፆታ ይምረጡ።',
   'intake.nav.errorDob': 'እባክዎ የትውልድ ቀንዎን ያስገቡ።',
   'intake.nav.errorHeight': 'እባክዎ ምክንያታዊ ቁመት ያስገቡ (ከ3 ft 4 in እስከ 8 ft 2 in ግድም)።',
+  'intake.nav.errorPregnancy': 'እባክዎ አዎ ወይም አይ ይምረጡ።',
   'intake.nav.errorHfType': 'እባክዎ አንዱን ይምረጡ — እርግጠኛ አይደለሁም መልካም ነው።',
   'intake.nav.errorFreq': '{name} ምን ያህል ጊዜ እንደሚወስዱ ይምረጡ።',
   'intake.nav.errorSubmit': 'መረጃዎን በማስገባት ላይ የሆነ ችግር ተፈጥሯል።',

@@ -1139,6 +1139,7 @@ const en = {
   'intake.nav.errorGender': 'Please select a gender.',
   'intake.nav.errorDob': 'Please enter your date of birth.',
   'intake.nav.errorHeight': 'Please enter a realistic height (about 3 ft 4 in to 8 ft 2 in).',
+  'intake.nav.errorPregnancy': 'Please pick Yes or No.',
   'intake.nav.errorHfType': 'Please pick one — Not sure is OK.',
   'intake.nav.errorFreq': 'Pick how often you take {name}.',
   'intake.nav.errorSubmit': 'Something went wrong submitting your profile.',

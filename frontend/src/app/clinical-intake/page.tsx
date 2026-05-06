@@ -318,7 +318,7 @@ function A1Demographics({ state, setState }: StepProps) {
             icon={<Mars className="w-6 h-6" />}
             title={t('intake.a1.genderMale')}
             selected={state.gender === 'MALE'}
-            onClick={() => setState((p) => ({ ...p, gender: 'MALE', isPregnant: false }))}
+            onClick={() => setState((p) => ({ ...p, gender: 'MALE' }))}
             audioText={t('intake.a1.genderMale')}
             compact
           />
@@ -334,7 +334,7 @@ function A1Demographics({ state, setState }: StepProps) {
             icon={<Asterisk className="w-6 h-6" />}
             title={t('intake.a1.genderOther')}
             selected={state.gender === 'OTHER'}
-            onClick={() => setState((p) => ({ ...p, gender: 'OTHER', isPregnant: false }))}
+            onClick={() => setState((p) => ({ ...p, gender: 'OTHER' }))}
             audioText={t('intake.a1.genderOther')}
             compact
           />
@@ -2154,6 +2154,10 @@ function ClinicalIntakeWizard() {
         setSubmitError({ kind: 'key', key: 'intake.nav.errorHeight' });
         return;
       }
+    }
+    if (step === 'A2' && state.isPregnant !== true && state.isPregnant !== false) {
+      setSubmitError({ kind: 'key', key: 'intake.nav.errorPregnancy' });
+      return;
     }
     if (step === 'A4' && !state.heartFailureType) {
       setSubmitError({ kind: 'key', key: 'intake.nav.errorHfType' });

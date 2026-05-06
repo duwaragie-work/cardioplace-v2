@@ -1135,6 +1135,7 @@ const es: Record<TranslationKey, string> = {
   'intake.nav.errorGender': 'Por favor seleccione un género.',
   'intake.nav.errorDob': 'Por favor ingresa tu fecha de nacimiento.',
   'intake.nav.errorHeight': 'Por favor ingrese una altura realista (aproximadamente 3 ft 4 in a 8 ft 2 in).',
+  'intake.nav.errorPregnancy': 'Por favor elija Sí o No.',
   'intake.nav.errorHfType': 'Por favor elija una — No sé está bien.',
   'intake.nav.errorFreq': 'Elija con qué frecuencia toma {name}.',
   'intake.nav.errorSubmit': 'Algo salió mal al enviar su perfil.',

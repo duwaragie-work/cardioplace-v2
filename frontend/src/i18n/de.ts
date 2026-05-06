@@ -1135,6 +1135,7 @@ const de: Record<TranslationKey, string> = {
   'intake.nav.errorGender': 'Bitte wählen Sie ein Geschlecht.',
   'intake.nav.errorDob': 'Bitte geben Sie Ihr Geburtsdatum ein.',
   'intake.nav.errorHeight': 'Bitte geben Sie eine realistische Größe ein (etwa 3 ft 4 in bis 8 ft 2 in).',
+  'intake.nav.errorPregnancy': 'Bitte wählen Sie Ja oder Nein.',
   'intake.nav.errorHfType': 'Bitte wählen Sie eines — Unsicher ist okay.',
   'intake.nav.errorFreq': 'Wählen Sie, wie oft Sie {name} nehmen.',
   'intake.nav.errorSubmit': 'Beim Senden Ihres Profils ist etwas schiefgegangen.',
