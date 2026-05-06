@@ -16,7 +16,7 @@
 // last for this to work — see shared/src/medications.ts (Screen 1/2/3
 // comments).
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -76,6 +76,8 @@ import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
 import MedicationPhotoButton from '@/components/intake/MedicationPhotoButton';
 import type { ConfirmedMedication } from '@/components/intake/MedicationPhotoConfirmModal';
+import OtherMedicationsList from '@/components/intake/OtherMedicationsList';
+import OtherMedEditModal from '@/components/intake/OtherMedEditModal';
 import { cmToFtIn, ftInToCm } from '@/lib/units';
 import StepDots from '@/components/intake/StepDots';
 import ChoiceCard from '@/components/intake/ChoiceCard';
@@ -671,6 +673,104 @@ function MedicationGroup({
   );
 }
 
+/**
+ * Identity match for two SelectedMedication entries — prefers serverId
+ * (loaded from a prior session via PatientMedication.id), falls back to
+ * case-insensitive drugName for in-session adds. Top-level helper so
+ * useCallback dep arrays don't have to chase its reference.
+ */
+function isSameMed(a: SelectedMedication, b: SelectedMedication): boolean {
+  if (a.serverId && b.serverId) return a.serverId === b.serverId;
+  return (
+    a.drugName.trim().toLowerCase() === b.drugName.trim().toLowerCase() &&
+    !a.serverId &&
+    !b.serverId
+  );
+}
+
+/**
+ * Phase/28 — shared edit/delete/toggle handlers for the OTHER_UNVERIFIED
+ * meds list rendered on A5 + A8. Both steps instantiate this so each
+ * keeps its own edit-modal-open state without leaking across steps.
+ */
+function useOtherMedHandlers(
+  state: IntakeFormState,
+  setState: (updater: (prev: IntakeFormState) => IntakeFormState) => void,
+) {
+  const [editingMed, setEditingMed] = useState<SelectedMedication | null>(null);
+
+  const otherMeds = useMemo(
+    () =>
+      state.selectedMedications.filter(
+        (m) => m.drugClass === 'OTHER_UNVERIFIED',
+      ),
+    [state.selectedMedications],
+  );
+
+  const handleDelete = useCallback(
+    (med: SelectedMedication) => {
+      setState((prev) => ({
+        ...prev,
+        selectedMedications: prev.selectedMedications.filter(
+          (m) => !isSameMed(m, med),
+        ),
+      }));
+    },
+    [setState],
+  );
+
+  const handleEdit = useCallback((med: SelectedMedication) => {
+    setEditingMed(med);
+  }, []);
+
+  const handleSaveEdit = useCallback(
+    (
+      med: SelectedMedication,
+      patch: { drugName: string; frequency?: SelectedMedication['frequency'] },
+    ) => {
+      setState((prev) => ({
+        ...prev,
+        selectedMedications: prev.selectedMedications.map((m) =>
+          isSameMed(m, med)
+            ? { ...m, drugName: patch.drugName, frequency: patch.frequency }
+            : m,
+        ),
+      }));
+      setEditingMed(null);
+    },
+    [setState],
+  );
+
+  const handleCancelEdit = useCallback(() => setEditingMed(null), []);
+
+  const isDuplicateName = useCallback(
+    (proposedName: string, currentMed: SelectedMedication): boolean => {
+      const target = proposedName.trim().toLowerCase();
+      if (!target) return false;
+      return state.selectedMedications.some((m) => {
+        if (isSameMed(m, currentMed)) return false; // allow saving same name
+        if (m.drugName.trim().toLowerCase() === target) return true;
+        // Also block renaming into a catalog brand/generic name — patient
+        // should use the catalog tile in that case (the modal also surfaces
+        // a hint, but this is the hard guard).
+        if (!m.catalogId) return false;
+        return false; // catalog row stored under genericName already collides via the drugName check above
+      });
+    },
+    [state.selectedMedications],
+  );
+
+  return {
+    otherMeds,
+    editingMed,
+    handleEdit,
+    handleDelete,
+    handleSaveEdit,
+    handleCancelEdit,
+    isDuplicateName,
+  };
+}
+
 function A5CoreMeds({ state, setState }: StepProps) {
   const selectedIds = useMemo(
     () => new Set(state.selectedMedications.filter((m) => !m.isCombination).map((m) => m.catalogId).filter(Boolean) as string[]),
@@ -706,6 +806,11 @@ function A5CoreMeds({ state, setState }: StepProps) {
   };
 
   const { t } = useLanguage();
+
+  // Phase/28 — OTHER_UNVERIFIED meds list at the bottom of A5. The hook
+  // derives the freeform subset + handlers; the modal opens when the
+  // patient taps the edit pencil.
+  const otherMedHandlers = useOtherMedHandlers(state, setState);
 
   // Phase/27 — when the patient scans a prescription, fan the OCR-extracted
   // medications out into selectedMedications. Catalog matches inherit the
@@ -805,6 +910,27 @@ function A5CoreMeds({ state, setState }: StepProps) {
         selectedIds={selectedIds}
         toggle={toggle}
       />
+
+      {/* Phase/28 — Your other medications. Renders only when the patient has
+          OTHER_UNVERIFIED rows (from OCR scan or A8 freeform input or a
+          prior session loaded via seedFromMedications). Body-click toggles
+          off (== delete); pencil opens edit modal; trash deletes outright. */}
+      {otherMedHandlers.otherMeds.length > 0 && (
+        <OtherMedicationsList
+          meds={otherMedHandlers.otherMeds}
+          onToggle={otherMedHandlers.handleDelete}
+          onEdit={otherMedHandlers.handleEdit}
+          onDelete={otherMedHandlers.handleDelete}
+        />
+      )}
+      {otherMedHandlers.editingMed && (
+        <OtherMedEditModal
+          med={otherMedHandlers.editingMed}
+          isDuplicateName={otherMedHandlers.isDuplicateName}
+          onSave={otherMedHandlers.handleSaveEdit}
+          onCancel={otherMedHandlers.handleCancelEdit}
+        />
+      )}
     </div>
   );
 }
@@ -966,6 +1092,10 @@ function A8Categories({ state, setState }: StepProps) {
 
   const otherCount = state.selectedMedications.filter((m) => m.drugClass === 'OTHER_UNVERIFIED').length;
 
+  // Phase/28 — same OTHER_UNVERIFIED list as A5 (each step instantiates its
+  // own modal-state so editing one doesn't leak to the other).
+  const otherMedHandlers = useOtherMedHandlers(state, setState);
+
   const categories: { key: string; label: string; icon: React.ReactNode; audio: string }[] = [
     { key: 'WATER_PILL', label: t('intake.a8.categoryWaterPill'), icon: <Droplet className="w-6 h-6" />, audio: t('intake.a8.categoryWaterPill') },
     { key: 'BLOOD_THINNER', label: t('intake.a8.categoryBloodThinner'), icon: <Pill className="w-6 h-6" />, audio: t('intake.a8.categoryBloodThinner') },
@@ -1114,7 +1244,12 @@ function A8Categories({ state, setState }: StepProps) {
 
             </div>
 
-            {otherCount > 0 && (
+            {/* Phase/28 — the count line (e.g. "3 more medications added")
+                is redundant once OtherMedicationsList renders inline below
+                with full per-row visibility, so suppress it when the list
+                is going to render. Keep the count for the rare case where
+                the list is hidden somehow. */}
+            {otherCount > 0 && otherMedHandlers.otherMeds.length === 0 && (
               <p className="text-[12px] text-center" style={{ color: 'var(--brand-text-muted)' }}>
                 {(otherCount === 1 ? t('intake.a8.otherCountSingle') : t('intake.a8.otherCountPlural')).replace('{n}', String(otherCount))}
               </p>
@@ -1122,6 +1257,27 @@ function A8Categories({ state, setState }: StepProps) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Phase/28 — Your other medications list. Renders here on A8 too
+          (mirroring A5) so patients who land directly on A8 see + can edit
+          their freeform meds without backtracking. Each step instance owns
+          its own edit-modal state via the hook. */}
+      {otherMedHandlers.otherMeds.length > 0 && (
+        <OtherMedicationsList
+          meds={otherMedHandlers.otherMeds}
+          onToggle={otherMedHandlers.handleDelete}
+          onEdit={otherMedHandlers.handleEdit}
+          onDelete={otherMedHandlers.handleDelete}
+        />
+      )}
+      {otherMedHandlers.editingMed && (
+        <OtherMedEditModal
+          med={otherMedHandlers.editingMed}
+          isDuplicateName={otherMedHandlers.isDuplicateName}
+          onSave={otherMedHandlers.handleSaveEdit}
+          onCancel={otherMedHandlers.handleCancelEdit}
+        />
+      )}
 
       <div
         className="rounded-xl p-4 flex items-start gap-3 mt-4"
@@ -1734,6 +1890,7 @@ function ClinicalIntakeWizard() {
                 const comboEntry = ALL_COMBO_MEDS.find((c) => c.brandName.toLowerCase() === lower);
                 return {
                   catalogId: catEntry?.id ?? comboEntry?.id,
+                  serverId: m.id,
                   drugName: m.drugName,
                   drugClass: m.drugClass as IntakeFormState['selectedMedications'][number]['drugClass'],
                   isCombination: m.isCombination,
@@ -1741,6 +1898,8 @@ function ClinicalIntakeWizard() {
                   source: m.source as IntakeFormState['selectedMedications'][number]['source'],
                   rawInputText: m.rawInputText ?? undefined,
                   frequency: m.frequency,
+                  pillImageUrl: m.pillImageUrl,
+                  plainLanguageDescription: m.plainLanguageDescription,
                 };
               }),
           };
