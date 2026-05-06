@@ -14,6 +14,10 @@ const SEVERITY_ORDER: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 }
 type DerivedRiskTier = 'STANDARD' | 'ELEVATED' | 'HIGH'
 
 interface PatientProfileShape {
+  // Gender drives pregnancy gating — non-FEMALE patients can't carry an
+  // active "Pregnancy" or "Preeclampsia history" condition even if a stale
+  // boolean lingers in the row from a prior FEMALE selection.
+  gender: string | null
   hasHeartFailure: boolean
   heartFailureType: string | null
   hasAFib: boolean
@@ -46,13 +50,14 @@ export class ProviderService {
     profile: PatientProfileShape | null,
   ): string | null {
     if (!profile) return null
-    // Split pregnancy from preeclampsia history. Conflating them ("Pregnancy
-    // / preeclampsia history") was misleading for non-pregnant patients
-    // with only a documented history — it implied current pregnancy. Per
-    // CLINICAL_SPEC §3 the history flag is a *notation* for enhanced
-    // monitoring, not a pregnancy indicator.
-    if (profile.isPregnant) return 'Pregnancy'
-    if (profile.historyPreeclampsia) return 'Preeclampsia history'
+    // Pregnancy + preeclampsia history are clinically meaningful only for
+    // FEMALE patients — gating here means a stale isPregnant=true boolean
+    // on a non-FEMALE row (e.g., a patient who picked FEMALE earlier and
+    // later switched to OTHER) doesn't surface a "Pregnancy" pill in the
+    // admin patient list / detail header.
+    if (profile.gender === 'FEMALE' && profile.isPregnant) return 'Pregnancy'
+    if (profile.gender === 'FEMALE' && profile.historyPreeclampsia)
+      return 'Preeclampsia history'
     if (profile.hasHeartFailure) {
       const t = profile.heartFailureType
       if (t === 'HFREF') return 'Heart Failure (HFrEF)'
@@ -80,9 +85,11 @@ export class ProviderService {
     if (!profile) {
       return ageGroup === '65+' ? 'ELEVATED' : 'STANDARD'
     }
+    const femalePregnancyRisk =
+      profile.gender === 'FEMALE' &&
+      (profile.isPregnant || profile.historyPreeclampsia)
     if (
-      profile.isPregnant ||
-      profile.historyPreeclampsia ||
+      femalePregnancyRisk ||
       profile.hasHeartFailure ||
       profile.hasHCM ||
       profile.hasDCM
@@ -323,9 +330,11 @@ export class ProviderService {
         // CLINICAL_SPEC §3 (enhanced-monitoring marker for women with
         // history, even outside pregnancy). Frontend hides the history
         // badge when isPregnant=true so the pregnancy banner takes
-        // priority and the row doesn't double-flag.
-        isPregnant: profile?.isPregnant ?? false,
-        historyPreeclampsia: profile?.historyPreeclampsia ?? false,
+        // priority and the row doesn't double-flag. Gated on FEMALE so
+        // stale rows from a previously-FEMALE patient don't surface here.
+        isPregnant: profile?.gender === 'FEMALE' ? (profile?.isPregnant ?? false) : false,
+        historyPreeclampsia:
+          profile?.gender === 'FEMALE' ? (profile?.historyPreeclampsia ?? false) : false,
         onboardingStatus: u.onboardingStatus,
         enrollmentStatus: u.enrollmentStatus,
         // Flow K — surface the patient's profile verification state so the

@@ -393,8 +393,14 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
         </div>
       </div>
 
-      {/* Two-column reconciliation grid */}
-      {(['demographics', 'pregnancy', 'cardiac'] as const).map((group) => (
+      {/* Two-column reconciliation grid. The pregnancy group is irrelevant
+          for non-FEMALE patients and is hidden — the patient frontend
+          gates the same group on gender, and the intake submit clears
+          pregnancy fields whenever gender isn't FEMALE so there's no
+          orphaned data to verify. */}
+      {(['demographics', 'pregnancy', 'cardiac'] as const)
+        .filter((g) => g !== 'pregnancy' || profile.gender === 'FEMALE')
+        .map((group) => (
         <div key={group} className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
           <div className="px-5 py-3" style={{ borderBottom: '1px solid var(--brand-border)' }}>
             <h3 className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>

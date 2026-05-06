@@ -453,9 +453,11 @@ export default function PatientDetailShell({ patientId }: Props) {
                         women with documented history outside pregnancy.
                         Hidden when isPregnant=true since the pregnancy
                         primary-condition pill above already covers active
-                        pregnancies (avoids double-flagging). Notation only
-                        — no threshold logic. */}
-                    {profile?.historyPreeclampsia && !profile?.isPregnant && (
+                        pregnancies (avoids double-flagging). Gated on
+                        gender=FEMALE so a stale flag on a non-FEMALE row
+                        from a prior FEMALE selection doesn't surface here.
+                        Notation only — no threshold logic. */}
+                    {profile?.gender === 'FEMALE' && profile?.historyPreeclampsia && !profile?.isPregnant && (
                       <span
                         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold"
                         style={{

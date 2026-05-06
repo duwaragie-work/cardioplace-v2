@@ -209,9 +209,18 @@ function buildProfilePayload(s: IntakeFormState): IntakeProfilePayload {
     // engine has age available before any check-in. Backend splits it
     // back out into User.dateOfBirth.
     dateOfBirth: s.dateOfBirth || null,
-    isPregnant: s.gender === 'FEMALE' ? s.isPregnant ?? false : undefined,
-    pregnancyDueDate: s.pregnancyDueDate || null,
-    historyPreeclampsia: s.historyPreeclampsia ?? false,
+    // Pregnancy block is cleared whenever gender isn't FEMALE so the DB
+    // can't end up with stale "is pregnant" / "due date" / "history of
+    // preeclampsia" values from a prior FEMALE selection. Sending explicit
+    // false / null beats sending undefined — undefined gets stripped on the
+    // backend and existing rows would keep their old pregnancy state.
+    isPregnant: s.gender === 'FEMALE' ? (s.isPregnant ?? false) : false,
+    pregnancyDueDate:
+      s.gender === 'FEMALE' && s.isPregnant === true
+        ? (s.pregnancyDueDate || null)
+        : null,
+    historyPreeclampsia:
+      s.gender === 'FEMALE' ? (s.historyPreeclampsia ?? false) : false,
     hasHeartFailure: s.hasHeartFailure ?? false,
     heartFailureType: s.hasHeartFailure
       ? (s.heartFailureType ?? 'UNKNOWN')
@@ -563,7 +572,19 @@ function A2Pregnancy({ state, setState }: StepProps) {
           title={t('intake.a2.noTitle')}
           description={t('intake.a2.noDesc')}
           selected={state.isPregnant === false}
-          onClick={() => setState((p) => ({ ...p, isPregnant: false, pregnancyDueDate: undefined }))}
+          onClick={() =>
+            setState((p) => ({
+              ...p,
+              isPregnant: false,
+              // Due-date and preeclampsia history live inside the "Yes"
+              // panel and are inaccessible once the patient picks No, so
+              // clear both here. Without this, a stale historyPreeclampsia
+              // toggle from a mistaken "Yes" earlier in the session would
+              // still ride through to submit.
+              pregnancyDueDate: undefined,
+              historyPreeclampsia: false,
+            }))
+          }
           audioText={t('intake.a2.noAudio')}
         />
       </div>
