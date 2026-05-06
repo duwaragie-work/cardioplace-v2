@@ -39,8 +39,7 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   }
 }
 
-function hasAdminRole(token: string): boolean {
-  const payload = decodeJwtPayload(token);
+function payloadHasAdminRole(payload: Record<string, unknown> | null): boolean {
   if (!payload) return false;
   const roles = payload.roles;
   if (!Array.isArray(roles)) return false;
@@ -62,7 +61,18 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(signInUrl);
   }
 
-  if (!hasAdminRole(token)) {
+  // AUTH-51: malformed token is indistinguishable from "no token" to the
+  // user — drop the forbidden reason and use the no-token branch's `next`
+  // param so they land back on the page they were trying to reach after
+  // signing in.
+  const payload = decodeJwtPayload(token);
+  if (!payload) {
+    const signInUrl = new URL('/sign-in', request.url);
+    signInUrl.searchParams.set('next', pathname);
+    return NextResponse.redirect(signInUrl);
+  }
+
+  if (!payloadHasAdminRole(payload)) {
     const signInUrl = new URL('/sign-in', request.url);
     signInUrl.searchParams.set('reason', 'forbidden');
     return NextResponse.redirect(signInUrl);

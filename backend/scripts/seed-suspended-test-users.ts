@@ -10,24 +10,46 @@ const prisma = isAccelerate
   : new PrismaClient({ adapter: new PrismaPg(new pg.Pool({ connectionString: dbUrl })) })
 
 async function main() {
+  // Patient-app fixtures (AUTH-29 / AUTH-31 / AUTH-32 on /localhost:3000).
+  // Admin-app fixtures (AUTH-12 / AUTH-13 on /localhost:3001).
+  // No perma-OTP rows — the auth.service status check fires before any
+  // OTP is generated, which is what these tests verify.
   const fixtures = [
-    { email: 'suspended-test@cardioplace.test', accountStatus: 'SUSPENDED' as const },
-    { email: 'blocked-test@cardioplace.test', accountStatus: 'BLOCKED' as const },
+    {
+      email: 'suspended-test@cardioplace.test',
+      accountStatus: 'SUSPENDED' as const,
+      roles: ['PATIENT'] as const,
+    },
+    {
+      email: 'blocked-test@cardioplace.test',
+      accountStatus: 'BLOCKED' as const,
+      roles: ['PATIENT'] as const,
+    },
+    {
+      email: 'suspended-admin-test@cardioplace.test',
+      accountStatus: 'SUSPENDED' as const,
+      roles: ['SUPER_ADMIN'] as const,
+    },
+    {
+      email: 'blocked-admin-test@cardioplace.test',
+      accountStatus: 'BLOCKED' as const,
+      roles: ['PROVIDER'] as const,
+    },
   ]
 
   for (const f of fixtures) {
     await prisma.user.upsert({
       where: { email: f.email },
-      update: { accountStatus: f.accountStatus },
+      update: { accountStatus: f.accountStatus, roles: [...f.roles] },
       create: {
         email: f.email,
         accountStatus: f.accountStatus,
-        roles: ['PATIENT'],
+        roles: [...f.roles],
         isVerified: true,
         onboardingStatus: 'COMPLETED',
       },
     })
-    console.log(`✓ ${f.email} (${f.accountStatus})`)
+    console.log(`✓ ${f.email} (${f.accountStatus}, ${f.roles.join('+')})`)
   }
 }
 
