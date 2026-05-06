@@ -1002,6 +1002,19 @@ const en = {
   'intake.a5.groupBeta': 'Beta-blockers',
   'intake.a5.groupCcb': 'Calcium channel blockers',
   'intake.a5.audioAlsoKnown': 'also known as',
+  // Phase/28 — "Your other medications" list (OCR / freeform meds shown
+  // beneath the catalog tiles on A5 + A8). Tile body click toggles, edit
+  // pencil opens a modal, trash deletes. Same UI shows on profile re-edit.
+  'intake.a5.otherMedsTitle': 'Your other medications',
+  'intake.a5.otherMedEdit': 'Edit',
+  'intake.a5.otherMedDelete': 'Remove',
+  'intake.a5.otherMedEditModalTitle': 'Edit medication',
+  'intake.a5.otherMedDrugLabel': 'Medication name',
+  'intake.a5.otherMedFrequencyLabel': 'How often',
+  'intake.a5.otherMedSave': 'Save',
+  'intake.a5.otherMedCancel': 'Cancel',
+  'intake.a5.otherMedDupError': '{name} is already on your list. Pick a different name.',
+  'intake.a5.otherMedCatalogHint': '{name} is in the catalog — tap that tile instead so it benefits from verified contraindication checks.',
 
   // A6 — combination pills
   'intake.a6.title': 'Combination pills',
@@ -1231,6 +1244,10 @@ const en = {
   'ocr.med.unskip': 'Add back',
   'ocr.med.addAll': 'Add {count}',
   'ocr.med.addAllEmpty': 'Add medications',
+  'ocr.med.addNothing': 'Nothing to add',
+  'ocr.med.addNothingHelp': 'These medications are already on your list. Change a frequency to update an existing one, or tap Cancel.',
+  'ocr.med.updateOnly': 'Update {count}',
+  'ocr.med.addAndUpdate': 'Add {add} + Update {update}',
   'ocr.med.cancel': 'Cancel',
   'ocr.med.retake': 'Re-take',
   'ocr.med.freqOnce': 'Once a day',
