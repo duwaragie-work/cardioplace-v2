@@ -130,7 +130,40 @@ export default function MedicationPhotoConfirmModal({
   }, [rows.length]);
 
   const lowConfidence = confidence < 0.6;
-  const keptCount = rows.filter((r) => r.kept && r.drugName.trim()).length;
+
+  // Per-row action classification — drives the Add-button gate. A row only
+  // counts toward `actionableCount` if it'll actually produce a write:
+  //   • new med (no existingMatch) → 'add'
+  //   • already-in-list AND patient picked a non-UNSURE freq that differs
+  //     from the stored one → 'update'
+  //   • everything else → 'noop' (button stays disabled if all rows are noop).
+  // UNSURE never counts as an update — re-scans with poor OCR shouldn't
+  // silently downgrade an established frequency.
+  const rowActions = useMemo(() => {
+    return rows.map((row): 'add' | 'update' | 'noop' => {
+      if (!row.kept || !row.drugName.trim()) return 'noop';
+      const existing = findExisting ? findExisting(row.drugName) : null;
+      if (!existing) return 'add';
+      if (existing.currentFrequency === row.frequency) return 'noop';
+      if (row.frequency === 'UNSURE') return 'noop';
+      return 'update';
+    });
+  }, [rows, findExisting]);
+  const effectiveAddCount = rowActions.filter((a) => a === 'add').length;
+  const effectiveUpdateCount = rowActions.filter((a) => a === 'update').length;
+  const actionableCount = effectiveAddCount + effectiveUpdateCount;
+
+  // Button label state machine — see plan's "Add-button gating" table.
+  const buttonLabel =
+    actionableCount === 0
+      ? t('ocr.med.addNothing')
+      : effectiveAddCount > 0 && effectiveUpdateCount > 0
+        ? t('ocr.med.addAndUpdate')
+            .replace('{add}', String(effectiveAddCount))
+            .replace('{update}', String(effectiveUpdateCount))
+        : effectiveAddCount > 0
+          ? t('ocr.med.addAll').replace('{count}', String(effectiveAddCount))
+          : t('ocr.med.updateOnly').replace('{count}', String(effectiveUpdateCount));
 
   return (
     <motion.div
@@ -223,6 +256,21 @@ export default function MedicationPhotoConfirmModal({
                 />
               ))}
             </div>
+
+            {/* No-op helper line — shown when every kept row is already on
+                the patient's list at the same frequency (so the Add button
+                is disabled). Steers the patient toward Cancel/Re-take or
+                changing a frequency rather than letting them tap a dead
+                button without explanation. */}
+            {actionableCount === 0 && rows.some((r) => r.kept) && (
+              <p
+                role="note"
+                className="text-[12px] mt-1 leading-snug text-center"
+                style={{ color: 'var(--brand-text-muted)' }}
+              >
+                {t('ocr.med.addNothingHelp')}
+              </p>
+            )}
           </div>
         </div>
 
@@ -234,17 +282,15 @@ export default function MedicationPhotoConfirmModal({
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={keptCount === 0}
+            disabled={actionableCount === 0}
             className="flex-1 h-11 rounded-xl font-bold text-white cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--brand-primary-purple)] disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
               background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
               boxShadow:
-                keptCount === 0 ? 'none' : '0 4px 14px rgba(123,0,224,0.28)',
+                actionableCount === 0 ? 'none' : '0 4px 14px rgba(123,0,224,0.28)',
             }}
           >
-            {keptCount === 0
-              ? t('ocr.med.addAllEmpty')
-              : t('ocr.med.addAll').replace('{count}', String(keptCount))}
+            {buttonLabel}
           </button>
           <button
             type="button"
