@@ -77,13 +77,14 @@ export default function LandingFooter() {
             <span className="font-bold text-white text-sm">{t('landing.company')}</span>
             <a href="/about" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.mission')}</a>
             <a href="/about" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.ourStory')}</a>
-            <a href="/about" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.team')}</a>
-            <a href="/about" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.careTeams')}</a>
+            <a href="/about#team" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.team')}</a>
+            {/* Care Teams link hidden — page section not yet built. */}
+            {/* <a href="/about" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.careTeams')}</a> */}
           </div>
           <div className="flex flex-col gap-3">
             <span className="font-bold text-white text-sm">{t('landing.legal')}</span>
-            <a href="#" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.privacy')}</a>
-            <a href="#" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.terms')}</a>
+            <a href="/privacy" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.privacy')}</a>
+            <a href="/terms" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.terms')}</a>
           </div>
         </div>
 
@@ -141,7 +142,7 @@ export default function LandingFooter() {
           rel="noopener noreferrer"
           className="hover:underline hover:text-gray-200 transition-colors"
         >
-          A Healplace Company
+          {t('landing.healplaceCompany')}
         </a>
       </div>
     </footer>

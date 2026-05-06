@@ -81,7 +81,7 @@ export function canAssignCareTeam(input: RoleInput | UserInput): boolean {
  * @Roles(SUPER_ADMIN, MEDICAL_DIRECTOR, HEALPLACE_OPS)    // PROVIDER excluded
  * backend/src/practice/enrollment.controller.ts
  */
-export function canCompleteOnboarding(input: RoleInput | UserInput): boolean {
+export function canCompleteEnrollment(input: RoleInput | UserInput): boolean {
   return has(input, ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'HEALPLACE_OPS'])
 }
 

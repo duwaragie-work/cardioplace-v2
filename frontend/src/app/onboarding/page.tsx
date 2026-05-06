@@ -16,6 +16,7 @@ import LandingHeader from "@/components/cardio/LandingHeader";
 import LandingFooter from "@/components/cardio/LandingFooter";
 import AudioButton from "@/components/intake/AudioButton";
 import MicButton from "@/components/intake/MicButton";
+import { validateDateOfBirth, maxDobIso } from "@/lib/dob-validator";
 
 function getBrowserTimezone(): string | undefined {
   if (typeof Intl === "undefined" || typeof Intl.DateTimeFormat === "undefined") return undefined;
@@ -64,54 +65,25 @@ export default function OnboardingPage() {
     }
   }, [user, isLoading, router]);
 
-  /**
-   * Validate the DOB. Returns null when OK, otherwise the user-facing
-   * error message. Copy is intentionally friendly + actionable — the
-   * patient should always know what to fix and why.
-   */
-  function validateDateOfBirth(raw: string): string | null {
-    if (!raw) {
-      return 'Please pick your date of birth from the calendar.';
-    }
-    const dob = new Date(raw);
-    if (Number.isNaN(dob.getTime())) {
-      return "That doesn't look like a valid date — please pick from the calendar.";
-    }
-    const today = new Date();
-    const dobDay = new Date(dob.getFullYear(), dob.getMonth(), dob.getDate());
-    const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    if (dobDay > todayDay) {
-      return "That date is in the future. Please pick the day you were born.";
-    }
-    if (dobDay.getTime() === todayDay.getTime()) {
-      return "Today can't be your date of birth — please pick the day you were born.";
-    }
-    // 18+ check: compute "18 years ago today" and require dob <= that.
-    const eighteenAgo = new Date(
-      todayDay.getFullYear() - 18,
-      todayDay.getMonth(),
-      todayDay.getDate(),
-    );
-    if (dobDay > eighteenAgo) {
-      return 'Cardioplace is for adults 18 and older. Please double-check your date of birth.';
-    }
-    if (dobDay.getFullYear() < todayDay.getFullYear() - 120) {
-      return "That date doesn't look right — please check the year and try again.";
-    }
-    return null;
-  }
-
-  /** Browser-level cap on the date picker: cannot select a date that
-   *  would make the user under 18. Computed once per render. */
-  const maxDobIso = (() => {
-    const t0 = new Date();
-    const max = new Date(t0.getFullYear() - 18, t0.getMonth(), t0.getDate());
-    return max.toISOString().slice(0, 10);
-  })();
+  // DOB rules (validateDateOfBirth + maxDobIso) live in @/lib/dob-validator
+  // so onboarding and the profile editor stay in lockstep.
+  const dobMax = maxDobIso();
 
   const isFormPartiallyFilled = name.trim() !== "" || dateOfBirth !== "" || communicationPreference !== "";
 
-  if (isLoading || !user || isRedirecting) {
+  // Synchronous "should we redirect?" check — if shouldShowOnboardingForUser
+  // returns false, useEffect will router.replace('/dashboard') on the next
+  // tick. Render the spinner instead of the form so the user never flashes
+  // through the onboarding UI on their way out (AUTH-36).
+  const willRedirectAway =
+    !!user &&
+    !shouldShowOnboardingForUser({
+      userId: user.id,
+      onboardingStatus: user.onboardingStatus,
+      onboardingRequiredHint: user.onboardingRequired,
+    });
+
+  if (isLoading || !user || isRedirecting || willRedirectAway) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <SpinnerIndicator size={40} className="text-[#7B00E0]" />
@@ -178,31 +150,26 @@ export default function OnboardingPage() {
       router.push("/sign-in");
       return;
     }
-    if (typeof window !== "undefined") {
-      // eslint-disable-next-line no-console
-      console.debug("[onboarding] skip clicked", { userId: user.id });
-    }
+    // Skip is a client-only signal. We deliberately do NOT call POST
+    // /v2/auth/profile here — that would mark onboardingStatus=COMPLETED
+    // server-side, conflating "skipped" with "completed" (the admin can no
+    // longer tell them apart). The localStorage flag is enough to suppress
+    // the form on subsequent navigations within this browser.
     markOnboardingSkipped(user.id);
-    // Fire-and-forget: persist skip to backend without blocking navigation
-    fetchWithAuth(`${process.env.NEXT_PUBLIC_API_URL}/api/v2/auth/profile`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: null }),
-    }).catch(() => {});
     router.push("/dashboard");
   }
 
   return (
     <div className="bg-white">
       <LandingHeader activeLink="" />
-      <main id="main" className="lg:min-h-screen pt-24 lg:pt-[80px] pb-10 lg:pb-0 flex items-start lg:items-center justify-center px-4 sm:px-6 lg:px-12">
+      <main id="main" className="pt-28 pb-10 flex items-start justify-center px-4 sm:px-6 lg:px-12">
       <div className="w-full max-w-300 mx-auto">
         <div className="flex flex-col items-center md:items-center md:flex-row gap-8 lg:gap-20">
           {/* Left side - Form */}
           <div className="flex-1 w-full max-w-[400px] md:max-w-105 lg:max-w-130">
 
             {/* Heading */}
-            <div className="mb-6 md:mb-10">
+            <div className="mb-4 md:mb-6">
               <h1 className="font-semibold text-[#171717] text-2xl sm:text-3xl lg:text-4xl tracking-[-0.04em] mb-2 text-center md:text-left">
                 {t('onboarding.title')}
               </h1>
@@ -249,7 +216,7 @@ export default function OnboardingPage() {
                   id="onboarding-dob"
                   type="date"
                   value={dateOfBirth}
-                  max={maxDobIso}
+                  max={dobMax}
                   onChange={(e) => setDateOfBirth(e.target.value)}
                   className="w-full h-12 px-4 lg:px-5 bg-white border border-[#e5d9f2] rounded-lg text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
                   style={{ colorScheme: 'light', minHeight: 48 }}
@@ -325,7 +292,7 @@ export default function OnboardingPage() {
                       />
                     </svg>
                   </div>
-                  <h3 className="font-bold text-[#170c1d] text-base lg:text-2xl whitespace-nowrap">
+                  <h3 className="font-bold text-[#170c1d] text-base lg:text-2xl leading-tight">
                     {t('onboarding.cardTitle')}
                   </h3>
                 </div>

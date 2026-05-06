@@ -14,6 +14,8 @@ const PUBLIC_PATHS = new Set<string>([
   '/home',
   '/about',
   '/sign-in',
+  '/terms',
+  '/privacy',
   '/auth/magic-link',
   '/auth/callback',
 ]);
@@ -66,7 +68,12 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(signInUrl);
   }
 
-  return NextResponse.next();
+  const response = NextResponse.next();
+  // Disqualify protected pages from the browser back/forward cache so a
+  // logged-out admin pressing Back gets a fresh request — proxy then
+  // redirects them to /sign-in instead of restoring the stale dashboard.
+  response.headers.set('Cache-Control', 'no-store, must-revalidate');
+  return response;
 }
 
 export const config = {

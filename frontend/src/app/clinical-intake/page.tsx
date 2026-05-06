@@ -52,6 +52,7 @@ import {
 } from '@cardioplace/shared';
 
 import { useAuth } from '@/lib/auth-context';
+import { shouldShowOnboardingForUser } from '@/lib/onboarding';
 import { useLanguage } from '@/contexts/LanguageContext';
 import {
   getMyPatientProfile,
@@ -1780,14 +1781,19 @@ function ClinicalIntakeWizard() {
     };
   }, [user?.id, isLoading, searchParams]);
 
-  // Auth gating: send unauthenticated to sign-in; basic onboarding incomplete to /onboarding.
+  // Auth gating: send unauthenticated to sign-in; basic onboarding incomplete
+  // to /onboarding — but honor the localStorage skip flag (ONB-20: skip no
+  // longer marks onboardingStatus=COMPLETED, so we'd otherwise loop here).
   useEffect(() => {
     if (isLoading) return;
     if (!user) {
       router.replace('/sign-in');
       return;
     }
-    if (user.onboardingStatus !== 'COMPLETED') {
+    if (
+      user.onboardingStatus !== 'COMPLETED' &&
+      shouldShowOnboardingForUser({ userId: user.id })
+    ) {
       router.replace('/onboarding');
     }
   }, [user, isLoading, router]);

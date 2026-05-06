@@ -43,6 +43,7 @@ import MicButton from '@/components/intake/MicButton';
 import AudioButton from '@/components/intake/AudioButton';
 import { formatHeightFtIn } from '@/lib/units';
 import { matchToCatalog } from '@cardioplace/shared';
+import { validateDateOfBirth, maxDobIso } from '@/lib/dob-validator';
 import {
   getMyPatientProfile,
   getMyMedications,
@@ -410,6 +411,14 @@ function PersonalInfoModal({
 
   async function save() {
     if (!dirty || saving) return;
+    // Same DOB rules as onboarding — 18+, not future, not today, sane year.
+    if (dateOfBirth) {
+      const dobError = validateDateOfBirth(dateOfBirth);
+      if (dobError) {
+        setError(dobError);
+        return;
+      }
+    }
     setSaving(true);
     setError('');
     try {
@@ -519,7 +528,11 @@ function PersonalInfoModal({
               id="profile-edit-dob"
               type="date"
               value={dateOfBirth}
-              onChange={(e) => setDateOfBirth(e.target.value)}
+              max={maxDobIso()}
+              onChange={(e) => {
+                setDateOfBirth(e.target.value);
+                if (error) setError('');
+              }}
               className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
               style={{
                 borderColor: 'var(--brand-border)',

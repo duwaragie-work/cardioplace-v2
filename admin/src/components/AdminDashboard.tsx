@@ -410,6 +410,10 @@ export default function AdminDashboard() {
     );
   }
 
+  // No user (logged out / mid-navigation) — render nothing so the
+  // role-mismatch screen doesn't flash before window.location.href fires.
+  if (!user) return null;
+
   if (!hasAdminRole(user)) {
     return (
       <div

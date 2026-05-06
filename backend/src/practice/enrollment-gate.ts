@@ -25,7 +25,7 @@ export type EnrollmentGateResult =
  *
  * HFpEF (§4.9) is recommended-but-not-mandatory — intentionally not gated.
  */
-export async function canCompleteOnboarding(
+export async function canCompleteEnrollment(
   prisma: PrismaTx,
   userId: string,
 ): Promise<EnrollmentGateResult> {

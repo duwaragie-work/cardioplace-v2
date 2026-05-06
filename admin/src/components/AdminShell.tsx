@@ -15,7 +15,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import AdminSidebar from './AdminSidebar';
 import AdminTopBar from './AdminTopBar';
 
-const PUBLIC_PATHS = new Set<string>(['/', '/home', '/about', '/sign-in']);
+const PUBLIC_PATHS = new Set<string>(['/', '/home', '/about', '/sign-in', '/terms', '/privacy']);
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? '';

@@ -1,12 +1,12 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, KeyRound } from "lucide-react";
+import { CheckCircle2, KeyRound, Eye, EyeOff } from "lucide-react";
 import { useAuth, type AdminAuthResponse } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
-import Logo from "@/components/Logo";
 import { getOrCreateDeviceId } from "@/lib/device";
 import { useLanguage } from "@/contexts/LanguageContext";
+import type { TranslationKey } from "@/i18n";
 import LandingHeader from "@/components/LandingHeader";
 import LandingFooter from "@/components/LandingFooter";
 
@@ -25,31 +25,45 @@ function isEmailValid(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+// Map known backend English messages to translation keys. Stored at module
+// level so the lookup is independent of language — callers translate the
+// returned key via t() at render time, which re-runs on language switch.
+const BACKEND_MSG_KEY_MAP: Record<string, TranslationKey> = {
+  'OTP sent successfully': 'register.otpSentSuccess',
+  'Please wait 60 seconds before requesting a new OTP': 'register.pleaseWait',
+  'Invalid OTP': 'register.invalidOtp',
+  'Verification failed': 'register.verificationFailed',
+  // Admin-app gate (auth.service.ts assertAdminAccessAllowed). Both rejection
+  // paths — unknown email and known email without an admin role — collapse
+  // to one friendly "no permission" message.
+  'No admin account exists for this email': 'register.adminAccessDenied',
+  'This account is not authorized to access the admin app': 'register.adminAccessDenied',
+  'Account is suspended': 'register.accountSuspended',
+  'Account is blocked': 'register.accountBlocked',
+};
+
+function backendMsgToKey(msg: string | undefined): TranslationKey | null {
+  if (!msg) return null;
+  for (const [en, key] of Object.entries(BACKEND_MSG_KEY_MAP)) {
+    if (msg.includes(en)) return key;
+  }
+  return null;
+}
+
 export default function RegisterPage() {
   const router = useRouter();
   const { t } = useLanguage();
-
-  // Map known backend English messages to translated versions
-  const backendMsgMap: Record<string, string> = {
-    'OTP sent successfully': t('register.otpSentSuccess'),
-    'Please wait 60 seconds before requesting a new OTP': t('register.pleaseWait'),
-    'Invalid OTP': t('register.invalidOtp'),
-    'Verification failed': t('register.verificationFailed'),
-  };
-  function translateBackendMsg(msg: string | undefined): string {
-    if (!msg) return '';
-    for (const [en, translated] of Object.entries(backendMsgMap)) {
-      if (msg.includes(en)) return translated;
-    }
-    return msg;
-  }
 
   const { user, isLoading, login } = useAuth();
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
-  const [statusMessage, setStatusMessage] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
+  // Status + error both store a translation key (not a resolved string) so
+  // the rendered text re-translates live when the language is switched.
+  const [statusKey, setStatusKey] = useState<TranslationKey | null>(null);
+  const [errorKey, setErrorKey] = useState<TranslationKey | null>(null);
+  const statusMessage = statusKey ? t(statusKey) : "";
+  const errorMessage = errorKey ? t(errorKey) : "";
   const [isRequestingOtp, setIsRequestingOtp] = useState(false);
   const [isResendingOtp, setIsResendingOtp] = useState(false);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
@@ -57,6 +71,7 @@ export default function RegisterPage() {
   const resendTimerRef = useRef<number | null>(null);
   // Admin app is OTP-only — magic-link mode was removed.
 
+  const [showOtp, setShowOtp] = useState(false);
   const [mounted, setMounted] = useState(false);
   const emailTrimmed = email.trim();
   const emailIsValid = useMemo(() => isEmailValid(emailTrimmed), [emailTrimmed]);
@@ -68,6 +83,7 @@ export default function RegisterPage() {
   // hidden as soon as they hit the full 6 — quiet UI when nothing's wrong.
   const showOtpLengthHint = otp.length > 0 && otp.length < OTP_LENGTH;
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
@@ -124,17 +140,17 @@ export default function RegisterPage() {
 
   async function handleSendOtp() {
     if (!emailIsValid || isRequestingOtp) return;
-    setErrorMessage("");
-    setStatusMessage("");
+    setErrorKey(null);
+    setStatusKey(null);
     setIsRequestingOtp(true);
     try {
-      const data = await sendOtpRequest(email.trim());
+      await sendOtpRequest(email.trim());
       setOtpSent(true);
       setOtp("");
-      setStatusMessage(translateBackendMsg(data.message) || t('register.otpSent'));
+      setStatusKey('register.otpSentSuccess');
       startResendCooldown();
     } catch (err) {
-      setErrorMessage(translateBackendMsg(err instanceof Error ? err.message : '') || t('register.failedOtp'));
+      setErrorKey(backendMsgToKey(err instanceof Error ? err.message : '') ?? 'register.failedOtp');
     } finally {
       setIsRequestingOtp(false);
     }
@@ -142,15 +158,15 @@ export default function RegisterPage() {
 
   async function handleResendOtp() {
     if (!otpSent || resendCooldown > 0 || isResendingOtp) return;
-    setErrorMessage("");
-    setStatusMessage("");
+    setErrorKey(null);
+    setStatusKey(null);
     setIsResendingOtp(true);
     try {
-      const data = await sendOtpRequest(email.trim());
-      setStatusMessage(translateBackendMsg(data.message) || t('register.otpResent'));
+      await sendOtpRequest(email.trim());
+      setStatusKey('register.otpResent');
       startResendCooldown();
     } catch (err) {
-      setErrorMessage(translateBackendMsg(err instanceof Error ? err.message : '') || t('register.failedResend'));
+      setErrorKey(backendMsgToKey(err instanceof Error ? err.message : '') ?? 'register.failedResend');
     } finally {
       setIsResendingOtp(false);
     }
@@ -158,8 +174,8 @@ export default function RegisterPage() {
 
   async function handleVerifyOtp() {
     if (!canVerifyOtp || isVerifyingOtp || !otpSent) return;
-    setErrorMessage("");
-    setStatusMessage("");
+    setErrorKey(null);
+    setStatusKey(null);
     setIsVerifyingOtp(true);
     try {
       const deviceId = getOrCreateDeviceId();
@@ -176,13 +192,13 @@ export default function RegisterPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setErrorMessage(translateBackendMsg(data.message) || t('register.verificationFailed'));
+        setErrorKey(backendMsgToKey(data.message) ?? 'register.verificationFailed');
         throw new Error(data.message || "Verification failed.");
       }
       login(data as AdminAuthResponse);
       router.push("/dashboard");
     } catch (err) {
-      setErrorMessage(translateBackendMsg(err instanceof Error ? err.message : '') || t('register.invalidOtp'));
+      setErrorKey(backendMsgToKey(err instanceof Error ? err.message : '') ?? 'register.invalidOtp');
     } finally {
       setIsVerifyingOtp(false);
     }
@@ -215,13 +231,19 @@ export default function RegisterPage() {
             <div className="space-y-6 w-full">
               {/* Email input */}
               <div className="w-full max-w-105">
-                <label className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
+                <label htmlFor="signin-email" className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
                   {t('register.emailAddress')}
                 </label>
                 <input
+                  id="signin-email"
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (otpSent) { setOtpSent(false); setOtp(""); }
+                    if (statusKey) setStatusKey(null);
+                    if (errorKey) setErrorKey(null);
+                  }}
                   placeholder={t('register.emailPlaceholder')}
                   autoComplete="email"
                   aria-invalid={showEmailError}
@@ -236,60 +258,73 @@ export default function RegisterPage() {
                   </p>
                 )}
 
-                {/* OTP-only flow (admin app) */}
+                {/* OTP-only flow (admin app) — single primary button toggles
+                    Send / Resend so older users see one obvious target. */}
                 <button
-                  onClick={handleSendOtp}
-                  disabled={!emailIsValid || isRequestingOtp}
+                  type="button"
+                  onClick={otpSent ? handleResendOtp : handleSendOtp}
+                  disabled={!emailIsValid || isRequestingOtp || isResendingOtp || (otpSent && resendCooldown > 0)}
                   className="w-full h-12 lg:h-14 rounded-lg flex items-center justify-center border border-[#6B00D1] mt-3 mb-7 transition-opacity enabled:cursor-pointer enabled:hover:bg-[#7B00E0]/5 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <span className="font-semibold text-[#6B00D1] text-base lg:text-medium">{isRequestingOtp ? t('register.sendingOtp') : t('register.sendOtp')}</span>
+                  <span className="font-semibold text-[#6B00D1] text-base lg:text-medium">
+                    {isRequestingOtp
+                      ? t('register.sendingOtp')
+                      : isResendingOtp
+                        ? t('register.resending')
+                        : otpSent
+                          ? (resendCooldown > 0
+                              ? t('register.resendIn').replace('{s}', String(resendCooldown))
+                              : t('register.resendCode'))
+                          : t('register.sendOtp')}
+                  </span>
                 </button>
 
                 {otpSent && (
                   <>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="font-semibold text-[#171717] text-xs lg:text-sm">
-                        {t('register.enterOtp')}
-                      </label>
+                    <label htmlFor="signin-otp" className="block font-semibold text-[#171717] text-xs lg:text-sm mb-2">
+                      {t('register.enterOtp')}
+                    </label>
+                    <div className="relative mb-1">
+                      <input
+                        id="signin-otp"
+                        type={showOtp ? "text" : "password"}
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        value={otp}
+                        onChange={(e) => {
+                          setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH));
+                          if (statusKey) setStatusKey(null);
+                          if (errorKey) setErrorKey(null);
+                        }}
+                        placeholder="••••••"
+                        maxLength={OTP_LENGTH}
+                        className="w-full h-11 lg:h-12 pl-4 lg:pl-5 pr-11 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-base lg:text-lg text-center tracking-[8px] text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                      />
                       <button
                         type="button"
-                        onClick={handleResendOtp}
-                        disabled={resendCooldown > 0 || isResendingOtp}
-                        className="font-medium text-[#7B00E0] text-xs lg:text-sm hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => setShowOtp((s) => !s)}
+                        aria-label={showOtp ? t('register.hideOtp') : t('register.showOtp')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#737373] hover:text-[#7B00E0] transition-colors cursor-pointer"
                       >
-                        {isResendingOtp
-                          ? t('register.resending')
-                          : resendCooldown > 0
-                            ? t('register.resendIn').replace('{s}', String(resendCooldown))
-                            : t('register.resendCode')}
+                        {showOtp ? <EyeOff aria-hidden="true" className="w-4 h-4" /> : <Eye aria-hidden="true" className="w-4 h-4" />}
                       </button>
                     </div>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={otp}
-                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH))}
-                      placeholder="••••••"
-                      maxLength={OTP_LENGTH}
-                      className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-base lg:text-lg text-center tracking-[8px] text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all mb-1"
-                    />
                     {/* OTP-length hint: only while user is mid-typing */}
                     {showOtpLengthHint && (
                       <p className="text-[11px] lg:text-xs text-[#a16207] mb-2">
-                        Enter all 6 digits ({otp.length}/6)
+                        {t('register.otpLengthHint').replace('{n}', String(otp.length))}
                       </p>
                     )}
                   </>
                 )}
 
-                {/* Feedback messages */}
+                {/* Feedback messages — <output> has implicit role="status". */}
                 {(statusMessage || errorMessage) && (
-                  <p
-                    role="status"
-                    className={`mt-2 text-xs lg:text-sm ${errorMessage ? "text-red-500" : "text-green-500"}`}
+                  <output
+                    className={`block mt-2 text-xs lg:text-sm ${errorMessage ? "text-red-500" : "text-green-500"}`}
                   >
                     {errorMessage || statusMessage}
-                  </p>
+                  </output>
                 )}
                 {/* "Enter code" prompt — shown when OTP just sent and field empty */}
                 {otpSent && otp.length === 0 && !statusMessage && !errorMessage && (
@@ -316,14 +351,14 @@ export default function RegisterPage() {
                 <p className="text-[#737373] text-[11px] lg:text-xs leading-relaxed text-center">
                   {t('register.terms')}{" "}
                   <a
-                    href="#"
+                    href="/terms"
                     className="font-medium text-[#7B00E0] hover:underline"
                   >
                     {t('register.termsOfService')}
                   </a>{" "}
-                  {t('register.and')}{" "} <br />
+                  {t('register.and')}{" "}
                   <a
-                    href="#"
+                    href="/privacy"
                     className="font-medium text-[#7B00E0] hover:underline"
                   >
                     {t('register.privacyPolicy')}

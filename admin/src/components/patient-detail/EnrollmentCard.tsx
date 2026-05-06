@@ -10,11 +10,11 @@
 //   so the button reflects readiness without first having to click and
 //   eat a 409. The server is still authoritative — the click also handles
 //   a fresh 409 and updates reasons accordingly.
-// • Reuses the same completePatientOnboarding + ENROLLMENT_REASON_LABELS
+// • Reuses the same completePatientEnrollment + ENROLLMENT_REASON_LABELS
 //   used by the list page — single source of truth, no behavior fork.
 //
 // Backend unchanged: same /admin/patients/:id/enrollment-check (GET) and
-// /admin/patients/:id/complete-onboarding (POST) endpoints the list page
+// /admin/patients/:id/complete-enrollment (POST) endpoints the list page
 // already uses.
 
 import { useCallback, useEffect, useState } from 'react';
@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import {
   ENROLLMENT_REASON_LABELS,
-  completePatientOnboarding,
+  completePatientEnrollment,
   getEnrollmentCheck,
   type EnrollmentGateReason,
 } from '@/lib/services/practice.service';
@@ -97,7 +97,7 @@ export default function EnrollmentCard({
     setEnrolling(true);
     setError(null);
     try {
-      await completePatientOnboarding(patientId);
+      await completePatientEnrollment(patientId);
       // Success — let the parent refetch the header so this card
       // unmounts on the next render.
       onEnrolled();

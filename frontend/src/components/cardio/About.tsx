@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Mic, Send, Users, ShieldCheck, HeartHandshake, Eye } from 'lucide-react';
@@ -12,6 +13,31 @@ export default function About() {
   const { t } = useLanguage();
   const { isAuthenticated, isLoading } = useAuth();
   const closingHref = !isLoading && isAuthenticated ? '/dashboard' : '/sign-in';
+
+  // Hash-anchor scroll on mount. Without this, navigating from another page
+  // to /about#team lands at the top because images / fonts shift the layout
+  // after the browser's initial anchor resolution. We re-resolve once the
+  // layout has settled, and a few times after, in case images are still
+  // loading and the target moves.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const hash = window.location.hash;
+    if (!hash) return;
+    const id = hash.slice(1);
+    const tryScroll = () => {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    // Initial frame, then again after images/fonts have likely settled.
+    const t0 = requestAnimationFrame(tryScroll);
+    const t1 = window.setTimeout(tryScroll, 300);
+    const t2 = window.setTimeout(tryScroll, 800);
+    return () => {
+      cancelAnimationFrame(t0);
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, []);
 
   const principles = [
     { num: '01', title: t('about.principle1Title'), desc: t('about.principle1Desc') },
@@ -259,7 +285,7 @@ export default function About() {
         </section>
 
         {/* ============ TEAM SECTION ============ */}
-        <section className="w-full bg-[#f5eafa] py-12 md:py-24">
+        <section id="team" className="w-full bg-[#f5eafa] py-12 md:py-24 scroll-mt-20">
           <div className="max-w-[1280px] mx-auto px-4 sm:px-6 md:px-8">
             <div className="flex flex-col items-center gap-4 md:gap-6 mb-10 md:mb-20 text-center">
               <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px]">{t('about.teamTitle')}</h2>
