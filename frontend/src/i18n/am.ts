@@ -966,6 +966,14 @@ const am: Record<TranslationKey, string> = {
   'intake.a2.preeclampsiaTitle': 'የፕሪኤክላምፕሲያ ታሪክ',
   'intake.a2.preeclampsiaDesc': 'በቀድሞ እርግዝና',
   'intake.a2.preeclampsiaAudio': 'በቀድሞ እርግዝና የፕሪኤክላምፕሲያ ታሪክ',
+  'intake.a2.currentlyPregnantQuestion': 'አሁን እርጉዝ ነዎት?',
+  'intake.a2.currentlyPregnantAudio': 'አሁን እርጉዝ ነዎት?',
+  'intake.a2.preeclampsiaQuestion': 'ፕሪኤክላምፕሲያ ኖሮብዎ ያውቃል?',
+  'intake.a2.preeclampsiaQuestionAudio': 'በቀድሞ እርግዝና ፕሪኤክላምፕሲያ ኖሮብዎ ያውቃል?',
+  'intake.a2.preeclampsiaYesDesc': 'አዎ፣ በቀድሞ እርግዝና',
+  'intake.a2.preeclampsiaYesAudio': 'አዎ፣ በቀድሞ እርግዝና ፕሪኤክላምፕሲያ ነበረኝ።',
+  'intake.a2.preeclampsiaNoDesc': 'ፕሪኤክላምፕሲያ ኖሮብኝ አያውቅም',
+  'intake.a2.preeclampsiaNoAudio': 'አይ፣ ፕሪኤክላምፕሲያ ኖሮብኝ አያውቅም።',
 
   // A3 — heart conditions
   'intake.a3.title': 'የልብ ሁኔታዎች',
@@ -1139,6 +1147,7 @@ const am: Record<TranslationKey, string> = {
   'intake.nav.errorDob': 'እባክዎ የትውልድ ቀንዎን ያስገቡ።',
   'intake.nav.errorHeight': 'እባክዎ ምክንያታዊ ቁመት ያስገቡ (ከ3 ft 4 in እስከ 8 ft 2 in ግድም)።',
   'intake.nav.errorPregnancy': 'እባክዎ አዎ ወይም አይ ይምረጡ።',
+  'intake.nav.errorPreeclampsia': 'ለፕሪኤክላምፕሲያ ታሪክ እባክዎ አዎ ወይም አይ ይምረጡ።',
   'intake.nav.errorHfType': 'እባክዎ አንዱን ይምረጡ — እርግጠኛ አይደለሁም መልካም ነው።',
   'intake.nav.errorFreq': '{name} ምን ያህል ጊዜ እንደሚወስዱ ይምረጡ።',
   'intake.nav.errorSubmit': 'መረጃዎን በማስገባት ላይ የሆነ ችግር ተፈጥሯል።',

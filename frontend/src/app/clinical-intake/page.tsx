@@ -555,38 +555,46 @@ function A2Pregnancy({ state, setState }: StepProps) {
         audio={t('intake.a2.audio')}
       />
 
-      {/* Pregnancy is a binary clinical question — Yes / No only. The prior
-          "Not applicable" option was confusing for female patients (the
-          step is gated to gender === FEMALE upstream). */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <ChoiceCard
-          icon={<Baby className="w-6 h-6" />}
-          title={t('intake.a2.yesTitle')}
-          description={t('intake.a2.yesDesc')}
-          selected={state.isPregnant === true}
-          onClick={() => setState((p) => ({ ...p, isPregnant: true }))}
-          audioText={t('intake.a2.yesAudio')}
+      {/* Two independent yes/no questions for FEMALE patients:
+          1. Are you currently pregnant? (drives current-pregnancy alert rules)
+          2. Have you ever had preeclampsia? (long-term risk marker — relevant
+             outside pregnancy too, per CLINICAL_SPEC §3)
+          The preeclampsia question used to live INSIDE the "currently pregnant
+          = Yes" panel, which made it unreachable for non-pregnant women with
+          a documented history. Splitting them keeps the clinical question
+          accurate for both states. */}
+      <div>
+        <SectionLabel
+          text={t('intake.a2.currentlyPregnantQuestion')}
+          audio={t('intake.a2.currentlyPregnantAudio')}
         />
-        <ChoiceCard
-          icon={<Heart className="w-6 h-6" />}
-          title={t('intake.a2.noTitle')}
-          description={t('intake.a2.noDesc')}
-          selected={state.isPregnant === false}
-          onClick={() =>
-            setState((p) => ({
-              ...p,
-              isPregnant: false,
-              // Due-date and preeclampsia history live inside the "Yes"
-              // panel and are inaccessible once the patient picks No, so
-              // clear both here. Without this, a stale historyPreeclampsia
-              // toggle from a mistaken "Yes" earlier in the session would
-              // still ride through to submit.
-              pregnancyDueDate: undefined,
-              historyPreeclampsia: false,
-            }))
-          }
-          audioText={t('intake.a2.noAudio')}
-        />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <ChoiceCard
+            icon={<Baby className="w-6 h-6" />}
+            title={t('intake.a2.yesTitle')}
+            description={t('intake.a2.yesDesc')}
+            selected={state.isPregnant === true}
+            onClick={() => setState((p) => ({ ...p, isPregnant: true }))}
+            audioText={t('intake.a2.yesAudio')}
+          />
+          <ChoiceCard
+            icon={<Heart className="w-6 h-6" />}
+            title={t('intake.a2.noTitle')}
+            description={t('intake.a2.noDesc')}
+            selected={state.isPregnant === false}
+            onClick={() =>
+              setState((p) => ({
+                ...p,
+                isPregnant: false,
+                // Due date is gated behind the Yes panel so it's safe to
+                // wipe here. historyPreeclampsia is its own independent
+                // question now and is left untouched.
+                pregnancyDueDate: undefined,
+              }))
+            }
+            audioText={t('intake.a2.noAudio')}
+          />
+        </div>
       </div>
 
       <AnimatePresence>
@@ -595,37 +603,49 @@ function A2Pregnancy({ state, setState }: StepProps) {
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
-            className="space-y-5"
           >
-            <div>
-              <SectionLabel text={t('intake.a2.dueDateLabel')} audio={t('intake.a2.dueDateAudio')} />
-              <input
-                type="date"
-                aria-label={t('intake.a2.dueDateLabel')}
-                value={state.pregnancyDueDate ?? ''}
-                onChange={(e) => setState((p) => ({ ...p, pregnancyDueDate: e.target.value || undefined }))}
-                className="w-full h-14 px-5 rounded-xl text-[15px] outline-none transition box-border"
-                style={{
-                  border: '2px solid var(--brand-border)',
-                  color: 'var(--brand-text-primary)',
-                  backgroundColor: 'white',
-                  colorScheme: 'light',
-                }}
-              />
-            </div>
-
-            <ChoiceCard
-              icon={<Shield className="w-5 h-5" />}
-              title={t('intake.a2.preeclampsiaTitle')}
-              description={t('intake.a2.preeclampsiaDesc')}
-              selected={state.historyPreeclampsia === true}
-              onClick={() => setState((p) => ({ ...p, historyPreeclampsia: !p.historyPreeclampsia }))}
-              audioText={t('intake.a2.preeclampsiaAudio')}
-              compact
+            <SectionLabel text={t('intake.a2.dueDateLabel')} audio={t('intake.a2.dueDateAudio')} />
+            <input
+              type="date"
+              aria-label={t('intake.a2.dueDateLabel')}
+              value={state.pregnancyDueDate ?? ''}
+              onChange={(e) => setState((p) => ({ ...p, pregnancyDueDate: e.target.value || undefined }))}
+              className="w-full h-14 px-5 rounded-xl text-[15px] outline-none transition box-border"
+              style={{
+                border: '2px solid var(--brand-border)',
+                color: 'var(--brand-text-primary)',
+                backgroundColor: 'white',
+                colorScheme: 'light',
+              }}
             />
           </motion.div>
         )}
       </AnimatePresence>
+
+      <div>
+        <SectionLabel
+          text={t('intake.a2.preeclampsiaQuestion')}
+          audio={t('intake.a2.preeclampsiaQuestionAudio')}
+        />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <ChoiceCard
+            icon={<Shield className="w-6 h-6" />}
+            title={t('intake.a2.yesTitle')}
+            description={t('intake.a2.preeclampsiaYesDesc')}
+            selected={state.historyPreeclampsia === true}
+            onClick={() => setState((p) => ({ ...p, historyPreeclampsia: true }))}
+            audioText={t('intake.a2.preeclampsiaYesAudio')}
+          />
+          <ChoiceCard
+            icon={<Heart className="w-6 h-6" />}
+            title={t('intake.a2.noTitle')}
+            description={t('intake.a2.preeclampsiaNoDesc')}
+            selected={state.historyPreeclampsia === false}
+            onClick={() => setState((p) => ({ ...p, historyPreeclampsia: false }))}
+            audioText={t('intake.a2.preeclampsiaNoAudio')}
+          />
+        </div>
+      </div>
     </div>
   );
 }
@@ -2176,9 +2196,15 @@ function ClinicalIntakeWizard() {
         return;
       }
     }
-    if (step === 'A2' && state.isPregnant !== true && state.isPregnant !== false) {
-      setSubmitError({ kind: 'key', key: 'intake.nav.errorPregnancy' });
-      return;
+    if (step === 'A2') {
+      if (state.isPregnant !== true && state.isPregnant !== false) {
+        setSubmitError({ kind: 'key', key: 'intake.nav.errorPregnancy' });
+        return;
+      }
+      if (state.historyPreeclampsia !== true && state.historyPreeclampsia !== false) {
+        setSubmitError({ kind: 'key', key: 'intake.nav.errorPreeclampsia' });
+        return;
+      }
     }
     if (step === 'A4' && !state.heartFailureType) {
       setSubmitError({ kind: 'key', key: 'intake.nav.errorHfType' });

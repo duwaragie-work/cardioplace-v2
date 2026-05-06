@@ -964,6 +964,18 @@ const en = {
   'intake.a2.preeclampsiaTitle': 'History of preeclampsia',
   'intake.a2.preeclampsiaDesc': 'In a previous pregnancy',
   'intake.a2.preeclampsiaAudio': 'History of preeclampsia in a previous pregnancy',
+  // Phase/26 — split A2 into two independent questions. The pregnancy
+  // question gates current-pregnancy alert rules; the preeclampsia
+  // question is a long-term marker per CLINICAL_SPEC §3 that applies
+  // even outside an active pregnancy.
+  'intake.a2.currentlyPregnantQuestion': 'Are you currently pregnant?',
+  'intake.a2.currentlyPregnantAudio': 'Are you currently pregnant?',
+  'intake.a2.preeclampsiaQuestion': 'Have you ever had preeclampsia?',
+  'intake.a2.preeclampsiaQuestionAudio': 'Have you ever had preeclampsia in a past pregnancy?',
+  'intake.a2.preeclampsiaYesDesc': 'Yes, in a past pregnancy',
+  'intake.a2.preeclampsiaYesAudio': 'Yes, I had preeclampsia in a past pregnancy.',
+  'intake.a2.preeclampsiaNoDesc': "I've never had preeclampsia",
+  'intake.a2.preeclampsiaNoAudio': "No, I've never had preeclampsia.",
 
   // A3 — heart conditions
   'intake.a3.title': 'Heart conditions',
@@ -1140,6 +1152,7 @@ const en = {
   'intake.nav.errorDob': 'Please enter your date of birth.',
   'intake.nav.errorHeight': 'Please enter a realistic height (about 3 ft 4 in to 8 ft 2 in).',
   'intake.nav.errorPregnancy': 'Please pick Yes or No.',
+  'intake.nav.errorPreeclampsia': 'Please pick Yes or No for preeclampsia history.',
   'intake.nav.errorHfType': 'Please pick one — Not sure is OK.',
   'intake.nav.errorFreq': 'Pick how often you take {name}.',
   'intake.nav.errorSubmit': 'Something went wrong submitting your profile.',

@@ -963,6 +963,14 @@ const fr: Record<TranslationKey, string> = {
   'intake.a2.preeclampsiaTitle': 'Antécédents de prééclampsie',
   'intake.a2.preeclampsiaDesc': 'Lors d\'une grossesse précédente',
   'intake.a2.preeclampsiaAudio': 'Antécédents de prééclampsie lors d\'une grossesse précédente',
+  'intake.a2.currentlyPregnantQuestion': 'Êtes-vous actuellement enceinte ?',
+  'intake.a2.currentlyPregnantAudio': 'Êtes-vous actuellement enceinte ?',
+  'intake.a2.preeclampsiaQuestion': 'Avez-vous déjà eu une prééclampsie ?',
+  'intake.a2.preeclampsiaQuestionAudio': 'Avez-vous déjà eu une prééclampsie lors d\'une grossesse précédente ?',
+  'intake.a2.preeclampsiaYesDesc': 'Oui, lors d\'une grossesse précédente',
+  'intake.a2.preeclampsiaYesAudio': 'Oui, j\'ai eu une prééclampsie lors d\'une grossesse précédente.',
+  'intake.a2.preeclampsiaNoDesc': 'Je n\'ai jamais eu de prééclampsie',
+  'intake.a2.preeclampsiaNoAudio': 'Non, je n\'ai jamais eu de prééclampsie.',
 
   // A3 — heart conditions
   'intake.a3.title': 'Conditions cardiaques',
@@ -1136,6 +1144,7 @@ const fr: Record<TranslationKey, string> = {
   'intake.nav.errorDob': 'Veuillez saisir votre date de naissance.',
   'intake.nav.errorHeight': 'Veuillez entrer une taille réaliste (environ 3 ft 4 in à 8 ft 2 in).',
   'intake.nav.errorPregnancy': 'Veuillez choisir Oui ou Non.',
+  'intake.nav.errorPreeclampsia': 'Veuillez choisir Oui ou Non pour les antécédents de prééclampsie.',
   'intake.nav.errorHfType': 'Veuillez en choisir une — Je ne sais pas convient.',
   'intake.nav.errorFreq': 'Choisissez à quelle fréquence vous prenez {name}.',
   'intake.nav.errorSubmit': 'Une erreur est survenue lors de l\'envoi de votre profil.',
