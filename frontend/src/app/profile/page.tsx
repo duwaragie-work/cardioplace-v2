@@ -413,9 +413,9 @@ function PersonalInfoModal({
     if (!dirty || saving) return;
     // Same DOB rules as onboarding — 18+, not future, not today, sane year.
     if (dateOfBirth) {
-      const dobError = validateDateOfBirth(dateOfBirth);
-      if (dobError) {
-        setError(dobError);
+      const dobErrKey = validateDateOfBirth(dateOfBirth);
+      if (dobErrKey) {
+        setError(t(dobErrKey));
         return;
       }
     }

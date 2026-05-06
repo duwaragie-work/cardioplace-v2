@@ -427,6 +427,12 @@ const en = {
   'profile.commPrefAudio': 'Audio first',
   'profile.saving': 'Saving…',
   'profile.saveError': 'Could not save changes.',
+  // DOB validator messages (shared by onboarding, profile editor, intake A1).
+  'dob.errInvalid': "That doesn't look like a valid date. Please pick from the calendar.",
+  'dob.errFuture': 'That date is in the future. Please pick the day you were born.',
+  'dob.errToday': "Today can't be your date of birth. Please pick the day you were born.",
+  'dob.errUnder18': 'Cardioplace is for adults 18 and older. Please double-check your date of birth.',
+  'dob.errAncient': "That date doesn't look right. Please check the year and try again.",
   'profile.saveChangesBtn': 'Save changes',
   'profile.careTeam': 'Your care team',
   'profile.personalInfoSection': 'Personal info',

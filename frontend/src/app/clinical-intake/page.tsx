@@ -54,6 +54,7 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { shouldShowOnboardingForUser } from '@/lib/onboarding';
 import { useLanguage } from '@/contexts/LanguageContext';
+import type { TranslationKey } from '@/i18n';
 import { getProfile as getAuthProfile } from '@/lib/services/auth.service';
 import { validateDateOfBirth, maxDobIso } from '@/lib/dob-validator';
 import {
@@ -1921,7 +1922,15 @@ function ClinicalIntakeWizard() {
   const [pendingDedup, setPendingDedup] = useState<DedupConflict[]>([]);
   const [showExitSave, setShowExitSave] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState('');
+  // Stored as a translation-key (+ optional interpolation values) OR a raw
+  // backend message — never as the rendered string. We translate at render
+  // time so the message updates if the patient switches language while the
+  // error is on screen.
+  const [submitError, setSubmitError] = useState<
+    | { kind: 'key'; key: TranslationKey; values?: Record<string, string> }
+    | { kind: 'raw'; text: string }
+    | null
+  >(null);
   const [bootstrapping, setBootstrapping] = useState(true);
   // True only when we hit the route without ?step= AND the patient already
   // has a profile saved — in that case we render the "you're all set" page
@@ -2131,33 +2140,33 @@ function ClinicalIntakeWizard() {
   const goNext = async () => {
     // Validation gates.
     if (step === 'A1') {
-      if (!state.gender) { setSubmitError(t('intake.nav.errorGender')); return; }
+      if (!state.gender) { setSubmitError({ kind: 'key', key: 'intake.nav.errorGender' }); return; }
       if (!state.dateOfBirth) {
-        setSubmitError(t('intake.nav.errorDob'));
+        setSubmitError({ kind: 'key', key: 'intake.nav.errorDob' });
         return;
       }
-      const dobError = validateDateOfBirth(state.dateOfBirth);
-      if (dobError) {
-        setSubmitError(dobError);
+      const dobErrKey = validateDateOfBirth(state.dateOfBirth);
+      if (dobErrKey) {
+        setSubmitError({ kind: 'key', key: dobErrKey });
         return;
       }
       if (!state.heightCm || state.heightCm < 100 || state.heightCm > 250) {
-        setSubmitError(t('intake.nav.errorHeight'));
+        setSubmitError({ kind: 'key', key: 'intake.nav.errorHeight' });
         return;
       }
     }
     if (step === 'A4' && !state.heartFailureType) {
-      setSubmitError(t('intake.nav.errorHfType'));
+      setSubmitError({ kind: 'key', key: 'intake.nav.errorHfType' });
       return;
     }
     if (step === 'A9') {
       const missingFreq = state.selectedMedications.find((m) => !m.frequency);
       if (missingFreq) {
-        setSubmitError(t('intake.nav.errorFreq').replace('{name}', missingFreq.drugName));
+        setSubmitError({ kind: 'key', key: 'intake.nav.errorFreq', values: { name: missingFreq.drugName } });
         return;
       }
     }
-    setSubmitError('');
+    setSubmitError(null);
 
     // A6 (combos — the last med screen) → A9 transition: surface dedup
     // conflicts before letting the user proceed, so combo entries can be
@@ -2183,7 +2192,7 @@ function ClinicalIntakeWizard() {
   };
 
   const goBack = () => {
-    setSubmitError('');
+    setSubmitError(null);
     if (step === 'A0b') {
       router.push('/dashboard');
       return;
@@ -2196,7 +2205,7 @@ function ClinicalIntakeWizard() {
 
   const goTo = (target: IntakeStepKey) => {
     if (!flow.includes(target)) return;
-    setSubmitError('');
+    setSubmitError(null);
     const targetIdx = flow.indexOf(target);
     setDirection(targetIdx > stepIndex ? 1 : -1);
     persistStep(target);
@@ -2204,7 +2213,7 @@ function ClinicalIntakeWizard() {
 
   const handleSubmit = async () => {
     if (submitting) return;
-    setSubmitError('');
+    setSubmitError(null);
     setSubmitting(true);
     try {
       await saveIntakeProfile(buildProfilePayload(state));
@@ -2221,7 +2230,11 @@ function ClinicalIntakeWizard() {
       setStep('A11');
       if (user?.id) clearDraft(user.id);
     } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : t('intake.nav.errorSubmit'));
+      setSubmitError(
+        e instanceof Error
+          ? { kind: 'raw', text: e.message }
+          : { kind: 'key', key: 'intake.nav.errorSubmit' },
+      );
     } finally {
       setSubmitting(false);
     }
@@ -2434,7 +2447,16 @@ function ClinicalIntakeWizard() {
             className="mt-5 text-[13px] text-center font-semibold px-4 py-2 rounded-lg"
             style={{ color: 'var(--brand-alert-red)', backgroundColor: 'var(--brand-alert-red-light)' }}
           >
-            {submitError}
+            {(() => {
+              if (submitError.kind === 'raw') return submitError.text;
+              let s = t(submitError.key);
+              if (submitError.values) {
+                for (const [k, v] of Object.entries(submitError.values)) {
+                  s = s.replace(`{${k}}`, v);
+                }
+              }
+              return s;
+            })()}
           </p>
         )}
       </main>
