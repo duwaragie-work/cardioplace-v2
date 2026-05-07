@@ -326,6 +326,7 @@ export default function RegisterPage() {
               <div className="w-full max-w-105 flex rounded-lg border border-[#e5d9f2] overflow-hidden">
                 <button
                   type="button"
+                  data-testid="signin-magic-tab"
                   onClick={() => { setAuthMode("magic_link"); setErrorKey(null); setStatusKey(null); setOtpSent(false); setOtp(""); }}
                   className={`flex-1 py-2.5 text-sm font-semibold transition-colors cursor-pointer ${authMode === "magic_link" ? "bg-[#7B00E0] text-white" : "bg-white text-[#6B00D1]"}`}
                 >
@@ -333,6 +334,7 @@ export default function RegisterPage() {
                 </button>
                 <button
                   type="button"
+                  data-testid="signin-otp-tab"
                   onClick={() => { setAuthMode("otp"); setErrorKey(null); setStatusKey(null); setMagicLinkSent(false); }}
                   className={`flex-1 py-2.5 text-sm font-semibold transition-colors cursor-pointer ${authMode === "otp" ? "bg-[#7B00E0] text-white" : "bg-white text-[#6B00D1]"}`}
                 >
@@ -347,6 +349,7 @@ export default function RegisterPage() {
                 </label>
                 <input
                   id="signin-email"
+                  data-testid="signin-email-input"
                   type="email"
                   value={email}
                   onChange={(e) => {
@@ -376,6 +379,7 @@ export default function RegisterPage() {
                   <>
                     <button
                       type="button"
+                      data-testid="signin-send-otp-btn"
                       onClick={otpSent ? handleResendOtp : handleSendOtp}
                       disabled={!emailIsValid || isRequestingOtp || isResendingOtp || (otpSent && resendCooldown > 0)}
                       className="w-full h-12 lg:h-14 rounded-lg flex items-center justify-center border border-[#6B00D1] mt-3 mb-7 transition-opacity enabled:cursor-pointer enabled:hover:bg-[#7B00E0]/5 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -401,6 +405,7 @@ export default function RegisterPage() {
                         <div className="relative mb-1">
                           <input
                             id="signin-otp"
+                            data-testid="signin-otp-input"
                             type={showOtp ? "text" : "password"}
                             inputMode="numeric"
                             autoComplete="one-time-code"
@@ -457,6 +462,7 @@ export default function RegisterPage() {
                 {/* Feedback messages — <output> has implicit role="status". */}
                 {(statusMessage || errorMessage) && (
                   <output
+                    data-testid={errorMessage ? 'signin-error' : 'signin-status'}
                     className={`block mt-2 text-xs lg:text-sm ${errorMessage ? "text-red-500" : "text-green-500"}`}
                   >
                     {errorMessage || statusMessage}
@@ -474,6 +480,7 @@ export default function RegisterPage() {
                 <div className="pt-4 w-full max-w-105">
                   <button
                     type="button"
+                    data-testid="signin-verify-btn"
                     onClick={handleVerifyOtp}
                     disabled={!canVerifyOtp || isVerifyingOtp}
                     className="w-full h-12 lg:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm lg:text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"

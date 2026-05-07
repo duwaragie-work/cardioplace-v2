@@ -236,6 +236,7 @@ export default function RegisterPage() {
                 </label>
                 <input
                   id="signin-email"
+                  data-testid="admin-signin-email"
                   type="email"
                   value={email}
                   onChange={(e) => {
@@ -262,6 +263,7 @@ export default function RegisterPage() {
                     Send / Resend so older users see one obvious target. */}
                 <button
                   type="button"
+                  data-testid="admin-signin-send-otp"
                   onClick={otpSent ? handleResendOtp : handleSendOtp}
                   disabled={!emailIsValid || isRequestingOtp || isResendingOtp || (otpSent && resendCooldown > 0)}
                   className="w-full h-12 lg:h-14 rounded-lg flex items-center justify-center border border-[#6B00D1] mt-3 mb-7 transition-opacity enabled:cursor-pointer enabled:hover:bg-[#7B00E0]/5 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -287,6 +289,7 @@ export default function RegisterPage() {
                     <div className="relative mb-1">
                       <input
                         id="signin-otp"
+                        data-testid="admin-signin-otp"
                         type={showOtp ? "text" : "password"}
                         inputMode="numeric"
                         autoComplete="one-time-code"
@@ -338,6 +341,7 @@ export default function RegisterPage() {
               <div className="pt-4 w-full max-w-105">
                 <button
                   type="button"
+                  data-testid="admin-signin-verify"
                   onClick={handleVerifyOtp}
                   disabled={!canVerifyOtp || isVerifyingOtp}
                   className="w-full h-12 lg:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm lg:text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
