@@ -153,3 +153,42 @@ export async function uploadMedicationPhoto(file: File): Promise<MedOcrSuccess> 
       throw new MedOcrError('NETWORK', `Server returned ${res.status}`);
   }
 }
+
+// ─── Drug-name enrichment (RxNorm + DailyMed + OpenFDA + Gemini) ──────────
+
+export interface DrugEnrichment {
+  rxcui: string;
+  canonicalDrugName: string;
+  pillImageUrl: string | null;
+  plainLanguageDescription: string | null;
+  pregnancy: { category: string | null; warning: string | null } | null;
+  source: 'rxnorm+dailymed+openfda';
+}
+
+/**
+ * Resolve a freeform drug name into canonical name + pill image + plain-language
+ * description. Returns null when RxNorm doesn't recognise the drug or when the
+ * backend is rate-limited / down — caller falls back to showing the raw name.
+ */
+export async function enrichDrugName(
+  drugName: string,
+  locale: string = 'en',
+): Promise<DrugEnrichment | null> {
+  const trimmed = drugName.trim();
+  if (!trimmed) return null;
+
+  let res: Response;
+  try {
+    res = await fetchWithAuth(`${API}/api/v2/medications/enrich`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ drugName: trimmed, locale }),
+    });
+  } catch {
+    return null;
+  }
+
+  if (!res.ok) return null;
+  const body = (await res.json().catch(() => null)) as DrugEnrichment | null;
+  return body && typeof body === 'object' && 'canonicalDrugName' in body ? body : null;
+}

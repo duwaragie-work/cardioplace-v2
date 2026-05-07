@@ -427,6 +427,12 @@ const en = {
   'profile.commPrefAudio': 'Audio first',
   'profile.saving': 'Saving…',
   'profile.saveError': 'Could not save changes.',
+  // DOB validator messages (shared by onboarding, profile editor, intake A1).
+  'dob.errInvalid': "That doesn't look like a valid date. Please pick from the calendar.",
+  'dob.errFuture': 'That date is in the future. Please pick the day you were born.',
+  'dob.errToday': "Today can't be your date of birth. Please pick the day you were born.",
+  'dob.errUnder18': 'Cardioplace is for adults 18 and older. Please double-check your date of birth.',
+  'dob.errAncient': "That date doesn't look right. Please check the year and try again.",
   'profile.saveChangesBtn': 'Save changes',
   'profile.careTeam': 'Your care team',
   'profile.personalInfoSection': 'Personal info',
@@ -447,6 +453,7 @@ const en = {
   'profile.freqOnceDaily': 'One time a day',
   'profile.freqTwiceDaily': 'Two times a day',
   'profile.freqThreeTimesDaily': 'Three times a day',
+  'profile.freqAsNeeded': 'As needed',
   'profile.freqUnknown': 'Frequency unknown',
   'profile.hfHfrEf': 'HFrEF (reduced ejection fraction)',
   'profile.hfHfpEf': 'HFpEF (preserved ejection fraction)',
@@ -931,9 +938,13 @@ const en = {
   'intake.a1.genderMale': 'Male',
   'intake.a1.genderFemale': 'Female',
   'intake.a1.genderOther': 'Other',
-  'intake.a1.heightQuestion': 'How tall are you? (centimeters)',
-  'intake.a1.heightAudio': 'How tall are you, in centimeters?',
-  'intake.a1.heightHint': 'Roughly 5 ft = 152 cm · 5 ft 5 in = 165 cm · 6 ft = 183 cm',
+  'intake.a1.heightQuestion': 'How tall are you?',
+  'intake.a1.heightAudio': 'How tall are you?',
+  'intake.a1.heightHint': 'Pick the unit you prefer. We store the value in centimeters either way.',
+  'intake.a1.heightFeetLabel': 'Feet',
+  'intake.a1.heightInchesLabel': 'Inches',
+  'intake.a1.dobQuestion': 'When were you born?',
+  'intake.a1.dobHint': 'Your date of birth helps us tailor blood-pressure thresholds and alerts to your age.',
 
   // A2 — pregnancy
   'intake.a2.title': 'Pregnancy status',
@@ -953,6 +964,18 @@ const en = {
   'intake.a2.preeclampsiaTitle': 'History of preeclampsia',
   'intake.a2.preeclampsiaDesc': 'In a previous pregnancy',
   'intake.a2.preeclampsiaAudio': 'History of preeclampsia in a previous pregnancy',
+  // Phase/26 — split A2 into two independent questions. The pregnancy
+  // question gates current-pregnancy alert rules; the preeclampsia
+  // question is a long-term marker per CLINICAL_SPEC §3 that applies
+  // even outside an active pregnancy.
+  'intake.a2.currentlyPregnantQuestion': 'Are you currently pregnant?',
+  'intake.a2.currentlyPregnantAudio': 'Are you currently pregnant?',
+  'intake.a2.preeclampsiaQuestion': 'Have you ever had preeclampsia?',
+  'intake.a2.preeclampsiaQuestionAudio': 'Have you ever had preeclampsia in a past pregnancy?',
+  'intake.a2.preeclampsiaYesDesc': 'Yes, in a past pregnancy',
+  'intake.a2.preeclampsiaYesAudio': 'Yes, I had preeclampsia in a past pregnancy.',
+  'intake.a2.preeclampsiaNoDesc': "I've never had preeclampsia",
+  'intake.a2.preeclampsiaNoAudio': "No, I've never had preeclampsia.",
 
   // A3 — heart conditions
   'intake.a3.title': 'Heart conditions',
@@ -1001,6 +1024,19 @@ const en = {
   'intake.a5.groupBeta': 'Beta-blockers',
   'intake.a5.groupCcb': 'Calcium channel blockers',
   'intake.a5.audioAlsoKnown': 'also known as',
+  // Phase/28 — "Your other medications" list (OCR / freeform meds shown
+  // beneath the catalog tiles on A5 + A8). Tile body click toggles, edit
+  // pencil opens a modal, trash deletes. Same UI shows on profile re-edit.
+  'intake.a5.otherMedsTitle': 'Your other medications',
+  'intake.a5.otherMedEdit': 'Edit',
+  'intake.a5.otherMedDelete': 'Remove',
+  'intake.a5.otherMedEditModalTitle': 'Edit medication',
+  'intake.a5.otherMedDrugLabel': 'Medication name',
+  'intake.a5.otherMedFrequencyLabel': 'How often',
+  'intake.a5.otherMedSave': 'Save',
+  'intake.a5.otherMedCancel': 'Cancel',
+  'intake.a5.otherMedDupError': '{name} is already on your list. Pick a different name.',
+  'intake.a5.otherMedCatalogHint': '{name} is in the catalog — tap that tile instead so it benefits from verified contraindication checks.',
 
   // A6 — combination pills
   'intake.a6.title': 'Combination pills',
@@ -1049,6 +1085,7 @@ const en = {
   'intake.a9.freqOnce': 'One time',
   'intake.a9.freqTwice': 'Two times',
   'intake.a9.freqThree': 'Three times',
+  'intake.a9.freqAsNeeded': 'As needed',
   'intake.a9.freqUnsure': 'Not sure',
   'intake.a9.medAudio': 'How many times a day do you take {name}?',
 
@@ -1061,6 +1098,7 @@ const en = {
   'intake.a10.sectionConditions': 'Conditions',
   'intake.a10.sectionMedications': 'Medications',
   'intake.a10.rowGender': 'Gender',
+  'intake.a10.rowDob': 'Date of birth',
   'intake.a10.rowHeight': 'Height',
   'intake.a10.rowPregnancy': 'Pregnancy',
   'intake.a10.pregnancyYes': 'Yes',
@@ -1082,8 +1120,8 @@ const en = {
   'intake.a10.edit': 'Edit',
 
   // A11 — complete
-  'intake.a11.title': 'Thank you — we got it',
-  'intake.a11.body': "Your care team will review your profile within 48 to 72 hours. You can use the app normally in the meantime — we'll let you know when review is complete.",
+  'intake.a11.title': "Thank you, we got it",
+  'intake.a11.body': "Your care team will review your profile within 48 to 72 hours. You can use the app normally in the meantime, and we'll let you know when review is complete.",
   'intake.a11.cta': 'Go to dashboard',
 
   // Exit save modal
@@ -1111,7 +1149,10 @@ const en = {
   'intake.nav.submit': 'Submit profile',
   'intake.nav.continue': 'Continue',
   'intake.nav.errorGender': 'Please select a gender.',
-  'intake.nav.errorHeight': 'Please enter a height between 100 and 250 cm.',
+  'intake.nav.errorDob': 'Please enter your date of birth.',
+  'intake.nav.errorHeight': 'Please enter a realistic height (about 3 ft 4 in to 8 ft 2 in).',
+  'intake.nav.errorPregnancy': 'Please pick Yes or No.',
+  'intake.nav.errorPreeclampsia': 'Please pick Yes or No for preeclampsia history.',
   'intake.nav.errorHfType': 'Please pick one — Not sure is OK.',
   'intake.nav.errorFreq': 'Pick how often you take {name}.',
   'intake.nav.errorSubmit': 'Something went wrong submitting your profile.',
@@ -1120,6 +1161,7 @@ const en = {
   'intake.freq.once': 'One time a day',
   'intake.freq.twice': 'Two times a day',
   'intake.freq.three': 'Three times a day',
+  'intake.freq.asNeeded': 'As needed',
   'intake.freq.unsure': 'Not sure',
   'intake.freq.unset': 'Set frequency',
 
@@ -1220,15 +1262,24 @@ const en = {
   'ocr.med.rowFrequencyLabel': 'How often',
   'ocr.med.badgeInCatalog': 'In catalog',
   'ocr.med.badgeFreeform': 'Freeform',
+  'ocr.med.badgeAlready': 'Already in your list',
+  'ocr.med.verifying': 'Verifying…',
+  'ocr.med.useCanonical': 'Use {name}',
+  'ocr.med.willUpdateFreq': 'Will update frequency: {from} → {to}',
   'ocr.med.skip': 'Skip',
   'ocr.med.unskip': 'Add back',
   'ocr.med.addAll': 'Add {count}',
   'ocr.med.addAllEmpty': 'Add medications',
+  'ocr.med.addNothing': 'Nothing to add',
+  'ocr.med.addNothingHelp': 'These medications are already on your list. Change a frequency to update an existing one, or tap Cancel.',
+  'ocr.med.updateOnly': 'Update {count}',
+  'ocr.med.addAndUpdate': 'Add {add} + Update {update}',
   'ocr.med.cancel': 'Cancel',
   'ocr.med.retake': 'Re-take',
   'ocr.med.freqOnce': 'Once a day',
   'ocr.med.freqTwice': 'Twice a day',
   'ocr.med.freqThrice': 'Three times a day',
+  'ocr.med.freqAsNeeded': 'As needed',
   'ocr.med.freqUnsure': "I'm not sure",
   'ocr.med.errLowConfidence': "Couldn't read the photo clearly. Try better lighting or a closer shot.",
   'ocr.med.errEmpty': "I didn't find any medications in that photo. Try again with the label fully visible.",

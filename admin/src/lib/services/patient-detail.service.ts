@@ -17,6 +17,10 @@ export interface PatientProfile {
   userId: string
   gender: Gender | null
   heightCm: number | null
+  // From User.dateOfBirth (not PatientProfile). Surfaced in this DTO so the
+  // admin profile tab can display age in the Demographics section.
+  // Read-only — patients self-edit via clinical-intake A1 or profile edit.
+  dateOfBirth: string | null
   isPregnant: boolean
   pregnancyDueDate: string | null
   historyPreeclampsia: boolean
@@ -58,6 +62,7 @@ export type MedicationFrequency =
   | 'ONCE_DAILY'
   | 'TWICE_DAILY'
   | 'THREE_TIMES_DAILY'
+  | 'AS_NEEDED'
   | 'UNSURE'
 
 export type MedicationSource =

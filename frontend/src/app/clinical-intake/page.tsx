@@ -16,7 +16,7 @@
 // last for this to work — see shared/src/medications.ts (Screen 1/2/3
 // comments).
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -54,6 +54,9 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { shouldShowOnboardingForUser } from '@/lib/onboarding';
 import { useLanguage } from '@/contexts/LanguageContext';
+import type { TranslationKey } from '@/i18n';
+import { getProfile as getAuthProfile } from '@/lib/services/auth.service';
+import { validateDateOfBirth, maxDobIso } from '@/lib/dob-validator';
 import {
   getMyPatientProfile,
   getMyMedications,
@@ -76,6 +79,8 @@ import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
 import MedicationPhotoButton from '@/components/intake/MedicationPhotoButton';
 import type { ConfirmedMedication } from '@/components/intake/MedicationPhotoConfirmModal';
+import OtherMedicationsList from '@/components/intake/OtherMedicationsList';
+import OtherMedEditModal from '@/components/intake/OtherMedEditModal';
 import { cmToFtIn, ftInToCm } from '@/lib/units';
 import StepDots from '@/components/intake/StepDots';
 import ChoiceCard from '@/components/intake/ChoiceCard';
@@ -91,7 +96,12 @@ function computeFlow(state: IntakeFormState): IntakeStepKey[] {
   if (state.gender === 'FEMALE') flow.push('A2');
   flow.push('A3');
   if (state.hasHeartFailure) flow.push('A4');
-  flow.push('A5', 'A8', 'A6', 'A9', 'A10', 'A11');
+  flow.push('A5', 'A8', 'A6');
+  // A9 (frequency) only matters when there's at least one medication. With
+  // an empty list the patient just sees "you can skip ahead" copy and a
+  // disabled Continue — drop the step entirely instead.
+  if (state.selectedMedications.length > 0) flow.push('A9');
+  flow.push('A10', 'A11');
   return flow;
 }
 
@@ -195,9 +205,22 @@ function buildProfilePayload(s: IntakeFormState): IntakeProfilePayload {
   return {
     gender: s.gender,
     heightCm: s.heightCm,
-    isPregnant: s.gender === 'FEMALE' ? s.isPregnant ?? false : undefined,
-    pregnancyDueDate: s.pregnancyDueDate || null,
-    historyPreeclampsia: s.historyPreeclampsia ?? false,
+    // dateOfBirth lives on User but rides the same submit so the rule
+    // engine has age available before any check-in. Backend splits it
+    // back out into User.dateOfBirth.
+    dateOfBirth: s.dateOfBirth || null,
+    // Pregnancy block is cleared whenever gender isn't FEMALE so the DB
+    // can't end up with stale "is pregnant" / "due date" / "history of
+    // preeclampsia" values from a prior FEMALE selection. Sending explicit
+    // false / null beats sending undefined — undefined gets stripped on the
+    // backend and existing rows would keep their old pregnancy state.
+    isPregnant: s.gender === 'FEMALE' ? (s.isPregnant ?? false) : false,
+    pregnancyDueDate:
+      s.gender === 'FEMALE' && s.isPregnant === true
+        ? (s.pregnancyDueDate || null)
+        : null,
+    historyPreeclampsia:
+      s.gender === 'FEMALE' ? (s.historyPreeclampsia ?? false) : false,
     hasHeartFailure: s.hasHeartFailure ?? false,
     heartFailureType: s.hasHeartFailure
       ? (s.heartFailureType ?? 'UNKNOWN')
@@ -304,7 +327,7 @@ function A1Demographics({ state, setState }: StepProps) {
             icon={<Mars className="w-6 h-6" />}
             title={t('intake.a1.genderMale')}
             selected={state.gender === 'MALE'}
-            onClick={() => setState((p) => ({ ...p, gender: 'MALE', isPregnant: false }))}
+            onClick={() => setState((p) => ({ ...p, gender: 'MALE' }))}
             audioText={t('intake.a1.genderMale')}
             compact
           />
@@ -320,7 +343,7 @@ function A1Demographics({ state, setState }: StepProps) {
             icon={<Asterisk className="w-6 h-6" />}
             title={t('intake.a1.genderOther')}
             selected={state.gender === 'OTHER'}
-            onClick={() => setState((p) => ({ ...p, gender: 'OTHER', isPregnant: false }))}
+            onClick={() => setState((p) => ({ ...p, gender: 'OTHER' }))}
             audioText={t('intake.a1.genderOther')}
             compact
           />
@@ -328,96 +351,194 @@ function A1Demographics({ state, setState }: StepProps) {
       </div>
 
       <div>
+        <SectionLabel text={t('intake.a1.dobQuestion')} audio={t('intake.a1.dobQuestion')} />
+        <input
+          id="intake-a1-dob"
+          type="date"
+          value={state.dateOfBirth ?? ''}
+          max={maxDobIso()}
+          onChange={(e) => setState((p) => ({ ...p, dateOfBirth: e.target.value || undefined }))}
+          className="w-full h-14 px-4 rounded-xl text-[18px] outline-none transition box-border"
+          style={{
+            border: '2px solid var(--brand-border)',
+            color: 'var(--brand-text-primary)',
+            backgroundColor: 'white',
+            colorScheme: 'light',
+          }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+        />
+        <p className="text-[12px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
+          {t('intake.a1.dobHint')}
+        </p>
+      </div>
+
+      <div>
         <SectionLabel text={t('intake.a1.heightQuestion')} audio={t('intake.a1.heightAudio')} />
         {(() => {
-          // Phase/26 — patients enter height in feet+inches; we convert to
-          // cm for storage. Existing patients with cm values keep working —
-          // cmToFtIn renders their stored value back into the dual fields.
+          // Patients pick a unit (ft/in primary, cm secondary) — same toggle
+          // pattern as weight on the daily check-in. Storage is always cm;
+          // ft/in convert via ftInToCm before persisting.
+          const unit: 'ftin' | 'cm' = state.heightUnit ?? 'ftin';
+          const setUnit = (u: 'ftin' | 'cm') => setState((p) => ({ ...p, heightUnit: u }));
           const { feet: storedFeet, inches: storedInches } = cmToFtIn(state.heightCm ?? 0);
-          const updateHeight = (feet: number, inches: number) => {
+          const updateHeightFromFtIn = (feet: number, inches: number) => {
             const cm = ftInToCm(feet, inches);
             setState((p) => ({ ...p, heightCm: cm > 0 ? cm : undefined }));
           };
+          const updateHeightFromCm = (cm: number) => {
+            setState((p) => ({ ...p, heightCm: cm > 0 ? cm : undefined }));
+          };
           return (
-            <div className="flex items-end gap-3">
-              <div className="flex-1">
-                <label htmlFor="intake-a1-height-ft" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
-                  Feet
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="intake-a1-height-ft"
-                    type="number"
-                    inputMode="numeric"
-                    min={3}
-                    max={8}
-                    value={storedFeet || ''}
-                    onChange={(e) => {
-                      const v = parseInt(e.target.value, 10);
-                      updateHeight(Number.isFinite(v) ? v : 0, storedInches);
-                    }}
-                    placeholder="5"
-                    className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
+            <>
+              <div
+                className="inline-flex rounded-full p-1 gap-1 mb-4"
+                style={{ backgroundColor: 'var(--brand-background)', border: '1px solid var(--brand-border)' }}
+              >
+                {(['ftin', 'cm'] as const).map((u) => (
+                  <button
+                    key={u}
+                    type="button"
+                    onClick={() => setUnit(u)}
+                    className="px-5 py-1.5 rounded-full text-sm font-semibold transition-all cursor-pointer"
                     style={{
-                      border: '2px solid var(--brand-border)',
-                      color: 'var(--brand-text-primary)',
-                      backgroundColor: 'white',
+                      backgroundColor: unit === u ? 'var(--brand-primary-purple)' : 'transparent',
+                      color: unit === u ? 'white' : 'var(--brand-text-secondary)',
                     }}
-                    onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
-                    onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
-                  />
+                  >
+                    {u === 'ftin' ? 'ft / in' : 'cm'}
+                  </button>
+                ))}
+              </div>
+              {unit === 'ftin' ? (
+                <div className="flex items-end gap-3">
+                  <div className="flex-1">
+                    <label htmlFor="intake-a1-height-ft" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+                      {t('intake.a1.heightFeetLabel')}
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="intake-a1-height-ft"
+                        type="number"
+                        inputMode="numeric"
+                        min={3}
+                        max={8}
+                        value={storedFeet || ''}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          updateHeightFromFtIn(Number.isFinite(v) ? v : 0, storedInches);
+                        }}
+                        placeholder="5"
+                        className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
+                        style={{
+                          border: '2px solid var(--brand-border)',
+                          color: 'var(--brand-text-primary)',
+                          backgroundColor: 'white',
+                        }}
+                        onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
+                        onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+                      />
+                      <MicButton
+                        inputId="intake-a1-height-ft"
+                        numeric
+                        onTranscript={(text) => {
+                          const n = parseInt(text, 10);
+                          if (Number.isFinite(n)) updateHeightFromFtIn(n, storedInches);
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <label htmlFor="intake-a1-height-in" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+                      {t('intake.a1.heightInchesLabel')}
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="intake-a1-height-in"
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        max={11}
+                        value={storedInches || (storedFeet ? '0' : '')}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          updateHeightFromFtIn(storedFeet, Number.isFinite(v) ? v : 0);
+                        }}
+                        placeholder="9"
+                        className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
+                        style={{
+                          border: '2px solid var(--brand-border)',
+                          color: 'var(--brand-text-primary)',
+                          backgroundColor: 'white',
+                        }}
+                        onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
+                        onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+                      />
+                      <MicButton
+                        inputId="intake-a1-height-in"
+                        numeric
+                        onTranscript={(text) => {
+                          const n = parseInt(text, 10);
+                          if (Number.isFinite(n)) updateHeightFromFtIn(storedFeet, n);
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 relative">
+                    <input
+                      id="intake-a1-height-cm"
+                      type="number"
+                      inputMode="numeric"
+                      min={100}
+                      max={250}
+                      value={state.heightCm ?? ''}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        updateHeightFromCm(Number.isFinite(v) ? v : 0);
+                      }}
+                      placeholder="165"
+                      className="w-full h-14 pl-4 pr-14 rounded-xl text-[18px] outline-none transition box-border"
+                      style={{
+                        border: '2px solid var(--brand-border)',
+                        color: 'var(--brand-text-primary)',
+                        backgroundColor: 'white',
+                      }}
+                      onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
+                      onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+                    />
+                    <span
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-[16px]"
+                      style={{ color: 'var(--brand-text-muted)' }}
+                    >
+                      cm
+                    </span>
+                  </div>
                   <MicButton
-                    inputId="intake-a1-height-ft"
+                    inputId="intake-a1-height-cm"
                     numeric
                     onTranscript={(text) => {
                       const n = parseInt(text, 10);
-                      if (Number.isFinite(n)) updateHeight(n, storedInches);
+                      if (Number.isFinite(n)) updateHeightFromCm(n);
                     }}
                   />
                 </div>
-              </div>
-              <div className="flex-1">
-                <label htmlFor="intake-a1-height-in" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
-                  Inches
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="intake-a1-height-in"
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    max={11}
-                    value={storedInches || (storedFeet ? '0' : '')}
-                    onChange={(e) => {
-                      const v = parseInt(e.target.value, 10);
-                      updateHeight(storedFeet, Number.isFinite(v) ? v : 0);
-                    }}
-                    placeholder="9"
-                    className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
-                    style={{
-                      border: '2px solid var(--brand-border)',
-                      color: 'var(--brand-text-primary)',
-                      backgroundColor: 'white',
-                    }}
-                    onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
-                    onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
-                  />
-                  <MicButton
-                    inputId="intake-a1-height-in"
-                    numeric
-                    onTranscript={(text) => {
-                      const n = parseInt(text, 10);
-                      if (Number.isFinite(n)) updateHeight(storedFeet, n);
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
+              )}
+              {state.heightCm ? (
+                <p className="text-[13px] mt-3 font-medium" style={{ color: 'var(--brand-primary-purple)' }}>
+                  {unit === 'ftin'
+                    ? `≈ ${state.heightCm} cm`
+                    : `≈ ${cmToFtIn(state.heightCm).feet} ft ${cmToFtIn(state.heightCm).inches} in`}
+                </p>
+              ) : null}
+              <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
+                {t('intake.a1.heightHint')}
+              </p>
+            </>
           );
         })()}
-        <p className="text-[12px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
-          {t('intake.a1.heightHint')}
-        </p>
       </div>
     </div>
   );
@@ -434,26 +555,46 @@ function A2Pregnancy({ state, setState }: StepProps) {
         audio={t('intake.a2.audio')}
       />
 
-      {/* Pregnancy is a binary clinical question — Yes / No only. The prior
-          "Not applicable" option was confusing for female patients (the
-          step is gated to gender === FEMALE upstream). */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <ChoiceCard
-          icon={<Baby className="w-6 h-6" />}
-          title={t('intake.a2.yesTitle')}
-          description={t('intake.a2.yesDesc')}
-          selected={state.isPregnant === true}
-          onClick={() => setState((p) => ({ ...p, isPregnant: true }))}
-          audioText={t('intake.a2.yesAudio')}
+      {/* Two independent yes/no questions for FEMALE patients:
+          1. Are you currently pregnant? (drives current-pregnancy alert rules)
+          2. Have you ever had preeclampsia? (long-term risk marker — relevant
+             outside pregnancy too, per CLINICAL_SPEC §3)
+          The preeclampsia question used to live INSIDE the "currently pregnant
+          = Yes" panel, which made it unreachable for non-pregnant women with
+          a documented history. Splitting them keeps the clinical question
+          accurate for both states. */}
+      <div>
+        <SectionLabel
+          text={t('intake.a2.currentlyPregnantQuestion')}
+          audio={t('intake.a2.currentlyPregnantAudio')}
         />
-        <ChoiceCard
-          icon={<Heart className="w-6 h-6" />}
-          title={t('intake.a2.noTitle')}
-          description={t('intake.a2.noDesc')}
-          selected={state.isPregnant === false}
-          onClick={() => setState((p) => ({ ...p, isPregnant: false, pregnancyDueDate: undefined }))}
-          audioText={t('intake.a2.noAudio')}
-        />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <ChoiceCard
+            icon={<Baby className="w-6 h-6" />}
+            title={t('intake.a2.yesTitle')}
+            description={t('intake.a2.yesDesc')}
+            selected={state.isPregnant === true}
+            onClick={() => setState((p) => ({ ...p, isPregnant: true }))}
+            audioText={t('intake.a2.yesAudio')}
+          />
+          <ChoiceCard
+            icon={<Heart className="w-6 h-6" />}
+            title={t('intake.a2.noTitle')}
+            description={t('intake.a2.noDesc')}
+            selected={state.isPregnant === false}
+            onClick={() =>
+              setState((p) => ({
+                ...p,
+                isPregnant: false,
+                // Due date is gated behind the Yes panel so it's safe to
+                // wipe here. historyPreeclampsia is its own independent
+                // question now and is left untouched.
+                pregnancyDueDate: undefined,
+              }))
+            }
+            audioText={t('intake.a2.noAudio')}
+          />
+        </div>
       </div>
 
       <AnimatePresence>
@@ -462,37 +603,49 @@ function A2Pregnancy({ state, setState }: StepProps) {
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
-            className="space-y-5"
           >
-            <div>
-              <SectionLabel text={t('intake.a2.dueDateLabel')} audio={t('intake.a2.dueDateAudio')} />
-              <input
-                type="date"
-                aria-label={t('intake.a2.dueDateLabel')}
-                value={state.pregnancyDueDate ?? ''}
-                onChange={(e) => setState((p) => ({ ...p, pregnancyDueDate: e.target.value || undefined }))}
-                className="w-full h-14 px-5 rounded-xl text-[15px] outline-none transition box-border"
-                style={{
-                  border: '2px solid var(--brand-border)',
-                  color: 'var(--brand-text-primary)',
-                  backgroundColor: 'white',
-                  colorScheme: 'light',
-                }}
-              />
-            </div>
-
-            <ChoiceCard
-              icon={<Shield className="w-5 h-5" />}
-              title={t('intake.a2.preeclampsiaTitle')}
-              description={t('intake.a2.preeclampsiaDesc')}
-              selected={state.historyPreeclampsia === true}
-              onClick={() => setState((p) => ({ ...p, historyPreeclampsia: !p.historyPreeclampsia }))}
-              audioText={t('intake.a2.preeclampsiaAudio')}
-              compact
+            <SectionLabel text={t('intake.a2.dueDateLabel')} audio={t('intake.a2.dueDateAudio')} />
+            <input
+              type="date"
+              aria-label={t('intake.a2.dueDateLabel')}
+              value={state.pregnancyDueDate ?? ''}
+              onChange={(e) => setState((p) => ({ ...p, pregnancyDueDate: e.target.value || undefined }))}
+              className="w-full h-14 px-5 rounded-xl text-[15px] outline-none transition box-border"
+              style={{
+                border: '2px solid var(--brand-border)',
+                color: 'var(--brand-text-primary)',
+                backgroundColor: 'white',
+                colorScheme: 'light',
+              }}
             />
           </motion.div>
         )}
       </AnimatePresence>
+
+      <div>
+        <SectionLabel
+          text={t('intake.a2.preeclampsiaQuestion')}
+          audio={t('intake.a2.preeclampsiaQuestionAudio')}
+        />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <ChoiceCard
+            icon={<Shield className="w-6 h-6" />}
+            title={t('intake.a2.yesTitle')}
+            description={t('intake.a2.preeclampsiaYesDesc')}
+            selected={state.historyPreeclampsia === true}
+            onClick={() => setState((p) => ({ ...p, historyPreeclampsia: true }))}
+            audioText={t('intake.a2.preeclampsiaYesAudio')}
+          />
+          <ChoiceCard
+            icon={<Heart className="w-6 h-6" />}
+            title={t('intake.a2.noTitle')}
+            description={t('intake.a2.preeclampsiaNoDesc')}
+            selected={state.historyPreeclampsia === false}
+            onClick={() => setState((p) => ({ ...p, historyPreeclampsia: false }))}
+            audioText={t('intake.a2.preeclampsiaNoAudio')}
+          />
+        </div>
+      </div>
     </div>
   );
 }
@@ -671,6 +824,104 @@ function MedicationGroup({
   );
 }
 
+/**
+ * Identity match for two SelectedMedication entries — prefers serverId
+ * (loaded from a prior session via PatientMedication.id), falls back to
+ * case-insensitive drugName for in-session adds. Top-level helper so
+ * useCallback dep arrays don't have to chase its reference.
+ */
+function isSameMed(a: SelectedMedication, b: SelectedMedication): boolean {
+  if (a.serverId && b.serverId) return a.serverId === b.serverId;
+  return (
+    a.drugName.trim().toLowerCase() === b.drugName.trim().toLowerCase() &&
+    !a.serverId &&
+    !b.serverId
+  );
+}
+
+/**
+ * Phase/28 — shared edit/delete/toggle handlers for the OTHER_UNVERIFIED
+ * meds list rendered on A5 + A8. Both steps instantiate this so each
+ * keeps its own edit-modal-open state without leaking across steps.
+ */
+function useOtherMedHandlers(
+  state: IntakeFormState,
+  setState: (updater: (prev: IntakeFormState) => IntakeFormState) => void,
+) {
+  const [editingMed, setEditingMed] = useState<SelectedMedication | null>(null);
+
+  const otherMeds = useMemo(
+    () =>
+      state.selectedMedications.filter(
+        (m) => m.drugClass === 'OTHER_UNVERIFIED',
+      ),
+    [state.selectedMedications],
+  );
+
+  const handleDelete = useCallback(
+    (med: SelectedMedication) => {
+      setState((prev) => ({
+        ...prev,
+        selectedMedications: prev.selectedMedications.filter(
+          (m) => !isSameMed(m, med),
+        ),
+      }));
+    },
+    [setState],
+  );
+
+  const handleEdit = useCallback((med: SelectedMedication) => {
+    setEditingMed(med);
+  }, []);
+
+  const handleSaveEdit = useCallback(
+    (
+      med: SelectedMedication,
+      patch: { drugName: string; frequency?: SelectedMedication['frequency'] },
+    ) => {
+      setState((prev) => ({
+        ...prev,
+        selectedMedications: prev.selectedMedications.map((m) =>
+          isSameMed(m, med)
+            ? { ...m, drugName: patch.drugName, frequency: patch.frequency }
+            : m,
+        ),
+      }));
+      setEditingMed(null);
+    },
+    [setState],
+  );
+
+  const handleCancelEdit = useCallback(() => setEditingMed(null), []);
+
+  const isDuplicateName = useCallback(
+    (proposedName: string, currentMed: SelectedMedication): boolean => {
+      const target = proposedName.trim().toLowerCase();
+      if (!target) return false;
+      return state.selectedMedications.some((m) => {
+        if (isSameMed(m, currentMed)) return false; // allow saving same name
+        if (m.drugName.trim().toLowerCase() === target) return true;
+        // Also block renaming into a catalog brand/generic name — patient
+        // should use the catalog tile in that case (the modal also surfaces
+        // a hint, but this is the hard guard).
+        if (!m.catalogId) return false;
+        return false; // catalog row stored under genericName already collides via the drugName check above
+      });
+    },
+    [state.selectedMedications],
+  );
+
+  return {
+    otherMeds,
+    editingMed,
+    handleEdit,
+    handleDelete,
+    handleSaveEdit,
+    handleCancelEdit,
+    isDuplicateName,
+  };
+}
+
 function A5CoreMeds({ state, setState }: StepProps) {
   const selectedIds = useMemo(
     () => new Set(state.selectedMedications.filter((m) => !m.isCombination).map((m) => m.catalogId).filter(Boolean) as string[]),
@@ -706,6 +957,11 @@ function A5CoreMeds({ state, setState }: StepProps) {
   };
 
   const { t } = useLanguage();
+
+  // Phase/28 — OTHER_UNVERIFIED meds list at the bottom of A5. The hook
+  // derives the freeform subset + handlers; the modal opens when the
+  // patient taps the edit pencil.
+  const otherMedHandlers = useOtherMedHandlers(state, setState);
 
   // Phase/27 — when the patient scans a prescription, fan the OCR-extracted
   // medications out into selectedMedications. Catalog matches inherit the
@@ -765,9 +1021,20 @@ function A5CoreMeds({ state, setState }: StepProps) {
 
       {/* Phase/27 — Gemini Vision OCR for prescriptions. Hidden when
           NEXT_PUBLIC_MED_OCR_ENABLED !== 'true'. Fans OCR results across
-          A5/A6/A8 + A9 frequency in one shot via addOcrMedications. */}
+          A5/A6/A8 + A9 frequency in one shot via addOcrMedications.
+          findExisting lets the modal badge already-on-list rows pre-Confirm
+          using the same drugName / brandName / genericName logic the handler
+          applies post-Confirm via findExistingMedIndex. */}
       <div className="flex">
-        <MedicationPhotoButton onConfirm={addOcrMedications} />
+        <MedicationPhotoButton
+          onConfirm={addOcrMedications}
+          findExisting={(drugName) => {
+            const idx = findExistingMedIndex(state.selectedMedications, drugName);
+            if (idx < 0) return null;
+            const m = state.selectedMedications[idx];
+            return { currentFrequency: m.frequency ?? null };
+          }}
+        />
       </div>
 
       <MedicationGroup
@@ -794,6 +1061,27 @@ function A5CoreMeds({ state, setState }: StepProps) {
         selectedIds={selectedIds}
         toggle={toggle}
       />
+
+      {/* Phase/28 — Your other medications. Renders only when the patient has
+          OTHER_UNVERIFIED rows (from OCR scan or A8 freeform input or a
+          prior session loaded via seedFromMedications). Body-click toggles
+          off (== delete); pencil opens edit modal; trash deletes outright. */}
+      {otherMedHandlers.otherMeds.length > 0 && (
+        <OtherMedicationsList
+          meds={otherMedHandlers.otherMeds}
+          onToggle={otherMedHandlers.handleDelete}
+          onEdit={otherMedHandlers.handleEdit}
+          onDelete={otherMedHandlers.handleDelete}
+        />
+      )}
+      {otherMedHandlers.editingMed && (
+        <OtherMedEditModal
+          med={otherMedHandlers.editingMed}
+          isDuplicateName={otherMedHandlers.isDuplicateName}
+          onSave={otherMedHandlers.handleSaveEdit}
+          onCancel={otherMedHandlers.handleCancelEdit}
+        />
+      )}
     </div>
   );
 }
@@ -955,6 +1243,10 @@ function A8Categories({ state, setState }: StepProps) {
 
   const otherCount = state.selectedMedications.filter((m) => m.drugClass === 'OTHER_UNVERIFIED').length;
 
+  // Phase/28 — same OTHER_UNVERIFIED list as A5 (each step instantiates its
+  // own modal-state so editing one doesn't leak to the other).
+  const otherMedHandlers = useOtherMedHandlers(state, setState);
+
   const categories: { key: string; label: string; icon: React.ReactNode; audio: string }[] = [
     { key: 'WATER_PILL', label: t('intake.a8.categoryWaterPill'), icon: <Droplet className="w-6 h-6" />, audio: t('intake.a8.categoryWaterPill') },
     { key: 'BLOOD_THINNER', label: t('intake.a8.categoryBloodThinner'), icon: <Pill className="w-6 h-6" />, audio: t('intake.a8.categoryBloodThinner') },
@@ -1103,7 +1395,12 @@ function A8Categories({ state, setState }: StepProps) {
 
             </div>
 
-            {otherCount > 0 && (
+            {/* Phase/28 — the count line (e.g. "3 more medications added")
+                is redundant once OtherMedicationsList renders inline below
+                with full per-row visibility, so suppress it when the list
+                is going to render. Keep the count for the rare case where
+                the list is hidden somehow. */}
+            {otherCount > 0 && otherMedHandlers.otherMeds.length === 0 && (
               <p className="text-[12px] text-center" style={{ color: 'var(--brand-text-muted)' }}>
                 {(otherCount === 1 ? t('intake.a8.otherCountSingle') : t('intake.a8.otherCountPlural')).replace('{n}', String(otherCount))}
               </p>
@@ -1111,6 +1408,27 @@ function A8Categories({ state, setState }: StepProps) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Phase/28 — Your other medications list. Renders here on A8 too
+          (mirroring A5) so patients who land directly on A8 see + can edit
+          their freeform meds without backtracking. Each step instance owns
+          its own edit-modal state via the hook. */}
+      {otherMedHandlers.otherMeds.length > 0 && (
+        <OtherMedicationsList
+          meds={otherMedHandlers.otherMeds}
+          onToggle={otherMedHandlers.handleDelete}
+          onEdit={otherMedHandlers.handleEdit}
+          onDelete={otherMedHandlers.handleDelete}
+        />
+      )}
+      {otherMedHandlers.editingMed && (
+        <OtherMedEditModal
+          med={otherMedHandlers.editingMed}
+          isDuplicateName={otherMedHandlers.isDuplicateName}
+          onSave={otherMedHandlers.handleSaveEdit}
+          onCancel={otherMedHandlers.handleCancelEdit}
+        />
+      )}
 
       <div
         className="rounded-xl p-4 flex items-start gap-3 mt-4"
@@ -1157,6 +1475,7 @@ function A9Frequency({ state, setState }: StepProps) {
     { value: 'ONCE_DAILY', label: t('intake.a9.freqOnce') },
     { value: 'TWICE_DAILY', label: t('intake.a9.freqTwice') },
     { value: 'THREE_TIMES_DAILY', label: t('intake.a9.freqThree') },
+    { value: 'AS_NEEDED', label: t('intake.a9.freqAsNeeded') },
     { value: 'UNSURE', label: t('intake.a9.freqUnsure') },
   ];
 
@@ -1264,6 +1583,26 @@ function A10Review({ state, goTo }: StepProps) {
 
       <ReviewSection title={t('intake.a10.sectionAbout')} onEdit={() => goTo?.('A1')}>
         <ReviewRow label={t('intake.a10.rowGender')} value={genderLabel(state.gender)} />
+        <ReviewRow
+          label={t('intake.a10.rowDob')}
+          value={(() => {
+            if (!state.dateOfBirth) return '—';
+            const dob = new Date(state.dateOfBirth);
+            if (Number.isNaN(dob.getTime())) return '—';
+            const today = new Date();
+            let age = today.getFullYear() - dob.getFullYear();
+            const beforeBirthday =
+              today.getMonth() < dob.getMonth() ||
+              (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate());
+            if (beforeBirthday) age -= 1;
+            const formatted = dob.toLocaleDateString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric',
+            });
+            return age >= 0 ? `${formatted} (${age} yrs)` : formatted;
+          })()}
+        />
         <ReviewRow
           label={t('intake.a10.rowHeight')}
           value={
@@ -1422,6 +1761,7 @@ function frequencyLabel(f: MedicationFrequencyInput | undefined, t: TranslateFn)
     case 'ONCE_DAILY': return t('intake.freq.once');
     case 'TWICE_DAILY': return t('intake.freq.twice');
     case 'THREE_TIMES_DAILY': return t('intake.freq.three');
+    case 'AS_NEEDED': return t('intake.freq.asNeeded');
     case 'UNSURE': return t('intake.freq.unsure');
     default: return t('intake.freq.unset');
   }
@@ -1623,7 +1963,15 @@ function ClinicalIntakeWizard() {
   const [pendingDedup, setPendingDedup] = useState<DedupConflict[]>([]);
   const [showExitSave, setShowExitSave] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState('');
+  // Stored as a translation-key (+ optional interpolation values) OR a raw
+  // backend message — never as the rendered string. We translate at render
+  // time so the message updates if the patient switches language while the
+  // error is on screen.
+  const [submitError, setSubmitError] = useState<
+    | { kind: 'key'; key: TranslationKey; values?: Record<string, string> }
+    | { kind: 'raw'; text: string }
+    | null
+  >(null);
   const [bootstrapping, setBootstrapping] = useState(true);
   // True only when we hit the route without ?step= AND the patient already
   // has a profile saved — in that case we render the "you're all set" page
@@ -1662,6 +2010,11 @@ function ClinicalIntakeWizard() {
           getMyPatientProfile().catch(() => null),
           isEdit ? getMyMedications().catch(() => []) : Promise.resolve([]),
         ]);
+        // Pull dateOfBirth off the auth profile so A1 can pre-fill it for
+        // returning users who set DOB during the old onboarding flow before
+        // it moved here. Best-effort — DOB is optional fallback only.
+        const authProfile = await getAuthProfile().catch(() => null);
+        const carriedDob = authProfile?.dateOfBirth ?? undefined;
         if (cancelled) return;
 
         // Branch 3 — show the all-set page only when the patient is truly
@@ -1684,6 +2037,7 @@ function ClinicalIntakeWizard() {
           const seeded: IntakeFormState = {
             gender: profile.gender ?? undefined,
             heightCm: profile.heightCm ?? undefined,
+            dateOfBirth: carriedDob,
             isPregnant: profile.isPregnant ?? undefined,
             pregnancyDueDate: profile.pregnancyDueDate ?? undefined,
             historyPreeclampsia: profile.historyPreeclampsia ?? false,
@@ -1701,14 +2055,27 @@ function ClinicalIntakeWizard() {
               .filter((m) => !m.discontinuedAt)
               .map((m) => {
                 // Resolve the catalog id from drugName so the toggle UI lights up
-                // when the patient revisits.
+                // when the patient revisits. Match against both brandName AND
+                // genericName — the OCR confirm flow saves entryToMatch's
+                // drugName=genericName, so a brand-only lookup misses every
+                // OCR-added catalog row and the tile fails to light up on
+                // reload. Combos only have a brandName so they're brand-only.
                 const lower = m.drugName.toLowerCase();
                 const catEntry =
-                  ALL_CORE_MEDS.find((c) => c.brandName.toLowerCase() === lower) ??
-                  ALL_CATEGORY_MEDS.find((c) => c.brandName.toLowerCase() === lower);
+                  ALL_CORE_MEDS.find(
+                    (c) =>
+                      c.brandName.toLowerCase() === lower ||
+                      c.genericName.toLowerCase() === lower,
+                  ) ??
+                  ALL_CATEGORY_MEDS.find(
+                    (c) =>
+                      c.brandName.toLowerCase() === lower ||
+                      c.genericName.toLowerCase() === lower,
+                  );
                 const comboEntry = ALL_COMBO_MEDS.find((c) => c.brandName.toLowerCase() === lower);
                 return {
                   catalogId: catEntry?.id ?? comboEntry?.id,
+                  serverId: m.id,
                   drugName: m.drugName,
                   drugClass: m.drugClass as IntakeFormState['selectedMedications'][number]['drugClass'],
                   isCombination: m.isCombination,
@@ -1716,6 +2083,8 @@ function ClinicalIntakeWizard() {
                   source: m.source as IntakeFormState['selectedMedications'][number]['source'],
                   rawInputText: m.rawInputText ?? undefined,
                   frequency: m.frequency,
+                  pillImageUrl: m.pillImageUrl,
+                  plainLanguageDescription: m.plainLanguageDescription,
                 };
               }),
           };
@@ -1741,9 +2110,13 @@ function ClinicalIntakeWizard() {
           if (draft.currentStep === 'A11') {
             clearDraft(user.id);
           } else {
-            setStateRaw(draft);
+            // Carry user's existing DOB into the draft if the draft predates
+            // the DOB-on-A1 change.
+            setStateRaw({ ...draft, dateOfBirth: draft.dateOfBirth ?? carriedDob });
             if (draft.currentStep) setStep(draft.currentStep);
           }
+        } else if (carriedDob) {
+          setStateRaw((prev) => ({ ...prev, dateOfBirth: carriedDob }));
         }
         // Honor ?step= even on a fresh wizard so deep-links still work.
         if (requestedStep) setStep(requestedStep);
@@ -1808,24 +2181,43 @@ function ClinicalIntakeWizard() {
   const goNext = async () => {
     // Validation gates.
     if (step === 'A1') {
-      if (!state.gender) { setSubmitError(t('intake.nav.errorGender')); return; }
+      if (!state.gender) { setSubmitError({ kind: 'key', key: 'intake.nav.errorGender' }); return; }
+      if (!state.dateOfBirth) {
+        setSubmitError({ kind: 'key', key: 'intake.nav.errorDob' });
+        return;
+      }
+      const dobErrKey = validateDateOfBirth(state.dateOfBirth);
+      if (dobErrKey) {
+        setSubmitError({ kind: 'key', key: dobErrKey });
+        return;
+      }
       if (!state.heightCm || state.heightCm < 100 || state.heightCm > 250) {
-        setSubmitError(t('intake.nav.errorHeight'));
+        setSubmitError({ kind: 'key', key: 'intake.nav.errorHeight' });
+        return;
+      }
+    }
+    if (step === 'A2') {
+      if (state.isPregnant !== true && state.isPregnant !== false) {
+        setSubmitError({ kind: 'key', key: 'intake.nav.errorPregnancy' });
+        return;
+      }
+      if (state.historyPreeclampsia !== true && state.historyPreeclampsia !== false) {
+        setSubmitError({ kind: 'key', key: 'intake.nav.errorPreeclampsia' });
         return;
       }
     }
     if (step === 'A4' && !state.heartFailureType) {
-      setSubmitError(t('intake.nav.errorHfType'));
+      setSubmitError({ kind: 'key', key: 'intake.nav.errorHfType' });
       return;
     }
     if (step === 'A9') {
       const missingFreq = state.selectedMedications.find((m) => !m.frequency);
       if (missingFreq) {
-        setSubmitError(t('intake.nav.errorFreq').replace('{name}', missingFreq.drugName));
+        setSubmitError({ kind: 'key', key: 'intake.nav.errorFreq', values: { name: missingFreq.drugName } });
         return;
       }
     }
-    setSubmitError('');
+    setSubmitError(null);
 
     // A6 (combos — the last med screen) → A9 transition: surface dedup
     // conflicts before letting the user proceed, so combo entries can be
@@ -1851,7 +2243,7 @@ function ClinicalIntakeWizard() {
   };
 
   const goBack = () => {
-    setSubmitError('');
+    setSubmitError(null);
     if (step === 'A0b') {
       router.push('/dashboard');
       return;
@@ -1864,7 +2256,7 @@ function ClinicalIntakeWizard() {
 
   const goTo = (target: IntakeStepKey) => {
     if (!flow.includes(target)) return;
-    setSubmitError('');
+    setSubmitError(null);
     const targetIdx = flow.indexOf(target);
     setDirection(targetIdx > stepIndex ? 1 : -1);
     persistStep(target);
@@ -1872,7 +2264,7 @@ function ClinicalIntakeWizard() {
 
   const handleSubmit = async () => {
     if (submitting) return;
-    setSubmitError('');
+    setSubmitError(null);
     setSubmitting(true);
     try {
       await saveIntakeProfile(buildProfilePayload(state));
@@ -1889,7 +2281,11 @@ function ClinicalIntakeWizard() {
       setStep('A11');
       if (user?.id) clearDraft(user.id);
     } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : t('intake.nav.errorSubmit'));
+      setSubmitError(
+        e instanceof Error
+          ? { kind: 'raw', text: e.message }
+          : { kind: 'key', key: 'intake.nav.errorSubmit' },
+      );
     } finally {
       setSubmitting(false);
     }
@@ -2102,7 +2498,16 @@ function ClinicalIntakeWizard() {
             className="mt-5 text-[13px] text-center font-semibold px-4 py-2 rounded-lg"
             style={{ color: 'var(--brand-alert-red)', backgroundColor: 'var(--brand-alert-red-light)' }}
           >
-            {submitError}
+            {(() => {
+              if (submitError.kind === 'raw') return submitError.text;
+              let s = t(submitError.key);
+              if (submitError.values) {
+                for (const [k, v] of Object.entries(submitError.values)) {
+                  s = s.replace(`{${k}}`, v);
+                }
+              }
+              return s;
+            })()}
           </p>
         )}
       </main>

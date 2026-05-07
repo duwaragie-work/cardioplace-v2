@@ -15,6 +15,8 @@ import {
   CheckCircle,
   AlertCircle,
   Trash2,
+  Camera,
+  Loader2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '@/lib/auth-context';
@@ -39,6 +41,12 @@ import {
   type BPPhotoSummary,
 } from '@/hooks/useVoiceSession';
 // Phase/27 chatbot v2 — rich result cards.
+import {
+  uploadBpPhoto,
+  BpOcrError,
+  type BpOcrSuccess,
+} from '@/lib/services/ocr.service';
+import BpPhotoConfirmModal from '@/components/intake/BpPhotoConfirmModal';
 import CheckinCard from '@/components/cardio/cards/CheckinCard';
 import UpdateCard from '@/components/cardio/cards/UpdateCard';
 import DeleteCard from '@/components/cardio/cards/DeleteCard';
@@ -120,6 +128,32 @@ function getUserInitials(name: string | null | undefined): string {
 
 function nowTimeStr(): string {
   return new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+// Phase/27 — map BpOcrError codes to the existing patient-app i18n strings
+// so the chat photo flow surfaces the same friendly fallback copy as the
+// CheckIn surface.
+function photoErrorMessage(
+  code: string,
+  t: (
+    key:
+      | 'ocr.bp.errLowConfidence'
+      | 'ocr.bp.errRateLimited'
+      | 'ocr.bp.errTooLarge'
+      | 'ocr.bp.errNetwork',
+  ) => string,
+): string {
+  switch (code) {
+    case 'LOW_CONFIDENCE':
+    case 'OUT_OF_RANGE':
+      return t('ocr.bp.errLowConfidence');
+    case 'RATE_LIMITED':
+      return t('ocr.bp.errRateLimited');
+    case 'TOO_LARGE':
+      return t('ocr.bp.errTooLarge');
+    default:
+      return t('ocr.bp.errNetwork');
+  }
 }
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
@@ -1036,6 +1070,20 @@ export default function AIChatInterface() {
   const [pendingCheckin, setPendingCheckin] = useState<CheckinSummary | null>(null);
   const [pendingUpdateCard, setPendingUpdateCard] = useState<UpdateSummary | null>(null);
   const [pendingDeleteCard, setPendingDeleteCard] = useState<DeleteSummary | null>(null);
+  // Phase/27 chatbot v2 — three new tool-result cards (commit 220bc12 had
+  // them imported but unrendered; this closes that gap).
+  const [pendingAdherence, setPendingAdherence] = useState<MedicationAdherenceSummary | null>(null);
+  const [pendingSymptom, setPendingSymptom] = useState<SymptomLogSummary | null>(null);
+  const [pendingPhoto, setPendingPhoto] = useState<BPPhotoSummary | null>(null);
+  // Phase/27 — photo-attach flow in chat input. Reuses BpPhotoConfirmModal
+  // from the patient-app CheckIn surface. On confirm, the parsed numbers
+  // become a synthetic patient message ("I just took my BP — 138/84,
+  // pulse 72.") that flows through the normal chat pipeline so the bot
+  // can ask remaining check-in questions naturally.
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const [photoConfirm, setPhotoConfirm] = useState<{ result: BpOcrSuccess; previewUrl: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -1126,6 +1174,9 @@ export default function AIChatInterface() {
       setPendingCheckin(null);
       setPendingUpdateCard(null);
       setPendingDeleteCard(null);
+      setPendingAdherence(null);
+      setPendingSymptom(null);
+      setPendingPhoto(null);
       setVoiceSummaryLoading(true);
 
       const sessionId = activeSessionId;
@@ -1286,14 +1337,67 @@ export default function AIChatInterface() {
   }, [activeSessionId]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
-  const handleSend = async () => {
-    const text = inputValue.trim();
+  // ── Photo-attach flow (Phase/27) ────────────────────────────────────────
+  // Three handlers wired to the BpPhotoConfirmModal: confirm injects a
+  // synthetic patient message, edit/cancel just dismisses, retake re-opens
+  // the file picker.
+
+  const handlePhotoFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // reset so picking the same file again still fires
+    if (!file) return;
+
+    setPhotoError(null);
+    setPhotoUploading(true);
+    try {
+      const result = await uploadBpPhoto(file);
+      const previewUrl = URL.createObjectURL(file);
+      setPhotoConfirm({ result, previewUrl });
+    } catch (err) {
+      const code = err instanceof BpOcrError ? err.code : 'NETWORK';
+      setPhotoError(photoErrorMessage(code, t));
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
+
+  const handlePhotoConfirm = () => {
+    if (!photoConfirm) return;
+    const { sbp, dbp, pulse } = photoConfirm.result;
+    URL.revokeObjectURL(photoConfirm.previewUrl);
+    setPhotoConfirm(null);
+    // Synthesize a natural-sounding patient message so the bot picks up the
+    // BP numbers and continues a normal check-in flow (asking remaining
+    // questions like medication / symptoms).
+    const text = pulse != null
+      ? `I just took my BP — it's ${sbp} over ${dbp}, pulse ${pulse}.`
+      : `I just took my BP — it's ${sbp} over ${dbp}.`;
+    void handleSend(text);
+  };
+
+  const handlePhotoCancel = () => {
+    if (photoConfirm) URL.revokeObjectURL(photoConfirm.previewUrl);
+    setPhotoConfirm(null);
+  };
+
+  const handlePhotoRetake = () => {
+    if (photoConfirm) URL.revokeObjectURL(photoConfirm.previewUrl);
+    setPhotoConfirm(null);
+    setTimeout(() => photoInputRef.current?.click(), 0);
+  };
+
+  const handleSend = async (textOverride?: string) => {
+    // Phase/27 — accept an optional text override so synthetic flows (e.g.
+    // a BP photo confirm modal that injects a "I just took my BP — 138/84"
+    // message) can drive the same send pipeline without going through
+    // inputValue state propagation.
+    const text = (textOverride ?? inputValue).trim();
     if (!text || isSending) return;
 
     const userMsg: Message = { id: Date.now(), type: 'patient', source: 'text', text, time: nowTimeStr() };
     const aiId = Date.now() + 1;
     setMessages((prev) => [...prev, userMsg]);
-    setInputValue('');
+    if (!textOverride) setInputValue('');
     setIsTyping(true);
     setIsSending(true);
 
@@ -1375,6 +1479,54 @@ export default function AIChatInterface() {
               deletedCount: r.deleted ? 1 : 0,
               failedCount: r.deleted ? 0 : 1,
               success: !!r.deleted,
+              message: r.message ?? '',
+            });
+          } else if (tool === 'log_medication_adherence') {
+            // Phase/27 chatbot v2 — backend returns {logged, message,
+            // medication, status, entryId}. Pass through to MedicationAdherenceCard.
+            const r = result as Partial<MedicationAdherenceSummary> & {
+              logged?: boolean;
+              status?: 'taken' | 'missed' | 'scheduled_later';
+            };
+            if (r.logged) {
+              setPendingAdherence({
+                logged: true,
+                message: r.message ?? '',
+                medication: r.medication ?? null,
+                status: r.status ?? 'taken',
+                entryId: r.entryId,
+                streakDays: r.streakDays,
+              });
+            }
+          } else if (tool === 'log_symptom_quick') {
+            // Backend returns {logged, message, symptom, entryId}. The card
+            // renders the structured symptom label + "care team notified" footer.
+            const r = result as Partial<SymptomLogSummary> & {
+              logged?: boolean;
+              symptom?: string;
+            };
+            if (r.logged) {
+              setPendingSymptom({
+                logged: true,
+                message: r.message ?? '',
+                symptom: r.symptom ?? '',
+                notes: r.notes,
+                alert: r.alert ?? null,
+                entryId: r.entryId,
+              });
+            }
+          } else if (tool === 'submit_bp_from_photo') {
+            // Backend returns {parsed, sbp, dbp, pulse, confidence, message}.
+            // Always render the card — the patient needs to verify the numbers
+            // (Confirm/Edit/Re-take) regardless of parse success, and a low-
+            // confidence result still shows the failure path of BPPhotoCard.
+            const r = result as Partial<BPPhotoSummary> & { parsed?: boolean };
+            setPendingPhoto({
+              parsed: !!r.parsed,
+              sbp: r.sbp,
+              dbp: r.dbp,
+              pulse: r.pulse,
+              confidence: r.confidence,
               message: r.message ?? '',
             });
           }
@@ -1637,6 +1789,44 @@ export default function AIChatInterface() {
                   </motion.div>
                 )}
               </AnimatePresence>
+
+              {/* Phase/27 chatbot v2 — three new card types. Voice path
+                  doesn't fan these out yet (deliberate scope-down per the
+                  v2 plan); this block lights them up for the text chat. */}
+              <AnimatePresence>
+                {pendingAdherence && (
+                  <motion.div key="adherence" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                    <MedicationAdherenceCard
+                      summary={pendingAdherence}
+                      onDismiss={() => setPendingAdherence(null)}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <AnimatePresence>
+                {pendingSymptom && (
+                  <motion.div key="symptom" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                    <SymptomLogCard
+                      summary={pendingSymptom}
+                      onDismiss={() => setPendingSymptom(null)}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <AnimatePresence>
+                {pendingPhoto && (
+                  <motion.div key="photo" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                    <BPPhotoCard
+                      summary={pendingPhoto}
+                      onConfirm={() => setPendingPhoto(null)}
+                      onEdit={() => setPendingPhoto(null)}
+                      onRetake={() => setPendingPhoto(null)}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </>
           )}
 
@@ -1678,6 +1868,50 @@ export default function AIChatInterface() {
               }}
               disabled={isSending || isVoiceActive || isVoiceConnecting}
             />
+
+            {/* Phase/27 — BP photo button. Hidden when
+                NEXT_PUBLIC_BP_OCR_ENABLED !== 'true' so the chat input
+                stays clean for surfaces that don't need photo capture.
+                On select, the existing BpPhotoConfirmModal handles
+                verification before injecting a synthetic patient message. */}
+            {process.env.NEXT_PUBLIC_BP_OCR_ENABLED === 'true' && (
+              <>
+                <motion.button
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={photoUploading || isSending || isVoiceActive || isVoiceConnecting}
+                  aria-label={photoUploading ? t('ocr.bp.uploading') : t('ocr.bp.cameraLabel')}
+                  aria-pressed={photoUploading}
+                  className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition disabled:opacity-40"
+                  style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
+                  whileHover={{ scale: 1.08 }}
+                  whileTap={{ scale: 0.92 }}
+                  title={t('ocr.bp.cameraLabel')}
+                >
+                  {photoUploading ? (
+                    <Loader2
+                      className="w-3.5 h-3.5 animate-spin"
+                      style={{ color: 'var(--brand-primary-purple)' }}
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <Camera
+                      className="w-3.5 h-3.5"
+                      style={{ color: 'var(--brand-primary-purple)' }}
+                      aria-hidden="true"
+                    />
+                  )}
+                </motion.button>
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                  capture="environment"
+                  className="sr-only"
+                  onChange={handlePhotoFile}
+                />
+              </>
+            )}
 
             {/* Mic button — disabled while text is sending. Color encodes:
                 - red: active call
@@ -1746,6 +1980,45 @@ export default function AIChatInterface() {
           </p>
         </div>
       </div>
+
+      {/* Phase/27 — BP photo confirm modal for the chat input photo flow.
+          Reuses the patient-app modal shipped in commit 0dac339 verbatim. */}
+      <AnimatePresence>
+        {photoConfirm && (
+          <BpPhotoConfirmModal
+            result={photoConfirm.result}
+            previewUrl={photoConfirm.previewUrl}
+            onConfirm={handlePhotoConfirm}
+            onCancel={handlePhotoCancel}
+            onRetake={handlePhotoRetake}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Photo upload error toast — surfaces low-confidence / rate-limit /
+          network errors right above the chat input. Auto-dismisses on next
+          successful photo or send. */}
+      {photoError && (
+        <div
+          role="alert"
+          className="fixed bottom-32 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full text-[12px] font-semibold shadow-lg"
+          style={{
+            backgroundColor: 'var(--brand-alert-red-light)',
+            color: 'var(--brand-alert-red)',
+            border: '1px solid var(--brand-alert-red)',
+          }}
+        >
+          {photoError}
+          <button
+            type="button"
+            onClick={() => setPhotoError(null)}
+            className="ml-2 underline"
+            aria-label="Dismiss error"
+          >
+            {t('chat.dismiss')}
+          </button>
+        </div>
+      )}
 
       {/* Delete confirm modal */}
       <AnimatePresence>

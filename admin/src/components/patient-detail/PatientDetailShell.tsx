@@ -22,7 +22,6 @@ import {
   Users as UsersIcon,
   AlertTriangle,
   RefreshCw,
-  Heart,
   Activity,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -48,8 +47,19 @@ import ThresholdsTab from './ThresholdsTab';
 import TimelineTab from './TimelineTab';
 import CareTeamTab from './CareTeamTab';
 import EnrollmentCard from './EnrollmentCard';
+import ConditionPill from './ConditionPill';
 
 type TabKey = 'profile' | 'medications' | 'alerts' | 'readings' | 'thresholds' | 'careteam' | 'timeline';
+
+// v2 condition tag — backend's derivePatientConditions returns these.
+// `severity` drives the pill color; `id` is stable for keys + future
+// click-to-filter wiring.
+export type ConditionSeverity = 'critical' | 'elevated' | 'standard';
+export interface ConditionTag {
+  id: string;
+  label: string;
+  severity: ConditionSeverity;
+}
 
 interface PatientHeader {
   id: string;
@@ -57,6 +67,10 @@ interface PatientHeader {
   email: string | null;
   riskTier: string | null;
   primaryCondition: string | null;
+  /** v2 — every comorbidity the patient carries, ordered critical →
+   *  elevated → standard. Replaces the single-string `primaryCondition`
+   *  in the header. Both fields ride along during transition. */
+  conditions: ConditionTag[];
   communicationPreference: string | null;
   activeAlertsCount: number;
   latestBP: { systolicBP: number | null; diastolicBP: number | null; weight: number | null; entryDate: string | null } | null;
@@ -141,6 +155,7 @@ export default function PatientDetailShell({ patientId }: Props) {
           email: p?.email ?? null,
           riskTier: p?.riskTier ?? null,
           primaryCondition: p?.primaryCondition ?? null,
+          conditions: Array.isArray(p?.conditions) ? p.conditions : [],
           communicationPreference: p?.communicationPreference ?? null,
           activeAlertsCount: p?.activeAlertsCount ?? 0,
           latestBP: p?.latestBP ?? null,
@@ -437,37 +452,16 @@ export default function PatientDetailShell({ patientId }: Props) {
                         {new Date(header.lastEntryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                       </span>
                     )}
-                    {header.primaryCondition &&
-                      // Suppress when the backend's primary-condition string
-                      // is "Preeclampsia history" — that case is owned by
-                      // the dedicated amber notation pill below, so showing
-                      // the gray label too would double-render the same
-                      // text. Every other primary condition (Pregnancy,
-                      // Heart Failure, CAD, etc.) still renders here.
-                      header.primaryCondition !== 'Preeclampsia history' && (
-                        <span className="inline-flex items-center gap-1 font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
-                          {header.primaryCondition}
-                        </span>
-                      )}
-                    {/* CLINICAL_SPEC §3 — preeclampsia-history notation for
-                        women with documented history outside pregnancy.
-                        Hidden when isPregnant=true since the pregnancy
-                        primary-condition pill above already covers active
-                        pregnancies (avoids double-flagging). Notation only
-                        — no threshold logic. */}
-                    {profile?.historyPreeclampsia && !profile?.isPregnant && (
-                      <span
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold"
-                        style={{
-                          backgroundColor: 'var(--brand-warning-amber-light)',
-                          color: 'var(--brand-warning-amber)',
-                        }}
-                        title="Documented history of preeclampsia or gestational hypertension — enhanced monitoring recommended outside pregnancy per 2025 AHA/ACC Hypertension Guideline."
-                      >
-                        <Heart className="w-3 h-3" aria-hidden />
-                        Preeclampsia history
-                      </span>
-                    )}
+                    {/* v2 condition pills — every comorbidity the patient
+                        carries, ordered by clinical priority server-side
+                        in derivePatientConditions. Replaces the v1
+                        single-string primaryCondition + the standalone
+                        preeclampsia notation pill. Color is driven purely
+                        by severity tier so providers can scan severity at
+                        a glance without reading each label. */}
+                    {header.conditions.map((c) => (
+                      <ConditionPill key={c.id} tag={c} />
+                    ))}
                   </div>
                 </div>
               </div>

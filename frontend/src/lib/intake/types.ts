@@ -25,6 +25,10 @@ export type IntakeStepKey =
 export interface SelectedMedication {
   /** Stable key for catalog meds; undefined for free-text "other". */
   catalogId?: string;
+  /** Server-side `PatientMedication.id` when loaded from a prior session;
+   *  undefined for in-session adds that haven't been persisted yet. Used by
+   *  OtherMedicationsList to key tiles + scope edit/delete to a single row. */
+  serverId?: string;
   drugName: string;
   drugClass: DrugClassInput;
   isCombination: boolean;
@@ -34,12 +38,26 @@ export interface SelectedMedication {
   /** Voice transcript or photo OCR placeholder for "other". */
   rawInputText?: string;
   frequency?: MedicationFrequencyInput;
+  /** Drug-enrichment service output, persisted on PatientMedication and
+   *  carried into SelectedMedication on reload so OtherMedicationsList can
+   *  render the pill image + plain-language line for previously-saved
+   *  freeform meds. Undefined for in-session adds (background enrichment
+   *  fires only after wizard submit). */
+  pillImageUrl?: string | null;
+  plainLanguageDescription?: string | null;
 }
 
 export interface IntakeFormState {
   // A1 demographics
   gender?: GenderInput;
   heightCm?: number;
+  /** UI-only: which unit mode the patient is entering height in. Storage
+   *  is always cm — this just toggles the input(s) shown. */
+  heightUnit?: 'ftin' | 'cm';
+  /** Date of birth in YYYY-MM-DD. Stored on User.dateOfBirth via the same
+   *  intake.profile submit. Captured at A1 because age is a clinical input
+   *  the rule engine needs whenever an alert fires. */
+  dateOfBirth?: string;
 
   // A2 pregnancy (only relevant if gender === FEMALE)
   isPregnant?: boolean;

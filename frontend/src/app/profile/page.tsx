@@ -42,7 +42,7 @@ import type { TranslationKey } from '@/i18n';
 import MicButton from '@/components/intake/MicButton';
 import AudioButton from '@/components/intake/AudioButton';
 import { formatHeightFtIn } from '@/lib/units';
-import { validateDateOfBirth, maxDobIso } from '@/lib/dob-validator';
+import { matchToCatalog } from '@cardioplace/shared';
 import {
   getMyPatientProfile,
   getMyMedications,
@@ -76,6 +76,7 @@ function frequencyLabel(f: PatientMedicationDto['frequency'], t: TFn): string {
     case 'ONCE_DAILY': return t('profile.freqOnceDaily');
     case 'TWICE_DAILY': return t('profile.freqTwiceDaily');
     case 'THREE_TIMES_DAILY': return t('profile.freqThreeTimesDaily');
+    case 'AS_NEEDED': return t('profile.freqAsNeeded');
     case 'UNSURE': return t('profile.freqUnknown');
     default: return '—';
   }
@@ -395,34 +396,21 @@ function PersonalInfoModal({
 }) {
   const { t } = useLanguage();
   const [name, setName] = useState(current.name ?? '');
-  const [dateOfBirth, setDateOfBirth] = useState(
-    current.dateOfBirth ? current.dateOfBirth.slice(0, 10) : '',
-  );
   const [commPref, setCommPref] = useState<CommPref>(current.communicationPreference);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const dirty =
     (name || '') !== (current.name ?? '') ||
-    dateOfBirth !== (current.dateOfBirth ? current.dateOfBirth.slice(0, 10) : '') ||
     commPref !== current.communicationPreference;
 
   async function save() {
     if (!dirty || saving) return;
-    // Same DOB rules as onboarding — 18+, not future, not today, sane year.
-    if (dateOfBirth) {
-      const dobError = validateDateOfBirth(dateOfBirth);
-      if (dobError) {
-        setError(dobError);
-        return;
-      }
-    }
     setSaving(true);
     setError('');
     try {
       const next = await patchAuthProfile({
         name: name.trim() || null,
-        dateOfBirth: dateOfBirth || null,
         communicationPreference: commPref,
       });
       onSaved(next);
@@ -514,28 +502,6 @@ function PersonalInfoModal({
                 borderColor: 'var(--brand-border)',
                 color: 'var(--brand-text-muted)',
                 backgroundColor: 'var(--brand-background)',
-              }}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="profile-edit-dob" className="block text-[12px] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
-              {t('profile.dobLabel')}
-            </label>
-            <input
-              id="profile-edit-dob"
-              type="date"
-              value={dateOfBirth}
-              max={maxDobIso()}
-              onChange={(e) => {
-                setDateOfBirth(e.target.value);
-                if (error) setError('');
-              }}
-              className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
-              style={{
-                borderColor: 'var(--brand-border)',
-                color: 'var(--brand-text-primary)',
-                colorScheme: 'light',
               }}
             />
           </div>
@@ -859,16 +825,11 @@ export default function ProfilePage() {
                 `${t('profile.personalInfoSection')}.`,
                 `${t('profile.nameLabel')}: ${authProfile?.name || t('profile.notSet')}.`,
                 `${t('profile.email')}: ${authProfile?.email ?? '—'}.`,
-                `${t('profile.dobLabel')}: ${authProfile?.dateOfBirth ? formatDate(authProfile.dateOfBirth) : t('profile.notSet')}.`,
                 `${t('profile.commPrefLabel')}: ${commPrefLabel(authProfile?.communicationPreference ?? null, t)}.`,
               ].join(' ')}
             >
               <Row label={t('profile.nameLabel')} value={authProfile?.name || t('profile.notSet')} />
               <Row label={t('profile.email')} value={authProfile?.email ?? '—'} />
-              <Row
-                label={t('profile.dobLabel')}
-                value={authProfile?.dateOfBirth ? formatDate(authProfile.dateOfBirth) : t('profile.notSet')}
-              />
               <Row
                 label={t('profile.commPrefLabel')}
                 value={commPrefLabel(authProfile?.communicationPreference ?? null, t)}
@@ -881,10 +842,15 @@ export default function ProfilePage() {
               audioText={[
                 `${t('profile.aboutYou')}.`,
                 `${t('profile.gender')}: ${genderLabel(profile?.gender, t)}.`,
+                `${t('profile.dobLabel')}: ${authProfile?.dateOfBirth ? formatDate(authProfile.dateOfBirth) : t('profile.notSet')}.`,
                 `${t('profile.heightLabel')}: ${profile?.heightCm ? formatHeightFtIn(profile.heightCm) : t('profile.notSet')}.`,
               ].join(' ')}
             >
               <Row label={t('profile.gender')} value={genderLabel(profile?.gender, t)} />
+              <Row
+                label={t('profile.dobLabel')}
+                value={authProfile?.dateOfBirth ? formatDate(authProfile.dateOfBirth) : t('profile.notSet')}
+              />
               <Row
                 label={t('profile.heightLabel')}
                 value={profile?.heightCm ? formatHeightFtIn(profile.heightCm) : t('profile.notSet')}
@@ -1027,9 +993,19 @@ export default function ProfilePage() {
                 parts.push(t('profile.noMedications'));
                 return parts.join(' ');
               }
+              // Silent-literacy: include each med's plain-language purpose in
+              // the audio readout. Freeform meds use the Gemini-simplified
+              // `plainLanguageDescription` from the drug-enrichment service;
+              // catalog meds (which the enrichment service skips) fall back
+              // to the hand-written `purpose` on the shared catalog entry.
               const medSentences = activeMeds.map((m) => {
                 const combo = m.isCombination ? ` (${t('profile.combinationPill')})` : '';
-                return `${m.drugName}${combo}, ${frequencyLabel(m.frequency, t)}`;
+                const catalogPurpose = !m.plainLanguageDescription
+                  ? matchToCatalog(m.drugName)?.purpose
+                  : null;
+                const purposeLine = m.plainLanguageDescription || catalogPurpose;
+                const purpose = purposeLine ? `. ${purposeLine}` : '';
+                return `${m.drugName}${combo}, ${frequencyLabel(m.frequency, t)}${purpose}`;
               });
               parts.push(`${medSentences.join('. ')}.`);
               return parts.join(' ');
@@ -1044,38 +1020,74 @@ export default function ProfilePage() {
                 {activeMeds.map((m) => (
                   <div
                     key={m.id}
-                    className="rounded-xl p-3"
+                    className="rounded-xl p-3 flex gap-3"
                     style={{ backgroundColor: 'var(--brand-background)', border: '1px solid var(--brand-border)' }}
                   >
-                    {/* Row 1: name (truncates to single line) + verified badge */}
-                    <div className="flex items-center justify-between gap-2 min-w-0">
-                      <p
-                        className="text-[13.5px] font-bold leading-tight truncate min-w-0 flex-1"
-                        style={{ color: 'var(--brand-text-primary)' }}
-                        title={m.drugName}
-                      >
-                        {m.drugName}
-                      </p>
-                      <div className="shrink-0">
-                        <MedVerifiedBadge status={m.verificationStatus} />
-                      </div>
-                    </div>
-                    {/* Row 2: optional 2-in-1 badge + frequency */}
-                    <div className="mt-1 flex items-center gap-2 flex-wrap">
-                      {m.isCombination && (
-                        <span
-                          className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider"
-                          style={{ backgroundColor: 'var(--brand-accent-teal)', color: 'white' }}
+                    {/* Pill image — only rendered for freeform meds that
+                        actually got a DailyMed hit; catalog meds keep their
+                        existing layout (no thumb). */}
+                    {m.pillImageUrl && (
+                      <img
+                        src={m.pillImageUrl}
+                        alt=""
+                        aria-hidden="true"
+                        className="w-10 h-10 rounded-md object-cover shrink-0"
+                        style={{ border: '1px solid var(--brand-border)' }}
+                        onError={(e) => {
+                          // DailyMed URL went stale or 404'd — drop the image
+                          (e.currentTarget as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      {/* Row 1: name (truncates to single line) + verified badge */}
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <p
+                          className="text-[13.5px] font-bold leading-tight truncate min-w-0 flex-1"
+                          style={{ color: 'var(--brand-text-primary)' }}
+                          title={m.drugName}
                         >
-                          {t('profile.combinationPill')}
-                        </span>
-                      )}
-                      <p
-                        className="text-[12px]"
-                        style={{ color: 'var(--brand-text-muted)' }}
-                      >
-                        {frequencyLabel(m.frequency, t)}
-                      </p>
+                          {m.drugName}
+                        </p>
+                        <div className="shrink-0">
+                          <MedVerifiedBadge status={m.verificationStatus} />
+                        </div>
+                      </div>
+                      {/* Plain-language indication. Freeform meds use the
+                          drug-enrichment service's Gemini-simplified text;
+                          catalog meds fall back to the hand-written purpose
+                          string from the shared catalog. Either way every
+                          med shows what it's for in plain language. */}
+                      {(() => {
+                        const purposeLine =
+                          m.plainLanguageDescription ||
+                          matchToCatalog(m.drugName)?.purpose;
+                        return purposeLine ? (
+                          <p
+                            className="text-[11.5px] mt-0.5 leading-snug"
+                            style={{ color: 'var(--brand-text-secondary)' }}
+                          >
+                            {purposeLine}
+                          </p>
+                        ) : null;
+                      })()}
+                      {/* Row 2: optional 2-in-1 badge + frequency */}
+                      <div className="mt-1 flex items-center gap-2 flex-wrap">
+                        {m.isCombination && (
+                          <span
+                            className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider"
+                            style={{ backgroundColor: 'var(--brand-accent-teal)', color: 'white' }}
+                          >
+                            {t('profile.combinationPill')}
+                          </span>
+                        )}
+                        <p
+                          className="text-[12px]"
+                          style={{ color: 'var(--brand-text-muted)' }}
+                        >
+                          {frequencyLabel(m.frequency, t)}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 ))}

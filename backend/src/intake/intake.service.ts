@@ -1,5 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { DrugEnrichmentService } from '../drug-enrichment/drug-enrichment.service.js'
 import {
+  DrugClass,
   MedicationVerificationStatus,
   Prisma,
   ProfileVerificationStatus,
@@ -64,7 +66,40 @@ type VerifiableField = (typeof VERIFIABLE_PROFILE_FIELDS)[number]
 
 @Injectable()
 export class IntakeService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(IntakeService.name)
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly drugEnrichment: DrugEnrichmentService,
+  ) {}
+
+  /**
+   * Background-enrich freeform medications (drugClass = OTHER_UNVERIFIED) by
+   * resolving canonical name + pill image + plain-language description via
+   * RxNorm/DailyMed/OpenFDA. Fire-and-forget — never blocks intake submit.
+   * Catalog-tapped meds keep their hand-written `purpose` and brand icon and
+   * are skipped here.
+   */
+  private kickOffMedicationEnrichment(meds: PatientMedication[]): void {
+    const freeform = meds.filter((m) => m.drugClass === DrugClass.OTHER_UNVERIFIED)
+    if (!freeform.length) return
+
+    void Promise.allSettled(
+      freeform.map(async (med) => {
+        const enrichment = await this.drugEnrichment.enrich(med.drugName)
+        if (!enrichment) return
+        await this.prisma.patientMedication.update({
+          where: { id: med.id },
+          data: {
+            pillImageUrl: enrichment.pillImageUrl,
+            plainLanguageDescription: enrichment.plainLanguageDescription,
+          },
+        })
+      }),
+    ).catch((err) => {
+      this.logger.warn(`background medication enrichment failed: ${(err as Error).message}`)
+    })
+  }
 
   // ─── Patient: POST /intake/profile ───────────────────────────────────────
 
@@ -73,10 +108,21 @@ export class IntakeService {
       const existing = await tx.patientProfile.findUnique({ where: { userId } })
 
       const patch = this.stripUndefined(dto)
+      // Pull dateOfBirth out — it lives on User, not PatientProfile. Captured
+      // at intake A1 so the rule engine has age before the first check-in.
+      const dobPatch = patch.dateOfBirth
+      delete (patch as Partial<IntakeProfileDto>).dateOfBirth
       this.validatePregnancyShape(patch, existing)
 
       // Diff every verifiable field the DTO touches.
       const changes = this.diffProfile(existing, patch)
+
+      if (dobPatch !== undefined) {
+        await tx.user.update({
+          where: { id: userId },
+          data: { dateOfBirth: dobPatch === null ? null : new Date(dobPatch) },
+        })
+      }
 
       const profile = existing
         ? await tx.patientProfile.update({
@@ -228,11 +274,17 @@ export class IntakeService {
         : `${created.length} medication(s) recorded`
 
       return {
-        statusCode: 201,
-        message,
-        data: responseRows.map((m) => this.serializeMedication(m)),
+        result: {
+          statusCode: 201,
+          message,
+          data: responseRows.map((m) => this.serializeMedication(m)),
+        },
+        created,
       }
-    }, TX_OPTIONS)
+    }, TX_OPTIONS).then(({ result, created }) => {
+      this.kickOffMedicationEnrichment(created)
+      return result
+    })
   }
 
   // ─── Patient: PATCH /me/medications/:id ──────────────────────────────────
@@ -363,9 +415,12 @@ export class IntakeService {
 
       if (!toClose.length && !toCreate.length) {
         return {
-          statusCode: 200,
-          message: 'No changes applied',
-          data: current.map((m) => this.serializeMedication(m)),
+          result: {
+            statusCode: 200,
+            message: 'No changes applied',
+            data: current.map((m) => this.serializeMedication(m)),
+          },
+          created: [] as PatientMedication[],
         }
       }
 
@@ -434,11 +489,17 @@ export class IntakeService {
       })
 
       return {
-        statusCode: 200,
-        message: `Medication list replaced (${toClose.length} closed, ${toCreate.length} added)`,
-        data: active.map((m) => this.serializeMedication(m)),
+        result: {
+          statusCode: 200,
+          message: `Medication list replaced (${toClose.length} closed, ${toCreate.length} added)`,
+          data: active.map((m) => this.serializeMedication(m)),
+        },
+        created,
       }
-    }, TX_OPTIONS)
+    }, TX_OPTIONS).then(({ result, created }) => {
+      this.kickOffMedicationEnrichment(created)
+      return result
+    })
   }
 
   // ─── Admin: POST /admin/users/:id/verify-profile ─────────────────────────
@@ -667,13 +728,22 @@ export class IntakeService {
   // ─── Reads (admin dashboards will need these; also used by tests) ────────
 
   async getProfile(userId: string) {
-    const profile = await this.prisma.patientProfile.findUnique({
-      where: { userId },
-    })
+    const [profile, user] = await Promise.all([
+      this.prisma.patientProfile.findUnique({ where: { userId } }),
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { dateOfBirth: true },
+      }),
+    ])
+    const dob = user?.dateOfBirth ? user.dateOfBirth.toISOString().slice(0, 10) : null
     return {
       statusCode: 200,
       message: profile ? 'Profile retrieved' : 'No profile yet',
-      data: profile ? this.serializeProfile(profile) : null,
+      // dateOfBirth lives on User but is surfaced here so the admin
+      // profile tab can show age alongside other demographics without a
+      // second fetch. Read-only — patients edit it via /v2/auth/profile
+      // or via clinical-intake A1.
+      data: profile ? { ...this.serializeProfile(profile), dateOfBirth: dob } : null,
     }
   }
 

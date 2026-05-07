@@ -13,7 +13,35 @@ const SEVERITY_ORDER: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 }
 
 type DerivedRiskTier = 'STANDARD' | 'ELEVATED' | 'HIGH'
 
+// v2 condition tags surfaced on patient-row payloads. Each tag is a
+// distinct comorbidity from the spec — patients can have several. Severity
+// drives the admin UI pill color and orders the array within each tier.
+//
+//   critical  → CLINICAL_SPEC §3 / §4.2 / §4.6 / §4.8: pregnancy, HFrEF,
+//               HF subtype-unknown (defaults to HFrEF behavior),
+//               HCM, DCM. Threshold table is fundamentally different
+//               and/or provider configuration is mandatory.
+//   elevated  → §3 preeclampsia-history flag, §4.9 HFpEF: enhanced
+//               monitoring or recommended (not mandatory) provider config.
+//   standard  → CAD, AFib, diagnosedHypertension: standard adult
+//               threshold table applies, no special configuration.
+//
+// Tachycardia/Bradycardia are NOT included — they're not in the v2 intake
+// step (CLINICAL_SPEC §5 step 5: HF/AFib/CAD/HCM/DCM/None), so surfacing
+// them here would render fields the patient never had a chance to set.
+export type ConditionSeverity = 'critical' | 'elevated' | 'standard'
+
+export interface ConditionTag {
+  id: string
+  label: string
+  severity: ConditionSeverity
+}
+
 interface PatientProfileShape {
+  // Gender drives pregnancy gating — non-FEMALE patients can't carry an
+  // active "Pregnancy" or "Preeclampsia history" condition even if a stale
+  // boolean lingers in the row from a prior FEMALE selection.
+  gender: string | null
   hasHeartFailure: boolean
   heartFailureType: string | null
   hasAFib: boolean
@@ -46,13 +74,14 @@ export class ProviderService {
     profile: PatientProfileShape | null,
   ): string | null {
     if (!profile) return null
-    // Split pregnancy from preeclampsia history. Conflating them ("Pregnancy
-    // / preeclampsia history") was misleading for non-pregnant patients
-    // with only a documented history — it implied current pregnancy. Per
-    // CLINICAL_SPEC §3 the history flag is a *notation* for enhanced
-    // monitoring, not a pregnancy indicator.
-    if (profile.isPregnant) return 'Pregnancy'
-    if (profile.historyPreeclampsia) return 'Preeclampsia history'
+    // Pregnancy + preeclampsia history are clinically meaningful only for
+    // FEMALE patients — gating here means a stale isPregnant=true boolean
+    // on a non-FEMALE row (e.g., a patient who picked FEMALE earlier and
+    // later switched to OTHER) doesn't surface a "Pregnancy" pill in the
+    // admin patient list / detail header.
+    if (profile.gender === 'FEMALE' && profile.isPregnant) return 'Pregnancy'
+    if (profile.gender === 'FEMALE' && profile.historyPreeclampsia)
+      return 'Preeclampsia history'
     if (profile.hasHeartFailure) {
       const t = profile.heartFailureType
       if (t === 'HFREF') return 'Heart Failure (HFrEF)'
@@ -69,6 +98,70 @@ export class ProviderService {
     return null
   }
 
+  // v2 replacement for derivePrimaryCondition. Returns every comorbidity
+  // the patient carries, ordered by clinical priority (critical → elevated
+  // → standard, then the spec's intra-tier ordering). The admin patient
+  // header renders these as colored pills so providers see the full
+  // clinical picture instead of one synthesised "primary condition" string.
+  // Replaces the v1 helper once phase/11's dashboard rebuild lands.
+  private derivePatientConditions(
+    profile: PatientProfileShape | null,
+  ): ConditionTag[] {
+    if (!profile) return []
+    const tags: ConditionTag[] = []
+
+    // Critical tier — different threshold tables / mandatory provider config.
+    if (profile.gender === 'FEMALE' && profile.isPregnant) {
+      tags.push({ id: 'pregnancy', label: 'Pregnancy', severity: 'critical' })
+    }
+    if (profile.hasHeartFailure) {
+      if (profile.heartFailureType === 'HFREF') {
+        tags.push({ id: 'hfref', label: 'HF (HFrEF)', severity: 'critical' })
+      } else if (profile.heartFailureType === 'HFPEF') {
+        tags.push({ id: 'hfpef', label: 'HF (HFpEF)', severity: 'elevated' })
+      } else {
+        // UNKNOWN / NOT_APPLICABLE / null. CLINICAL_SPEC §5: "Heart failure,
+        // type unknown → apply HFrEF defaults" — so it's still critical.
+        tags.push({ id: 'hf-unknown', label: 'HF (subtype TBD)', severity: 'critical' })
+      }
+    }
+    if (profile.hasHCM) {
+      tags.push({ id: 'hcm', label: 'HCM', severity: 'critical' })
+    }
+    if (profile.hasDCM) {
+      tags.push({ id: 'dcm', label: 'DCM', severity: 'critical' })
+    }
+
+    // Elevated tier — recommended provider config / notation flag.
+    if (profile.gender === 'FEMALE' && profile.historyPreeclampsia && !profile.isPregnant) {
+      // Hidden during active pregnancy because the Pregnancy tag above
+      // already conveys the clinical state — avoids double-flagging the
+      // same patient with two related pills.
+      tags.push({
+        id: 'preeclampsia-history',
+        label: 'Preeclampsia history',
+        severity: 'elevated',
+      })
+    }
+
+    // Standard tier — standard adult threshold table applies.
+    if (profile.hasCAD) {
+      tags.push({ id: 'cad', label: 'CAD', severity: 'standard' })
+    }
+    if (profile.hasAFib) {
+      tags.push({ id: 'afib', label: 'AFib', severity: 'standard' })
+    }
+    if (profile.diagnosedHypertension) {
+      tags.push({
+        id: 'hypertension',
+        label: 'Hypertension',
+        severity: 'standard',
+      })
+    }
+
+    return tags
+  }
+
   private deriveRiskTier(
     profile: PatientProfileShape | null,
     dob: Date | null,
@@ -80,9 +173,11 @@ export class ProviderService {
     if (!profile) {
       return ageGroup === '65+' ? 'ELEVATED' : 'STANDARD'
     }
+    const femalePregnancyRisk =
+      profile.gender === 'FEMALE' &&
+      (profile.isPregnant || profile.historyPreeclampsia)
     if (
-      profile.isPregnant ||
-      profile.historyPreeclampsia ||
+      femalePregnancyRisk ||
       profile.hasHeartFailure ||
       profile.hasHCM ||
       profile.hasDCM
@@ -144,6 +239,13 @@ export class ProviderService {
   }
 
   private readonly profileSelect = {
+    // Gender drives FEMALE-only condition gating (Pregnancy + Preeclampsia
+    // history) in derivePatientConditions / derivePrimaryCondition /
+    // deriveRiskTier. Without it the Prisma row arrives with `gender`
+    // undefined and every `gender === 'FEMALE'` check silently fails — the
+    // pregnancy + preeclampsia pills then never render even when the
+    // patient is correctly marked pregnant.
+    gender: true,
     hasHeartFailure: true,
     heartFailureType: true,
     hasAFib: true,
@@ -318,14 +420,22 @@ export class ProviderService {
         riskTier: this.deriveRiskTier(profile, u.dateOfBirth),
         communicationPreference: u.communicationPreference ?? null,
         primaryCondition: this.derivePrimaryCondition(profile),
+        // v2 replacement for primaryCondition. Surfaces every comorbidity
+        // the patient carries so the admin header can render a row of
+        // colored pills instead of one synthesised string. primaryCondition
+        // stays in the payload during transition — both fields will live
+        // here until phase/11's dashboard rebuild retires the legacy one.
+        conditions: this.derivePatientConditions(profile),
         // Surface pregnancy + preeclampsia-history flags directly so the
         // patient list can render the "Preeclampsia history" notation per
         // CLINICAL_SPEC §3 (enhanced-monitoring marker for women with
         // history, even outside pregnancy). Frontend hides the history
         // badge when isPregnant=true so the pregnancy banner takes
-        // priority and the row doesn't double-flag.
-        isPregnant: profile?.isPregnant ?? false,
-        historyPreeclampsia: profile?.historyPreeclampsia ?? false,
+        // priority and the row doesn't double-flag. Gated on FEMALE so
+        // stale rows from a previously-FEMALE patient don't surface here.
+        isPregnant: profile?.gender === 'FEMALE' ? (profile?.isPregnant ?? false) : false,
+        historyPreeclampsia:
+          profile?.gender === 'FEMALE' ? (profile?.historyPreeclampsia ?? false) : false,
         onboardingStatus: u.onboardingStatus,
         enrollmentStatus: u.enrollmentStatus,
         // Flow K — surface the patient's profile verification state so the
@@ -532,6 +642,7 @@ export class ProviderService {
       riskTier: this.deriveRiskTier(profile, user.dateOfBirth),
       communicationPreference: user.communicationPreference ?? null,
       primaryCondition: this.derivePrimaryCondition(profile),
+      conditions: this.derivePatientConditions(profile),
       onboardingStatus: user.onboardingStatus,
       enrollmentStatus: user.enrollmentStatus,
       latestBaseline: baseline,

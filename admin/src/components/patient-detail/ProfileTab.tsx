@@ -84,6 +84,21 @@ function fmtValue(v: unknown, type: FieldType): string {
   return String(v);
 }
 
+// Age from DOB (YYYY-MM-DD). Calendar-year accurate — accounts for whether
+// the birthday has passed this year. Null on invalid/missing input.
+function ageFromDob(dob: string | null): number | null {
+  if (!dob) return null;
+  const d = new Date(dob);
+  if (Number.isNaN(d.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - d.getFullYear();
+  const beforeBirthday =
+    today.getMonth() < d.getMonth() ||
+    (today.getMonth() === d.getMonth() && today.getDate() < d.getDate());
+  if (beforeBirthday) age -= 1;
+  return age >= 0 ? age : null;
+}
+
 type FieldStatus = 'pending' | 'confirmed' | 'editing' | 'rejected';
 
 export default function ProfileTab({ patientId, profile, loading, onChanged }: Props) {
@@ -378,8 +393,14 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
         </div>
       </div>
 
-      {/* Two-column reconciliation grid */}
-      {(['demographics', 'pregnancy', 'cardiac'] as const).map((group) => (
+      {/* Two-column reconciliation grid. The pregnancy group is irrelevant
+          for non-FEMALE patients and is hidden — the patient frontend
+          gates the same group on gender, and the intake submit clears
+          pregnancy fields whenever gender isn't FEMALE so there's no
+          orphaned data to verify. */}
+      {(['demographics', 'pregnancy', 'cardiac'] as const)
+        .filter((g) => g !== 'pregnancy' || profile.gender === 'FEMALE')
+        .map((group) => (
         <div key={group} className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
           <div className="px-5 py-3" style={{ borderBottom: '1px solid var(--brand-border)' }}>
             <h3 className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
@@ -399,6 +420,31 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
             </span>
           </div>
           <div>
+            {/* Age row — derived from User.dateOfBirth (collected at clinical
+                intake A1, editable by patient via profile edit). Read-only
+                here; no admin verify/correct flow because patients self-report
+                DOB and any correction goes back through the patient. */}
+            {group === 'demographics' && (
+              <div
+                className="grid grid-cols-1 md:grid-cols-[180px_1fr_1fr] gap-2 md:gap-3 px-5 py-3 items-center"
+                style={{ borderTop: '1px solid var(--brand-border)' }}
+              >
+                <span className="text-[12.5px] font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
+                  Age
+                </span>
+                <span className="text-[12.5px]" style={{ color: 'var(--brand-text-primary)' }}>
+                  {(() => {
+                    const age = ageFromDob(profile.dateOfBirth);
+                    if (age == null) return '—';
+                    const dobLabel = fmtValue(profile.dateOfBirth, 'date');
+                    return `${age} yrs (DOB ${dobLabel})`;
+                  })()}
+                </span>
+                <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
+                  Self-reported
+                </span>
+              </div>
+            )}
             {grouped[group].map((field) => (
               <div
                 key={field.key as string}

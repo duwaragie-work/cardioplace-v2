@@ -8,7 +8,6 @@ import {
   markOnboardingSkipped,
   shouldShowOnboardingForUser,
 } from "@/lib/onboarding";
-import Logo from "@/components/Logo";
 import { CheckCircle2 } from "lucide-react";
 import SpinnerIndicator from "@/components/ui/SpinnerIndicator";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -16,7 +15,6 @@ import LandingHeader from "@/components/cardio/LandingHeader";
 import LandingFooter from "@/components/cardio/LandingFooter";
 import AudioButton from "@/components/intake/AudioButton";
 import MicButton from "@/components/intake/MicButton";
-import { validateDateOfBirth, maxDobIso } from "@/lib/dob-validator";
 
 function getBrowserTimezone(): string | undefined {
   if (typeof Intl === "undefined" || typeof Intl.DateTimeFormat === "undefined") return undefined;
@@ -32,7 +30,6 @@ export default function OnboardingPage() {
   const { t } = useLanguage();
   const { user, isLoading, logout, markOnboardingComplete, updateUser } = useAuth();
   const [name, setName] = useState("");
-  const [dateOfBirth, setDateOfBirth] = useState("");
   const [communicationPreference, setCommunicationPreference] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -65,11 +62,7 @@ export default function OnboardingPage() {
     }
   }, [user, isLoading, router]);
 
-  // DOB rules (validateDateOfBirth + maxDobIso) live in @/lib/dob-validator
-  // so onboarding and the profile editor stay in lockstep.
-  const dobMax = maxDobIso();
-
-  const isFormPartiallyFilled = name.trim() !== "" || dateOfBirth !== "" || communicationPreference !== "";
+  const isFormPartiallyFilled = name.trim() !== "" || communicationPreference !== "";
 
   // Synchronous "should we redirect?" check — if shouldShowOnboardingForUser
   // returns false, useEffect will router.replace('/dashboard') on the next
@@ -130,16 +123,8 @@ export default function OnboardingPage() {
 
   async function handleContinue() {
     if (!isFormPartiallyFilled || isSubmitting) return;
-    if (dateOfBirth) {
-      const dobError = validateDateOfBirth(dateOfBirth);
-      if (dobError) {
-        setError(dobError);
-        return;
-      }
-    }
     await submitProfile({
       name: name.trim() || null,
-      dateOfBirth: dateOfBirth || null,
       communicationPreference: communicationPreference || null,
     });
   }
@@ -162,7 +147,7 @@ export default function OnboardingPage() {
   return (
     <div className="bg-white">
       <LandingHeader activeLink="" />
-      <main id="main" className="pt-28 pb-10 flex items-start justify-center px-4 sm:px-6 lg:px-12">
+      <main id="main" className="lg:min-h-screen pt-28 pb-10 lg:pb-0 flex items-start lg:items-center justify-center px-4 sm:px-6 lg:px-12">
       <div className="w-full max-w-300 mx-auto">
         <div className="flex flex-col items-center md:items-center md:flex-row gap-8 lg:gap-20">
           {/* Left side - Form */}
@@ -204,24 +189,11 @@ export default function OnboardingPage() {
                 </div>
               </div>
 
-              {/* Date of Birth */}
-              <div className="w-full max-w-105">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <label htmlFor="onboarding-dob" className="block font-semibold text-[#171717] text-xs lg:text-sm">
-                    {t('onboarding.dob')}
-                  </label>
-                  <AudioButton text={t('onboarding.dob')} size="sm" />
-                </div>
-                <input
-                  id="onboarding-dob"
-                  type="date"
-                  value={dateOfBirth}
-                  max={dobMax}
-                  onChange={(e) => setDateOfBirth(e.target.value)}
-                  className="w-full h-12 px-4 lg:px-5 bg-white border border-[#e5d9f2] rounded-lg text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
-                  style={{ colorScheme: 'light', minHeight: 48 }}
-                />
-              </div>
+              {/* Date of birth moved to clinical-intake A1 (alongside sex
+                  and height) — DOB is a clinical field the rule engine
+                  needs before alerts fire, not a UX preference. Onboarding
+                  stays purely identity (name + comm preference) so it can
+                  be skipped without losing clinical data. */}
 
               {/* Communication Preference */}
               <div className="w-full max-w-105">

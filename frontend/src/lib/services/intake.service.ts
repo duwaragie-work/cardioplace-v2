@@ -40,13 +40,19 @@ export interface PatientMedicationDto {
   drugClass: string;
   isCombination: boolean;
   combinationComponents: string[];
-  frequency: 'ONCE_DAILY' | 'TWICE_DAILY' | 'THREE_TIMES_DAILY' | 'UNSURE';
+  frequency: 'ONCE_DAILY' | 'TWICE_DAILY' | 'THREE_TIMES_DAILY' | 'AS_NEEDED' | 'UNSURE';
   source: 'PATIENT_SELF_REPORT' | 'PROVIDER_ENTERED' | 'PATIENT_VOICE' | 'PATIENT_PHOTO';
   verificationStatus: 'UNVERIFIED' | 'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER';
   reportedAt: string;
   discontinuedAt?: string | null;
   rawInputText?: string | null;
   notes?: string | null;
+  /** Resolved pill image URL (DailyMed via drug-enrichment service). Null
+   *  for catalog meds and for freeform meds without a DailyMed match. */
+  pillImageUrl?: string | null;
+  /** Plain-language indication simplified by Gemini. Null for catalog meds
+   *  (they carry hand-written `purpose` in the shared catalog instead). */
+  plainLanguageDescription?: string | null;
 }
 
 async function unwrap<T>(res: Response): Promise<T> {

@@ -174,6 +174,11 @@ export interface CatalogMatch {
   isCombination: boolean
   combinationComponents: DrugClassInput[]
   screen: 'CORE' | 'CATEGORY' | 'COMBO'
+  /** Hand-written plain-language purpose from the shared catalog (e.g.
+   *  "Lowers blood pressure."). Always present for catalog meds; the
+   *  drug-enrichment service skips catalog matches and only writes
+   *  PatientMedication.plainLanguageDescription for freeform meds. */
+  purpose: string
 }
 
 function comboToMatch(combo: MedComboEntry): CatalogMatch {
@@ -184,6 +189,7 @@ function comboToMatch(combo: MedComboEntry): CatalogMatch {
     isCombination: true,
     combinationComponents: combo.registersAs,
     screen: 'COMBO',
+    purpose: combo.purpose,
   }
 }
 
@@ -195,6 +201,7 @@ function entryToMatch(entry: MedCatalogEntry): CatalogMatch {
     isCombination: false,
     combinationComponents: [],
     screen: entry.screen,
+    purpose: entry.purpose,
   }
 }
 
@@ -248,26 +255,46 @@ export function matchToCatalog(raw: string): CatalogMatch | null {
 }
 
 /**
- * Map Gemini's free-text frequency output to the 4-value MedicationFrequency
+ * Map Gemini's free-text frequency output to the 5-value MedicationFrequency
  * enum. Returns 'UNSURE' on no match — patient confirms on the next wizard
  * step (A9).
+ *
+ * Order of checks matters: PRN beats once-a-day cues so a label saying "one
+ * tablet as needed" doesn't get pinned to ONCE_DAILY by the lone "one";
+ * three-times beats twice (else "three times" trips the "2 / two" guard via
+ * a digit boundary); twice beats once for the same reason. Time-of-day cues
+ * ("at night", "in the morning", "with breakfast") fall through to ONCE_DAILY
+ * since each names a single dosing window.
  */
 export function normaliseFrequency(raw: string): MedicationFrequencyInput {
   if (!raw || typeof raw !== 'string') return 'UNSURE'
   const s = raw.trim().toLowerCase()
   if (!s) return 'UNSURE'
 
-  // Three times daily — check first because "three times" contains "two" via
-  // word-boundary collision risk; explicit checks are safer.
+  // PRN / "as needed" — must come first. A label like "one tablet as needed"
+  // would otherwise tip into ONCE_DAILY via the "one" cue.
+  if (/\bprn\b|\bp\.r\.n\b|\bas\s*needed\b|\bwhen\s*needed\b|\bwhen\s*required\b|\bif\s*needed\b|\bas\s*required\b/.test(s)) {
+    return 'AS_NEEDED'
+  }
+  // Three times daily — "three times" before twice/once to dodge digit
+  // collisions inside the broader patterns.
   if (/\bthree\s*times\b|\b3\s*times\b|\b3x\b|\btid\b|\bt\.i\.d\b|every\s*8\s*(hour|hr)/.test(s)) {
     return 'THREE_TIMES_DAILY'
   }
-  // Twice daily
-  if (/\btwice\b|\b2\s*times\b|\btwo\s*times\b|\b2x\b|\bbid\b|\bb\.i\.d\b|every\s*12\s*(hour|hr)/.test(s)) {
+  // Twice daily — explicit "twice / 2x / BID" plus paired time-of-day cues
+  // ("morning and night", "AM and PM") that imply two windows per day.
+  if (/\btwice\b|\b2\s*times\b|\btwo\s*times\b|\b2x\b|\bbid\b|\bb\.i\.d\b|every\s*12\s*(hour|hr)|morning\s*and\s*(night|evening|bedtime)|am\s*and\s*pm|\bam\/pm\b/.test(s)) {
     return 'TWICE_DAILY'
   }
-  // Once daily — broad catch-all for "once a day", "daily", "qd", "1 time"
-  if (/\bonce\b|\bqd\b|\bq\.d\b|\b1\s*time\b|\bone\s*time\b|\bdaily\b|\bper\s*day\b|every\s*24\s*(hour|hr)/.test(s)) {
+  // Once daily — broad catch-all plus single time-of-day cues. "at night",
+  // "in the morning", "with breakfast" each name one dosing window per day.
+  // The `at\s*night` / `at\s*bedtime` patterns cover "one tablet at night"
+  // which is the exact phrase Manisha flagged.
+  if (
+    /\bonce\b|\bqd\b|\bq\.d\b|\bq\s*am\b|\bq\s*pm\b|\b1\s*time\b|\bone\s*time\b|\bdaily\b|\bper\s*day\b|every\s*24\s*(hour|hr)|at\s*night|at\s*bedtime|at\s*hs\b|\bhs\b|before\s*bed|in\s*the\s*morning|in\s*the\s*evening|with\s*breakfast|with\s*lunch|with\s*dinner|at\s*dinner|at\s*lunch|at\s*breakfast/.test(
+      s,
+    )
+  ) {
     return 'ONCE_DAILY'
   }
 

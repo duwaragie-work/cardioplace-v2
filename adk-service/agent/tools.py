@@ -69,6 +69,9 @@ def make_tools(
         ruq_pain: bool = False,
         edema: bool = False,
         other_symptoms: list[str] = [],
+        # ── Phase/28 v2 fields ───────────────────────────────────────────────
+        measurement_conditions: dict | None = None,
+        missed_medications: list | None = None,
     ) -> dict:
         """
         Submit the patient's health check-in after all values have been
@@ -91,7 +94,11 @@ def make_tools(
                               booleans below for the 9 known clinical symptoms.
             notes:            Extra notes. ALWAYS in English.
             entry_date:       YYYY-MM-DD or "" for today.
-            measurement_time: HH:mm 24-hour or "" / "now" for current time.
+            measurement_time: HH:mm 24-hour. Pass "now" / "right now" / "just now"
+                              / "current" when the patient said the reading was
+                              taken at this moment — the tool substitutes the
+                              current time in the patient's timezone. Pass "" only
+                              if you genuinely couldn't get a time (last resort).
             pulse:            Pulse / heart rate (30–220). 0 = not provided.
             position:         "SITTING" / "STANDING" / "LYING" / "" = not provided.
             medication_scheduled_later:
@@ -108,6 +115,20 @@ def make_tools(
                               True for non-pregnant patients is safely ignored.
             other_symptoms:   "Anything else" the patient said that doesn't map
                               to a structured boolean. ALWAYS in English.
+            measurement_conditions:
+                              B1 pre-measurement checklist as a partial dict —
+                              only include keys the patient explicitly answered.
+                              Keys: noCaffeine, noSmoking, noExercise, bladderEmpty,
+                              seatedQuietly, posturalSupport, notTalking, cuffOnBareArm.
+                              Each value is a bool (True = patient confirmed they
+                              followed it, False = explicitly said they didn't).
+                              Pass None when nothing was asked.
+            missed_medications:
+                              List of {"drug_name", "reason", "missed_doses"} dicts
+                              for meds the patient explicitly named as missed today.
+                              reason ∈ FORGOT / SIDE_EFFECTS / RAN_OUT / COST /
+                              INTENTIONAL / OTHER. AS_NEEDED (PRN) drugs are
+                              filtered server-side; you don't need to filter them.
 
         Returns:
             dict with 'saved' (bool) and 'message' (str).
@@ -153,14 +174,33 @@ def make_tools(
         resolved_time = patient_now.strftime("%H:%M")
         if measurement_time and measurement_time.strip():
             mt = measurement_time.strip().lower()
-            if mt in ("now", "current", "current time", "right now"):
+            if mt in ("now", "current", "current time", "right now", "just now"):
                 resolved_time = patient_now.strftime("%H:%M")
                 logger.info("Resolved 'now' to %s in timezone %s", resolved_time, patient_timezone)
             else:
                 resolved_time = measurement_time.strip()
 
+        # NestJS CreateJournalEntryDto requires a single ISO 8601 measuredAt
+        # field (legacy code emitted entryDate + measurementTime separately,
+        # which ValidationPipe dropped — those rows persisted with the wrong
+        # date/time, or the request 400'd outright). Build measuredAt from
+        # the resolved date+time in the patient's timezone and convert to UTC.
+        try:
+            from zoneinfo import ZoneInfo
+            local_dt = datetime.strptime(
+                f"{resolved_date} {resolved_time}", "%Y-%m-%d %H:%M"
+            ).replace(tzinfo=ZoneInfo(patient_timezone))
+            measured_at_iso = local_dt.astimezone().isoformat()
+        except Exception:
+            # Fall back to naive UTC if zoneinfo / parse fails.
+            measured_at_iso = (
+                datetime.strptime(
+                    f"{resolved_date} {resolved_time}", "%Y-%m-%d %H:%M"
+                ).isoformat() + "Z"
+            )
+
         payload: dict[str, Any] = {
-            "entryDate": resolved_date,
+            "measuredAt": measured_at_iso,
             "medicationTaken": medication_taken,
             "symptoms": symptoms or [],
             "notes": notes or "",
@@ -169,8 +209,6 @@ def make_tools(
         if bp_provided:
             payload["systolicBP"] = systolic_bp
             payload["diastolicBP"] = diastolic_bp
-        if resolved_time:
-            payload["measurementTime"] = resolved_time
         if weight and weight > 0:
             payload["weight"] = weight
         # Phase/27 v2 optional fields — only send when populated so existing
@@ -196,6 +234,53 @@ def make_tools(
         payload["edema"] = bool(edema)
         if other_symptoms:
             payload["otherSymptoms"] = other_symptoms
+
+        # B1 pre-measurement checklist — accept only the 8 known keys with
+        # boolean values; drop everything else. Empty result = omit (don't
+        # default to all-false).
+        if isinstance(measurement_conditions, dict):
+            allowed_keys = {
+                "noCaffeine",
+                "noSmoking",
+                "noExercise",
+                "bladderEmpty",
+                "seatedQuietly",
+                "posturalSupport",
+                "notTalking",
+                "cuffOnBareArm",
+            }
+            cleaned = {
+                k: bool(v)
+                for k, v in measurement_conditions.items()
+                if k in allowed_keys and isinstance(v, bool)
+            }
+            if cleaned:
+                payload["measurementConditions"] = cleaned
+
+        # Per-medication miss detail — backend resolves drug_name → medicationId
+        # and filters AS_NEEDED meds. Pass through as-is; the executor will
+        # validate reason values and drop unmatched drugs.
+        if isinstance(missed_medications, list) and missed_medications:
+            cleaned_misses = []
+            for row in missed_medications:
+                if not isinstance(row, dict):
+                    continue
+                drug_name = str(row.get("drug_name") or "").strip()
+                reason = str(row.get("reason") or "").strip().upper()
+                if not drug_name or not reason:
+                    continue
+                doses_raw = row.get("missed_doses", 1)
+                try:
+                    doses = max(1, min(10, int(doses_raw)))
+                except (TypeError, ValueError):
+                    doses = 1
+                cleaned_misses.append({
+                    "drug_name": drug_name,
+                    "reason": reason,
+                    "missed_doses": doses,
+                })
+            if cleaned_misses:
+                payload["missedMedications"] = cleaned_misses
 
         saved = False
         try:
@@ -302,8 +387,16 @@ def make_tools(
                 lines = []
                 for e in entries[:5]:
                     entry_id = e.get("id", "unknown")
-                    d = e.get("entryDate", "unknown")
-                    t = e.get("measurementTime", "")
+                    # Backend serialises measuredAt as an ISO 8601 string;
+                    # split it for the human-readable summary the model echoes
+                    # back to the patient.
+                    measured_at = e.get("measuredAt", "")
+                    if measured_at:
+                        d = measured_at[:10] if len(measured_at) >= 10 else "unknown"
+                        t = measured_at[11:16] if len(measured_at) >= 16 else ""
+                    else:
+                        d = "unknown"
+                        t = ""
                     s = e.get("systolicBP", "?")
                     di = e.get("diastolicBP", "?")
                     med = "yes" if e.get("medicationTaken") else "no"
@@ -363,7 +456,38 @@ def make_tools(
         """
         payload: dict[str, Any] = {}
         if measurement_time:
-            payload["measurementTime"] = measurement_time
+            # Backend stores a single ISO measuredAt — to change just the time
+            # we need the existing date. Fetch the row first.
+            try:
+                existing_resp = requests.get(
+                    f"{NESTJS_URL}/daily-journal/{entry_id}",
+                    headers=headers,
+                    timeout=REQUEST_TIMEOUT,
+                )
+                if existing_resp.status_code == 200:
+                    existing = existing_resp.json()
+                    existing_iso = (existing or {}).get("measuredAt", "")
+                    existing_date = existing_iso[:10] if len(existing_iso) >= 10 else None
+                    if existing_date:
+                        try:
+                            from zoneinfo import ZoneInfo
+                            local_dt = datetime.strptime(
+                                f"{existing_date} {measurement_time.strip()}",
+                                "%Y-%m-%d %H:%M",
+                            ).replace(tzinfo=ZoneInfo(patient_timezone))
+                            payload["measuredAt"] = local_dt.astimezone().isoformat()
+                        except Exception:
+                            logger.warning(
+                                "Could not build measuredAt from existing date %s + time %s",
+                                existing_date, measurement_time,
+                            )
+                else:
+                    logger.warning(
+                        "GET /daily-journal/%s returned %s — skipping time change",
+                        entry_id, existing_resp.status_code,
+                    )
+            except Exception as exc:
+                logger.warning("Failed to fetch existing entry %s: %s", entry_id, exc)
         if systolic_bp and systolic_bp > 0:
             payload["systolicBP"] = systolic_bp
         if diastolic_bp and diastolic_bp > 0:
@@ -449,7 +573,8 @@ def make_tools(
                 )
                 if get_resp.status_code == 200:
                     data = get_resp.json()
-                    entry_date = data.get("entryDate", "")
+                    measured_at = data.get("measuredAt", "")
+                    entry_date = measured_at[:10] if len(measured_at) >= 10 else ""
                     final_systolic = data.get("systolicBP", final_systolic)
                     final_diastolic = data.get("diastolicBP", final_diastolic)
                     final_weight = data.get("weight", final_weight) or 0.0

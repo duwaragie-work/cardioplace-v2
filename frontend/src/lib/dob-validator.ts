@@ -1,39 +1,46 @@
+/** Translation key returned by `validateDateOfBirth`. The caller looks the
+ *  key up via `t()` at render time so the message stays in the patient's
+ *  current language — including after they switch language post-error. */
+export type DobErrorKey =
+  | 'dob.errInvalid'
+  | 'dob.errFuture'
+  | 'dob.errToday'
+  | 'dob.errUnder18'
+  | 'dob.errAncient';
+
 /**
  * Validate a date-of-birth string (YYYY-MM-DD).
  *
- * Returns null when OK, otherwise a user-facing error message. Copy is
- * intentionally friendly + actionable — the patient should always know
- * what to fix and why. Used by both onboarding and the profile editor
- * so the same rules apply everywhere a DOB is set.
+ * Returns null when OK, otherwise a translation key the caller resolves
+ * with `t()`. Used by onboarding, profile editor, and clinical-intake A1
+ * so the same rules apply wherever a DOB is set.
  *
- * Empty input is the caller's concern — both onboarding and the profile
- * editor treat DOB as optional and skip the call when the field is blank.
+ * Empty input is the caller's concern — callers gate with `if (raw)`.
  */
-export function validateDateOfBirth(raw: string): string | null {
+export function validateDateOfBirth(raw: string): DobErrorKey | null {
   const dob = new Date(raw);
   if (Number.isNaN(dob.getTime())) {
-    return "That doesn't look like a valid date — please pick from the calendar.";
+    return 'dob.errInvalid';
   }
   const today = new Date();
   const dobDay = new Date(dob.getFullYear(), dob.getMonth(), dob.getDate());
   const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   if (dobDay > todayDay) {
-    return 'That date is in the future. Please pick the day you were born.';
+    return 'dob.errFuture';
   }
   if (dobDay.getTime() === todayDay.getTime()) {
-    return "Today can't be your date of birth — please pick the day you were born.";
+    return 'dob.errToday';
   }
-  // 18+ check: compute "18 years ago today" and require dob <= that.
   const eighteenAgo = new Date(
     todayDay.getFullYear() - 18,
     todayDay.getMonth(),
     todayDay.getDate(),
   );
   if (dobDay > eighteenAgo) {
-    return 'Cardioplace is for adults 18 and older. Please double-check your date of birth.';
+    return 'dob.errUnder18';
   }
   if (dobDay.getFullYear() < todayDay.getFullYear() - 120) {
-    return "That date doesn't look right — please check the year and try again.";
+    return 'dob.errAncient';
   }
   return null;
 }

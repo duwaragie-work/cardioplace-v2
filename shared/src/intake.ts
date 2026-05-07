@@ -32,6 +32,7 @@ export type MedicationFrequencyInput =
   | 'ONCE_DAILY'
   | 'TWICE_DAILY'
   | 'THREE_TIMES_DAILY'
+  | 'AS_NEEDED'
   | 'UNSURE'
 
 export type MedicationSourceInput =
@@ -56,6 +57,11 @@ export type ProfileVerificationStatusInput =
 export interface IntakeProfilePayload {
   gender?: GenderInput
   heightCm?: number
+  // Date of birth (YYYY-MM-DD). Lives on the User table, not PatientProfile,
+  // but collected at intake A1 because age is a clinical input the rule
+  // engine needs whenever an alert fires. The intake service writes it
+  // through to User.dateOfBirth as part of the same transaction.
+  dateOfBirth?: string | null
 
   isPregnant?: boolean
   pregnancyDueDate?: string | null

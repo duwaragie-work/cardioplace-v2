@@ -9,7 +9,6 @@ import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { Check } from 'lucide-react';
 import AudioButton from './AudioButton';
-import { applyFriendlyVoice } from '@/lib/tts-voice';
 
 interface Props {
   icon: ReactNode;
@@ -45,42 +44,17 @@ export default function ChoiceCard({
     ? 'var(--brand-alert-red-light)'
     : 'var(--brand-primary-purple-light)';
 
-  // Phase/26 TTS pass 2 — when the card is in compact mode (no inline
-  // AudioButton renders), tapping or keyboard-activating the card also
-  // speaks its `audioText` so non-readers hear what they just selected.
-  // Cancel any in-flight utterance so rapid taps don't queue.
-  const speakIfCompact = () => {
-    if (
-      audioText &&
-      compact &&
-      typeof window !== 'undefined' &&
-      'speechSynthesis' in window
-    ) {
-      const synth = window.speechSynthesis;
-      synth.cancel();
-      const u = new SpeechSynthesisUtterance(audioText);
-      u.lang = audioLang ?? 'en-US';
-      u.rate = 0.95;
-      applyFriendlyVoice(u);
-      synth.speak(u);
-    }
-  };
-  const handleSelect = () => {
-    speakIfCompact();
-    onClick();
-  };
-
   return (
     // div+role=button (not <button>) so the nested AudioButton doesn't
     // produce <button>-inside-<button> hydration warnings.
     <motion.div
       role="button"
       tabIndex={0}
-      onClick={handleSelect}
+      onClick={onClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          handleSelect();
+          onClick();
         }
       }}
       className={`relative w-full rounded-2xl transition-all cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary-purple)] ${className ?? ''}`}
@@ -175,6 +149,17 @@ export default function ChoiceCard({
         >
           <Check className="w-3 h-3 text-white" strokeWidth={3} />
         </motion.div>
+      )}
+
+      {/* Compact cards used to auto-speak `audioText` on tap with no way for
+          the patient to stop the utterance. Now they expose a real speaker
+          button at the top-left — symmetric with the selection check on the
+          top-right. AudioButton calls e.stopPropagation() on click so it
+          doesn't double-fire the card's onClick. */}
+      {compact && audioText && (
+        <div className="absolute top-1 left-1">
+          <AudioButton text={audioText} lang={audioLang} size="sm" />
+        </div>
       )}
     </motion.div>
   );

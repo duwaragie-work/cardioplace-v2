@@ -24,6 +24,14 @@ export class IntakeProfileDto implements IntakeProfilePayload {
   @Max(250)
   heightCm?: number
 
+  // Date of birth (YYYY-MM-DD). Stored on User, not PatientProfile, but
+  // collected here so the rule engine has age available before the patient
+  // can submit any check-in. `null` clears it.
+  @ValidateIf((_, v) => v !== null)
+  @IsOptional()
+  @IsISO8601({}, { message: 'dateOfBirth must be ISO 8601 (YYYY-MM-DD)' })
+  dateOfBirth?: string | null
+
   @IsOptional()
   @IsBoolean()
   isPregnant?: boolean
