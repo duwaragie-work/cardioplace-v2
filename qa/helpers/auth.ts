@@ -60,16 +60,23 @@ export async function apiSignIn(
   email: string,
   appContext: 'patient' | 'admin' = 'patient',
 ): Promise<{ accessToken: string; userId: string; ctx: APIRequestContext }> {
-  const ctx = await pwRequest.newContext({ baseURL: apiBase })
-  const sendRes = await ctx.post('/api/v2/auth/otp/send', {
-    data: { email, appContext },
+  // Backend mounts /api globally — strip if caller already included it,
+  // then re-prefix here so callers can stay agnostic.
+  const root = apiBase.replace(/\/api\/?$/, '').replace(/\/$/, '')
+  const deviceId = `qa-${email}-device`
+  const ctx = await pwRequest.newContext({
+    baseURL: root,
+    extraHTTPHeaders: { 'x-device-id': deviceId },
   })
-  expect(sendRes.ok(), `OTP send failed: ${sendRes.status()}`).toBeTruthy()
+  const sendRes = await ctx.post('/api/v2/auth/otp/send', {
+    data: { email, appContext, deviceId },
+  })
+  expect(sendRes.ok(), `OTP send failed: ${sendRes.status()}: ${await sendRes.text()}`).toBeTruthy()
 
   const verifyRes = await ctx.post('/api/v2/auth/otp/verify', {
-    data: { email, otp: DEMO_OTP, appContext },
+    data: { email, otp: DEMO_OTP, appContext, deviceId },
   })
-  expect(verifyRes.ok(), `OTP verify failed: ${verifyRes.status()}`).toBeTruthy()
+  expect(verifyRes.ok(), `OTP verify failed: ${verifyRes.status()}: ${await verifyRes.text()}`).toBeTruthy()
 
   const body = await verifyRes.json()
   const accessToken = body?.accessToken ?? body?.access_token
@@ -82,7 +89,8 @@ export async function apiSignIn(
 
 /**
  * Build an authenticated APIRequestContext that sends the bearer token on
- * every request. Reuses the already-signed-in ctx instead of forking.
+ * every request. baseURL includes the /api prefix so helpers can call
+ * `/daily-journal`, `/admin/...`, `/me/...` without re-prefixing.
  */
 export async function authedApi(
   apiBase: string,
@@ -90,8 +98,9 @@ export async function authedApi(
   appContext: 'patient' | 'admin' = 'patient',
 ): Promise<APIRequestContext> {
   const { accessToken } = await apiSignIn(apiBase, email, appContext)
+  const root = apiBase.replace(/\/api\/?$/, '').replace(/\/$/, '')
   return pwRequest.newContext({
-    baseURL: apiBase,
+    baseURL: `${root}/api/`,
     extraHTTPHeaders: { Authorization: `Bearer ${accessToken}` },
   })
 }

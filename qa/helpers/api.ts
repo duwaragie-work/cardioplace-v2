@@ -36,9 +36,12 @@ export async function postJournalEntry(
   api: APIRequestContext,
   entry: CreateJournalEntry,
 ): Promise<{ id: string; measuredAt: string }> {
-  const res = await api.post('/daily-journal', { data: entry })
+  const res = await api.post('daily-journal', { data: entry })
   expect(res.status(), `journal create: ${await res.text()}`).toBe(202)
-  return res.json()
+  // Backend wraps successful responses in { statusCode, message, data }.
+  // Unwrap so callers can use `created.id` directly.
+  const body = await res.json()
+  return body?.data ?? body
 }
 
 export async function getActiveAlerts(
@@ -54,7 +57,7 @@ export async function getActiveAlerts(
   dismissible: boolean
   createdAt: string
 }>> {
-  const res = await api.get('/daily-journal/alerts')
+  const res = await api.get('daily-journal/alerts')
   expect(res.ok()).toBeTruthy()
   const body = await res.json()
   return Array.isArray(body) ? body : (body?.alerts ?? [])
@@ -64,7 +67,7 @@ export async function patchPatientAcknowledgeAlert(
   api: APIRequestContext,
   alertId: string,
 ): Promise<void> {
-  const res = await api.patch(`/daily-journal/alerts/${alertId}/acknowledge`)
+  const res = await api.patch(`daily-journal/alerts/${alertId}/acknowledge`)
   expect(res.ok(), `patient ack: ${await res.text()}`).toBeTruthy()
 }
 
@@ -74,7 +77,7 @@ export async function adminAcknowledgeAlert(
   api: APIRequestContext,
   alertId: string,
 ): Promise<void> {
-  const res = await api.post(`/admin/alerts/${alertId}/acknowledge`)
+  const res = await api.post(`admin/alerts/${alertId}/acknowledge`)
   expect(res.ok(), `admin ack: ${await res.text()}`).toBeTruthy()
 }
 
@@ -83,7 +86,7 @@ export async function adminResolveAlert(
   alertId: string,
   body: { resolutionAction: string; resolutionRationale?: string },
 ): Promise<void> {
-  const res = await api.post(`/admin/alerts/${alertId}/resolve`, { data: body })
+  const res = await api.post(`admin/alerts/${alertId}/resolve`, { data: body })
   expect(res.ok(), `admin resolve: ${await res.text()}`).toBeTruthy()
 }
 
@@ -91,7 +94,7 @@ export async function adminAuditAlert(
   api: APIRequestContext,
   alertId: string,
 ): Promise<Record<string, unknown>> {
-  const res = await api.get(`/admin/alerts/${alertId}/audit`)
+  const res = await api.get(`admin/alerts/${alertId}/audit`)
   expect(res.ok(), `admin audit: ${await res.text()}`).toBeTruthy()
   return res.json()
 }
@@ -100,7 +103,7 @@ export async function adminCompleteEnrollment(
   api: APIRequestContext,
   userId: string,
 ): Promise<{ ok: boolean; reasons?: string[]; status?: number }> {
-  const res = await api.post(`/admin/patients/${userId}/complete-enrollment`)
+  const res = await api.post(`admin/patients/${userId}/complete-enrollment`)
   return { ok: res.ok(), status: res.status(), ...(await res.json().catch(() => ({}))) }
 }
 
@@ -108,7 +111,7 @@ export async function adminEnrollmentCheck(
   api: APIRequestContext,
   userId: string,
 ): Promise<{ ready: boolean; reasons: string[] }> {
-  const res = await api.get(`/admin/patients/${userId}/enrollment-check`)
+  const res = await api.get(`admin/patients/${userId}/enrollment-check`)
   expect(res.ok(), `enrollment-check: ${await res.text()}`).toBeTruthy()
   return res.json()
 }

@@ -8,6 +8,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common'
+import { Public } from '../auth/decorators/public.decorator.js'
 import { TestControlService } from './test-control.service.js'
 
 /**
@@ -20,6 +21,7 @@ import { TestControlService } from './test-control.service.js'
  * suite or an ops shell, not from the public web. NEVER ship with the env
  * flag on in production.
  */
+@Public()
 @Controller('test-control')
 export class TestControlController {
   private readonly secret: string | null

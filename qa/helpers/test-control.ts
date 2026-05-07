@@ -19,8 +19,13 @@ export class TestControl {
   }
 
   static async create(apiBase: string, secret?: string): Promise<TestControl> {
+    // Backend mounts a global /api prefix in main.ts; embed it in baseURL.
+    // Trailing slash matters: `new URL('test-control/x', 'http://h/api')` →
+    // `http://h/test-control/x` (drops /api), whereas `'http://h/api/'` →
+    // `http://h/api/test-control/x`.
+    const root = apiBase.replace(/\/api\/?$/, '').replace(/\/$/, '')
     const ctx = await pwRequest.newContext({
-      baseURL: apiBase,
+      baseURL: `${root}/api/`,
       extraHTTPHeaders: secret ? { 'X-Test-Control-Secret': secret } : {},
     })
     return new TestControl(ctx, secret)
@@ -48,7 +53,7 @@ export class TestControl {
 
   // ─── Health ─────────────────────────────────────────────────────────────
   async health(): Promise<{ ok: true; enableTestControl: boolean; nodeEnv: string }> {
-    return this.get('/test-control/health')
+    return this.get('test-control/health')
   }
 
   // ─── Cron drivers ───────────────────────────────────────────────────────
@@ -58,21 +63,21 @@ export class TestControl {
    * scheduledFor ≤ now AND advances overdue ladders for unacknowledged alerts.
    */
   async runEscalationScan(now?: Date): Promise<{ scanned: number; dispatched: number }> {
-    return this.post('/test-control/cron/escalation/run', {
+    return this.post('test-control/cron/escalation/run', {
       now: (now ?? new Date()).toISOString(),
     })
   }
 
   /** Run the gap-alert scanner. 48h trigger, 24h idempotency. */
   async runGapAlertScan(now?: Date): Promise<{ scanned: number; nudged: number }> {
-    return this.post('/test-control/cron/gap-alert/run', {
+    return this.post('test-control/cron/gap-alert/run', {
       now: (now ?? new Date()).toISOString(),
     })
   }
 
   /** Run the monthly-reask scanner. 30d trigger, 28d idempotency. */
   async runMonthlyReaskScan(now?: Date): Promise<{ scanned: number; reasked: number }> {
-    return this.post('/test-control/cron/monthly-reask/run', {
+    return this.post('test-control/cron/monthly-reask/run', {
       now: (now ?? new Date()).toISOString(),
     })
   }
@@ -84,17 +89,17 @@ export class TestControl {
    * past T+4h without sleeping.
    */
   async backdateAlertAnchor(alertId: string, deltaSeconds: number): Promise<void> {
-    await this.post('/test-control/anchor/backdate', { alertId, deltaSeconds })
+    await this.post('test-control/anchor/backdate', { alertId, deltaSeconds })
   }
 
   /** Backdate the latest JournalEntry for a user (for gap-alert + monthly-reask). */
   async backdateLastJournalEntry(userId: string, deltaSeconds: number): Promise<void> {
-    await this.post('/test-control/journal/backdate-latest', { userId, deltaSeconds })
+    await this.post('test-control/journal/backdate-latest', { userId, deltaSeconds })
   }
 
   /** Backdate a medication's `verifiedAt` / `reportedAt` (monthly-reask). */
   async backdateMedicationVerified(medId: string, deltaSeconds: number): Promise<void> {
-    await this.post('/test-control/medication/backdate-verified', { medId, deltaSeconds })
+    await this.post('test-control/medication/backdate-verified', { medId, deltaSeconds })
   }
 
   // ─── State reset ────────────────────────────────────────────────────────
@@ -104,12 +109,12 @@ export class TestControl {
    * practice, or assignment rows — those are seed-stable.
    */
   async resetTestPatients(): Promise<{ usersTouched: number; rowsDeleted: number }> {
-    return this.post('/test-control/reset/test-patients')
+    return this.post('test-control/reset/test-patients')
   }
 
   /** Wipe journal/alert/escalation/notification rows for one user. */
   async resetUser(userId: string): Promise<{ rowsDeleted: number }> {
-    return this.post('/test-control/reset/user', { userId })
+    return this.post('test-control/reset/user', { userId })
   }
 
   /**
@@ -120,7 +125,7 @@ export class TestControl {
     userId: string,
     status: 'NOT_ENROLLED' | 'ENROLLED',
   ): Promise<void> {
-    await this.post('/test-control/user/set-enrollment', { userId, status })
+    await this.post('test-control/user/set-enrollment', { userId, status })
   }
 
   /** Force a user's `profileVerificationStatus` (UNVERIFIED/VERIFIED/CORRECTED). */
@@ -128,7 +133,7 @@ export class TestControl {
     userId: string,
     status: 'UNVERIFIED' | 'VERIFIED' | 'CORRECTED',
   ): Promise<void> {
-    await this.post('/test-control/user/set-profile-verification', { userId, status })
+    await this.post('test-control/user/set-profile-verification', { userId, status })
   }
 
   // ─── Inspection ─────────────────────────────────────────────────────────
@@ -148,7 +153,7 @@ export class TestControl {
       resolvedAt: string | null
     }>
   > {
-    return this.get(`/test-control/alerts?userId=${encodeURIComponent(userId)}`)
+    return this.get(`test-control/alerts?userId=${encodeURIComponent(userId)}`)
   }
 
   /** List EscalationEvent rows for an alert (ladder progression inspection). */
@@ -165,7 +170,7 @@ export class TestControl {
       reason: string | null
     }>
   > {
-    return this.get(`/test-control/escalation-events?alertId=${encodeURIComponent(alertId)}`)
+    return this.get(`test-control/escalation-events?alertId=${encodeURIComponent(alertId)}`)
   }
 
   /** List Notification rows fanned out for a user. */
@@ -181,7 +186,7 @@ export class TestControl {
       escalationEventId: string | null
     }>
   > {
-    return this.get(`/test-control/notifications?userId=${encodeURIComponent(userId)}`)
+    return this.get(`test-control/notifications?userId=${encodeURIComponent(userId)}`)
   }
 
   /** Look up a user by email — returns id + status. */
@@ -192,7 +197,7 @@ export class TestControl {
     onboardingStatus: string
     profileVerificationStatus: string | null
   }> {
-    return this.get(`/test-control/user/find?email=${encodeURIComponent(email)}`)
+    return this.get(`test-control/user/find?email=${encodeURIComponent(email)}`)
   }
 
   async dispose(): Promise<void> {

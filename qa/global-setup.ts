@@ -13,17 +13,18 @@ import { request as pwRequest } from '@playwright/test'
  * SKIP_RESET=1 to retain whatever state already exists.
  */
 async function globalSetup(): Promise<void> {
-  const apiBase = process.env.API_BASE_URL ?? 'http://localhost:4000'
+  const apiBase = (process.env.API_BASE_URL ?? 'http://localhost:4000')
+    .replace(/\/$/, '')
   const secret = process.env.TEST_CONTROL_SECRET
   const ctx = await pwRequest.newContext({
-    baseURL: apiBase,
+    baseURL: `${apiBase}/api/`,
     extraHTTPHeaders: secret ? { 'X-Test-Control-Secret': secret } : {},
   })
 
   // 1. Reachability check — backend up?
   let healthOk = false
   try {
-    const res = await ctx.get('/test-control/health')
+    const res = await ctx.get('test-control/health')
     healthOk = res.ok()
   } catch {
     // swallow — handled below
@@ -41,7 +42,7 @@ async function globalSetup(): Promise<void> {
 
   // 2. Optional reset of test-patient state
   if (process.env.SKIP_RESET !== '1') {
-    const reset = await ctx.post('/test-control/reset/test-patients', {
+    const reset = await ctx.post('test-control/reset/test-patients', {
       data: {},
     })
     if (!reset.ok()) {
