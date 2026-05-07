@@ -35,6 +35,9 @@ export class TestControlController {
     if (this.nodeEnv === 'production') {
       throw new ForbiddenException('test-control disabled in production')
     }
+    if (process.env.ENABLE_TEST_CONTROL !== 'true') {
+      throw new ForbiddenException('test-control: ENABLE_TEST_CONTROL=true required')
+    }
     if (this.secret && headerSecret !== this.secret) {
       throw new ForbiddenException('test-control: invalid or missing secret header')
     }

@@ -26,13 +26,14 @@ import { DrugEnrichmentModule } from './drug-enrichment/drug-enrichment.module.j
 import { TestControlModule } from './test-control/test-control.module.js'
 
 // Dev-only test-control endpoints (Playwright cron + escalation drivers).
-// Mounted ONLY when ENABLE_TEST_CONTROL=true AND not in production. The
-// controller layer additionally rejects every request when NODE_ENV=production
-// — defense in depth so a misconfigured env can't expose them.
-const TEST_CONTROL_MODULES =
-  process.env.ENABLE_TEST_CONTROL === 'true' && process.env.NODE_ENV !== 'production'
-    ? [TestControlModule]
-    : []
+// The TestControlController rejects every request with 403 unless:
+//   1. NODE_ENV !== 'production'
+//   2. ENABLE_TEST_CONTROL=true
+//   3. (optional) X-Test-Control-Secret matches TEST_CONTROL_SECRET
+// We mount the module unconditionally because the env-var check at top-level
+// of this file evaluates before dotenv loads — the controller-level guard is
+// the source of truth, this is defense in depth.
+const TEST_CONTROL_MODULES = [TestControlModule]
 
 @Module({
   imports: [
