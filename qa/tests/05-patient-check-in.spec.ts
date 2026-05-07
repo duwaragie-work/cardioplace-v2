@@ -54,7 +54,7 @@ test.describe('Check-in submissions trigger expected alerts (via API)', () => {
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
-    const res = await api.post('/daily-journal', {
+    const res = await api.post('daily-journal', {
       data: {
         measuredAt: new Date().toISOString(),
         systolicBP: 124,
@@ -83,7 +83,7 @@ test.describe('Check-in submissions trigger expected alerts (via API)', () => {
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
-    const res = await api.post('/daily-journal', {
+    const res = await api.post('daily-journal', {
       data: {
         measuredAt: new Date().toISOString(),
         systolicBP: 165,
@@ -106,7 +106,7 @@ test.describe('Check-in submissions trigger expected alerts (via API)', () => {
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
-    const res = await api.post('/daily-journal', {
+    const res = await api.post('daily-journal', {
       data: {
         measuredAt: new Date().toISOString(),
         systolicBP: 185,

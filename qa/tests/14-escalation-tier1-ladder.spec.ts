@@ -95,7 +95,7 @@ test.describe('Tier 1 ladder progression via runScan', () => {
     expect(tier1).toBeDefined()
 
     // Acknowledge via the patient ack endpoint (admin ack would also work)
-    await patientApi.patch(`/daily-journal/alerts/${tier1!.id}/acknowledge`)
+    await patientApi.patch(`daily-journal/alerts/${tier1!.id}/acknowledge`)
 
     // Advance 4h — runScan should NOT add a T4H event
     await tc.backdateAlertAnchor(tier1!.id, 4 * 60 * 60)

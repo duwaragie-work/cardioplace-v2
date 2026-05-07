@@ -83,7 +83,7 @@ test.describe('Alert resolution', () => {
     expect(tier1).toBeDefined()
 
     const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
-    const res = await adminApi.post(`/admin/alerts/${tier1!.id}/resolve`, {
+    const res = await adminApi.post(`admin/alerts/${tier1!.id}/resolve`, {
       data: { resolutionAction: 'TIER1_FALSE_POSITIVE' /* no rationale */ },
     })
     expect(res.status(), 'expected 400 for Tier 1 without rationale').toBe(400)

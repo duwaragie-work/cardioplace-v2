@@ -48,7 +48,7 @@ test.describe('Layer A journaling gate (no PatientProfile → 403)', () => {
     // accepts the reading and runs the rule pipeline (which produces no alert
     // for 124/78/72).
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
-    const res = await api.post('/daily-journal', {
+    const res = await api.post('daily-journal', {
       data: {
         measuredAt: new Date().toISOString(),
         systolicBP: 124,

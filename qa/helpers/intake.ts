@@ -44,7 +44,7 @@ export async function postIntakeProfile(
   api: APIRequestContext,
   profile: IntakeProfile,
 ): Promise<void> {
-  const res = await api.post('/intake/profile', { data: profile })
+  const res = await api.post('intake/profile', { data: profile })
   expect(res.ok(), `intake/profile: ${await res.text()}`).toBeTruthy()
 }
 
@@ -52,7 +52,7 @@ export async function postIntakeMedications(
   api: APIRequestContext,
   medications: IntakeMedication[],
 ): Promise<void> {
-  const res = await api.post('/intake/medications', { data: { medications } })
+  const res = await api.post('intake/medications', { data: { medications } })
   expect(res.ok(), `intake/medications: ${await res.text()}`).toBeTruthy()
 }
 

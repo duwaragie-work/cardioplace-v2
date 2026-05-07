@@ -22,7 +22,7 @@ test.describe('Admin verification — profile', () => {
     await tc.setProfileVerificationStatus(u.id, 'UNVERIFIED')
 
     const api = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
-    const res = await api.post(`/admin/users/${u.id}/verify-profile`, {
+    const res = await api.post(`admin/users/${u.id}/verify-profile`, {
       data: { rationale: 'qa-test verification' },
     })
     expect(res.ok(), `verify-profile: ${await res.text()}`).toBeTruthy()
@@ -35,7 +35,7 @@ test.describe('Admin verification — profile', () => {
 
   test('PROVIDER role cannot write Practice (admin role boundary)', async () => {
     const api = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
-    const res = await api.post('/admin/practices', {
+    const res = await api.post('admin/practices', {
       data: { name: 'unauthorized', businessHoursStart: '08:00', businessHoursEnd: '18:00', businessHoursTimezone: 'America/New_York' },
     })
     // PROVIDER is excluded from practice CRUD — must 403.
@@ -54,14 +54,14 @@ test.describe('Admin medication verification', () => {
     const u = await tc.findUser(PATIENTS.aisha.email)
 
     // List Aisha's meds to grab one to reject (Lisinopril per seed.ts)
-    const medsRes = await patientApi.get('/me/medications')
+    const medsRes = await patientApi.get('me/medications')
     expect(medsRes.ok()).toBeTruthy()
     const meds: Array<{ id: string; drugName: string }> = await medsRes.json()
     const lisinopril = meds.find((m) => /lisinopril/i.test(m.drugName))
     expect(lisinopril, 'Aisha should have a Lisinopril row from seed').toBeDefined()
 
     // Reject it
-    const rejectRes = await adminApi.post(`/admin/medications/${lisinopril!.id}/verify`, {
+    const rejectRes = await adminApi.post(`admin/medications/${lisinopril!.id}/verify`, {
       data: { status: 'REJECTED', rationale: 'qa-test reject — confused with Losartan' },
     })
     expect(rejectRes.ok(), `med reject: ${await rejectRes.text()}`).toBeTruthy()
@@ -84,7 +84,7 @@ test.describe('Admin threshold editor', () => {
     const u = await tc.findUser(PATIENTS.aisha.email)
 
     const mdApi = await authedApi(API_BASE_URL, ADMINS.medicalDirector.email, 'admin')
-    const mdRes = await mdApi.post(`/admin/patients/${u.id}/threshold`, {
+    const mdRes = await mdApi.post(`admin/patients/${u.id}/threshold`, {
       data: {
         sbpUpperTarget: 130,
         sbpLowerTarget: 100,
@@ -96,7 +96,7 @@ test.describe('Admin threshold editor', () => {
     expect(mdRes.ok(), `MD threshold POST: ${await mdRes.text()}`).toBeTruthy()
 
     const provApi = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
-    const provRes = await provApi.post(`/admin/patients/${u.id}/threshold`, {
+    const provRes = await provApi.post(`admin/patients/${u.id}/threshold`, {
       data: {
         sbpUpperTarget: 140,
         sbpLowerTarget: 100,
