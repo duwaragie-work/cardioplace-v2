@@ -156,7 +156,8 @@ export class TestControlService {
         physicianMessage: true,
         createdAt: true,
         acknowledgedAt: true,
-        resolvedAt: true,
+        resolvedBy: true,
+        resolutionAction: true,
       },
     })
   }
@@ -169,7 +170,7 @@ export class TestControlService {
         id: true,
         ladderStep: true,
         recipientRoles: true,
-        channels: true,
+        notificationChannel: true,
         afterHours: true,
         scheduledFor: true,
         notificationSentAt: true,
