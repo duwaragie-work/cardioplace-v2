@@ -259,6 +259,7 @@ function MessageBubble({ msg }: { msg: Message }) {
   // AI message
   return (
     <motion.div
+      data-testid="assistant-message"
       className="flex items-end gap-2.5"
       initial={{ opacity: 0, y: 8, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -1720,7 +1721,7 @@ export default function AIChatInterface() {
           )}
 
           {messages.length === 0 && transcript.length === 0 && !isTyping && !isLoadingHistory && !voiceSummaryLoading && (
-            <div className="flex-1 flex items-center justify-center">
+            <div data-testid="chat-empty-state" className="flex-1 flex items-center justify-center">
               <div className="text-center max-w-xs mx-auto">
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
                   <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={50} height={50} />
@@ -1852,6 +1853,7 @@ export default function AIChatInterface() {
             }}
           >
             <textarea
+              data-testid="chat-input"
               ref={inputRef}
               rows={1}
               value={inputValue}
@@ -1960,6 +1962,7 @@ export default function AIChatInterface() {
 
             {/* Send button — disabled during voice */}
             <motion.button
+              data-testid="chat-send-btn"
               onClick={() => void handleSend()}
               disabled={isSending || !inputValue.trim() || isVoiceActive || isVoiceConnecting}
               className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40"
