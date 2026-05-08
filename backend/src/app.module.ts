@@ -23,6 +23,18 @@ import { VoiceModule } from './voice/voice.module.js'
 import { CommonModule } from './common/common.module.js'
 import { OcrModule } from './ocr/ocr.module.js'
 import { DrugEnrichmentModule } from './drug-enrichment/drug-enrichment.module.js'
+import { TestControlModule } from './test-control/test-control.module.js'
+
+// Dev-only test-control endpoints (Playwright cron + escalation drivers).
+// The TestControlController rejects every request with 403 unless:
+//   1. NODE_ENV !== 'production'
+//   2. ENABLE_TEST_CONTROL=true
+//   3. (optional) X-Test-Control-Secret matches TEST_CONTROL_SECRET
+// We mount the module unconditionally because the env-var check at top-level
+// of this file evaluates before dotenv loads — the controller-level guard is
+// the source of truth, this is defense in depth.
+const TEST_CONTROL_MODULES = [TestControlModule]
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -64,6 +76,7 @@ import { DrugEnrichmentModule } from './drug-enrichment/drug-enrichment.module.j
     VoiceModule,
     OcrModule,
     DrugEnrichmentModule,
+    ...TEST_CONTROL_MODULES,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],

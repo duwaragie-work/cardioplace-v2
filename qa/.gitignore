@@ -1,0 +1,19 @@
+node_modules/
+.env
+.env.local
+playwright-report/
+test-results/
+*.log
+.DS_Store
+
+# qa is not in the root npm workspaces array — its lockfile is regenerated
+# fresh on each CI install (`cd qa && npm install`). Don't track it; the
+# resolved versions are pinned by the CI runner's package-lock cache key.
+package-lock.json
+
+# Playwright run artifacts. The HTML report + raw JSON results churn on
+# every local + CI run — CI uploads them as `playwright-report-shard-*`
+# build artifacts so the dev team always has the latest. The curated
+# RESULTS.md (next to this gitignore) is the only tracked artifact.
+reports/final/
+reports/results.json

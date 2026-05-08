@@ -198,7 +198,13 @@ export class AlertEngineService {
     // Pass 1 — multi-axis BP/HR pipeline
     const bpResults = await this.runPipeline(session, ctx, priorElevated)
     const primary = bpResults[0] ?? null
-    if (primary) this.addPhysicianAnnotations(primary, session, ctx, priorElevated)
+    // HR-context annotation (added below in addPhysicianAnnotations) was a
+    // workaround for the old terminal-stage pattern where Stage C never ran.
+    // With co-fire, an HR-axis row may already be in bpResults — skip the
+    // annotation to avoid double-surfacing the same finding.
+    const hasHrRow = bpResults.some((r) => axisFor(r) === 'hr')
+    if (primary)
+      this.addPhysicianAnnotations(primary, session, ctx, priorElevated, hasHrRow)
     for (const r of bpResults) {
       await this.persistAlert(session, ctx, r)
     }
@@ -226,45 +232,75 @@ export class AlertEngineService {
     ctx: ResolvedContext,
     priorElevated: boolean,
   ): Promise<RuleResult[]> {
-    // Stage A — pre-gate rules that don't depend on averaged vitals. Must run
-    // even for AFib patients with <3 readings (the gate below blocks BP/HR
-    // rules but must not block med contraindications / symptom overrides).
-    // Terminal: first match wins, no further rules evaluate.
+    // Multi-alert co-fire: every stage routes its winner into the same
+    // claimed Map, keyed by clinical axis (contraindication / emergency /
+    // bp-high / sbp-low / dbp-low / hr / info). Distinct axes coexist;
+    // same-axis later candidates are skipped. v2 spec addendum Part D
+    // requires this — Tier 1 contraindication, BP Level 2, and BP Level 1
+    // each have their own escalation ladder, so each must produce its own
+    // DeviationAlert row to start its own ladder. The previous "Stage A
+    // terminally returns" pattern broke this for pregnant-on-ACE patients
+    // (the patient never saw the BP Level 2 911 message because the Tier 1
+    // ACE row preempted everything).
+    const claimed = new Map<Axis, RuleResult>()
+
+    // Stage A — pre-gate rules that don't depend on averaged vitals. Must
+    // also run for AFib patients with <3 readings, since contraindications
+    // and symptom overrides aren't BP/HR-sample-size dependent.
     const preGateRules: RuleFunction[] = [
       pregnancyAceArbRule,
       ndhpHfrefRule,
+      // symptomOverridePregnancyRule runs BEFORE symptomOverrideGeneralRule
+      // so a pregnant patient with ruqPain gets the preeclampsia-specific
+      // message wording, not the generic one. Both share the 'emergency'
+      // axis so only the first match claims it.
       symptomOverridePregnancyRule,
       symptomOverrideGeneralRule,
     ]
     for (const rule of preGateRules) {
       const r = rule(session, ctx)
-      if (r) return [r]
+      if (!r) continue
+      const axis = axisFor(r)
+      if (claimed.has(axis)) continue
+      claimed.set(axis, r)
     }
 
-    // AFib ≥3-reading gate — stops BP/HR-dependent rules when session sample
-    // size is too small.
+    // AFib <3-reading gate — stops Stage B + Stage C (BP/HR-dependent
+    // rules) but preserves anything Stage A already claimed. Per
+    // CLINICAL_SPEC §4.4, AFib readings need ≥3 samples before BP/HR
+    // alerts fire; contraindications and symptom overrides are not
+    // sample-size dependent and continue to fire on the first reading.
     if (ctx.profile.hasAFib && session.readingCount < AlertEngineService.AFIB_MIN_READINGS) {
       this.logger.log(
         `AFib gate: skipping BP/HR rules for entry ${session.entryId} — session has ${session.readingCount}/${AlertEngineService.AFIB_MIN_READINGS} readings.`,
       )
-      return []
+      return AXIS_PRIORITY
+        .map((axis) => claimed.get(axis))
+        .filter((r): r is RuleResult => r !== undefined)
     }
 
-    // Stage B — emergency rules. Terminal: a Level 2 emergency dominates
-    // every other axis (by spec, the patient gets the 911 message and the
-    // BP Level 2 ladder fires immediately — nothing else adds value).
+    // Stage B — emergency rules. BP Level 2 (SBP ≥180 / DBP ≥120 or the
+    // pregnancy ≥160/110) coexists with any Tier 1 contraindication
+    // claimed in Stage A — they're on different axes ('emergency' vs
+    // 'contraindication'). Per v2 addendum D.5: the patient-facing 911
+    // message + dual provider notification fires from the L2 row at T+0,
+    // independently of Tier 1's T+0/4h/8h/24h/48h ladder.
     const emergencyRules: RuleFunction[] = [
       absoluteEmergencyRule,
       pregnancyL2Rule,
     ]
     for (const rule of emergencyRules) {
       const r = rule(session, ctx)
-      if (r) return [r]
+      if (!r) continue
+      const axis = axisFor(r)
+      if (claimed.has(axis)) continue
+      claimed.set(axis, r)
     }
 
     // Stage C — multi-axis accumulation. Tachycardia uses the cross-session
     // priorElevated flag computed once in evaluate() (used here + by the
-    // HR-context annotation when terminal stages preempt Stage C).
+    // HR-context annotation, gated below to avoid double-annotating when
+    // an HR rule has its own row).
     const tachyRule = buildTachyRule(priorElevated)
 
     // Order matters for the suppression invariant: HFrEF/HFpEF/HCM/DCM rules
@@ -299,7 +335,8 @@ export class AlertEngineService {
       bradyRule,
     ]
 
-    const claimed = new Map<Axis, RuleResult>()
+    // Stage C continues into the same `claimed` Map declared above so
+    // Stage A contraindications coexist with Stage C BP/HR rows.
     for (const rule of axisRules) {
       const r = rule(session, ctx)
       if (!r) continue
@@ -365,6 +402,7 @@ export class AlertEngineService {
     session: SessionAverage,
     ctx: ResolvedContext,
     priorElevated: boolean,
+    hasHrRow: boolean,
   ) {
     const annotations: string[] = result.metadata.physicianAnnotations ?? []
 
@@ -395,20 +433,23 @@ export class AlertEngineService {
       if (htnNote) annotations.push(htnNote)
     }
 
-    // Phase/26 Reading 5b fix — HR context annotation. When a terminal-stage
-    // rule (symptom override or absolute emergency) preempts Stage C, the
-    // HR-axis rule that would have fired never gets a chance. Surface that
-    // finding here so the physician sees both framings (BP-emergency AND
-    // HR-specific remediation, e.g. heart-block / Stokes-Adams suspicion).
-    // Open clinical question (pending Manisha): should this co-fire as a
-    // separate row + ladder? Annotation is the reversible interim answer.
-    const TERMINAL_RULE_IDS = [
+    // Phase/26 Reading 5b fix — HR context annotation. When a Stage A/B
+    // rule (symptom override or absolute emergency) is the primary, the
+    // HR-axis rule may also have fired (post co-fire fix) OR may have been
+    // suppressed (sample-size, gating). Surface the HR finding as an
+    // annotation only when there is NO HR row in the result set; otherwise
+    // the dedicated HR row already carries the framing and double-surfacing
+    // would be redundant.
+    const STAGE_AB_RULE_IDS = [
       'RULE_SYMPTOM_OVERRIDE_GENERAL',
       'RULE_SYMPTOM_OVERRIDE_PREGNANCY',
       'RULE_ABSOLUTE_EMERGENCY',
       'RULE_PREGNANCY_L2',
     ] as const
-    if ((TERMINAL_RULE_IDS as readonly string[]).includes(result.ruleId)) {
+    if (
+      !hasHrRow &&
+      (STAGE_AB_RULE_IDS as readonly string[]).includes(result.ruleId)
+    ) {
       const hrNote = getHrContextAnnotation(session, ctx, priorElevated)
       if (hrNote) annotations.push(hrNote)
     }

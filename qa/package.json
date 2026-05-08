@@ -1,0 +1,30 @@
+{
+  "name": "@cardioplace/qa",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cardioplace v2 multi-engine Playwright E2E suite (patient + admin + escalation + crons)",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:chromium": "playwright test --project=chromium-desktop",
+    "test:firefox": "playwright test --project=firefox-desktop",
+    "test:webkit": "playwright test --project=webkit-desktop",
+    "test:mobile": "playwright test --project=chromium-mobile --project=webkit-mobile",
+    "test:patient": "playwright test tests/0[1-9]-* tests/0[2-9]-*",
+    "test:admin": "playwright test tests/1[0-4]-*",
+    "test:escalation": "playwright test tests/1[5-6]-*",
+    "test:crons": "playwright test tests/1[7-8]-*",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "report": "playwright show-report",
+    "install:browsers": "playwright install --with-deps chromium firefox webkit",
+    "lint": "eslint . --ext .ts"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^20.0.0",
+    "dotenv": "^17.0.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -221,9 +221,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.severity).toBe('HIGH')
     expect(createArgs.data.type).toBe('MEDICATION_ADHERENCE')
     expect(createArgs.data.pulsePressure).toBeNull()
-    expect(createArgs.data.patientMessage).toContain(
-      'blood pressure medicine',
-    )
+    expect(createArgs.data.patientMessage).toContain('Lisinopril')
     expect(createArgs.data.patientMessage).toContain('pregnant')
     expect(createArgs.data.physicianMessage).toContain('Teratogenic')
     expect(createArgs.data.physicianMessage).toContain('Lisinopril')
@@ -1074,7 +1072,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(1)
   })
 
-  it('Scenario 51 — Pregnant + ACE + BP 195/130 → Tier 1 (not absolute emergency)', async () => {
+  it('Scenario 51 — Pregnant + ACE + BP 195/130 → Tier 1 + emergency co-fire (v2 addendum D.5)', async () => {
     const { result } = await run(
       buildSession({ systolicBP: 195, diastolicBP: 130 }),
       buildCtx({
@@ -1082,8 +1080,28 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
         contextMeds: [buildMed()],
       }),
     )
-    expect(result?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
-    // Contraindication short-circuits — no BP-tier alert even though BP is emergency-range.
+    // v2 addendum D.5: emergency-axis row must co-fire so the patient
+    // gets the 911 message at T+0; Tier 1 contraindication runs its own
+    // T+0/4h/8h/24h/48h ladder in parallel. At 195/130 both
+    // absoluteEmergency (≥180/120) and pregnancyL2 (≥160/110 + pregnant)
+    // qualify on the emergency axis — absoluteEmergency runs first in
+    // Stage B and claims the slot.
+    expect(result?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+    // Three distinct rule violations → three rows: contraindication
+    // (Tier 1), emergency (BP L2 absolute), and bp-high (pregnancyL1High
+    // — pregnant + SBP ≥140). Each ladder is independent per v2 addendum
+    // Part D.
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(3)
+    const persistedRuleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(persistedRuleIds).toEqual(
+      expect.arrayContaining([
+        'RULE_ABSOLUTE_EMERGENCY',
+        'RULE_PREGNANCY_ACE_ARB',
+        'RULE_PREGNANCY_L1_HIGH',
+      ]),
+    )
   })
 
   // ========================================================================
@@ -1359,5 +1377,179 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     // instantiates two independent ladders (verified per design — no
     // assertion on count here because eventEmitter is shared with the
     // patient-notification pipeline; existing scenarios hold that contract).
+  })
+
+  // ========================================================================
+  // Phase/27 multi-ladder co-fire (B1 + G1–G7) — v2 addendum Part D
+  // requires Tier 1 contraindication, BP L2 emergency, and BP L1 to each
+  // run their own escalation ladder. Stage A/B no longer terminally
+  // short-circuit, so distinct-axis rules co-fire.
+  // ========================================================================
+
+  it('Scenario 65 (B1) — Non-pregnant + ruqPain → RULE_SYMPTOM_OVERRIDE_GENERAL fires (§2.3 lumped trigger)', async () => {
+    const { result, createArgs } = await run(
+      buildSession({
+        systolicBP: 130,
+        diastolicBP: 80,
+        symptoms: { ...noSymptoms(), ruqPain: true },
+      }),
+      buildCtx(),
+    )
+    expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+    expect(createArgs.data.physicianMessage).toContain('RUQ pain')
+  })
+
+  it('Scenario 66 (G1) — HFrEF + Diltiazem + SBP 80 → NDHP_HFREF + HFREF_LOW co-fire', async () => {
+    await run(
+      buildSession({ systolicBP: 80, diastolicBP: 55, pulse: 72 }),
+      buildCtx({
+        profile: {
+          hasHeartFailure: true,
+          heartFailureType: 'HFREF',
+          resolvedHFType: 'HFREF',
+        },
+        contextMeds: [
+          buildMed({ drugName: 'Diltiazem', drugClass: 'NDHP_CCB' }),
+        ],
+      }),
+    )
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(2)
+    const persistedRuleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(persistedRuleIds).toEqual(
+      expect.arrayContaining(['RULE_NDHP_HFREF', 'RULE_HFREF_LOW']),
+    )
+  })
+
+  it('Scenario 67 (G2) — Pregnant + ACE + 175/115 → ACE_ARB + L2 + L1_HIGH (three ladders)', async () => {
+    await run(
+      buildSession({ systolicBP: 175, diastolicBP: 115, pulse: 80 }),
+      buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
+    )
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(3)
+    const persistedRuleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(persistedRuleIds).toEqual(
+      expect.arrayContaining([
+        'RULE_PREGNANCY_ACE_ARB',
+        'RULE_PREGNANCY_L2',
+        'RULE_PREGNANCY_L1_HIGH',
+      ]),
+    )
+  })
+
+  it('Scenario 68 (G3) — Pregnant + ACE + newOnsetHeadache + normal BP → ACE_ARB + SYMPTOM_OVERRIDE_PREGNANCY', async () => {
+    await run(
+      buildSession({
+        systolicBP: 130,
+        diastolicBP: 85,
+        symptoms: { ...noSymptoms(), newOnsetHeadache: true },
+      }),
+      buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
+    )
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(2)
+    const persistedRuleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(persistedRuleIds).toEqual(
+      expect.arrayContaining([
+        'RULE_PREGNANCY_ACE_ARB',
+        'RULE_SYMPTOM_OVERRIDE_PREGNANCY',
+      ]),
+    )
+  })
+
+  it('Scenario 69 (G4) — Pregnant + ACE + ruqPain → ACE_ARB + SYMPTOM_OVERRIDE_PREGNANCY (pregnancy wording wins)', async () => {
+    // Pregnancy override runs first in Stage A so it claims the
+    // emergency axis ahead of the general override that also includes
+    // ruqPain (§2.3 lumped trigger). Result: preeclampsia-specific
+    // wording, not generic.
+    await run(
+      buildSession({
+        systolicBP: 130,
+        diastolicBP: 85,
+        symptoms: { ...noSymptoms(), ruqPain: true },
+      }),
+      buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
+    )
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(2)
+    const persistedRuleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(persistedRuleIds).toEqual(
+      expect.arrayContaining([
+        'RULE_PREGNANCY_ACE_ARB',
+        'RULE_SYMPTOM_OVERRIDE_PREGNANCY',
+      ]),
+    )
+    expect(persistedRuleIds).not.toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
+  })
+
+  it('Scenario 70 (G5) — Pregnant + ACE + visualChanges → ACE_ARB + SYMPTOM_OVERRIDE_GENERAL', async () => {
+    // visualChanges is a general (non-pregnancy-specific) symptom, so
+    // the pregnancy-specific override does not fire and the general
+    // override claims the emergency axis.
+    await run(
+      buildSession({
+        systolicBP: 130,
+        diastolicBP: 85,
+        symptoms: { ...noSymptoms(), visualChanges: true },
+      }),
+      buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
+    )
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(2)
+    const persistedRuleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(persistedRuleIds).toEqual(
+      expect.arrayContaining([
+        'RULE_PREGNANCY_ACE_ARB',
+        'RULE_SYMPTOM_OVERRIDE_GENERAL',
+      ]),
+    )
+  })
+
+  it('Scenario 71 (G6) — HFrEF + Diltiazem + SBP 165 → NDHP_HFREF + HFREF_HIGH co-fire', async () => {
+    await run(
+      buildSession({ systolicBP: 165, diastolicBP: 95, pulse: 78 }),
+      buildCtx({
+        profile: {
+          hasHeartFailure: true,
+          heartFailureType: 'HFREF',
+          resolvedHFType: 'HFREF',
+        },
+        contextMeds: [
+          buildMed({ drugName: 'Diltiazem', drugClass: 'NDHP_CCB' }),
+        ],
+      }),
+    )
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(2)
+    const persistedRuleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(persistedRuleIds).toEqual(
+      expect.arrayContaining(['RULE_NDHP_HFREF', 'RULE_HFREF_HIGH']),
+    )
+  })
+
+  it('Scenario 72 (G7) — Pregnant + ACE + 145/85 → ACE_ARB + PREGNANCY_L1_HIGH (no L2)', async () => {
+    await run(
+      buildSession({ systolicBP: 145, diastolicBP: 85, pulse: 78 }),
+      buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
+    )
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(2)
+    const persistedRuleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(persistedRuleIds).toEqual(
+      expect.arrayContaining([
+        'RULE_PREGNANCY_ACE_ARB',
+        'RULE_PREGNANCY_L1_HIGH',
+      ]),
+    )
+    expect(persistedRuleIds).not.toContain('RULE_PREGNANCY_L2')
   })
 })

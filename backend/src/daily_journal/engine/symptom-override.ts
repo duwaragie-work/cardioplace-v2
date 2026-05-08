@@ -6,8 +6,16 @@ import type { RuleFunction } from './types.js'
 import { getPulsePressure } from '@cardioplace/shared'
 
 /**
- * Rule 3a — General symptom override. Any of the six structured
- * target-organ-damage symptoms fires Level 2 at any BP.
+ * Rule 3a — General symptom override. Any of the structured target-organ-
+ * damage symptoms fires Level 2 at any BP.
+ *
+ * Note: `ruqPain` is included here per CLINICAL_SPEC §2.3 which lumps
+ * "severe epigastric or right upper quadrant pain" as a single Level 2
+ * trigger for any patient. The pregnancy-specific override
+ * (symptomOverridePregnancyRule) still fires for pregnant patients and
+ * runs FIRST in the pre-gate ordering, so pregnant patients get the
+ * preeclampsia-specific message wording. Non-pregnant patients with RUQ
+ * pain fall through to here so they don't lose the alert entirely.
  */
 export const symptomOverrideGeneralRule: RuleFunction = (session, ctx) => {
   const s = session.symptoms
@@ -17,7 +25,8 @@ export const symptomOverrideGeneralRule: RuleFunction = (session, ctx) => {
     s.alteredMentalStatus ||
     s.chestPainOrDyspnea ||
     s.focalNeuroDeficit ||
-    s.severeEpigastricPain
+    s.severeEpigastricPain ||
+    s.ruqPain
   if (!anyGeneral) return null
 
   const pp = getPulsePressure(session.systolicBP, session.diastolicBP)
@@ -70,6 +79,7 @@ function activeGeneralSymptoms(s: {
   chestPainOrDyspnea: boolean
   focalNeuroDeficit: boolean
   severeEpigastricPain: boolean
+  ruqPain: boolean
 }): string[] {
   const out: string[] = []
   if (s.severeHeadache) out.push('severe headache')
@@ -78,6 +88,7 @@ function activeGeneralSymptoms(s: {
   if (s.chestPainOrDyspnea) out.push('chest pain or dyspnea')
   if (s.focalNeuroDeficit) out.push('focal neuro deficit')
   if (s.severeEpigastricPain) out.push('severe epigastric pain')
+  if (s.ruqPain) out.push('RUQ pain')
   return out
 }
 

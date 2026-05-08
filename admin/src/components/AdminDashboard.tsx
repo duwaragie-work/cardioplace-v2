@@ -888,6 +888,7 @@ export default function AdminDashboard() {
                 <div className="flex items-center gap-1 ml-auto">
                   <input
                     type="date"
+                    aria-label="Trend range start date"
                     value={trendStartDate}
                     max={trendEndDate}
                     onChange={(e) => {
@@ -900,6 +901,7 @@ export default function AdminDashboard() {
                   <span className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>–</span>
                   <input
                     type="date"
+                    aria-label="Trend range end date"
                     value={trendEndDate}
                     min={trendStartDate}
                     max={new Date().toISOString().slice(0, 10)}

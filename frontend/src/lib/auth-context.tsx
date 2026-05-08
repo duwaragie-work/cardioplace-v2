@@ -7,12 +7,15 @@ import {
   useEffect,
   type ReactNode,
 } from 'react';
-import { REFRESH_TOKEN_KEY, fetchWithAuth } from '@/lib/services/token';
-
-const REFRESH_ENDPOINT = '/api/v2/auth/refresh';
+import {
+  fetchWithAuth,
+  setAccessToken,
+  getAccessToken,
+  clearTokenState,
+  rehydrateFromCookie,
+} from '@/lib/services/token';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
-const TOKEN_KEY = 'healplace_token';
 
 // Backend returns a flat AuthResponse (camelCase) from verifyOtp/googleLogin/etc.
 // Also accepts legacy snake_case access_token for compatibility.
@@ -83,133 +86,99 @@ const AuthContext = createContext<AuthContextType>({
   updateUser: () => {},
 });
 
-function setAuthCookie(token: string) {
-  document.cookie = `access_token=${token}; path=/; max-age=604800; SameSite=Lax`;
+// Non-token marker cookies for proxy.ts to gate page navigation. They carry
+// no credential — only "logged in or not" + the role list. The actual auth
+// happens via the HttpOnly access_token cookie + Bearer header on API calls.
+// Tampering with these only affects which page shell renders; the backend
+// rejects unauthenticated API calls regardless.
+function writeAuthMarkers(roles: string[]) {
+  if (typeof document === 'undefined') return;
+  document.cookie = `auth_marker=1; path=/; max-age=2592000; SameSite=Lax`;
+  document.cookie = `auth_role=${encodeURIComponent(roles.join(','))}; path=/; max-age=2592000; SameSite=Lax`;
 }
 
-function clearAuthCookie() {
-  document.cookie = 'access_token=; path=/; max-age=0; SameSite=Lax';
+function clearAuthMarkers() {
+  if (typeof document === 'undefined') return;
+  document.cookie = 'auth_marker=; path=/; max-age=0; SameSite=Lax';
+  document.cookie = 'auth_role=; path=/; max-age=0; SameSite=Lax';
+}
+
+async function fetchProfile(accessToken: string): Promise<AuthUser | null> {
+  try {
+    const res = await fetch(`${API_URL}/api/v2/auth/profile`, {
+      credentials: 'include',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return {
+      id: data.id,
+      email: data.email,
+      name: data.name,
+      roles: data.roles,
+      isVerified: data.isVerified,
+      riskTier: data.riskTier,
+      accountStatus: data.accountStatus,
+      onboardingStatus: data.onboardingStatus,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
-  // Start as false when there's nothing to rehydrate; true only when we have a stored token/refresh token
-  const [isLoading, setIsLoading] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    return !!(localStorage.getItem(TOKEN_KEY) || localStorage.getItem(REFRESH_TOKEN_KEY));
-  });
+  // Always start in loading state on the client — we have to attempt a
+  // cookie-based rehydrate before we can know whether the session is live.
+  // (The HttpOnly `refresh_token` cookie isn't visible to JS so we can't
+  // peek at storage to short-circuit.)
+  const [isLoading, setIsLoading] = useState(true);
 
-  // On mount: rehydrate session — try access token first, then refresh token
+  // On mount: try a silent refresh against the HttpOnly refresh_token
+  // cookie. If it succeeds we hydrate state with a fresh access token +
+  // user profile; if it fails we treat the user as logged-out.
   useEffect(() => {
-    const stored = localStorage.getItem(TOKEN_KEY);
-    const storedRefresh = localStorage.getItem(REFRESH_TOKEN_KEY);
-
-    if (!stored && !storedRefresh) {
-      // isLoading already initialized to false when no tokens exist
-      return;
-    }
-
+    let cancelled = false;
     async function rehydrate() {
-      const accessToken = stored;
-
-      // 1. Try /profile with the existing access token (returns full user incl. name)
-      if (accessToken) {
-        try {
-          const res = await fetch(`${API_URL}/api/v2/auth/profile`, {
-            headers: { Authorization: `Bearer ${accessToken}` },
-          });
-          if (res.ok) {
-            const data = await res.json();
-            setToken(accessToken);
-            setAuthCookie(accessToken);
-            setUser({
-              id: data.id,
-              email: data.email,
-              name: data.name,
-              roles: data.roles,
-              isVerified: data.isVerified,
-              riskTier: data.riskTier,
-              accountStatus: data.accountStatus,
-              onboardingStatus: data.onboardingStatus,
-            });
-            return;
-          }
-        } catch {
-          // access token failed — fall through to refresh
-        }
+      const newAccess = await rehydrateFromCookie();
+      if (cancelled) return;
+      if (!newAccess) {
+        clearTokenState();
+        clearAuthMarkers();
+        setToken(null);
+        setUser(null);
+        setIsLoading(false);
+        return;
       }
-
-      // 2. Access token expired or missing — try refresh
-      if (storedRefresh) {
-        try {
-          const res = await fetch(`${API_URL}${REFRESH_ENDPOINT}`, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refreshToken: storedRefresh }),
-          });
-
-          if (res.ok) {
-            const data: { accessToken?: string; refreshToken?: string } = await res.json();
-            const newAccess = data.accessToken;
-
-            if (newAccess) {
-              localStorage.setItem(TOKEN_KEY, newAccess);
-              setAuthCookie(newAccess);
-
-              if (data.refreshToken) {
-                localStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
-              }
-
-              // Fetch full profile with the fresh token
-              const profileRes = await fetch(`${API_URL}/api/v2/auth/profile`, {
-                headers: { Authorization: `Bearer ${newAccess}` },
-              });
-              if (profileRes.ok) {
-                const profileData = await profileRes.json();
-                setToken(newAccess);
-                setUser({
-                  id: profileData.id,
-                  email: profileData.email,
-                  name: profileData.name,
-                  roles: profileData.roles,
-                  isVerified: profileData.isVerified,
-                  riskTier: profileData.riskTier,
-                  accountStatus: profileData.accountStatus,
-                  onboardingStatus: profileData.onboardingStatus,
-                });
-                return;
-              }
-            }
-          }
-        } catch {
-          // refresh failed — clear everything
-        }
+      const profile = await fetchProfile(newAccess);
+      if (cancelled) return;
+      if (profile) {
+        setToken(newAccess);
+        setUser(profile);
+        writeAuthMarkers(profile.roles ?? []);
+      } else {
+        clearTokenState();
+        clearAuthMarkers();
+        setToken(null);
+        setUser(null);
       }
-
-      // 3. Both access and refresh failed — clear session
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(REFRESH_TOKEN_KEY);
-      clearAuthCookie();
-      setToken(null);
-      setUser(null);
-    }
-
-    rehydrate().finally(() => {
       setIsLoading(false);
-    });
+    }
+    rehydrate();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  // Keep in-memory token in sync with localStorage when fetchWithAuth silently
-  // refreshes. Without this, context consumers (e.g. voice realtime) keep
-  // using the stale token until the user hard-reloads the page.
+  // Keep the React state in sync when fetchWithAuth silently refreshes.
+  // Without this, components that read `token` from context keep using the
+  // stale value until the user hard-reloads the page.
   useEffect(() => {
     function handleTokenRefreshed(e: Event) {
       const detail = (e as CustomEvent<{ accessToken?: string }>).detail;
       if (detail?.accessToken) {
         setToken(detail.accessToken);
-        setAuthCookie(detail.accessToken);
       }
     }
     function handleSessionExpired() {
@@ -229,7 +198,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // there's no stored token so proxy.ts can redirect to /sign-in.
   useEffect(() => {
     function handlePageShow(event: PageTransitionEvent) {
-      if (event.persisted && !localStorage.getItem(TOKEN_KEY)) {
+      if (event.persisted && !getAccessToken()) {
         window.location.reload();
       }
     }
@@ -293,27 +262,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(newToken);
     setUser(newUser);
 
-    if (newUser?.email) {
-      localStorage.setItem('healplace_user_email', newUser.email);
-    }
-
     if (newToken) {
-      localStorage.setItem(TOKEN_KEY, newToken);
-      setAuthCookie(newToken);
+      setAccessToken(newToken);
     }
-
-    const newRefreshToken = response.refreshToken || null;
-    if (newRefreshToken) {
-      localStorage.setItem(REFRESH_TOKEN_KEY, newRefreshToken);
+    if (newUser?.roles) {
+      writeAuthMarkers(newUser.roles);
     }
+    // Refresh token deliberately NOT persisted client-side — the backend
+    // already set the HttpOnly `refresh_token` cookie on the verify-OTP
+    // response (auth.controller.setRefreshCookie). Keeping it out of JS
+    // closes the XSS path that ate refresh sessions in v1.
   };
 
-  const logout = () => {
+  const logout = async () => {
+    // Tell the backend so it can clear both HttpOnly cookies + revoke the
+    // refresh-token row. AWAIT the response so the server's Set-Cookie
+    // (max-age=0 on access_token + refresh_token) is fully processed by
+    // the browser BEFORE we redirect — fire-and-forget races the next
+    // request and proxy.ts can keep seeing the old cookies. Best-effort:
+    // we still clear local state if the network call fails (offline,
+    // expired session, etc.) — proxy.ts will reject the next nav anyway.
+    try {
+      await fetch(`${API_URL}/api/v2/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (err) {
+      console.error('Logout request failed:', err);
+    }
     setToken(null);
     setUser(null);
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
-    clearAuthCookie();
+    clearTokenState();
+    clearAuthMarkers();
     // Hard navigation guarantees the cookie clear has settled before the
     // next request — router.push raced with cookie clearing in production
     // and proxy.ts kept routing the user back to /dashboard.

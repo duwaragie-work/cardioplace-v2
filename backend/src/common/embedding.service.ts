@@ -12,6 +12,15 @@ export class EmbeddingService implements OnModuleInit {
   private ready = false
 
   async onModuleInit() {
+    // Kick off model load asynchronously — don't block Nest boot on the
+    // first-time HuggingFace download (~50MB). Callers using getEmbeddings()
+    // before the model is ready hit the existing graceful fallback below
+    // (empty vectors + warn), so the chat surface degrades gracefully for
+    // the first ~15s after a cold boot instead of refusing to start.
+    void this.loadModel()
+  }
+
+  private async loadModel(): Promise<void> {
     try {
       const { pipeline, env } = await import('@huggingface/transformers')
       // Disable local model check warnings

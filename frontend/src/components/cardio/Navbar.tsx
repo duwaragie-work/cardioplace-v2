@@ -229,7 +229,7 @@ export default function Navbar() {
             )}
           </div>
 
-          <Link href="/notifications" className="relative p-1" aria-label="Alerts">
+          <Link data-testid="notification-bell" href="/notifications" className="relative p-1" aria-label="Alerts">
             <Bell
               className="w-5 h-5"
               style={{

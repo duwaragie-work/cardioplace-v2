@@ -361,6 +361,7 @@ function EntryCard({
           {/* Date + Time — derived from single measuredAt timestamp */}
           <div className="flex items-center gap-2 mb-2">
             <p
+              data-testid="reading-row-date"
               className="text-[12px] font-semibold"
               style={{ color: 'var(--brand-text-muted)' }}
             >
@@ -1636,9 +1637,10 @@ export default function ReadingsPage() {
                     }
                   }
                   return (
-                    <div key={group.date} className="space-y-2">
+                    <div key={group.date} data-testid="reading-group" className="space-y-2">
                       {group.items.length > 1 && (
                         <p
+                          data-testid="reading-group-date"
                           className="text-[11px] font-bold uppercase tracking-wider px-1 pt-2"
                           style={{ color: 'var(--brand-text-muted)' }}
                         >

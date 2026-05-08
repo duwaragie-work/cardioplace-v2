@@ -180,8 +180,23 @@ describe('AlertEngineService (orchestrator)', () => {
       )
 
       const r = await service.evaluate('entry-1')
-      expect(r?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
-      expect(r?.tier).toBe('TIER_1_CONTRAINDICATION')
+      // v2 addendum D.5: emergency-axis row co-fires with the Tier 1
+      // contraindication so the patient gets the 911 message at T+0.
+      // At 195/130 absoluteEmergency (≥180/120) wins the emergency axis
+      // ahead of pregnancyL2; pregnancyL1High also fires on bp-high.
+      expect(r?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+      expect(r?.tier).toBe('BP_LEVEL_2')
+      expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(3)
+      const persistedRuleIds = (
+        prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+      ).map((c) => c[0].data.ruleId)
+      expect(persistedRuleIds).toEqual(
+        expect.arrayContaining([
+          'RULE_ABSOLUTE_EMERGENCY',
+          'RULE_PREGNANCY_ACE_ARB',
+          'RULE_PREGNANCY_L1_HIGH',
+        ]),
+      )
     })
 
     it('both Tier 1 pairs present — pregnancy+ACE wins short-circuit', async () => {

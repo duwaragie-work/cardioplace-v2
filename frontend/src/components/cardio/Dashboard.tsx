@@ -536,7 +536,7 @@ export default function Dashboard() {
         {/* D3 — Active alert card (top priority; tier-colored). Tap to open
             the Flow C alert detail. Hidden when no open alerts. */}
         {topAlert && topAlertVariant && (
-          <div className="relative mb-3 md:mb-4">
+          <div data-testid="active-alert-banner" className="relative mb-3 md:mb-4">
           <button
             type="button"
             onClick={() => router.push(`/alerts/${topAlert.id}`)}
@@ -570,6 +570,7 @@ export default function Dashboard() {
                 {topAlertVariant.title}
               </p>
               <p
+                data-testid="active-alert-reading"
                 lang="en"
                 className="text-[12px] mt-0.5 leading-snug"
                 style={{ color: 'var(--brand-text-secondary)', wordBreak: 'break-word' }}
@@ -617,7 +618,7 @@ export default function Dashboard() {
             <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 bg-white" />
             <div className="absolute -bottom-8 -right-4 w-20 h-20 rounded-full opacity-10 bg-white" />
 
-            <p className="text-white/70 text-xs font-medium mb-1">{greeting}</p>
+            <p data-testid="dashboard-greeting" className="text-white/70 text-xs font-medium mb-1">{greeting}</p>
             {loading ? (
               <Bone w={160} h={26} color="rgba(255,255,255,0.3)" />
             ) : (
@@ -652,7 +653,7 @@ export default function Dashboard() {
           {/* D4 — BP stat card. Status pill is colored vs the patient's
               PatientThreshold (or AHA defaults if no threshold set). Pulse
               renders below the BP when present on the latest entry. */}
-          <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl relative" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
+          <div data-testid="latest-bp" className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl relative" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
             <div className="flex items-start justify-between gap-2 mb-2">
               <span className="block text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
                 {loading ? <Bone w={60} h={9} r={5} /> : (todayHasEntry ? t('dashboard.todaysBp') : t('dashboard.latestBp'))}
@@ -675,6 +676,7 @@ export default function Dashboard() {
               <Bone w={72} h={18} r={99} />
             ) : (
               <span
+                data-testid="latest-bp-status"
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
                 style={{ backgroundColor: bpVsTargetStyle.bg, color: bpVsTargetStyle.fg }}
               >
@@ -816,7 +818,18 @@ export default function Dashboard() {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F1EEFF" vertical={false} />
-                    <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} interval={Math.max(0, Math.floor(visibleChartData.length / 8) - 1)} tickFormatter={(v: string) => v.replace(/ #\d+$/, '')}>
+                    <XAxis dataKey="day" axisLine={false} tickLine={false} tick={((props: { x?: number | string; y?: number | string; payload?: { value?: unknown } }) => {
+                      const x = typeof props.x === 'number' ? props.x : Number(props.x ?? 0);
+                      const y = typeof props.y === 'number' ? props.y : Number(props.y ?? 0);
+                      const raw = String(props.payload?.value ?? '');
+                      const display = raw.replace(/ #\d+$/, '');
+                      return (
+                        <g transform={`translate(${x},${y})`}>
+                          <text data-testid="bp-chart-x-tick" x={0} y={0} dy={10} textAnchor="middle" fill="#94A3B8" fontSize={10}>{display}</text>
+                        </g>
+                      );
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    }) as any} interval={Math.max(0, Math.floor(visibleChartData.length / 8) - 1)} tickFormatter={(v: string) => v.replace(/ #\d+$/, '')}>
                       <Label value={t('dashboard.chartDateAxis')} position="insideBottom" offset={-2} style={{ fill: '#1d1d1d', fontSize: 10, fontWeight: 600 }} />
                     </XAxis>
                     <YAxis domain={bpDomain} axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} width={38}>
@@ -831,7 +844,9 @@ export default function Dashboard() {
                           return (
                             <div className="bg-white px-3 py-2 rounded-xl text-xs" style={{ boxShadow: '0 4px 16px rgba(123,0,224,0.1)', border: '1px solid #E9D5FF' }}>
                               <p className="font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{d.systolic}/{d.diastolic} mmHg</p>
-                              <p style={{ color: '#94A3B8' }}>{dateStr}{d.time ? ` ${t('dashboard.chartAt')} ${d.time}` : ''}</p>
+                              {/* Cluster-3 / B10: was #94A3B8 (slate-400, 2.56:1) — failed
+                                  WCAG AA. Bumped to slate-600 (#475569, 7.04:1). */}
+                              <p style={{ color: '#475569' }}>{dateStr}{d.time ? ` ${t('dashboard.chartAt')} ${d.time}` : ''}</p>
                             </div>
                           );
                         }
@@ -889,6 +904,7 @@ export default function Dashboard() {
                     finishes onboarding before logging readings the rule
                     engine can't safely evaluate against a partial profile. */}
                 <button
+                  data-testid="start-checkin-cta"
                   onClick={() =>
                     router.push(intakeUi.kind === 'done' ? '/check-in' : '/clinical-intake')
                   }

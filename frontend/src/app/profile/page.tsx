@@ -702,6 +702,7 @@ export default function ProfilePage() {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1
+                  data-testid="profile-name"
                   className="text-[20px] sm:text-[22px] font-bold leading-tight truncate"
                   style={{ color: 'var(--brand-text-primary)' }}
                 >
@@ -734,6 +735,7 @@ export default function ProfilePage() {
           </div>
 
           <button
+            data-testid="profile-signout"
             type="button"
             onClick={logout}
             className="shrink-0 inline-flex items-center gap-1.5 h-10 px-3 sm:px-4 rounded-full font-bold text-[12.5px] cursor-pointer transition hover:opacity-85"
