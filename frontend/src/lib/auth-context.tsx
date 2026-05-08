@@ -274,14 +274,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // closes the XSS path that ate refresh sessions in v1.
   };
 
-  const logout = () => {
+  const logout = async () => {
     // Tell the backend so it can clear both HttpOnly cookies + revoke the
-    // refresh-token row. Best-effort: we still clear local state even if
-    // the request fails (e.g. offline) — proxy.ts will reject the next nav.
-    void fetch(`${API_URL}/api/v2/auth/logout`, {
-      method: 'POST',
-      credentials: 'include',
-    }).catch(() => undefined);
+    // refresh-token row. AWAIT the response so the server's Set-Cookie
+    // (max-age=0 on access_token + refresh_token) is fully processed by
+    // the browser BEFORE we redirect — fire-and-forget races the next
+    // request and proxy.ts can keep seeing the old cookies. Best-effort:
+    // we still clear local state if the network call fails (offline,
+    // expired session, etc.) — proxy.ts will reject the next nav anyway.
+    try {
+      await fetch(`${API_URL}/api/v2/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (err) {
+      console.error('Logout request failed:', err);
+    }
     setToken(null);
     setUser(null);
     clearTokenState();
