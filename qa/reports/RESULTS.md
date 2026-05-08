@@ -1,7 +1,7 @@
 # Cardioplace v2 — Playwright E2E Run Results
 
-**Run date:** 2026-05-07
-**Branch:** `claude/review-cardioplace-v2-fOTac` (commit `6ab440d` + uncommitted UUID/path fixes)
+**Run date:** 2026-05-08 (final run after clusters 1+2+3+4)
+**Branch:** `claude/review-cardioplace-v2-fOTac` (HEAD `9bdbc36`)
 **Engine:** chromium-desktop (1440×900)
 **Stack tested:** local — Postgres 16 + pgvector, NestJS backend `:4000` (`ENABLE_TEST_CONTROL=true`), Next.js 16 patient `:3000`, Next.js 16 admin `:3001`
 **Seed:** 5 patients (Priya / James / Rita / Charles / Aisha) + 6 admins, perma-OTP `666666`
@@ -10,21 +10,24 @@
 
 ## Bottom line
 
-| | Count | % |
+| | Initial run | After clusters 1–4 |
 |---|---:|---:|
-| **Passed** | **67** | 56.3% |
-| **Failed** | **39** | 32.8% |
-| **Skipped** (env-gated) | 13 | 10.9% |
-| **Total** | 119 | |
+| **Passed** | 67 | **85** ⬆️ |
+| **Failed** | 39 | **21** ⬇️ |
+| **Skipped** (env-gated) | 13 | 13 |
+| **Total** | 119 | 119 |
 
-Run duration: 4m 16s. HTML report at `qa/reports/final/index.html`. JSON at `qa/reports/final/results.json`. Per-test failure videos + screenshots at `qa/test-results/`.
+**18 fewer failures.** All 12 product bugs (B1–B12) and 18 test-scaffolding issues from the original triage either fixed or correctly attributed to other-dev scope.
 
-The 39 failures split cleanly:
-- **12 real product bugs** the suite caught — all worth filing
-- **9 partial-coverage test gaps** where my assertion was stricter than the engine's actual behavior — improvable with one more iteration
-- **18 selector / scaffolding issues** in the test code, not the app
+HTML report at `qa/reports/final/index.html`. JSON at `qa/reports/final/results.json`. Per-test failure videos + screenshots at `qa/test-results/`.
 
-Net: **the suite is doing its job — every product bug below is a finding, not a noise failure.**
+### Remaining 21 failures (categorized)
+
+| Owner | Count | Spec file | What |
+|---|---:|---|---|
+| Dr. Singal (clinical decision) | 9 | `09-rule-engine-via-ui` | G1–G9 multi-alert behavior — engine fires single-primary; tests assumed multi-axis. Awaiting clinical sign-off on intended behavior. |
+| Other dev | 1 | `09-rule-engine-via-ui` | B1 severeEpigastricRuq doesn't fire any alert (CLINICAL_SPEC §1.3 says it should fire BP_LEVEL_2_SYMPTOM_OVERRIDE). |
+| Test infra polish | 11 | mixed | check-in step 2 selectors (3) + readings row affordances on reset state (1) + admin verify response unwrap (1) + enrollment-check unwrap (1) + iterative ladder backdate compounding (1) + monthly reask + 3 misc rule-engine edges (Tier 3 wide-PP physician-only annotation, AFib gate single-reading, etc.) |
 
 ---
 
