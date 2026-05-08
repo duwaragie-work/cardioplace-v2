@@ -53,6 +53,7 @@ async function submitAndAssert(e: Expectation): Promise<{
   fired: string[]
   tiers: string[]
   unexpected: string[]
+  physicianMessages: string[]
 }> {
   const u = await tc.findUser(PATIENTS[e.patient].email)
   await tc.resetUser(u.id)
@@ -74,10 +75,11 @@ async function submitAndAssert(e: Expectation): Promise<{
 
   const fired = alerts.map((a) => a.ruleId)
   const tiers = alerts.map((a) => a.tier)
+  const physicianMessages = alerts.map((a) => a.physicianMessage ?? '')
   const unexpected = e.exclusive
     ? fired.filter((r) => !e.expectRuleIds.includes(r))
     : []
-  return { fired, tiers, unexpected }
+  return { fired, tiers, unexpected, physicianMessages }
 }
 
 // ─── Section 1 — Standard adult thresholds ─────────────────────────────────
@@ -147,7 +149,7 @@ test.describe('Symptom overrides — Level 2 at any BP', () => {
     ['alteredMentalStatus', { alteredMentalStatus: true }],
     ['chestPainOrDyspnea', { chestPainOrDyspnea: true }],
     ['focalNeuroDeficit', { focalNeuroDeficit: true }],
-    ['severeEpigastricRuq', { severeEpigastricRuq: true }],
+    ['severeEpigastricPain', { severeEpigastricPain: true }],
   ]
 
   for (const [name, flag] of symptoms) {
@@ -385,21 +387,27 @@ test.describe('AFib HR rules (§4.4 — ≥3-reading session gate)', () => {
 test.describe('Tier 3 physician-only annotations', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
-  test('Wide pulse pressure (170/85 → PP=85) → PULSE_PRESSURE_WIDE Tier 3', async () => {
+  test('Wide pulse pressure (170/85 → PP=85) → annotation on primary BP row', async () => {
     const r = await submitAndAssert({
       label: 'wide PP',
       patient: 'aisha',
       entry: { measuredAt: FUTURE(), systolicBP: 170, diastolicBP: 85, pulse: 78 },
-      expectRuleIds: ['RULE_PULSE_PRESSURE_WIDE', 'RULE_STANDARD_L1_HIGH'],
-      expectTiers: ['TIER_3_INFO', 'BP_LEVEL_1_HIGH'],
-      notes: 'PP rule rides as a separate Tier 3 alongside the primary BP rule',
+      expectRuleIds: ['RULE_STANDARD_L1_HIGH'],
+      expectTiers: ['BP_LEVEL_1_HIGH'],
+      notes: 'PP rule rides as physicianAnnotation on the primary BP row when Stage C claims an axis (Scenario 15).',
     })
-    // PP rule may ride as physicianAnnotation on the primary alert OR as
-    // its own Tier 3 row. Accept either by checking the alerts list.
+    // Wide-PP fires as a standalone Tier 3 row only when no other axis
+    // claimed; otherwise it's appended to the primary's physicianMessage.
+    // At 170/85, Stage C standardL1HighRule claims bp-high, so PP rides
+    // as an annotation. Accept either form.
     const ppPresent =
       r.fired.includes('RULE_PULSE_PRESSURE_WIDE') ||
-      r.tiers.includes('TIER_3_INFO')
-    expect(ppPresent, `expected wide pulse pressure flagged; fired: [${r.fired.join(',')}], tiers: [${r.tiers.join(',')}]`).toBeTruthy()
+      r.tiers.includes('TIER_3_INFO') ||
+      r.physicianMessages.some((m) => /wide pulse pressure/i.test(m))
+    expect(
+      ppPresent,
+      `expected wide pulse pressure flagged; fired: [${r.fired.join(',')}], tiers: [${r.tiers.join(',')}], messages: [${r.physicianMessages.join(' || ')}]`,
+    ).toBeTruthy()
   })
 })
 
