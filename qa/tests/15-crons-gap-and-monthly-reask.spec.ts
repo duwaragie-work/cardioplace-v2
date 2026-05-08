@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test'
 import { PATIENTS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
+import { authedApi } from '../helpers/auth.js'
+import { postJournalEntry } from '../helpers/api.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
 /**
@@ -16,10 +18,17 @@ test.describe('Gap-alert cron (48h trigger)', () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
-    // Aisha has 5 seeded readings; their measuredAt is `daysAgo: 0..13`.
-    // Backdate the latest reading >48h to expose the gap.
-    // (Note: resetUser deleted them — the gap-alert filter is "no entry OR
-    // last entry < cutoff", so an empty journalEntries list is itself a gap.)
+    // resetUser deleted Aisha's seeded readings. The gap-alert engine's gate
+    // is "last journal entry < cutoff", so we post one entry then backdate
+    // it >48h to put it past the cutoff.
+    const patientApi = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    await postJournalEntry(patientApi, {
+      measuredAt: new Date().toISOString(),
+      systolicBP: 122,
+      diastolicBP: 78,
+      pulse: 72,
+    })
+    await tc.backdateLastJournalEntry(u.id, 49 * 60 * 60)
     const result = await tc.runGapAlertScan(new Date())
     expect(result.scanned).toBe(1)
 
@@ -27,6 +36,7 @@ test.describe('Gap-alert cron (48h trigger)', () => {
     const gap = notes.find((n) => /time for your bp check|bp check/i.test(n.title))
     expect(gap, 'expected a gap-alert notification row').toBeDefined()
 
+    await patientApi.dispose()
     await tc.dispose()
   })
 
@@ -57,14 +67,15 @@ test.describe('Monthly re-ask cron (30d trigger)', () => {
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
 
-    // Backdate Aisha's medications by 31 days
-    const meds: Array<{ id: string }> = await (await fetch(
-      `${API_BASE_URL}/me/medications`,
-      // direct call — not authedApi since we only need read
-    )).json().catch(() => [])
+    // Backdate Aisha's medications by 31 days. Pull her active med list via
+    // authedApi (raw fetch can't carry her bearer token).
+    const patientApi = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    const medsRes = await patientApi.get('me/medications')
+    const medsBody = await medsRes.json()
+    const meds = medsBody?.data ?? medsBody
 
-    if (meds.length === 0) {
-      test.skip(true, 'Could not list meds without auth — extend test-control with a meds-by-user endpoint')
+    if (!Array.isArray(meds) || meds.length === 0) {
+      test.skip(true, 'No active meds for Aisha — skip')
     }
 
     for (const m of meds) {
@@ -78,6 +89,7 @@ test.describe('Monthly re-ask cron (30d trigger)', () => {
     const reask = notes.find((n) => /confirm your medications/i.test(n.title))
     expect(reask, 'expected a monthly re-ask notification row').toBeDefined()
 
+    await patientApi.dispose()
     await tc.dispose()
   })
 

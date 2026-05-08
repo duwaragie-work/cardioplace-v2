@@ -81,19 +81,29 @@ test.describe('Admin threshold editor', () => {
 
   test('MEDICAL_DIRECTOR can write PatientThreshold; PROVIDER cannot', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
-    const u = await tc.findUser(PATIENTS.aisha.email)
+    // Use Priya — she has no seeded threshold (Aisha picks one up across
+    // runs and would 409 on re-POST). Keeps this test idempotent on first
+    // run; subsequent runs fall back to PATCH if a threshold exists.
+    const u = await tc.findUser(PATIENTS.priya.email)
 
     const mdApi = await authedApi(API_BASE_URL, ADMINS.medicalDirector.email, 'admin')
-    const mdRes = await mdApi.post(`admin/patients/${u.id}/threshold`, {
-      data: {
-        sbpUpperTarget: 130,
-        sbpLowerTarget: 100,
-        dbpUpperTarget: 85,
-        dbpLowerTarget: 60,
-        notes: 'qa-test threshold',
-      },
+    const thresholdBody = {
+      sbpUpperTarget: 130,
+      sbpLowerTarget: 100,
+      dbpUpperTarget: 85,
+      dbpLowerTarget: 60,
+      notes: 'qa-test threshold',
+    }
+    let mdRes = await mdApi.post(`admin/patients/${u.id}/threshold`, {
+      data: thresholdBody,
     })
-    expect(mdRes.ok(), `MD threshold POST: ${await mdRes.text()}`).toBeTruthy()
+    if (mdRes.status() === 409) {
+      // Threshold already exists from a previous run — patch instead.
+      mdRes = await mdApi.patch(`admin/patients/${u.id}/threshold`, {
+        data: thresholdBody,
+      })
+    }
+    expect(mdRes.ok(), `MD threshold write: ${await mdRes.text()}`).toBeTruthy()
 
     const provApi = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
     const provRes = await provApi.post(`admin/patients/${u.id}/threshold`, {

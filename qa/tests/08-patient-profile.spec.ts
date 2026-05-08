@@ -15,9 +15,16 @@ test.describe('Profile — basic render', () => {
 
   test('profile renders name + email + sign-out button', async ({ page }) => {
     await page.goto('/profile')
-    await expect(page.getByText(PATIENTS.aisha.name)).toBeVisible({ timeout: 10_000 })
-    await expect(page.getByText(PATIENTS.aisha.email)).toBeVisible()
-    const signOut = page.getByRole('button', { name: /sign\s*out|log\s*out/i })
+    // Name appears twice in the markup (h1 + span on the avatar). Use the
+    // testid that was added in cluster-4 to disambiguate.
+    await expect(page.locator('[data-testid="profile-name"]')).toContainText(
+      PATIENTS.aisha.name,
+      { timeout: 10_000 },
+    )
+    await expect(page.getByText(PATIENTS.aisha.email).first()).toBeVisible()
+    const signOut = page
+      .locator('[data-testid="profile-signout"]')
+      .or(page.getByRole('button', { name: /sign\s*out|log\s*out/i }))
     await expect(signOut.first()).toBeVisible()
   })
 

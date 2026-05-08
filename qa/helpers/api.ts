@@ -59,8 +59,11 @@ export async function getActiveAlerts(
 }>> {
   const res = await api.get('daily-journal/alerts')
   expect(res.ok()).toBeTruthy()
+  // Backend wraps successful responses in { statusCode, message, data }.
+  // Unwrap so callers always see the array directly.
   const body = await res.json()
-  return Array.isArray(body) ? body : (body?.alerts ?? [])
+  const unwrapped = body?.data ?? body
+  return Array.isArray(unwrapped) ? unwrapped : (unwrapped?.alerts ?? [])
 }
 
 export async function patchPatientAcknowledgeAlert(
@@ -96,7 +99,9 @@ export async function adminAuditAlert(
 ): Promise<Record<string, unknown>> {
   const res = await api.get(`admin/alerts/${alertId}/audit`)
   expect(res.ok(), `admin audit: ${await res.text()}`).toBeTruthy()
-  return res.json()
+  // Backend wraps successful responses in { statusCode, message, data }.
+  const body = await res.json()
+  return body?.data ?? body
 }
 
 export async function adminCompleteEnrollment(
@@ -113,5 +118,7 @@ export async function adminEnrollmentCheck(
 ): Promise<{ ready: boolean; reasons: string[] }> {
   const res = await api.get(`admin/patients/${userId}/enrollment-check`)
   expect(res.ok(), `enrollment-check: ${await res.text()}`).toBeTruthy()
-  return res.json()
+  // Backend wraps successful responses in { statusCode, message, data }.
+  const body = await res.json()
+  return body?.data ?? body
 }

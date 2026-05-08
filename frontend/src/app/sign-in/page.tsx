@@ -100,21 +100,15 @@ export default function RegisterPage() {
       // a cross-origin redirect that admin can't honor (no cookie there).
       if (hasAdminRole(user.roles)) {
         const adminUrl = process.env.NEXT_PUBLIC_ADMIN_URL || 'http://localhost:3001';
-        const accessToken = localStorage.getItem('healplace_token') ?? '';
-        const refreshToken = localStorage.getItem('healplace_refresh_token') ?? '';
-        const params = new URLSearchParams({
-          accessToken,
-          refreshToken,
-          userId: String(user.id ?? ''),
-          email: user.email ?? '',
-          name: user.name ?? '',
-          roles: (user.roles as string[]).join(','),
-        });
-        // Clear patient state so navigating back here doesn't loop.
-        localStorage.removeItem('healplace_token');
-        localStorage.removeItem('healplace_refresh_token');
-        document.cookie = 'access_token=; path=/; max-age=0; SameSite=Lax';
-        window.location.href = `${adminUrl}/auth/magic-link?${params.toString()}`;
+        // Cookie-only handoff: the backend already set HttpOnly access +
+        // refresh cookies on the verify-OTP response, scoped to the API
+        // origin. The admin app on first mount calls /api/v2/auth/refresh
+        // with `credentials: 'include'` (auth-context.rehydrate) — that
+        // request carries the refresh_token cookie and gets back a fresh
+        // access token. No tokens in URL params (those leak via Referer
+        // and history) and no localStorage (XSS surface — closed by
+        // cluster 1, B5/B6 in qa/reports/RESULTS.md).
+        window.location.href = `${adminUrl}/dashboard`;
         return;
       }
       // Honor the localStorage skip flag — a previously-skipped user

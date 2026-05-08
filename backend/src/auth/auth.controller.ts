@@ -95,6 +95,7 @@ export class AuthController {
       dto.otp,
       context,
     )
+    this.setAccessCookie(res, result.accessToken)
     this.setRefreshCookie(res, result.refreshToken)
     if (context.deviceId) {
       await this.authService.upsertOrTrackDevice({
@@ -133,6 +134,7 @@ export class AuthController {
     try {
       const context = this.buildAuthContext(req)
       const result = await this.authService.verifyMagicLink(token, context)
+      this.setAccessCookie(res, result.accessToken)
       this.setRefreshCookie(res, result.refreshToken)
 
       const targetUrl = result.roles.includes(UserRole.SUPER_ADMIN)
@@ -171,6 +173,7 @@ export class AuthController {
 
     const context = this.buildAuthContext(req)
     const result = await this.authService.rotateRefreshToken(rawToken, context)
+    this.setAccessCookie(res, result.accessToken)
     this.setRefreshCookie(res, result.refreshToken)
     return {
       accessToken: result.accessToken,
@@ -194,6 +197,7 @@ export class AuthController {
       const context = this.buildAuthContext(req)
       await this.authService.revokeRefreshToken(rawToken, context)
     }
+    res.clearCookie('access_token')
     res.clearCookie('refresh_token')
     return { message: 'Logged out successfully' }
   }
@@ -233,17 +237,33 @@ export class AuthController {
     return this.authService.patchProfile(id, dto)
   }
 
-  // ─── Cookie Helper ────────────────────────────────────────────────────────────
+  // ─── Cookie Helpers ───────────────────────────────────────────────────────────
 
-  private setRefreshCookie(res: Response, token: string) {
+  private cookieDefaults() {
     const sameSite = this.config.get<'lax' | 'strict' | 'none'>(
       'COOKIE_SAME_SITE',
       'lax',
     )
-    res.cookie('refresh_token', token, {
+    return {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite,
+    } as const
+  }
+
+  private setAccessCookie(res: Response, token: string) {
+    // 7 day max-age — shorter than refresh but long enough to survive idle
+    // tabs without the Bearer-fallback re-prompting; the backend's actual
+    // JWT expiry (JWT_ACCESS_EXPIRES_IN, default 15m) is the real lifetime.
+    res.cookie('access_token', token, {
+      ...this.cookieDefaults(),
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    })
+  }
+
+  private setRefreshCookie(res: Response, token: string) {
+    res.cookie('refresh_token', token, {
+      ...this.cookieDefaults(),
       maxAge: 30 * 24 * 60 * 60 * 1000,
     })
   }

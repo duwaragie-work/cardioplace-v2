@@ -114,7 +114,14 @@ test.describe('Security smoke', () => {
     await page.goto('/notifications')
     await page.goto('/profile')
     const fatal = errors.filter(
-      (e) => !/ResizeObserver|preload|hydration|favicon|net::ERR_/i.test(e),
+      (e) =>
+        // Standard noise filters
+        !/ResizeObserver|preload|hydration|favicon|net::ERR_/i.test(e) &&
+        // 401 from the cookie-rehydrate /refresh attempt is expected when
+        // there's no live session yet — it's how the auth-context detects
+        // "logged out" (cluster-1 / B5+B6 model). Filtering this lets the
+        // console-clean assertion still catch genuine errors.
+        !/401|Unauthorized/i.test(e),
     )
     expect(fatal, fatal.join('\n')).toEqual([])
   })
