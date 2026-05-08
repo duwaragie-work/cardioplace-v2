@@ -197,8 +197,13 @@ export class AuthController {
       const context = this.buildAuthContext(req)
       await this.authService.revokeRefreshToken(rawToken, context)
     }
-    res.clearCookie('access_token')
-    res.clearCookie('refresh_token')
+    // Clear must mirror the setter's attribute set exactly. Browsers ignore
+    // a clearCookie whose `secure`, `sameSite`, `path`, or `domain` doesn't
+    // match the original Set-Cookie — the cookie silently survives. Reuse
+    // `cookieDefaults()` so setter + clearer share one source of truth.
+    const clearOpts = { ...this.cookieDefaults(), path: '/' }
+    res.clearCookie('access_token', clearOpts)
+    res.clearCookie('refresh_token', clearOpts)
     return { message: 'Logged out successfully' }
   }
 
