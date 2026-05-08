@@ -24,7 +24,7 @@ export type CreateJournalEntry = {
   alteredMentalStatus?: boolean
   chestPainOrDyspnea?: boolean
   focalNeuroDeficit?: boolean
-  severeEpigastricRuq?: boolean
+  severeEpigastricPain?: boolean
   newOnsetHeadache?: boolean
   ruqPain?: boolean
   edema?: boolean
