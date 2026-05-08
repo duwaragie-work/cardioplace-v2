@@ -844,7 +844,9 @@ export default function Dashboard() {
                           return (
                             <div className="bg-white px-3 py-2 rounded-xl text-xs" style={{ boxShadow: '0 4px 16px rgba(123,0,224,0.1)', border: '1px solid #E9D5FF' }}>
                               <p className="font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{d.systolic}/{d.diastolic} mmHg</p>
-                              <p style={{ color: '#94A3B8' }}>{dateStr}{d.time ? ` ${t('dashboard.chartAt')} ${d.time}` : ''}</p>
+                              {/* Cluster-3 / B10: was #94A3B8 (slate-400, 2.56:1) — failed
+                                  WCAG AA. Bumped to slate-600 (#475569, 7.04:1). */}
+                              <p style={{ color: '#475569' }}>{dateStr}{d.time ? ` ${t('dashboard.chartAt')} ${d.time}` : ''}</p>
                             </div>
                           );
                         }

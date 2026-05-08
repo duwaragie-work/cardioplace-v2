@@ -83,6 +83,10 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf|otf|mp4|pdf)).*)',
+    // Cluster-3 / B8+B9: exclude robots.txt + sitemap.xml from the auth gate.
+    // They're public crawler-facing files served by Next via app/robots.ts +
+    // app/sitemap.ts; the proxy was redirecting them to /sign-in (text/html
+    // 307) and breaking SEO indexing.
+    '/((?!api|_next/static|_next/image|favicon.ico|robots\\.txt|sitemap\\.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf|otf|mp4|pdf)).*)',
   ],
 }

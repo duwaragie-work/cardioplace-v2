@@ -116,10 +116,14 @@ const TIER_META: Record<
   TIER_3_INFO: { label: 'Care team update', icon: Bell, severity: 'LOW' },
 };
 
+// Cluster-3 / B10: severity foregrounds were -600 shades on -50/-100 backs,
+// all 3.0–3.95:1 ratios — fails AA. Bumped to -800 shades (~6:1+) while
+// keeping the same hue families. Same fix applied to the notifications
+// SEVERITY_META below for foreground-on-light pairs.
 const SEVERITY_META = {
-  HIGH: { label: 'Urgent', bg: '#FEE2E2', text: '#DC2626', border: '#FECACA' },
-  MEDIUM: { label: 'Moderate', bg: '#FFF7ED', text: '#EA580C', border: '#FED7AA' },
-  LOW: { label: 'Low', bg: '#F0FDF4', text: '#16A34A', border: '#BBF7D0' },
+  HIGH: { label: 'Urgent', bg: '#FEE2E2', text: '#991B1B', border: '#FECACA' },
+  MEDIUM: { label: 'Moderate', bg: '#FFF7ED', text: '#9A3412', border: '#FED7AA' },
+  LOW: { label: 'Low', bg: '#F0FDF4', text: '#166534', border: '#BBF7D0' },
 };
 
 function timeAgo(dateStr: string, t: TFn): string {

@@ -66,16 +66,20 @@ Each line: **expected** → **got**. Copy these into a triage backlog.
 | **B5** | `16 — refresh token NOT in localStorage` | Refresh token in `HttpOnly` cookie only | **`localStorage["healplace_refresh_token"]` populated** — single XSS = account takeover with 30-day window | **P0** | Handoff brief §9 — same v1 bug confirmed in v2 |
 | **B6** | `16 — access_token cookie is HttpOnly` | Cookie has `HttpOnly: true` | **Cookie is JS-readable** | **P0** | Handoff brief §9 |
 
-### P1 — Marketing / SEO / accessibility
+### P1 — Marketing / SEO / accessibility (all closed in cluster 3)
 
-| # | Test | Expected | Got | Severity | Reference |
-|---|---|---|---|---|---|
-| **B7** | `01 — homepage exposes a single h1` | `document.querySelectorAll('h1').length === 1` | **2 `<h1>` elements** | **P1** | Brief §P1.2 — confirmed unfixed |
-| **B8** | `16 — robots.txt returns text/plain` | `Content-Type: text/plain` | Got HTML / wrong content-type | **P1** | Brief §P0.2 |
-| **B9** | `16 — sitemap.xml returns xml` | `Content-Type: application/xml` or `text/xml` | Wrong content-type | **P1** | Brief §P0.2 |
-| **B10** | `16 — axe hard-fail on /` | Zero hard-fail violations (`color-contrast`, `label`, `duplicate-id`, `heading-order`, `aria-required-attr`, `image-alt`) | Hard-fail violations present (likely color-contrast on the marketing gradient italic) | **P1** | Brief §P2.1 |
-| **B11** | `16 — axe hard-fail on /dashboard` | Zero hard-fail violations | Hard-fail violations present | **P1** | New |
-| **B12** | `16 — axe hard-fail on /profile` AND `admin /dashboard` | Zero hard-fail violations | Hard-fail violations present | **P1** | New |
+> Cluster 3 closed all six on the patient + admin frontends. Specs `tests/01`
+> and `tests/16` now run 22/22 green for marketing + cross-cutting a11y +
+> security + HTTP smoke.
+
+| # | Test | Original Expected | Original Got | Status |
+|---|---|---|---|---|
+| ~~**B7**~~ | `01 — homepage exposes a single h1` | `length === 1` | 2 `<h1>` elements | **CLOSED** — `frontend/src/components/cardio/Homepage.tsx` collapses both visual lines into a single `<h1>` with two `<span>`s (desktop) and a single `<h2>` with two `<span>`s (mobile). |
+| ~~**B8**~~ | `16 — robots.txt returns text/plain` | text/plain | text/html via Next catch-all | **CLOSED** — `frontend/src/app/robots.ts` (Next 16 file convention) + proxy.ts matcher excludes `robots.txt`. |
+| ~~**B9**~~ | `16 — sitemap.xml returns xml` | application/xml | text/html via Next catch-all | **CLOSED** — `frontend/src/app/sitemap.ts` (Next 16 file convention) + proxy.ts matcher excludes `sitemap.xml`. |
+| ~~**B10**~~ | `16 — axe hard-fail on /, /readings, /notifications` | zero violations | color-contrast hits on marketing copy + dashboard chip + reading row badges + notification severity chips | **CLOSED** — bumped `--brand-text-muted` slate-500→slate-600 globally, semantic chip foregrounds (`--brand-{alert-red,warning-amber,success-green,accent-teal}`) from -600 shades to -800 shades (~6:1+ on light backs), severity meta inline colors moved to -800 shades, hardcoded chart-tooltip slate-400 bumped to slate-600. |
+| ~~**B11**~~ | `16 — axe hard-fail on /dashboard` | zero violations | as above | **CLOSED** — same bumps. |
+| ~~**B12**~~ | `16 — axe hard-fail on /profile + admin /dashboard` | zero violations | as above + admin sidebar muted labels + unlabeled date inputs | **CLOSED** — admin `--brand-text-muted` bumped from slate-400 → slate-600 (3.25:1 → 7:1) + same chip-color bumps + `aria-label` on the two date inputs in `admin/src/components/AdminDashboard.tsx`. |
 
 **Worth calling out:** the security findings (B5, B6) and the missing audit fields (B2) are clinical-deployment blockers. The ladder-doesn't-stop-on-ack bug (B3) and unable-to-reach-retry bug (B4) are spec violations that affect provider workflow. The `severeEpigastricRuq` engine miss (B1) is a clinical-safety gap — that symptom is supposed to trigger BP Level 2.
 
