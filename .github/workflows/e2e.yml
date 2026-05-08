@@ -61,7 +61,11 @@ jobs:
       WEB_APP_URL: http://localhost:3000,http://localhost:3001
       ADMIN_BASE_URL: http://localhost:3001
       COOKIE_SAME_SITE: lax
-      PORT: '4000'
+      # NOTE: do NOT set PORT here. PORT at job-level inherits into every
+      # step including `next start`, which then tries to bind :4000 and
+      # collides with the backend (the actual error from the EADDRINUSE
+      # we hit on first run). Backend's PORT is scoped inline on its
+      # start step below.
       RESEND_API_KEY: re_dummy_ci_key
       GOOGLE_API_KEY: ci-noop
       GEMINI_CHAT_MODEL: gemini-2.5-flash
@@ -126,18 +130,27 @@ jobs:
         run: npm run build
 
       - name: Start backend (compiled, single process)
+        env:
+          PORT: '4000'
         run: |
           cd backend && nohup node dist/main > /tmp/backend.log 2>&1 &
           echo $! > /tmp/backend.pid
           echo "Backend pid=$(cat /tmp/backend.pid)"
 
-      - name: Start frontend (next start)
+      - name: Start frontend (next start on 3000)
+        env:
+          # Defense-in-depth: explicit PORT override even though the job
+          # no longer sets PORT globally. `next start` defaults to 3000;
+          # this just makes the intent unambiguous in the YAML.
+          PORT: '3000'
         run: |
           cd frontend && nohup npm run start > /tmp/frontend.log 2>&1 &
           echo $! > /tmp/frontend.pid
           echo "Frontend pid=$(cat /tmp/frontend.pid)"
 
-      - name: Start admin (next start)
+      - name: Start admin (next start on 3001)
+        env:
+          PORT: '3001'
         run: |
           cd admin && nohup npm run start > /tmp/admin.log 2>&1 &
           echo $! > /tmp/admin.pid
