@@ -165,16 +165,51 @@ export class TestControlService {
   }
 
   async resetUser(userId: string): Promise<{ rowsDeleted: number }> {
-    const [notifications, escalations, alerts, entries] = await Promise.all([
-      this.prisma.notification.deleteMany({ where: { userId } }),
-      this.prisma.escalationEvent.deleteMany({ where: { alert: { userId } } }),
-      this.prisma.deviationAlert.deleteMany({ where: { userId } }),
-      this.prisma.journalEntry.deleteMany({ where: { userId } }),
-    ])
-    return {
-      rowsDeleted:
-        notifications.count + escalations.count + alerts.count + entries.count,
+    // Niva's co-fire pipeline ~doubles alert volume per scenario, which
+    // multiplies the queued escalation/notification/email-retry transactions
+    // running concurrently with the next test's reset. The original
+    // Promise.all of four deleteManys ran them as four separate auto-commit
+    // transactions, opening cyclic-lock-order deadlocks (Postgres 40P01)
+    // against in-flight dispatch writes on EscalationEvent / Notification.
+    //
+    // Fix: serialize all four deletes into a single $transaction with
+    // SERIALIZABLE isolation, ordered child-tables-first to acquire locks
+    // in a single direction, and retry on either P2034 (Prisma transaction
+    // conflict) or 40P01 (Postgres deadlock) up to three attempts with a
+    // 100ms backoff between each. Test-infra only — no production path
+    // resets users.
+    const MAX_ATTEMPTS = 3
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const [escalations, notifications, alerts, entries] =
+          await this.prisma.$transaction(
+            [
+              // Children of DeviationAlert first so the alerts row delete
+              // can't be blocked by an FK reference still in flight.
+              this.prisma.escalationEvent.deleteMany({ where: { alert: { userId } } }),
+              this.prisma.notification.deleteMany({ where: { userId } }),
+              this.prisma.deviationAlert.deleteMany({ where: { userId } }),
+              this.prisma.journalEntry.deleteMany({ where: { userId } }),
+            ],
+            { isolationLevel: 'Serializable' },
+          )
+        return {
+          rowsDeleted:
+            notifications.count + escalations.count + alerts.count + entries.count,
+        }
+      } catch (err: unknown) {
+        const e = err as { code?: string; meta?: { code?: string }; cause?: { code?: string } }
+        const isDeadlock =
+          e?.code === 'P2034' || e?.meta?.code === '40P01' || e?.cause?.code === '40P01'
+        if (!isDeadlock || attempt === MAX_ATTEMPTS) throw err
+        this.logger.warn(
+          `resetUser deadlock (attempt ${attempt}/${MAX_ATTEMPTS}) for ${userId} — retrying in 100ms`,
+        )
+        await new Promise((r) => setTimeout(r, 100))
+      }
     }
+    // Unreachable — the loop either returns or rethrows on the final attempt.
+    return { rowsDeleted: 0 }
   }
 
   async setEnrollment(userId: string, status: 'NOT_ENROLLED' | 'ENROLLED'): Promise<void> {
