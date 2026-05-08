@@ -28,11 +28,24 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 2 : 1,
-  reporter: [
-    ['list'],
-    ['html', { open: 'never', outputFolder: 'playwright-report' }],
-    ['json', { outputFile: 'test-results/results.json' }],
-  ],
+  reporter: process.env.CI
+    ? [
+        ['list'],
+        ['json', { outputFile: 'reports/results.json' }],
+        // open: 'never' suppresses the HTML reporter's auto-launched
+        // local server (port 9323). Without this the playwright CLI hangs
+        // after the run completes — `process.env.CI` masks it on GitHub
+        // Actions but a local `CI=1 npm run test` would also hang.
+        ['html', { open: 'never', outputFolder: 'reports/final' }],
+      ]
+    : [
+        ['list'],
+        // Local runs only auto-open the HTML report on test failures so
+        // pass-runs return the shell prompt immediately instead of
+        // serving a report nobody asked for. open: 'on-failure' = launch
+        // the HTML server in the background only when something failed.
+        ['html', { open: 'on-failure', outputFolder: 'playwright-report' }],
+      ],
   use: {
     baseURL: PATIENT_BASE_URL,
     trace: 'on-first-retry',
