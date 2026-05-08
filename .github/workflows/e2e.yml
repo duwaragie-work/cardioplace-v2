@@ -107,20 +107,41 @@ jobs:
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
 
-      - name: Start backend
-        run: |
-          cd backend && nohup npm run start:dev > /tmp/backend.log 2>&1 &
-          echo "Backend started"
+      # Production-build all three services. CI must NOT run dev/watch mode:
+      # `nest start --watch` spawns tsc --watch + nest start as separate
+      # processes that race — the tsc-recompile-on-cold-start can fire after
+      # nest already bound :4000, and the second nest hits EADDRINUSE while
+      # the first one keeps serving (silent split brain). Same shape risk
+      # for `next dev` HMR. The compiled-output path is single-process.
+      - name: Build backend
+        working-directory: backend
+        run: npm run build
 
-      - name: Start frontend
-        run: |
-          cd frontend && nohup npm run dev > /tmp/frontend.log 2>&1 &
-          echo "Frontend started"
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
 
-      - name: Start admin
+      - name: Build admin
+        working-directory: admin
+        run: npm run build
+
+      - name: Start backend (compiled, single process)
         run: |
-          cd admin && nohup npm run dev > /tmp/admin.log 2>&1 &
-          echo "Admin started"
+          cd backend && nohup node dist/main > /tmp/backend.log 2>&1 &
+          echo $! > /tmp/backend.pid
+          echo "Backend pid=$(cat /tmp/backend.pid)"
+
+      - name: Start frontend (next start)
+        run: |
+          cd frontend && nohup npm run start > /tmp/frontend.log 2>&1 &
+          echo $! > /tmp/frontend.pid
+          echo "Frontend pid=$(cat /tmp/frontend.pid)"
+
+      - name: Start admin (next start)
+        run: |
+          cd admin && nohup npm run start > /tmp/admin.log 2>&1 &
+          echo $! > /tmp/admin.pid
+          echo "Admin pid=$(cat /tmp/admin.pid)"
 
       # Wait for each service to be reachable. Each loop also handles the
       # transient first-time compile delay (Next 16 dev mode + Nest watch).
