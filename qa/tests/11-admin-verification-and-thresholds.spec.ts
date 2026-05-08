@@ -53,10 +53,15 @@ test.describe('Admin medication verification', () => {
     const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
     const u = await tc.findUser(PATIENTS.aisha.email)
 
-    // List Aisha's meds to grab one to reject (Lisinopril per seed.ts)
+    // List Aisha's meds to grab one to reject (Lisinopril per seed.ts).
+    // Backend wraps successful responses in { statusCode, message, data } —
+    // unwrap so .find() runs against the array, not the envelope.
     const medsRes = await patientApi.get('me/medications')
     expect(medsRes.ok()).toBeTruthy()
-    const meds: Array<{ id: string; drugName: string }> = await medsRes.json()
+    const medsBody = await medsRes.json()
+    const meds: Array<{ id: string; drugName: string }> = Array.isArray(medsBody)
+      ? medsBody
+      : (medsBody?.data ?? [])
     const lisinopril = meds.find((m) => /lisinopril/i.test(m.drugName))
     expect(lisinopril, 'Aisha should have a Lisinopril row from seed').toBeDefined()
 

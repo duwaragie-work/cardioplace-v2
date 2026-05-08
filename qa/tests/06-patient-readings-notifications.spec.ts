@@ -17,7 +17,13 @@ test.describe('/readings — TZ day-grouping regression (brief §13.1, walkthrou
 
   test('every group header date matches its rows\' date prefixes', async ({ page }) => {
     await page.goto('/readings')
+    // CI cold-start renders /readings before the seeded readings finish
+    // hydrating from the API — the default 10s actionTimeout is occasionally
+    // too tight on a freshly-built backend. Wait up to 15s for the first
+    // group to attach; if none ever do, the testid simply isn't wired and we
+    // skip below as before.
     const groups = page.locator(byTestId(T.readings.group))
+    await groups.first().waitFor({ state: 'attached', timeout: 15_000 }).catch(() => {})
     const count = await groups.count()
     test.skip(
       count === 0,

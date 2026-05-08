@@ -109,7 +109,12 @@ export async function adminCompleteEnrollment(
   userId: string,
 ): Promise<{ ok: boolean; reasons?: string[]; status?: number }> {
   const res = await api.post(`admin/patients/${userId}/complete-enrollment`)
-  return { ok: res.ok(), status: res.status(), ...(await res.json().catch(() => ({}))) }
+  // Backend wraps successful responses in { statusCode, message, data }; the
+  // payload (with `reasons` etc.) lives under `data`. Unwrap before spreading
+  // so callers see the fields at top level.
+  const body = await res.json().catch(() => ({}))
+  const payload = (body && typeof body === 'object' && 'data' in body ? body.data : body) ?? {}
+  return { ok: res.ok(), status: res.status(), ...(payload as Record<string, unknown>) }
 }
 
 export async function adminEnrollmentCheck(

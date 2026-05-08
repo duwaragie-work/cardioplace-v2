@@ -389,7 +389,12 @@ function AlertCard({
               return (
                 <p data-testid="notification-date" className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
                   {formatAlertDate(alert.journalEntry.measuredAt)}
-                  <span className="ml-1 font-semibold">{`${hh}:${mi}`}</span>
+                  {/* Literal space — `ml-1` is a CSS margin, which doesn't
+                      add a word boundary in innerText. Without this the
+                      copy/screen-reader output collapses to "Fri, May 811:22"
+                      (walkthrough finding §13.1 / Phase D regression). */}
+                  {' '}
+                  <span className="font-semibold">{`${hh}:${mi}`}</span>
                 </p>
               );
             })()}

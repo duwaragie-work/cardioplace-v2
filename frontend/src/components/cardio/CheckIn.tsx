@@ -245,6 +245,7 @@ function ChecklistRow({
   checked,
   onToggle,
   audioText,
+  testId,
 }: {
   icon: React.ReactNode;
   text: string;
@@ -254,9 +255,11 @@ function ChecklistRow({
    *  AudioButton next to the row so a non-reader can hear the option before
    *  toggling. Defaults to undefined (no audio button) for backwards compat. */
   audioText?: string;
+  testId?: string;
 }) {
   return (
     <motion.div
+      data-testid={testId}
       role="button"
       tabIndex={0}
       onClick={onToggle}
@@ -368,6 +371,7 @@ function B1Checklist({ form, setField }: StepProps) {
             audioText={it.text}
             checked={Boolean(form[it.key])}
             onToggle={() => setField(it.key, !form[it.key] as FormData[typeof it.key])}
+            testId={`checkin-checklist-${it.key}`}
           />
         ))}
       </div>

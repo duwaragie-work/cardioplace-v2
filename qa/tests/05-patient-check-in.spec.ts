@@ -23,12 +23,11 @@ test.describe('Check-in wizard — UI spine', () => {
 
   test('step 1 renders the pre-measurement checklist', async ({ page }) => {
     await page.goto('/check-in')
-    // Pre-measurement checklist: per CLINICAL_SPEC §6, 8 items. UI may render
-    // them as li's or interactive checkboxes — match either.
-    const items = page.getByText(
-      /caffeine|smoking|exercise|bladder|seated|back supported|talking|cuff/i,
-    )
-    expect(await items.count()).toBeGreaterThanOrEqual(4)
+    // CLINICAL_SPEC §6 — exactly 8 pre-measurement checklist rows. Each row
+    // carries data-testid="checkin-checklist-<formKey>"; count those instead
+    // of regex-matching translated copy (en/es/etc strings differ).
+    const rows = page.locator('[data-testid^="checkin-checklist-"]')
+    await expect(rows).toHaveCount(8)
   })
 
   test('Continue advances from step 1 to BP entry', async ({ page }) => {
@@ -70,10 +69,14 @@ test.describe('Check-in submissions trigger expected alerts (via API)', () => {
     const alerts = await tc.listAlerts(u.id)
     expect(alerts.filter((a) => a.status === 'OPEN'), 'expected no OPEN alerts').toEqual([])
 
-    // Sanity: dashboard renders the new reading
+    // Sanity: dashboard renders the new reading. Scope to the dedicated
+    // latest-bp card so we don't collide with the chart's own 124/78 axis
+    // tick (Playwright strict mode flags multiple matches otherwise).
     await signInPatient(page, PATIENTS.aisha.email)
     await expect(page).toHaveURL(/\/dashboard/)
-    await expect(page.getByText(/124\/78/)).toBeVisible({ timeout: 15_000 })
+    await expect(
+      page.locator('[data-testid="latest-bp"]').getByText(/124\/78/),
+    ).toBeVisible({ timeout: 15_000 })
     await api.dispose()
     await tc.dispose()
   })
