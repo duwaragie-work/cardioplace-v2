@@ -98,6 +98,17 @@ export class TestControlController {
     return { ok: true }
   }
 
+  @Post('retry-event/backdate')
+  @HttpCode(200)
+  async backdateRetryEvent(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { alertId: string; deltaSeconds: number },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.backdateRetryEvent(body.alertId, body.deltaSeconds)
+    return { ok: true }
+  }
+
   @Post('journal/backdate-latest')
   @HttpCode(200)
   async backdateLastJournalEntry(

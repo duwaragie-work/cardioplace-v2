@@ -92,7 +92,16 @@ test.describe('Alert resolution', () => {
     await tc.dispose()
   })
 
-  test('BP_L2_UNABLE_TO_REACH_RETRY leaves alert OPEN + schedules fresh T+4h event', async () => {
+  test('BP_L2_UNABLE_TO_REACH_RETRY schedules retry that fires regardless of ack state', async () => {
+    // Cluster-2 / B4 contract per Dr. Singal Option 2:
+    //   - Provider acknowledges + chooses "unable to reach, retry in 4h"
+    //   - Alert keeps its acknowledgedAt timestamp (audit trail of "I saw this,
+    //     I tried"). Status MAY be ACKNOWLEDGED or OPEN; either is fine.
+    //   - A fresh EscalationEvent with triggeredByResolution=true is scheduled
+    //     for T+4h.
+    //   - When that event's scheduledFor passes, firePendingScheduled
+    //     dispatches it EVEN IF the alert is ACKNOWLEDGED (the retry was an
+    //     explicit provider decision after ack — must not be silently dropped).
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
@@ -117,17 +126,32 @@ test.describe('Alert resolution', () => {
       resolutionRationale: 'qa-test: tried twice, patient unreachable',
     })
 
-    const after = await tc.listAlerts(u.id)
-    const stillOpen = after.find((a) => a.id === bpL2!.id)
-    expect(
-      stillOpen?.status,
-      'BP_L2_UNABLE_TO_REACH_RETRY must leave alert OPEN, not RESOLVED',
-    ).toBe('OPEN')
-
-    // A fresh EscalationEvent with triggeredByResolution=true should exist
-    const events = await tc.listEscalationEvents(bpL2!.id)
+    // A fresh EscalationEvent with triggeredByResolution=true must exist
+    let events = await tc.listEscalationEvents(bpL2!.id)
     const retry = events.find((e) => e.triggeredByResolution)
     expect(retry, 'expected a triggeredByResolution=true EscalationEvent').toBeDefined()
+    expect(retry?.scheduledFor, 'retry must have scheduledFor in the future').toBeTruthy()
+    expect(retry?.notificationSentAt, 'retry not yet dispatched').toBeNull()
+
+    // Status check is now lax — Option 2 keeps acknowledgedAt for audit trail
+    const after = await tc.listAlerts(u.id)
+    const status = after.find((a) => a.id === bpL2!.id)?.status
+    expect(['OPEN', 'ACKNOWLEDGED']).toContain(status)
+
+    // The clinical correctness check: backdate the retry's scheduledFor so
+    // the cron sees it as ripe, run scan, assert it dispatched (NOT skipped).
+    await tc.backdateRetryEvent(bpL2!.id, 5 * 60 * 60) // 5h backdate
+    await tc.runEscalationScan(new Date())
+    events = await tc.listEscalationEvents(bpL2!.id)
+    const retryAfter = events.find((e) => e.id === retry!.id)
+    expect(
+      retryAfter?.notificationSentAt,
+      'retry MUST dispatch even though alert is ACKNOWLEDGED — silent drop = clinical bug',
+    ).not.toBeNull()
+    expect(
+      retryAfter?.reason,
+      `retry should not be skipped. reason: ${retryAfter?.reason}`,
+    ).not.toMatch(/skipped/i)
 
     await patientApi.dispose()
     await adminApi.dispose()
@@ -153,6 +177,10 @@ test.describe('Alert resolution', () => {
     const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
     const audit = await adminAuditAlert(adminApi, a!.id)
 
+    // 15-field Joint Commission audit per CLINICAL_SPEC §V2-D.13. Backend
+    // uses *Ms suffix for the two computed time fields — explicit unit per
+    // audit-precision convention (cluster-2 / B2 reconfirm). Reads better
+    // than ambiguous "time" alone.
     const expected = [
       'alertId',
       'alertType',
@@ -164,8 +192,8 @@ test.describe('Alert resolution', () => {
       'recipientsNotified',
       'acknowledgmentTimestamp',
       'resolutionTimestamp',
-      'timeToAcknowledgment',
-      'timeToResolution',
+      'timeToAcknowledgmentMs',
+      'timeToResolutionMs',
       'escalationTriggered',
       'resolutionAction',
       'resolutionRationale',

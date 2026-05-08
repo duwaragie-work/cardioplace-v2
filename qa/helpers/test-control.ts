@@ -92,6 +92,15 @@ export class TestControl {
     await this.post('test-control/anchor/backdate', { alertId, deltaSeconds })
   }
 
+  /**
+   * Backdate a `triggeredByResolution: true` event (BP L2 retry) so its
+   * `scheduledFor` is in the past — lets tests verify the retry actually
+   * dispatches without sleeping 4h.
+   */
+  async backdateRetryEvent(alertId: string, deltaSeconds: number): Promise<void> {
+    await this.post('test-control/retry-event/backdate', { alertId, deltaSeconds })
+  }
+
   /** Backdate the latest JournalEntry for a user (for gap-alert + monthly-reask). */
   async backdateLastJournalEntry(userId: string, deltaSeconds: number): Promise<void> {
     await this.post('test-control/journal/backdate-latest', { userId, deltaSeconds })

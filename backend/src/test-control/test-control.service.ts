@@ -39,25 +39,79 @@ export class TestControlService {
 
   // ─── Time advancement ───────────────────────────────────────────────────
   async backdateAlertAnchor(alertId: string, deltaSeconds: number): Promise<void> {
-    // Backdate the T+0 EscalationEvent's notificationSentAt + scheduledFor
-    // by deltaSeconds, so subsequent runScan calls see ladder steps as overdue.
-    const t0 = await this.prisma.escalationEvent.findFirst({
-      where: { alertId, ladderStep: 'T0' },
+    // Backdate the T+0 anchor row so subsequent runScan calls see ladder
+    // steps as overdue.
+    //
+    // Two complications this helper has to handle:
+    //
+    //   1. Tier 1 has TWO T+0 rows when the alert fires after-hours: a
+    //      QUEUED primary (notificationSentAt=null, scheduledFor=next-business
+    //      -open) AND a courtesy backup row that fires immediately. The
+    //      ladder anchor is the PRIMARY one — pick it explicitly via
+    //      recipientRoles filter, otherwise we'd backdate the wrong row and
+    //      advance never triggers.
+    //
+    //   2. After-hours queueing leaves notificationSentAt=null. The advance
+    //      logic only treats a T+0 as "completed" when notificationSentAt is
+    //      non-null, so we have to FORCE-SET it to the backdated anchor time.
+    //      This effectively simulates "the T+0 dispatch happened
+    //      deltaSeconds ago" — what tests need to fast-forward through the
+    //      after-hours window.
+    const ms = deltaSeconds * 1000
+    const primary = await this.prisma.escalationEvent.findFirst({
+      where: {
+        alertId,
+        ladderStep: 'T0',
+        recipientRoles: { has: 'PRIMARY_PROVIDER' },
+      },
       orderBy: { triggeredAt: 'asc' },
     })
+    const t0 =
+      primary ??
+      (await this.prisma.escalationEvent.findFirst({
+        where: { alertId, ladderStep: 'T0' },
+        orderBy: { triggeredAt: 'asc' },
+      }))
     if (!t0) {
       throw new Error(`No T0 event found for alert ${alertId}`)
     }
-    const sentAt = t0.notificationSentAt
-      ? new Date(t0.notificationSentAt.getTime() - deltaSeconds * 1000)
-      : null
+    const triggeredAt = new Date(t0.triggeredAt.getTime() - ms)
+    // Force-set notificationSentAt — even if row was queued (null), tests
+    // need the anchor calc to find a non-null value so the deadline math
+    // works regardless of business-hours.
+    const notificationSentAt = t0.notificationSentAt
+      ? new Date(t0.notificationSentAt.getTime() - ms)
+      : triggeredAt
     const scheduledFor = t0.scheduledFor
-      ? new Date(t0.scheduledFor.getTime() - deltaSeconds * 1000)
+      ? new Date(t0.scheduledFor.getTime() - ms)
       : null
-    const triggeredAt = new Date(t0.triggeredAt.getTime() - deltaSeconds * 1000)
     await this.prisma.escalationEvent.update({
       where: { id: t0.id },
-      data: { notificationSentAt: sentAt, scheduledFor, triggeredAt },
+      data: { triggeredAt, notificationSentAt, scheduledFor },
+    })
+  }
+
+  /**
+   * Backdate a `triggeredByResolution: true` event (BP L2 retry path) so the
+   * scheduled retry's `scheduledFor` is in the past — lets tests verify the
+   * retry actually dispatches via firePendingScheduled without sleeping 4h.
+   */
+  async backdateRetryEvent(alertId: string, deltaSeconds: number): Promise<void> {
+    const retry = await this.prisma.escalationEvent.findFirst({
+      where: { alertId, triggeredByResolution: true, notificationSentAt: null },
+      orderBy: { triggeredAt: 'desc' },
+    })
+    if (!retry) {
+      throw new Error(`No pending retry event found for alert ${alertId}`)
+    }
+    const ms = deltaSeconds * 1000
+    const scheduledFor = retry.scheduledFor
+      ? new Date(retry.scheduledFor.getTime() - ms)
+      : new Date(Date.now() - ms)
+    const triggeredAt = new Date(retry.triggeredAt.getTime() - ms)
+    await this.prisma.escalationEvent.update({
+      where: { id: retry.id },
+      data: { scheduledFor, triggeredAt },
     })
   }
 

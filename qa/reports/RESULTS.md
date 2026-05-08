@@ -41,18 +41,23 @@ Full list is in `results.json`. Highlights worth calling out:
 
 ---
 
-## 🔴 12 real product bugs caught by the suite
+## 🔴 Real product bugs caught by the suite (post-cluster-2 reconfirm)
 
 Each line: **expected** → **got**. Copy these into a triage backlog.
 
+> **Reconfirm note (cluster 2 — 2026-05-08):** B2 + B3 closed as test-side
+> issues, not product bugs. B4 narrative updated with deeper clinical
+> impact + Option-2 fix. See "Cluster 2 reconfirm log" section below for
+> the full ladder analysis.
+
 ### P0 — Patient safety / clinical correctness
 
-| # | Test | Expected | Got | Severity | Reference |
+| # | Test | Expected | Got | Severity | Status |
 |---|---|---|---|---|---|
-| **B1** | `09 — severeEpigastricRuq at 130/80 → BP_LEVEL_2_SYMPTOM_OVERRIDE` | `RULE_SYMPTOM_OVERRIDE_GENERAL` fires (CLINICAL_SPEC §1.3 lists severe epigastric/RUQ pain as a Level 2 trigger) | **No alert fired at all** — empty alert list | **P0** | CLINICAL_SPEC §1.3 |
-| **B2** | `13 — audit endpoint returns the 15 expected fields` | All 15 Joint Commission audit fields present | **Missing 2:** `timeToAcknowledgment`, `timeToResolution` | **P0** | CLINICAL_SPEC §V2-D Audit-trail |
-| **B3** | `14 — acknowledged alert stops ladder progression` | After patient/admin acks an alert, the next `runScan(now+4h)` should NOT add a `T4H` event | **`T4H` fires anyway** — ack does not stop the cron | **P0** | TESTING_FLOW_GUIDE §8.3 "Acknowledgment stops the cron" |
-| **B4** | `13 — BP_L2_UNABLE_TO_REACH_RETRY leaves alert OPEN + schedules fresh T+4h` | Resolution sets alert back to `OPEN` and schedules a new `EscalationEvent` with `triggeredByResolution: true` | **Alert ends up `ACKNOWLEDGED`** — never reverts to OPEN, no retry event scheduled | **P0** | TESTING_FLOW_GUIDE §8.4, resolution-actions.ts |
+| **B1** | `09 — severeEpigastricRuq at 130/80 → BP_LEVEL_2_SYMPTOM_OVERRIDE` | `RULE_SYMPTOM_OVERRIDE_GENERAL` fires (CLINICAL_SPEC §1.3 lists severe epigastric/RUQ pain as a Level 2 trigger) | **No alert fired at all** — empty alert list | **P0** | Open — owned by other dev |
+| ~~**B2**~~ | ~~`13 — audit endpoint returns the 15 expected fields`~~ | ~~Missing `timeToAcknowledgment` + `timeToResolution`~~ | **Reconfirm:** fields exist as `timeToAcknowledgmentMs` + `timeToResolutionMs` (proper unit suffix per Joint Commission audit precision). Backend is correct. | n/a | **CLOSED — naming mismatch in the test, fixed in cluster-2 commit.** |
+| ~~**B3**~~ | ~~`14 — acknowledged alert stops ladder progression`~~ | ~~`T4H` fires anyway after ack~~ | **Reconfirm:** admin ack via `POST /admin/alerts/:id/acknowledge` correctly flips state and `advanceOverdueLadders` filters out ack'd alerts. Original test failure used patient-side `PATCH /daily-journal/alerts/:id/acknowledge` which **returns 400 for Tier 1** (correct — patients can't self-ack a contraindication); test didn't check response, treated 400 as success. | n/a | **CLOSED — test used wrong endpoint, fixed in cluster-2 commit.** |
+| **B4** | `13 — BP_L2_UNABLE_TO_REACH_RETRY` retry actually fires | After provider acks + chooses "unable to reach, retry in 4h", the scheduled retry event must dispatch when its `scheduledFor` passes | **Retry event silently dropped** — `firePendingScheduled` skips the event because `alert.acknowledgedAt` is set (typical ack-then-resolve flow). Patient who couldn't be reached for a BP Level 2 emergency receives no follow-up dispatch. | **P0** | **FIXED in cluster-2 commit (Option 2)** — `firePendingScheduled` exempts `triggeredByResolution: true` events from the ack/status skip. Ack stays for audit trail; retry fires anyway. Per Dr. Singal sign-off. |
 
 ### P0 — Security / HIPAA
 
@@ -132,6 +137,48 @@ These run only with `RUN_LLM_TESTS=1` (Gemini-paid LLM safety evals on `/chat`) 
 - `12 — enrollment failure modes` (3 — needs additional test-control helpers per qa/README §"Known gaps" #3)
 - `14 — BP L2 after-hours` (1 — needs business-hours toggle helper)
 - `09 — etc.` (1 misc)
+
+---
+
+## Cluster 2 reconfirm log (2026-05-08)
+
+Before fixing B2/B3/B4, ran a manual curl repro + re-read the ladder code. Findings rewrote the bug list:
+
+**Ladder behavior matrix** (per `escalation/ladder-defs.ts` + `escalation.service.ts`):
+
+| Tier | T+0 recipients/channels | After-hours | Cron advances? | Auto-resolve on benign? |
+|---|---|---|---|---|
+| `TIER_1_CONTRAINDICATION` | PRIMARY, PUSH+EMAIL+DASH | Queue primary; **fire BACKUP courtesy immediately** | ✅ T+4h→T+8h→T+24h→T+48h | ❌ No (preserved) |
+| `TIER_2_DISCREPANCY` | PRIMARY, DASH-only badge | Queue | ✅ T+48h→T+7d→T+14d | ❌ No |
+| `BP_LEVEL_2` | PRIMARY+BACKUP+PATIENT, PUSH+EMAIL+DASH | **FIRE_IMMEDIATELY** | ✅ T+2h MD, T+4h ops | ❌ No |
+| `BP_LEVEL_2_SYMPTOM_OVERRIDE` | same as BP L2 + T+2h includes PATIENT ("Have you called 911?") | Immediate | ✅ Yes | ❌ No |
+| `BP_LEVEL_1_HIGH/LOW` | PRIMARY (EMAIL+DASH) + PATIENT separate (PUSH, immediate) | Queue provider, immediate patient | **❌ NOT in `advanceOverdueLadders` filter** — T+24h/T+72h/T+7d defined but never auto-fire (phase/23 TODO) | ✅ Yes on benign reading |
+| `TIER_3_INFO` | No ladder | N/A | ❌ No | N/A |
+
+**Cron rules:**
+- `advanceOverdueLadders` skips alerts unless `status='OPEN' AND acknowledgedAt=null`
+- `firePendingScheduled` (handles queued + retry events) skips events when `alert.status != 'OPEN' OR alert.acknowledgedAt`. **Cluster-2 fix:** events with `triggeredByResolution: true` are now exempted from this skip.
+- Anchor for advance = T+0 PRIMARY's `notificationSentAt ?? scheduledFor ?? triggeredAt ?? alert.createdAt`
+
+**B4 root cause** (the reason the bug is more severe than originally documented):
+
+```
+1. BP Level 2 alert fires → status=OPEN
+2. Admin ack → status=ACKNOWLEDGED, acknowledgedAt=now
+3. Admin resolves with BP_L2_UNABLE_TO_REACH_RETRY → scheduleRetry creates
+   EscalationEvent { triggeredByResolution: true, scheduledFor: now+4h }.
+   Alert status NOT touched (stays ACKNOWLEDGED).
+4. 4h later, cron firePendingScheduled finds the retry event → checks
+   "alert.status !== OPEN || alert.acknowledgedAt" → SKIPS, marks
+   "skipped — alert resolved or acknowledged".
+   PATIENT NEVER FOLLOWED UP.
+```
+
+**Option 2 fix:** add `!row.triggeredByResolution &&` to the skip condition in `firePendingScheduled`. Three lines in `escalation.service.ts`. Preserves the audit trail (provider's ack timestamp stays — "I saw this, I tried") while ensuring the retry actually dispatches.
+
+**Test infra also hardened:**
+- `test-control.service.ts` `backdateAlertAnchor` now filters to the PRIMARY T+0 row (not the courtesy backup) and force-sets `notificationSentAt` even when it was null (after-hours queue case). Lets escalation tests run regardless of business-hours.
+- New `backdateRetryEvent` endpoint to backdate `triggeredByResolution: true` events for end-to-end retry assertions.
 
 ---
 
