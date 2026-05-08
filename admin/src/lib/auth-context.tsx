@@ -177,11 +177,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // response. Keeping it out of JS closes the XSS path.
   };
 
-  const logout = () => {
-    void fetch(`${API_URL}/api/v2/auth/logout`, {
-      method: 'POST',
-      credentials: 'include',
-    }).catch(() => undefined);
+  const logout = async () => {
+    // Await the server round-trip so its Set-Cookie clear headers land
+    // before we redirect. See frontend/src/lib/auth-context.tsx logout()
+    // for the full rationale — same race condition.
+    try {
+      await fetch(`${API_URL}/api/v2/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (err) {
+      console.error('Logout request failed:', err);
+    }
     setToken(null);
     setUser(null);
     clearTokenState();
