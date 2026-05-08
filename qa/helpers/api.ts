@@ -123,7 +123,14 @@ export async function adminEnrollmentCheck(
 ): Promise<{ ready: boolean; reasons: string[] }> {
   const res = await api.get(`admin/patients/${userId}/enrollment-check`)
   expect(res.ok(), `enrollment-check: ${await res.text()}`).toBeTruthy()
-  // Backend wraps successful responses in { statusCode, message, data }.
+  // Backend wraps successful responses in { statusCode, message, data } and the
+  // gate result inside `data` exposes { ok, reasons? } (see enrollment-gate.ts).
+  // Normalize to { ready, reasons } so callers can read a stable contract
+  // without leaking the gate's internal `ok` field.
   const body = await res.json()
-  return body?.data ?? body
+  const payload = (body?.data ?? body) as { ok?: boolean; ready?: boolean; reasons?: string[] }
+  return {
+    ready: payload.ready ?? payload.ok ?? false,
+    reasons: payload.reasons ?? [],
+  }
 }

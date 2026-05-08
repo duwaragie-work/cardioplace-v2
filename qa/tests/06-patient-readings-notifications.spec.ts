@@ -32,7 +32,13 @@ test.describe('/readings — TZ day-grouping regression (brief §13.1, walkthrou
     )
     for (let i = 0; i < count; i++) {
       const group = groups.nth(i)
-      const headerDate = (await group.locator(byTestId(T.readings.groupDate)).innerText()).trim()
+      // The date header only renders for multi-reading days (readings/page.tsx:1641
+      // — `group.items.length > 1`). Single-reading groups still get the parent
+      // testid but no `reading-group-date` child; skip those rather than time
+      // out waiting for a header that will never exist.
+      const dateLocator = group.locator(byTestId(T.readings.groupDate))
+      if ((await dateLocator.count()) === 0) continue
+      const headerDate = (await dateLocator.innerText()).trim()
       const firstRowDate = (
         await group.locator(byTestId(T.readings.rowDate)).first().innerText()
       ).trim()
