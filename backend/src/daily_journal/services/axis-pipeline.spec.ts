@@ -351,10 +351,13 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
   })
 
   // ────────────────────────────────────────────────────────────────────────
-  // Terminal stages — emergency and contraindication short-circuit other axes.
+  // Multi-ladder co-fire — v2 addendum Part D defines three independent
+  // escalation ladders (Tier 1, BP L2, BP L1). Stage A/B no longer
+  // terminally short-circuit — distinct-axis rules co-fire so each ladder
+  // gets its own DeviationAlert row.
   // ────────────────────────────────────────────────────────────────────────
 
-  it('Emergency terminal — SBP 185 + adherence-miss → 1 BP row + 1 adherence row', async () => {
+  it('Emergency + L1 high co-fire — SBP 185 fires BOTH ABSOLUTE_EMERGENCY + STANDARD_L1_HIGH (independent ladders)', async () => {
     const { calls } = await run(
       buildSession({
         systolicBP: 185,
@@ -364,16 +367,18 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
       }),
       buildCtx({ profile: { diagnosedHypertension: true } }),
     )
-    // BP pipeline emits only the emergency (terminal). Adherence pass adds
-    // its own independent row. Standard L1 / pulse-pressure NOT fired.
-    expect(calls).toHaveLength(2)
+    // SBP 185 violates BOTH the L2 emergency threshold (≥180) AND the L1
+    // high threshold (≥160). Per v2 addendum D, the two ladders run
+    // independently (T+0/2h/4h vs T+0/24h/72h/7d). Adherence adds its
+    // own row.
+    expect(calls).toHaveLength(3)
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_ABSOLUTE_EMERGENCY')
+    expect(ids).toContain('RULE_STANDARD_L1_HIGH')
     expect(ids).toContain('RULE_MEDICATION_MISSED')
-    expect(ids).not.toContain('RULE_STANDARD_L1_HIGH')
   })
 
-  it('Contraindication terminal — pregnant + ACE → 1 row only (no BP rules)', async () => {
+  it('Contraindication alone — pregnant + ACE @ 95/60 → 1 row only (no BP rule met)', async () => {
     const { calls } = await run(
       buildSession({ systolicBP: 95, diastolicBP: 60, pulse: 72 }),
       buildCtx({
@@ -381,6 +386,8 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
         contextMeds: [buildMed()],
       }),
     )
+    // BP 95/60 is in-range — no L1/L2/condition rule fires. Only the
+    // contraindication-axis row persists.
     expect(calls).toHaveLength(1)
     expect(calls[0].data.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
   })
@@ -507,15 +514,14 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
   })
 
   // ────────────────────────────────────────────────────────────────────────
-  // Reading 5b — HR context annotation when terminal-stage rules preempt.
-  // Symptom override (Stage A) and absolute emergency (Stage B) are terminal:
-  // first match returns immediately and Stage C never runs. Without this
-  // annotation, an HR concern that would have fired in Stage C is silently
-  // dropped (e.g., HR 48 + AMS = heart-block / Stokes-Adams pattern needing
-  // ECG + pacemaker eval, distinct from the BP-emergency framing).
+  // Reading 5b — HR context co-fire. Phase/27 made Stage A/B non-terminal,
+  // so HR rules now fire as their OWN row alongside symptom-override /
+  // absolute-emergency BP rows. The phase/26 HR-context annotation is
+  // gated to only run when there is no HR row in the result set; with the
+  // co-fire fix the dedicated HR row carries the framing instead.
   // ────────────────────────────────────────────────────────────────────────
 
-  it('Reading 5b — symptom override + HR 48 + AMS + brady → BP L2 row + brady annotation', async () => {
+  it('Reading 5b — symptom override + HR 48 + AMS + brady → 2 rows (override + brady symptomatic)', async () => {
     const { calls } = await run(
       buildSession({
         systolicBP: 130,
@@ -525,45 +531,55 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
       }),
       buildCtx({ profile: { hasBradycardia: true } }),
     )
-    expect(calls).toHaveLength(1)
-    expect(calls[0].data.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
-    expect(calls[0].data.physicianMessage).toContain('BP Level 2')
-    expect(calls[0].data.physicianMessage).toContain('symptomatic bradycardia')
-    expect(calls[0].data.physicianMessage).toContain('heart-block / Stokes-Adams')
+    expect(calls).toHaveLength(2)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
+    expect(ids).toContain('RULE_BRADY_HR_SYMPTOMATIC')
+    // Annotation is suppressed when an HR row exists — the row's own
+    // physicianMessage is the canonical surface for the HR finding.
+    const overrideRow = calls.find(
+      (c: { data: { ruleId: string } }) => c.data.ruleId === 'RULE_SYMPTOM_OVERRIDE_GENERAL',
+    )
+    expect(overrideRow?.data.physicianMessage).not.toContain('Stokes-Adams')
   })
 
-  it('Absolute emergency + brady-asymptomatic — HR <40 annotated regardless of symptoms', async () => {
+  it('Absolute emergency + brady-asymptomatic — three rows: emergency + L1 high + HR low', async () => {
     const { calls } = await run(
       buildSession({
         systolicBP: 185,
         diastolicBP: 105,
         pulse: 38,
-        symptoms: noSymptoms(), // no symptom triggers — only the absolute BP threshold
+        symptoms: noSymptoms(),
       }),
       buildCtx({ profile: { hasBradycardia: true } }),
     )
-    expect(calls).toHaveLength(1)
-    expect(calls[0].data.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
-    expect(calls[0].data.physicianMessage).toContain('asymptomatic bradycardia')
+    // SBP 185 → absolute_emergency (emergency axis) + standardL1High
+    // (bp-high axis); HR 38 + hasBradycardia → brady_asymptomatic (hr).
+    expect(calls).toHaveLength(3)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_ABSOLUTE_EMERGENCY')
+    expect(ids).toContain('RULE_STANDARD_L1_HIGH')
+    expect(ids).toContain('RULE_BRADY_HR_ASYMPTOMATIC')
   })
 
-  it('Symptom override + AFib HR-high — rate-uncontrolled AFib annotated', async () => {
+  it('Symptom override + AFib HR-high — two rows: override + AFIB_HR_HIGH', async () => {
     const { calls } = await run(
       buildSession({
         systolicBP: 140,
         diastolicBP: 88,
         pulse: 115,
-        readingCount: 3, // AFib gate requires ≥3 readings
+        readingCount: 3,
         symptoms: { ...noSymptoms(), chestPainOrDyspnea: true },
       }),
       buildCtx({ profile: { hasAFib: true } }),
     )
-    expect(calls).toHaveLength(1)
-    expect(calls[0].data.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
-    expect(calls[0].data.physicianMessage).toContain('rate-uncontrolled AFib')
+    expect(calls).toHaveLength(2)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
+    expect(ids).toContain('RULE_AFIB_HR_HIGH')
   })
 
-  it('Pregnancy L2 + brady-symptomatic — annotation surfaces both framings', async () => {
+  it('Pregnancy + symptom override + brady — three rows: override + L1_HIGH + brady symptomatic', async () => {
     const { calls } = await run(
       buildSession({
         systolicBP: 165,
@@ -576,11 +592,15 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
         profile: { hasBradycardia: true },
       }),
     )
-    expect(calls).toHaveLength(1)
-    // Pregnancy symptom override fires before pregnancyL2 (both terminal in
-    // Stage A vs B respectively). With AMS, symptomOverrideGeneral fires.
-    expect(calls[0].data.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
-    expect(calls[0].data.physicianMessage).toContain('symptomatic bradycardia')
+    // AMS triggers symptomOverrideGeneralRule first (Stage A) which
+    // claims the emergency axis; pregnancyL2 (Stage B) sees emergency
+    // already claimed and skips. pregnancyL1High still fires on bp-high
+    // (≥140), and brady_symptomatic on hr.
+    expect(calls).toHaveLength(3)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
+    expect(ids).toContain('RULE_PREGNANCY_L1_HIGH')
+    expect(ids).toContain('RULE_BRADY_HR_SYMPTOMATIC')
   })
 
   it('NEGATIVE — symptom override + normal HR → no HR annotation', async () => {
@@ -651,5 +671,73 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_CAD_HIGH')
     expect(ids).toContain('RULE_BRADY_HR_ASYMPTOMATIC')
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Phase/27 — Stage A/B no longer terminal. Tier 1 contraindications and
+  // Stage B emergency rules now coexist with Stage C BP/HR rows so each
+  // escalation ladder defined in v2 addendum Part D gets its own row.
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('Stage A + Stage C — Tier 1 NDHP_HFREF + BP L1 LOW (HFREF_LOW) co-fire on different axes', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 80, diastolicBP: 55, pulse: 72 }),
+      buildCtx({
+        profile: {
+          hasHeartFailure: true,
+          heartFailureType: 'HFREF',
+          resolvedHFType: 'HFREF',
+        },
+        contextMeds: [
+          buildMed({ drugName: 'Diltiazem', drugClass: 'NDHP_CCB' }),
+        ],
+      }),
+    )
+    expect(calls).toHaveLength(2)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_NDHP_HFREF')
+    expect(ids).toContain('RULE_HFREF_LOW')
+  })
+
+  it('Stage A + Stage C — Tier 1 PREGNANCY_ACE_ARB + BP L1 HIGH (PREGNANCY_L1_HIGH) co-fire', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 145, diastolicBP: 85, pulse: 78 }),
+      buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
+    )
+    expect(calls).toHaveLength(2)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_PREGNANCY_ACE_ARB')
+    expect(ids).toContain('RULE_PREGNANCY_L1_HIGH')
+    // L2 threshold (≥160/110) NOT met at 145/85.
+    expect(ids).not.toContain('RULE_PREGNANCY_L2')
+  })
+
+  it('Stage A + Stage B — Tier 1 PREGNANCY_ACE_ARB + BP L2 (PREGNANCY_L2) co-fire (D.5 patient-911)', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 175, diastolicBP: 115, pulse: 80 }),
+      buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
+    )
+    // 175/115 hits pregnancyL2 (≥160/110) and pregnancyL1High (≥140) on
+    // separate axes alongside the contraindication row → three ladders.
+    expect(calls).toHaveLength(3)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_PREGNANCY_ACE_ARB')
+    expect(ids).toContain('RULE_PREGNANCY_L2')
+    expect(ids).toContain('RULE_PREGNANCY_L1_HIGH')
+  })
+
+  it('Stage A + Stage A — Tier 1 PREGNANCY_ACE_ARB + symptom override coexist (different axes)', async () => {
+    const { calls } = await run(
+      buildSession({
+        systolicBP: 130,
+        diastolicBP: 85,
+        symptoms: { ...noSymptoms(), newOnsetHeadache: true },
+      }),
+      buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
+    )
+    expect(calls).toHaveLength(2)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_PREGNANCY_ACE_ARB')
+    expect(ids).toContain('RULE_SYMPTOM_OVERRIDE_PREGNANCY')
   })
 })
