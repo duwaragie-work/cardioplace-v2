@@ -131,6 +131,27 @@ export class TestControlController {
     return { ok: true }
   }
 
+  @Post('medications/backdate-all-for-user')
+  @HttpCode(200)
+  async backdateAllUserMedications(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; deltaSeconds: number },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.backdateAllUserMedications(body.userId, body.deltaSeconds)
+  }
+
+  @Post('user/backdate-updated-at')
+  @HttpCode(200)
+  async backdateUserUpdatedAt(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; deltaSeconds: number },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.backdateUserUpdatedAt(body.userId, body.deltaSeconds)
+    return { ok: true }
+  }
+
   // ─── Reset ──────────────────────────────────────────────────────────────
   @Post('reset/test-patients')
   @HttpCode(200)

@@ -18,9 +18,11 @@ test.describe('Gap-alert cron (48h trigger)', () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
-    // resetUser deleted Aisha's seeded readings. The gap-alert engine's gate
-    // is "last journal entry < cutoff", so we post one entry then backdate
-    // it >48h to put it past the cutoff.
+    // Two pre-conditions the gap-alert cron checks (gap-alert.service.ts:46):
+    //   1. User.updatedAt <= now-48h  — enrollment-completed proxy filter.
+    //      resetUser doesn't touch the user row, so backdate it explicitly.
+    //   2. JournalEntry.measuredAt < now-48h — the actual gap.
+    //      Post one entry, then backdate measuredAt past the cutoff.
     const patientApi = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     await postJournalEntry(patientApi, {
       measuredAt: new Date().toISOString(),
@@ -29,6 +31,7 @@ test.describe('Gap-alert cron (48h trigger)', () => {
       pulse: 72,
     })
     await tc.backdateLastJournalEntry(u.id, 49 * 60 * 60)
+    await tc.backdateUserUpdatedAt(u.id, 49 * 60 * 60)
     const result = await tc.runGapAlertScan(new Date())
     expect(result.scanned).toBe(1)
 
@@ -67,19 +70,15 @@ test.describe('Monthly re-ask cron (30d trigger)', () => {
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
 
-    // Backdate Aisha's medications by 31 days. Pull her active med list via
-    // authedApi (raw fetch can't carry her bearer token).
-    const patientApi = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
-    const medsRes = await patientApi.get('me/medications')
-    const medsBody = await medsRes.json()
-    const meds = medsBody?.data ?? medsBody
-
-    if (!Array.isArray(meds) || meds.length === 0) {
+    // Backdate every non-discontinued med for Aisha by 31 days. The previous
+    // approach looped over `me/medications`, which filters by verification
+    // status — so a row left REJECTED by tests/11 was skipped, only Amlodipine
+    // got backdated, and the cron's latestTouch still saw Lisinopril's recent
+    // verifiedAt and skipped Aisha. The new helper bypasses the patient-side
+    // filter and updates every PatientMedication.where(discontinuedAt: null).
+    const updated = await tc.backdateAllUserMedications(u.id, 31 * 24 * 60 * 60)
+    if (updated.updated === 0) {
       test.skip(true, 'No active meds for Aisha — skip')
-    }
-
-    for (const m of meds) {
-      await tc.backdateMedicationVerified(m.id, 31 * 24 * 60 * 60)
     }
 
     const result = await tc.runMonthlyReaskScan(new Date())
@@ -89,7 +88,6 @@ test.describe('Monthly re-ask cron (30d trigger)', () => {
     const reask = notes.find((n) => /confirm your medications/i.test(n.title))
     expect(reask, 'expected a monthly re-ask notification row').toBeDefined()
 
-    await patientApi.dispose()
     await tc.dispose()
   })
 

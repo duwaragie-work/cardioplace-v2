@@ -142,6 +142,54 @@ export class TestControlService {
     })
   }
 
+  /**
+   * Backdate every non-discontinued PatientMedication for a user. Drops the
+   * dependence on `me/medications` (which filters by verificationStatus, so a
+   * REJECTED med set up by an earlier test never gets touched) — the cron's
+   * latestTouch over patientMedications.where(discontinuedAt: null) needs all
+   * rows pushed past the cutoff for the test to be meaningful.
+   */
+  async backdateAllUserMedications(
+    userId: string,
+    deltaSeconds: number,
+  ): Promise<{ updated: number }> {
+    const meds = await this.prisma.patientMedication.findMany({
+      where: { userId, discontinuedAt: null },
+    })
+    let updated = 0
+    for (const m of meds) {
+      const reportedAt = m.reportedAt
+        ? new Date(m.reportedAt.getTime() - deltaSeconds * 1000)
+        : null
+      const verifiedAt = m.verifiedAt
+        ? new Date(m.verifiedAt.getTime() - deltaSeconds * 1000)
+        : null
+      await this.prisma.patientMedication.update({
+        where: { id: m.id },
+        data: { reportedAt: reportedAt ?? m.reportedAt, verifiedAt },
+      })
+      updated++
+    }
+    return { updated }
+  }
+
+  /**
+   * Backdate a User's `updatedAt`. The gap-alert cron uses
+   * `User.updatedAt <= cutoff` as the "enrollment completed ≥48h ago" proxy
+   * (see backend/src/crons/gap-alert.service.ts:51); resetUser doesn't touch
+   * the user row so without this helper the candidate filter never matches a
+   * just-seeded patient. Raw SQL is required because Prisma's `@updatedAt`
+   * decorator overrides any value passed via `update()`.
+   */
+  async backdateUserUpdatedAt(userId: string, deltaSeconds: number): Promise<void> {
+    const newUpdatedAt = new Date(Date.now() - deltaSeconds * 1000)
+    await this.prisma.$executeRaw`
+      UPDATE "User"
+      SET "updatedAt" = ${newUpdatedAt}
+      WHERE id = ${userId}
+    `
+  }
+
   // ─── State reset ────────────────────────────────────────────────────────
   /**
    * Wipe journal/alert/escalation/notification rows for every *.cardioplace.test

@@ -111,6 +111,33 @@ export class TestControl {
     await this.post('test-control/medication/backdate-verified', { medId, deltaSeconds })
   }
 
+  /**
+   * Backdate every non-discontinued PatientMedication for a user. Use this
+   * instead of looping `me/medications` when the test depends on the cron's
+   * latestTouch over ALL active rows — `me/medications` filters out REJECTED
+   * meds, leaving them with their original recent verifiedAt and the cron
+   * never reaches the cutoff.
+   */
+  async backdateAllUserMedications(
+    userId: string,
+    deltaSeconds: number,
+  ): Promise<{ updated: number }> {
+    return this.post('test-control/medications/backdate-all-for-user', {
+      userId,
+      deltaSeconds,
+    })
+  }
+
+  /**
+   * Backdate a User's `updatedAt`. Required for gap-alert tests because the
+   * cron pre-filter is `User.updatedAt <= cutoff` (enrollment-completed
+   * proxy) — resetUser doesn't touch the user row, so without this the
+   * candidate set never includes the seeded patient.
+   */
+  async backdateUserUpdatedAt(userId: string, deltaSeconds: number): Promise<void> {
+    await this.post('test-control/user/backdate-updated-at', { userId, deltaSeconds })
+  }
+
   // ─── State reset ────────────────────────────────────────────────────────
   /**
    * Wipe journal/alert/escalation/notification rows for ALL *.cardioplace.test
