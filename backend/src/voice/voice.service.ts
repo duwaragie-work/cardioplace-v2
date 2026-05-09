@@ -1,9 +1,11 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import * as grpc from '@grpc/grpc-js'
-import * as protoLoader from '@grpc/proto-loader'
+import { Modality } from '@google/genai'
+import type { Session, LiveServerMessage, FunctionResponse } from '@google/genai'
+import { trace, SpanStatusCode } from '@opentelemetry/api'
 import { randomUUID } from 'node:crypto'
-import { fileURLToPath } from 'node:url'
+
+const tracer = trace.getTracer('cardioplace.voice')
 import {
   getTrailing7DayBaseline,
   ProfileNotFoundException,
@@ -14,6 +16,9 @@ import { ConversationHistoryService } from '../chat/services/conversation-histor
 import { SystemPromptService } from '../chat/services/system-prompt.service.js'
 import { ProfileResolverService } from '../daily_journal/services/profile-resolver.service.js'
 import { GeminiService } from '../gemini/gemini.service.js'
+import { VoiceToolsService } from './tools/voice-tools.service.js'
+import type { ToolEvent } from './tools/voice-tools.service.js'
+import { buildVoiceSystemInstruction } from './prompts/voice-system-instruction.js'
 
 export interface VoiceSessionCallbacks {
   onReady: () => void
@@ -72,10 +77,10 @@ interface SessionActivity {
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024
 
 interface ActiveSession {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  call: any
+  liveSession: Session
   userId: string
   sessionId: string
+  timezone: string
   transcriptBuffer: TranscriptEntry[]
   activity: SessionActivity
   callbacks: VoiceSessionCallbacks
@@ -102,8 +107,9 @@ export class VoiceService implements OnModuleDestroy {
   // Invalidated on any CRUD action so readings/baseline stay fresh.
   private readonly contextCache = new Map<string, { value: string; at: number }>()
   private static readonly CONTEXT_TTL_MS = 60_000
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private voiceClient: any
+
+  // Default to a Live-capable model. Override via GEMINI_VOICE_MODEL.
+  private readonly voiceModel: string
 
   constructor(
     private readonly config: ConfigService,
@@ -112,8 +118,11 @@ export class VoiceService implements OnModuleDestroy {
     private readonly geminiService: GeminiService,
     private readonly systemPromptService: SystemPromptService,
     private readonly profileResolver: ProfileResolverService,
+    private readonly voiceTools: VoiceToolsService,
   ) {
-    this.initGrpcClient()
+    this.voiceModel =
+      this.config.get<string>('GEMINI_VOICE_MODEL') ??
+      'gemini-live-2.5-flash-preview'
   }
 
   /** Convert raw PCM buffers to a WAV file (adds 44-byte header). */
@@ -136,48 +145,17 @@ export class VoiceService implements OnModuleDestroy {
     return Buffer.concat([header, pcm])
   }
 
-  private initGrpcClient(): void {
-    // Resolve relative to this file, not process.cwd(). Hardens against
-    // tooling (jest, tsx, nest-cli) launched from a different directory —
-    // and works identically for `src/` (dev) and `dist/` (prod) because
-    // the compiled layout preserves the `../../proto/voice.proto` depth.
-    const protoPath = fileURLToPath(
-      new URL('../../proto/voice.proto', import.meta.url),
-    )
-
-    const packageDef = protoLoader.loadSync(protoPath, {
-      keepCase: false,
-      longs: String,
-      enums: String,
-      defaults: true,
-      oneofs: true,
-    })
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const protoDesc = grpc.loadPackageDefinition(packageDef) as any
-
-    const host = this.config.get<string>('ADK_SERVICE_HOST', 'localhost')
-    const port = this.config.get<string>('ADK_SERVICE_PORT', '50051')
-
-    this.voiceClient = new protoDesc.voice.VoiceAgent(
-      `${host}:${port}`,
-      grpc.credentials.createInsecure(),
-      {
-        'grpc.max_receive_message_length': 10 * 1024 * 1024,
-        'grpc.max_send_message_length': 10 * 1024 * 1024,
-      },
-    )
-
-    this.logger.log(`gRPC client configured → ${host}:${port}`)
-  }
-
   async createSession(
     socketId: string,
     userId: string,
     callbacks: VoiceSessionCallbacks,
-    authToken = '',
+    _authToken = '',
     chatSessionId?: string,
   ): Promise<void> {
+    // _authToken is preserved in the public signature for backwards-compat
+    // with the gateway; unused now that voice tools call services directly
+    // (no internal HTTP loopback).
+    void _authToken
     const t0 = Date.now()
     // Clean up any existing session for this socket
     await this.endSession(socketId)
@@ -199,20 +177,91 @@ export class VoiceService implements OnModuleDestroy {
       this.logger.log(`[FLOW] Step 3b — patient context built + cached (${Date.now() - t0}ms)`)
     }
 
-    // Open bidirectional gRPC stream (Step 4)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let call: any
+    // Resolve patient timezone — used by voice tools to interpret "now".
+    const userRow = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { timezone: true },
+    })
+    const timezone = userRow?.timezone ?? 'America/New_York'
+
+    // ── Open Gemini Live session (Step 4 — replaces ADK gRPC stream) ──
+    const client = this.geminiService.clientInstance
+    const systemInstruction = buildVoiceSystemInstruction(patientContext)
+
+    // Span covers just the connect handshake. The session itself is long-
+    // lived; per-tool spans are recorded inside handleLiveEvent.
+    const connectSpan = tracer.startSpan('voice.session.connect', {
+      attributes: {
+        'voice.user.id': userId,
+        'voice.session.id': sessionId,
+        'voice.model': this.voiceModel,
+      },
+    })
+
+    let liveSession: Session
     try {
-      call = this.voiceClient.StreamSession()
-      this.logger.log(`[FLOW] Step 4 — gRPC stream opened to ADK (${Date.now() - t0}ms)`)
+      liveSession = await client.live.connect({
+        model: this.voiceModel,
+        config: {
+          responseModalities: [Modality.AUDIO],
+          systemInstruction,
+          speechConfig: { languageCode: 'en-US' },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
+          tools: [{ functionDeclarations: this.voiceTools.getToolDeclarations() }],
+        },
+        callbacks: {
+          onopen: () => {
+            this.logger.log(`[FLOW] Step 4 — Gemini Live session opened (${Date.now() - t0}ms)`)
+            callbacks.onReady()
+          },
+          onmessage: (msg: LiveServerMessage) => {
+            this.handleLiveEvent(msg, socketId)
+          },
+          onerror: (err: ErrorEvent) => {
+            this.logger.error(`[VOICE Live] error: ${err.message ?? 'unknown'} [socket=${socketId}]`, err)
+            const sess = this.sessions.get(socketId)
+            if (sess) {
+              sess.streamClosed = true
+              this.saveVoiceTranscript(socketId).then(() => {
+                this.sessions.delete(socketId)
+                callbacks.onError('Voice service connection lost. Please try again.')
+              })
+            }
+          },
+          onclose: (e: CloseEvent) => {
+            this.logger.log(`[VOICE Live] closed reason="${e.reason ?? ''}" [socket=${socketId}]`)
+            const sess = this.sessions.get(socketId)
+            if (!sess) return
+            sess.streamClosed = true
+            this.saveVoiceTranscript(socketId).then(() => {
+              this.sessions.delete(socketId)
+              if (!sess.closedNotified) {
+                sess.closedNotified = true
+                callbacks.onClose()
+              }
+            })
+          },
+        },
+      })
     } catch (err) {
-      this.logger.error(`[FLOW] Step 4 FAIL — gRPC stream failed (${Date.now() - t0}ms)`, err)
+      connectSpan.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: (err as Error).message,
+      })
+      connectSpan.end()
+      this.logger.error(`[FLOW] Step 4 FAIL — Gemini Live connect failed (${Date.now() - t0}ms)`, err)
       callbacks.onError('Could not connect to voice service. Please try again.')
       return
     }
+    connectSpan.end()
 
     const activeSession: ActiveSession = {
-      call, userId, sessionId, transcriptBuffer: [],
+      liveSession,
+      userId,
+      sessionId,
+      timezone,
+      transcriptBuffer: [],
       activity: { userTexts: [], agentTexts: [], checkins: [], actions: [] },
       savedTranscript: false,
       streamClosed: false,
@@ -226,178 +275,181 @@ export class VoiceService implements OnModuleDestroy {
     }
     this.sessions.set(socketId, activeSession)
 
-    // ── Handle messages from ADK service ──────────────────────────────────────
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    call.on('data', (msg: any) => {
-      const payload: string = msg.payload
+    this.logger.log(`Voice session started [socket=${socketId}, user=${userId}, chatSession=${sessionId}, model=${this.voiceModel}]`)
+  }
 
-      if (payload === 'ready') {
-        this.logger.log(`[VOICE gRPC→NestJS] ready [socket=${socketId}]`)
-        callbacks.onReady()
-      } else if (payload === 'audio') {
-        const rawData = Buffer.isBuffer(msg.audio.data)
-          ? msg.audio.data
-          : Buffer.from(msg.audio.data)
-        // Buffer agent audio for post-session transcription
-        if (activeSession.agentAudioBytes < MAX_AUDIO_BYTES) {
-          activeSession.agentAudioChunks.push(rawData)
-          activeSession.agentAudioBytes += rawData.length
-        }
-        // Latency: first agent audio chunk after a user final — log and clear.
-        if (activeSession.lastUserFinalAt !== null) {
-          const ms = Date.now() - activeSession.lastUserFinalAt
-          this.logger.log(`[VOICE latency] user_final→first_audio=${ms}ms [socket=${socketId}]`)
-          activeSession.lastUserFinalAt = null
-        }
-        const audioBase64 = rawData.toString('base64')
-        // Audio arrives at ~50Hz — only log when VOICE_DEBUG_AUDIO=1
-        if (process.env.VOICE_DEBUG_AUDIO === '1') {
-          this.logger.log(`[VOICE gRPC→NestJS] audio bytes=${rawData.length} [socket=${socketId}]`)
-        }
-        callbacks.onAudio(audioBase64)
-      } else if (payload === 'transcript') {
-        const t = msg.transcript
-        const text: string = t.text ?? ''
-        const isFinal: boolean = t.isFinal ?? false
-        const speaker = (t.speaker as 'user' | 'agent') ?? 'agent'
-        this.logger.log(`[VOICE gRPC→NestJS] transcript speaker=${speaker} isFinal=${isFinal} len=${text.length} [socket=${socketId}]`)
-        // Latency: stamp user's final transcript so the next audio chunk can
-        // measure round-trip time at the NestJS layer.
-        if (speaker === 'user' && isFinal && text.trim()) {
-          activeSession.lastUserFinalAt = Date.now()
-        }
-        callbacks.onTranscript(text, isFinal, speaker)
-        // Accumulate non-empty transcript lines for persistence (cap at 200 to
-        // avoid RESOURCE_EXHAUSTED when sessions run long).
-        if (text.trim()) {
-          const sess = this.sessions.get(socketId)
-          if (sess && sess.transcriptBuffer.length < 200) {
-            sess.transcriptBuffer.push({ speaker, text: text.trim() })
-            // Also track in activity for fallback summary
-            if (speaker === 'user') {
-              sess.activity.userTexts.push(text.trim())
-            } else {
-              sess.activity.agentTexts.push(text.trim())
-            }
+  /**
+   * Demux a `LiveServerMessage` into Socket.io fan-out events. Mirrors the
+   * old gRPC handler: setup → ready, audio chunks → onAudio, transcripts →
+   * onTranscript (with latency stamping), tool calls → voiceTools.dispatch
+   * → sendToolResponse(...).
+   */
+  private async handleLiveEvent(msg: LiveServerMessage, socketId: string): Promise<void> {
+    const session = this.sessions.get(socketId)
+    if (!session || session.streamClosed) return
+    const { callbacks } = session
+
+    if (msg.setupComplete) {
+      // The onopen callback already fired callbacks.onReady(); setupComplete
+      // is just the model handshake confirmation.
+      this.logger.log(`[VOICE Live] setupComplete [socket=${socketId}]`)
+      return
+    }
+
+    if (msg.serverContent) {
+      const c = msg.serverContent
+      // ── Audio chunks (PCM 24kHz from agent) ─────────────────────────────
+      const parts = c.modelTurn?.parts ?? []
+      for (const p of parts) {
+        const inline = p.inlineData
+        if (inline?.data && inline.mimeType?.startsWith('audio/')) {
+          const rawData = Buffer.from(inline.data, 'base64')
+          if (session.agentAudioBytes < MAX_AUDIO_BYTES) {
+            session.agentAudioChunks.push(rawData)
+            session.agentAudioBytes += rawData.length
           }
+          if (session.lastUserFinalAt !== null) {
+            const ms = Date.now() - session.lastUserFinalAt
+            this.logger.log(`[VOICE latency] user_final→first_audio=${ms}ms [socket=${socketId}]`)
+            session.lastUserFinalAt = null
+          }
+          if (process.env.VOICE_DEBUG_AUDIO === '1') {
+            this.logger.log(`[VOICE Live→NestJS] audio bytes=${rawData.length} [socket=${socketId}]`)
+          }
+          callbacks.onAudio(inline.data)
         }
-      } else if (payload === 'action') {
-        const actionType = msg.action.type ?? ''
-        const actionDetail = msg.action.detail ?? ''
-        this.logger.log(`[VOICE gRPC→NestJS] action type=${actionType} detail=${actionDetail.slice(0, 80)} [socket=${socketId}]`)
-        callbacks.onAction(actionType, actionDetail)
-        // Track action for summary
-        const sess = this.sessions.get(socketId)
-        if (sess) {
-          sess.activity.actions.push({ type: actionType, detail: actionDetail, timestamp: Date.now() })
-          this.logger.log(`[ACTION TRACKED] total actions=${sess.activity.actions.length}`)
-        }
-      } else if (payload === 'actionComplete') {
-        const ac = msg.actionComplete
-        const type = ac?.type ?? ''
-        const success = ac?.success ?? false
-        const detail = ac?.detail ?? ''
-        this.logger.log(`[VOICE gRPC→NestJS] action_complete type=${type} success=${success} [socket=${socketId}]`)
-        callbacks.onActionComplete(type, success, detail)
-      } else if (payload === 'checkin') {
-        const c = msg.checkin
-        this.logger.log(`[VOICE gRPC→NestJS] checkin BP=${c.systolicBp}/${c.diastolicBp} saved=${c.saved} [socket=${socketId}]`)
-        callbacks.onCheckinSaved({
-          systolicBP: c.systolicBp ?? undefined,
-          diastolicBP: c.diastolicBp ?? undefined,
-          weight: c.weight > 0 ? c.weight : undefined,
-          medicationTaken: c.medicationTaken,
-          symptoms: c.symptoms ?? [],
-          saved: c.saved ?? false,
-        })
-        // Track the checkin in activity
-        const sessC = this.sessions.get(socketId)
-        if (sessC) {
-          sessC.activity.checkins.push({
-            systolicBP: c.systolicBp ?? undefined,
-            diastolicBP: c.diastolicBp ?? undefined,
-            weight: c.weight > 0 ? c.weight : undefined,
-            medicationTaken: c.medicationTaken,
-            symptoms: c.symptoms ?? [],
-            saved: c.saved ?? false,
-          })
-        }
-      } else if (payload === 'updated') {
-        const u = msg.updated
-        this.logger.log(`[VOICE gRPC→NestJS] updated entryId=${u.entryId} updated=${u.updated} [socket=${socketId}]`)
-        callbacks.onCheckinUpdated({
-          entryId: u.entryId ?? '',
-          entryDate: u.entryDate ?? undefined,
-          systolicBP: u.systolicBp ?? undefined,
-          diastolicBP: u.diastolicBp ?? undefined,
-          weight: u.weight > 0 ? u.weight : undefined,
-          medicationTaken: u.medicationTaken,
-          symptoms: u.symptoms ?? [],
-          updated: u.updated ?? false,
-        })
-      } else if (payload === 'deleted') {
-        const d = msg.deleted
-        this.logger.log(`[VOICE gRPC→NestJS] deleted count=${d.deletedCount}/${d.failedCount} success=${d.success} [socket=${socketId}]`)
-        callbacks.onCheckinDeleted({
-          entryIds: d.entryIds ?? [],
-          deletedCount: d.deletedCount ?? 0,
-          failedCount: d.failedCount ?? 0,
-          success: d.success ?? false,
-          message: d.message ?? '',
-        })
-      } else if (payload === 'error') {
-        this.logger.warn(`[VOICE gRPC→NestJS] error msg="${msg.error.message}" [socket=${socketId}]`)
-        callbacks.onError(msg.error.message ?? 'Unknown voice service error')
-      } else if (payload === 'closed') {
-        this.logger.log(`[VOICE gRPC→NestJS] closed [socket=${socketId}]`)
-        activeSession.streamClosed = true
-        this.saveVoiceTranscript(socketId)
-          .then(() => {
-            this.sessions.delete(socketId)
-            if (!activeSession.closedNotified) {
-              activeSession.closedNotified = true
-              callbacks.onClose()
-            }
-          })
-      } else {
-        this.logger.warn(`[VOICE gRPC→NestJS] UNKNOWN payload="${payload}" [socket=${socketId}]`)
       }
-    })
+      // ── Transcripts (input = user, output = agent) ──────────────────────
+      const inT = c.inputTranscription?.text
+      if (inT) {
+        const trimmed = inT.trim()
+        // Gemini Live emits incremental transcripts; treat each chunk as a
+        // partial. The frontend already handles the (text, isFinal) shape.
+        callbacks.onTranscript(inT, false, 'user')
+        if (trimmed && session.transcriptBuffer.length < 200) {
+          session.transcriptBuffer.push({ speaker: 'user', text: trimmed })
+          session.activity.userTexts.push(trimmed)
+        }
+        // Stamp at any non-empty user transcript so we can measure agent
+        // latency on the next audio chunk.
+        if (trimmed) session.lastUserFinalAt = Date.now()
+      }
+      const outT = c.outputTranscription?.text
+      if (outT) {
+        const trimmed = outT.trim()
+        callbacks.onTranscript(outT, false, 'agent')
+        if (trimmed && session.transcriptBuffer.length < 200) {
+          session.transcriptBuffer.push({ speaker: 'agent', text: trimmed })
+          session.activity.agentTexts.push(trimmed)
+        }
+      }
+      // Generation-complete is the closest analogue to ADK's "speaker turn
+      // ended" signal. Mark the last transcript line as final so the UI can
+      // commit it.
+      if (c.turnComplete && session.transcriptBuffer.length > 0) {
+        const last = session.transcriptBuffer[session.transcriptBuffer.length - 1]
+        callbacks.onTranscript(last.text, true, last.speaker)
+      }
+      if (c.interrupted) {
+        this.logger.log(`[VOICE Live] interrupted [socket=${socketId}]`)
+      }
+      return
+    }
 
-    call.on('error', (err: Error) => {
-      this.logger.error(`[VOICE gRPC→NestJS] STREAM ERROR name=${err.name} msg=${err.message} [socket=${socketId}]`, err.stack)
-      activeSession.streamClosed = true
-      this.saveVoiceTranscript(socketId)
-        .then(() => {
-          this.sessions.delete(socketId)
-          callbacks.onError('Voice service connection lost. Please try again.')
+    if (msg.toolCall) {
+      const calls = msg.toolCall.functionCalls ?? []
+      const responses: FunctionResponse[] = []
+      for (const fc of calls) {
+        const name = fc.name ?? ''
+        const args = (fc.args ?? {}) as Record<string, unknown>
+        this.logger.log(`[VOICE Live] toolCall name=${name} id=${fc.id ?? '?'} [socket=${socketId}]`)
+        const result = await tracer.startActiveSpan(
+          `voice.tool.${name || 'unknown'}`,
+          async (span) => {
+            span.setAttribute('voice.tool.name', name)
+            span.setAttribute('voice.user.id', session.userId)
+            try {
+              const r = await this.voiceTools.dispatch(name, args, {
+                userId: session.userId,
+                timezone: session.timezone,
+              })
+              span.setAttribute(
+                'voice.tool.ok',
+                Boolean(
+                  (r.llmResponse as Record<string, unknown>).saved ??
+                    (r.llmResponse as Record<string, unknown>).updated ??
+                    !(r.llmResponse as Record<string, unknown>).error,
+                ),
+              )
+              return r
+            } catch (err) {
+              span.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: (err as Error).message,
+              })
+              throw err
+            } finally {
+              span.end()
+            }
+          },
+        )
+        // Fan out side-channel events (action notices, checkin summaries) to
+        // the WebSocket client BEFORE sending the toolResponse so the UI
+        // updates while the model is still composing its spoken reply.
+        for (const ev of result.events) {
+          this.relayToolEvent(session, ev)
+        }
+        responses.push({
+          id: fc.id,
+          name,
+          response: result.llmResponse,
         })
-    })
+      }
+      try {
+        session.liveSession.sendToolResponse({ functionResponses: responses })
+      } catch (err) {
+        this.logger.error(`[VOICE Live] sendToolResponse failed [socket=${socketId}]`, err)
+      }
+      return
+    }
 
-    call.on('end', () => {
-      this.logger.log(`[VOICE gRPC→NestJS] STREAM END alreadyClosed=${activeSession.streamClosed} notified=${activeSession.closedNotified} [socket=${socketId}]`)
-      activeSession.streamClosed = true
-      this.saveVoiceTranscript(socketId)
-        .then(() => {
-          this.sessions.delete(socketId)
-          if (!activeSession.closedNotified) {
-            activeSession.closedNotified = true
-            callbacks.onClose()
-          }
-        })
-    })
+    if (msg.toolCallCancellation) {
+      this.logger.log(`[VOICE Live] toolCallCancellation ids=${(msg.toolCallCancellation.ids ?? []).join(',')} [socket=${socketId}]`)
+      return
+    }
 
-    // ── Send SessionInit as first message ─────────────────────────────────────
-    call.write({
-      init: {
-        userId,
-        mode: 'chat',
-        patientContext,
-        authToken,
-      },
-    })
+    if (msg.goAway) {
+      this.logger.warn(`[VOICE Live] goAway timeLeft=${msg.goAway.timeLeft ?? '?'} [socket=${socketId}]`)
+      return
+    }
 
-    this.logger.log(`Voice session started [socket=${socketId}, user=${userId}, chatSession=${sessionId}]`)
+    if (msg.usageMetadata) {
+      // Quiet trace — useful for cost telemetry but noisy at debug level.
+      return
+    }
+  }
+
+  private relayToolEvent(session: ActiveSession, ev: ToolEvent): void {
+    const { callbacks, activity } = session
+    switch (ev.kind) {
+      case 'action':
+        callbacks.onAction(ev.type, ev.detail)
+        activity.actions.push({ type: ev.type, detail: ev.detail, timestamp: Date.now() })
+        break
+      case 'action_complete':
+        callbacks.onActionComplete(ev.type, ev.success, ev.detail)
+        break
+      case 'checkin_saved':
+        callbacks.onCheckinSaved(ev.payload)
+        activity.checkins.push(ev.payload)
+        break
+      case 'checkin_updated':
+        callbacks.onCheckinUpdated(ev.payload)
+        break
+      case 'checkin_deleted':
+        callbacks.onCheckinDeleted(ev.payload)
+        break
+    }
   }
 
   sendAudio(socketId: string, audioBase64: string): void {
@@ -410,11 +462,12 @@ export class VoiceService implements OnModuleDestroy {
         session.userAudioChunks.push(data)
         session.userAudioBytes += data.length
       }
-      session.call.write({
-        audio: { data, mimeType: 'audio/pcm;rate=16000' },
+      // Gemini Live wants Blob.data as a base64 string, NOT a Buffer.
+      session.liveSession.sendRealtimeInput({
+        audio: { data: audioBase64, mimeType: 'audio/pcm;rate=16000' },
       })
     } catch (err) {
-      this.logger.error('Failed to forward audio to ADK service', err)
+      this.logger.error('Failed to forward audio to Gemini Live', err)
       session.streamClosed = true
       session.callbacks.onError('Voice connection lost. Please try again.')
       void this.endSession(socketId)
@@ -425,13 +478,13 @@ export class VoiceService implements OnModuleDestroy {
     const session = this.sessions.get(socketId)
     if (!session || session.streamClosed) return
     try {
-      session.call.write({ text: { text } })
+      session.liveSession.sendRealtimeInput({ text })
       // Track user text input in activity
       if (text.trim()) {
         session.activity.userTexts.push(text.trim())
       }
     } catch (err) {
-      this.logger.error('Failed to forward text to ADK service', err)
+      this.logger.error('Failed to forward text to Gemini Live', err)
       session.streamClosed = true
       session.callbacks.onError('Voice connection lost. Please try again.')
       void this.endSession(socketId)
@@ -439,7 +492,7 @@ export class VoiceService implements OnModuleDestroy {
   }
 
   /**
-   * Forward client-side VAD "user paused" signal to ADK. Gemini Live's
+   * Forward client-side VAD "user paused" signal to Gemini Live. Gemini's
    * server-side VAD otherwise waits ~300-500ms of trailing silence before
    * finalising the user turn; this shortcuts that wait.
    */
@@ -447,10 +500,10 @@ export class VoiceService implements OnModuleDestroy {
     const session = this.sessions.get(socketId)
     if (!session || session.streamClosed) return
     try {
-      session.call.write({ endOfUtterance: {} })
+      session.liveSession.sendRealtimeInput({ audioStreamEnd: true })
     } catch (err) {
       // Non-fatal — worst case the turn just takes longer to finalise.
-      this.logger.warn(`Failed to forward audio_stream_end to ADK: ${(err as Error).message}`)
+      this.logger.warn(`Failed to forward audio_stream_end to Gemini Live: ${(err as Error).message}`)
     }
   }
 
@@ -472,8 +525,7 @@ export class VoiceService implements OnModuleDestroy {
     if (!session.streamClosed) {
       session.streamClosed = true
       try {
-        session.call.write({ end: {} })
-        session.call.end()
+        session.liveSession.close()
       } catch {
         // Stream may already be closed
       }
@@ -651,10 +703,6 @@ export class VoiceService implements OnModuleDestroy {
       // SystemPromptService.buildPatientContext() give voice the same
       // conditions / meds / threshold / active-alert block (including the
       // three-tier patientMessage bodies) that the text chatbot sees.
-      //
-      // The guardrails themselves live in adk-service/agent/prompts.py since
-      // they're the voice agent's static directives; this method only builds
-      // the per-session patient context payload.
       const [user, entries, activeAlerts, sessionData, resolvedContext] = await Promise.all([
         this.prisma.user.findUnique({
           where: { id: userId },
@@ -742,7 +790,7 @@ export class VoiceService implements OnModuleDestroy {
       })
 
       // Current date/time in patient timezone — voice-specific, kept here
-      // because the Python prompt references "CURRENT DATE AND TIME".
+      // because the system instruction references "CURRENT DATE AND TIME".
       const tz = user?.timezone ?? 'America/New_York'
       this.logger.log(
         `[TIMEZONE] user=${userId} stored=${user?.timezone ?? 'null'} using=${tz} now=${new Date().toISOString()}`,

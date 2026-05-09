@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { VoiceGateway } from './voice.gateway.js'
 import { VoiceService } from './voice.service.js'
+import { VoiceToolsService } from './tools/voice-tools.service.js'
 import { PrismaModule } from '../prisma/prisma.module.js'
 import { ChatModule } from '../chat/chat.module.js'
 import { GeminiModule } from '../gemini/gemini.module.js'
@@ -22,6 +23,6 @@ import { DailyJournalModule } from '../daily_journal/daily_journal.module.js'
       }),
     }),
   ],
-  providers: [VoiceGateway, VoiceService],
+  providers: [VoiceGateway, VoiceService, VoiceToolsService],
 })
 export class VoiceModule {}

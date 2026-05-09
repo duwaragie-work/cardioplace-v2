@@ -8,11 +8,10 @@ Live v1 app runs at `www.cardioplaceai.com` — this repo (`cardioplace-v2`) is 
 
 ## Monorepo structure (npm workspaces)
 
-- `/backend`       → NestJS + Prisma + PostgreSQL (shared API for both frontends)
+- `/backend`       → NestJS + Prisma + PostgreSQL (shared API for both frontends; voice runs in-process via @google/genai Live)
 - `/frontend`      → Next.js 16 patient app → app.cardioplaceai.com
 - `/admin`         → Next.js 16 admin/provider app → admin.cardioplaceai.com (NEW, being scaffolded in phase/1)
 - `/shared`        → npm workspace package: DTOs, enums, alert-message registry (NEW)
-- `/adk-service`   → Python voice/Gemini service (untouched in v2)
 
 ## Key reference docs (READ FIRST)
 
@@ -61,7 +60,8 @@ NEEDS BUILD (mostly greenfield):
 - Backend: NestJS, Prisma, PostgreSQL, `@nestjs/schedule` for cron, event-driven pipeline
 - Frontend + Admin: **Next.js 16** App Router, Tailwind CSS v4, TypeScript, React 19
 - Auth: JWT + magic link
-- Chat: Gemini 3.1 (text), Piper TTS (voice, via adk-service)
+- Chat / Voice: Gemini via `@google/genai` (text via `gemini-2.5-flash`; bidirectional audio via `gemini-live-2.5-flash-preview` Live API, in-process inside NestJS — no separate service)
+- Observability: OpenTelemetry → `OTEL_EXPORTER_OTLP_ENDPOINT` (LangSmith or any OTLP/HTTP collector). Voice session + tool-dispatch spans land in the same trace tree as HTTP / Prisma.
 - Monorepo: **npm workspaces** (npm 7+, native support — chosen over pnpm for lower risk)
 
 ### Next.js 16 notes
@@ -77,7 +77,6 @@ NEEDS BUILD (mostly greenfield):
 | Backend (NestJS) | **4000** | http://localhost:4000 |
 | Patient frontend (Next.js) | **3000** | http://localhost:3000 |
 | Admin app (Next.js) | **3001** | http://localhost:3001 |
-| ADK voice service (Python) | 50051 | grpc://localhost:50051 |
 
 All three workspaces ship a `.env.example` — copy to `.env` / `.env.local` and fill in secrets.
 
@@ -128,7 +127,7 @@ Dev roles (see `docs/BUILD_PLAN.md` for detail):
 - `SUPER_ADMIN` role only accesses `/admin` app — no patient-facing pages
 - Three-tier alert messages live in `/shared/alert-messages.ts` — single source of truth
 - `/frontend` is patient-only. `/admin` is provider/care-team only.
-- Don't touch `/adk-service` (Python voice service) unless the chat integration requires it
+- Voice runs inside the NestJS backend (`backend/src/voice/`) via `@google/genai` Live. No separate Python service. Tool dispatch calls `DailyJournalService` / `GeminiService` directly — no internal HTTP loopback.
 - Live production app is at `www.cardioplaceai.com` (v1) — this repo targets separate domains and a separate database
 
 ## Clinical authority
