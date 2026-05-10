@@ -866,3 +866,106 @@ test.describe('Bucket B G5: HFpEF thresholds and personalized override', () => {
     ).toBeTruthy()
   })
 })
+
+// ─── Section 16 — Bucket B G6: Per-condition × age 65+ edges ───────────────
+//
+// Spec says only the 65+ branch alters thresholds — verify each condition ×
+// 65+ combination still reaches the right primary rule.
+test.describe('Bucket B G6: Per-condition × age 65+ edges', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test('Paul (CAD, 65+) SBP 145 → STANDARD_L1_HIGH (or CAD_HIGH)', async () => {
+    // Paul has CAD + DOB 1957 (~69yo). At SBP 145 we expect a bp-high
+    // rule to fire — accept either standard or CAD-specific path since
+    // the threshold logic shifts by age but the axis claim is the same.
+    const r = await submitAndAssert({
+      label: 'paul 145',
+      patient: 'paul',
+      entry: { measuredAt: FUTURE(), systolicBP: 145, diastolicBP: 92, pulse: 72 },
+      expectRuleIds: ['RULE_CAD_HIGH'],
+      expectTiers: ['BP_LEVEL_1_HIGH'],
+    })
+    const highRule =
+      r.fired.includes('RULE_CAD_HIGH') ||
+      r.fired.includes('RULE_STANDARD_L1_HIGH')
+    expect(
+      highRule,
+      `expected high rule at Paul 145; fired: [${r.fired.join(',')}]`,
+    ).toBeTruthy()
+  })
+
+  test('Paul (CAD, 65+) SBP 95 → 65+ lower-bound override', async () => {
+    // 65+ lower-bound is <100 (not standard <90). At SBP 95 we expect
+    // AGE_65_LOW or a CAD-specific low rule, NOT the standard L1 low.
+    const r = await submitAndAssert({
+      label: 'paul 95',
+      patient: 'paul',
+      entry: { measuredAt: FUTURE(), systolicBP: 95, diastolicBP: 64, pulse: 70 },
+      expectRuleIds: ['RULE_AGE_65_LOW'],
+      expectTiers: ['BP_LEVEL_1_LOW'],
+    })
+    expect(r.fired).toContain('RULE_AGE_65_LOW')
+    expect(r.fired).not.toContain('RULE_STANDARD_L1_LOW')
+  })
+
+  test('Jane (65+, no comorbidities) SBP 95 → AGE_65_LOW', async () => {
+    // Pure 65+ override without any condition confounders.
+    const r = await submitAndAssert({
+      label: 'jane 95',
+      patient: 'jane',
+      entry: { measuredAt: FUTURE(), systolicBP: 95, diastolicBP: 64, pulse: 70 },
+      expectRuleIds: ['RULE_AGE_65_LOW'],
+      expectTiers: ['BP_LEVEL_1_LOW'],
+    })
+    expect(r.fired).toContain('RULE_AGE_65_LOW')
+  })
+
+  test('Jane SBP 165 → STANDARD_L1_HIGH (65+ does not change upper-bound)', async () => {
+    // Per spec the 65+ override only shifts the LOWER bound. Upper-bound
+    // emergency thresholds remain standard.
+    const r = await submitAndAssert({
+      label: 'jane 165',
+      patient: 'jane',
+      entry: { measuredAt: FUTURE(), systolicBP: 165, diastolicBP: 95, pulse: 76 },
+      expectRuleIds: ['RULE_STANDARD_L1_HIGH'],
+      expectTiers: ['BP_LEVEL_1_HIGH'],
+    })
+    expect(r.fired).toContain('RULE_STANDARD_L1_HIGH')
+  })
+
+  test('Jane (65+) + setUserCondition hasHCM=true, SBP 100 → HCM_LOW path', async () => {
+    // Compose 65+ × HCM by toggling Jane's profile flag inline. Cleanup
+    // (toggle off) happens after the assertion to avoid leaking state into
+    // later tests in the sequential run.
+    const u = await tc.findUser(PATIENTS.jane.email)
+    await tc.setUserCondition(u.id, 'hasHCM', true)
+    try {
+      const r = await submitAndAssert({
+        label: 'jane HCM 100',
+        patient: 'jane',
+        entry: { measuredAt: FUTURE(), systolicBP: 100, diastolicBP: 65, pulse: 72 },
+        expectRuleIds: ['RULE_HCM_LOW'],
+        expectTiers: ['BP_LEVEL_1_LOW'],
+      })
+      expect(r.fired).toContain('RULE_HCM_LOW')
+    } finally {
+      await tc.setUserCondition(u.id, 'hasHCM', false)
+    }
+  })
+
+  test('Charles (AFib + 65+) HR 110 single reading → AFib gate active (no fire)', async () => {
+    // Charles DOB 1955 = 65+. AFib rule needs ≥3 readings per session
+    // before HR rules apply (CLINICAL_SPEC §4.4) — a single 145/95 + HR110
+    // entry must NOT fire AFIB_HR_HIGH. Confirms the gate works on a 65+
+    // patient too (no age-related bypass).
+    const r = await submitAndAssert({
+      label: 'charles afib gate',
+      patient: 'charles',
+      entry: { measuredAt: FUTURE(), systolicBP: 145, diastolicBP: 95, pulse: 110 },
+      expectRuleIds: [],
+      expectTiers: [],
+      exclusive: true,
+    })
+    expect(r.fired).not.toContain('RULE_AFIB_HR_HIGH')
+  })
+})
