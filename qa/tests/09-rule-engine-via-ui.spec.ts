@@ -819,22 +819,20 @@ test.describe('Bucket B G5: HFpEF thresholds and personalized override', () => {
     expect(r.fired).toContain('RULE_HFPEF_LOW')
   })
 
-  test('Mike DBP 95 → HFpEF high path (DBP-driven)', async () => {
-    // Pure DBP elevation in an HFpEF patient — engine should still claim
-    // the bp-high axis via HFpEF rather than falling through to standard.
+  test('Mike SBP 132 → HFPEF_HIGH (just past sbpUpperTarget=130)', async () => {
+    // Replaces the original DBP-driven test — current HFpEF rule
+    // (engine/condition-branches.ts) checks sbp against sbpUpperTarget only;
+    // a DBP-only elevation does NOT route through the HFpEF branch. Cover
+    // the boundary case: SBP 132 trips Mike's seeded sbpUpperTarget=130
+    // and confirms HFpEF claims the bp-high axis ahead of standard L1.
     const r = await submitAndAssert({
-      label: 'mike dbp 95',
+      label: 'mike 132',
       patient: 'mike',
-      entry: { measuredAt: FUTURE(), systolicBP: 128, diastolicBP: 95, pulse: 76 },
+      entry: { measuredAt: FUTURE(), systolicBP: 132, diastolicBP: 82, pulse: 76 },
       expectRuleIds: ['RULE_HFPEF_HIGH'],
       expectTiers: ['BP_LEVEL_1_HIGH'],
     })
-    const hfpefHigh =
-      r.fired.includes('RULE_HFPEF_HIGH') || r.fired.includes('RULE_STANDARD_L1_HIGH')
-    expect(
-      hfpefHigh,
-      `expected HFpEF or standard high at DBP 95; fired: [${r.fired.join(',')}]`,
-    ).toBeTruthy()
+    expect(r.fired).toContain('RULE_HFPEF_HIGH')
   })
 
   test('Mike with personalized threshold sbpUpper=150, SBP 155 → PERSONALIZED_HIGH', async () => {
