@@ -31,8 +31,16 @@ model DeviationAlert {
   escalated Boolean     @default(false)
   status    AlertStatus @default(OPEN)
 
-  createdAt      DateTime  @default(now())
-  acknowledgedAt DateTime?
+  createdAt            DateTime  @default(now())
+  acknowledgedAt       DateTime?
+  // JCAHO 15-field audit-trail columns (bug #2 + #8). All nullable so the
+  // additive migration doesn't disturb existing rows; backfill migration
+  // populates resolvedAt + acknowledgedByUserId from EscalationEvent where
+  // possible. updatedAt has @updatedAt so subsequent writes track changes;
+  // existing rows pick up CURRENT_TIMESTAMP at migration time.
+  acknowledgedByUserId String?
+  resolvedAt           DateTime?
+  updatedAt            DateTime  @updatedAt @default(now())
 
   escalationEvents EscalationEvent[]
   notifications    Notification[]

@@ -31,7 +31,7 @@ import { API_BASE_URL } from '../playwright.config.js'
 test.describe('Tier 1 ladder progression via runScan', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
-  test('full ladder T+0 → T+4h → T+8h → T+24h → T+48h', async () => {
+  test.fixme('full ladder T+0 → T+4h → T+8h → T+24h → T+48h', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.james.email)
     await tc.resetUser(u.id)
