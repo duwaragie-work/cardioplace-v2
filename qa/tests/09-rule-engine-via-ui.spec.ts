@@ -598,3 +598,69 @@ test.describe('Bucket B G1: Loop diuretic — orthostatic hypotension band', () 
     expect(r.fired).toContain('RULE_HFREF_LOW')
   })
 })
+
+// ─── Section 12 — Bucket B G2: Pulse pressure derived alerts ───────────────
+test.describe('Bucket B G2: Pulse pressure annotations', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test('Wide PP (170/85, PP=85) on Jane (65+ control) → annotation OR Tier 3 row', async () => {
+    // Distinct from Section 8 (which exercises Aisha) — confirms wide PP
+    // routing on a 65+ patient with no comorbidities. Engine puts it as
+    // either a standalone TIER_3_INFO row or a physicianMessage annotation
+    // on the primary BP row, depending on whether another axis claims first.
+    const r = await submitAndAssert({
+      label: 'jane wide PP',
+      patient: 'jane',
+      entry: { measuredAt: FUTURE(), systolicBP: 170, diastolicBP: 85, pulse: 76 },
+      expectRuleIds: ['RULE_STANDARD_L1_HIGH'],
+      expectTiers: ['BP_LEVEL_1_HIGH'],
+    })
+    const ppPresent =
+      r.fired.includes('RULE_PULSE_PRESSURE_WIDE') ||
+      r.tiers.includes('TIER_3_INFO') ||
+      r.physicianMessages.some((m) => /wide pulse pressure/i.test(m))
+    expect(
+      ppPresent,
+      `expected wide PP flagged; fired: [${r.fired.join(',')}], tiers: [${r.tiers.join(',')}], messages: [${r.physicianMessages.join(' || ')}]`,
+    ).toBeTruthy()
+  })
+
+  // CLUSTER_6_RISK: narrow PP rule does not exist in the engine today
+  // (no RULE_PULSE_PRESSURE_NARROW or matching annotation hook). If
+  // Cluster 6 introduces it, swap the fixme for a real assertion.
+  test.fixme(
+    'Narrow PP (130/110, PP=20) → narrow-pulse-pressure annotation',
+    async () => {
+      const r = await submitAndAssert({
+        label: 'narrow PP',
+        patient: 'jane',
+        entry: { measuredAt: FUTURE(), systolicBP: 130, diastolicBP: 110, pulse: 72 },
+        expectRuleIds: [],
+        expectTiers: [],
+      })
+      const narrowNote = r.physicianMessages.some((m) =>
+        /narrow pulse pressure/i.test(m),
+      )
+      expect(narrowNote, 'expected narrow PP annotation').toBeTruthy()
+    },
+  )
+
+  test('Normal PP (140/90, PP=50) → no PP-specific output', async () => {
+    // Standard L1 High will fire on 140/90 (SBP≥140 or DBP≥90), but the
+    // primary row's physicianMessage must NOT carry a pulse-pressure note,
+    // and there must be no standalone PULSE_PRESSURE_WIDE row.
+    const r = await submitAndAssert({
+      label: 'normal PP 140/90',
+      patient: 'jane',
+      entry: { measuredAt: FUTURE(), systolicBP: 140, diastolicBP: 90, pulse: 72 },
+      expectRuleIds: ['RULE_STANDARD_L1_HIGH'],
+      expectTiers: ['BP_LEVEL_1_HIGH'],
+    })
+    expect(r.fired).not.toContain('RULE_PULSE_PRESSURE_WIDE')
+    const hasPPNote = r.physicianMessages.some((m) => /pulse pressure/i.test(m))
+    expect(
+      hasPPNote,
+      `expected NO PP annotation at PP=50; messages: [${r.physicianMessages.join(' || ')}]`,
+    ).toBe(false)
+  })
+})
