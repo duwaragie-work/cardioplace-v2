@@ -138,6 +138,68 @@ export class TestControl {
     await this.post('test-control/user/backdate-updated-at', { userId, deltaSeconds })
   }
 
+  /**
+   * Insert journal entries at exact timestamps. Bypasses the alert engine
+   * (raw fixture insertion only) — use this for tests that need a specific
+   * session window or reading count without triggering alerts mid-setup.
+   */
+  async seedReadingsAtTime(
+    userId: string,
+    readings: Array<{
+      measuredAt: string
+      systolicBP: number
+      diastolicBP: number
+      pulse: number
+      sessionId?: string
+    }>,
+  ): Promise<{ created: number }> {
+    return this.post('test-control/journal/seed-at-time', { userId, readings })
+  }
+
+  /**
+   * Flip a single PatientProfile boolean condition flag. Used to compose
+   * persona × condition scenarios in tests without reseeding.
+   */
+  async setUserCondition(
+    userId: string,
+    flag:
+      | 'isPregnant'
+      | 'historyPreeclampsia'
+      | 'hasHeartFailure'
+      | 'hasAFib'
+      | 'hasCAD'
+      | 'hasHCM'
+      | 'hasDCM'
+      | 'hasBradycardia'
+      | 'hasTachycardia'
+      | 'diagnosedHypertension',
+    value: boolean,
+    heartFailureType?: 'HFREF' | 'HFPEF' | 'UNKNOWN' | 'NOT_APPLICABLE',
+  ): Promise<void> {
+    await this.post('test-control/user/set-condition', {
+      userId,
+      flag,
+      value,
+      heartFailureType,
+    })
+  }
+
+  /**
+   * Attach a medication inline (bypasses admin verification). Default
+   * `verificationStatus=VERIFIED`; pass `UNVERIFIED` for safety-net tests.
+   */
+  async setUserMedication(
+    userId: string,
+    med: {
+      drugName: string
+      drugClass: string
+      frequency: 'ONCE_DAILY' | 'TWICE_DAILY' | 'THREE_TIMES_DAILY' | 'AS_NEEDED' | 'UNSURE'
+      verificationStatus?: 'VERIFIED' | 'UNVERIFIED'
+    },
+  ): Promise<{ id: string }> {
+    return this.post('test-control/user/set-medication', { userId, med })
+  }
+
   // ─── State reset ────────────────────────────────────────────────────────
   /**
    * Wipe journal/alert/escalation/notification rows for ALL *.cardioplace.test
