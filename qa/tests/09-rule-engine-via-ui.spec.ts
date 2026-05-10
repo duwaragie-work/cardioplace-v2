@@ -664,3 +664,77 @@ test.describe('Bucket B G2: Pulse pressure annotations', () => {
     ).toBe(false)
   })
 })
+
+// ─── Section 13 — Bucket B G3: Pre-Day-3 mode ──────────────────────────────
+//
+// CLUSTER_6_RISK: the engine today uses preDay3Mode (readingCount < 7) only
+// to switch the patient-facing message tone, NOT to suppress L1 alerts. Q2
+// is expected to add suppression of Level 1 alerts during the first 7
+// readings (educational mode). Until that lands, test 1 is fixme'd.
+test.describe('Bucket B G3: Pre-Day-3 mode (educational suppression)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test.fixme(
+    'New patient, day 1, 145/95 → Level 1 High SUPPRESSED (post-Q2 behavior)',
+    async () => {
+      // Today the engine fires RULE_STANDARD_L1_HIGH with mode=STANDARD even
+      // on the first reading (preDay3Mode just changes message wording).
+      // After Q2 lands, this assertion flips to "no L1 row, only an
+      // educational notification".
+      const r = await submitAndAssert({
+        label: 'preDay3 day1 L1 suppressed',
+        patient: 'aisha',
+        entry: { measuredAt: FUTURE(), systolicBP: 145, diastolicBP: 95, pulse: 78 },
+        expectRuleIds: [],
+        expectTiers: [],
+        exclusive: true,
+      })
+      expect(r.fired).not.toContain('RULE_STANDARD_L1_HIGH')
+    },
+  )
+
+  test('New patient, day 2 + severeHeadache → emergency fires regardless of preDay3', async () => {
+    // CLINICAL_SPEC §1.3 — symptom override is always Level 2 at any BP
+    // and any reading count. Pre-Day-3 must NOT suppress this.
+    const r = await submitAndAssert({
+      label: 'preDay3 emergency wins',
+      patient: 'aisha',
+      entry: {
+        measuredAt: FUTURE(),
+        systolicBP: 130,
+        diastolicBP: 80,
+        pulse: 76,
+        severeHeadache: true,
+      },
+      expectRuleIds: ['RULE_SYMPTOM_OVERRIDE_GENERAL'],
+      expectTiers: ['BP_LEVEL_2_SYMPTOM_OVERRIDE'],
+    })
+    expect(r.fired).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
+  })
+
+  test('Post Day-3 (≥7 readings), 145/95 → STANDARD_L1_HIGH fires normally', async () => {
+    // submitAndAssert calls tc.resetUser FIRST, which wipes seeded readings.
+    // Seed in preSubmit so the 7 historical entries land between reset and
+    // the alert-triggering POST. preDay3Mode = readingCount < 7, so seven
+    // pre-existing readings + the new one = 8 in-window readings → false.
+    const r = await submitAndAssert({
+      label: 'post day-3 L1 fires',
+      patient: 'aisha',
+      entry: { measuredAt: FUTURE(), systolicBP: 145, diastolicBP: 95, pulse: 78 },
+      expectRuleIds: ['RULE_STANDARD_L1_HIGH'],
+      expectTiers: ['BP_LEVEL_1_HIGH'],
+      preSubmit: async () => {
+        const u = await tc.findUser(PATIENTS.aisha.email)
+        const baseTime = Date.now() - 14 * 24 * 60 * 60 * 1000
+        const seed = Array.from({ length: 7 }, (_, i) => ({
+          measuredAt: new Date(baseTime + i * 24 * 60 * 60 * 1000).toISOString(),
+          systolicBP: 122,
+          diastolicBP: 78,
+          pulse: 72,
+        }))
+        await tc.seedReadingsAtTime(u.id, seed)
+      },
+    })
+    expect(r.fired).toContain('RULE_STANDARD_L1_HIGH')
+  })
+})
