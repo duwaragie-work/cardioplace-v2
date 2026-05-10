@@ -248,7 +248,10 @@ export class TestControl {
       physicianMessage: string
       createdAt: string
       acknowledgedAt: string | null
+      acknowledgedByUserId: string | null
       resolvedAt: string | null
+      resolvedBy: string | null
+      resolutionAction: string | null
     }>
   > {
     return this.get(`test-control/alerts?userId=${encodeURIComponent(userId)}`)
@@ -260,10 +263,14 @@ export class TestControl {
       id: string
       ladderStep: string
       recipientRoles: string[]
-      channels: string[]
+      notificationChannel: string[]
       afterHours: boolean
       scheduledFor: string | null
       notificationSentAt: string | null
+      acknowledgedAt: string | null
+      acknowledgedBy: string | null
+      resolvedAt: string | null
+      resolvedBy: string | null
       triggeredByResolution: boolean
       reason: string | null
     }>

@@ -425,10 +425,29 @@ export class DailyJournalService {
       }
     }
 
-    const updated = await this.prisma.deviationAlert.update({
-      where: { id: alertId },
-      data: { status: 'ACKNOWLEDGED', acknowledgedAt: new Date() },
-    })
+    // Bug #4 fix: ack must propagate to EscalationEvent rows so the JCAHO
+    // 15-field audit trail (CLINICAL_SPEC §V2-D) carries the patient's
+    // ack-by + ack-at on every dispatched event row, not just the parent
+    // DeviationAlert. Bug #2 fix: also populate acknowledgedByUserId so
+    // the actor (patient vs admin vs provider) is recoverable from the
+    // alert row alone — matches the admin path semantics in
+    // alert-resolution.service.ts. Both writes happen inside a single
+    // transaction so a partial failure can't desynchronize state.
+    const now = new Date()
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.deviationAlert.update({
+        where: { id: alertId },
+        data: {
+          status: 'ACKNOWLEDGED',
+          acknowledgedAt: now,
+          acknowledgedByUserId: userId,
+        },
+      }),
+      this.prisma.escalationEvent.updateMany({
+        where: { alertId, acknowledgedAt: null, resolvedAt: null },
+        data: { acknowledgedAt: now, acknowledgedBy: userId },
+      }),
+    ])
 
     return {
       statusCode: 200,

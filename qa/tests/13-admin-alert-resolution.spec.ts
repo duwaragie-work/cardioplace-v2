@@ -205,3 +205,80 @@ test.describe('Alert resolution', () => {
     await tc.dispose()
   })
 })
+
+test.describe('Patient acknowledgement (bug #4: propagation to EscalationEvent)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test('patient ack writes acknowledgedByUserId AND propagates to EscalationEvent rows', async () => {
+    // Reproduces production-side bug #4 evidence: Patient B alert f4058d79.
+    // BP_LEVEL_1_HIGH dispatches T+0 to PRIMARY_PROVIDER + PATIENT — both
+    // EscalationEvent rows must pick up the patient's ack metadata when
+    // PATCH /api/daily-journal/alerts/:id/acknowledge runs. Tier 1 + BP L2
+    // are non-dismissable for patients (CLINICAL_SPEC §V2-C) so the same
+    // path runs for L1 only — but the propagation logic is the same.
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+
+    const patientApi = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    await postJournalEntry(patientApi, {
+      measuredAt: new Date().toISOString(),
+      systolicBP: 165,
+      diastolicBP: 100,
+      pulse: 78,
+    })
+    await new Promise((r) => setTimeout(r, 1500))
+
+    const alerts = await tc.listAlerts(u.id)
+    const bpL1 = alerts.find((a) => a.tier === 'BP_LEVEL_1_HIGH')
+    expect(bpL1, `expected BP_LEVEL_1_HIGH alert; got tiers: [${alerts.map((a) => a.tier).join(',')}]`).toBeDefined()
+
+    const eventsBefore = await tc.listEscalationEvents(bpL1!.id)
+    expect(
+      eventsBefore.length,
+      'expected at least one T+0 EscalationEvent for the L1 alert',
+    ).toBeGreaterThanOrEqual(1)
+    expect(
+      eventsBefore.every((e) => e.acknowledgedAt === null && e.acknowledgedBy === null),
+      'all EscalationEvent rows should start without ack metadata',
+    ).toBe(true)
+
+    const ackRes = await patientApi.patch(`daily-journal/alerts/${bpL1!.id}/acknowledge`)
+    expect(ackRes.ok(), `patient ack response: ${ackRes.status()} ${await ackRes.text()}`).toBeTruthy()
+
+    // Allow the txn to settle.
+    await new Promise((r) => setTimeout(r, 500))
+
+    // 1. DeviationAlert state — bug #2 fix surface: acknowledgedByUserId must
+    // be the patient's own userId.
+    const alertsAfter = await tc.listAlerts(u.id)
+    const bpL1After = alertsAfter.find((a) => a.id === bpL1!.id)
+    expect(bpL1After?.status).toBe('ACKNOWLEDGED')
+    expect(
+      bpL1After?.acknowledgedAt,
+      'DeviationAlert.acknowledgedAt should be set after patient ack',
+    ).not.toBeNull()
+    expect(
+      bpL1After?.acknowledgedByUserId,
+      'DeviationAlert.acknowledgedByUserId should be the patient userId',
+    ).toBe(u.id)
+
+    // 2. EscalationEvent state — bug #4 fix surface: each row picks up
+    // acknowledgedAt + acknowledgedBy from the same transaction.
+    const eventsAfter = await tc.listEscalationEvents(bpL1!.id)
+    expect(eventsAfter.length).toBe(eventsBefore.length)
+    for (const ev of eventsAfter) {
+      expect(
+        ev.acknowledgedAt,
+        `EscalationEvent ${ev.id} (${ev.ladderStep}) should have acknowledgedAt set`,
+      ).not.toBeNull()
+      expect(
+        ev.acknowledgedBy,
+        `EscalationEvent ${ev.id} (${ev.ladderStep}) should have acknowledgedBy = patient userId`,
+      ).toBe(u.id)
+    }
+
+    await patientApi.dispose()
+    await tc.dispose()
+  })
+})
