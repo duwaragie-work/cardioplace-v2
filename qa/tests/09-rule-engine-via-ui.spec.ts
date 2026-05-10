@@ -738,3 +738,50 @@ test.describe('Bucket B G3: Pre-Day-3 mode (educational suppression)', () => {
     expect(r.fired).toContain('RULE_STANDARD_L1_HIGH')
   })
 })
+
+// ─── Section 14 — Bucket B G4: Bradycardia × beta-blocker suppression ──────
+test.describe('Bucket B G4: Bradycardia × beta-blocker', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test('Nora (BB + bradycardia diagnosed) HR 55 → suppressed (no HR alert)', async () => {
+    // Per spec, a patient with `hasBradycardia: true` AND on a beta-blocker
+    // has an expected-on-BB band: bradycardia within ~50–60 BPM is the
+    // therapeutic target, not an alert. The asymptomatic-brady rule should
+    // NOT fire in this band.
+    const r = await submitAndAssert({
+      label: 'nora 55',
+      patient: 'nora',
+      entry: { measuredAt: FUTURE(), systolicBP: 122, diastolicBP: 76, pulse: 55 },
+      expectRuleIds: [],
+      expectTiers: [],
+      exclusive: true,
+    })
+    expect(r.fired).not.toContain('RULE_BRADY_HR_ASYMPTOMATIC')
+    expect(r.fired).not.toContain('RULE_BRADY_HR_SYMPTOMATIC')
+    expect(
+      r.unexpected,
+      `unexpected fires for Nora HR 55: ${r.unexpected.join(',')}`,
+    ).toEqual([])
+  })
+
+  test('Nora HR 45 → BRADY_HR_ASYMPTOMATIC fires (below suppression floor)', async () => {
+    // Below the BB suppression band, the bradycardia rule fires regardless
+    // of the patient's diagnosed-bradycardia status. The asymptomatic vs
+    // symptomatic split depends on the symptom flags on the entry — none
+    // are set here so we expect the asymptomatic variant.
+    const r = await submitAndAssert({
+      label: 'nora 45',
+      patient: 'nora',
+      entry: { measuredAt: FUTURE(), systolicBP: 122, diastolicBP: 76, pulse: 45 },
+      expectRuleIds: ['RULE_BRADY_HR_ASYMPTOMATIC'],
+      expectTiers: ['BP_LEVEL_1_LOW'],
+    })
+    const bradyFired =
+      r.fired.includes('RULE_BRADY_HR_ASYMPTOMATIC') ||
+      r.fired.includes('RULE_BRADY_HR_SYMPTOMATIC')
+    expect(
+      bradyFired,
+      `expected a brady rule to fire at HR 45; fired: [${r.fired.join(',')}]`,
+    ).toBeTruthy()
+  })
+})
