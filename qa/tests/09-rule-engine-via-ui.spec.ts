@@ -525,3 +525,76 @@ test.describe('Benign reading auto-resolves open BP_LEVEL_1', () => {
     await api.dispose()
   })
 })
+
+// ─── Section 11 — Bucket B G1: Loop diuretic full coverage ─────────────────
+//
+// CLUSTER_6_RISK: SBP 91 falls in the current 90–92 sensitivity band. After
+// Q1 (loop-diuretic strict <90) the band would collapse and that case would
+// stop firing the LOOP_DIURETIC_HYPOTENSION rule.
+test.describe('Bucket B G1: Loop diuretic — orthostatic hypotension band', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test('Olive (loop + age 70, no HF) SBP 88 → AGE_65_LOW + loop-diuretic annotation', async () => {
+    // Below the 90–92 band, the loop-diuretic rule defers to the lower-bound
+    // rules. For Olive (DOB 1955, 70+) AGE_65_LOW claims the bp-low axis,
+    // and the loop-diuretic note rides as a physicianMessage annotation on
+    // that primary row.
+    const r = await submitAndAssert({
+      label: 'olive 88',
+      patient: 'olive',
+      entry: { measuredAt: FUTURE(), systolicBP: 88, diastolicBP: 60, pulse: 76 },
+      expectRuleIds: ['RULE_AGE_65_LOW'],
+      expectTiers: ['BP_LEVEL_1_LOW'],
+    })
+    expect(r.fired).toContain('RULE_AGE_65_LOW')
+    const hasLoopNote = r.physicianMessages.some((m) =>
+      /loop diuretic|hypotension/i.test(m),
+    )
+    expect(
+      hasLoopNote,
+      `expected loop-diuretic annotation; messages: [${r.physicianMessages.join(' || ')}]`,
+    ).toBeTruthy()
+  })
+
+  test('Olive SBP 91 (90–92 band) → LOOP_DIURETIC_HYPOTENSION Tier 3', async () => {
+    // CLUSTER_6_RISK: assertion will need update after Q1 (strict <90) —
+    // post-Q1 this case would NOT fire LOOP_DIURETIC_HYPOTENSION.
+    const r = await submitAndAssert({
+      label: 'olive 91',
+      patient: 'olive',
+      entry: { measuredAt: FUTURE(), systolicBP: 91, diastolicBP: 62, pulse: 74 },
+      expectRuleIds: ['RULE_LOOP_DIURETIC_HYPOTENSION'],
+      expectTiers: ['TIER_3_INFO'],
+    })
+    expect(r.fired).toContain('RULE_LOOP_DIURETIC_HYPOTENSION')
+  })
+
+  test('Olive SBP 95 → no alert (above the 90–92 band)', async () => {
+    const r = await submitAndAssert({
+      label: 'olive 95',
+      patient: 'olive',
+      entry: { measuredAt: FUTURE(), systolicBP: 95, diastolicBP: 64, pulse: 72 },
+      expectRuleIds: [],
+      expectTiers: [],
+      exclusive: true,
+    })
+    expect(
+      r.unexpected,
+      `unexpected fires for Olive 95: ${r.unexpected.join(',')}`,
+    ).toEqual([])
+  })
+
+  test('Carol (loop + HFrEF) SBP 84 → HFREF_LOW takes precedence', async () => {
+    // Carol's threshold (sbpLowerTarget: 85) catches 84 first via the HFrEF
+    // branch. Loop-diuretic rule's <90 floor means it doesn't fire here, so
+    // there's no axis competition — HFREF_LOW is the sole bp-low claim.
+    const r = await submitAndAssert({
+      label: 'carol 84',
+      patient: 'carol',
+      entry: { measuredAt: FUTURE(), systolicBP: 84, diastolicBP: 56, pulse: 68 },
+      expectRuleIds: ['RULE_HFREF_LOW'],
+      expectTiers: ['BP_LEVEL_1_LOW'],
+    })
+    expect(r.fired).toContain('RULE_HFREF_LOW')
+  })
+})
