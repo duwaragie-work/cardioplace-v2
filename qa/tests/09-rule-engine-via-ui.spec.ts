@@ -962,17 +962,19 @@ test.describe('Bucket B G6: Per-condition × age 65+ edges', () => {
     expect(r.fired).toContain('RULE_STANDARD_L1_HIGH')
   })
 
-  test('Jane (65+) + setUserCondition hasHCM=true, SBP 100 → HCM_LOW path', async () => {
-    // Compose 65+ × HCM by toggling Jane's profile flag inline. Cleanup
-    // (toggle off) happens after the assertion to avoid leaking state into
-    // later tests in the sequential run.
+  test('Jane (65+) + setUserCondition hasHCM=true, SBP 99 → HCM_LOW path', async () => {
+    // HCM_DEFAULT_LOWER = 100 in engine/condition-branches.ts and the rule
+    // is `sbp < lower` (exclusive). SBP 100 sits exactly at the boundary
+    // and does NOT trigger; use 99 to actually exercise the HCM-low path.
+    // setUserCondition adds a 100ms post-write hold (test-control.service)
+    // so any future profile cache has time to settle before the post.
     const u = await tc.findUser(PATIENTS.jane.email)
     await tc.setUserCondition(u.id, 'hasHCM', true)
     try {
       const r = await submitAndAssert({
-        label: 'jane HCM 100',
+        label: 'jane HCM 99',
         patient: 'jane',
-        entry: { measuredAt: FUTURE(), systolicBP: 100, diastolicBP: 65, pulse: 72 },
+        entry: { measuredAt: FUTURE(), systolicBP: 99, diastolicBP: 65, pulse: 72 },
         expectRuleIds: ['RULE_HCM_LOW'],
         expectTiers: ['BP_LEVEL_1_LOW'],
       })

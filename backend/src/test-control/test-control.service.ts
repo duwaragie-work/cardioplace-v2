@@ -341,6 +341,12 @@ export class TestControlService {
       data.heartFailureType = value ? heartFailureType ?? 'UNKNOWN' : 'NOT_APPLICABLE'
     }
     await this.prisma.patientProfile.updateMany({ where: { userId }, data })
+    // ProfileResolverService doesn't cache today (one fresh user.findUnique
+    // per resolve), so this delay is defensive: if Cluster 6 introduces a
+    // profile cache for performance, tests that flip a flag immediately
+    // before submitting a reading would race the cache invalidation. A
+    // small post-write hold keeps those tests stable across the refactor.
+    await new Promise((resolve) => setTimeout(resolve, 100))
   }
 
   /**
