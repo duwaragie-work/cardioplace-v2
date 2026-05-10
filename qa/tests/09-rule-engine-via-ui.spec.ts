@@ -969,3 +969,119 @@ test.describe('Bucket B G6: Per-condition × age 65+ edges', () => {
     expect(r.fired).not.toContain('RULE_AFIB_HR_HIGH')
   })
 })
+
+// ─── Section 17 — Bucket B G7: Multi-axis co-fire additional combos ────────
+//
+// These extend Section 9's pre-gate × BP-rule pairs with non-pregnancy
+// patients + multi-axis stacks. After Niva's co-fire engine refactor, each
+// distinct axis should produce its own DeviationAlert row.
+test.describe('Bucket B G7: Multi-axis co-fire additional combinations', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test('Mike (HFpEF) SBP 165 + severeHeadache → HFPEF_HIGH + SYMPTOM_OVERRIDE_GENERAL', async () => {
+    // Bucket B spec calls for Dana (HFpEF) but seed defers her — Mike has
+    // the same archetype. Two distinct axis claims expected: bp-high
+    // (HFpEF) and emergency (symptom override).
+    const r = await submitAndAssert({
+      label: 'mike multi: HFpEF + headache',
+      patient: 'mike',
+      entry: {
+        measuredAt: FUTURE(),
+        systolicBP: 165,
+        diastolicBP: 92,
+        pulse: 78,
+        severeHeadache: true,
+      },
+      expectRuleIds: ['RULE_HFPEF_HIGH', 'RULE_SYMPTOM_OVERRIDE_GENERAL'],
+      expectTiers: ['BP_LEVEL_1_HIGH', 'BP_LEVEL_2_SYMPTOM_OVERRIDE'],
+    })
+    expect(r.fired).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
+    expect(
+      r.fired.includes('RULE_HFPEF_HIGH') || r.fired.includes('RULE_STANDARD_L1_HIGH'),
+      `expected HFpEF or standard high; fired: [${r.fired.join(',')}]`,
+    ).toBeTruthy()
+  })
+
+  test('James (HFrEF + Diltiazem) SBP 80 + chestPain → 3 axes co-fire', async () => {
+    // Triple co-fire: contraindication (NDHP_HFREF) + bp-low (HFREF_LOW)
+    // + emergency (SYMPTOM_OVERRIDE_GENERAL). Tests that the new engine
+    // doesn't collapse three distinct axes into one row.
+    const r = await submitAndAssert({
+      label: 'james triple co-fire',
+      patient: 'james',
+      entry: {
+        measuredAt: FUTURE(),
+        systolicBP: 80,
+        diastolicBP: 54,
+        pulse: 64,
+        chestPainOrDyspnea: true,
+      },
+      expectRuleIds: [
+        'RULE_NDHP_HFREF',
+        'RULE_HFREF_LOW',
+        'RULE_SYMPTOM_OVERRIDE_GENERAL',
+      ],
+      expectTiers: [
+        'TIER_1_CONTRAINDICATION',
+        'BP_LEVEL_1_LOW',
+        'BP_LEVEL_2_SYMPTOM_OVERRIDE',
+      ],
+    })
+    expect(r.fired).toContain('RULE_NDHP_HFREF')
+    expect(r.fired).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
+    // HFREF_LOW is the bp-low axis claim — this is the new co-fire path.
+    // CLUSTER_6_RISK: if Cluster 6 changes axis precedence (e.g. emergency
+    // suppresses bp-low) this assertion may flip.
+    expect(
+      r.fired.includes('RULE_HFREF_LOW'),
+      `expected HFREF_LOW alongside contraindication + emergency; fired: [${r.fired.join(',')}]`,
+    ).toBeTruthy()
+  })
+
+  test('Iris (AFib + Apixaban + BB) HR 130 single reading → AFib gate (no fire)', async () => {
+    // CLUSTER_6_RISK: Q5 introduces a single-reading exception for AFib
+    // when HR is severely deranged. Today the gate suppresses any HR rule
+    // until ≥3 readings — assert current behavior, flag for update.
+    const r = await submitAndAssert({
+      label: 'iris afib single 130',
+      patient: 'iris',
+      entry: { measuredAt: FUTURE(), systolicBP: 132, diastolicBP: 82, pulse: 130 },
+      expectRuleIds: [],
+      expectTiers: [],
+      exclusive: true,
+    })
+    expect(r.fired).not.toContain('RULE_AFIB_HR_HIGH')
+  })
+
+  test('Kate (HCM + Amlodipine) SBP 100 + visualChanges → HCM_LOW + symptom override', async () => {
+    // HCM patient on a vasodilator at the lower threshold + Level 2 symptom.
+    // Expected axes: bp-low (HCM_LOW), info (HCM_VASODILATOR annotation
+    // OR row), emergency (SYMPTOM_OVERRIDE_GENERAL). Vasodilator note may
+    // ride as physicianMessage on the primary or as its own row.
+    const r = await submitAndAssert({
+      label: 'kate HCM 100 + visual',
+      patient: 'kate',
+      entry: {
+        measuredAt: FUTURE(),
+        systolicBP: 100,
+        diastolicBP: 64,
+        pulse: 72,
+        visualChanges: true,
+      },
+      expectRuleIds: ['RULE_HCM_LOW', 'RULE_SYMPTOM_OVERRIDE_GENERAL'],
+      expectTiers: ['BP_LEVEL_1_LOW', 'BP_LEVEL_2_SYMPTOM_OVERRIDE'],
+    })
+    expect(r.fired).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
+    expect(
+      r.fired.includes('RULE_HCM_LOW'),
+      `expected HCM_LOW alongside symptom override; fired: [${r.fired.join(',')}]`,
+    ).toBeTruthy()
+    const vasodilatorMention =
+      r.fired.includes('RULE_HCM_VASODILATOR') ||
+      r.physicianMessages.some((m) => /vasodilator|amlodipine/i.test(m))
+    expect(
+      vasodilatorMention,
+      `expected vasodilator framing somewhere; fired: [${r.fired.join(',')}], messages: [${r.physicianMessages.join(' || ')}]`,
+    ).toBeTruthy()
+  })
+})
