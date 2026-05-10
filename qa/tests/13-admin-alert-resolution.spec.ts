@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { randomUUID } from 'node:crypto'
 import { authedApi } from '../helpers/auth.js'
 import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
@@ -202,6 +203,106 @@ test.describe('Alert resolution', () => {
     expect(missing, `missing audit fields: ${missing.join(',')}`).toEqual([])
     await patientApi.dispose()
     await adminApi.dispose()
+    await tc.dispose()
+  })
+})
+
+test.describe('Bug #6/#7 — clean reading does NOT auto-resolve open BP L1 alerts', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test('clean reading after BP_LEVEL_1_HIGH + BP_LEVEL_1_LOW leaves both OPEN with no audit trail breach', async () => {
+    // Reproduces production-side bug #6/#7 evidence:
+    //   Patient B userId 01KQC9FQJB54CKE3XFQ22C1SJQ
+    //   4 prior alerts OPEN/ACK before 12:46:54Z
+    //   Reading 5a (BP 120/75, HR 48, no symptoms) fired 0 alerts
+    //   All 4 prior alerts flipped to RESOLVED with NULL audit fields
+    //   ProfileVerificationLog query shows 0 new rows post-submission
+    //
+    // Scope: the auto-resolve sweep (alert-engine.service.ts:572-587) only
+    // fires for BP_LEVEL_1 tiers, so the trigger must produce those tiers
+    // — Tier 1 contraindications and symptom overrides aren't in scope and
+    // wouldn't have surfaced the bug. Aisha (65+ HTN, no pregnancy / HF /
+    // AFib / HCM) gives a clean BP-only path:
+    //   reading 1: 165/95 → STANDARD_L1_HIGH (BP_LEVEL_1_HIGH)
+    //   reading 2: 90/55 → AGE_65_LOW (BP_LEVEL_1_LOW; Aisha is 67)
+    //   reading 3: 120/75 → 0 alerts (clean)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+
+    // Each reading gets its own sessionId so the engine evaluates them
+    // independently rather than averaging into a single session.
+    const session1 = randomUUID()
+    const session2 = randomUUID()
+    const session3 = randomUUID()
+
+    // Reading 1 — fires BP_LEVEL_1_HIGH
+    await postJournalEntry(api, {
+      measuredAt: new Date(Date.now() - 4 * 60_000).toISOString(),
+      systolicBP: 165,
+      diastolicBP: 95,
+      pulse: 78,
+      sessionId: session1,
+    })
+    await new Promise((r) => setTimeout(r, 1500))
+
+    // Reading 2 — fires BP_LEVEL_1_LOW (AGE_65_LOW)
+    await postJournalEntry(api, {
+      measuredAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+      systolicBP: 90,
+      diastolicBP: 55,
+      pulse: 72,
+      sessionId: session2,
+    })
+    await new Promise((r) => setTimeout(r, 1500))
+
+    const before = await tc.listAlerts(u.id)
+    const highAlert = before.find((a) => a.tier === 'BP_LEVEL_1_HIGH')
+    const lowAlert = before.find((a) => a.tier === 'BP_LEVEL_1_LOW')
+    expect(highAlert, `expected BP_LEVEL_1_HIGH; got tiers: [${before.map((a) => a.tier).join(',')}]`).toBeDefined()
+    expect(lowAlert, `expected BP_LEVEL_1_LOW; got tiers: [${before.map((a) => a.tier).join(',')}]`).toBeDefined()
+    expect(highAlert?.status).toBe('OPEN')
+    expect(lowAlert?.status).toBe('OPEN')
+
+    // Reading 3 — clean. Engine fires 0 new alerts. The bug-#6/#7 sweep
+    // would silently flip both prior alerts to RESOLVED with no audit
+    // trail. Post-fix, both must remain OPEN.
+    await postJournalEntry(api, {
+      measuredAt: new Date().toISOString(),
+      systolicBP: 120,
+      diastolicBP: 75,
+      pulse: 72,
+      sessionId: session3,
+    })
+    await new Promise((r) => setTimeout(r, 1500))
+
+    const after = await tc.listAlerts(u.id)
+    const highAfter = after.find((a) => a.id === highAlert!.id)
+    const lowAfter = after.find((a) => a.id === lowAlert!.id)
+
+    // Critical bug-#6/#7 assertion: status stays OPEN.
+    expect(highAfter?.status, 'BP_LEVEL_1_HIGH must remain OPEN after clean reading').toBe('OPEN')
+    expect(lowAfter?.status, 'BP_LEVEL_1_LOW must remain OPEN after clean reading').toBe('OPEN')
+
+    // Audit-field invariants: no resolution metadata may be set.
+    for (const a of [highAfter, lowAfter]) {
+      expect(a?.resolvedBy, `${a?.tier} resolvedBy must be null`).toBeNull()
+      expect(a?.resolutionAction, `${a?.tier} resolutionAction must be null`).toBeNull()
+      expect(a?.resolvedAt, `${a?.tier} resolvedAt must be null`).toBeNull()
+    }
+
+    // No EscalationEvent rows with triggeredByResolution=true should appear
+    // — those only come from the explicit /resolve API path (BP L2 retry).
+    for (const a of [highAlert!, lowAlert!]) {
+      const events = await tc.listEscalationEvents(a.id)
+      expect(
+        events.every((e) => !e.triggeredByResolution),
+        `${a.tier} should have NO triggeredByResolution events; got: ${events.filter((e) => e.triggeredByResolution).map((e) => e.ladderStep).join(',')}`,
+      ).toBe(true)
+    }
+
+    await api.dispose()
     await tc.dispose()
   })
 })

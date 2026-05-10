@@ -462,7 +462,17 @@ test.describe('Multi-alert: pre-gate Tier 1 + BP rule fire together', () => {
 test.describe('Benign reading auto-resolves open BP_LEVEL_1', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
-  test('165/100 then 124/78 → first alert flips OPEN→RESOLVED', async () => {
+  // CLUSTER_6_RISK / bug #6/#7 — this test asserted the auto-resolve
+  // behavior that was removed (alert-engine.service.ts resolveOpenAlerts +
+  // its call site). The sweep silently flipped OPEN BP L1 alerts to
+  // RESOLVED with NULL audit fields whenever a clean reading produced 0
+  // new alerts — JCAHO §V2-D 15-field audit trail breach. Manisha sign-off
+  // is needed before reintroducing this as a Suggestion-style feature in
+  // admin UI; until then, all alert resolutions go through the explicit
+  // /admin/alerts/:id/resolve API path. The replacement assertion (clean
+  // reading does NOT auto-resolve) lives in tests/13 under the bug #6/#7
+  // describe.
+  test.fixme('165/100 then 124/78 → first alert flips OPEN→RESOLVED', async () => {
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)

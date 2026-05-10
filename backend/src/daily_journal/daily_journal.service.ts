@@ -658,10 +658,13 @@ export class DailyJournalService {
     // averaged vitals for what's left of the session.
     //
     // DeviationAlert / EscalationEvent rows owned by `entry` cascade-delete
-    // via the FK (phase/2 schema). The re-evaluation below takes care of any
-    // *sibling-owned* alert that should now be resolved or re-classified — if
-    // the average changes such that no rule fires, AlertEngine.resolveOpenAlerts
-    // flips open BP_LEVEL_1 alerts to RESOLVED.
+    // via the FK (phase/2 schema). The re-evaluation below re-runs the rule
+    // engine against the surviving session-anchor entry. Bug #6/#7 fix
+    // (alert-engine.service.ts) removed the silent auto-resolve sweep, so
+    // sibling-owned alerts retain their state until an admin resolves them
+    // explicitly via /admin/alerts/:id/resolve. Re-evaluation may surface
+    // NEW alerts on the surviving entry, but it never silently closes
+    // existing ones.
     const survivingAnchor = await this.findSessionReevalAnchor(entry)
 
     await this.prisma.journalEntry.delete({ where: { id } })
