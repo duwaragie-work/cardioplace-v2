@@ -277,12 +277,16 @@ export class AlertEngineService {
       await this.persistAlert(session, ctx, adherenceResult)
     }
 
-    // Only run the BP-L1 resolve-sweep when NEITHER pipeline fired. This
-    // preserves Bug 2 fix scope (sweep is scoped to BP L1 tiers only) and
-    // avoids auto-resolving adherence alerts on an unrelated benign BP entry.
-    if (bpResults.length === 0 && !adherenceResult) {
-      await this.resolveOpenAlerts(session.userId)
-    }
+    // Bug #6/#7 fix: the silent auto-resolve sweep was removed. A clean
+    // reading must NOT mutate prior open alerts — that flow flipped alerts
+    // to RESOLVED with NULL resolutionAction / resolutionRationale /
+    // resolvedBy, breaching the JCAHO 15-field audit trail and conflating
+    // patient-self-clear with provider closure. Resolution now happens
+    // ONLY through the explicit /admin/alerts/:id/resolve API path
+    // (alert-resolution.service.ts), which writes the full audit fields
+    // and closes EscalationEvent rows. If "trend recovery" is wanted in
+    // the future, it must be a non-blocking SUGGESTION in admin UI per
+    // Manisha — never a silent state mutation.
 
     return primary ?? adherenceResult
   }
@@ -664,23 +668,6 @@ export class AlertEngineService {
       escalated: upserted.escalated,
       tier: result.tier,
       ruleId: result.ruleId,
-    })
-  }
-
-  /**
-   * Bug 2 fix — only auto-resolve BP Level 1 alerts when a benign reading
-   * arrives. Tier 1 contraindications, BP Level 2 emergencies, and Tier 2/3
-   * need explicit admin resolution (phase/7). Historically this cleared
-   * everything and silently wiped unresolved safety-critical alerts.
-   */
-  private async resolveOpenAlerts(userId: string) {
-    await this.prisma.deviationAlert.updateMany({
-      where: {
-        userId,
-        status: { in: ['OPEN', 'ACKNOWLEDGED'] },
-        tier: { in: ['BP_LEVEL_1_HIGH', 'BP_LEVEL_1_LOW'] },
-      },
-      data: { status: 'RESOLVED' },
     })
   }
 

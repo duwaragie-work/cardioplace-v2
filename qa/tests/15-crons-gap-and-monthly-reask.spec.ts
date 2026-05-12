@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test'
 import { PATIENTS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
+import { authedApi } from '../helpers/auth.js'
+import { postJournalEntry } from '../helpers/api.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
 /**
@@ -16,10 +18,20 @@ test.describe('Gap-alert cron (48h trigger)', () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
-    // Aisha has 5 seeded readings; their measuredAt is `daysAgo: 0..13`.
-    // Backdate the latest reading >48h to expose the gap.
-    // (Note: resetUser deleted them — the gap-alert filter is "no entry OR
-    // last entry < cutoff", so an empty journalEntries list is itself a gap.)
+    // Two pre-conditions the gap-alert cron checks (gap-alert.service.ts:46):
+    //   1. User.updatedAt <= now-48h  — enrollment-completed proxy filter.
+    //      resetUser doesn't touch the user row, so backdate it explicitly.
+    //   2. JournalEntry.measuredAt < now-48h — the actual gap.
+    //      Post one entry, then backdate measuredAt past the cutoff.
+    const patientApi = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    await postJournalEntry(patientApi, {
+      measuredAt: new Date().toISOString(),
+      systolicBP: 122,
+      diastolicBP: 78,
+      pulse: 72,
+    })
+    await tc.backdateLastJournalEntry(u.id, 49 * 60 * 60)
+    await tc.backdateUserUpdatedAt(u.id, 49 * 60 * 60)
     const result = await tc.runGapAlertScan(new Date())
     expect(result.scanned).toBe(1)
 
@@ -27,6 +39,7 @@ test.describe('Gap-alert cron (48h trigger)', () => {
     const gap = notes.find((n) => /time for your bp check|bp check/i.test(n.title))
     expect(gap, 'expected a gap-alert notification row').toBeDefined()
 
+    await patientApi.dispose()
     await tc.dispose()
   })
 
@@ -57,18 +70,15 @@ test.describe('Monthly re-ask cron (30d trigger)', () => {
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
 
-    // Backdate Aisha's medications by 31 days
-    const meds: Array<{ id: string }> = await (await fetch(
-      `${API_BASE_URL}/me/medications`,
-      // direct call — not authedApi since we only need read
-    )).json().catch(() => [])
-
-    if (meds.length === 0) {
-      test.skip(true, 'Could not list meds without auth — extend test-control with a meds-by-user endpoint')
-    }
-
-    for (const m of meds) {
-      await tc.backdateMedicationVerified(m.id, 31 * 24 * 60 * 60)
+    // Backdate every non-discontinued med for Aisha by 31 days. The previous
+    // approach looped over `me/medications`, which filters by verification
+    // status — so a row left REJECTED by tests/11 was skipped, only Amlodipine
+    // got backdated, and the cron's latestTouch still saw Lisinopril's recent
+    // verifiedAt and skipped Aisha. The new helper bypasses the patient-side
+    // filter and updates every PatientMedication.where(discontinuedAt: null).
+    const updated = await tc.backdateAllUserMedications(u.id, 31 * 24 * 60 * 60)
+    if (updated.updated === 0) {
+      test.skip(true, 'No active meds for Aisha — skip')
     }
 
     const result = await tc.runMonthlyReaskScan(new Date())

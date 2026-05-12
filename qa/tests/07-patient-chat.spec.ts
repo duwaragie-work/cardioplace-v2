@@ -16,7 +16,9 @@ test.describe('Chat — empty state + spine', () => {
 
   test('chat page loads with empty state', async ({ page }) => {
     await page.goto('/chat')
-    await expect(page.locator('main, [role="main"]').first()).toBeVisible()
+    // Cluster-4 added data-testid="chat-empty-state" on the empty-state
+    // container. Check that directly — chat doesn't wrap content in a
+    // `<main>` so the previous structural check was wrong.
     const empty = page.locator(byTestId(T.chat.emptyState))
       .or(page.getByText(/how can i help|ask me about|monitored by care team/i).first())
     await expect(empty.first()).toBeVisible({ timeout: 15_000 })

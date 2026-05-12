@@ -350,10 +350,34 @@ export class EscalationService {
       // Check alert still open + not acknowledged; if it's been resolved /
       // acknowledged since, skip and mark the event as sent (so we don't
       // re-scan it forever).
-      if (alert.status !== 'OPEN' || alert.acknowledgedAt) {
+      //
+      // EXCEPTION: events scheduled by a resolution decision (retry path —
+      // BP_L2_UNABLE_TO_REACH_RETRY currently) MUST fire regardless of the
+      // alert's ack state. The provider chose "unable to reach, try again
+      // later" *after* acknowledging — the ack is part of the audit trail
+      // ("I saw this and I tried"), not a signal to abandon the patient.
+      // Without this exemption the retry gets silently dropped and a BP L2
+      // emergency where the patient was unreachable receives no follow-up.
+      // Tracked: cluster-2 / B4 in qa/reports/RESULTS.md (Dr. Singal sign-off
+      // — Option 2: preserve ack for audit, retry fires anyway).
+      if (
+        !row.triggeredByResolution &&
+        (alert.status !== 'OPEN' || alert.acknowledgedAt)
+      ) {
         await this.prisma.escalationEvent.update({
           where: { id: row.id },
           data: { notificationSentAt: now, reason: 'skipped — alert resolved or acknowledged' },
+        })
+        continue
+      }
+      // For retry-triggered events on a fully RESOLVED alert (i.e. the
+      // provider explicitly closed the alert with a different action AFTER
+      // scheduling the retry), still skip — closure means patient was
+      // reached. Only ACKNOWLEDGED state is exempted above.
+      if (row.triggeredByResolution && alert.status === 'RESOLVED') {
+        await this.prisma.escalationEvent.update({
+          where: { id: row.id },
+          data: { notificationSentAt: now, reason: 'skipped — alert resolved post-retry-schedule' },
         })
         continue
       }

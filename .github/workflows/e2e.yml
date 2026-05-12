@@ -1,0 +1,239 @@
+name: E2E (Playwright)
+
+# Phase B (cluster-2 / RESULTS.md): wire the local 85/21/13 green run into CI
+# so PRs to `dev` (and the `dev` → `main` promotion PR) get an automatic
+# regression check before merge. Per the deployment flow all changes go
+# through `dev` first; this workflow is the gate at that boundary.
+#
+# Advisory only at first — Mubeen flips this to `required` in repo settings
+# after one green run on a real `dev` PR.
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+
+# Concurrency cancels older runs when a new commit lands on the same PR —
+# saves runner minutes when reviewers keep pushing fixups.
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: E2E shard ${{ matrix.shard }} / 4
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Sharding strategy: each shard gets its OWN postgres + backend + apps
+    # (GitHub Actions jobs are independent processes — service containers
+    # don't cross-pollute). That keeps state-mutation tests (resetUser,
+    # backdateAlertAnchor, runEscalationScan) from racing against each
+    # other across shards. fail-fast: false so one flaky shard doesn't
+    # mask the others.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: cardioplace_e2e
+          POSTGRES_USER: cardioplace
+          POSTGRES_PASSWORD: cardioplace
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Backend
+      DATABASE_URL: postgresql://cardioplace:cardioplace@localhost:5432/cardioplace_e2e
+      JWT_SECRET: ci-jwt-secret
+      JWT_ACCESS_SECRET: ci-jwt-access-secret
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_SECRET: ci-jwt-refresh-secret
+      JWT_REFRESH_EXPIRES_IN: 30d
+      WEB_APP_URL: http://localhost:3000,http://localhost:3001
+      ADMIN_BASE_URL: http://localhost:3001
+      COOKIE_SAME_SITE: lax
+      # NOTE: do NOT set PORT here. PORT at job-level inherits into every
+      # step including `next start`, which then tries to bind :4000 and
+      # collides with the backend (the actual error from the EADDRINUSE
+      # we hit on first run). Backend's PORT is scoped inline on its
+      # start step below.
+      RESEND_API_KEY: re_dummy_ci_key
+      GOOGLE_API_KEY: ci-noop
+      GEMINI_CHAT_MODEL: gemini-2.5-flash
+      DRUG_ENRICHMENT_ENABLED: 'false'
+      CHAT_V2_PROMPT_ENABLED: 'false'
+      ENABLE_TEST_CONTROL: 'true'
+      TEST_CONTROL_SECRET: ci-test-control-secret
+      NODE_ENV: test
+      # Frontend
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_ADMIN_URL: http://localhost:3001
+      NEXT_PUBLIC_FRONTEND_URL: http://localhost:3000
+      NEXT_PUBLIC_BP_OCR_ENABLED: 'false'
+      NEXT_PUBLIC_MED_OCR_ENABLED: 'false'
+      # CI marker — playwright.config.ts uses this to switch to the
+      # report-friendly reporter set (no auto-launched HTML server).
+      CI: 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install workspace deps
+        run: npm ci
+
+      - name: Build shared package
+        run: npm run build:shared
+
+      - name: Prisma migrate + seed
+        working-directory: backend
+        run: |
+          npx prisma migrate deploy
+          npx prisma generate
+          npx prisma db seed
+
+      - name: Install Playwright (chromium only)
+        working-directory: qa
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      # Production-build all three services. CI must NOT run dev/watch mode:
+      # `nest start --watch` spawns tsc --watch + nest start as separate
+      # processes that race — the tsc-recompile-on-cold-start can fire after
+      # nest already bound :4000, and the second nest hits EADDRINUSE while
+      # the first one keeps serving (silent split brain). Same shape risk
+      # for `next dev` HMR. The compiled-output path is single-process.
+      - name: Build backend
+        working-directory: backend
+        run: npm run build
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Build admin
+        working-directory: admin
+        run: npm run build
+
+      - name: Start backend (compiled, single process)
+        env:
+          PORT: '4000'
+        run: |
+          cd backend && nohup node dist/main > /tmp/backend.log 2>&1 &
+          echo $! > /tmp/backend.pid
+          echo "Backend pid=$(cat /tmp/backend.pid)"
+
+      - name: Start frontend (next start on 3000)
+        env:
+          # Defense-in-depth: explicit PORT override even though the job
+          # no longer sets PORT globally. `next start` defaults to 3000;
+          # this just makes the intent unambiguous in the YAML.
+          PORT: '3000'
+        run: |
+          cd frontend && nohup npm run start > /tmp/frontend.log 2>&1 &
+          echo $! > /tmp/frontend.pid
+          echo "Frontend pid=$(cat /tmp/frontend.pid)"
+
+      - name: Start admin (next start on 3001)
+        env:
+          PORT: '3001'
+        run: |
+          cd admin && nohup npm run start > /tmp/admin.log 2>&1 &
+          echo $! > /tmp/admin.pid
+          echo "Admin pid=$(cat /tmp/admin.pid)"
+
+      # Wait for each service to be reachable. Each loop also handles the
+      # transient first-time compile delay (Next 16 dev mode + Nest watch).
+      - name: Wait for backend (port 4000)
+        run: |
+          for i in $(seq 1 60); do
+            curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/api/test-control/health \
+              -H "X-Test-Control-Secret: $TEST_CONTROL_SECRET" | grep -q 200 && exit 0
+            sleep 3
+          done
+          echo "Backend never came up — last 60 lines of log:" && tail -60 /tmp/backend.log && exit 1
+
+      - name: Wait for frontend (port 3000)
+        run: |
+          for i in $(seq 1 60); do
+            curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/sign-in | grep -q 200 && exit 0
+            sleep 3
+          done
+          echo "Frontend never came up — last 60 lines of log:" && tail -60 /tmp/frontend.log && exit 1
+
+      - name: Wait for admin (port 3001)
+        run: |
+          for i in $(seq 1 60); do
+            curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/sign-in | grep -q 200 && exit 0
+            sleep 3
+          done
+          echo "Admin never came up — last 60 lines of log:" && tail -60 /tmp/admin.log && exit 1
+
+      - name: Run Playwright (shard ${{ matrix.shard }} / 4)
+        working-directory: qa
+        env:
+          # Mirror the local-run flag so write-tests + escalation specs
+          # actually exercise the seed patients. Without it ~30 specs skip.
+          RUN_WRITE_TESTS: '1'
+          PATIENT_BASE_URL: http://localhost:3000
+          ADMIN_BASE_URL: http://localhost:3001
+          API_BASE_URL: http://localhost:4000
+        # --shard=N/M splits tests deterministically across runners.
+        # `--workers=1` keeps each shard single-worker — multi-worker
+        # parallelism INSIDE a shard would re-introduce the cross-test
+        # state collisions that made us pick per-job postgres.
+        run: |
+          npx playwright test --shard=${{ matrix.shard }}/4 --workers=1
+
+      - name: Tail server logs on failure
+        if: failure()
+        run: |
+          echo "=== backend.log (last 200) ==="; tail -200 /tmp/backend.log || true
+          echo "=== frontend.log (last 80) ==="; tail -80 /tmp/frontend.log || true
+          echo "=== admin.log (last 80) ==="; tail -80 /tmp/admin.log || true
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-shard-${{ matrix.shard }}
+          path: |
+            qa/reports/final/
+            qa/reports/results.json
+            qa/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # Aggregator job — for branch-protection rules to hang `Required` on a
+  # single check name instead of all four shards. Currently does nothing
+  # but report a green status iff every shard above passed; flip the
+  # workflow to required by selecting THIS check in repo settings once
+  # the suite has run cleanly on a real `dev` PR.
+  e2e-summary:
+    name: E2E summary
+    runs-on: ubuntu-latest
+    needs: e2e
+    if: always()
+    steps:
+      - name: Report
+        run: |
+          if [ "${{ needs.e2e.result }}" = "success" ]; then
+            echo "All 4 shards green."
+          else
+            echo "One or more shards failed: ${{ needs.e2e.result }}"
+            exit 1
+          fi

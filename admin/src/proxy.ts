@@ -1,6 +1,19 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
-const ADMIN_COOKIE_NAME = 'cardioplace_admin_token';
+// Phase/cluster-1 (B5/B6): same model as the patient proxy. The JWT lives
+// in (a) the backend's HttpOnly access_token cookie scoped to the API origin
+// and (b) the React in-memory state of AuthProvider. The proxy needs to
+// gate page navigation without seeing the JWT, so AuthProvider.login()
+// writes two non-token marker cookies on the admin origin:
+//
+//   admin_auth_marker — opaque "logged in" boolean ("1" or empty)
+//   admin_auth_role   — comma-separated role list (e.g. "PROVIDER,SUPER_ADMIN")
+//
+// They carry no credential. They're tamperable by client design — they
+// only choose which page renders, not whether API calls succeed (the
+// backend rejects unauthenticated requests regardless).
+const MARKER_COOKIE = 'admin_auth_marker';
+const ROLE_COOKIE = 'admin_auth_role';
 
 // Any role on this list can reach the admin app. The backend `@Roles()`
 // decorators on individual endpoints are the real authorization — per-tab
@@ -25,25 +38,20 @@ function isPublicPath(pathname: string): boolean {
   return pathname.startsWith('/sign-in') || pathname.startsWith('/auth/');
 }
 
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  const parts = token.split('.');
-  if (parts.length !== 3) return null;
+function rolesFromCookie(value: string | undefined): string[] {
+  if (!value) return [];
   try {
-    const normalized = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
-    // atob is available in Next's Edge runtime where proxy.ts executes.
-    const json = atob(padded);
-    return JSON.parse(json) as Record<string, unknown>;
+    return decodeURIComponent(value)
+      .split(',')
+      .map((r) => r.trim())
+      .filter(Boolean);
   } catch {
-    return null;
+    return [];
   }
 }
 
-function payloadHasAdminRole(payload: Record<string, unknown> | null): boolean {
-  if (!payload) return false;
-  const roles = payload.roles;
-  if (!Array.isArray(roles)) return false;
-  return roles.some((role) => typeof role === 'string' && ADMIN_ROLES.has(role));
+function hasAdminRole(roles: string[]): boolean {
+  return roles.some((role) => ADMIN_ROLES.has(role));
 }
 
 export function proxy(request: NextRequest) {
@@ -53,26 +61,16 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const token = request.cookies.get(ADMIN_COOKIE_NAME)?.value;
+  const marker = request.cookies.get(MARKER_COOKIE)?.value;
+  const roles = rolesFromCookie(request.cookies.get(ROLE_COOKIE)?.value);
 
-  if (!token) {
+  if (!marker) {
     const signInUrl = new URL('/sign-in', request.url);
     signInUrl.searchParams.set('next', pathname);
     return NextResponse.redirect(signInUrl);
   }
 
-  // AUTH-51: malformed token is indistinguishable from "no token" to the
-  // user — drop the forbidden reason and use the no-token branch's `next`
-  // param so they land back on the page they were trying to reach after
-  // signing in.
-  const payload = decodeJwtPayload(token);
-  if (!payload) {
-    const signInUrl = new URL('/sign-in', request.url);
-    signInUrl.searchParams.set('next', pathname);
-    return NextResponse.redirect(signInUrl);
-  }
-
-  if (!payloadHasAdminRole(payload)) {
+  if (!hasAdminRole(roles)) {
     const signInUrl = new URL('/sign-in', request.url);
     signInUrl.searchParams.set('reason', 'forbidden');
     return NextResponse.redirect(signInUrl);

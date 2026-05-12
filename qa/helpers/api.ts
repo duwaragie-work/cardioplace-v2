@@ -59,8 +59,11 @@ export async function getActiveAlerts(
 }>> {
   const res = await api.get('daily-journal/alerts')
   expect(res.ok()).toBeTruthy()
+  // Backend wraps successful responses in { statusCode, message, data }.
+  // Unwrap so callers always see the array directly.
   const body = await res.json()
-  return Array.isArray(body) ? body : (body?.alerts ?? [])
+  const unwrapped = body?.data ?? body
+  return Array.isArray(unwrapped) ? unwrapped : (unwrapped?.alerts ?? [])
 }
 
 export async function patchPatientAcknowledgeAlert(
@@ -96,7 +99,9 @@ export async function adminAuditAlert(
 ): Promise<Record<string, unknown>> {
   const res = await api.get(`admin/alerts/${alertId}/audit`)
   expect(res.ok(), `admin audit: ${await res.text()}`).toBeTruthy()
-  return res.json()
+  // Backend wraps successful responses in { statusCode, message, data }.
+  const body = await res.json()
+  return body?.data ?? body
 }
 
 export async function adminCompleteEnrollment(
@@ -104,7 +109,12 @@ export async function adminCompleteEnrollment(
   userId: string,
 ): Promise<{ ok: boolean; reasons?: string[]; status?: number }> {
   const res = await api.post(`admin/patients/${userId}/complete-enrollment`)
-  return { ok: res.ok(), status: res.status(), ...(await res.json().catch(() => ({}))) }
+  // Backend wraps successful responses in { statusCode, message, data }; the
+  // payload (with `reasons` etc.) lives under `data`. Unwrap before spreading
+  // so callers see the fields at top level.
+  const body = await res.json().catch(() => ({}))
+  const payload = (body && typeof body === 'object' && 'data' in body ? body.data : body) ?? {}
+  return { ok: res.ok(), status: res.status(), ...(payload as Record<string, unknown>) }
 }
 
 export async function adminEnrollmentCheck(
@@ -113,5 +123,14 @@ export async function adminEnrollmentCheck(
 ): Promise<{ ready: boolean; reasons: string[] }> {
   const res = await api.get(`admin/patients/${userId}/enrollment-check`)
   expect(res.ok(), `enrollment-check: ${await res.text()}`).toBeTruthy()
-  return res.json()
+  // Backend wraps successful responses in { statusCode, message, data } and the
+  // gate result inside `data` exposes { ok, reasons? } (see enrollment-gate.ts).
+  // Normalize to { ready, reasons } so callers can read a stable contract
+  // without leaking the gate's internal `ok` field.
+  const body = await res.json()
+  const payload = (body?.data ?? body) as { ok?: boolean; ready?: boolean; reasons?: string[] }
+  return {
+    ready: payload.ready ?? payload.ok ?? false,
+    reasons: payload.reasons ?? [],
+  }
 }

@@ -50,15 +50,20 @@ export default function Homepage() {
                   <Activity className="w-3.5 h-3.5 text-white" />
                   <span className="font-semibold text-white text-sm">{t('home.heroBadge')}</span>
                 </div>
-                {/* Title — desktop only */}
+                {/* Title — desktop only. Cluster-3 / B7: collapse the two
+                    visual lines into a SINGLE <h1> with line-2 as a span.
+                    Previously rendered as two <h1>s which the audit flagged
+                    as a WCAG violation (heading-order / single-h1-per-page). */}
                 <div className="hidden lg:block">
                   <h1 className="font-bold text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-[72px] leading-[1.05] tracking-tight"
                     style={{ textShadow: '0 2px 10px rgba(0,0,0,0.4)', color: '#ffffff' }}>
-                    {t('home.heroTitle1')}
-                  </h1>
-                  <h1 className="font-bold italic text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-[72px] leading-[1.05] tracking-tight mt-1"
-                    style={{ textShadow: '0 2px 16px rgba(0, 0, 0, 0.3)', color: '#d4a5ff' }}>
-                    {t('home.heroTitle2')}
+                    <span className="block">{t('home.heroTitle1')}</span>
+                    <span
+                      className="block italic mt-1"
+                      style={{ textShadow: '0 2px 16px rgba(0, 0, 0, 0.3)', color: '#d4a5ff' }}
+                    >
+                      {t('home.heroTitle2')}
+                    </span>
                   </h1>
                 </div>
                 <p className="hidden lg:block text-lg lg:text-xl leading-relaxed max-w-[576px]"
@@ -69,13 +74,17 @@ export default function Homepage() {
 
               <div className="flex flex-col items-center justify-end gap-3 sm:gap-4 md:gap-5 max-w-[672px] mx-auto w-full">
                 {/* Title — above chat input on tablet only */}
-                {/* Title — above chat input on all mobile/tablet */}
+                {/* Title — above chat input on all mobile/tablet. Single
+                    visible heading per breakpoint (cluster-3 / B7). */}
                 <div className="lg:hidden text-center">
                   <h2 className="font-bold text-2xl sm:text-3xl md:text-5xl leading-tight tracking-tight" style={{ color: '#ffffff', textShadow: '0 2px 10px rgba(0,0,0,0.5)' }}>
-                    {t('home.heroTitle1')}
-                  </h2>
-                  <h2 className="font-bold italic text-2xl sm:text-3xl md:text-5xl leading-tight tracking-tight mt-0.5" style={{ color: '#d4a5ff', textShadow: '0 2px 10px rgba(0,0,0,0.4)' }}>
-                    {t('home.heroTitle2')}
+                    <span className="block">{t('home.heroTitle1')}</span>
+                    <span
+                      className="block italic mt-0.5"
+                      style={{ color: '#d4a5ff', textShadow: '0 2px 10px rgba(0,0,0,0.4)' }}
+                    >
+                      {t('home.heroTitle2')}
+                    </span>
                   </h2>
                 </div>
                 <form
@@ -227,7 +236,7 @@ export default function Homepage() {
                 <div className="flex-1 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3" style={{ backgroundColor: '#FEE2E2', borderLeft: '4px solid #DC2626' }}>
                   <div className="flex items-center gap-1.5 mb-0.5">
                     <div className="w-2 h-2 rounded-full bg-[#DC2626] animate-pulse" />
-                    <p className="text-[#DC2626] text-[10px] sm:text-xs font-bold uppercase tracking-wider">Level 2</p>
+                    <p className="text-[#B91C1C] text-[10px] sm:text-xs font-bold uppercase tracking-wider">Level 2</p>
                   </div>
                   <p className="text-[#991B1B] text-[9px] sm:text-[10px]">Immediate 911 alert</p>
                 </div>
@@ -354,7 +363,7 @@ export default function Homepage() {
         <section className="w-full">
           <div className="w-full p-8 sm:p-10 md:p-16 flex flex-col items-center gap-6 md:gap-8 bg-[#f5eafa]" >
             <h2 className="text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center font-semibold max-w-[1024px]">{t('home.ctaTitle')}</h2>
-            <p className="text-gray-500 text-sm sm:text-base md:text-xl text-left md:text-center leading-relaxed max-w-[672px]">{t('home.ctaDesc')}</p>
+            <p className="text-gray-700 text-sm sm:text-base md:text-xl text-left md:text-center leading-relaxed max-w-[672px]">{t('home.ctaDesc')}</p>
             <Link href="/about" className="bg-[#7b00e0] text-white font-semibold text-base md:text-lg px-8 md:px-12 py-3 md:py-3.5 rounded-full hover:bg-[#9333ea] transition-colors mt-2">
               {t('home.ctaButton')}
             </Link>

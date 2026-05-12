@@ -116,10 +116,14 @@ const TIER_META: Record<
   TIER_3_INFO: { label: 'Care team update', icon: Bell, severity: 'LOW' },
 };
 
+// Cluster-3 / B10: severity foregrounds were -600 shades on -50/-100 backs,
+// all 3.0–3.95:1 ratios — fails AA. Bumped to -800 shades (~6:1+) while
+// keeping the same hue families. Same fix applied to the notifications
+// SEVERITY_META below for foreground-on-light pairs.
 const SEVERITY_META = {
-  HIGH: { label: 'Urgent', bg: '#FEE2E2', text: '#DC2626', border: '#FECACA' },
-  MEDIUM: { label: 'Moderate', bg: '#FFF7ED', text: '#EA580C', border: '#FED7AA' },
-  LOW: { label: 'Low', bg: '#F0FDF4', text: '#16A34A', border: '#BBF7D0' },
+  HIGH: { label: 'Urgent', bg: '#FEE2E2', text: '#991B1B', border: '#FECACA' },
+  MEDIUM: { label: 'Moderate', bg: '#FFF7ED', text: '#9A3412', border: '#FED7AA' },
+  LOW: { label: 'Low', bg: '#F0FDF4', text: '#166534', border: '#BBF7D0' },
 };
 
 function timeAgo(dateStr: string, t: TFn): string {
@@ -383,9 +387,14 @@ function AlertCard({
               const hh = String(dt.getHours()).padStart(2, '0');
               const mi = String(dt.getMinutes()).padStart(2, '0');
               return (
-                <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
+                <p data-testid="notification-date" className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
                   {formatAlertDate(alert.journalEntry.measuredAt)}
-                  <span className="ml-1 font-semibold">{`${hh}:${mi}`}</span>
+                  {/* Literal space — `ml-1` is a CSS margin, which doesn't
+                      add a word boundary in innerText. Without this the
+                      copy/screen-reader output collapses to "Fri, May 811:22"
+                      (walkthrough finding §13.1 / Phase D regression). */}
+                  {' '}
+                  <span className="font-semibold">{`${hh}:${mi}`}</span>
                 </p>
               );
             })()}
@@ -523,6 +532,7 @@ function NotifCard({
                 {notif.title}
               </p>
               <span
+                data-testid="notification-date"
                 className="text-[11px] shrink-0 mt-0.5"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
@@ -709,6 +719,7 @@ function TopTabBar({
       {tabs.map((tab) => (
         <button
           key={tab.id}
+          data-testid={tab.id === 'alerts' ? 'notifications-tab-alerts' : 'notifications-tab-notifications'}
           onClick={() => onChange(tab.id)}
           className="relative flex-1 h-10 rounded-lg text-[13.5px] sm:text-[14px] font-semibold transition flex items-center justify-center gap-2 cursor-pointer"
           style={{
@@ -738,10 +749,11 @@ function TopTabBar({
 }
 
 // ─── Section header ───────────────────────────────────────────────────────────
-function SectionLabel({ children, count }: { children: React.ReactNode; count?: number }) {
+function SectionLabel({ children, count, testId }: { children: React.ReactNode; count?: number; testId?: string }) {
   return (
     <div className="flex items-center gap-2 mb-3 mt-1">
       <span
+        data-testid={testId}
         className="text-[12px] font-bold uppercase tracking-wide"
         style={{ color: 'var(--brand-text-muted)' }}
       >
@@ -1062,11 +1074,15 @@ export default function NotificationsPage() {
                 if (!buckets.has(k)) buckets.set(k, []);
                 buckets.get(k)!.push(a);
               }
+              const sectionTestIds: Partial<Record<TierBucketKey, string>> = {
+                emergency: 'alerts-section-emergency',
+                high: 'alerts-section-elevated',
+              };
               return order
                 .filter((k) => buckets.has(k))
                 .map((k) => (
                   <div key={k}>
-                    <SectionLabel count={buckets.get(k)!.length}>{headings[k]}</SectionLabel>
+                    <SectionLabel count={buckets.get(k)!.length} testId={sectionTestIds[k]}>{headings[k]}</SectionLabel>
                     <div className="space-y-3">
                       <AnimatePresence mode="popLayout">
                         {buckets.get(k)!.map((alert) => (
@@ -1130,6 +1146,7 @@ function PastAlerts({ alerts }: { alerts: Alert[] }) {
   return (
     <div>
       <button
+        data-testid="alerts-section-past"
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-wide transition hover:opacity-75"
         style={{ color: 'var(--brand-text-muted)' }}

@@ -754,4 +754,72 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
     expect(ids).toContain('RULE_PREGNANCY_ACE_ARB')
     expect(ids).toContain('RULE_SYMPTOM_OVERRIDE_PREGNANCY')
   })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Phase/27 — Stage A/B no longer terminal. Tier 1 contraindications and
+  // Stage B emergency rules now coexist with Stage C BP/HR rows so each
+  // escalation ladder defined in v2 addendum Part D gets its own row.
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('Stage A + Stage C — Tier 1 NDHP_HFREF + BP L1 LOW (HFREF_LOW) co-fire on different axes', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 80, diastolicBP: 55, pulse: 72 }),
+      buildCtx({
+        profile: {
+          hasHeartFailure: true,
+          heartFailureType: 'HFREF',
+          resolvedHFType: 'HFREF',
+        },
+        contextMeds: [
+          buildMed({ drugName: 'Diltiazem', drugClass: 'NDHP_CCB' }),
+        ],
+      }),
+    )
+    expect(calls).toHaveLength(2)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_NDHP_HFREF')
+    expect(ids).toContain('RULE_HFREF_LOW')
+  })
+
+  it('Stage A + Stage C — Tier 1 PREGNANCY_ACE_ARB + BP L1 HIGH (PREGNANCY_L1_HIGH) co-fire', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 145, diastolicBP: 85, pulse: 78 }),
+      buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
+    )
+    expect(calls).toHaveLength(2)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_PREGNANCY_ACE_ARB')
+    expect(ids).toContain('RULE_PREGNANCY_L1_HIGH')
+    // L2 threshold (≥160/110) NOT met at 145/85.
+    expect(ids).not.toContain('RULE_PREGNANCY_L2')
+  })
+
+  it('Stage A + Stage B — Tier 1 PREGNANCY_ACE_ARB + BP L2 (PREGNANCY_L2) co-fire (D.5 patient-911)', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 175, diastolicBP: 115, pulse: 80 }),
+      buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
+    )
+    // 175/115 hits pregnancyL2 (≥160/110) and pregnancyL1High (≥140) on
+    // separate axes alongside the contraindication row → three ladders.
+    expect(calls).toHaveLength(3)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_PREGNANCY_ACE_ARB')
+    expect(ids).toContain('RULE_PREGNANCY_L2')
+    expect(ids).toContain('RULE_PREGNANCY_L1_HIGH')
+  })
+
+  it('Stage A + Stage A — Tier 1 PREGNANCY_ACE_ARB + symptom override coexist (different axes)', async () => {
+    const { calls } = await run(
+      buildSession({
+        systolicBP: 130,
+        diastolicBP: 85,
+        symptoms: { ...noSymptoms(), newOnsetHeadache: true },
+      }),
+      buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
+    )
+    expect(calls).toHaveLength(2)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_PREGNANCY_ACE_ARB')
+    expect(ids).toContain('RULE_SYMPTOM_OVERRIDE_PREGNANCY')
+  })
 })

@@ -255,6 +255,7 @@ function ChecklistRow({
   checked,
   onToggle,
   audioText,
+  testId,
 }: {
   icon: React.ReactNode;
   text: string;
@@ -264,9 +265,11 @@ function ChecklistRow({
    *  AudioButton next to the row so a non-reader can hear the option before
    *  toggling. Defaults to undefined (no audio button) for backwards compat. */
   audioText?: string;
+  testId?: string;
 }) {
   return (
     <motion.div
+      data-testid={testId}
       role="button"
       tabIndex={0}
       onClick={onToggle}
@@ -342,7 +345,7 @@ function B1Checklist({ form, setField }: StepProps) {
   const checkedCount = items.filter((it) => Boolean(form[it.key])).length;
 
   return (
-    <div className="space-y-5">
+    <div data-testid="checkin-step-1" className="space-y-5">
       <StepHeader
         title={t('checkin.b1.title')}
         subtitle={t('checkin.b1.subtitle')}
@@ -378,6 +381,7 @@ function B1Checklist({ form, setField }: StepProps) {
             audioText={it.text}
             checked={Boolean(form[it.key])}
             onToggle={() => setField(it.key, !form[it.key] as FormData[typeof it.key])}
+            testId={`checkin-checklist-${it.key}`}
           />
         ))}
       </div>
@@ -393,7 +397,7 @@ function B2Reading({ form, setField }: StepProps) {
   const { t } = useLanguage();
 
   return (
-    <div className="space-y-6">
+    <div data-testid="checkin-step-2" className="space-y-6">
       <StepHeader
         title={t('checkin.b2.title')}
         subtitle={t('checkin.b2.subtitle')}
@@ -498,6 +502,7 @@ function B2Reading({ form, setField }: StepProps) {
         <div className="flex items-end gap-3">
           <div className="flex-1">
             <input
+              data-testid="checkin-systolic"
               id="checkin-systolic"
               type="number"
               inputMode="numeric"
@@ -528,6 +533,7 @@ function B2Reading({ form, setField }: StepProps) {
           <div className="pb-7 text-[32px] font-light" style={{ color: 'var(--brand-text-muted)' }}>/</div>
           <div className="flex-1">
             <input
+              data-testid="checkin-diastolic"
               id="checkin-diastolic"
               type="number"
               inputMode="numeric"
@@ -567,6 +573,7 @@ function B2Reading({ form, setField }: StepProps) {
         </label>
         <div className="flex items-center gap-2">
           <input
+            data-testid="checkin-pulse"
             id="checkin-pulse"
             type="number"
             inputMode="numeric"
@@ -597,7 +604,7 @@ function B2Reading({ form, setField }: StepProps) {
 function StepWeight({ form, setField }: StepProps) {
   const { t } = useLanguage();
   return (
-    <div className="space-y-6">
+    <div data-testid="checkin-step-3" className="space-y-6">
       <StepHeader
         title={t('checkin.weight.title')}
         subtitle={t('checkin.weight.subtitle')}
@@ -745,7 +752,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
   };
 
   return (
-    <div className="space-y-6">
+    <div data-testid="checkin-step-4" className="space-y-6">
       <StepHeader
         title={t('checkin.b4.title')}
         subtitle={t('checkin.b4.subtitle')}
@@ -988,7 +995,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
   ];
 
   return (
-    <div className="space-y-5">
+    <div data-testid="checkin-step-5" className="space-y-5">
       <StepHeader
         title={t('checkin.b3.title')}
         subtitle={t('checkin.b3.subtitle')}
@@ -1768,6 +1775,7 @@ export default function CheckIn() {
         <div className="max-w-3xl mx-auto">
           <motion.button
             type="button"
+            data-testid={step === 'B3' ? 'checkin-submit-btn' : 'checkin-next-btn'}
             onClick={goNext}
             disabled={submitting}
             className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"

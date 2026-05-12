@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { PassportStrategy } from '@nestjs/passport'
+import type { Request } from 'express'
 import { ExtractJwt, Strategy } from 'passport-jwt'
 import { UserRole } from '../../generated/prisma/enums.js'
 
@@ -12,11 +13,26 @@ export interface JwtPayload {
   exp?: number
 }
 
+// Read the access token from the HttpOnly access_token cookie. This lets the
+// frontend stop persisting the JWT in JS-readable storage (closes B6 — XSS
+// can no longer exfiltrate the access token).
+function fromAccessCookie(req: Request): string | null {
+  const cookies = req?.cookies as Record<string, string> | undefined
+  return cookies?.['access_token'] ?? null
+}
+
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   constructor(config: ConfigService) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      // Accept BOTH the Authorization: Bearer header AND the HttpOnly cookie.
+      // Bearer takes precedence so existing API clients that send the header
+      // (e.g. mobile, ad-hoc curl) keep working; the cookie is the new path
+      // for browser sessions where JS no longer holds the token.
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        fromAccessCookie,
+      ]),
       ignoreExpiration: false,
       secretOrKey: config.get<string>('JWT_ACCESS_SECRET', 'fallback-secret'),
     })

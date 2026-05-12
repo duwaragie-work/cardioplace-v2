@@ -30,14 +30,13 @@ test.describe.serial('Patient onboarding journey (ad-hoc account)', () => {
     // the auth.service should accept seed perma-OTP only for seeded accounts.
     // This ad-hoc flow needs a real sent OTP — see backend logs for the
     // `OTP for <email>: NNNNNN` line.
-    test.fail(
+    test.skip(
       true,
-      'Ad-hoc sign-in requires reading a fresh OTP from backend logs ' +
-        '— spec scaffolds the journey but cannot complete without a log-tail helper. ' +
-        'Mark TODO for next pass: seed an extra blank account in seed.ts that uses 666666.',
+      'TODO(next-pass): seed a blank-archetype patient in seed.ts that uses the perma-OTP ' +
+        '666666, then exercise the onboarding redirect end-to-end. Until then the ad-hoc ' +
+        'flow needs a fresh OTP from backend logs and cannot run unattended.',
     )
     await page.goto('/sign-in')
-    // ...
   })
 })
 

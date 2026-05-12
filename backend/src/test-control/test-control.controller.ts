@@ -98,6 +98,17 @@ export class TestControlController {
     return { ok: true }
   }
 
+  @Post('retry-event/backdate')
+  @HttpCode(200)
+  async backdateRetryEvent(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { alertId: string; deltaSeconds: number },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.backdateRetryEvent(body.alertId, body.deltaSeconds)
+    return { ok: true }
+  }
+
   @Post('journal/backdate-latest')
   @HttpCode(200)
   async backdateLastJournalEntry(
@@ -118,6 +129,95 @@ export class TestControlController {
     this.assertAuthorized(secret)
     await this.svc.backdateMedicationVerified(body.medId, body.deltaSeconds)
     return { ok: true }
+  }
+
+  @Post('medications/backdate-all-for-user')
+  @HttpCode(200)
+  async backdateAllUserMedications(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; deltaSeconds: number },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.backdateAllUserMedications(body.userId, body.deltaSeconds)
+  }
+
+  @Post('user/backdate-updated-at')
+  @HttpCode(200)
+  async backdateUserUpdatedAt(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; deltaSeconds: number },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.backdateUserUpdatedAt(body.userId, body.deltaSeconds)
+    return { ok: true }
+  }
+
+  @Post('journal/seed-at-time')
+  @HttpCode(200)
+  async seedReadingsAtTime(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: {
+      userId: string
+      readings: Array<{
+        measuredAt: string
+        systolicBP: number
+        diastolicBP: number
+        pulse: number
+        sessionId?: string
+      }>
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.seedReadingsAtTime(body.userId, body.readings)
+  }
+
+  @Post('user/set-condition')
+  @HttpCode(200)
+  async setUserCondition(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: {
+      userId: string
+      flag:
+        | 'isPregnant'
+        | 'historyPreeclampsia'
+        | 'hasHeartFailure'
+        | 'hasAFib'
+        | 'hasCAD'
+        | 'hasHCM'
+        | 'hasDCM'
+        | 'hasBradycardia'
+        | 'hasTachycardia'
+        | 'diagnosedHypertension'
+      value: boolean
+      heartFailureType?: 'HFREF' | 'HFPEF' | 'UNKNOWN' | 'NOT_APPLICABLE'
+    },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.setUserCondition(
+      body.userId,
+      body.flag,
+      body.value,
+      body.heartFailureType,
+    )
+    return { ok: true }
+  }
+
+  @Post('user/set-medication')
+  @HttpCode(200)
+  async setUserMedication(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: {
+      userId: string
+      med: {
+        drugName: string
+        drugClass: string
+        frequency: 'ONCE_DAILY' | 'TWICE_DAILY' | 'THREE_TIMES_DAILY' | 'AS_NEEDED' | 'UNSURE'
+        verificationStatus?: 'VERIFIED' | 'UNVERIFIED'
+      }
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.setUserMedication(body.userId, body.med)
   }
 
   // ─── Reset ──────────────────────────────────────────────────────────────

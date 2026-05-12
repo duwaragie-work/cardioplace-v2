@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { signInPatient } from '../helpers/auth.js'
+import { signInPatient, authedApi } from '../helpers/auth.js'
 import { PATIENTS } from '../helpers/accounts.js'
 import { byTestId, T } from '../helpers/selectors.js'
+import { postJournalEntry } from '../helpers/api.js'
+import { API_BASE_URL } from '../playwright.config.js'
 
 /**
  * Patient /readings + /notifications surfaces. These two tabs are where the
@@ -17,7 +19,13 @@ test.describe('/readings — TZ day-grouping regression (brief §13.1, walkthrou
 
   test('every group header date matches its rows\' date prefixes', async ({ page }) => {
     await page.goto('/readings')
+    // CI cold-start renders /readings before the seeded readings finish
+    // hydrating from the API — the default 10s actionTimeout is occasionally
+    // too tight on a freshly-built backend. Wait up to 15s for the first
+    // group to attach; if none ever do, the testid simply isn't wired and we
+    // skip below as before.
     const groups = page.locator(byTestId(T.readings.group))
+    await groups.first().waitFor({ state: 'attached', timeout: 15_000 }).catch(() => {})
     const count = await groups.count()
     test.skip(
       count === 0,
@@ -26,7 +34,13 @@ test.describe('/readings — TZ day-grouping regression (brief §13.1, walkthrou
     )
     for (let i = 0; i < count; i++) {
       const group = groups.nth(i)
-      const headerDate = (await group.locator(byTestId(T.readings.groupDate)).innerText()).trim()
+      // The date header only renders for multi-reading days (readings/page.tsx:1641
+      // — `group.items.length > 1`). Single-reading groups still get the parent
+      // testid but no `reading-group-date` child; skip those rather than time
+      // out waiting for a header that will never exist.
+      const dateLocator = group.locator(byTestId(T.readings.groupDate))
+      if ((await dateLocator.count()) === 0) continue
+      const headerDate = (await dateLocator.innerText()).trim()
       const firstRowDate = (
         await group.locator(byTestId(T.readings.rowDate)).first().innerText()
       ).trim()
@@ -38,10 +52,29 @@ test.describe('/readings — TZ day-grouping regression (brief §13.1, walkthrou
   })
 
   test('each row has BP value + pulse + edit/delete affordances', async ({ page }) => {
+    // Self-seed a deterministic reading via the API. Aisha's seed-time
+    // readings are wiped when prior specs (05/09/15) call tc.resetUser,
+    // and in --workers=1 sequential mode this test runs after several of
+    // those — so the loose ">=1 BP row" assertion was order-dependent.
+    // Posting one row up front makes the test self-contained.
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    await postJournalEntry(api, {
+      measuredAt: new Date().toISOString(),
+      systolicBP: 124,
+      diastolicBP: 78,
+      pulse: 72,
+    })
+    await api.dispose()
+
     await page.goto('/readings')
-    // Loose: at least one BP row exists (Aisha has 5 seeded readings).
-    const bpText = page.getByText(/\d{2,3}\/\d{2,3}/)
-    expect(await bpText.count()).toBeGreaterThanOrEqual(1)
+    // Wait for at least one row group to render (proves the seeded reading
+    // landed in the page payload). The BP value itself is split across three
+    // span text nodes — `<span>124</span><span>/</span><span>78</span>` — so
+    // `getByText()` against a single regex never matches; assert against the
+    // concatenated `innerText` of the readings region instead.
+    await expect(page.locator(byTestId(T.readings.group)).first()).toBeVisible()
+    const text = await page.locator('main').innerText()
+    expect(text, 'expected at least one BP row in readings list').toMatch(/\d{2,3}\s*\/\s*\d{2,3}/)
   })
 })
 

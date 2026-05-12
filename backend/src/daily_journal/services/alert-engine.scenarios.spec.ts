@@ -230,9 +230,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.severity).toBe('HIGH')
     expect(createArgs.data.type).toBe('MEDICATION_ADHERENCE')
     expect(createArgs.data.pulsePressure).toBeNull()
-    expect(createArgs.data.patientMessage).toContain(
-      'blood pressure medicine',
-    )
+    expect(createArgs.data.patientMessage).toContain('Lisinopril')
     expect(createArgs.data.patientMessage).toContain('pregnant')
     expect(createArgs.data.physicianMessage).toContain('Teratogenic')
     expect(createArgs.data.physicianMessage).toContain('Lisinopril')

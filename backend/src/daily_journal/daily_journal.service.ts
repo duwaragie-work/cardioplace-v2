@@ -433,10 +433,29 @@ export class DailyJournalService {
       }
     }
 
-    const updated = await this.prisma.deviationAlert.update({
-      where: { id: alertId },
-      data: { status: 'ACKNOWLEDGED', acknowledgedAt: new Date() },
-    })
+    // Bug #4 fix: ack must propagate to EscalationEvent rows so the JCAHO
+    // 15-field audit trail (CLINICAL_SPEC §V2-D) carries the patient's
+    // ack-by + ack-at on every dispatched event row, not just the parent
+    // DeviationAlert. Bug #2 fix: also populate acknowledgedByUserId so
+    // the actor (patient vs admin vs provider) is recoverable from the
+    // alert row alone — matches the admin path semantics in
+    // alert-resolution.service.ts. Both writes happen inside a single
+    // transaction so a partial failure can't desynchronize state.
+    const now = new Date()
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.deviationAlert.update({
+        where: { id: alertId },
+        data: {
+          status: 'ACKNOWLEDGED',
+          acknowledgedAt: now,
+          acknowledgedByUserId: userId,
+        },
+      }),
+      this.prisma.escalationEvent.updateMany({
+        where: { alertId, acknowledgedAt: null, resolvedAt: null },
+        data: { acknowledgedAt: now, acknowledgedBy: userId },
+      }),
+    ])
 
     return {
       statusCode: 200,
@@ -647,10 +666,13 @@ export class DailyJournalService {
     // averaged vitals for what's left of the session.
     //
     // DeviationAlert / EscalationEvent rows owned by `entry` cascade-delete
-    // via the FK (phase/2 schema). The re-evaluation below takes care of any
-    // *sibling-owned* alert that should now be resolved or re-classified — if
-    // the average changes such that no rule fires, AlertEngine.resolveOpenAlerts
-    // flips open BP_LEVEL_1 alerts to RESOLVED.
+    // via the FK (phase/2 schema). The re-evaluation below re-runs the rule
+    // engine against the surviving session-anchor entry. Bug #6/#7 fix
+    // (alert-engine.service.ts) removed the silent auto-resolve sweep, so
+    // sibling-owned alerts retain their state until an admin resolves them
+    // explicitly via /admin/alerts/:id/resolve. Re-evaluation may surface
+    // NEW alerts on the surviving entry, but it never silently closes
+    // existing ones.
     const survivingAnchor = await this.findSessionReevalAnchor(entry)
 
     await this.prisma.journalEntry.delete({ where: { id } })

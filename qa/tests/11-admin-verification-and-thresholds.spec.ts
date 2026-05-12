@@ -53,10 +53,15 @@ test.describe('Admin medication verification', () => {
     const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
     const u = await tc.findUser(PATIENTS.aisha.email)
 
-    // List Aisha's meds to grab one to reject (Lisinopril per seed.ts)
+    // List Aisha's meds to grab one to reject (Lisinopril per seed.ts).
+    // Backend wraps successful responses in { statusCode, message, data } —
+    // unwrap so .find() runs against the array, not the envelope.
     const medsRes = await patientApi.get('me/medications')
     expect(medsRes.ok()).toBeTruthy()
-    const meds: Array<{ id: string; drugName: string }> = await medsRes.json()
+    const medsBody = await medsRes.json()
+    const meds: Array<{ id: string; drugName: string }> = Array.isArray(medsBody)
+      ? medsBody
+      : (medsBody?.data ?? [])
     const lisinopril = meds.find((m) => /lisinopril/i.test(m.drugName))
     expect(lisinopril, 'Aisha should have a Lisinopril row from seed').toBeDefined()
 
@@ -81,19 +86,29 @@ test.describe('Admin threshold editor', () => {
 
   test('MEDICAL_DIRECTOR can write PatientThreshold; PROVIDER cannot', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
-    const u = await tc.findUser(PATIENTS.aisha.email)
+    // Use Priya — she has no seeded threshold (Aisha picks one up across
+    // runs and would 409 on re-POST). Keeps this test idempotent on first
+    // run; subsequent runs fall back to PATCH if a threshold exists.
+    const u = await tc.findUser(PATIENTS.priya.email)
 
     const mdApi = await authedApi(API_BASE_URL, ADMINS.medicalDirector.email, 'admin')
-    const mdRes = await mdApi.post(`admin/patients/${u.id}/threshold`, {
-      data: {
-        sbpUpperTarget: 130,
-        sbpLowerTarget: 100,
-        dbpUpperTarget: 85,
-        dbpLowerTarget: 60,
-        notes: 'qa-test threshold',
-      },
+    const thresholdBody = {
+      sbpUpperTarget: 130,
+      sbpLowerTarget: 100,
+      dbpUpperTarget: 85,
+      dbpLowerTarget: 60,
+      notes: 'qa-test threshold',
+    }
+    let mdRes = await mdApi.post(`admin/patients/${u.id}/threshold`, {
+      data: thresholdBody,
     })
-    expect(mdRes.ok(), `MD threshold POST: ${await mdRes.text()}`).toBeTruthy()
+    if (mdRes.status() === 409) {
+      // Threshold already exists from a previous run — patch instead.
+      mdRes = await mdApi.patch(`admin/patients/${u.id}/threshold`, {
+        data: thresholdBody,
+      })
+    }
+    expect(mdRes.ok(), `MD threshold write: ${await mdRes.text()}`).toBeTruthy()
 
     const provApi = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
     const provRes = await provApi.post(`admin/patients/${u.id}/threshold`, {
