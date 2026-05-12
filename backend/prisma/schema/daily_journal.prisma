@@ -32,6 +32,14 @@ model JournalEntry {
   ruqPain          Boolean @default(false)
   edema            Boolean @default(false)
 
+  // Cluster 6 (Manisha 5/10/26) — patient-driven signals for brady-symptomatic
+  // (dizziness/syncope), HF decompensation (legSwelling + weightDelta), and
+  // palpitations rules. `edema` stays separate — preeclampsia-specific.
+  dizziness    Boolean @default(false)
+  syncope      Boolean @default(false)
+  palpitations Boolean @default(false)
+  legSwelling  Boolean @default(false)
+
   otherSymptoms String[]
 
   teachBackAnswer  String?

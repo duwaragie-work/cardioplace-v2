@@ -173,6 +173,11 @@ const en = {
   'checkin.b3.symptomNewHeadache': 'New headache (not usual for you)',
   'checkin.b3.symptomRuq': 'Pain in upper-right belly',
   'checkin.b3.symptomEdema': 'New swelling in face, hands, or feet',
+  // Cluster 6 (Manisha 5/10/26 sign-off) — exact patient-facing labels.
+  'checkin.b3.symptomDizziness': 'Feeling dizzy or lightheaded',
+  'checkin.b3.symptomSyncope': 'Felt faint or passed out recently',
+  'checkin.b3.symptomPalpitations': "Heart feels like it's racing or fluttering",
+  'checkin.b3.symptomLegSwelling': 'Swelling in your legs or feet, or gained weight quickly',
   'checkin.b3.otherLabel': 'Anything else? (optional)',
   'checkin.b3.otherPlaceholder': 'In your own words…',
 

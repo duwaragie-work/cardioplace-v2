@@ -122,6 +122,12 @@ interface FormData {
   newOnsetHeadache: boolean;
   ruqPain: boolean;
   edema: boolean;
+  // Cluster 6 (Manisha 5/10/26) — patient-driven signals for brady-symptomatic,
+  // HF decomp, palpitations, and orthostatic rules.
+  dizziness: boolean;
+  syncope: boolean;
+  palpitations: boolean;
+  legSwelling: boolean;
   otherSymptomsText: string;
 }
 
@@ -178,6 +184,10 @@ function emptyForm(): FormData {
     newOnsetHeadache: false,
     ruqPain: false,
     edema: false,
+    dizziness: false,
+    syncope: false,
+    palpitations: false,
+    legSwelling: false,
     otherSymptomsText: '',
   };
 }
@@ -964,6 +974,12 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
     { key: 'chestPainOrDyspnea', icon: <Wind className="w-5 h-5" />, text: t('checkin.b3.symptomChestPain') },
     { key: 'focalNeuroDeficit', icon: <Zap className="w-5 h-5" />, text: t('checkin.b3.symptomNeuro') },
     { key: 'severeEpigastricPain', icon: <Stethoscope className="w-5 h-5" />, text: t('checkin.b3.symptomStomach') },
+    // Cluster 6 (Manisha 5/10/26) — feed brady-symptomatic, palpitations,
+    // orthostatic, and HF-decomp engine rules.
+    { key: 'dizziness', icon: <Activity className="w-5 h-5" />, text: t('checkin.b3.symptomDizziness') },
+    { key: 'syncope', icon: <Activity className="w-5 h-5" />, text: t('checkin.b3.symptomSyncope') },
+    { key: 'palpitations', icon: <Heart className="w-5 h-5" />, text: t('checkin.b3.symptomPalpitations') },
+    { key: 'legSwelling', icon: <Droplets className="w-5 h-5" />, text: t('checkin.b3.symptomLegSwelling') },
   ];
   const pregnancy: { key: keyof FormData; icon: React.ReactNode; text: string }[] = [
     { key: 'newOnsetHeadache', icon: <Brain className="w-5 h-5" />, text: t('checkin.b3.symptomNewHeadache') },
@@ -1504,6 +1520,11 @@ export default function CheckIn() {
         newOnsetHeadache: isPregnant ? form.newOnsetHeadache : false,
         ruqPain: isPregnant ? form.ruqPain : false,
         edema: isPregnant ? form.edema : false,
+        // Cluster 6 — universal (non-pregnancy) symptom signals.
+        dizziness: form.dizziness,
+        syncope: form.syncope,
+        palpitations: form.palpitations,
+        legSwelling: form.legSwelling,
         otherSymptoms: form.otherSymptomsText.trim() ? [form.otherSymptomsText.trim()] : undefined,
       });
 

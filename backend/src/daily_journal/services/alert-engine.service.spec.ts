@@ -18,6 +18,7 @@ function baseSession(over: Partial<SessionAverage> = {}): SessionAverage {
     systolicBP: 125,
     diastolicBP: 78,
     pulse: 72,
+    weight: null,
     readingCount: 1,
     symptoms: {
       severeHeadache: false,
@@ -29,6 +30,10 @@ function baseSession(over: Partial<SessionAverage> = {}): SessionAverage {
       newOnsetHeadache: false,
       ruqPain: false,
       edema: false,
+      dizziness: false,
+      syncope: false,
+      palpitations: false,
+      legSwelling: false,
       otherSymptoms: [],
     },
     suboptimalMeasurement: false,
@@ -105,6 +110,7 @@ describe('AlertEngineService (orchestrator)', () => {
       },
       journalEntry: {
         findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
       },
       notification: {
         // alert-engine writes a patient-facing dashboard Notification per alert
@@ -320,6 +326,10 @@ describe('AlertEngineService (orchestrator)', () => {
             newOnsetHeadache: false,
             ruqPain: false,
             edema: false,
+            dizziness: false,
+            syncope: false,
+            palpitations: false,
+            legSwelling: false,
             otherSymptoms: [],
           },
         }),

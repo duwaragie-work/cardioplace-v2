@@ -72,6 +72,16 @@ export interface AlertContext {
     reason: 'FORGOT' | 'SIDE_EFFECTS' | 'RAN_OUT' | 'COST' | 'INTENTIONAL' | 'OTHER'
     missedDoses: number
   }>
+
+  /** Cluster 6 — adherence template inputs. Cleaner than threading them
+   *  through `physicianAnnotations`. Only populated for RULE_MEDICATION_MISSED. */
+  adherenceDaysWithMiss?: number
+  adherenceDaysWithMissOver7d?: number
+  adherenceBetaBlockerCarveOut?: boolean
+
+  /** Cluster 6 — patient first name (when available). Used by caregiver
+   *  message templates for the new HF / adherence rules. */
+  patientName?: string | null
 }
 
 export type MessageBuilder = (ctx: AlertContext) => string
@@ -422,33 +432,153 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       `Tier 3 — Loop diuretic + SBP ${ctx.systolicBP ?? '?'} — increased hypotension sensitivity.${physSuffix(ctx)}`,
   },
 
-  // ── Tier 2 medication adherence ───────────────────────────────────────
-  // TODO(Dr. Singal): review all three tones + confirm that single-miss is
-  // the right threshold. Wording is a first-pass placeholder.
+  // ── Tier 2 medication adherence (Cluster 6 — Manisha 5/10/26 wording) ─
   RULE_MEDICATION_MISSED: {
     patientMessage: (ctx) => {
       const meds = ctx.missedMedications ?? []
-      if (meds.length === 0) {
-        return "We noticed you didn't take your medication today. Try to take your next dose on time, and talk to your care team if you're having trouble staying on schedule."
+      const list = meds.length > 0 ? formatDrugList(meds.map((m) => m.drugName)) : ''
+      if (ctx.adherenceBetaBlockerCarveOut && list) {
+        return (
+          `It looks like you may have missed ${list} today. This medicine is important for your heart. ` +
+          'Please try to take your next dose on time, and let your care team know if anything is making it hard to stay on schedule.'
+        )
       }
-      const list = meds.map((m) => m.drugName).join(', ')
-      return `We noticed you missed ${list} today. Try to take your next dose on time, and let your care team know if there's anything making it hard to stay on schedule.`
+      if (list) {
+        return (
+          `It looks like you may have missed ${list} a couple of times recently. These medicines help protect your heart and keep your blood pressure steady. ` +
+          'If anything is making it hard to take them, your care team can help.'
+        )
+      }
+      return (
+        'It looks like you may have missed your medicine a couple of times recently. Taking your medicine regularly helps keep your blood pressure steady. ' +
+        'If something is making it hard to stay on schedule, your care team can help.'
+      )
     },
     caregiverMessage: (ctx) => {
-      const meds = (ctx.missedMedications ?? []).map((m) => m.drugName).join(', ')
-      return meds
-        ? `The patient reported missing ${meds} today. A gentle reminder may help them stay on track.`
-        : 'The patient reported missing a medication dose today. A gentle reminder may help.'
+      const name = ctx.patientName?.trim() || 'The patient'
+      const days = ctx.adherenceDaysWithMiss ?? 0
+      const meds = ctx.missedMedications ?? []
+      const list = meds.length > 0 ? formatDrugList(meds.map((m) => m.drugName)) : ''
+      if (list) {
+        return (
+          `${name} has reported missing ${list} on ${days} of the last 3 days. ` +
+          'A gentle check-in may help — common reasons include side effects, cost, or forgetting.'
+        )
+      }
+      return (
+        `${name} has reported missing medication doses on ${days} of the last 3 days. ` +
+        'A gentle check-in may help identify any barriers.'
+      )
     },
     physicianMessage: (ctx) => {
+      const days = ctx.adherenceDaysWithMiss ?? 0
       const meds = ctx.missedMedications ?? []
       if (meds.length === 0) {
-        return `Tier 2 — Patient self-reported missed dose (no medication specified). Consider reconciliation at next visit.${physSuffix(ctx)}`
+        return (
+          `Tier 2 — Non-adherence pattern: patient self-reported missed doses on ${days}/3 days (no medication specified). ` +
+          `Consider barrier assessment and reconciliation.${physSuffix(ctx)}`
+        )
       }
       const detail = meds
-        .map((m) => `${m.drugName} (${m.drugClass}) — reason: ${m.reason}, doses missed: ${m.missedDoses}`)
+        .map(
+          (m) =>
+            `${m.drugName} (${m.drugClass}) — missed ${m.missedDoses}/3 days — reason: ${m.reason}`,
+        )
         .join('; ')
-      return `Tier 2 — Non-adherence self-reported: ${detail}.${physSuffix(ctx)}`
+      return (
+        `Tier 2 — Non-adherence pattern: ${detail}. ` +
+        `Consider barrier assessment; if persistent, evaluate regimen simplification or longer-acting agent.${physSuffix(ctx)}`
+      )
     },
+  },
+
+  // ── Cluster 6 — bradycardia + symptom-driven rules ─────────────────────
+
+  RULE_BRADY_ABSOLUTE: {
+    patientMessage: () =>
+      'Your heart rate is very low and your care team has been notified. Please contact your care team or call 911 right away if you feel dizzy, faint, short of breath, or have chest pain.',
+    caregiverMessage: (ctx) => {
+      const name = ctx.patientName?.trim() || 'The patient'
+      return `${name}'s heart rate is below 40 bpm. This needs urgent attention — please help them contact their care team or 911 if they have any symptoms.`
+    },
+    physicianMessage: (ctx) =>
+      `Tier 1 — Absolute bradycardia ${hr(ctx)}. ECG + pacemaker evaluation; hold rate-controlling agents pending review.${physSuffix(ctx)}`,
+  },
+
+  RULE_HF_DECOMPENSATION: {
+    patientMessage: () =>
+      'You reported swelling in your ankles or legs (or a quick weight gain). Because of your heart condition, your care team needs to know about this right away. ' +
+      'Please also let them know if you have gained weight, feel more short of breath, or are having trouble lying flat.',
+    caregiverMessage: (ctx) => {
+      const name = ctx.patientName?.trim() || 'The patient'
+      return `${name} reported leg swelling or rapid weight gain. With their heart condition this can indicate fluid overload — please contact their care team today.`
+    },
+    physicianMessage: (ctx) =>
+      `Tier 2 — Possible HF decompensation. Patient reported leg swelling and/or >2 lb weight gain in 24h. Review volume status, diuretic regimen, and consider in-person visit.${physSuffix(ctx)}`,
+  },
+
+  RULE_DHP_CCB_LEG_SWELLING: {
+    patientMessage: () =>
+      'You reported swelling in your ankles or legs. This can sometimes happen with your blood-pressure medicine. It is usually not dangerous, but your care team should know — they may want to adjust your medicine.',
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) =>
+      `Tier 3 — Possible DHP-CCB peripheral edema. Patient on dihydropyridine CCB reports leg swelling without HF flag. Consider dose reduction or non-DHP alternative.${physSuffix(ctx)}`,
+  },
+
+  RULE_BETA_BLOCKER_DIZZINESS: {
+    patientMessage: () =>
+      "You reported feeling dizzy, and your blood pressure looks lower than usual. Please sit or lie down until it passes, and let your care team know — they may want to review your medicine.",
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) =>
+      `Tier 3 — Possible β-blocker-induced hypotension. ${bp(ctx)} with dizziness reported. Consider dose review or timing change.${physSuffix(ctx)}`,
+  },
+
+  RULE_ORTHOSTATIC_HYPOTENSION: {
+    patientMessage: () =>
+      "You reported feeling dizzy, and your blood pressure dropped compared to your last reading. Try standing up slowly and drinking water. If it happens again, please let your care team know.",
+    caregiverMessage: (ctx) => {
+      const name = ctx.patientName?.trim() || 'The patient'
+      return `${name} reported dizziness with a drop in blood pressure from the prior reading. Watch for unsteadiness when they stand up and let their care team know if it continues.`
+    },
+    physicianMessage: (ctx) =>
+      `Tier 2 — Orthostatic hypotension pattern: SBP drop ≥15 mmHg from prior session with dizziness. Review antihypertensive regimen + hydration status.${physSuffix(ctx)}`,
+  },
+
+  RULE_AFIB_PALPITATIONS: {
+    patientMessage: () =>
+      "You reported your heart feeling like it's racing or fluttering. With your AFib history, your care team should know about this. Please contact them today.",
+    caregiverMessage: (ctx) => {
+      const name = ctx.patientName?.trim() || 'The patient'
+      return `${name} reported palpitations. With their AFib history, please help them contact their care team today.`
+    },
+    physicianMessage: (ctx) =>
+      `Tier 2 — AFib patient reports palpitations. Consider paroxysmal AFib recurrence. Review rate control.${physSuffix(ctx)}`,
+  },
+
+  RULE_TACHY_WITH_PALPITATIONS: {
+    patientMessage: () =>
+      "You reported your heart racing, and your pulse is higher than usual. Please rest, drink water, and let your care team know if it doesn't settle in the next hour.",
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) =>
+      `Tier 2 — Symptomatic tachycardia: ${hr(ctx)} with palpitations reported. Rule out causes; consider Holter / event monitor.${physSuffix(ctx)}`,
+  },
+
+  RULE_PALPITATIONS_GENERAL: {
+    patientMessage: () =>
+      "You reported your heart feeling like it's racing or fluttering. Your pulse looks normal right now, but please mention this at your next visit — your care team may want to take a closer look.",
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) =>
+      `Tier 3 — Patient reports palpitations with normal resting HR. Consider Holter/event monitor at next visit.${physSuffix(ctx)}`,
+  },
+
+  RULE_SYNCOPE_GENERAL: {
+    patientMessage: () =>
+      'You reported feeling faint or passing out recently. This always needs a doctor to look at. Please contact your care team today — and call 911 if you feel faint again with chest pain, weakness, or trouble breathing.',
+    caregiverMessage: (ctx) => {
+      const name = ctx.patientName?.trim() || 'The patient'
+      return `${name} reported a recent fainting or near-fainting episode. Please help them contact their care team today.`
+    },
+    physicianMessage: (ctx) =>
+      `Tier 2 — Syncope/near-syncope reported. Consider cardiac vs. vasovagal etiology. ECG recommended.${physSuffix(ctx)}`,
   },
 }

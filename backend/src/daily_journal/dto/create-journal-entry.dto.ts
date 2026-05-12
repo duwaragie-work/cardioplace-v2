@@ -181,6 +181,14 @@ export class CreateJournalEntryDto {
   @IsOptional() @IsBoolean() ruqPain?: boolean
   @IsOptional() @IsBoolean() edema?: boolean
 
+  // Cluster 6 (Manisha 5/10/26) — feeds brady-symptomatic, HF decomp,
+  // palpitations, and orthostatic rules. Independent of the L2 BP-emergency
+  // override set above — these flow to condition-specific rules instead.
+  @IsOptional() @IsBoolean() dizziness?: boolean
+  @IsOptional() @IsBoolean() syncope?: boolean
+  @IsOptional() @IsBoolean() palpitations?: boolean
+  @IsOptional() @IsBoolean() legSwelling?: boolean
+
   // Patient's freeform "anything else" — sent as String[] so the schema
   // column can hold multiple notes if a future UI captures more than one.
   @IsOptional()

@@ -93,6 +93,10 @@ export class DailyJournalService {
           newOnsetHeadache: dto.newOnsetHeadache ?? false,
           ruqPain: dto.ruqPain ?? false,
           edema: dto.edema ?? false,
+          dizziness: dto.dizziness ?? false,
+          syncope: dto.syncope ?? false,
+          palpitations: dto.palpitations ?? false,
+          legSwelling: dto.legSwelling ?? false,
           otherSymptoms: [
             ...(dto.otherSymptoms ?? []),
             ...(dto.symptoms ?? []),
@@ -187,6 +191,10 @@ export class DailyJournalService {
       if (dto.newOnsetHeadache !== undefined) data.newOnsetHeadache = dto.newOnsetHeadache
       if (dto.ruqPain !== undefined) data.ruqPain = dto.ruqPain
       if (dto.edema !== undefined) data.edema = dto.edema
+      if (dto.dizziness !== undefined) data.dizziness = dto.dizziness
+      if (dto.syncope !== undefined) data.syncope = dto.syncope
+      if (dto.palpitations !== undefined) data.palpitations = dto.palpitations
+      if (dto.legSwelling !== undefined) data.legSwelling = dto.legSwelling
 
       if (dto.otherSymptoms !== undefined || dto.symptoms !== undefined) {
         data.otherSymptoms = [
@@ -915,6 +923,10 @@ export class DailyJournalService {
     newOnsetHeadache?: boolean
     ruqPain?: boolean
     edema?: boolean
+    dizziness?: boolean
+    syncope?: boolean
+    palpitations?: boolean
+    legSwelling?: boolean
     otherSymptoms: string[]
     teachBackAnswer: string | null
     teachBackCorrect: boolean | null
@@ -947,6 +959,10 @@ export class DailyJournalService {
       newOnsetHeadache: entry.newOnsetHeadache ?? false,
       ruqPain: entry.ruqPain ?? false,
       edema: entry.edema ?? false,
+      dizziness: entry.dizziness ?? false,
+      syncope: entry.syncope ?? false,
+      palpitations: entry.palpitations ?? false,
+      legSwelling: entry.legSwelling ?? false,
       otherSymptoms: entry.otherSymptoms,
       teachBackAnswer: entry.teachBackAnswer,
       teachBackCorrect: entry.teachBackCorrect,

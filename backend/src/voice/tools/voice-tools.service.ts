@@ -101,6 +101,12 @@ export class VoiceToolsService {
             new_onset_headache: { type: Type.BOOLEAN, description: 'Pregnancy-only trigger; safely ignored otherwise.' },
             ruq_pain: { type: Type.BOOLEAN, description: 'Right-upper-quadrant pain (pregnancy-only trigger).' },
             edema: { type: Type.BOOLEAN, description: 'Pregnancy-only trigger; safely ignored otherwise.' },
+            // Cluster 6 (Manisha 5/10/26) — feed brady-symptomatic, palpitations,
+            // orthostatic, HF-decompensation, and DHP-CCB side-effect rules.
+            dizziness: { type: Type.BOOLEAN, description: 'Patient reports feeling dizzy or lightheaded.' },
+            syncope: { type: Type.BOOLEAN, description: 'Patient fainted or had a near-fainting episode recently.' },
+            palpitations: { type: Type.BOOLEAN, description: "Patient reports heart racing or fluttering." },
+            leg_swelling: { type: Type.BOOLEAN, description: 'Patient reports new leg/foot swelling or rapid weight gain. Routes to HF decompensation and DHP-CCB rules.' },
             other_symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Patient-described symptoms not covered by the structured booleans. ALWAYS English.' },
             measurement_conditions: {
               type: Type.OBJECT,
@@ -304,6 +310,11 @@ export class VoiceToolsService {
     dto.newOnsetHeadache = toBool(args.new_onset_headache, false)
     dto.ruqPain = toBool(args.ruq_pain, false)
     dto.edema = toBool(args.edema, false)
+    // Cluster 6 — universal symptom signals.
+    dto.dizziness = toBool(args.dizziness, false)
+    dto.syncope = toBool(args.syncope, false)
+    dto.palpitations = toBool(args.palpitations, false)
+    dto.legSwelling = toBool(args.leg_swelling, false)
     const otherSymptoms = toStringArray(args.other_symptoms)
     if (otherSymptoms.length) dto.otherSymptoms = otherSymptoms
 

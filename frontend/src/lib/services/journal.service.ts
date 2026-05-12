@@ -55,6 +55,11 @@ export interface JournalEntryPayload {
   newOnsetHeadache?: boolean
   ruqPain?: boolean
   edema?: boolean
+  // Cluster 6 (Manisha 5/10/26) — universal symptom signals.
+  dizziness?: boolean
+  syncope?: boolean
+  palpitations?: boolean
+  legSwelling?: boolean
   /** Patient's "anything else" freeform notes — stored as String[]. */
   otherSymptoms?: string[]
   notes?: string

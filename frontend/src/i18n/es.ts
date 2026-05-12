@@ -178,6 +178,11 @@ const es: Record<TranslationKey, string> = {
   'checkin.b3.symptomNewHeadache': 'Dolor de cabeza nuevo (no habitual en usted)',
   'checkin.b3.symptomRuq': 'Dolor en la parte superior derecha del abdomen',
   'checkin.b3.symptomEdema': 'Hinchazón nueva en cara, manos o pies',
+  // Cluster 6 — Priority 2 translation (pending ES sign-off).
+  'checkin.b3.symptomDizziness': 'Sentirse mareado o aturdido',
+  'checkin.b3.symptomSyncope': 'Se desmayó o estuvo a punto de desmayarse recientemente',
+  'checkin.b3.symptomPalpitations': 'Siente que el corazón se acelera o le palpita',
+  'checkin.b3.symptomLegSwelling': 'Hinchazón en piernas o pies, o aumento rápido de peso',
   'checkin.b3.otherLabel': '¿Algo más? (opcional)',
   'checkin.b3.otherPlaceholder': 'En sus propias palabras…',
 

@@ -38,10 +38,11 @@ import {
   standardL1HighRule,
   standardL1LowRule,
 } from './standard.js'
-import { afibHrRule, bradyRule, buildTachyRule } from './hr-branches.js'
+import { afibHrRule, bradyAbsoluteRule, bradySymptomaticRule, buildTachyRule } from './hr-branches.js'
 import { pulsePressureWideRule } from './pulse-pressure.js'
 import { loopDiureticHypotensionRule } from './loop-diuretic.js'
-import { medicationMissedRule } from './adherence.js'
+import { medicationMissedRule, medicationMissedRuleWithWindow } from './adherence.js'
+import type { AdherenceWindow } from './adherence-window.js'
 import type { SessionAverage, SessionSymptoms } from './types.js'
 
 // ─── fixtures ───────────────────────────────────────────────────────────────
@@ -59,6 +60,10 @@ function noSymptoms(): SessionSymptoms {
     newOnsetHeadache: false,
     ruqPain: false,
     edema: false,
+    dizziness: false,
+    syncope: false,
+    palpitations: false,
+    legSwelling: false,
     otherSymptoms: [],
   }
 }
@@ -71,6 +76,7 @@ function session(over: Partial<SessionAverage> = {}): SessionAverage {
     systolicBP: 125,
     diastolicBP: 75,
     pulse: 72,
+    weight: null,
     readingCount: 1,
     symptoms: noSymptoms(),
     suboptimalMeasurement: false,
@@ -869,11 +875,11 @@ describe('tachy rule (P)', () => {
   })
 })
 
-describe('bradyRule (P)', () => {
+describe('bradySymptomaticRule (P)', () => {
   const bctx = ctx({ profile: { hasBradycardia: true } })
 
   it('HR=48 + chestPain → symptomatic L1', () => {
-    const r = bradyRule(
+    const r = bradySymptomaticRule(
       session({
         pulse: 48,
         symptoms: { ...noSymptoms(), chestPainOrDyspnea: true },
@@ -884,17 +890,33 @@ describe('bradyRule (P)', () => {
     expect(r?.ruleId).toBe('RULE_BRADY_HR_SYMPTOMATIC')
   })
 
-  it('HR=38 asymptomatic → L1 regardless', () => {
-    const r = bradyRule(session({ pulse: 38 }), bctx)
-    expect(r?.ruleId).toBe('RULE_BRADY_HR_ASYMPTOMATIC')
+  // Cluster 6 (Manisha 5/10/26) — HR<40 is now owned by bradyAbsoluteRule
+  // (Tier 1) — bradySymptomaticRule covers only [40, 50). The absolute rule
+  // fires regardless of symptoms; this spec covers both branches.
+  it('HR=38 asymptomatic → bradyAbsoluteRule (Tier 1), bradySymptomaticRule no-fires', () => {
+    expect(bradySymptomaticRule(session({ pulse: 38 }), bctx)).toBeNull()
+    const abs = bradyAbsoluteRule(session({ pulse: 38 }), bctx)
+    expect(abs?.ruleId).toBe('RULE_BRADY_ABSOLUTE')
+    expect(abs?.tier).toBe('TIER_1_CONTRAINDICATION')
+  })
+
+  it('HR=48 + dizziness → bradySymptomaticRule fires (predicate widened in Cluster 6)', () => {
+    const r = bradySymptomaticRule(
+      session({
+        pulse: 48,
+        symptoms: { ...noSymptoms(), dizziness: true },
+      }),
+      bctx,
+    )
+    expect(r?.ruleId).toBe('RULE_BRADY_HR_SYMPTOMATIC')
   })
 
   it('HR=55 → no alert', () => {
-    expect(bradyRule(session({ pulse: 55 }), bctx)).toBeNull()
+    expect(bradySymptomaticRule(session({ pulse: 55 }), bctx)).toBeNull()
   })
 
   it('beta-blocker + HR=55 → suppressed', () => {
-    const r = bradyRule(
+    const r = bradySymptomaticRule(
       session({
         pulse: 55,
         symptoms: { ...noSymptoms(), chestPainOrDyspnea: true },
@@ -908,7 +930,7 @@ describe('bradyRule (P)', () => {
   })
 
   it('beta-blocker + HR=48 + symptoms → alert (below 50 fires)', () => {
-    const r = bradyRule(
+    const r = bradySymptomaticRule(
       session({
         pulse: 48,
         symptoms: { ...noSymptoms(), chestPainOrDyspnea: true },
@@ -1148,40 +1170,136 @@ describe('medicationMissedRule — Phase/26 scheduledLater regression', () => {
     expect(r).toBeNull()
   })
 
-  it('medicationTaken=false → fires RULE_MEDICATION_MISSED', () => {
+  // Cluster 6 (Manisha 5/10/26) — adherence is now pattern-based (2 of 3
+  // days) with a single-miss carve-out for β-blocker in HFrEF/HCM/AFib.
+  // The legacy single-session `medicationMissedRule` always returns null
+  // because pattern detection requires the rolling window. These tests
+  // verify both the rolling rule + carve-out via the windowed variant.
+
+  it('legacy medicationMissedRule(session=missed-once) → null (no window)', () => {
     const r = medicationMissedRule(
       session({ medicationTaken: false, missedMedications: [] }),
       { profile: {}, contextMeds: [], thresholds: {}, preDay3Mode: false } as unknown as ResolvedContext,
     )
-    expect(r).not.toBeNull()
+    expect(r).toBeNull()
+  })
+
+  it('windowed rule: daysWithMiss=2 → RULE_MEDICATION_MISSED fires', () => {
+    const window: AdherenceWindow = {
+      daysWithMiss: 2,
+      daysWithMissOver7d: 2,
+      missesByDrugClass: new Map([['ACE_INHIBITOR', 2]]),
+      missedMedications: [
+        {
+          medicationId: 'm1',
+          drugName: 'Lisinopril',
+          drugClass: 'ACE_INHIBITOR',
+          reason: 'FORGOT',
+          missedDoses: 2,
+        },
+      ],
+    }
+    const r = medicationMissedRuleWithWindow(window)(
+      session({ medicationTaken: false, missedMedications: [] }),
+      ctx({ profile: { hasHeartFailure: false, hasHCM: false, hasAFib: false } }),
+    )
     expect(r?.ruleId).toBe('RULE_MEDICATION_MISSED')
     expect(r?.tier).toBe('TIER_2_DISCREPANCY')
   })
 
-  it('per-med detail with non-empty list also fires', () => {
-    const r = medicationMissedRule(
-      session({
-        medicationTaken: null,
-        missedMedications: [
-          {
-            medicationId: 'm1',
-            drugName: 'Lisinopril',
-            drugClass: 'ACE_INHIBITOR',
-            reason: 'FORGOT',
-            missedDoses: 1,
-          },
-        ],
-      }),
-      { profile: {}, contextMeds: [], thresholds: {}, preDay3Mode: false } as unknown as ResolvedContext,
+  it('windowed rule: single miss for non-beta-blocker → null', () => {
+    const window: AdherenceWindow = {
+      daysWithMiss: 1,
+      daysWithMissOver7d: 1,
+      missesByDrugClass: new Map([['ACE_INHIBITOR', 1]]),
+      missedMedications: [
+        {
+          medicationId: 'm1',
+          drugName: 'Lisinopril',
+          drugClass: 'ACE_INHIBITOR',
+          reason: 'FORGOT',
+          missedDoses: 1,
+        },
+      ],
+    }
+    const r = medicationMissedRuleWithWindow(window)(
+      session({ medicationTaken: false, missedMedications: [] }),
+      ctx({ profile: { hasHeartFailure: false } }),
     )
-    expect(r).not.toBeNull()
+    expect(r).toBeNull()
+  })
+
+  it('windowed rule: single beta-blocker miss in HFrEF patient → fires (carve-out)', () => {
+    const window: AdherenceWindow = {
+      daysWithMiss: 1,
+      daysWithMissOver7d: 1,
+      missesByDrugClass: new Map([['BETA_BLOCKER', 1]]),
+      missedMedications: [
+        {
+          medicationId: 'm1',
+          drugName: 'Metoprolol',
+          drugClass: 'BETA_BLOCKER',
+          reason: 'FORGOT',
+          missedDoses: 1,
+        },
+      ],
+    }
+    const r = medicationMissedRuleWithWindow(window)(
+      session({ medicationTaken: false, missedMedications: [] }),
+      ctx({ profile: { hasHeartFailure: true } }),
+    )
     expect(r?.ruleId).toBe('RULE_MEDICATION_MISSED')
+    expect(r?.metadata.adherenceBetaBlockerCarveOut).toBe(true)
+  })
+
+  it('windowed rule: single beta-blocker miss in patient WITHOUT HF/HCM/AFib → null', () => {
+    const window: AdherenceWindow = {
+      daysWithMiss: 1,
+      daysWithMissOver7d: 1,
+      missesByDrugClass: new Map([['BETA_BLOCKER', 1]]),
+      missedMedications: [
+        {
+          medicationId: 'm1',
+          drugName: 'Metoprolol',
+          drugClass: 'BETA_BLOCKER',
+          reason: 'FORGOT',
+          missedDoses: 1,
+        },
+      ],
+    }
+    const r = medicationMissedRuleWithWindow(window)(
+      session({ medicationTaken: false, missedMedications: [] }),
+      ctx({ profile: { hasHeartFailure: false, hasHCM: false, hasAFib: false } }),
+    )
+    expect(r).toBeNull()
+  })
+
+  it('windowed rule: ≥3-of-7 days adds physician escalation annotation', () => {
+    const window: AdherenceWindow = {
+      daysWithMiss: 2,
+      daysWithMissOver7d: 4,
+      missesByDrugClass: new Map([['ACE_INHIBITOR', 2]]),
+      missedMedications: [
+        {
+          medicationId: 'm1',
+          drugName: 'Lisinopril',
+          drugClass: 'ACE_INHIBITOR',
+          reason: 'FORGOT',
+          missedDoses: 2,
+        },
+      ],
+    }
+    const r = medicationMissedRuleWithWindow(window)(
+      session({ medicationTaken: false, missedMedications: [] }),
+      ctx({ profile: { hasHeartFailure: false } }),
+    )
+    expect(r?.metadata.physicianAnnotations).toContain('escalate-3-of-7')
   })
 })
 
-describe('bradyRule unverified beta-blocker suppression (P gap)', () => {
+describe('bradySymptomaticRule unverified beta-blocker suppression (P gap)', () => {
   it('UNVERIFIED beta-blocker + HR=55 + symptoms → still suppressed', () => {
-    const r = bradyRule(
+    const r = bradySymptomaticRule(
       session({
         pulse: 55,
         symptoms: { ...noSymptoms(), chestPainOrDyspnea: true },

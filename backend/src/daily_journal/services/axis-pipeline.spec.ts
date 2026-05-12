@@ -33,6 +33,10 @@ function noSymptoms(): SessionSymptoms {
     newOnsetHeadache: false,
     ruqPain: false,
     edema: false,
+    dizziness: false,
+    syncope: false,
+    palpitations: false,
+    legSwelling: false,
     otherSymptoms: [],
   }
 }
@@ -45,6 +49,7 @@ function buildSession(over: Partial<SessionAverage> = {}): SessionAverage {
     systolicBP: 125,
     diastolicBP: 78,
     pulse: 72,
+    weight: null,
     readingCount: 1,
     symptoms: noSymptoms(),
     suboptimalMeasurement: false,
@@ -150,6 +155,7 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
       },
       journalEntry: {
         findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
       },
       notification: {
         create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
@@ -358,19 +364,27 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
   // ────────────────────────────────────────────────────────────────────────
 
   it('Emergency + L1 high co-fire — SBP 185 fires BOTH ABSOLUTE_EMERGENCY + STANDARD_L1_HIGH (independent ladders)', async () => {
+    // Seed two prior days of misses so the Cluster 6 2-of-3 adherence
+    // window also fires, giving us the full three-ladder picture.
+    const now = new Date('2026-04-22T10:00:00Z')
+    prisma.journalEntry.findMany.mockResolvedValueOnce([
+      { id: 'p1', measuredAt: new Date(now.getTime() - 24 * 60 * 60 * 1000), medicationTaken: false, missedMedications: null },
+      { id: 'p2', measuredAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000), medicationTaken: false, missedMedications: null },
+    ])
     const { calls } = await run(
       buildSession({
         systolicBP: 185,
         diastolicBP: 100,
         pulse: 72,
         medicationTaken: false,
+        measuredAt: now,
       }),
       buildCtx({ profile: { diagnosedHypertension: true } }),
     )
     // SBP 185 violates BOTH the L2 emergency threshold (≥180) AND the L1
     // high threshold (≥160). Per v2 addendum D, the two ladders run
-    // independently (T+0/2h/4h vs T+0/24h/72h/7d). Adherence adds its
-    // own row.
+    // independently (T+0/2h/4h vs T+0/24h/72h/7d). Cluster 6 adherence
+    // (rolling 2-of-3 pattern) adds its own row.
     expect(calls).toHaveLength(3)
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_ABSOLUTE_EMERGENCY')
@@ -559,7 +573,7 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_ABSOLUTE_EMERGENCY')
     expect(ids).toContain('RULE_STANDARD_L1_HIGH')
-    expect(ids).toContain('RULE_BRADY_HR_ASYMPTOMATIC')
+    expect(ids).toContain('RULE_BRADY_ABSOLUTE')
   })
 
   it('Symptom override + AFib HR-high — two rows: override + AFIB_HR_HIGH', async () => {
@@ -651,7 +665,7 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
       buildCtx({ profile: { hasBradycardia: true } }),
     )
     expect(calls).toHaveLength(1)
-    expect(calls[0].data.ruleId).toBe('RULE_BRADY_HR_ASYMPTOMATIC')
+    expect(calls[0].data.ruleId).toBe('RULE_BRADY_ABSOLUTE')
   })
 
   it('DO NOT REGRESS — Stage C BP+brady co-fire with no terminal preempt', async () => {
@@ -670,7 +684,7 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
     expect(calls).toHaveLength(2)
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_CAD_HIGH')
-    expect(ids).toContain('RULE_BRADY_HR_ASYMPTOMATIC')
+    expect(ids).toContain('RULE_BRADY_ABSOLUTE')
   })
 
   // ────────────────────────────────────────────────────────────────────────

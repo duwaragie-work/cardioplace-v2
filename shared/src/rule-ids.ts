@@ -55,10 +55,22 @@ export const RULE_IDS = {
   PULSE_PRESSURE_WIDE: 'RULE_PULSE_PRESSURE_WIDE',
   LOOP_DIURETIC_HYPOTENSION: 'RULE_LOOP_DIURETIC_HYPOTENSION',
 
-  // Medication adherence (Tier 2 discrepancy, dismissable) — fires on any
-  // self-reported missed dose. Runs in an independent pipeline pass alongside
-  // the BP/HR rules so both can coexist on one journal entry.
+  // Medication adherence (Tier 2 discrepancy, dismissable) — fires on a
+  // rolling 2-of-3-day pattern with a single-miss carve-out for beta-blockers
+  // in HFrEF/HCM/AFib patients (Cluster 6, Manisha 5/10/26).
   MEDICATION_MISSED: 'RULE_MEDICATION_MISSED',
+
+  // Cluster 6 — symptomatic bradycardia + adjacent rules driven by the new
+  // dizziness / syncope / palpitations / legSwelling buttons.
+  BRADY_ABSOLUTE: 'RULE_BRADY_ABSOLUTE',
+  HF_DECOMPENSATION: 'RULE_HF_DECOMPENSATION',
+  DHP_CCB_LEG_SWELLING: 'RULE_DHP_CCB_LEG_SWELLING',
+  BETA_BLOCKER_DIZZINESS: 'RULE_BETA_BLOCKER_DIZZINESS',
+  ORTHOSTATIC_HYPOTENSION: 'RULE_ORTHOSTATIC_HYPOTENSION',
+  AFIB_PALPITATIONS: 'RULE_AFIB_PALPITATIONS',
+  TACHY_WITH_PALPITATIONS: 'RULE_TACHY_WITH_PALPITATIONS',
+  PALPITATIONS_GENERAL: 'RULE_PALPITATIONS_GENERAL',
+  SYNCOPE_GENERAL: 'RULE_SYNCOPE_GENERAL',
 } as const
 
 export type RuleId = (typeof RULE_IDS)[keyof typeof RULE_IDS]

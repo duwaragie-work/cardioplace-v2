@@ -83,41 +83,75 @@ export function buildTachyRule(priorElevated: boolean): RuleFunction {
   }
 }
 
-export const bradyRule: RuleFunction = (session, ctx) => {
-  if (!ctx.profile.hasBradycardia) return null
+/**
+ * Cluster 6 (Manisha 5/10/26) — HR<40 is Tier 1 regardless of symptoms per
+ * v1.0 spec §5.6. Renamed from `RULE_BRADY_HR_ASYMPTOMATIC` (was Tier 2) to
+ * `RULE_BRADY_ABSOLUTE` (Tier 1). The escalation ladder picks up the new
+ * tier automatically; admin dashboard treats it as non-dismissable. Gate:
+ * patient must have hasBradycardia OR be on a beta-blocker — we don't fire
+ * Tier 1 brady for a random reading on a healthy patient.
+ */
+export const bradyAbsoluteRule: RuleFunction = (session, ctx) => {
   if (session.pulse == null) return null
+  if (session.pulse >= BRADY_ASYMPTOMATIC) return null
+  const gated = ctx.profile.hasBradycardia || onBetaBlocker(ctx)
+  if (!gated) return null
 
-  // Asymptomatic HR <40 fires regardless of beta-blocker.
-  if (session.pulse < BRADY_ASYMPTOMATIC) {
-    return bradyResult(
-      session,
-      RULE_IDS.BRADY_HR_ASYMPTOMATIC,
-      BRADY_ASYMPTOMATIC,
-      'asymptomatic',
-    )
+  return {
+    ruleId: RULE_IDS.BRADY_ABSOLUTE,
+    tier: 'TIER_1_CONTRAINDICATION',
+    mode: 'STANDARD',
+    pulsePressure: getPulsePressure(session.systolicBP, session.diastolicBP),
+    suboptimalMeasurement: session.suboptimalMeasurement,
+    actualValue: session.pulse,
+    reason: `HR ${session.pulse} < ${BRADY_ASYMPTOMATIC} — absolute bradycardia.`,
+    metadata: {
+      conditionLabel: 'Absolute bradycardia',
+      thresholdValue: BRADY_ASYMPTOMATIC,
+    },
   }
+}
 
-  // Symptomatic HR <50 — check structured symptoms for brady-relevant ones.
-  // Beta-blocker suppression (50–60 bpm) is mutually exclusive with this
-  // branch (<50), so no suppression check is needed here. The unit test
-  // "beta-blocker + HR=55 → suppressed" passes because the rule already
-  // returns null for pulse in [50, 60) — no branch fires.
-  if (session.pulse < BRADY_SYMPTOMATIC) {
-    const isSymptomatic =
-      session.symptoms.alteredMentalStatus ||
-      session.symptoms.chestPainOrDyspnea ||
-      session.symptoms.focalNeuroDeficit
-    if (isSymptomatic) {
-      return bradyResult(
-        session,
-        RULE_IDS.BRADY_HR_SYMPTOMATIC,
-        BRADY_SYMPTOMATIC,
-        'symptomatic',
-      )
-    }
+/**
+ * Symptomatic bradycardia HR<50 with at least one cerebral-hypoperfusion
+ * symptom. Cluster 6 widened the predicate to include the new dizziness +
+ * syncope buttons (2018 ACC/AHA/HRS Guideline §5 names lightheadedness +
+ * pre-syncope as canonical low-cardiac-output presentations).
+ *
+ * Gate also widened: in addition to `hasBradycardia`, fires when patient is
+ * on a beta-blocker — even a healthy patient on a β-blocker can develop
+ * symptomatic brady from dose / interaction / illness.
+ */
+export const bradySymptomaticRule: RuleFunction = (session, ctx) => {
+  if (session.pulse == null) return null
+  // HR<40 path is owned by bradyAbsoluteRule (Tier 1). This rule covers the
+  // [40, 50) range only — keeps the two non-overlapping, both can co-fire on
+  // the same reading via different axes (contraindication vs hr).
+  if (session.pulse < BRADY_ASYMPTOMATIC || session.pulse >= BRADY_SYMPTOMATIC) {
+    return null
   }
+  const gated = ctx.profile.hasBradycardia || onBetaBlocker(ctx)
+  if (!gated) return null
 
-  return null
+  const s = session.symptoms
+  const isSymptomatic =
+    s.alteredMentalStatus ||
+    s.chestPainOrDyspnea ||
+    s.focalNeuroDeficit ||
+    s.dizziness ||
+    s.syncope
+  if (!isSymptomatic) return null
+
+  return bradyResult(
+    session,
+    RULE_IDS.BRADY_HR_SYMPTOMATIC,
+    BRADY_SYMPTOMATIC,
+    'symptomatic',
+  )
+}
+
+function onBetaBlocker(ctx: ResolvedContext): boolean {
+  return ctx.contextMeds.some((m) => m.drugClass === 'BETA_BLOCKER')
 }
 
 // ─── HR context annotation ──────────────────────────────────────────────────
@@ -151,13 +185,15 @@ export function getHrContextAnnotation(
   // Bradycardia — only when the patient is flagged hasBradycardia.
   if (ctx.profile.hasBradycardia) {
     if (pulse < BRADY_ASYMPTOMATIC) {
-      return `HR ${pulse} — asymptomatic bradycardia (<${BRADY_ASYMPTOMATIC}); ECG and pacemaker eval regardless of symptoms.`
+      return `HR ${pulse} — absolute bradycardia (<${BRADY_ASYMPTOMATIC}); Tier 1 — ECG + pacemaker eval, hold rate-controlling agents.`
     }
     if (pulse < BRADY_SYMPTOMATIC) {
       const symptomatic =
         session.symptoms.alteredMentalStatus ||
         session.symptoms.chestPainOrDyspnea ||
-        session.symptoms.focalNeuroDeficit
+        session.symptoms.focalNeuroDeficit ||
+        session.symptoms.dizziness ||
+        session.symptoms.syncope
       if (symptomatic) {
         return `HR ${pulse} + brady-relevant symptoms — symptomatic bradycardia (heart-block / Stokes-Adams suspicion); ECG and pacemaker eval, consider holding beta-blocker.`
       }

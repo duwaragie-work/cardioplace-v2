@@ -29,12 +29,22 @@ import {
   cadDbpRule,
   cadHighRule,
   dcmRule,
+  dhpCcbLegSwellingRule,
   getCadHtnUncontrolledAnnotation,
   hcmRule,
   hcmVasodilatorRule,
+  hfDecompensationRule,
   hfpefRule,
   hfrefRule,
 } from '../engine/condition-branches.js'
+import {
+  afibPalpitationsRule,
+  betaBlockerDizzinessRule,
+  orthostaticHypotensionRule,
+  palpitationsGeneralRule,
+  syncopeGeneralRule,
+  tachyPalpitationsRule,
+} from '../engine/symptom-rules.js'
 import {
   personalizedHighRule,
   personalizedLowRule,
@@ -45,7 +55,8 @@ import {
 } from '../engine/standard.js'
 import {
   afibHrRule,
-  bradyRule,
+  bradyAbsoluteRule,
+  bradySymptomaticRule,
   buildTachyRule,
   getHrContextAnnotation,
 } from '../engine/hr-branches.js'
@@ -57,7 +68,8 @@ import {
   getLoopDiureticAnnotation,
   loopDiureticHypotensionRule,
 } from '../engine/loop-diuretic.js'
-import { medicationMissedRule } from '../engine/adherence.js'
+import { medicationMissedRuleWithWindow } from '../engine/adherence.js'
+import { loadAdherenceWindow } from '../engine/adherence-window.js'
 
 /**
  * Phase/5 AlertEngineService — the single owner of rule evaluation.
@@ -93,7 +105,19 @@ import { medicationMissedRule } from '../engine/adherence.js'
  *   primary result when not standalone (preserves Scenario 15). Three-tier
  *   messages come from OutputGenerator (per-result, stateless).
  */
-type Axis = 'contraindication' | 'emergency' | 'bp-high' | 'sbp-low' | 'dbp-low' | 'hr' | 'info'
+type Axis =
+  | 'contraindication'
+  | 'emergency'
+  | 'bp-high'
+  | 'sbp-low'
+  | 'dbp-low'
+  | 'hr'
+  | 'hf-decomp'
+  | 'palpitations'
+  | 'orthostatic'
+  | 'syncope'
+  | 'med-side-effect'
+  | 'info'
 
 const AXIS_PRIORITY: Axis[] = [
   'emergency',
@@ -102,6 +126,11 @@ const AXIS_PRIORITY: Axis[] = [
   'sbp-low',
   'dbp-low',
   'hr',
+  'hf-decomp',
+  'orthostatic',
+  'palpitations',
+  'syncope',
+  'med-side-effect',
   'info',
 ]
 
@@ -121,6 +150,24 @@ function axisFor(r: RuleResult): Axis {
     r.ruleId === 'RULE_BRADY_HR_ASYMPTOMATIC'
   ) {
     return 'hr'
+  }
+  // Cluster 6 — each new rule lives on its own axis so they coexist with
+  // whatever BP/HR row also fires on the same reading.
+  if (r.ruleId === 'RULE_HF_DECOMPENSATION') return 'hf-decomp'
+  if (r.ruleId === 'RULE_ORTHOSTATIC_HYPOTENSION') return 'orthostatic'
+  if (
+    r.ruleId === 'RULE_AFIB_PALPITATIONS' ||
+    r.ruleId === 'RULE_TACHY_WITH_PALPITATIONS' ||
+    r.ruleId === 'RULE_PALPITATIONS_GENERAL'
+  ) {
+    return 'palpitations'
+  }
+  if (r.ruleId === 'RULE_SYNCOPE_GENERAL') return 'syncope'
+  if (
+    r.ruleId === 'RULE_DHP_CCB_LEG_SWELLING' ||
+    r.ruleId === 'RULE_BETA_BLOCKER_DIZZINESS'
+  ) {
+    return 'med-side-effect'
   }
   if (r.tier === 'BP_LEVEL_1_LOW') return 'sbp-low'
   if (r.tier === 'BP_LEVEL_1_HIGH') return 'bp-high'
@@ -195,6 +242,12 @@ export class AlertEngineService {
     // preempt Stage C. Computed once here so we don't re-query the DB.
     const priorElevated = await this.wasPriorReadingPulseElevated(session, ctx)
 
+    // Cluster 6 — one Prisma read for prior weight + prior SBP. Drives the
+    // HF-decompensation weight-delta + orthostatic-hypotension SBP-drop
+    // predicates. Cheap (single row lookup on the indexed (userId, measuredAt)
+    // pair) and the same row covers both fields.
+    await this.attachPriorReading(session)
+
     // Pass 1 — multi-axis BP/HR pipeline
     const bpResults = await this.runPipeline(session, ctx, priorElevated)
     const primary = bpResults[0] ?? null
@@ -209,8 +262,17 @@ export class AlertEngineService {
       await this.persistAlert(session, ctx, r)
     }
 
-    // Pass 2 — Adherence pipeline (independent of Pass 1)
-    const adherenceResult = medicationMissedRule(session, ctx)
+    // Pass 2 — Adherence pipeline (independent of Pass 1). Pre-computes a
+    // rolling 3-day / 7-day window so the rule can fire on a non-adherence
+    // PATTERN, not a single miss. Carves out beta-blockers for HFrEF/HCM/
+    // AFib patients where even a single miss is hemodynamically risky.
+    const adherenceWindow = await loadAdherenceWindow(
+      this.prisma,
+      session.userId,
+      session.measuredAt,
+      ctx.timezone ?? 'America/New_York',
+    )
+    const adherenceResult = medicationMissedRuleWithWindow(adherenceWindow)(session, ctx)
     if (adherenceResult) {
       await this.persistAlert(session, ctx, adherenceResult)
     }
@@ -332,7 +394,23 @@ export class AlertEngineService {
       standardL1LowRule,
       afibHrRule,
       tachyRule,
-      bradyRule,
+      // Cluster 6 — brady split into two emitters. bradyAbsoluteRule (HR<40)
+      // claims 'contraindication' (Tier 1); bradySymptomaticRule (HR<50 +
+      // dizziness/syncope/AMS/etc.) claims 'hr'. They're on different axes
+      // so both can co-fire on the same reading.
+      bradyAbsoluteRule,
+      bradySymptomaticRule,
+      // Cluster 6 — HF decompensation + DHP-CCB side-effect + the six
+      // symptom-rules.ts entries. Each claims a distinct axis so they
+      // coexist with whatever BP/HR row also fires.
+      hfDecompensationRule,
+      dhpCcbLegSwellingRule,
+      orthostaticHypotensionRule,
+      betaBlockerDizzinessRule,
+      afibPalpitationsRule,
+      tachyPalpitationsRule,
+      palpitationsGeneralRule,
+      syncopeGeneralRule,
     ]
 
     // Stage C continues into the same `claimed` Map declared above so
@@ -393,6 +471,26 @@ export class AlertEngineService {
     })
     if (!prior || prior.pulse == null) return false
     return prior.pulse > 100
+  }
+
+  /**
+   * Cluster 6 — populate `session.priorWeight`, `session.priorWeightAt`, and
+   * `session.priorSystolicBP` from the most-recent prior journal entry. One
+   * query covers both predicates (HF-decompensation weight-delta + orthostatic
+   * SBP-drop). Idempotent — fields are simply assigned, defaulting to null.
+   */
+  private async attachPriorReading(session: SessionAverage): Promise<void> {
+    const prior = await this.prisma.journalEntry.findFirst({
+      where: {
+        userId: session.userId,
+        measuredAt: { lt: session.measuredAt },
+      },
+      orderBy: { measuredAt: 'desc' },
+      select: { weight: true, systolicBP: true, measuredAt: true },
+    })
+    session.priorWeight = prior?.weight != null ? Number(prior.weight) : null
+    session.priorWeightAt = prior?.measuredAt ?? null
+    session.priorSystolicBP = prior?.systolicBP ?? null
   }
 
   // ─── annotations ───────────────────────────────────────────────────────

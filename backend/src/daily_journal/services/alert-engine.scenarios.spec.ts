@@ -31,6 +31,10 @@ function noSymptoms(): SessionSymptoms {
     newOnsetHeadache: false,
     ruqPain: false,
     edema: false,
+    dizziness: false,
+    syncope: false,
+    palpitations: false,
+    legSwelling: false,
     otherSymptoms: [],
   }
 }
@@ -43,6 +47,7 @@ function buildSession(over: Partial<SessionAverage> = {}): SessionAverage {
     systolicBP: 125,
     diastolicBP: 78,
     pulse: 72,
+    weight: null,
     readingCount: 1,
     symptoms: noSymptoms(),
     suboptimalMeasurement: false,
@@ -165,6 +170,10 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       },
       journalEntry: {
         findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
+        // Cluster 6 — loadAdherenceWindow queries the past 7 days. Empty
+        // result means "no recent misses" so the rule needs a 2-of-3-day
+        // pattern in the test fixture (or beta-blocker carve-out) to fire.
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
       },
       notification: {
         // alert-engine writes a patient-facing dashboard Notification per alert
@@ -843,14 +852,16 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
   })
 
-  it('Scenario 36 — Brady + pulse 38 (asymptomatic) → RULE_BRADY_HR_ASYMPTOMATIC', async () => {
+  // Cluster 6 (Manisha 5/10/26) — HR<40 retiered to Tier 1 (was Tier 2
+  // BP_LEVEL_1_LOW). Rule renamed BRADY_HR_ASYMPTOMATIC → BRADY_ABSOLUTE.
+  it('Scenario 36 — Brady + pulse 38 (asymptomatic) → RULE_BRADY_ABSOLUTE (Tier 1)', async () => {
     const { result, createArgs } = await run(
       buildSession({ systolicBP: 115, diastolicBP: 70, pulse: 38 }),
       buildCtx({ profile: { hasBradycardia: true } }),
     )
-    expect(result?.ruleId).toBe('RULE_BRADY_HR_ASYMPTOMATIC')
-    expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
-    expect(createArgs.data.physicianMessage).toContain('asymptomatic bradycardia')
+    expect(result?.ruleId).toBe('RULE_BRADY_ABSOLUTE')
+    expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
+    expect(createArgs.data.physicianMessage).toContain('Absolute bradycardia')
   })
 
   it('Scenario 37 — Wide PP standalone 145/80 (PP 65) → RULE_PULSE_PRESSURE_WIDE', async () => {
@@ -1202,16 +1213,32 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // Tier 2 — Medication adherence (dismissable, independent pipeline pass)
   // ========================================================================
 
-  it('Scenario 60 — medicationTaken=false (no per-med data) → RULE_MEDICATION_MISSED Tier 2', async () => {
-    // Legacy-form path: patient tapped "Missed" without specifying which
-    // medication. Fires the generic Tier 2 adherence alert with a warm,
-    // non-medication-specific reminder.
+  it('Scenario 60 — Cluster 6: 2-of-3-day miss pattern → RULE_MEDICATION_MISSED Tier 2', async () => {
+    // Cluster 6 (Manisha 5/10/26) — adherence is now pattern-based. Seed the
+    // adherence-window query with two prior days of misses so the threshold
+    // (≥2 in rolling 3) is met by the current session.
+    const now = new Date('2026-04-22T10:00:00Z')
+    prisma.journalEntry.findMany.mockResolvedValueOnce([
+      {
+        id: 'prev-1',
+        measuredAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        medicationTaken: false,
+        missedMedications: null,
+      },
+      {
+        id: 'prev-2',
+        measuredAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
+        medicationTaken: false,
+        missedMedications: null,
+      },
+    ])
     const { result, createArgs, eventArgs } = await run(
       buildSession({
         systolicBP: 124,
         diastolicBP: 78,
         pulse: 72,
         medicationTaken: false,
+        measuredAt: now,
       }),
       buildCtx({ profile: { diagnosedHypertension: true } }),
     )
@@ -1221,8 +1248,10 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.type).toBe('MEDICATION_ADHERENCE')
     expect(createArgs.data.dismissible).toBe(true)
     expect(createArgs.data.severity).toBe('MEDIUM')
+    // Cluster 6 wording — patient message references the missed pattern,
+    // not single-dose phrasing.
     expect(createArgs.data.patientMessage.toLowerCase()).toContain(
-      "didn't take your medication",
+      'a couple of times',
     )
     expect(createArgs.data.physicianMessage).toContain('Tier 2')
     expect(createArgs.data.physicianMessage.toLowerCase()).toContain(
@@ -1235,47 +1264,75 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     })
   })
 
-  it('Scenario 61 — per-medication miss (Lisinopril FORGOT) → physician msg names drug + reason', async () => {
-    // New-form path: patient tapped "Missed" AND checked specific meds.
-    // Per-med detail flows through metadata.missedMedications → AlertContext
-    // → physicianMessage.
+  it('Scenario 61 — Cluster 6: 2-of-3 miss pattern with Lisinopril → physician msg names drug + reason', async () => {
+    // Per-med detail flows through the adherence window's per-med accumulator
+    // → metadata.missedMedications → AlertContext → physicianMessage.
+    const now = new Date('2026-04-22T10:00:00Z')
+    const missDetail = {
+      medicationId: 'med-lisino',
+      drugName: 'Lisinopril',
+      drugClass: 'ACE_INHIBITOR' as const,
+      reason: 'FORGOT' as const,
+      missedDoses: 1,
+    }
+    prisma.journalEntry.findMany.mockResolvedValueOnce([
+      {
+        id: 'prev-1',
+        measuredAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        medicationTaken: null,
+        missedMedications: [missDetail],
+      },
+      {
+        id: 'prev-2',
+        measuredAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
+        medicationTaken: null,
+        missedMedications: [missDetail],
+      },
+    ])
     const { result, createArgs } = await run(
       buildSession({
         systolicBP: 124,
         diastolicBP: 78,
-        medicationTaken: true, // generic toggle doesn't matter when array populated
-        missedMedications: [
-          {
-            medicationId: 'med-lisino',
-            drugName: 'Lisinopril',
-            drugClass: 'ACE_INHIBITOR',
-            reason: 'FORGOT',
-            missedDoses: 1,
-          },
-        ],
+        medicationTaken: true,
+        missedMedications: [missDetail],
+        measuredAt: now,
       }),
       buildCtx({ profile: { diagnosedHypertension: true } }),
     )
 
     expect(result?.ruleId).toBe('RULE_MEDICATION_MISSED')
     expect(createArgs.data.tier).toBe('TIER_2_DISCREPANCY')
-    expect(createArgs.data.patientMessage).toContain('Lisinopril')
     expect(createArgs.data.physicianMessage).toContain('Lisinopril')
     expect(createArgs.data.physicianMessage).toContain('ACE_INHIBITOR')
     expect(createArgs.data.physicianMessage).toContain('FORGOT')
-    expect(createArgs.data.physicianMessage).toContain('doses missed: 1')
   })
 
-  it('Scenario 62 — BP L1 High + medicationTaken=false → TWO DeviationAlert rows created', async () => {
-    // Co-occurrence path: independent BP pipeline fires first (row 1), then
-    // adherence pass fires (row 2). Both creates are asserted; event emission
-    // happens twice.
+  it('Scenario 62 — BP L1 High + 2-of-3 day miss pattern → TWO DeviationAlert rows created', async () => {
+    // Co-occurrence path: independent BP pipeline fires (row 1), then the
+    // Cluster 6 windowed adherence pass fires (row 2). Both creates are
+    // asserted; event emission happens twice.
+    const now = new Date('2026-04-22T10:00:00Z')
+    prisma.journalEntry.findMany.mockResolvedValueOnce([
+      {
+        id: 'prev-1',
+        measuredAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        medicationTaken: false,
+        missedMedications: null,
+      },
+      {
+        id: 'prev-2',
+        measuredAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
+        medicationTaken: false,
+        missedMedications: null,
+      },
+    ])
     await run(
       buildSession({
         systolicBP: 165,
         diastolicBP: 94,
         pulse: 78,
         medicationTaken: false,
+        measuredAt: now,
       }),
       buildCtx({ profile: { diagnosedHypertension: true } }),
     )
@@ -1319,12 +1376,10 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     })
   })
 
-  it('Scenario 59 — Brady + Beta-blocker + pulse 38 → RULE_BRADY_HR_ASYMPTOMATIC (BB suppression is 50–60 only)', async () => {
-    // Scenario 19 shows BB + pulse 55 suppresses the alert. Scenario 36 shows
-    // pulse 38 without BB fires asymptomatic brady. This pair confirms the
-    // suppression window is 50–60 exclusive — below 50, brady fires even when
-    // a beta-blocker is on board (clinically: <50 bpm on BB needs provider
-    // review regardless).
+  it('Scenario 59 — Brady + Beta-blocker + pulse 38 → RULE_BRADY_ABSOLUTE Tier 1 (Cluster 6 retier)', async () => {
+    // BB suppression window is 50–60 exclusive — below 40, RULE_BRADY_ABSOLUTE
+    // fires at Tier 1 regardless of beta-blocker (clinically: <40 bpm on BB
+    // needs urgent provider review).
     const { result, createArgs } = await run(
       buildSession({ systolicBP: 118, diastolicBP: 72, pulse: 38 }),
       buildCtx({
@@ -1335,9 +1390,9 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       }),
     )
 
-    expect(result?.ruleId).toBe('RULE_BRADY_HR_ASYMPTOMATIC')
-    expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
-    expect(createArgs.data.physicianMessage).toContain('asymptomatic bradycardia')
+    expect(result?.ruleId).toBe('RULE_BRADY_ABSOLUTE')
+    expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
+    expect(createArgs.data.physicianMessage).toContain('Absolute bradycardia')
   })
 
   it('Scenario 64 — 65+ CAD + 95/65 → TWO rows (RULE_AGE_65_LOW + RULE_CAD_DBP_CRITICAL)', async () => {

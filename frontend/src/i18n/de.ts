@@ -178,6 +178,11 @@ const de: Record<TranslationKey, string> = {
   'checkin.b3.symptomNewHeadache': 'Neue Kopfschmerzen (für Sie ungewöhnlich)',
   'checkin.b3.symptomRuq': 'Schmerzen im rechten Oberbauch',
   'checkin.b3.symptomEdema': 'Neue Schwellung in Gesicht, Händen oder Füßen',
+  // Cluster 6 — Priority 2 translation (pending DE sign-off).
+  'checkin.b3.symptomDizziness': 'Schwindel oder Benommenheit',
+  'checkin.b3.symptomSyncope': 'Kürzlich Ohnmachtsanfall oder Beinahe-Ohnmacht',
+  'checkin.b3.symptomPalpitations': 'Herz rast oder flattert',
+  'checkin.b3.symptomLegSwelling': 'Schwellung in Beinen/Füßen oder schnelle Gewichtszunahme',
   'checkin.b3.otherLabel': 'Noch etwas? (optional)',
   'checkin.b3.otherPlaceholder': 'In Ihren eigenen Worten…',
 

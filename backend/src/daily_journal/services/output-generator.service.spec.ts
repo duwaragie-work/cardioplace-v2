@@ -15,6 +15,7 @@ const baseSession: SessionAverage = {
   systolicBP: 150,
   diastolicBP: 92,
   pulse: 78,
+  weight: null,
   readingCount: 1,
   symptoms: {
     severeHeadache: false,
@@ -26,6 +27,10 @@ const baseSession: SessionAverage = {
     newOnsetHeadache: false,
     ruqPain: false,
     edema: false,
+    dizziness: false,
+    syncope: false,
+    palpitations: false,
+    legSwelling: false,
     otherSymptoms: [],
   },
   suboptimalMeasurement: false,
