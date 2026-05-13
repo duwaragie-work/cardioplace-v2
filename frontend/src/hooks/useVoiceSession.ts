@@ -223,6 +223,12 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
   );
   const actionType = actionTypeState;
 
+  // Mirror sessionState into a ref so the AudioWorklet onmessage callback can
+  // half-duplex on the live value without re-binding every state change.
+  useEffect(() => {
+    sessionStateRef.current = sessionState;
+  }, [sessionState]);
+
   // Listening watchdog helpers — arm after `audio_stream_end`, clear on
   // any inbound event that confirms Gemini is alive (audio_response,
   // transcript, action). If 15 s pass with nothing, surface a friendly
@@ -248,6 +254,12 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
   const micStreamRef = useRef<MediaStream | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  // Mirror of sessionState into a ref so the worklet onmessage callback can
+  // read it without re-binding. Used to half-duplex the mic — while the agent
+  // is speaking (or we're connecting/processing), drop incoming audio frames
+  // before they ever touch the socket. Eliminates the trailing-chunks-after-
+  // audio_stream_end and echo-during-agent bugs.
+  const sessionStateRef = useRef<SessionState>('idle');
   // Scheduled playback — each arriving audio chunk is scheduled to start at
   // nextStartTimeRef on the playback AudioContext, avoiding the onended gap
   // that caused choppy output. When no chunks arrive for ~200ms after the
@@ -391,15 +403,25 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
     //  - END_OF_UTTERANCE_MS 300: shaves ~300ms off Gemini's own VAD tail.
     //    Short decisive utterances ("save it", "yes", "no") shouldn't wait
     //    800ms to be finalised.
-    //  - COOLDOWN_MS 2000: after an emit, suppress further emits for 2s so a
-    //    user who pauses, resumes, pauses again doesn't spam the signal.
+    //  - COOLDOWN_MS 500: after an emit, suppress further emits briefly so a
+    //    flutter in VAD doesn't spam audio_stream_end. Down from 2000 — with
+    //    the VAD-gated emit below, the previous 2s ceiling blocked legitimate
+    //    quick back-and-forth.
     const RMS_THRESHOLD = 0.02;
     const END_OF_UTTERANCE_MS = 300;
-    const COOLDOWN_MS = 2000;
+    const COOLDOWN_MS = 500;
     let lastEmitAt = 0;
 
     node.port.onmessage = (e: MessageEvent<Int16Array>) => {
       if (!socketRef.current?.connected) return;
+
+      // Half-duplex: while the agent is speaking (or we're connecting/
+      // processing), drop incoming frames before they touch the socket.
+      // Eliminates agent-echo capture AND the trailing-chunks-after-
+      // audio_stream_end bug — Gemini was reading those frames as
+      // "user still talking" and stalling its turn detection.
+      if (sessionStateRef.current !== 'listening') return;
+
       const int16 = e.data;
 
       // RMS on Int16, normalised to [-1, 1] for the threshold compare.
@@ -431,10 +453,19 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
         }
       }
 
-      // Binary emit — Socket.io 4 sends ArrayBuffer as a binary frame
-      // automatically. Skips the O(n²) String.fromCharCode/btoa loop AND
-      // the 33% base64 wire bloat that the previous path paid per frame.
-      socketRef.current.emit('audio_chunk', int16.buffer);
+      // VAD-gated emit. Only forward frames while the user is actively
+      // speaking; once VAD flips speakingRef false (after END_OF_UTTERANCE_MS
+      // of confirmed silence), chunks stop immediately. Combined with the
+      // audio_stream_end Socket.io event, Gemini gets a clean end-of-turn
+      // signal AND the audio stream actually ends — turn finalises in
+      // <500ms instead of waiting on Gemini's own internal VAD.
+      //
+      // Socket.io 4 sends ArrayBuffer as a binary frame automatically —
+      // skips the O(n²) String.fromCharCode/btoa loop and the 33% base64
+      // wire bloat that the pre-worklet path paid per frame.
+      if (speakingRef.current) {
+        socketRef.current.emit('audio_chunk', int16.buffer);
+      }
     };
 
     source.connect(node);
@@ -491,6 +522,10 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
     drainTimerRef.current = setTimeout(() => {
       debug('audio', 'drain timer fired — reverting to listening');
       setSessionState((prev) => (prev === 'agent_speaking' ? 'listening' : prev), 'audio drained');
+      // Clear VAD bookkeeping so the next user turn starts clean — no stale
+      // silenceStart ticking down from before the agent spoke.
+      speakingRef.current = false;
+      silenceStartRef.current = null;
       drainTimerRef.current = null;
     }, msUntilEnd);
   }, [setSessionState]);

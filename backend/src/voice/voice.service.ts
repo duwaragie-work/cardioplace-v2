@@ -413,9 +413,15 @@ export class VoiceService implements OnModuleDestroy {
           session.transcriptBuffer.push({ speaker: 'user', text: trimmed })
           session.activity.userTexts.push(trimmed)
         }
-        // Stamp at any non-empty user transcript so we can measure agent
-        // latency on the next audio chunk.
-        if (trimmed) session.lastUserFinalAt = Date.now()
+        // Stamp ONCE per turn — the first non-empty partial. Gemini emits
+        // incremental inputTranscriptions and re-stamping on each one made
+        // the user_final→first_audio log report only the gap from the LAST
+        // partial, silently masking the true wait. The stamp clears back
+        // to null when the agent's first audio chunk arrives (see modelTurn
+        // branch above), so the next turn re-stamps freshly.
+        if (trimmed && session.lastUserFinalAt === null) {
+          session.lastUserFinalAt = Date.now()
+        }
       }
       const outT = c.outputTranscription?.text
       if (outT) {
