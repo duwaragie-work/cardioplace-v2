@@ -85,12 +85,14 @@ export class SessionAveragerService {
       userId: string
       measuredAt: Date
       sessionId: string | null
+      singleReadingFinalized?: boolean
     },
     siblings: Array<{
       id: string
       systolicBP: number | null
       diastolicBP: number | null
       pulse: number | null
+      weight: { toNumber?: () => number } | number | null
       measuredAt: Date
       measurementConditions: unknown
       severeHeadache: boolean
@@ -102,6 +104,10 @@ export class SessionAveragerService {
       newOnsetHeadache: boolean
       ruqPain: boolean
       edema: boolean
+      dizziness: boolean
+      syncope: boolean
+      palpitations: boolean
+      legSwelling: boolean
       otherSymptoms: string[]
       medicationTaken?: boolean | null
       missedMedications?: unknown
@@ -118,6 +124,14 @@ export class SessionAveragerService {
     const pulseVals = siblings
       .map((s) => s.pulse)
       .filter((v): v is number => v != null)
+    const weightVals = siblings
+      .map((s) => {
+        const w = s.weight
+        if (w == null) return null
+        if (typeof w === 'number') return w
+        return typeof w.toNumber === 'function' ? w.toNumber() : null
+      })
+      .filter((v): v is number => v != null)
 
     const symptoms = orReduceSymptoms(siblings)
     const suboptimal = siblings.some((s) => hasAnyFalseChecklistItem(s.measurementConditions))
@@ -133,6 +147,7 @@ export class SessionAveragerService {
       measuredAt: latest.measuredAt,
       systolicBP: mean(sbpVals),
       diastolicBP: mean(dbpVals),
+      weight: weightVals.length > 0 ? weightVals.reduce((a, b) => a + b, 0) / weightVals.length : null,
       pulse: mean(pulseVals),
       readingCount: siblings.length,
       symptoms,
@@ -140,6 +155,9 @@ export class SessionAveragerService {
       sessionId: anchor.sessionId,
       medicationTaken,
       missedMedications,
+      // Cluster 6 Q2 — bypass the non-emergency single-reading gate when
+      // the anchor entry has been finalized by the frontend 5-min timeout.
+      singleReadingFinalized: anchor.singleReadingFinalized ?? false,
     }
   }
 }
@@ -161,6 +179,10 @@ function orReduceSymptoms(
     newOnsetHeadache: boolean
     ruqPain: boolean
     edema: boolean
+    dizziness: boolean
+    syncope: boolean
+    palpitations: boolean
+    legSwelling: boolean
     otherSymptoms: string[]
   }>,
 ): SessionSymptoms {
@@ -174,6 +196,10 @@ function orReduceSymptoms(
     newOnsetHeadache: false,
     ruqPain: false,
     edema: false,
+    dizziness: false,
+    syncope: false,
+    palpitations: false,
+    legSwelling: false,
     otherSymptoms: [],
   }
   const otherSet = new Set<string>()
@@ -187,6 +213,10 @@ function orReduceSymptoms(
     merged.newOnsetHeadache ||= e.newOnsetHeadache
     merged.ruqPain ||= e.ruqPain
     merged.edema ||= e.edema
+    merged.dizziness ||= e.dizziness
+    merged.syncope ||= e.syncope
+    merged.palpitations ||= e.palpitations
+    merged.legSwelling ||= e.legSwelling
     for (const s of e.otherSymptoms) otherSet.add(s)
   }
   merged.otherSymptoms = [...otherSet]

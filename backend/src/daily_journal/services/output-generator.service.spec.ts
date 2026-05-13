@@ -15,7 +15,9 @@ const baseSession: SessionAverage = {
   systolicBP: 150,
   diastolicBP: 92,
   pulse: 78,
-  readingCount: 1,
+  weight: null,
+  // Cluster 6 Q2 default — ≥2 readings to bypass the single-reading gate.
+  readingCount: 2,
   symptoms: {
     severeHeadache: false,
     visualChanges: false,
@@ -26,12 +28,17 @@ const baseSession: SessionAverage = {
     newOnsetHeadache: false,
     ruqPain: false,
     edema: false,
+    dizziness: false,
+    syncope: false,
+    palpitations: false,
+    legSwelling: false,
     otherSymptoms: [],
   },
   suboptimalMeasurement: false,
   sessionId: null,
   medicationTaken: null,
   missedMedications: [],
+  singleReadingFinalized: false,
 }
 
 function baseResult(over: Partial<RuleResult> = {}): RuleResult {

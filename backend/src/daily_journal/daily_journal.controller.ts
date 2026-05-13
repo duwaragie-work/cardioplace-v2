@@ -161,6 +161,21 @@ export class DailyJournalController {
     return this.dailyJournalService.delete(userId, id)
   }
 
+  /**
+   * Cluster 6 Q2 (Manisha 5/9/26) — frontend's 5-min "take a second
+   * reading" timer elapsed. Flip the entry's `singleReadingFinalized`
+   * flag and re-evaluate so the alert fires on the lone reading with
+   * the "confirm with next reading" annotation.
+   */
+  @Post(':id/finalize-single-reading')
+  finalizeSingleReadingSession(
+    @Req() req: Request,
+    @Param('id') id: string,
+  ) {
+    const { id: userId } = req.user as { id: string }
+    return this.dailyJournalService.finalizeSingleReadingSession(userId, id)
+  }
+
   @Patch('alerts/:id/acknowledge')
   acknowledgeAlert(@Req() req: Request, @Param('id') id: string) {
     const { id: userId } = req.user as { id: string }

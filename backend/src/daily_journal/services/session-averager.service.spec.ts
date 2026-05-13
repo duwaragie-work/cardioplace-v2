@@ -8,6 +8,7 @@ function entry(over: Partial<any> = {}) {
     systolicBP: 130,
     diastolicBP: 80,
     pulse: 72,
+    weight: null,
     measurementConditions: null,
     sessionId: over.sessionId ?? null,
     severeHeadache: false,
@@ -19,6 +20,10 @@ function entry(over: Partial<any> = {}) {
     newOnsetHeadache: false,
     ruqPain: false,
     edema: false,
+    dizziness: false,
+    syncope: false,
+    palpitations: false,
+    legSwelling: false,
     otherSymptoms: [] as string[],
     ...over,
   }

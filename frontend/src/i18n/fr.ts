@@ -178,6 +178,14 @@ const fr: Record<TranslationKey, string> = {
   'checkin.b3.symptomNewHeadache': 'Nouveau mal de tête (pas habituel pour vous)',
   'checkin.b3.symptomRuq': 'Douleur en haut à droite du ventre',
   'checkin.b3.symptomEdema': 'Nouveau gonflement au visage, mains ou pieds',
+  // Cluster 6 — Priority 2 translation (English fallback pending FR sign-off).
+  'checkin.b3.symptomDizziness': 'Vertiges ou étourdissements',
+  'checkin.b3.symptomSyncope': 'Évanouissement récent ou sensation de défaillance',
+  'checkin.b3.symptomPalpitations': 'Cœur qui bat la chamade ou palpitations',
+  'checkin.b3.symptomLegSwelling': 'Gonflement des jambes/pieds ou prise de poids rapide',
+  'checkin.confirm.takeSecondReading': 'Prenez une seconde mesure dans environ 1 minute',
+  'checkin.confirm.takeSecondReadingHint':
+    "Une seule mesure peut être inexacte — une seconde aide votre équipe à voir l'ensemble. Nous attendrons quelques minutes.",
   'checkin.b3.otherLabel': 'Autre chose ? (optionnel)',
   'checkin.b3.otherPlaceholder': 'Dans vos propres mots…',
 

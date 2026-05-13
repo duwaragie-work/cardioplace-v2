@@ -79,38 +79,16 @@ jobs:
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     env:
       DATABASE_URL: postgresql://test:test@localhost:5432/healplace_test
-      ADK_SERVICE_HOST: localhost
-      ADK_SERVICE_PORT: '50051'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.12' }
 
       - name: Install backend
         run: |
           cd backend && npm ci
           npx prisma generate
           npx prisma migrate deploy
-
-      - name: Install & start ADK service
-        run: |
-          cd adk-service && pip install -r requirements.txt
-          python main.py &
-        env:
-          GEMINI_MODEL: gemini-2.0-flash-live-preview
-          GRPC_HOST: '0.0.0.0'
-          GRPC_PORT: '50051'
-          NESTJS_INTERNAL_URL: http://localhost:8080/api
-
-      - name: Wait for ADK service
-        run: |
-          for i in $(seq 1 30); do
-            python -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('localhost',50051)); s.close()" 2>/dev/null && exit 0
-            sleep 2
-          done
-          echo "ADK service failed to start" && exit 1
 
       - name: Run voice chat E2E + LLM-as-Judge
         run: cd backend && npm run test:e2e -- --testPathPatterns=voice-chat.e2e --forceExit

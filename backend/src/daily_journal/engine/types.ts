@@ -28,9 +28,29 @@ export interface SessionAverage {
   diastolicBP: number | null
   /** Mean pulse across all readings in the session. Integer. */
   pulse: number | null
+  /** Mean weight (lbs) across the session, or null when unrecorded. Used by
+   *  the HF-decompensation rule to compute 24h delta. */
+  weight: number | null
 
   /** Count of readings averaged. AFib requires ≥3. */
   readingCount: number
+
+  /** Cluster 6 — most-recent prior reading's weight + when it was logged.
+   *  Populated by AlertEngineService before rule evaluation when the patient
+   *  has any HF-related condition. Drives the >2-lbs-in-24h HF-decompensation
+   *  predicate. Both null when no prior reading. */
+  priorWeight?: number | null
+  priorWeightAt?: Date | null
+  /** Cluster 6 — most-recent prior SBP, for orthostatic-hypotension predicate
+   *  (SBP drop ≥15 from prior session + dizziness). */
+  priorSystolicBP?: number | null
+
+  /** Cluster 6 Q2 (Manisha 5/9/26) — true when the anchor entry's
+   *  `singleReadingFinalized` column is true (flipped by the 5-min
+   *  finalize endpoint). Bypasses the non-emergency single-reading gate
+   *  in `runPipeline` so the alert fires on the lone reading with a
+   *  "confirm with next reading" annotation. */
+  singleReadingFinalized: boolean
 
   /** Structured symptom flags — OR-reduced across the session's entries. */
   symptoms: SessionSymptoms
@@ -75,6 +95,14 @@ export interface SessionSymptoms {
   newOnsetHeadache: boolean
   ruqPain: boolean
   edema: boolean
+  /** Cluster 6 — new patient-driven signals. dizziness/syncope feed the
+   *  brady-symptomatic predicate; palpitations route to AFib/tachy/general
+   *  palpitation rules; legSwelling routes to HF decompensation and DHP-CCB
+   *  side-effect. `edema` is preserved as a preeclampsia-only trigger. */
+  dizziness: boolean
+  syncope: boolean
+  palpitations: boolean
+  legSwelling: boolean
   /** Freeform symptoms retained for context but not used in override logic. */
   otherSymptoms: string[]
 }
@@ -119,6 +147,12 @@ export interface RuleResultMetadata {
    * three-tier message builders can render drug names + reasons.
    */
   missedMedications?: SessionMissedMedication[]
+  /** Cluster 6 — drives "X of 3 days" wording in adherence three-tier messages. */
+  adherenceDaysWithMiss?: number
+  /** Cluster 6 — escalation flag for ≥3-of-7 push notification. */
+  adherenceDaysWithMissOver7d?: number
+  /** Cluster 6 — true when the alert fired because of the beta-blocker carve-out. */
+  adherenceBetaBlockerCarveOut?: boolean
 }
 
 /**

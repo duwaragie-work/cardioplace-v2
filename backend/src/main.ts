@@ -1,3 +1,7 @@
+// MUST be the first import — registers OTEL global providers before any
+// instrumented module loads. No-op when OTEL_EXPORTER_OTLP_ENDPOINT is unset.
+import './observability/tracing.js'
+
 import { ValidationPipe } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
 import cookieParser from 'cookie-parser'

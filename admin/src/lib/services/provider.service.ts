@@ -97,6 +97,15 @@ export interface PatientJournalEntry {
   newOnsetHeadache: boolean
   ruqPain: boolean
   edema: boolean
+  // Cluster 6 — universal symptom signals.
+  dizziness?: boolean
+  syncope?: boolean
+  palpitations?: boolean
+  legSwelling?: boolean
+  // Cluster 6 Q2 (Manisha 5/9/26) — true when this entry was finalized as
+  // a single-reading session by the patient's 5-min timeout. Drives the
+  // "Single-reading session" badge on the provider readings view.
+  singleReadingFinalized?: boolean
   otherSymptoms: string[]
   measurementConditions: Record<string, unknown> | null
   suboptimalMeasurement: boolean

@@ -33,6 +33,10 @@ function noSymptoms(): SessionSymptoms {
     newOnsetHeadache: false,
     ruqPain: false,
     edema: false,
+    dizziness: false,
+    syncope: false,
+    palpitations: false,
+    legSwelling: false,
     otherSymptoms: [],
   }
 }
@@ -45,12 +49,15 @@ function buildSession(over: Partial<SessionAverage> = {}): SessionAverage {
     systolicBP: 125,
     diastolicBP: 78,
     pulse: 72,
-    readingCount: 1,
+    weight: null,
+    // Cluster 6 Q2 default — ≥2 readings to bypass the single-reading gate.
+    readingCount: 2,
     symptoms: noSymptoms(),
     suboptimalMeasurement: false,
     sessionId: null,
     medicationTaken: null,
     missedMedications: [],
+    singleReadingFinalized: false,
     ...over,
   }
 }
@@ -150,10 +157,13 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
       },
       journalEntry: {
         findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
       },
       notification: {
         create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
       },
+      // Cluster 6 bug #11 — persistAlert wraps writes in $transaction.
+      $transaction: ((fn: any) => Promise.resolve(fn(prisma))) as any,
     }
     eventEmitter = { emit: jest.fn() }
     profileResolver = { resolve: jest.fn() as jest.Mock<any> }
@@ -358,19 +368,27 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
   // ────────────────────────────────────────────────────────────────────────
 
   it('Emergency + L1 high co-fire — SBP 185 fires BOTH ABSOLUTE_EMERGENCY + STANDARD_L1_HIGH (independent ladders)', async () => {
+    // Seed two prior days of misses so the Cluster 6 2-of-3 adherence
+    // window also fires, giving us the full three-ladder picture.
+    const now = new Date('2026-04-22T10:00:00Z')
+    prisma.journalEntry.findMany.mockResolvedValueOnce([
+      { id: 'p1', measuredAt: new Date(now.getTime() - 24 * 60 * 60 * 1000), medicationTaken: false, missedMedications: null },
+      { id: 'p2', measuredAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000), medicationTaken: false, missedMedications: null },
+    ])
     const { calls } = await run(
       buildSession({
         systolicBP: 185,
         diastolicBP: 100,
         pulse: 72,
         medicationTaken: false,
+        measuredAt: now,
       }),
       buildCtx({ profile: { diagnosedHypertension: true } }),
     )
     // SBP 185 violates BOTH the L2 emergency threshold (≥180) AND the L1
     // high threshold (≥160). Per v2 addendum D, the two ladders run
-    // independently (T+0/2h/4h vs T+0/24h/72h/7d). Adherence adds its
-    // own row.
+    // independently (T+0/2h/4h vs T+0/24h/72h/7d). Cluster 6 adherence
+    // (rolling 2-of-3 pattern) adds its own row.
     expect(calls).toHaveLength(3)
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_ABSOLUTE_EMERGENCY')
@@ -559,7 +577,7 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_ABSOLUTE_EMERGENCY')
     expect(ids).toContain('RULE_STANDARD_L1_HIGH')
-    expect(ids).toContain('RULE_BRADY_HR_ASYMPTOMATIC')
+    expect(ids).toContain('RULE_BRADY_ABSOLUTE')
   })
 
   it('Symptom override + AFib HR-high — two rows: override + AFIB_HR_HIGH', async () => {
@@ -651,7 +669,7 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
       buildCtx({ profile: { hasBradycardia: true } }),
     )
     expect(calls).toHaveLength(1)
-    expect(calls[0].data.ruleId).toBe('RULE_BRADY_HR_ASYMPTOMATIC')
+    expect(calls[0].data.ruleId).toBe('RULE_BRADY_ABSOLUTE')
   })
 
   it('DO NOT REGRESS — Stage C BP+brady co-fire with no terminal preempt', async () => {
@@ -670,7 +688,75 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
     expect(calls).toHaveLength(2)
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_CAD_HIGH')
-    expect(ids).toContain('RULE_BRADY_HR_ASYMPTOMATIC')
+    expect(ids).toContain('RULE_BRADY_ABSOLUTE')
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Phase/27 — Stage A/B no longer terminal. Tier 1 contraindications and
+  // Stage B emergency rules now coexist with Stage C BP/HR rows so each
+  // escalation ladder defined in v2 addendum Part D gets its own row.
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('Stage A + Stage C — Tier 1 NDHP_HFREF + BP L1 LOW (HFREF_LOW) co-fire on different axes', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 80, diastolicBP: 55, pulse: 72 }),
+      buildCtx({
+        profile: {
+          hasHeartFailure: true,
+          heartFailureType: 'HFREF',
+          resolvedHFType: 'HFREF',
+        },
+        contextMeds: [
+          buildMed({ drugName: 'Diltiazem', drugClass: 'NDHP_CCB' }),
+        ],
+      }),
+    )
+    expect(calls).toHaveLength(2)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_NDHP_HFREF')
+    expect(ids).toContain('RULE_HFREF_LOW')
+  })
+
+  it('Stage A + Stage C — Tier 1 PREGNANCY_ACE_ARB + BP L1 HIGH (PREGNANCY_L1_HIGH) co-fire', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 145, diastolicBP: 85, pulse: 78 }),
+      buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
+    )
+    expect(calls).toHaveLength(2)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_PREGNANCY_ACE_ARB')
+    expect(ids).toContain('RULE_PREGNANCY_L1_HIGH')
+    // L2 threshold (≥160/110) NOT met at 145/85.
+    expect(ids).not.toContain('RULE_PREGNANCY_L2')
+  })
+
+  it('Stage A + Stage B — Tier 1 PREGNANCY_ACE_ARB + BP L2 (PREGNANCY_L2) co-fire (D.5 patient-911)', async () => {
+    const { calls } = await run(
+      buildSession({ systolicBP: 175, diastolicBP: 115, pulse: 80 }),
+      buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
+    )
+    // 175/115 hits pregnancyL2 (≥160/110) and pregnancyL1High (≥140) on
+    // separate axes alongside the contraindication row → three ladders.
+    expect(calls).toHaveLength(3)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_PREGNANCY_ACE_ARB')
+    expect(ids).toContain('RULE_PREGNANCY_L2')
+    expect(ids).toContain('RULE_PREGNANCY_L1_HIGH')
+  })
+
+  it('Stage A + Stage A — Tier 1 PREGNANCY_ACE_ARB + symptom override coexist (different axes)', async () => {
+    const { calls } = await run(
+      buildSession({
+        systolicBP: 130,
+        diastolicBP: 85,
+        symptoms: { ...noSymptoms(), newOnsetHeadache: true },
+      }),
+      buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
+    )
+    expect(calls).toHaveLength(2)
+    const ids = ruleIds(calls)
+    expect(ids).toContain('RULE_PREGNANCY_ACE_ARB')
+    expect(ids).toContain('RULE_SYMPTOM_OVERRIDE_PREGNANCY')
   })
 
   // ────────────────────────────────────────────────────────────────────────

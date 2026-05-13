@@ -18,7 +18,9 @@ function baseSession(over: Partial<SessionAverage> = {}): SessionAverage {
     systolicBP: 125,
     diastolicBP: 78,
     pulse: 72,
-    readingCount: 1,
+    weight: null,
+    // Cluster 6 Q2 default — ≥2 readings to bypass the single-reading gate.
+    readingCount: 2,
     symptoms: {
       severeHeadache: false,
       visualChanges: false,
@@ -29,12 +31,17 @@ function baseSession(over: Partial<SessionAverage> = {}): SessionAverage {
       newOnsetHeadache: false,
       ruqPain: false,
       edema: false,
+      dizziness: false,
+      syncope: false,
+      palpitations: false,
+      legSwelling: false,
       otherSymptoms: [],
     },
     suboptimalMeasurement: false,
     sessionId: null,
     medicationTaken: null,
     missedMedications: [],
+    singleReadingFinalized: false,
     ...over,
   }
 }
@@ -105,12 +112,19 @@ describe('AlertEngineService (orchestrator)', () => {
       },
       journalEntry: {
         findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
       },
       notification: {
         // alert-engine writes a patient-facing dashboard Notification per alert
         // (idempotent on @@unique([alertId, escalationEventId, userId, channel])).
         create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
       },
+      // Cluster 6 bug #11 — persistAlert now wraps its writes in
+      // `prisma.$transaction(async (tx) => {...}, {isolationLevel})`. The
+      // simplest mock just invokes the callback with `prisma` itself as tx,
+      // so the inner `tx.deviationAlert.findFirst/create/update` calls hit
+      // the same per-method mocks above.
+      $transaction: ((fn: any) => Promise.resolve(fn(prisma))) as any,
     }
     eventEmitter = { emit: jest.fn() }
     profileResolver = {
@@ -320,6 +334,10 @@ describe('AlertEngineService (orchestrator)', () => {
             newOnsetHeadache: false,
             ruqPain: false,
             edema: false,
+            dizziness: false,
+            syncope: false,
+            palpitations: false,
+            legSwelling: false,
             otherSymptoms: [],
           },
         }),

@@ -4,6 +4,7 @@ import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter'
 import { Cron } from '@nestjs/schedule'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
+import { withDeadlockRetry } from '../../common/deadlock-retry.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import type {
   AlertCreatedEvent,
@@ -561,54 +562,76 @@ export class EscalationService {
 
     if (shouldQueue && practice) {
       const scheduledFor = nextBusinessHoursStart(now, practice)
-      await this.prisma.escalationEvent.create({
-        data: {
-          alertId: alert.id,
-          userId: alert.userId,
-          escalationLevel: this.legacyLevelFor(args.ladderKind),
-          reason: `Queued for business hours — ${step.step}${dispatchReason.suffix}`,
-          ladderStep: step.step,
-          // Persist what we'd dispatch when the queue fires. The cron will
-          // re-resolve at fire time too (practice staff may change before
-          // then), but we keep the snapshot for audit.
-          recipientIds: resolved.recipientIds,
-          recipientRoles: resolved.recipientRoles,
-          notificationChannel: step.channels[0] ?? 'PUSH',
-          afterHours: true,
-          scheduledFor,
-        },
-      })
+      // Cluster 6 bug #11 — wrap EscalationEvent.create in deadlock retry.
+      // Same shape as the persistAlert retry: under concurrent dispatch +
+      // alert-resolution writes, this insert can deadlock against an
+      // in-flight Notification write. Lose the row silently and the step
+      // never fires.
+      await withDeadlockRetry(
+        `dispatchStep:queue:${alert.id}:${step.step}`,
+        () =>
+          this.prisma.escalationEvent.create({
+            data: {
+              alertId: alert.id,
+              userId: alert.userId,
+              escalationLevel: this.legacyLevelFor(args.ladderKind),
+              reason: `Queued for business hours — ${step.step}${dispatchReason.suffix}`,
+              ladderStep: step.step,
+              // Persist what we'd dispatch when the queue fires. The cron will
+              // re-resolve at fire time too (practice staff may change before
+              // then), but we keep the snapshot for audit.
+              recipientIds: resolved.recipientIds,
+              recipientRoles: resolved.recipientRoles,
+              notificationChannel: step.channels[0] ?? 'PUSH',
+              afterHours: true,
+              scheduledFor,
+            },
+          }),
+        this.logger,
+      )
       this.logger.log(
         `Queued ${step.step} for alert ${alert.id} until ${scheduledFor.toISOString()}`,
       )
       return
     }
 
-    const created = await this.prisma.escalationEvent.create({
-      data: {
-        alertId: alert.id,
-        userId: alert.userId,
-        escalationLevel: this.legacyLevelFor(args.ladderKind),
-        reason: `${step.step} dispatched${dispatchReason.suffix}`,
-        ladderStep: step.step,
-        recipientIds: resolved.recipientIds,
-        recipientRoles: resolved.recipientRoles,
-        notificationChannel: step.channels[0] ?? 'PUSH',
-        afterHours,
-        notificationSentAt: now,
-      },
-    })
+    // Cluster 6 bug #11 — wrap EscalationEvent.create + writeNotificationsAndEmit
+    // in a single deadlock-retry scope. writeNotificationsAndEmit also does
+    // Notification writes; if either side deadlocks, the whole pair retries.
+    // EmailService send inside writeNotificationsAndEmit stays outside the
+    // retry's transactional intent (idempotent at the Notification dedup
+    // layer), but a deadlock on the DB writes here will retry the whole.
+    await withDeadlockRetry(
+      `dispatchStep:fire:${alert.id}:${step.step}`,
+      async () => {
+        const created = await this.prisma.escalationEvent.create({
+          data: {
+            alertId: alert.id,
+            userId: alert.userId,
+            escalationLevel: this.legacyLevelFor(args.ladderKind),
+            reason: `${step.step} dispatched${dispatchReason.suffix}`,
+            ladderStep: step.step,
+            recipientIds: resolved.recipientIds,
+            recipientRoles: resolved.recipientRoles,
+            notificationChannel: step.channels[0] ?? 'PUSH',
+            afterHours,
+            notificationSentAt: now,
+          },
+        })
 
-    await this.writeNotificationsAndEmit({
-      eventId: created.id,
-      alert,
-      step,
-      recipientIds: resolved.recipientIds,
-      recipientRoles: resolved.recipientRoles,
-      afterHours,
-      now,
-      triggeredByResolution: false,
-    })
+        await this.writeNotificationsAndEmit({
+          eventId: created.id,
+          alert,
+          step,
+          recipientIds: resolved.recipientIds,
+          recipientRoles: resolved.recipientRoles,
+          afterHours,
+          now,
+          triggeredByResolution: false,
+        })
+      },
+      this.logger,
+    )
   }
 
   /**
@@ -645,27 +668,35 @@ export class EscalationService {
     const afterHours =
       args.practice != null && !isWithinBusinessHours(args.now, args.practice)
 
-    await this.prisma.escalationEvent.update({
-      where: { id: args.eventId },
-      data: {
-        notificationSentAt: args.now,
-        recipientIds: resolved.recipientIds,
-        recipientRoles: resolved.recipientRoles,
-        afterHours,
-        reason: `${args.step.step} dispatched${args.triggeredByResolution ? ' (retry)' : ''}${dispatchReason.suffix}`,
-      },
-    })
+    // Cluster 6 bug #11 — wrap update + write in deadlock retry. Same
+    // rationale as the dispatchStep wrappers above.
+    await withDeadlockRetry(
+      `dispatchForExistingEvent:${args.eventId}`,
+      async () => {
+        await this.prisma.escalationEvent.update({
+          where: { id: args.eventId },
+          data: {
+            notificationSentAt: args.now,
+            recipientIds: resolved.recipientIds,
+            recipientRoles: resolved.recipientRoles,
+            afterHours,
+            reason: `${args.step.step} dispatched${args.triggeredByResolution ? ' (retry)' : ''}${dispatchReason.suffix}`,
+          },
+        })
 
-    await this.writeNotificationsAndEmit({
-      eventId: args.eventId,
-      alert: args.alert,
-      step: args.step,
-      recipientIds: resolved.recipientIds,
-      recipientRoles: resolved.recipientRoles,
-      afterHours,
-      now: args.now,
-      triggeredByResolution: args.triggeredByResolution,
-    })
+        await this.writeNotificationsAndEmit({
+          eventId: args.eventId,
+          alert: args.alert,
+          step: args.step,
+          recipientIds: resolved.recipientIds,
+          recipientRoles: resolved.recipientRoles,
+          afterHours,
+          now: args.now,
+          triggeredByResolution: args.triggeredByResolution,
+        })
+      },
+      this.logger,
+    )
   }
 
   /**

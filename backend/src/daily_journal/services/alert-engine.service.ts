@@ -5,6 +5,7 @@ import {
   type ResolvedContext,
 } from '@cardioplace/shared'
 import { Prisma } from '../../generated/prisma/client.js'
+import { withDeadlockRetry } from '../../common/deadlock-retry.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import type { JournalEntryCreatedEvent, JournalEntryUpdatedEvent } from '../interfaces/events.interface.js'
@@ -29,12 +30,22 @@ import {
   cadDbpRule,
   cadHighRule,
   dcmRule,
+  dhpCcbLegSwellingRule,
   getCadHtnUncontrolledAnnotation,
   hcmRule,
   hcmVasodilatorRule,
+  hfDecompensationRule,
   hfpefRule,
   hfrefRule,
 } from '../engine/condition-branches.js'
+import {
+  afibPalpitationsRule,
+  betaBlockerDizzinessRule,
+  orthostaticHypotensionRule,
+  palpitationsGeneralRule,
+  syncopeGeneralRule,
+  tachyPalpitationsRule,
+} from '../engine/symptom-rules.js'
 import {
   personalizedHighRule,
   personalizedLowRule,
@@ -45,7 +56,8 @@ import {
 } from '../engine/standard.js'
 import {
   afibHrRule,
-  bradyRule,
+  bradyAbsoluteRule,
+  bradySymptomaticRule,
   buildTachyRule,
   getHrContextAnnotation,
 } from '../engine/hr-branches.js'
@@ -57,7 +69,8 @@ import {
   getLoopDiureticAnnotation,
   loopDiureticHypotensionRule,
 } from '../engine/loop-diuretic.js'
-import { medicationMissedRule } from '../engine/adherence.js'
+import { medicationMissedRuleWithWindow } from '../engine/adherence.js'
+import { loadAdherenceWindow } from '../engine/adherence-window.js'
 
 /**
  * Phase/5 AlertEngineService — the single owner of rule evaluation.
@@ -93,7 +106,19 @@ import { medicationMissedRule } from '../engine/adherence.js'
  *   primary result when not standalone (preserves Scenario 15). Three-tier
  *   messages come from OutputGenerator (per-result, stateless).
  */
-type Axis = 'contraindication' | 'emergency' | 'bp-high' | 'sbp-low' | 'dbp-low' | 'hr' | 'info'
+type Axis =
+  | 'contraindication'
+  | 'emergency'
+  | 'bp-high'
+  | 'sbp-low'
+  | 'dbp-low'
+  | 'hr'
+  | 'hf-decomp'
+  | 'palpitations'
+  | 'orthostatic'
+  | 'syncope'
+  | 'med-side-effect'
+  | 'info'
 
 const AXIS_PRIORITY: Axis[] = [
   'emergency',
@@ -102,6 +127,11 @@ const AXIS_PRIORITY: Axis[] = [
   'sbp-low',
   'dbp-low',
   'hr',
+  'hf-decomp',
+  'orthostatic',
+  'palpitations',
+  'syncope',
+  'med-side-effect',
   'info',
 ]
 
@@ -121,6 +151,24 @@ function axisFor(r: RuleResult): Axis {
     r.ruleId === 'RULE_BRADY_HR_ASYMPTOMATIC'
   ) {
     return 'hr'
+  }
+  // Cluster 6 — each new rule lives on its own axis so they coexist with
+  // whatever BP/HR row also fires on the same reading.
+  if (r.ruleId === 'RULE_HF_DECOMPENSATION') return 'hf-decomp'
+  if (r.ruleId === 'RULE_ORTHOSTATIC_HYPOTENSION') return 'orthostatic'
+  if (
+    r.ruleId === 'RULE_AFIB_PALPITATIONS' ||
+    r.ruleId === 'RULE_TACHY_WITH_PALPITATIONS' ||
+    r.ruleId === 'RULE_PALPITATIONS_GENERAL'
+  ) {
+    return 'palpitations'
+  }
+  if (r.ruleId === 'RULE_SYNCOPE_GENERAL') return 'syncope'
+  if (
+    r.ruleId === 'RULE_DHP_CCB_LEG_SWELLING' ||
+    r.ruleId === 'RULE_BETA_BLOCKER_DIZZINESS'
+  ) {
+    return 'med-side-effect'
   }
   if (r.tier === 'BP_LEVEL_1_LOW') return 'sbp-low'
   if (r.tier === 'BP_LEVEL_1_HIGH') return 'bp-high'
@@ -195,6 +243,12 @@ export class AlertEngineService {
     // preempt Stage C. Computed once here so we don't re-query the DB.
     const priorElevated = await this.wasPriorReadingPulseElevated(session, ctx)
 
+    // Cluster 6 — one Prisma read for prior weight + prior SBP. Drives the
+    // HF-decompensation weight-delta + orthostatic-hypotension SBP-drop
+    // predicates. Cheap (single row lookup on the indexed (userId, measuredAt)
+    // pair) and the same row covers both fields.
+    await this.attachPriorReading(session)
+
     // Pass 1 — multi-axis BP/HR pipeline
     const bpResults = await this.runPipeline(session, ctx, priorElevated)
     const primary = bpResults[0] ?? null
@@ -209,8 +263,17 @@ export class AlertEngineService {
       await this.persistAlert(session, ctx, r)
     }
 
-    // Pass 2 — Adherence pipeline (independent of Pass 1)
-    const adherenceResult = medicationMissedRule(session, ctx)
+    // Pass 2 — Adherence pipeline (independent of Pass 1). Pre-computes a
+    // rolling 3-day / 7-day window so the rule can fire on a non-adherence
+    // PATTERN, not a single miss. Carves out beta-blockers for HFrEF/HCM/
+    // AFib patients where even a single miss is hemodynamically risky.
+    const adherenceWindow = await loadAdherenceWindow(
+      this.prisma,
+      session.userId,
+      session.measuredAt,
+      ctx.timezone ?? 'America/New_York',
+    )
+    const adherenceResult = medicationMissedRuleWithWindow(adherenceWindow)(session, ctx)
     if (adherenceResult) {
       await this.persistAlert(session, ctx, adherenceResult)
     }
@@ -265,7 +328,26 @@ export class AlertEngineService {
       const r = rule(session, ctx)
       if (!r) continue
       const axis = axisFor(r)
-      if (claimed.has(axis)) continue
+      if (claimed.has(axis)) {
+        // Cluster 6 Q3 (Manisha 5/9/26): audit-log when ruqPain triggered
+        // BOTH pregnancy + general overrides. Pregnancy claims 'emergency'
+        // first (it iterates ahead of general in preGateRules), so general
+        // is silently dropped. Manisha asked for the suppression to be
+        // recorded for clinical-reasoning traceability.
+        const claimedRule = claimed.get(axis)?.ruleId
+        if (
+          r.ruleId === 'RULE_SYMPTOM_OVERRIDE_GENERAL' &&
+          claimedRule === 'RULE_SYMPTOM_OVERRIDE_PREGNANCY' &&
+          session.symptoms.ruqPain
+        ) {
+          this.logger.log(
+            `Symptom-override suppressed (Manisha 5/9 Q3): pregnancy override ` +
+              `fired on ruqPain — RULE_SYMPTOM_OVERRIDE_GENERAL skipped. ` +
+              `user=${session.userId} entry=${session.entryId}`,
+          )
+        }
+        continue
+      }
       claimed.set(axis, r)
     }
 
@@ -299,6 +381,31 @@ export class AlertEngineService {
       const axis = axisFor(r)
       if (claimed.has(axis)) continue
       claimed.set(axis, r)
+    }
+
+    // Cluster 6 Q2 (Manisha 5/9/26) — non-emergency BP/HR alerts require
+    // ≥2 readings averaged in the current session. Emergency rules from
+    // Stage A (symptom override) + Stage B (absolute emergency, pregnancy
+    // L2) already ran above and stay if they fired — they explicitly
+    // bypass the gate per Manisha's note. The remaining axisRules in
+    // Stage C / Stage D info fallback are suppressed for single-reading
+    // sessions on adult non-AFib non-preDay3 patients until either:
+    //   (a) a second reading lands and SessionAverager re-averages, or
+    //   (b) the frontend's 5-min timeout POSTs the finalize endpoint
+    //       which flips `JournalEntry.singleReadingFinalized = true`.
+    const isSingleReadingNonEmergency =
+      session.readingCount < 2 &&
+      !session.singleReadingFinalized &&
+      !ctx.preDay3Mode &&
+      !ctx.profile.hasAFib
+    if (isSingleReadingNonEmergency) {
+      this.logger.log(
+        `Single-reading session — gating non-emergency rules for entry ${session.entryId}. ` +
+          'Awaiting second reading or finalize call (Manisha 5/9 Q2).',
+      )
+      return AXIS_PRIORITY
+        .map((axis) => claimed.get(axis))
+        .filter((r): r is RuleResult => r !== undefined)
     }
 
     // Stage C — multi-axis accumulation. Tachycardia uses the cross-session
@@ -336,7 +443,23 @@ export class AlertEngineService {
       standardL1LowRule,
       afibHrRule,
       tachyRule,
-      bradyRule,
+      // Cluster 6 — brady split into two emitters. bradyAbsoluteRule (HR<40)
+      // claims 'contraindication' (Tier 1); bradySymptomaticRule (HR<50 +
+      // dizziness/syncope/AMS/etc.) claims 'hr'. They're on different axes
+      // so both can co-fire on the same reading.
+      bradyAbsoluteRule,
+      bradySymptomaticRule,
+      // Cluster 6 — HF decompensation + DHP-CCB side-effect + the six
+      // symptom-rules.ts entries. Each claims a distinct axis so they
+      // coexist with whatever BP/HR row also fires.
+      hfDecompensationRule,
+      dhpCcbLegSwellingRule,
+      orthostaticHypotensionRule,
+      betaBlockerDizzinessRule,
+      afibPalpitationsRule,
+      tachyPalpitationsRule,
+      palpitationsGeneralRule,
+      syncopeGeneralRule,
     ]
 
     // Stage C continues into the same `claimed` Map declared above so
@@ -380,23 +503,54 @@ export class AlertEngineService {
    * previous* JournalEntry for this user (before the current session's
    * anchor) and test its pulse. Prior implementation filtered on pulse>100 at
    * query time, which would match any prior elevated reading — even with
-   * intervening normal readings. Spec §4.5 requires back-to-back elevation.
+   * intervening normal readings.
+   *
+   * Cluster 6 Q5 (Manisha 5/9/26): narrow the lookup window from "any prior
+   * reading" to 8h consecutive. A reading 9+ hours ago is no longer
+   * clinically related to the current session's tachycardia question.
+   * (The HR > 130 single-reading Tier 2 exception lives in `buildTachyRule`
+   * — it doesn't consult this helper at all.)
    */
+  private static readonly TACHY_CONSECUTIVE_WINDOW_MS = 8 * 60 * 60 * 1000
+
   private async wasPriorReadingPulseElevated(
     session: SessionAverage,
     ctx: ResolvedContext,
   ): Promise<boolean> {
     if (!ctx.profile.hasTachycardia) return false
+    const windowStart = new Date(
+      session.measuredAt.getTime() - AlertEngineService.TACHY_CONSECUTIVE_WINDOW_MS,
+    )
     const prior = await this.prisma.journalEntry.findFirst({
       where: {
         userId: session.userId,
-        measuredAt: { lt: session.measuredAt },
+        measuredAt: { lt: session.measuredAt, gte: windowStart },
       },
       orderBy: { measuredAt: 'desc' },
       select: { pulse: true },
     })
     if (!prior || prior.pulse == null) return false
     return prior.pulse > 100
+  }
+
+  /**
+   * Cluster 6 — populate `session.priorWeight`, `session.priorWeightAt`, and
+   * `session.priorSystolicBP` from the most-recent prior journal entry. One
+   * query covers both predicates (HF-decompensation weight-delta + orthostatic
+   * SBP-drop). Idempotent — fields are simply assigned, defaulting to null.
+   */
+  private async attachPriorReading(session: SessionAverage): Promise<void> {
+    const prior = await this.prisma.journalEntry.findFirst({
+      where: {
+        userId: session.userId,
+        measuredAt: { lt: session.measuredAt },
+      },
+      orderBy: { measuredAt: 'desc' },
+      select: { weight: true, systolicBP: true, measuredAt: true },
+    })
+    session.priorWeight = prior?.weight != null ? Number(prior.weight) : null
+    session.priorWeightAt = prior?.measuredAt ?? null
+    session.priorSystolicBP = prior?.systolicBP ?? null
   }
 
   // ─── annotations ───────────────────────────────────────────────────────
@@ -475,90 +629,109 @@ export class AlertEngineService {
     const dismissible = !isNonDismissableTier(result.tier)
     const messages = this.outputGenerator.generate(result, session, ctx.preDay3Mode)
 
-    // Phase/7 — app-level dedup by (journalEntryId, ruleId). The legacy
-    // @@unique([journalEntryId, type]) was dropped so v2 can persist multiple
-    // alerts per entry (e.g. Tier 3 pulse-pressure riding alongside a Tier 1
-    // contraindication). Upsert is replaced with findFirst → update|create.
-    const existing = await this.prisma.deviationAlert.findFirst({
-      where: {
-        journalEntryId: session.entryId,
-        ruleId: result.ruleId,
-      },
-      select: { id: true },
-    })
-
     const actualValue =
       result.actualValue != null
         ? new Prisma.Decimal(result.actualValue.toFixed(2))
         : null
 
-    const upserted = existing
-      ? await this.prisma.deviationAlert.update({
-          where: { id: existing.id },
-          data: {
-            severity: legacySeverity,
-            tier: result.tier,
-            ruleId: result.ruleId,
-            mode: result.mode,
-            pulsePressure: result.pulsePressure,
-            suboptimalMeasurement: result.suboptimalMeasurement,
-            dismissible,
-            actualValue,
-            patientMessage: messages.patientMessage,
-            caregiverMessage: messages.caregiverMessage,
-            physicianMessage: messages.physicianMessage,
+    // Cluster 6 bug #11 (HIGH severity) — wrap the DeviationAlert upsert +
+    // patient notification write in a serializable transaction with
+    // deadlock-retry. Under Prisma Cloud DB concurrency, the previous
+    // auto-commit pattern silently rolled back alert creation when a
+    // deadlock collided with an in-flight escalation/notification write.
+    // Production failure: a BP Level 2 reading during a deadlock window
+    // simply doesn't fire its alert.
+    const upserted = await withDeadlockRetry(
+      `persistAlert:${result.ruleId}:${session.entryId}`,
+      async () => {
+        return await this.prisma.$transaction(
+          async (tx) => {
+            // Phase/7 — app-level dedup by (journalEntryId, ruleId). The legacy
+            // @@unique([journalEntryId, type]) was dropped so v2 can persist
+            // multiple alerts per entry (e.g. Tier 3 pulse-pressure riding
+            // alongside a Tier 1 contraindication). Upsert is replaced with
+            // findFirst → update|create.
+            const existing = await tx.deviationAlert.findFirst({
+              where: {
+                journalEntryId: session.entryId,
+                ruleId: result.ruleId,
+              },
+              select: { id: true },
+            })
+
+            const row = existing
+              ? await tx.deviationAlert.update({
+                  where: { id: existing.id },
+                  data: {
+                    severity: legacySeverity,
+                    tier: result.tier,
+                    ruleId: result.ruleId,
+                    mode: result.mode,
+                    pulsePressure: result.pulsePressure,
+                    suboptimalMeasurement: result.suboptimalMeasurement,
+                    dismissible,
+                    actualValue,
+                    patientMessage: messages.patientMessage,
+                    caregiverMessage: messages.caregiverMessage,
+                    physicianMessage: messages.physicianMessage,
+                  },
+                })
+              : await tx.deviationAlert.create({
+                  data: {
+                    userId: session.userId,
+                    journalEntryId: session.entryId,
+                    type: legacyType,
+                    severity: legacySeverity,
+                    tier: result.tier,
+                    ruleId: result.ruleId,
+                    mode: result.mode,
+                    pulsePressure: result.pulsePressure,
+                    suboptimalMeasurement: result.suboptimalMeasurement,
+                    dismissible,
+                    actualValue,
+                    patientMessage: messages.patientMessage,
+                    caregiverMessage: messages.caregiverMessage,
+                    physicianMessage: messages.physicianMessage,
+                  },
+                })
+
+            // Patient-facing in-app dashboard notification. Independent of
+            // the EscalationService ladder (which only pages PROVIDER/MD/OPS
+            // for most tiers per CLINICAL_SPEC §V2-D). Idempotent via the
+            // @@unique([alertId, escalationEventId, userId, channel]) index
+            // — re-evaluation of the same entry won't double-write.
+            if (messages.patientMessage) {
+              const patientTitle = patientNotificationTitle(result.tier)
+              try {
+                await tx.notification.create({
+                  data: {
+                    userId: session.userId,
+                    alertId: row.id,
+                    escalationEventId: null,
+                    channel: 'DASHBOARD',
+                    title: patientTitle,
+                    body: messages.patientMessage,
+                    tips: [],
+                  },
+                })
+              } catch (err: unknown) {
+                // P2002 = duplicate (re-evaluation of same entry). Safe to ignore.
+                const code = (err as { code?: string })?.code
+                if (code !== 'P2002') throw err
+              }
+            }
+
+            return row
           },
-        })
-      : await this.prisma.deviationAlert.create({
-          data: {
-            userId: session.userId,
-            journalEntryId: session.entryId,
-            type: legacyType,
-            severity: legacySeverity,
-            tier: result.tier,
-            ruleId: result.ruleId,
-            mode: result.mode,
-            pulsePressure: result.pulsePressure,
-            suboptimalMeasurement: result.suboptimalMeasurement,
-            dismissible,
-            actualValue,
-            patientMessage: messages.patientMessage,
-            caregiverMessage: messages.caregiverMessage,
-            physicianMessage: messages.physicianMessage,
-          },
-        })
+          { isolationLevel: 'Serializable' },
+        )
+      },
+      this.logger,
+    )
 
     this.logger.log(
       `Alert fired: ${result.ruleId} (${result.tier}) for user ${session.userId} — ${result.reason}`,
     )
-
-    // Patient-facing in-app dashboard notification. Independent of the
-    // EscalationService ladder (which only pages PROVIDER/MD/OPS for most
-    // tiers per CLINICAL_SPEC §V2-D). This row is what populates the
-    // patient's /notifications inbox so they see "Important medication
-    // alert" cards alongside their dashboard alerts banner. Idempotent via
-    // the @@unique([alertId, escalationEventId, userId, channel]) index —
-    // re-evaluation of the same entry won't double-write.
-    if (messages.patientMessage) {
-      const patientTitle = patientNotificationTitle(result.tier)
-      await this.prisma.notification
-        .create({
-          data: {
-            userId: session.userId,
-            alertId: upserted.id,
-            escalationEventId: null,
-            channel: 'DASHBOARD',
-            title: patientTitle,
-            body: messages.patientMessage,
-            tips: [],
-          },
-        })
-        .catch((err: unknown) => {
-          // P2002 = duplicate (re-evaluation of same entry). Safe to ignore.
-          const code = (err as { code?: string })?.code
-          if (code !== 'P2002') throw err
-        })
-    }
 
     // Phase/7 — renamed from ANOMALY_TRACKED and enriched with tier + ruleId so
     // the escalation service can route by tier without re-fetching the alert.

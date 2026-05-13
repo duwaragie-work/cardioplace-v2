@@ -180,6 +180,14 @@ const am: Record<TranslationKey, string> = {
   'checkin.b3.symptomNewHeadache': 'አዲስ ራስ ምታት (ለእርስዎ የተለመደ አይደለም)',
   'checkin.b3.symptomRuq': 'በቀኝ ላይ ሆድ ውስጥ ህመም',
   'checkin.b3.symptomEdema': 'በፊት፣ እጆች ወይም እግሮች አዲስ እብጠት',
+  // Cluster 6 — Priority 2 translation (pending AM sign-off).
+  'checkin.b3.symptomDizziness': 'መታወር ወይም ራስን መሳት ስሜት',
+  'checkin.b3.symptomSyncope': 'በቅርቡ ራስን መሳት ወይም ሊወድቅ የነበረበት ስሜት',
+  'checkin.b3.symptomPalpitations': 'ልብ የሚሮጥ ወይም የሚዳክም ስሜት',
+  'checkin.b3.symptomLegSwelling': 'በእግሮች/ጫማ ላይ እብጠት ወይም በፍጥነት ክብደት መጨመር',
+  'checkin.confirm.takeSecondReading': 'በ1 ደቂቃ ውስጥ ሁለተኛ ንባብ ይውሰዱ',
+  'checkin.confirm.takeSecondReadingHint':
+    'አንድ ብቻ ንባብ ሊሳሳት ይችላል — ሁለተኛ ንባብ የእንክብካቤ ቡድንዎ ሙሉ ስዕል እንዲያይ ይረዳል። ጥቂት ደቂቃዎችን እንጠብቃለን።',
   'checkin.b3.otherLabel': 'ሌላ ነገር? (አማራጭ)',
   'checkin.b3.otherPlaceholder': 'በራስዎ ቃላት…',
 

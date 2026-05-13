@@ -150,8 +150,20 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('audio_chunk')
   handleAudioChunk(
     @ConnectedSocket() client: Socket,
-    @MessageBody() audioBase64: string,
+    @MessageBody() audioBytes: ArrayBuffer | Buffer | string,
   ) {
+    // Frontend now sends raw Int16 PCM as a binary Socket.io frame (cheaper
+    // than the previous base64 string — skips main-thread btoa AND ~33% wire
+    // bloat). Fall back to string for compatibility if any old client is
+    // still attached. voice.service expects base64.
+    let audioBase64: string
+    if (typeof audioBytes === 'string') {
+      audioBase64 = audioBytes
+    } else if (Buffer.isBuffer(audioBytes)) {
+      audioBase64 = audioBytes.toString('base64')
+    } else {
+      audioBase64 = Buffer.from(audioBytes).toString('base64')
+    }
     this.voiceService.sendAudio(client.id, audioBase64)
   }
 

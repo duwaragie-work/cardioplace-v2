@@ -167,24 +167,6 @@ export interface StartOptions {
 
 // ── Audio helpers ─────────────────────────────────────────────────────────────
 
-function floatTo16BitPCM(float32: Float32Array): Int16Array {
-  const int16 = new Int16Array(float32.length);
-  for (let i = 0; i < float32.length; i++) {
-    const s = Math.max(-1, Math.min(1, float32[i]));
-    int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-  }
-  return int16;
-}
-
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
 function base64ToFloat32(base64: string, sampleRate: number): AudioBuffer | null {
   try {
     const binary = atob(base64);
@@ -241,13 +223,50 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
   );
   const actionType = actionTypeState;
 
+  // Mirror sessionState into a ref so the AudioWorklet onmessage callback can
+  // half-duplex on the live value without re-binding every state change.
+  useEffect(() => {
+    sessionStateRef.current = sessionState;
+  }, [sessionState]);
+
+  // Listening watchdog helpers — arm after `audio_stream_end`, clear on
+  // any inbound event that confirms Gemini is alive (audio_response,
+  // transcript, action). If 15 s pass with nothing, surface a friendly
+  // error and stop the mic so the patient can retry.
+  const clearListeningWatchdog = useCallback(() => {
+    if (listeningWatchdogRef.current) {
+      clearTimeout(listeningWatchdogRef.current);
+      listeningWatchdogRef.current = null;
+    }
+  }, []);
+  const armListeningWatchdog = useCallback(() => {
+    clearListeningWatchdog();
+    listeningWatchdogRef.current = setTimeout(() => {
+      debug('watchdog', '15s elapsed without agent response — surfacing error');
+      setErrorMessage("I didn't catch that — please try again.");
+      setSessionState('error', 'listening watchdog timeout');
+    }, 15_000);
+  }, [clearListeningWatchdog, setSessionState]);
+
   const socketRef = useRef<Socket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const playbackContextRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const processorRef = useRef<any>(null);
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  // Mirror of sessionState into a ref so the worklet onmessage callback can
+  // read it without re-binding. Used to half-duplex the mic — while the agent
+  // is speaking (or we're connecting/processing), drop incoming audio frames
+  // before they ever touch the socket. Eliminates the trailing-chunks-after-
+  // audio_stream_end and echo-during-agent bugs.
+  const sessionStateRef = useRef<SessionState>('idle');
+  // True once we've sent audio_stream_end for the current user turn. Gemini
+  // Live's audioStreamEnd is a once-per-turn signal — firing it multiple
+  // times (one per VAD-detected pause) puts the session into a state where
+  // subsequent audio is ignored and the model never responds. Reset to
+  // false when the agent finishes speaking and we transition back to
+  // 'listening' (in playAudio's drain timer).
+  const audioStreamEndSentRef = useRef(false);
   // Scheduled playback — each arriving audio chunk is scheduled to start at
   // nextStartTimeRef on the playback AudioContext, avoiding the onended gap
   // that caused choppy output. When no chunks arrive for ~200ms after the
@@ -270,6 +289,13 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
   const startMicPendingRef = useRef(false);
   const transcriptIdRef = useRef(0);
   const onSessionCreatedRef = useRef(onSessionCreated);
+  // Listening watchdog — armed when the VAD emits `audio_stream_end`.
+  // Tracks "we've finished a user turn, now waiting for agent response".
+  // If no inbound event progresses the turn within 15 s, surface a soft
+  // error instead of letting the UI sit on "listening" forever. Cleared
+  // by audio_response, agent transcript, action, session_error,
+  // session_closed, and end-of-call detection.
+  const listeningWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Prewarm lifecycle tracking — separate from sessionState so the UI can
   // reflect "voice unavailable" without flipping the main session state.
@@ -295,6 +321,11 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
 
   const cleanup = useCallback(async () => {
     stopMic();
+    // Cancel any pending listening-watchdog so it can't fire after we've torn down.
+    if (listeningWatchdogRef.current) {
+      clearTimeout(listeningWatchdogRef.current);
+      listeningWatchdogRef.current = null;
+    }
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current = null;
@@ -322,9 +353,10 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
 
   const stopMic = useCallback(() => {
     debug('mic', 'stopMic');
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-      processorRef.current = null;
+    if (workletNodeRef.current) {
+      workletNodeRef.current.port.onmessage = null;
+      workletNodeRef.current.disconnect();
+      workletNodeRef.current = null;
     }
     if (sourceRef.current) {
       sourceRef.current.disconnect();
@@ -361,78 +393,92 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
     const source = ctx.createMediaStreamSource(stream);
     sourceRef.current = source;
 
-    // ScriptProcessorNode — captures raw PCM and sends to backend.
-    // createScriptProcessor requires a power-of-2 bufferSize in {256, 512,
-    // 1024, 2048, 4096, 8192, 16384}. 512 @ 16kHz = 32ms chunks, which sits
-    // in Google Live API's recommended 20–40ms window. Down from 2048 (128ms)
-    // for ~96ms lower server-side VAD buffering per turn.
-    const bufferSize = 512;
-    // eslint-disable-next-line @typescript-eslint/no-deprecated
-    const processor = ctx.createScriptProcessor(bufferSize, 1, 1);
-    processorRef.current = processor;
+    // AudioWorklet runs on the audio render thread — immune to main-thread
+    // jitter (React renders, Framer Motion frames, GC pauses). The previous
+    // ScriptProcessorNode ran the Float32 → Int16 → base64 conversion on the
+    // main thread for every 32ms frame, which throttled emit rate to ~25/sec
+    // under load (vs the expected 31/sec at 32ms). With the worklet we get
+    // raw Int16 PCM at the audio thread's native cadence (128-sample blocks
+    // = ~8ms each at 16kHz) and emit as binary frames over Socket.io.
+    await ctx.audioWorklet.addModule('/voice-capture-worklet.js');
+    const node = new AudioWorkletNode(ctx, 'voice-capture');
+    workletNodeRef.current = node;
 
     // Client-side VAD thresholds.
-    //  - RMS_THRESHOLD 0.02: distinguishes real speech from low-level noise
-    //    (breathing, mic self-noise) after echoCancellation/noiseSuppression.
-    //  - END_OF_UTTERANCE_MS 500: shaves ~300 ms off Gemini's own VAD tail.
+    //  - RMS_THRESHOLD 0.02 (normalised): distinguishes real speech from
+    //    low-level noise after echoCancellation/noiseSuppression.
+    //  - END_OF_UTTERANCE_MS 300: shaves ~300ms off Gemini's own VAD tail.
     //    Short decisive utterances ("save it", "yes", "no") shouldn't wait
-    //    800 ms to be finalised. Mid-sentence pauses up to ~400 ms are still
-    //    safe because the cooldown + the user resuming speech both protect
-    //    against premature turn-ends.
-    //  - COOLDOWN_MS 2000: after an emit, suppress further emits for 2 s so a
-    //    user who pauses, resumes, pauses again doesn't spam the signal.
+    //    800ms to be finalised.
+    //  - COOLDOWN_MS 500: after an emit, suppress further emits briefly so a
+    //    flutter in VAD doesn't spam audio_stream_end. Down from 2000 — with
+    //    the VAD-gated emit below, the previous 2s ceiling blocked legitimate
+    //    quick back-and-forth.
     const RMS_THRESHOLD = 0.02;
     const END_OF_UTTERANCE_MS = 300;
-    const COOLDOWN_MS = 2000;
+    const COOLDOWN_MS = 500;
     let lastEmitAt = 0;
 
-    processor.onaudioprocess = (e: AudioProcessingEvent) => {
+    node.port.onmessage = (e: MessageEvent<Int16Array>) => {
       if (!socketRef.current?.connected) return;
-      const float32 = e.inputBuffer.getChannelData(0);
 
-      // RMS of this frame for VAD. Cheap: sum of squares / N, then sqrt.
+      // Half-duplex: while the agent is speaking (or we're connecting/
+      // processing), drop incoming frames before they touch the socket.
+      // Eliminates agent-echo capture AND the trailing-chunks-after-
+      // audio_stream_end bug — Gemini was reading those frames as
+      // "user still talking" and stalling its turn detection.
+      if (sessionStateRef.current !== 'listening') return;
+
+      const int16 = e.data;
+
+      // RMS on Int16, normalised to [-1, 1] for the threshold compare.
       let sumSq = 0;
-      for (let i = 0; i < float32.length; i++) sumSq += float32[i] * float32[i];
-      const rms = Math.sqrt(sumSq / float32.length);
+      for (let i = 0; i < int16.length; i++) sumSq += int16[i] * int16[i];
+      const rms = Math.sqrt(sumSq / int16.length) / 32768;
       const now = performance.now();
 
       if (rms >= RMS_THRESHOLD) {
-        // Speech frame.
         if (!speakingRef.current) {
           speakingRef.current = true;
           debug('vad', 'speech start');
         }
         silenceStartRef.current = null;
-      } else {
-        // Silence frame.
-        if (speakingRef.current) {
-          if (silenceStartRef.current === null) {
-            silenceStartRef.current = now;
-          } else if (now - silenceStartRef.current >= END_OF_UTTERANCE_MS) {
-            speakingRef.current = false;
-            silenceStartRef.current = null;
-            if (now - lastEmitAt >= COOLDOWN_MS) {
-              lastEmitAt = now;
-              debug('vad', `speech end — emit audio_stream_end after ${END_OF_UTTERANCE_MS}ms silence`);
-              socketRef.current.emit('audio_stream_end');
-            } else {
-              debug('vad', 'speech end — suppressed (cooldown)');
-            }
+      } else if (speakingRef.current) {
+        if (silenceStartRef.current === null) {
+          silenceStartRef.current = now;
+        } else if (now - silenceStartRef.current >= END_OF_UTTERANCE_MS) {
+          speakingRef.current = false;
+          silenceStartRef.current = null;
+          if (audioStreamEndSentRef.current) {
+            debug('vad', 'speech end — suppressed (audio_stream_end already sent this turn)');
+          } else if (now - lastEmitAt >= COOLDOWN_MS) {
+            lastEmitAt = now;
+            audioStreamEndSentRef.current = true;
+            debug('vad', `speech end — emit audio_stream_end after ${END_OF_UTTERANCE_MS}ms silence`);
+            socketRef.current.emit('audio_stream_end');
+            armListeningWatchdog();
+          } else {
+            debug('vad', 'speech end — suppressed (cooldown)');
           }
         }
       }
 
-      // Always forward the audio frame. Even during silence, trailing context
-      // helps Gemini's ASR; if the user resumes mid-pause, no frames are dropped.
-      const int16 = floatTo16BitPCM(float32);
-      const base64 = arrayBufferToBase64(int16.buffer as ArrayBuffer);
-      socketRef.current.emit('audio_chunk', base64);
+      // Send every frame during 'listening' (silent OR speech). The native-
+      // audio model wants a continuous audio context to detect turn
+      // boundaries — when we tried to gate on speakingRef the model went
+      // silent because it received only short disconnected bursts. The
+      // half-duplex gate above already prevents the agent-echo bug; we
+      // don't need per-chunk gating on top.
+      //
+      // Socket.io 4 sends ArrayBuffer as a binary frame automatically —
+      // skips the O(n²) String.fromCharCode/btoa loop and the 33% base64
+      // wire bloat that the pre-worklet path paid per frame.
+      socketRef.current.emit('audio_chunk', int16.buffer);
     };
 
-    source.connect(processor);
-    processor.connect(ctx.destination);
+    source.connect(node);
     setSessionState('listening', 'startMic success');
-  }, [setSessionState]);
+  }, [setSessionState, armListeningWatchdog]);
 
   // Scheduled playback — eliminates the onended gap that causes choppy audio.
   // Each arriving chunk is decoded and scheduled to start at nextStartTimeRef.
@@ -484,6 +530,13 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
     drainTimerRef.current = setTimeout(() => {
       debug('audio', 'drain timer fired — reverting to listening');
       setSessionState((prev) => (prev === 'agent_speaking' ? 'listening' : prev), 'audio drained');
+      // Clear VAD bookkeeping so the next user turn starts clean — no stale
+      // silenceStart ticking down from before the agent spoke. Also re-arm
+      // audio_stream_end so the next user pause can signal end-of-turn
+      // (the previous turn used its one allotted fire).
+      speakingRef.current = false;
+      silenceStartRef.current = null;
+      audioStreamEndSentRef.current = false;
       drainTimerRef.current = null;
     }, msUntilEnd);
   }, [setSessionState]);
@@ -639,6 +692,8 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
 
       socket.on('audio_response', (data: { audio: string }) => {
         if (VOICE_DEBUG) debug('socket', `audio_response bytes=${data.audio?.length ?? 0}`);
+        // Gemini is alive and responding — disarm the listening watchdog.
+        clearListeningWatchdog();
         // Latency: first audio chunk after a user final closes the loop.
         if (lastUserFinalTimeRef.current !== null) {
           const ms = Math.round(performance.now() - lastUserFinalTimeRef.current);
@@ -657,6 +712,8 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
         if (data.isFinal && data.text.trim()) {
           debug('socket', `transcript [${data.speaker}] "${data.text.slice(0, 60)}"`);
         }
+        // Any transcript confirms Gemini is alive — disarm the watchdog.
+        clearListeningWatchdog();
         // Stamp the moment the user's speaking turn ended so we can measure
         // the gap until the first agent audio chunk arrives.
         if (data.speaker === 'user' && data.isFinal && data.text.trim()) {
@@ -684,6 +741,8 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
 
       socket.on('action', (data: { type: string; detail: string }) => {
         debug('socket', `action type=${data.type} detail="${data.detail?.slice(0, 80)}"`);
+        // Tool dispatch confirms Gemini is alive — disarm the watchdog.
+        clearListeningWatchdog();
         setActionType(data.type, `action ${data.type}`);
         if (['submitting_checkin', 'updating_checkin', 'deleting_checkin', 'fetching_readings'].includes(data.type)) {
           setSessionState('processing', `action ${data.type}`);
@@ -722,6 +781,7 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
 
       socket.on('session_error', (data: { message: string }) => {
         debug('socket', `session_error "${data.message}"`);
+        clearListeningWatchdog();
         setErrorMessage(data.message);
         setSessionState('error', 'session_error');
         stopMic();
@@ -729,6 +789,7 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
 
       socket.on('session_closed', () => {
         debug('socket', 'session_closed');
+        clearListeningWatchdog();
         stopMic();
         setSessionState('idle', 'session_closed');
       });
@@ -799,6 +860,7 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
         // session_error/session_closed event (Railway proxy idle timeout,
         // ADK crash that outraces the cleanup chain). Without this the UI
         // would stay stuck on "Listening" forever.
+        clearListeningWatchdog();
         stopMic();
         setSessionState((prev) => (prev === 'error' ? prev : 'idle'), 'ws disconnect');
       });
@@ -808,7 +870,7 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
         socket.emit('start_session', { sessionId: sessionId ?? null });
       });
     },
-    [startMic, stopMic, playAudio, appendTranscript, setSessionState, setActionType],
+    [startMic, stopMic, playAudio, appendTranscript, setSessionState, setActionType, clearListeningWatchdog],
   );
 
   // Keep the _openRef synced to the latest _open instance so the inner

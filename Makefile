@@ -7,10 +7,9 @@
 #   make dev-inline
 #
 # Run individual services:
-#   make backend    # :4000
+#   make backend    # :4000  (voice runs in-process here)
 #   make frontend   # :3000
 #   make admin      # :3001
-#   make adk        # :50051
 #
 # Other:
 #   make install        # npm install at root (installs all workspaces)
@@ -19,7 +18,7 @@
 #   make docker-up      # docker compose up --build
 #   make docker-down    # docker compose down
 
-.PHONY: dev dev-inline adk backend frontend admin docker-up docker-down install stop restart
+.PHONY: dev dev-inline backend frontend admin docker-up docker-down install stop restart
 
 ROOT := $(CURDIR)
 
@@ -76,25 +75,11 @@ admin:
 	@echo "▶ Starting Next.js admin app on :3001"
 	npm run dev -w admin
 
-adk:
-	@echo "▶ Starting ADK voice service (Python gRPC) on :50051"
-	cd adk-service && \
-		[ -f .env ] || cp .env.example .env && \
-		[ -d .venv ] || python -m venv .venv && \
-		. .venv/bin/activate && \
-		pip install -q -r requirements.txt && \
-		python main.py
-
 # ── Install all workspace dependencies ─────────────────────────────────────
 
 install:
 	@echo "▶ Installing all workspace dependencies from root (npm workspaces)"
 	npm install
-	@echo "▶ Creating Python venv + installing adk-service dependencies"
-	cd adk-service && \
-		[ -d .venv ] || python -m venv .venv && \
-		. .venv/bin/activate && \
-		pip install -r requirements.txt
 
 # ── Docker commands ────────────────────────────────────────────────────────
 

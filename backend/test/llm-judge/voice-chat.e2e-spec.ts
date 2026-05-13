@@ -5,9 +5,10 @@
  * (simulating voice), verifies transcripts + tool events, and
  * judges response quality. All results logged to LangSmith.
  *
- * Requires: GOOGLE_API_KEY, DATABASE_URL, JWT_ACCESS_SECRET,
- *           ADK service running on ADK_SERVICE_HOST:ADK_SERVICE_PORT
- * Optional: LANGSMITH_API_KEY, LANGSMITH_PROJECT
+ * Requires: GOOGLE_API_KEY, DATABASE_URL, JWT_ACCESS_SECRET.
+ *           Voice runs in-process via @google/genai's Live API; no
+ *           separate ADK service is needed.
+ * Optional: LANGSMITH_API_KEY, LANGSMITH_PROJECT, OTEL_EXPORTER_OTLP_ENDPOINT
  *
  * Run: npm run test:e2e -- --testPathPattern=llm-judge/voice
  */
