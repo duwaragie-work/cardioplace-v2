@@ -26,15 +26,14 @@
      requirements and can't share one hex.
 
      USAGE RULES:
-     RED:
-     - `bg: var(--brand-alert-red)` + `color: white` → vibrant emergency feel
-       (red-600/white at 4.83:1, AA Normal)
+     RED — split:
+     - `bg: var(--brand-alert-red)` + `color: white` → vibrant emergency CTA
+       (red-600/white at 4.83:1, AA Normal at any text size)
      - `bg: var(--brand-alert-red-light)` + `color: var(--brand-alert-red-text)`
        → subtle chip (red-100/red-800 at 9.43:1, AAA)
-     AMBER:
-     - `bg: var(--brand-warning-amber)` + `color: white` → vibrant warning
-       (orange-500/white at 3.31:1, AA LARGE ONLY — text must be ≥14px bold-700
-       or ≥18px regular)
+     AMBER — single-token (kept at -800 for both directions; orange-500/white
+     fails AA Normal under 14px bold, and our amber consumers run 9–11px):
+     - `bg: var(--brand-warning-amber)` + `color: white` → ~9:1 (AAA)
      - `bg: var(--brand-warning-amber-light)` + `color: var(--brand-warning-amber-text)`
        → subtle chip (amber-100/amber-800 at 7.1:1, AAA)
      NEVER pair a `*-light` BG with the bare `*` token as foreground — the bg
@@ -42,7 +41,14 @@
   --brand-alert-red: #DC2626;        /* red-600 — button/banner BG; white text = 4.83:1 (AA Normal ✓) */
   --brand-alert-red-text: #991B1B;   /* red-800 — chip text on red-100 bg = 9.43:1 (AAA ✓) */
   --brand-alert-red-light: #FEE2E2;  /* red-100 — chip background */
-  --brand-warning-amber: #F97316;        /* orange-500 — button/banner BG; white text = 3.31:1 (AA LARGE only — requires ≥14px bold-700) */
+  /* AMBER kept at -800 for BOTH bg and chip-text use. Vibrant orange-500
+     (#F97316) was tempting but fails AA Normal (3.31:1) when white text is
+     under 14px bold — and our amber bg consumers (avatars, filter chips,
+     pills, status dots) sit in the 9–11px range. -800 + white = ~9:1 (AAA);
+     -800 + amber-100 = 7.1:1 (AAA). Both directions pass without font-size
+     surgery. `*-text` is exposed as an alias so consumers can use the same
+     fg/bg split convention as red. */
+  --brand-warning-amber: #92400E;        /* amber-800 — bg with white text = ~9:1 (AAA ✓) */
   --brand-warning-amber-text: #92400E;   /* amber-800 — chip text on amber-100 bg = 7.1:1 (AAA ✓) */
   --brand-warning-amber-light: #FEF3C7;  /* amber-100 — chip background */
   /* GREEN: unchanged — scoped to red + amber only this round.

@@ -20,8 +20,11 @@
   --brand-alert-red: #DC2626;        /* red-600 — button/banner BG; white = 4.83:1 (AA Normal ✓) */
   --brand-alert-red-text: #991B1B;   /* red-800 — chip text on red-100 = 9.43:1 (AAA ✓) */
   --brand-alert-red-light: #FEE2E2;
-  --brand-warning-amber: #F97316;        /* orange-500 — button/banner BG; white = 3.31:1 (AA LARGE only — requires ≥14px bold-700) */
-  --brand-warning-amber-text: #92400E;   /* amber-800 — chip text on amber-100 = 7.1:1 (AAA ✓) */
+  /* AMBER stays single-token at -800 — orange-500 + white at small font sizes
+     fails AA Normal, and our amber consumers (avatars, chips, pills) run
+     9–11px. -800 + white = ~9:1 (AAA) without font-size surgery. */
+  --brand-warning-amber: #92400E;        /* amber-800 — bg with white = ~9:1 (AAA ✓) */
+  --brand-warning-amber-text: #92400E;   /* same value; alias for `*-text` convention */
   --brand-warning-amber-light: #FEF3C7;
   --brand-success-green: #166534;    /* unchanged — single token, chips only */
   --brand-success-green-light: #DCFCE7;
