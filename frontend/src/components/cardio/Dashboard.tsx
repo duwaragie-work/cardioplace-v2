@@ -302,6 +302,7 @@ export default function Dashboard() {
   function variantForTopAlert(a: typeof topAlert): {
     key: AlertVariantKey;
     accent: string;
+    accentText: string;
     accentLight: string;
     icon: React.ReactNode;
     title: string;
@@ -325,6 +326,7 @@ export default function Dashboard() {
       return {
         key: 'emergency',
         accent: 'var(--brand-alert-red)',
+        accentText: 'var(--brand-alert-red-text)',
         accentLight: 'var(--brand-alert-red-light)',
         icon: <AlertTriangle className="w-5 h-5" />,
         title: 'Critical blood pressure reading',
@@ -335,6 +337,7 @@ export default function Dashboard() {
       return {
         key: 'tier1',
         accent: 'var(--brand-alert-red)',
+        accentText: 'var(--brand-alert-red-text)',
         accentLight: 'var(--brand-alert-red-light)',
         icon: <Pill className="w-5 h-5" />,
         title: 'Important medication alert',
@@ -345,6 +348,7 @@ export default function Dashboard() {
       return {
         key: 'low',
         accent: '#3B82F6',
+        accentText: '#1D4ED8',
         accentLight: '#DBEAFE',
         icon: <ArrowDown className="w-5 h-5" />,
         title: 'Your blood pressure is low',
@@ -355,6 +359,7 @@ export default function Dashboard() {
     return {
       key: 'high',
       accent: 'var(--brand-warning-amber)',
+      accentText: 'var(--brand-warning-amber-text)',
       accentLight: 'var(--brand-warning-amber-light)',
       icon: <ArrowUp className="w-5 h-5" />,
       title: 'Your blood pressure is elevated',
@@ -385,17 +390,17 @@ export default function Dashboard() {
       case 'critical':
         return {
           bg: 'var(--brand-alert-red-light)',
-          fg: 'var(--brand-alert-red)',
+          fg: 'var(--brand-alert-red-text)',
           label: t('dashboard.critical'),
         };
       case 'high':
         return {
           bg: 'var(--brand-warning-amber-light)',
-          fg: 'var(--brand-warning-amber)',
+          fg: 'var(--brand-warning-amber-text)',
           label: t('dashboard.elevated'),
         };
       case 'low':
-        return { bg: '#DBEAFE', fg: '#3B82F6', label: t('dashboard.low') };
+        return { bg: '#DBEAFE', fg: '#1D4ED8', label: t('dashboard.low') };
       case 'within':
         return {
           bg: 'var(--brand-success-green-light)',
@@ -557,7 +562,7 @@ export default function Dashboard() {
             <div className="flex-1 min-w-0">
               <p
                 className="text-[10px] font-bold uppercase tracking-wider mb-0.5"
-                style={{ color: topAlertVariant.accent }}
+                style={{ color: topAlertVariant.accentText }}
               >
                 {t('dashboard.activeAlert')}
               </p>
@@ -587,7 +592,7 @@ export default function Dashboard() {
             </div>
             <ArrowRight
               className="w-4 h-4 shrink-0 sm:hidden"
-              style={{ color: topAlertVariant.accent }}
+              style={{ color: topAlertVariant.accentText }}
             />
           </button>
           </div>
