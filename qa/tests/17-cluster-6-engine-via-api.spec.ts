@@ -480,6 +480,49 @@ test.describe('Cluster 6 — engine via API (Manisha 5/9)', () => {
     }
   })
 
+  test('Q5 — two HR>110 readings inside an 8h window fire RULE_TACHY_HR', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    await seedHistoryToClearPreDay3(tc, u.id)
+    // tachyRule gates to hasTachycardia=true.
+    await tc.setUserCondition(u.id, 'hasTachycardia', true)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    try {
+      const sessionId = randomUUID()
+      const t0 = Date.now()
+      // Two HR=120 readings 1 minute apart — well inside the 8h window
+      // Manisha tightened from 24h. Averaging clears the Q2 single-reading
+      // gate; priorElevated picks up the cross-session HR>110 history.
+      for (const offset of [0, 60_000]) {
+        const res = await api.post('daily-journal', {
+          data: {
+            measuredAt: new Date(t0 + offset).toISOString(),
+            systolicBP: 132,
+            diastolicBP: 84,
+            pulse: 120,
+            position: 'SITTING',
+            sessionId,
+          },
+        })
+        expect(res.status()).toBe(202)
+      }
+
+      const alerts = await waitForAlerts(tc, u.id, (xs) =>
+        xs.some((a) => a.status === 'OPEN' && a.ruleId === 'RULE_TACHY_HR'),
+      )
+      const openRuleIds = alerts.filter((a) => a.status === 'OPEN').map((a) => a.ruleId)
+      expect(
+        openRuleIds,
+        `expected RULE_TACHY_HR present (got: [${openRuleIds.join(', ')}])`,
+      ).toContain('RULE_TACHY_HR')
+    } finally {
+      await tc.setUserCondition(u.id, 'hasTachycardia', false)
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
+
   test('5/10 — bradycardia + AMS co-fires HR-axis brady AND emergency axis symptom override', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
