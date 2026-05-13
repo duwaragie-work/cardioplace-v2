@@ -345,4 +345,187 @@ test.describe('Cluster 6 — engine via API (Manisha 5/9)', () => {
       await tc.dispose()
     }
   })
+
+  test('Q3 — RUQ pain in pregnant patient fires pregnancy override (not the general one)', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.priya.email)
+    await tc.resetUser(u.id)
+    await seedHistoryToClearPreDay3(tc, u.id)
+    await tc.setUserCondition(u.id, 'isPregnant', true)
+    const api = await authedApi(API_BASE_URL, PATIENTS.priya.email)
+    try {
+      const res = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date().toISOString(),
+          systolicBP: 132,
+          diastolicBP: 84,
+          pulse: 78,
+          position: 'SITTING',
+          ruqPain: true,
+          sessionId: randomUUID(),
+        },
+      })
+      expect(res.status()).toBe(202)
+
+      // symptomOverridePregnancyRule + symptomOverrideGeneralRule share the
+      // 'emergency' axis; pregnancy iterates first in preGateRules so it
+      // claims the axis and the general row is intentionally dropped (and
+      // the engine logs the suppression for clinical traceability).
+      const alerts = await waitForAlerts(tc, u.id, (xs) =>
+        xs.some((a) => a.status === 'OPEN' && a.ruleId === 'RULE_SYMPTOM_OVERRIDE_PREGNANCY'),
+      )
+      const openRuleIds = alerts.filter((a) => a.status === 'OPEN').map((a) => a.ruleId)
+      expect(
+        openRuleIds,
+        `expected RULE_SYMPTOM_OVERRIDE_PREGNANCY present (got: [${openRuleIds.join(', ')}])`,
+      ).toContain('RULE_SYMPTOM_OVERRIDE_PREGNANCY')
+      expect(
+        openRuleIds,
+        `RULE_SYMPTOM_OVERRIDE_GENERAL must NOT co-fire with pregnancy override (got: [${openRuleIds.join(', ')}])`,
+      ).not.toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
+    } finally {
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
+
+  test('5/10 — 4 new symptom buttons persist on the journal entry', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    try {
+      const res = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date().toISOString(),
+          systolicBP: 124,
+          diastolicBP: 78,
+          pulse: 72,
+          position: 'SITTING',
+          dizziness: true,
+          syncope: true,
+          palpitations: true,
+          legSwelling: true,
+          sessionId: randomUUID(),
+        },
+      })
+      expect(res.status()).toBe(202)
+      const body = await res.json()
+      // Engine echo: the serialized entry should carry all four flags.
+      // CheckIn.tsx maps these straight through; this is the wire-contract
+      // assertion that the schema migration + DTO + serializer agree.
+      expect(body.data.dizziness, 'dizziness flag persisted on entry').toBe(true)
+      expect(body.data.syncope, 'syncope flag persisted on entry').toBe(true)
+      expect(body.data.palpitations, 'palpitations flag persisted on entry').toBe(true)
+      expect(body.data.legSwelling, 'legSwelling flag persisted on entry').toBe(true)
+    } finally {
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
+
+  test('5/10 — HR < 40 retiers to TIER_1_CONTRAINDICATION (Manisha 5/10 sign-off)', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    await seedHistoryToClearPreDay3(tc, u.id)
+    // bradyAbsoluteRule is gated to hasBradycardia OR beta-blocker patients;
+    // Aisha is a healthy control, so we set the bradycardia flag for this
+    // scenario to mirror the clinical population the Tier 1 retier targets.
+    await tc.setUserCondition(u.id, 'hasBradycardia', true)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    try {
+      const sessionId = randomUUID()
+      const t0 = Date.now()
+      // Two readings in the same session → averaging clears the Q2
+      // single-reading gate; bradyAbsoluteRule lives on the contraindication
+      // axis and emits a Tier 1 row.
+      for (const offset of [0, 60_000]) {
+        const res = await api.post('daily-journal', {
+          data: {
+            measuredAt: new Date(t0 + offset).toISOString(),
+            systolicBP: 124,
+            diastolicBP: 78,
+            pulse: 36,
+            position: 'SITTING',
+            sessionId,
+          },
+        })
+        expect(res.status()).toBe(202)
+      }
+
+      const alerts = await waitForAlerts(tc, u.id, (xs) =>
+        xs.some(
+          (a) =>
+            a.status === 'OPEN' &&
+            a.ruleId === 'RULE_BRADY_ABSOLUTE' &&
+            a.tier === 'TIER_1_CONTRAINDICATION',
+        ),
+      )
+      const open = alerts.filter((a) => a.status === 'OPEN')
+      const bradyRow = open.find((a) => a.ruleId === 'RULE_BRADY_ABSOLUTE')
+      expect(
+        bradyRow,
+        `expected RULE_BRADY_ABSOLUTE in OPEN alerts (got: [${open.map((a) => a.ruleId).join(', ')}])`,
+      ).toBeDefined()
+      expect(bradyRow?.tier, 'HR<40 must retier to TIER_1_CONTRAINDICATION').toBe(
+        'TIER_1_CONTRAINDICATION',
+      )
+    } finally {
+      // Leave hasBradycardia flipped; next test resets via its own resetUser.
+      // But clean up so unrelated specs aren't surprised.
+      await tc.setUserCondition(u.id, 'hasBradycardia', false)
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
+
+  test('5/10 — bradycardia + AMS co-fires HR-axis brady AND emergency axis symptom override', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    await seedHistoryToClearPreDay3(tc, u.id)
+    await tc.setUserCondition(u.id, 'hasBradycardia', true)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    try {
+      const sessionId = randomUUID()
+      const t0 = Date.now()
+      // Two HR-45 + AMS readings in the same session → bypasses Q2 gate via
+      // averaging. Expected co-fire: bradySymptomaticRule on HR axis (Stage C)
+      // AND symptomOverrideGeneralRule on emergency axis (Stage A pre-gate).
+      for (const offset of [0, 60_000]) {
+        const res = await api.post('daily-journal', {
+          data: {
+            measuredAt: new Date(t0 + offset).toISOString(),
+            systolicBP: 124,
+            diastolicBP: 78,
+            pulse: 45,
+            position: 'SITTING',
+            alteredMentalStatus: true,
+            sessionId,
+          },
+        })
+        expect(res.status()).toBe(202)
+      }
+
+      const alerts = await waitForAlerts(tc, u.id, (xs) => {
+        const open = xs.filter((a) => a.status === 'OPEN').map((a) => a.ruleId)
+        return (
+          open.includes('RULE_BRADY_HR_SYMPTOMATIC') &&
+          open.includes('RULE_SYMPTOM_OVERRIDE_GENERAL')
+        )
+      })
+      const openRuleIds = alerts.filter((a) => a.status === 'OPEN').map((a) => a.ruleId)
+      expect(
+        openRuleIds,
+        `expected RULE_BRADY_HR_SYMPTOMATIC + RULE_SYMPTOM_OVERRIDE_GENERAL co-fire (got: [${openRuleIds.join(', ')}])`,
+      ).toEqual(
+        expect.arrayContaining(['RULE_BRADY_HR_SYMPTOMATIC', 'RULE_SYMPTOM_OVERRIDE_GENERAL']),
+      )
+    } finally {
+      await tc.setUserCondition(u.id, 'hasBradycardia', false)
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
 })
