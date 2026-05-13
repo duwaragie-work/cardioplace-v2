@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { Modality } from '@google/genai'
+import { GoogleGenAI, Modality } from '@google/genai'
 import type { Session, LiveServerMessage, FunctionResponse } from '@google/genai'
 import { trace, SpanStatusCode } from '@opentelemetry/api'
 import { randomUUID } from 'node:crypto'
@@ -95,6 +95,10 @@ interface ActiveSession {
   // logged again on the next agent audio chunk to measure round-trip time.
   // Null until the next user turn; cleared after one measurement.
   lastUserFinalAt: number | null
+  // Diagnostic: count of audio chunks forwarded to Gemini Live this
+  // session. Surfaced every 25 chunks under VOICE_DEBUG_AUDIO=1 so we
+  // can see audio is flowing when troubleshooting "listening forever".
+  userAudioChunkCount: number
 }
 
 @Injectable()
@@ -110,6 +114,12 @@ export class VoiceService implements OnModuleDestroy {
 
   // Default to a Live-capable model. Override via GEMINI_VOICE_MODEL.
   private readonly voiceModel: string
+  // Dedicated GoogleGenAI client pinned to v1alpha for Live API. The shared
+  // `GeminiService.clientInstance` defaults to v1beta (for text/embeddings
+  // /OCR) where Live's bidiGenerateContent isn't exposed — caused the
+  // "model not found for API version v1beta" error. v1alpha is the
+  // documented Live endpoint on the Gemini Developer API (AI Studio key).
+  private readonly liveClient: GoogleGenAI
 
   constructor(
     private readonly config: ConfigService,
@@ -120,9 +130,19 @@ export class VoiceService implements OnModuleDestroy {
     private readonly profileResolver: ProfileResolverService,
     private readonly voiceTools: VoiceToolsService,
   ) {
+    // Default to a Live-capable model verified present via ListModels on
+    // the Gemini Developer API. `gemini-2.5-flash-native-audio-preview-
+    // 09-2025` exposes bidiGenerateContent and produces native-audio
+    // output (better voice quality vs. cascading models). Override via
+    // GEMINI_VOICE_MODEL env var.
     this.voiceModel =
       this.config.get<string>('GEMINI_VOICE_MODEL') ??
-      'gemini-live-2.5-flash-preview'
+      'gemini-2.5-flash-native-audio-preview-09-2025'
+    const apiKey = this.config.getOrThrow<string>('GOOGLE_API_KEY')
+    this.liveClient = new GoogleGenAI({
+      apiKey,
+      apiVersion: 'v1alpha',
+    })
   }
 
   /** Convert raw PCM buffers to a WAV file (adds 44-byte header). */
@@ -185,7 +205,9 @@ export class VoiceService implements OnModuleDestroy {
     const timezone = userRow?.timezone ?? 'America/New_York'
 
     // ── Open Gemini Live session (Step 4 — replaces ADK gRPC stream) ──
-    const client = this.geminiService.clientInstance
+    // Use the dedicated v1alpha client (see constructor). The shared
+    // `GeminiService.clientInstance` is on v1beta for text/OCR/embeddings.
+    const client = this.liveClient
     const systemInstruction = buildVoiceSystemInstruction(patientContext)
 
     // Span covers just the connect handshake. The session itself is long-
@@ -230,7 +252,11 @@ export class VoiceService implements OnModuleDestroy {
             }
           },
           onclose: (e: CloseEvent) => {
-            this.logger.log(`[VOICE Live] closed reason="${e.reason ?? ''}" [socket=${socketId}]`)
+            const reason = e.reason ?? ''
+            const code = e.code ?? 0
+            this.logger.log(
+              `[VOICE Live] closed code=${code} reason="${reason}" [socket=${socketId}]`,
+            )
             const sess = this.sessions.get(socketId)
             if (!sess) return
             sess.streamClosed = true
@@ -238,7 +264,22 @@ export class VoiceService implements OnModuleDestroy {
               this.sessions.delete(socketId)
               if (!sess.closedNotified) {
                 sess.closedNotified = true
-                callbacks.onClose()
+                // If Gemini Live closed with a non-normal reason (quota
+                // exhausted, model rejected request, network error, etc.),
+                // surface it as session_error so the patient sees an
+                // actionable message instead of a silent hung orb.
+                // Code 1000 = normal closure; anything else is unexpected.
+                const isAbnormal =
+                  code !== 0 &&
+                  code !== 1000 &&
+                  code !== 1005 // 1005 = no status code (also benign)
+                if (isAbnormal) {
+                  callbacks.onError(
+                    `Voice service closed unexpectedly${reason ? ` (${reason})` : ''}. Please try again.`,
+                  )
+                } else {
+                  callbacks.onClose()
+                }
               }
             })
           },
@@ -271,11 +312,30 @@ export class VoiceService implements OnModuleDestroy {
       userAudioBytes: 0,
       agentAudioBytes: 0,
       lastUserFinalAt: null,
+      userAudioChunkCount: 0,
       callbacks,
     }
     this.sessions.set(socketId, activeSession)
 
     this.logger.log(`Voice session started [socket=${socketId}, user=${userId}, chatSession=${sessionId}, model=${this.voiceModel}]`)
+
+    // Force Gemini to emit its first turn now. The system instruction's
+    // "GREET FIRST — UNPROMPTED" block tells it WHAT to say; this synthetic
+    // "[Session started]" user turn tells it WHEN. The prompt explicitly
+    // mentions this cue: "If you also receive a '[Session started]' message,
+    // treat it as a redundant cue, not a requirement." Native-audio models
+    // reject empty turnComplete pings ("Request contains an invalid argument"),
+    // so we send a real text turn instead. Non-fatal — patient can still
+    // drive the conversation by speaking if this fails.
+    try {
+      liveSession.sendClientContent({
+        turns: [{ role: 'user', parts: [{ text: '[Session started]' }] }],
+        turnComplete: true,
+      })
+      this.logger.log(`[FLOW] Step 4b — greeting trigger sent`)
+    } catch (err) {
+      this.logger.warn(`[VOICE] greeting trigger failed: ${(err as Error).message}`)
+    }
   }
 
   /**
@@ -288,6 +348,29 @@ export class VoiceService implements OnModuleDestroy {
     const session = this.sessions.get(socketId)
     if (!session || session.streamClosed) return
     const { callbacks } = session
+
+    // Diagnostic: trace every Live event when VOICE_DEBUG_AUDIO=1. Helps
+    // identify silent failures where Gemini stops responding mid-session.
+    // The "listening forever" bug was diagnosed using this — chunks
+    // forwarded but no events arriving meant Gemini wasn't generating.
+    if (process.env.VOICE_DEBUG_AUDIO === '1') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const keys = Object.keys(msg).filter((k) => (msg as any)[k] != null)
+      const sc = msg.serverContent
+      const subkeys: string[] = []
+      if (sc) {
+        if (sc.modelTurn) subkeys.push('modelTurn')
+        if (sc.inputTranscription) subkeys.push('inputTranscription')
+        if (sc.outputTranscription) subkeys.push('outputTranscription')
+        if (sc.turnComplete) subkeys.push('turnComplete')
+        if (sc.interrupted) subkeys.push('interrupted')
+      }
+      this.logger.log(
+        `[VOICE Live→NestJS] event keys=${keys.join(',')}` +
+          (subkeys.length ? ` serverContent=${subkeys.join(',')}` : '') +
+          ` [socket=${socketId}]`,
+      )
+    }
 
     if (msg.setupComplete) {
       // The onopen callback already fired callbacks.onReady(); setupComplete
@@ -462,6 +545,19 @@ export class VoiceService implements OnModuleDestroy {
         session.userAudioChunks.push(data)
         session.userAudioBytes += data.length
       }
+      session.userAudioChunkCount += 1
+      // Diagnostic: every 25th chunk under VOICE_DEBUG_AUDIO=1. ~25 chunks
+      // at 32 ms/chunk = 800 ms of audio. Helps confirm audio is reaching
+      // Gemini when troubleshooting "listening forever".
+      if (
+        process.env.VOICE_DEBUG_AUDIO === '1' &&
+        session.userAudioChunkCount % 25 === 0
+      ) {
+        this.logger.log(
+          `[VOICE NestJS→Live] forwarded ${session.userAudioChunkCount} chunks ` +
+            `(${(session.userAudioBytes / 1024).toFixed(1)} KB) [socket=${socketId}]`,
+        )
+      }
       // Gemini Live wants Blob.data as a base64 string, NOT a Buffer.
       session.liveSession.sendRealtimeInput({
         audio: { data: audioBase64, mimeType: 'audio/pcm;rate=16000' },
@@ -499,8 +595,27 @@ export class VoiceService implements OnModuleDestroy {
   sendAudioStreamEnd(socketId: string): void {
     const session = this.sessions.get(socketId)
     if (!session || session.streamClosed) return
+    // Don't ACK end-of-utterance before ANY audio has flowed — prevents the
+    // race where the frontend VAD fires `audio_stream_end` during the mic
+    // warm-up window (300 ms silence before user even speaks). Gemini would
+    // see an empty turn and not respond, leaving the patient stuck on
+    // "listening". Once the patient has spoken once in this session, the
+    // guard releases.
+    if (session.userAudioChunkCount === 0) {
+      if (process.env.VOICE_DEBUG_AUDIO === '1') {
+        this.logger.log(
+          `[VOICE NestJS→Live] suppressed empty audio_stream_end (no audio yet) [socket=${socketId}]`,
+        )
+      }
+      return
+    }
     try {
       session.liveSession.sendRealtimeInput({ audioStreamEnd: true })
+      if (process.env.VOICE_DEBUG_AUDIO === '1') {
+        this.logger.log(
+          `[VOICE NestJS→Live] forwarded audio_stream_end (frontend VAD fired) [socket=${socketId}]`,
+        )
+      }
     } catch (err) {
       // Non-fatal — worst case the turn just takes longer to finalise.
       this.logger.warn(`Failed to forward audio_stream_end to Gemini Live: ${(err as Error).message}`)
