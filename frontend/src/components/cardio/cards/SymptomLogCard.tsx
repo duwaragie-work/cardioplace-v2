@@ -57,7 +57,7 @@ export default function SymptomLogCard({ summary, onDismiss }: Props) {
           {summary.logged ? (
             <AlertTriangle
               className="w-5 h-5 shrink-0"
-              style={{ color: 'var(--brand-alert-red)' }}
+              style={{ color: 'var(--brand-alert-red-text)' }}
               aria-hidden="true"
             />
           ) : (
@@ -95,7 +95,7 @@ export default function SymptomLogCard({ summary, onDismiss }: Props) {
           >
             <AlertTriangle
               className="w-4 h-4 mt-0.5 shrink-0"
-              style={{ color: 'var(--brand-warning-amber)' }}
+              style={{ color: 'var(--brand-warning-amber-text)' }}
               aria-hidden="true"
             />
             <p
@@ -125,7 +125,7 @@ export default function SymptomLogCard({ summary, onDismiss }: Props) {
           className="flex-1 h-11 rounded-xl font-semibold text-[13px] inline-flex items-center justify-center gap-1.5 transition hover:opacity-90"
           style={{
             backgroundColor: 'var(--brand-alert-red-light)',
-            color: 'var(--brand-alert-red)',
+            color: 'var(--brand-alert-red-text)',
           }}
         >
           {t('chat.card.viewAlerts')}

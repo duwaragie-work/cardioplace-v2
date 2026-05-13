@@ -152,7 +152,7 @@ export default function UpdateCard({ summary, onDismiss }: Props) {
         >
           <AlertTriangle
             className="w-4 h-4 mt-0.5 shrink-0"
-            style={{ color: 'var(--brand-warning-amber)' }}
+            style={{ color: 'var(--brand-warning-amber-text)' }}
             aria-hidden="true"
           />
           <p
@@ -245,7 +245,7 @@ export default function UpdateCard({ summary, onDismiss }: Props) {
                 className="text-[11px] px-2 py-1 rounded-md font-semibold inline-flex items-center gap-1"
                 style={{
                   backgroundColor: 'var(--brand-alert-red-light)',
-                  color: 'var(--brand-alert-red)',
+                  color: 'var(--brand-alert-red-text)',
                 }}
               >
                 <AlertTriangle className="w-3 h-3" aria-hidden="true" />
@@ -258,7 +258,7 @@ export default function UpdateCard({ summary, onDismiss }: Props) {
                 className="text-[11px] px-2 py-1 rounded-md font-medium"
                 style={{
                   backgroundColor: 'var(--brand-warning-amber-light)',
-                  color: 'var(--brand-warning-amber)',
+                  color: 'var(--brand-warning-amber-text)',
                 }}
               >
                 {s}

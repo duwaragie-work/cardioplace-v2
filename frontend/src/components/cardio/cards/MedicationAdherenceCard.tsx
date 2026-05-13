@@ -106,12 +106,12 @@ export default function MedicationAdherenceCard({ summary, onDismiss }: Props) {
           >
             <Flame
               className="w-4 h-4"
-              style={{ color: 'var(--brand-warning-amber)' }}
+              style={{ color: 'var(--brand-warning-amber-text)' }}
               aria-hidden="true"
             />
             <p
               className="text-[12px] font-semibold"
-              style={{ color: 'var(--brand-warning-amber)' }}
+              style={{ color: 'var(--brand-warning-amber-text)' }}
             >
               {summary.streakDays}-day streak — keep it up!
             </p>
@@ -164,14 +164,14 @@ function statusFor(s: 'taken' | 'missed' | 'scheduled_later'): {
   if (s === 'missed') {
     return {
       label: 'Missed',
-      color: 'var(--brand-alert-red)',
+      color: 'var(--brand-alert-red-text)',
       pillBg: 'var(--brand-alert-red-light)',
       icon: <AlertCircle className="w-3 h-3" aria-hidden="true" />,
     };
   }
   return {
     label: 'Not due yet',
-    color: 'var(--brand-warning-amber)',
+    color: 'var(--brand-warning-amber-text)',
     pillBg: 'var(--brand-warning-amber-light)',
     icon: <Clock className="w-3 h-3" aria-hidden="true" />,
   };

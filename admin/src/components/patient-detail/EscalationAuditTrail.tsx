@@ -136,7 +136,7 @@ function channelChrome(c: NotificationChannel): {
     case 'PHONE':
       return {
         label: 'Phone',
-        color: 'var(--brand-warning-amber)',
+        color: 'var(--brand-warning-amber-text)',
         bg: 'var(--brand-warning-amber-light)',
         icon: <PhoneCall className="w-2.5 h-2.5" />,
       };
@@ -442,7 +442,7 @@ function EventDetail({ event }: { event: PatientAlertEscalationEvent }) {
         {event.afterHours && (
           <span
             className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded"
-            style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }}
+            style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
             title="Triggered outside business hours — backup recipient list applied"
           >
             <Moon className="w-2.5 h-2.5" />

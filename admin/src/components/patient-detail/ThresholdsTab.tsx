@@ -173,9 +173,9 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
             border: '1.5px solid var(--brand-alert-red)',
           }}
         >
-          <ShieldAlert className="w-5 h-5 shrink-0" style={{ color: 'var(--brand-alert-red)' }} />
+          <ShieldAlert className="w-5 h-5 shrink-0" style={{ color: 'var(--brand-alert-red-text)' }} />
           <div>
-            <p className="text-[13px] font-bold" style={{ color: 'var(--brand-alert-red)' }}>
+            <p className="text-[13px] font-bold" style={{ color: 'var(--brand-alert-red-text)' }}>
               Mandatory configuration required
             </p>
             <p className="text-[11.5px] mt-0.5" style={{ color: 'var(--brand-text-secondary)' }}>
@@ -353,7 +353,7 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
         {error && (
           <div
             className="mt-3 rounded-lg px-3 py-2 text-[12px] font-semibold"
-            style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)' }}
+            style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
           >
             {error}
           </div>

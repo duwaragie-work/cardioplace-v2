@@ -142,7 +142,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
   if (!profile) {
     return (
       <div className="bg-white rounded-2xl p-8 text-center" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
-        <AlertTriangle className="w-7 h-7 mx-auto mb-2" style={{ color: 'var(--brand-warning-amber)' }} />
+        <AlertTriangle className="w-7 h-7 mx-auto mb-2" style={{ color: 'var(--brand-warning-amber-text)' }} />
         <p className="text-[14px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
           No profile submitted yet
         </p>
@@ -349,7 +349,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
               style={{
                 border: `1px solid ${status === 'rejected' ? 'var(--brand-alert-red)' : 'var(--brand-border)'}`,
                 backgroundColor: status === 'rejected' ? 'var(--brand-alert-red-light)' : 'white',
-                color: 'var(--brand-alert-red)',
+                color: 'var(--brand-alert-red-text)',
               }}
             >
               {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <XIcon className="w-3 h-3" />}
@@ -374,7 +374,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
           {isFullyVerified ? (
             <ShieldCheck className="w-5 h-5 shrink-0" style={{ color: 'var(--brand-success-green)' }} />
           ) : (
-            <AlertTriangle className="w-5 h-5 shrink-0" style={{ color: 'var(--brand-warning-amber)' }} />
+            <AlertTriangle className="w-5 h-5 shrink-0" style={{ color: 'var(--brand-warning-amber-text)' }} />
           )}
           <div>
             <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
@@ -467,7 +467,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
       {completeError && (
         <div
           className="rounded-lg px-4 py-2.5 text-[12.5px] font-semibold"
-          style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)' }}
+          style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
         >
           {completeError}
         </div>

@@ -330,7 +330,7 @@ function CheckinCard({
           </p>
           <p
             className="text-[14px] font-bold"
-            style={{ color: summary.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red)' }}
+            style={{ color: summary.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red-text)' }}
           >
             {summary.medicationTaken ? 'Taken' : 'Missed'}
           </p>
@@ -341,7 +341,7 @@ function CheckinCard({
             <p className="text-[10px] font-semibold uppercase tracking-wide mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
               Symptoms
             </p>
-            <p className="text-[11px] font-semibold" style={{ color: 'var(--brand-warning-amber)' }}>
+            <p className="text-[11px] font-semibold" style={{ color: 'var(--brand-warning-amber-text)' }}>
               {summary.symptoms.slice(0, 2).join(', ')}
               {summary.symptoms.length > 2 && ` +${summary.symptoms.length - 2}`}
             </p>

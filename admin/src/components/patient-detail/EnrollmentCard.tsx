@@ -160,7 +160,7 @@ export default function EnrollmentCard({
                   className="text-[11.5px] leading-relaxed flex items-start gap-1.5"
                   style={{ color: 'var(--brand-text-secondary)' }}
                 >
-                  <span style={{ color: 'var(--brand-warning-amber)' }}>•</span>
+                  <span style={{ color: 'var(--brand-warning-amber-text)' }}>•</span>
                   <span>{ENROLLMENT_REASON_LABELS[r] ?? r}</span>
                 </li>
               ))}
@@ -170,7 +170,7 @@ export default function EnrollmentCard({
           {error && !blocked && (
             <p
               className="mt-2 text-[11.5px] font-semibold"
-              style={{ color: 'var(--brand-alert-red)' }}
+              style={{ color: 'var(--brand-alert-red-text)' }}
             >
               {error}
             </p>

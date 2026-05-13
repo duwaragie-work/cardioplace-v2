@@ -213,7 +213,7 @@ export default function ScheduleModal({
                     className="rounded-xl p-3 text-sm font-medium"
                     style={{
                       backgroundColor: 'var(--brand-alert-red-light)',
-                      color: 'var(--brand-alert-red)',
+                      color: 'var(--brand-alert-red-text)',
                     }}
                   >
                     {error}

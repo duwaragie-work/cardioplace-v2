@@ -339,7 +339,7 @@ function DeleteConfirmModal({
             className="w-14 h-14 mx-auto mb-3 rounded-full flex items-center justify-center"
             style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
           >
-            <Trash2 className="w-6 h-6" style={{ color: 'var(--brand-alert-red)' }} />
+            <Trash2 className="w-6 h-6" style={{ color: 'var(--brand-alert-red-text)' }} />
           </div>
           <p className="text-[15px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
             Delete conversation?
@@ -464,7 +464,7 @@ function SidebarContent({
                     className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg flex items-center justify-center hover:bg-red-50 transition-colors"
                     title="Delete"
                   >
-                    <Trash2 className="w-3 h-3" style={{ color: 'var(--brand-alert-red)' }} />
+                    <Trash2 className="w-3 h-3" style={{ color: 'var(--brand-alert-red-text)' }} />
                   </button>
                 </div>
               );
@@ -811,7 +811,7 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
               )}
               <div className="rounded-xl p-2.5 text-center" style={{ backgroundColor: pendingCheckin.medicationTaken ? 'var(--brand-success-green-light)' : 'var(--brand-alert-red-light)' }}>
                 <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Meds</p>
-                <p className="text-[13px] font-bold" style={{ color: pendingCheckin.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red)' }}>{pendingCheckin.medicationTaken ? 'Taken' : 'Missed'}</p>
+                <p className="text-[13px] font-bold" style={{ color: pendingCheckin.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red-text)' }}>{pendingCheckin.medicationTaken ? 'Taken' : 'Missed'}</p>
               </div>
             </div>
 
@@ -1016,7 +1016,7 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
             >
               <div className="flex items-center gap-2 mb-2">
                 {pendingDelete.success
-                  ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-alert-red)' }} />
+                  ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-alert-red-text)' }} />
                   : <AlertCircle className="w-5 h-5 text-red-500" />}
                 <p className="font-bold text-[14px]" style={{ color: 'var(--brand-text-primary)' }}>
                   {pendingDelete.success
@@ -1026,7 +1026,7 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
               </div>
               <div className="rounded-xl p-2.5 text-center mb-2" style={{ backgroundColor: 'var(--brand-alert-red-light)' }}>
                 <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Removed</p>
-                <p className="text-[14px] font-bold" style={{ color: 'var(--brand-alert-red)' }}>
+                <p className="text-[14px] font-bold" style={{ color: 'var(--brand-alert-red-text)' }}>
                   {pendingDelete.deletedCount} entry{pendingDelete.deletedCount === 1 ? '' : 'ies'}
                   {pendingDelete.failedCount > 0 ? ` (${pendingDelete.failedCount} failed)` : ''}
                 </p>
@@ -2007,7 +2007,7 @@ export default function AIChatInterface() {
           className="fixed bottom-32 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full text-[12px] font-semibold shadow-lg"
           style={{
             backgroundColor: 'var(--brand-alert-red-light)',
-            color: 'var(--brand-alert-red)',
+            color: 'var(--brand-alert-red-text)',
             border: '1px solid var(--brand-alert-red)',
           }}
         >

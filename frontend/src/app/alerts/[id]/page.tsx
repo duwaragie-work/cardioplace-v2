@@ -147,7 +147,7 @@ function NotFound({ reason }: { reason: string }) {
           <AlertCircle
             aria-hidden="true"
             className="w-8 h-8"
-            style={{ color: 'var(--brand-warning-amber)' }}
+            style={{ color: 'var(--brand-warning-amber-text)' }}
           />
         </div>
         <h1

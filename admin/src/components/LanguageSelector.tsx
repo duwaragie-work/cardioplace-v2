@@ -58,7 +58,7 @@ export default function LanguageSelector() {
                 <span className="flex-1">{l.nativeName}</span>
                 {!supported && (
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold"
-                    style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }}>
+                    style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}>
                     {t('common.comingSoon')}
                   </span>
                 )}

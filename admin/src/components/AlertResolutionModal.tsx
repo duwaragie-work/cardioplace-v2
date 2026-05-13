@@ -303,7 +303,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                                     className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
                                     style={{
                                       backgroundColor: 'var(--brand-warning-amber-light)',
-                                      color: 'var(--brand-warning-amber)',
+                                      color: 'var(--brand-warning-amber-text)',
                                     }}
                                   >
                                     Rationale required
@@ -338,7 +338,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                   >
                     Clinical rationale
                     {rationaleRequired ? (
-                      <span style={{ color: 'var(--brand-alert-red)' }}> · required</span>
+                      <span style={{ color: 'var(--brand-alert-red-text)' }}> · required</span>
                     ) : (
                       <span className="font-normal" style={{ color: 'var(--brand-text-muted)' }}> · optional</span>
                     )}
@@ -370,7 +370,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
               {error && (
                 <p
                   className="text-[12.5px] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
-                  style={{ color: 'var(--brand-alert-red)', backgroundColor: 'var(--brand-alert-red-light)' }}
+                  style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
                 >
                   {error}
                 </p>

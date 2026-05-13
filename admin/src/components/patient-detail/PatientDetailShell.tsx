@@ -395,7 +395,7 @@ export default function PatientDetailShell({ patientId }: Props) {
               </div>
             </div>
           ) : headerError ? (
-            <div className="text-[13px]" style={{ color: 'var(--brand-alert-red)' }}>
+            <div className="text-[13px]" style={{ color: 'var(--brand-alert-red-text)' }}>
               {headerError}{' '}
               <Link href="/patients" className="underline">Back</Link>
             </div>
@@ -731,7 +731,7 @@ function LoadErrorBanner({ message, onRetry }: { message: string; onRetry: () =>
       }}
       role="alert"
     >
-      <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--brand-alert-red)' }} />
+      <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--brand-alert-red-text)' }} />
       <div className="flex-1 min-w-0">
         <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
           Couldn&apos;t load this tab
@@ -746,7 +746,7 @@ function LoadErrorBanner({ message, onRetry }: { message: string; onRetry: () =>
         className="shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12px] font-semibold cursor-pointer"
         style={{
           backgroundColor: 'white',
-          color: 'var(--brand-alert-red)',
+          color: 'var(--brand-alert-red-text)',
           border: '1.5px solid var(--brand-alert-red)',
         }}
       >

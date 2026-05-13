@@ -1006,7 +1006,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
 
       <div className="rounded-xl p-3 flex items-start gap-3"
         style={{ backgroundColor: 'var(--brand-alert-red-light)' }}>
-        <Heart className="w-4 h-4 mt-0.5 shrink-0" style={{ color: 'var(--brand-alert-red)' }} />
+        <Heart className="w-4 h-4 mt-0.5 shrink-0" style={{ color: 'var(--brand-alert-red-text)' }} />
         <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
           {t('checkin.b3.alertBanner')}
         </p>
@@ -1269,7 +1269,7 @@ function ConfirmationScreen({
           className="w-full rounded-xl px-3 py-2 mb-3 flex items-start gap-2.5 text-left"
           style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}
         >
-          <Pill className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--brand-warning-amber)' }} />
+          <Pill className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--brand-warning-amber-text)' }} />
           <p className="text-[12px] leading-snug" style={{ color: 'var(--brand-text-primary)' }}>
             We noted you missed{' '}
             <span className="font-bold">{missedMedNames.join(', ')}</span>
@@ -1288,7 +1288,7 @@ function ConfirmationScreen({
         >
           <Activity
             className="w-4 h-4 shrink-0"
-            style={{ color: aFibSatisfied ? 'var(--brand-success-green)' : 'var(--brand-warning-amber)' }}
+            style={{ color: aFibSatisfied ? 'var(--brand-success-green)' : 'var(--brand-warning-amber-text)' }}
           />
           <p
             className="text-[12px] leading-snug"
@@ -1837,7 +1837,7 @@ export default function CheckIn() {
         {error && (
           <p
             className="mt-5 text-[13px] text-center font-semibold px-4 py-2 rounded-lg"
-            style={{ color: 'var(--brand-alert-red)', backgroundColor: 'var(--brand-alert-red-light)' }}
+            style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
           >
             {error}
           </p>

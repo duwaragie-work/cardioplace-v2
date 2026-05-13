@@ -1199,7 +1199,7 @@ function EditModal({
           {error && (
             <p
               className="text-[12.5px] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
-              style={{ color: 'var(--brand-alert-red)', backgroundColor: 'var(--brand-alert-red-light)' }}
+              style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
             >
               {error}
             </p>
@@ -1275,7 +1275,7 @@ function DeleteConfirm({
           {t('readings.deleteWarning')}
         </p>
         {error && (
-          <p className="text-[13px] mb-4 text-center" style={{ color: 'var(--brand-alert-red)' }}>
+          <p className="text-[13px] mb-4 text-center" style={{ color: 'var(--brand-alert-red-text)' }}>
             {error}
           </p>
         )}

@@ -40,7 +40,7 @@ export default function DeleteCard({ summary, onDismiss }: Props) {
         {summary.success ? (
           <CheckCircle
             className="w-5 h-5 shrink-0"
-            style={{ color: 'var(--brand-alert-red)' }}
+            style={{ color: 'var(--brand-alert-red-text)' }}
             aria-hidden="true"
           />
         ) : (
@@ -61,14 +61,14 @@ export default function DeleteCard({ summary, onDismiss }: Props) {
         >
           <Trash2
             className="w-5 h-5 shrink-0"
-            style={{ color: 'var(--brand-alert-red)' }}
+            style={{ color: 'var(--brand-alert-red-text)' }}
             aria-hidden="true"
           />
           <div>
             <p
               lang="en"
               className="text-[16px] font-bold"
-              style={{ color: 'var(--brand-alert-red)' }}
+              style={{ color: 'var(--brand-alert-red-text)' }}
             >
               {summary.deletedCount}{' '}
               {summary.deletedCount === 1 ? 'reading' : 'readings'} removed

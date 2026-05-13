@@ -59,8 +59,8 @@ interface FeedEntry {
 const VERIF_ICON: Record<string, { icon: React.ReactNode; color: string }> = {
   PATIENT_REPORT: { icon: <Edit3 className="w-3 h-3" />, color: 'var(--brand-primary-purple)' },
   ADMIN_VERIFY: { icon: <ShieldCheck className="w-3 h-3" />, color: 'var(--brand-success-green)' },
-  ADMIN_CORRECT: { icon: <Edit3 className="w-3 h-3" />, color: 'var(--brand-warning-amber)' },
-  ADMIN_REJECT: { icon: <XIcon className="w-3 h-3" />, color: 'var(--brand-alert-red)' },
+  ADMIN_CORRECT: { icon: <Edit3 className="w-3 h-3" />, color: 'var(--brand-warning-amber-text)' },
+  ADMIN_REJECT: { icon: <XIcon className="w-3 h-3" />, color: 'var(--brand-alert-red-text)' },
 };
 
 function dayKey(iso: string): string {
@@ -377,7 +377,7 @@ function entriesFromAlerts(alerts: PatientAlert[]): FeedEntry[] {
       ts: a.createdAt,
       filter: 'ALERT',
       icon: <Bell className="w-3 h-3" />,
-      color: 'var(--brand-alert-red)',
+      color: 'var(--brand-alert-red-text)',
       bg: 'var(--brand-alert-red-light)',
       title: `${tlabel} alert opened`,
       body: a.patientMessage ?? undefined,
@@ -390,7 +390,7 @@ function entriesFromAlerts(alerts: PatientAlert[]): FeedEntry[] {
         ts: e.triggeredAt,
         filter: 'ALERT',
         icon: <ArrowUp className="w-3 h-3" />,
-        color: 'var(--brand-warning-amber)',
+        color: 'var(--brand-warning-amber-text)',
         bg: 'var(--brand-warning-amber-light)',
         title: `Escalation ${e.escalationLevel} triggered`,
         body: e.reason ?? undefined,

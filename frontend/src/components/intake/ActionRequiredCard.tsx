@@ -73,7 +73,7 @@ export default function ActionRequiredCard({ state, ctaHref = '/clinical-intake'
         <div className="flex-1 min-w-0">
           <p
             className="text-[10px] font-bold uppercase tracking-wider mb-0.5"
-            style={{ color: 'var(--brand-warning-amber)' }}
+            style={{ color: 'var(--brand-warning-amber-text)' }}
           >
             {t('intake.a0.actionRequired')}
           </p>

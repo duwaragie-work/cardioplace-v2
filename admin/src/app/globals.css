@@ -15,12 +15,38 @@
   --brand-accent-teal: #115E59;
   --brand-accent-teal-light: #CCFBF1;
 
-  /* Cluster-3 / B11+B12: semantic chip foregrounds bumped to -800 shades
-     so the "color on -100 light bg" pairs clear WCAG AA. Hue preserved. */
-  --brand-alert-red: #991B1B;
-  --brand-alert-red-light: #FEE2E2;
-  --brand-warning-amber: #92400E;
-  --brand-warning-amber-light: #FEF3C7;
+  /* SEMANTIC PALETTE — role-split tokens for red + amber.
+     Green stays single-token (chips only, no button-bg variant). Teal too.
+     - `*` (no suffix): used as BACKGROUND with white foreground (buttons,
+       banners, severity pills). Vibrant shade.
+     - `*-text`: used as FOREGROUND/TEXT on top of `*-light` BG (chips,
+       inline annotations). Deep -800 shade.
+     - `*-light`: shared -100 bg for chips and subtle fills.
+     Split because chip-text and button-bg have inverted contrast
+     requirements and can't share one hex.
+
+     USAGE RULES:
+     RED:
+     - `bg: var(--brand-alert-red)` + `color: white` → vibrant emergency feel
+       (red-600/white at 4.83:1, AA Normal)
+     - `bg: var(--brand-alert-red-light)` + `color: var(--brand-alert-red-text)`
+       → subtle chip (red-100/red-800 at 9.43:1, AAA)
+     AMBER:
+     - `bg: var(--brand-warning-amber)` + `color: white` → vibrant warning
+       (orange-500/white at 3.31:1, AA LARGE ONLY — text must be ≥14px bold-700
+       or ≥18px regular)
+     - `bg: var(--brand-warning-amber-light)` + `color: var(--brand-warning-amber-text)`
+       → subtle chip (amber-100/amber-800 at 7.1:1, AAA)
+     NEVER pair a `*-light` BG with the bare `*` token as foreground — the bg
+     token is tuned for white-on-color, not dark-on-light. */
+  --brand-alert-red: #DC2626;        /* red-600 — button/banner BG; white text = 4.83:1 (AA Normal ✓) */
+  --brand-alert-red-text: #991B1B;   /* red-800 — chip text on red-100 bg = 9.43:1 (AAA ✓) */
+  --brand-alert-red-light: #FEE2E2;  /* red-100 — chip background */
+  --brand-warning-amber: #F97316;        /* orange-500 — button/banner BG; white text = 3.31:1 (AA LARGE only — requires ≥14px bold-700) */
+  --brand-warning-amber-text: #92400E;   /* amber-800 — chip text on amber-100 bg = 7.1:1 (AAA ✓) */
+  --brand-warning-amber-light: #FEF3C7;  /* amber-100 — chip background */
+  /* GREEN: unchanged — scoped to red + amber only this round.
+     Single token, used for chip text on green-100 (7.3:1). */
   --brand-success-green: #166534;
   --brand-success-green-light: #DCFCE7;
 

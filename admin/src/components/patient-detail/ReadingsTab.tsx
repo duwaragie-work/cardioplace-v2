@@ -86,10 +86,10 @@ function tierBucket(t: string | null): TierFilter | 'OTHER' {
 
 function tierChrome(b: TierFilter | 'OTHER'): { label: string; color: string; bg: string } {
   switch (b) {
-    case 'BP_L2': return { label: 'BP L2', color: 'var(--brand-alert-red)', bg: 'var(--brand-alert-red-light)' };
-    case 'TIER_1': return { label: 'Tier 1', color: 'var(--brand-alert-red)', bg: 'var(--brand-alert-red-light)' };
-    case 'TIER_2': return { label: 'Tier 2', color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)' };
-    case 'BP_L1': return { label: 'BP L1', color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)' };
+    case 'BP_L2': return { label: 'BP L2', color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)' };
+    case 'TIER_1': return { label: 'Tier 1', color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)' };
+    case 'TIER_2': return { label: 'Tier 2', color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
+    case 'BP_L1': return { label: 'BP L1', color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
     case 'TIER_3': return { label: 'Tier 3', color: 'var(--brand-accent-teal)', bg: 'var(--brand-accent-teal-light)' };
     default: return { label: 'Other', color: 'var(--brand-text-muted)', bg: 'var(--brand-background)' };
   }
@@ -294,7 +294,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
               className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
               style={{
                 backgroundColor: 'var(--brand-warning-amber-light)',
-                color: 'var(--brand-warning-amber)',
+                color: 'var(--brand-warning-amber-text)',
               }}
               title="Patient missed at least one pre-measurement checklist item"
             >
@@ -406,7 +406,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
                 className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full"
                 style={{
                   backgroundColor: 'var(--brand-alert-red-light)',
-                  color: 'var(--brand-alert-red)',
+                  color: 'var(--brand-alert-red-text)',
                 }}
               >
                 <XCircle className="w-3 h-3" />
@@ -427,7 +427,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
                   className="text-[12px] inline-flex items-center gap-1.5"
                   style={{ color: 'var(--brand-text-secondary)' }}
                 >
-                  <Pill className="w-3 h-3 shrink-0" style={{ color: 'var(--brand-alert-red)' }} />
+                  <Pill className="w-3 h-3 shrink-0" style={{ color: 'var(--brand-alert-red-text)' }} />
                   <span className="font-semibold">{m.drugName}</span>
                   {m.missedDoses != null && (
                     <span style={{ color: 'var(--brand-text-muted)' }}>
@@ -459,7 +459,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
                 className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full"
                 style={{
                   backgroundColor: 'var(--brand-alert-red-light)',
-                  color: 'var(--brand-alert-red)',
+                  color: 'var(--brand-alert-red-text)',
                 }}
               >
                 <Activity className="w-3 h-3" />
@@ -486,7 +486,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
       {/* Suboptimal — failed checklist items */}
       {entry.suboptimalMeasurement && entry.failedConditions.length > 0 && (
         <div className="mb-3">
-          <span className="text-[10px] font-bold uppercase tracking-wider block mb-1.5" style={{ color: 'var(--brand-warning-amber)' }}>
+          <span className="text-[10px] font-bold uppercase tracking-wider block mb-1.5" style={{ color: 'var(--brand-warning-amber-text)' }}>
             Failed checklist items
           </span>
           <div className="flex flex-wrap gap-1.5">
@@ -496,7 +496,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
                 className="text-[11px] font-medium px-2 py-0.5 rounded-full"
                 style={{
                   backgroundColor: 'var(--brand-warning-amber-light)',
-                  color: 'var(--brand-warning-amber)',
+                  color: 'var(--brand-warning-amber-text)',
                 }}
               >
                 {CONDITION_LABELS[c] ?? c}
@@ -633,7 +633,7 @@ function ErrorBanner({ message }: { message: string }) {
       }}
       role="alert"
     >
-      <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--brand-alert-red)' }} />
+      <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--brand-alert-red-text)' }} />
       <div className="flex-1">
         <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
           Couldn&apos;t load readings

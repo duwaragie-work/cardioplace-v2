@@ -11,14 +11,19 @@
   --brand-accent-teal: #115E59;
   --brand-accent-teal-light: #CCFBF1;
 
-  /* Cluster-3 / B10: semantic chip foregrounds bumped to -800 shades so the
-     "color on -100 light bg" pairs clear WCAG AA (≥4.5:1) for normal text.
-     Visual identity (hue) preserved; only the lightness drops. */
-  --brand-alert-red: #991B1B;        /* was #DC2626 — was 3.95:1 on red-100, now ~6.3:1 */
+  /* SEMANTIC PALETTE — role-split tokens for red + amber (admin globals.css
+     has the full USAGE RULES comment block; kept terse here to match the
+     monorepo two-source-of-truth pattern):
+     - `*` (no suffix): BACKGROUND with white foreground (buttons/banners) — vibrant
+     - `*-text`: FOREGROUND on `*-light` BG (chips/inline) — deep -800
+     Green + Teal: single-token (chips only, no button-bg variant). */
+  --brand-alert-red: #DC2626;        /* red-600 — button/banner BG; white = 4.83:1 (AA Normal ✓) */
+  --brand-alert-red-text: #991B1B;   /* red-800 — chip text on red-100 = 9.43:1 (AAA ✓) */
   --brand-alert-red-light: #FEE2E2;
-  --brand-warning-amber: #92400E;    /* was #D97706 — was 2.86:1 on amber-100, now ~5.0:1 */
+  --brand-warning-amber: #F97316;        /* orange-500 — button/banner BG; white = 3.31:1 (AA LARGE only — requires ≥14px bold-700) */
+  --brand-warning-amber-text: #92400E;   /* amber-800 — chip text on amber-100 = 7.1:1 (AAA ✓) */
   --brand-warning-amber-light: #FEF3C7;
-  --brand-success-green: #166534;    /* was #16A34A — was 3.0:1 on green-100, now ~6.3:1 */
+  --brand-success-green: #166534;    /* unchanged — single token, chips only */
   --brand-success-green-light: #DCFCE7;
 
   --brand-background: #F8FAFC;

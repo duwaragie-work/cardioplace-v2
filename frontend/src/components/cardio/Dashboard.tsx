@@ -256,7 +256,7 @@ export default function Dashboard() {
   const bpStatusStyle = bpStatusLabel === t('dashboard.withinTarget')
     ? { backgroundColor: 'var(--brand-success-green-light)', color: 'var(--brand-success-green)' }
     : bpStatusLabel === t('dashboard.elevated')
-      ? { backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }
+      ? { backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }
       : { backgroundColor: '#F1F5F9', color: 'var(--brand-text-muted)' };
 
   const baselineStr = baseline?.baselineSystolic && baseline?.baselineDiastolic
@@ -640,7 +640,7 @@ export default function Dashboard() {
                   className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
                   style={{
                     backgroundColor: 'var(--brand-warning-amber-light)',
-                    color: 'var(--brand-warning-amber)',
+                    color: 'var(--brand-warning-amber-text)',
                   }}
                 >
                   <ShieldCheck className="w-3 h-3" />
@@ -688,7 +688,7 @@ export default function Dashboard() {
           {/* Streak Stat Card */}
           <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl relative" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
             <div className="flex items-start justify-between gap-2 mb-2">
-              <Flame className="w-5 h-5" style={{ color: 'var(--brand-warning-amber)' }} />
+              <Flame className="w-5 h-5" style={{ color: 'var(--brand-warning-amber-text)' }} />
             </div>
             {loading ? (
               <Bone w={64} h={28} />
@@ -890,7 +890,7 @@ export default function Dashboard() {
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold"
-                      style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }}>
+                      style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}>
                       {t('dashboard.dueToday')}
                     </span>
                   )}

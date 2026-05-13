@@ -135,7 +135,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
         {loading || !practice || !form ? (
           <div className="bg-white rounded-2xl p-8 text-center" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
             {error ? (
-              <p className="text-[13px]" style={{ color: 'var(--brand-alert-red)' }}>{error}</p>
+              <p className="text-[13px]" style={{ color: 'var(--brand-alert-red-text)' }}>{error}</p>
             ) : (
               <Loader2 className="w-5 h-5 mx-auto animate-spin" style={{ color: 'var(--brand-text-muted)' }} />
             )}
@@ -249,7 +249,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
               {error && (
                 <div
                   className="rounded-lg px-3 py-2 text-[12px] font-semibold"
-                  style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)' }}
+                  style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
                 >
                   {error}
                 </div>
@@ -401,7 +401,7 @@ function slotChrome(slot: StaffSlot): { label: string; color: string; bg: string
     case 'BACKUP':
       return { label: 'Backup', color: 'var(--brand-accent-teal)', bg: 'var(--brand-accent-teal-light)' };
     case 'MEDICAL_DIRECTOR':
-      return { label: 'Med director', color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)' };
+      return { label: 'Med director', color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
   }
 }
 
@@ -410,7 +410,7 @@ function Field({ label, required, children }: { label: React.ReactNode; required
     <label className="block">
       <span className="block text-[10.5px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--brand-text-muted)' }}>
         {label}
-        {required && <span style={{ color: 'var(--brand-alert-red)' }}> *</span>}
+        {required && <span style={{ color: 'var(--brand-alert-red-text)' }}> *</span>}
       </span>
       {children}
     </label>
