@@ -260,6 +260,13 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
   // before they ever touch the socket. Eliminates the trailing-chunks-after-
   // audio_stream_end and echo-during-agent bugs.
   const sessionStateRef = useRef<SessionState>('idle');
+  // True once we've sent audio_stream_end for the current user turn. Gemini
+  // Live's audioStreamEnd is a once-per-turn signal — firing it multiple
+  // times (one per VAD-detected pause) puts the session into a state where
+  // subsequent audio is ignored and the model never responds. Reset to
+  // false when the agent finishes speaking and we transition back to
+  // 'listening' (in playAudio's drain timer).
+  const audioStreamEndSentRef = useRef(false);
   // Scheduled playback — each arriving audio chunk is scheduled to start at
   // nextStartTimeRef on the playback AudioContext, avoiding the onended gap
   // that caused choppy output. When no chunks arrive for ~200ms after the
@@ -442,8 +449,11 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
         } else if (now - silenceStartRef.current >= END_OF_UTTERANCE_MS) {
           speakingRef.current = false;
           silenceStartRef.current = null;
-          if (now - lastEmitAt >= COOLDOWN_MS) {
+          if (audioStreamEndSentRef.current) {
+            debug('vad', 'speech end — suppressed (audio_stream_end already sent this turn)');
+          } else if (now - lastEmitAt >= COOLDOWN_MS) {
             lastEmitAt = now;
+            audioStreamEndSentRef.current = true;
             debug('vad', `speech end — emit audio_stream_end after ${END_OF_UTTERANCE_MS}ms silence`);
             socketRef.current.emit('audio_stream_end');
             armListeningWatchdog();
@@ -453,19 +463,17 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
         }
       }
 
-      // VAD-gated emit. Only forward frames while the user is actively
-      // speaking; once VAD flips speakingRef false (after END_OF_UTTERANCE_MS
-      // of confirmed silence), chunks stop immediately. Combined with the
-      // audio_stream_end Socket.io event, Gemini gets a clean end-of-turn
-      // signal AND the audio stream actually ends — turn finalises in
-      // <500ms instead of waiting on Gemini's own internal VAD.
+      // Send every frame during 'listening' (silent OR speech). The native-
+      // audio model wants a continuous audio context to detect turn
+      // boundaries — when we tried to gate on speakingRef the model went
+      // silent because it received only short disconnected bursts. The
+      // half-duplex gate above already prevents the agent-echo bug; we
+      // don't need per-chunk gating on top.
       //
       // Socket.io 4 sends ArrayBuffer as a binary frame automatically —
       // skips the O(n²) String.fromCharCode/btoa loop and the 33% base64
       // wire bloat that the pre-worklet path paid per frame.
-      if (speakingRef.current) {
-        socketRef.current.emit('audio_chunk', int16.buffer);
-      }
+      socketRef.current.emit('audio_chunk', int16.buffer);
     };
 
     source.connect(node);
@@ -523,9 +531,12 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
       debug('audio', 'drain timer fired — reverting to listening');
       setSessionState((prev) => (prev === 'agent_speaking' ? 'listening' : prev), 'audio drained');
       // Clear VAD bookkeeping so the next user turn starts clean — no stale
-      // silenceStart ticking down from before the agent spoke.
+      // silenceStart ticking down from before the agent spoke. Also re-arm
+      // audio_stream_end so the next user pause can signal end-of-turn
+      // (the previous turn used its one allotted fire).
       speakingRef.current = false;
       silenceStartRef.current = null;
+      audioStreamEndSentRef.current = false;
       drainTimerRef.current = null;
     }, msUntilEnd);
   }, [setSessionState]);
