@@ -33,6 +33,43 @@ test.describe('Admin verification — profile', () => {
     await tc.dispose()
   })
 
+  test('admin correct-profile with dateOfBirth + condition flag returns 200, not 500', async () => {
+    // Regression — dateOfBirth lives on User, not PatientProfile, so the
+    // original correctProfile() spread the whole DTO into
+    // patientProfile.update(), Prisma rejected the unknown column, and the
+    // endpoint returned 500. Fix splits User and PatientProfile updates into
+    // one $transaction. Both fields must come back in `correctedFields`.
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    // Reset to UNVERIFIED so correct-profile has something to flip to CORRECTED.
+    await tc.setProfileVerificationStatus(u.id, 'UNVERIFIED')
+
+    const api = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+    // Use today minus ~30y so the value is plausible and stable across runs.
+    const newDob = new Date(Date.now() - 30 * 365 * 24 * 3600 * 1000)
+      .toISOString()
+      .slice(0, 10)
+    const res = await api.post(`admin/users/${u.id}/correct-profile`, {
+      data: {
+        corrections: {
+          dateOfBirth: newDob,
+          hasHCM: true,
+        },
+        rationale: 'qa-test: admin DOB + condition correction',
+      },
+    })
+    expect(
+      res.status(),
+      `expected 200 from correct-profile, got ${res.status()}: ${await res.text()}`,
+    ).toBe(200)
+    const body = await res.json()
+    expect(body.correctedFields).toEqual(
+      expect.arrayContaining(['dateOfBirth', 'hasHCM']),
+    )
+    await api.dispose()
+    await tc.dispose()
+  })
+
   test('PROVIDER role cannot write Practice (admin role boundary)', async () => {
     const api = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
     const res = await api.post('admin/practices', {
