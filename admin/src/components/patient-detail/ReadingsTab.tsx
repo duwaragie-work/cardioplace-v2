@@ -362,6 +362,24 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
             icon={<WeightIcon className="w-3 h-3" />}
           />
         )}
+        {entry.singleReadingFinalized && (
+          // Cluster 6 Q2 (Manisha 5/9/26) — flag readings where the engine
+          // had to fire on a single-reading session (5-min timeout finalized
+          // before a second reading landed). Provider should treat the
+          // threshold cross as provisional until next session.
+          <span
+            className="ml-auto inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+            style={{
+              backgroundColor: 'var(--brand-warning-amber-bg, #FEF3C7)',
+              color: 'var(--brand-warning-amber, #92400E)',
+              border: '1px solid var(--brand-warning-amber, #D97706)',
+            }}
+            title="Threshold crossed on an unaveraged reading. Confirm with next session."
+          >
+            <Clock className="w-3 h-3" />
+            Single-reading session
+          </span>
+        )}
       </div>
 
       {/* Medication row */}

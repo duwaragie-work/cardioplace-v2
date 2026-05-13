@@ -45,6 +45,13 @@ export interface SessionAverage {
    *  (SBP drop ≥15 from prior session + dizziness). */
   priorSystolicBP?: number | null
 
+  /** Cluster 6 Q2 (Manisha 5/9/26) — true when the anchor entry's
+   *  `singleReadingFinalized` column is true (flipped by the 5-min
+   *  finalize endpoint). Bypasses the non-emergency single-reading gate
+   *  in `runPipeline` so the alert fires on the lone reading with a
+   *  "confirm with next reading" annotation. */
+  singleReadingFinalized: boolean
+
   /** Structured symptom flags — OR-reduced across the session's entries. */
   symptoms: SessionSymptoms
 

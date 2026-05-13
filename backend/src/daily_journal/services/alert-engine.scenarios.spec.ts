@@ -48,7 +48,8 @@ function buildSession(over: Partial<SessionAverage> = {}): SessionAverage {
     diastolicBP: 78,
     pulse: 72,
     weight: null,
-    readingCount: 1,
+    // Cluster 6 Q2 default — ≥2 readings to bypass the single-reading gate.
+    readingCount: 2,
     symptoms: noSymptoms(),
     suboptimalMeasurement: false,
     sessionId: null,
@@ -56,6 +57,7 @@ function buildSession(over: Partial<SessionAverage> = {}): SessionAverage {
     // Keeps all 57 pre-existing scenarios unaffected by the adherence pass.
     medicationTaken: null,
     missedMedications: [],
+    singleReadingFinalized: false,
     ...over,
   }
 }
@@ -180,6 +182,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
         // (idempotent on @@unique([alertId, escalationEventId, userId, channel])).
         create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
       },
+      // Cluster 6 bug #11 — persistAlert wraps writes in $transaction.
+      $transaction: ((fn: any) => Promise.resolve(fn(prisma))) as any,
     }
     eventEmitter = { emit: jest.fn() }
     profileResolver = { resolve: jest.fn() as jest.Mock<any> }
@@ -873,18 +877,22 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.pulsePressure).toBe(65)
   })
 
-  it('Scenario 38 — Loop diuretic + SBP 92 standalone → RULE_LOOP_DIURETIC_HYPOTENSION', async () => {
+  it('Scenario 38 — Loop diuretic + SBP 89 → loop-diuretic rides as annotation on STANDARD_L1_LOW (Cluster 6 Q1: strict <90)', async () => {
+    // Manisha 5/9 Q1: the 90-92 trending-low band is dropped. Loop rule
+    // fires only at strict SBP < 90. At <90 STANDARD_L1_LOW also claims
+    // sbp-low, so the loop note rides as a physicianMessage annotation
+    // on the primary row instead of firing standalone — preserves the
+    // Scenario 15 "PP wide rides as annotation" pattern.
     const { result, createArgs } = await run(
-      buildSession({ systolicBP: 92, diastolicBP: 60, pulse: 72 }),
+      buildSession({ systolicBP: 89, diastolicBP: 60, pulse: 72 }),
       buildCtx({
         contextMeds: [
           buildMed({ drugName: 'Furosemide', drugClass: 'LOOP_DIURETIC' }),
         ],
       }),
     )
-    expect(result?.ruleId).toBe('RULE_LOOP_DIURETIC_HYPOTENSION')
-    expect(createArgs.data.tier).toBe('TIER_3_INFO')
-    expect(createArgs.data.patientMessage).toBe('')
+    expect(result?.ruleId).toBe('RULE_STANDARD_L1_LOW')
+    expect(createArgs.data.physicianMessage).toMatch(/loop diuretic/i)
   })
 
   // ========================================================================

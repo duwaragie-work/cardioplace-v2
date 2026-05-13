@@ -19,7 +19,8 @@ function baseSession(over: Partial<SessionAverage> = {}): SessionAverage {
     diastolicBP: 78,
     pulse: 72,
     weight: null,
-    readingCount: 1,
+    // Cluster 6 Q2 default — ≥2 readings to bypass the single-reading gate.
+    readingCount: 2,
     symptoms: {
       severeHeadache: false,
       visualChanges: false,
@@ -40,6 +41,7 @@ function baseSession(over: Partial<SessionAverage> = {}): SessionAverage {
     sessionId: null,
     medicationTaken: null,
     missedMedications: [],
+    singleReadingFinalized: false,
     ...over,
   }
 }
@@ -117,6 +119,12 @@ describe('AlertEngineService (orchestrator)', () => {
         // (idempotent on @@unique([alertId, escalationEventId, userId, channel])).
         create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
       },
+      // Cluster 6 bug #11 — persistAlert now wraps its writes in
+      // `prisma.$transaction(async (tx) => {...}, {isolationLevel})`. The
+      // simplest mock just invokes the callback with `prisma` itself as tx,
+      // so the inner `tx.deviationAlert.findFirst/create/update` calls hit
+      // the same per-method mocks above.
+      $transaction: ((fn: any) => Promise.resolve(fn(prisma))) as any,
     }
     eventEmitter = { emit: jest.fn() }
     profileResolver = {

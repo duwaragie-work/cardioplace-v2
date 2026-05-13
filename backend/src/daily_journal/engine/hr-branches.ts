@@ -17,6 +17,9 @@ import type { RuleFunction, RuleResult, SessionAverage } from './types.js'
 const AFIB_HR_HIGH = 110
 const AFIB_HR_LOW = 50
 const TACHY_HR = 100
+// Cluster 6 Q5 (Manisha 5/9/26) — single-reading Tier 2 exception: HR > 130
+// fires immediately, no need for a second reading to confirm.
+const TACHY_SEVERE_HR = 130
 const BRADY_SYMPTOMATIC = 50
 const BRADY_ASYMPTOMATIC = 40
 
@@ -57,18 +60,23 @@ export const afibHrRule: RuleFunction = (session, ctx) => {
 }
 
 /**
- * Tachycardia — fires only when the patient is flagged hasTachycardia AND
- * the current session's pulse >100 AND prior consecutive sessions also ≥100.
- * The "two consecutive readings" requirement is enforced by the orchestrator
- * via `ctx.tachycardiaConsecutiveCount` analog — for the rule function itself
- * we require the flag + pulse + a `priorElevated` hint passed in the session.
+ * Tachycardia — fires when the patient is flagged hasTachycardia.
+ *
+ * Cluster 6 Q5 (Manisha 5/9/26):
+ *  - Consecutive-reading branch: HR > 100 AND `priorElevated` (a reading
+ *    within the prior 8h was also > 100). The 8h window is enforced by
+ *    `wasPriorReadingPulseElevated`; this rule only consumes the boolean.
+ *  - Single-reading Tier 2 exception: HR > 130 fires immediately,
+ *    regardless of `priorElevated` — severe tachy doesn't need a second
+ *    reading to confirm.
  */
 export function buildTachyRule(priorElevated: boolean): RuleFunction {
   return (session, ctx) => {
     if (!ctx.profile.hasTachycardia) return null
     if (session.pulse == null) return null
     if (session.pulse <= TACHY_HR) return null
-    if (!priorElevated) return null
+    const isSevereSingleReading = session.pulse > TACHY_SEVERE_HR
+    if (!isSevereSingleReading && !priorElevated) return null
 
     return {
       ruleId: RULE_IDS.TACHY_HR,
@@ -77,8 +85,13 @@ export function buildTachyRule(priorElevated: boolean): RuleFunction {
       pulsePressure: getPulsePressure(session.systolicBP, session.diastolicBP),
       suboptimalMeasurement: session.suboptimalMeasurement,
       actualValue: session.pulse,
-      reason: `Tachycardia HR ${session.pulse} > ${TACHY_HR} (≥2 consecutive).`,
-      metadata: { conditionLabel: 'Tachycardia', thresholdValue: TACHY_HR },
+      reason: isSevereSingleReading
+        ? `Severe tachycardia HR ${session.pulse} > ${TACHY_SEVERE_HR} (single-reading Tier 2 exception per Manisha 5/9 Q5).`
+        : `Tachycardia HR ${session.pulse} > ${TACHY_HR} (≥2 consecutive within 8h).`,
+      metadata: {
+        conditionLabel: 'Tachycardia',
+        thresholdValue: isSevereSingleReading ? TACHY_SEVERE_HR : TACHY_HR,
+      },
     }
   }
 }

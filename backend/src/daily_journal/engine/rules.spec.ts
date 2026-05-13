@@ -77,12 +77,16 @@ function session(over: Partial<SessionAverage> = {}): SessionAverage {
     diastolicBP: 75,
     pulse: 72,
     weight: null,
-    readingCount: 1,
+    // Cluster 6 Q2 default: ≥2 readings so non-emergency rules aren't
+    // suppressed by the single-reading gate. Tests that want to verify
+    // the gate itself pass readingCount=1 explicitly.
+    readingCount: 2,
     symptoms: noSymptoms(),
     suboptimalMeasurement: false,
     sessionId: null,
     medicationTaken: null,
     missedMedications: [],
+    singleReadingFinalized: false,
     ...over,
   }
 }
@@ -859,19 +863,45 @@ describe('afibHrRule (P)', () => {
   })
 })
 
-describe('tachy rule (P)', () => {
+describe('tachy rule (P) — Cluster 6 Q5 (Manisha 5/9)', () => {
   const tctx = ctx({ profile: { hasTachycardia: true } })
 
-  it('single elevated (prior=false) → no alert', () => {
+  it('single elevated HR=105 (prior=false) → no alert', () => {
     const rule = buildTachyRule(false)
     expect(rule(session({ pulse: 105 }), tctx)).toBeNull()
   })
 
-  it('elevated + prior=true → alert', () => {
+  it('HR=105 + prior=true → consecutive-reading alert', () => {
     const rule = buildTachyRule(true)
     const r = rule(session({ pulse: 105 }), tctx)
     expect(r?.tier).toBe('BP_LEVEL_1_HIGH')
     expect(r?.ruleId).toBe('RULE_TACHY_HR')
+    expect(r?.reason).toMatch(/8h/)
+  })
+
+  it('HR=132 single-reading (prior=false) → Q5 severe-tachy exception fires immediately', () => {
+    const rule = buildTachyRule(false)
+    const r = rule(session({ pulse: 132 }), tctx)
+    expect(r?.tier).toBe('BP_LEVEL_1_HIGH')
+    expect(r?.ruleId).toBe('RULE_TACHY_HR')
+    expect(r?.reason).toMatch(/severe|130/i)
+  })
+
+  it('HR=130 (boundary, not strictly >130) + prior=false → no alert', () => {
+    const rule = buildTachyRule(false)
+    expect(rule(session({ pulse: 130 }), tctx)).toBeNull()
+  })
+
+  it('HR=131 single-reading → severe exception fires', () => {
+    const rule = buildTachyRule(false)
+    const r = rule(session({ pulse: 131 }), tctx)
+    expect(r?.ruleId).toBe('RULE_TACHY_HR')
+  })
+
+  it('non-tachycardia patient HR=132 → no alert (gate stays on flag)', () => {
+    const noFlagCtx = ctx({ profile: { hasTachycardia: false } })
+    const rule = buildTachyRule(false)
+    expect(rule(session({ pulse: 132 }), noFlagCtx)).toBeNull()
   })
 })
 
@@ -975,14 +1005,32 @@ describe('pulsePressureWideRule (Q)', () => {
 })
 
 // ─── R. Loop diuretic ───────────────────────────────────────────────────────
-describe('loopDiureticHypotensionRule (R)', () => {
+describe('loopDiureticHypotensionRule (R) — Cluster 6 Q1 (Manisha 5/9)', () => {
   const lctx = ctx({
     contextMeds: [med({ drugName: 'Furosemide', drugClass: 'LOOP_DIURETIC' })],
   })
 
-  it('loop + SBP=92 → Tier 3 note', () => {
-    const r = loopDiureticHypotensionRule(session({ systolicBP: 92 }), lctx)
+  it('loop + SBP=89 (below strict 90 cutoff) → Tier 3 fires', () => {
+    const r = loopDiureticHypotensionRule(session({ systolicBP: 89 }), lctx)
     expect(r?.tier).toBe('TIER_3_INFO')
+  })
+
+  it('loop + SBP=90 (boundary) → no alert', () => {
+    expect(
+      loopDiureticHypotensionRule(session({ systolicBP: 90 }), lctx),
+    ).toBeNull()
+  })
+
+  it('loop + SBP=91 (was 90-92 band) → no alert (band dropped per Manisha Q1)', () => {
+    expect(
+      loopDiureticHypotensionRule(session({ systolicBP: 91 }), lctx),
+    ).toBeNull()
+  })
+
+  it('loop + SBP=92 → no alert (band dropped)', () => {
+    expect(
+      loopDiureticHypotensionRule(session({ systolicBP: 92 }), lctx),
+    ).toBeNull()
   })
 
   it('loop + SBP=100 → no alert', () => {
@@ -991,9 +1039,33 @@ describe('loopDiureticHypotensionRule (R)', () => {
     ).toBeNull()
   })
 
-  it('loop + SBP=88 → delegates to standard L1 Low (no double alert)', () => {
+  it('HF precedence — HFrEF patient at SBP=80 → no loop alert (HF rule subsumes)', () => {
+    const hfCtx = ctx({
+      contextMeds: [med({ drugName: 'Furosemide', drugClass: 'LOOP_DIURETIC' })],
+      profile: { hasHeartFailure: true, resolvedHFType: 'HFREF' },
+    })
     expect(
-      loopDiureticHypotensionRule(session({ systolicBP: 88 }), lctx),
+      loopDiureticHypotensionRule(session({ systolicBP: 80 }), hfCtx),
+    ).toBeNull()
+  })
+
+  it('HF precedence — HFpEF patient at SBP=85 → no loop alert', () => {
+    const hfCtx = ctx({
+      contextMeds: [med({ drugName: 'Furosemide', drugClass: 'LOOP_DIURETIC' })],
+      profile: { hasHeartFailure: true, resolvedHFType: 'HFPEF' },
+    })
+    expect(
+      loopDiureticHypotensionRule(session({ systolicBP: 85 }), hfCtx),
+    ).toBeNull()
+  })
+
+  it('HF precedence — DCM patient at SBP=85 → no loop alert', () => {
+    const hfCtx = ctx({
+      contextMeds: [med({ drugName: 'Furosemide', drugClass: 'LOOP_DIURETIC' })],
+      profile: { hasDCM: true },
+    })
+    expect(
+      loopDiureticHypotensionRule(session({ systolicBP: 85 }), hfCtx),
     ).toBeNull()
   })
 })

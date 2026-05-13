@@ -5,6 +5,7 @@ import {
   type ResolvedContext,
 } from '@cardioplace/shared'
 import { Prisma } from '../../generated/prisma/client.js'
+import { withDeadlockRetry } from '../../common/deadlock-retry.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import type { JournalEntryCreatedEvent, JournalEntryUpdatedEvent } from '../interfaces/events.interface.js'
@@ -327,7 +328,26 @@ export class AlertEngineService {
       const r = rule(session, ctx)
       if (!r) continue
       const axis = axisFor(r)
-      if (claimed.has(axis)) continue
+      if (claimed.has(axis)) {
+        // Cluster 6 Q3 (Manisha 5/9/26): audit-log when ruqPain triggered
+        // BOTH pregnancy + general overrides. Pregnancy claims 'emergency'
+        // first (it iterates ahead of general in preGateRules), so general
+        // is silently dropped. Manisha asked for the suppression to be
+        // recorded for clinical-reasoning traceability.
+        const claimedRule = claimed.get(axis)?.ruleId
+        if (
+          r.ruleId === 'RULE_SYMPTOM_OVERRIDE_GENERAL' &&
+          claimedRule === 'RULE_SYMPTOM_OVERRIDE_PREGNANCY' &&
+          session.symptoms.ruqPain
+        ) {
+          this.logger.log(
+            `Symptom-override suppressed (Manisha 5/9 Q3): pregnancy override ` +
+              `fired on ruqPain — RULE_SYMPTOM_OVERRIDE_GENERAL skipped. ` +
+              `user=${session.userId} entry=${session.entryId}`,
+          )
+        }
+        continue
+      }
       claimed.set(axis, r)
     }
 
@@ -361,6 +381,31 @@ export class AlertEngineService {
       const axis = axisFor(r)
       if (claimed.has(axis)) continue
       claimed.set(axis, r)
+    }
+
+    // Cluster 6 Q2 (Manisha 5/9/26) — non-emergency BP/HR alerts require
+    // ≥2 readings averaged in the current session. Emergency rules from
+    // Stage A (symptom override) + Stage B (absolute emergency, pregnancy
+    // L2) already ran above and stay if they fired — they explicitly
+    // bypass the gate per Manisha's note. The remaining axisRules in
+    // Stage C / Stage D info fallback are suppressed for single-reading
+    // sessions on adult non-AFib non-preDay3 patients until either:
+    //   (a) a second reading lands and SessionAverager re-averages, or
+    //   (b) the frontend's 5-min timeout POSTs the finalize endpoint
+    //       which flips `JournalEntry.singleReadingFinalized = true`.
+    const isSingleReadingNonEmergency =
+      session.readingCount < 2 &&
+      !session.singleReadingFinalized &&
+      !ctx.preDay3Mode &&
+      !ctx.profile.hasAFib
+    if (isSingleReadingNonEmergency) {
+      this.logger.log(
+        `Single-reading session — gating non-emergency rules for entry ${session.entryId}. ` +
+          'Awaiting second reading or finalize call (Manisha 5/9 Q2).',
+      )
+      return AXIS_PRIORITY
+        .map((axis) => claimed.get(axis))
+        .filter((r): r is RuleResult => r !== undefined)
     }
 
     // Stage C — multi-axis accumulation. Tachycardia uses the cross-session
@@ -458,17 +503,28 @@ export class AlertEngineService {
    * previous* JournalEntry for this user (before the current session's
    * anchor) and test its pulse. Prior implementation filtered on pulse>100 at
    * query time, which would match any prior elevated reading — even with
-   * intervening normal readings. Spec §4.5 requires back-to-back elevation.
+   * intervening normal readings.
+   *
+   * Cluster 6 Q5 (Manisha 5/9/26): narrow the lookup window from "any prior
+   * reading" to 8h consecutive. A reading 9+ hours ago is no longer
+   * clinically related to the current session's tachycardia question.
+   * (The HR > 130 single-reading Tier 2 exception lives in `buildTachyRule`
+   * — it doesn't consult this helper at all.)
    */
+  private static readonly TACHY_CONSECUTIVE_WINDOW_MS = 8 * 60 * 60 * 1000
+
   private async wasPriorReadingPulseElevated(
     session: SessionAverage,
     ctx: ResolvedContext,
   ): Promise<boolean> {
     if (!ctx.profile.hasTachycardia) return false
+    const windowStart = new Date(
+      session.measuredAt.getTime() - AlertEngineService.TACHY_CONSECUTIVE_WINDOW_MS,
+    )
     const prior = await this.prisma.journalEntry.findFirst({
       where: {
         userId: session.userId,
-        measuredAt: { lt: session.measuredAt },
+        measuredAt: { lt: session.measuredAt, gte: windowStart },
       },
       orderBy: { measuredAt: 'desc' },
       select: { pulse: true },
@@ -573,90 +629,109 @@ export class AlertEngineService {
     const dismissible = !isNonDismissableTier(result.tier)
     const messages = this.outputGenerator.generate(result, session, ctx.preDay3Mode)
 
-    // Phase/7 — app-level dedup by (journalEntryId, ruleId). The legacy
-    // @@unique([journalEntryId, type]) was dropped so v2 can persist multiple
-    // alerts per entry (e.g. Tier 3 pulse-pressure riding alongside a Tier 1
-    // contraindication). Upsert is replaced with findFirst → update|create.
-    const existing = await this.prisma.deviationAlert.findFirst({
-      where: {
-        journalEntryId: session.entryId,
-        ruleId: result.ruleId,
-      },
-      select: { id: true },
-    })
-
     const actualValue =
       result.actualValue != null
         ? new Prisma.Decimal(result.actualValue.toFixed(2))
         : null
 
-    const upserted = existing
-      ? await this.prisma.deviationAlert.update({
-          where: { id: existing.id },
-          data: {
-            severity: legacySeverity,
-            tier: result.tier,
-            ruleId: result.ruleId,
-            mode: result.mode,
-            pulsePressure: result.pulsePressure,
-            suboptimalMeasurement: result.suboptimalMeasurement,
-            dismissible,
-            actualValue,
-            patientMessage: messages.patientMessage,
-            caregiverMessage: messages.caregiverMessage,
-            physicianMessage: messages.physicianMessage,
+    // Cluster 6 bug #11 (HIGH severity) — wrap the DeviationAlert upsert +
+    // patient notification write in a serializable transaction with
+    // deadlock-retry. Under Prisma Cloud DB concurrency, the previous
+    // auto-commit pattern silently rolled back alert creation when a
+    // deadlock collided with an in-flight escalation/notification write.
+    // Production failure: a BP Level 2 reading during a deadlock window
+    // simply doesn't fire its alert.
+    const upserted = await withDeadlockRetry(
+      `persistAlert:${result.ruleId}:${session.entryId}`,
+      async () => {
+        return await this.prisma.$transaction(
+          async (tx) => {
+            // Phase/7 — app-level dedup by (journalEntryId, ruleId). The legacy
+            // @@unique([journalEntryId, type]) was dropped so v2 can persist
+            // multiple alerts per entry (e.g. Tier 3 pulse-pressure riding
+            // alongside a Tier 1 contraindication). Upsert is replaced with
+            // findFirst → update|create.
+            const existing = await tx.deviationAlert.findFirst({
+              where: {
+                journalEntryId: session.entryId,
+                ruleId: result.ruleId,
+              },
+              select: { id: true },
+            })
+
+            const row = existing
+              ? await tx.deviationAlert.update({
+                  where: { id: existing.id },
+                  data: {
+                    severity: legacySeverity,
+                    tier: result.tier,
+                    ruleId: result.ruleId,
+                    mode: result.mode,
+                    pulsePressure: result.pulsePressure,
+                    suboptimalMeasurement: result.suboptimalMeasurement,
+                    dismissible,
+                    actualValue,
+                    patientMessage: messages.patientMessage,
+                    caregiverMessage: messages.caregiverMessage,
+                    physicianMessage: messages.physicianMessage,
+                  },
+                })
+              : await tx.deviationAlert.create({
+                  data: {
+                    userId: session.userId,
+                    journalEntryId: session.entryId,
+                    type: legacyType,
+                    severity: legacySeverity,
+                    tier: result.tier,
+                    ruleId: result.ruleId,
+                    mode: result.mode,
+                    pulsePressure: result.pulsePressure,
+                    suboptimalMeasurement: result.suboptimalMeasurement,
+                    dismissible,
+                    actualValue,
+                    patientMessage: messages.patientMessage,
+                    caregiverMessage: messages.caregiverMessage,
+                    physicianMessage: messages.physicianMessage,
+                  },
+                })
+
+            // Patient-facing in-app dashboard notification. Independent of
+            // the EscalationService ladder (which only pages PROVIDER/MD/OPS
+            // for most tiers per CLINICAL_SPEC §V2-D). Idempotent via the
+            // @@unique([alertId, escalationEventId, userId, channel]) index
+            // — re-evaluation of the same entry won't double-write.
+            if (messages.patientMessage) {
+              const patientTitle = patientNotificationTitle(result.tier)
+              try {
+                await tx.notification.create({
+                  data: {
+                    userId: session.userId,
+                    alertId: row.id,
+                    escalationEventId: null,
+                    channel: 'DASHBOARD',
+                    title: patientTitle,
+                    body: messages.patientMessage,
+                    tips: [],
+                  },
+                })
+              } catch (err: unknown) {
+                // P2002 = duplicate (re-evaluation of same entry). Safe to ignore.
+                const code = (err as { code?: string })?.code
+                if (code !== 'P2002') throw err
+              }
+            }
+
+            return row
           },
-        })
-      : await this.prisma.deviationAlert.create({
-          data: {
-            userId: session.userId,
-            journalEntryId: session.entryId,
-            type: legacyType,
-            severity: legacySeverity,
-            tier: result.tier,
-            ruleId: result.ruleId,
-            mode: result.mode,
-            pulsePressure: result.pulsePressure,
-            suboptimalMeasurement: result.suboptimalMeasurement,
-            dismissible,
-            actualValue,
-            patientMessage: messages.patientMessage,
-            caregiverMessage: messages.caregiverMessage,
-            physicianMessage: messages.physicianMessage,
-          },
-        })
+          { isolationLevel: 'Serializable' },
+        )
+      },
+      this.logger,
+    )
 
     this.logger.log(
       `Alert fired: ${result.ruleId} (${result.tier}) for user ${session.userId} — ${result.reason}`,
     )
-
-    // Patient-facing in-app dashboard notification. Independent of the
-    // EscalationService ladder (which only pages PROVIDER/MD/OPS for most
-    // tiers per CLINICAL_SPEC §V2-D). This row is what populates the
-    // patient's /notifications inbox so they see "Important medication
-    // alert" cards alongside their dashboard alerts banner. Idempotent via
-    // the @@unique([alertId, escalationEventId, userId, channel]) index —
-    // re-evaluation of the same entry won't double-write.
-    if (messages.patientMessage) {
-      const patientTitle = patientNotificationTitle(result.tier)
-      await this.prisma.notification
-        .create({
-          data: {
-            userId: session.userId,
-            alertId: upserted.id,
-            escalationEventId: null,
-            channel: 'DASHBOARD',
-            title: patientTitle,
-            body: messages.patientMessage,
-            tips: [],
-          },
-        })
-        .catch((err: unknown) => {
-          // P2002 = duplicate (re-evaluation of same entry). Safe to ignore.
-          const code = (err as { code?: string })?.code
-          if (code !== 'P2002') throw err
-        })
-    }
 
     // Phase/7 — renamed from ANOMALY_TRACKED and enriched with tier + ruleId so
     // the escalation service can route by tier without re-fetching the alert.

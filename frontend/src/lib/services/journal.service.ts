@@ -99,13 +99,54 @@ async function unwrap<T>(res: Response): Promise<T> {
   return (json.data ?? json) as T
 }
 
-export async function createJournalEntry(data: JournalEntryPayload): Promise<JournalEntryDto> {
+/**
+ * Cluster 6 Q2 (Manisha 5/9/26) — backend hint to render the "Take a second
+ * reading in about 1 minute" prompt + 5-min timeout. True when the just-
+ * created entry is the only one in its session AND the patient isn't AFib
+ * AND isn't Pre-Day-3.
+ */
+export interface JournalEntryCreated {
+  entry: JournalEntryDto
+  pendingSecondReading: boolean
+}
+
+export async function createJournalEntry(
+  data: JournalEntryPayload,
+): Promise<JournalEntryCreated> {
   const res = await fetchWithAuth(`${API}/api/daily-journal`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   })
-  return unwrap<JournalEntryDto>(res)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    if (res.status === 403 && err?.message === 'clinical-intake-required') {
+      throw new ClinicalIntakeRequiredError(err.reason)
+    }
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json()
+  return {
+    entry: (json.data ?? json) as JournalEntryDto,
+    pendingSecondReading: Boolean(json.pendingSecondReading),
+  }
+}
+
+/**
+ * Cluster 6 Q2 — fires after the patient's 5-min "take a second reading"
+ * window times out without a second reading. Flips
+ * JournalEntry.singleReadingFinalized = true server-side; engine then fires
+ * the alert with a "confirm with next reading" annotation. Idempotent.
+ */
+export async function finalizeSingleReadingSession(entryId: string): Promise<void> {
+  const res = await fetchWithAuth(
+    `${API}/api/daily-journal/${entryId}/finalize-single-reading`,
+    { method: 'POST' },
+  )
+  if (!res.ok && res.status !== 200 && res.status !== 202) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Finalize failed: ${res.status}`)
+  }
 }
 
 export async function updateJournalEntry(

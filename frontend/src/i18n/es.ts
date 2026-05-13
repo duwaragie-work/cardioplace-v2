@@ -183,6 +183,9 @@ const es: Record<TranslationKey, string> = {
   'checkin.b3.symptomSyncope': 'Se desmayó o estuvo a punto de desmayarse recientemente',
   'checkin.b3.symptomPalpitations': 'Siente que el corazón se acelera o le palpita',
   'checkin.b3.symptomLegSwelling': 'Hinchazón en piernas o pies, o aumento rápido de peso',
+  'checkin.confirm.takeSecondReading': 'Tome una segunda medición en aproximadamente 1 minuto',
+  'checkin.confirm.takeSecondReadingHint':
+    'Una sola medición puede ser inexacta — una segunda ayuda a su equipo de atención a ver el panorama completo. Esperaremos unos minutos.',
   'checkin.b3.otherLabel': '¿Algo más? (opcional)',
   'checkin.b3.otherPlaceholder': 'En sus propias palabras…',
 

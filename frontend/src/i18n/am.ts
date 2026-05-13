@@ -185,6 +185,9 @@ const am: Record<TranslationKey, string> = {
   'checkin.b3.symptomSyncope': 'በቅርቡ ራስን መሳት ወይም ሊወድቅ የነበረበት ስሜት',
   'checkin.b3.symptomPalpitations': 'ልብ የሚሮጥ ወይም የሚዳክም ስሜት',
   'checkin.b3.symptomLegSwelling': 'በእግሮች/ጫማ ላይ እብጠት ወይም በፍጥነት ክብደት መጨመር',
+  'checkin.confirm.takeSecondReading': 'በ1 ደቂቃ ውስጥ ሁለተኛ ንባብ ይውሰዱ',
+  'checkin.confirm.takeSecondReadingHint':
+    'አንድ ብቻ ንባብ ሊሳሳት ይችላል — ሁለተኛ ንባብ የእንክብካቤ ቡድንዎ ሙሉ ስዕል እንዲያይ ይረዳል። ጥቂት ደቂቃዎችን እንጠብቃለን።',
   'checkin.b3.otherLabel': 'ሌላ ነገር? (አማራጭ)',
   'checkin.b3.otherPlaceholder': 'በራስዎ ቃላት…',
 

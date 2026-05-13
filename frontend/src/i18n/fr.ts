@@ -183,6 +183,9 @@ const fr: Record<TranslationKey, string> = {
   'checkin.b3.symptomSyncope': 'Évanouissement récent ou sensation de défaillance',
   'checkin.b3.symptomPalpitations': 'Cœur qui bat la chamade ou palpitations',
   'checkin.b3.symptomLegSwelling': 'Gonflement des jambes/pieds ou prise de poids rapide',
+  'checkin.confirm.takeSecondReading': 'Prenez une seconde mesure dans environ 1 minute',
+  'checkin.confirm.takeSecondReadingHint':
+    "Une seule mesure peut être inexacte — une seconde aide votre équipe à voir l'ensemble. Nous attendrons quelques minutes.",
   'checkin.b3.otherLabel': 'Autre chose ? (optionnel)',
   'checkin.b3.otherPlaceholder': 'Dans vos propres mots…',
 

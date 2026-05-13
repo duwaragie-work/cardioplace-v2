@@ -178,6 +178,10 @@ const en = {
   'checkin.b3.symptomSyncope': 'Felt faint or passed out recently',
   'checkin.b3.symptomPalpitations': "Heart feels like it's racing or fluttering",
   'checkin.b3.symptomLegSwelling': 'Swelling in your legs or feet, or gained weight quickly',
+  // Cluster 6 Q2 (Manisha 5/9/26) — single-reading session prompt.
+  'checkin.confirm.takeSecondReading': 'Take a second reading in about 1 minute',
+  'checkin.confirm.takeSecondReadingHint':
+    "One reading on its own can be off — a second one helps your care team get the full picture. We'll wait a few minutes for you to take it.",
   'checkin.b3.otherLabel': 'Anything else? (optional)',
   'checkin.b3.otherPlaceholder': 'In your own words…',
 

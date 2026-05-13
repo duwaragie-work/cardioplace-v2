@@ -85,6 +85,7 @@ export class SessionAveragerService {
       userId: string
       measuredAt: Date
       sessionId: string | null
+      singleReadingFinalized?: boolean
     },
     siblings: Array<{
       id: string
@@ -154,6 +155,9 @@ export class SessionAveragerService {
       sessionId: anchor.sessionId,
       medicationTaken,
       missedMedications,
+      // Cluster 6 Q2 — bypass the non-emergency single-reading gate when
+      // the anchor entry has been finalized by the frontend 5-min timeout.
+      singleReadingFinalized: anchor.singleReadingFinalized ?? false,
     }
   }
 }

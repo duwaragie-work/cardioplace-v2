@@ -120,10 +120,19 @@ export class DailyJournalService {
         sessionId: entry.sessionId,
       })
 
+      // Cluster 6 Q2 (Manisha 5/9/26): frontend hint to render the "Take a
+      // second reading in about 1 minute" prompt + 5-min timeout. True when
+      // this is the only entry in its session AND the patient isn't AFib
+      // (which has its own ≥3-reading gate) AND isn't Pre-Day-3. The engine
+      // gate is the authoritative source — this hint is just for UX so the
+      // patient sees the prompt without polling.
+      const pendingSecondReading = await this.computePendingSecondReading(userId, entry)
+
       return {
         statusCode: 202,
         message: 'Journal entry accepted. Background analysis in progress.',
         data: this.serializeEntry(entry),
+        pendingSecondReading,
       }
     } catch (error) {
       if (
@@ -645,6 +654,63 @@ export class DailyJournalService {
     }
   }
 
+  /**
+   * Cluster 6 Q2 (Manisha 5/9/26) — patient's 5-min "take a second reading"
+   * timer elapsed. Flip `singleReadingFinalized = true` on the entry and
+   * emit a fresh ENTRY_UPDATED event so AlertEngine re-evaluates with the
+   * non-emergency single-reading gate bypassed. Idempotent — no-op if the
+   * flag is already set or a sibling reading has since arrived (in which
+   * case the session is no longer single-reading and the flag is moot).
+   */
+  async finalizeSingleReadingSession(userId: string, entryId: string) {
+    const entry = await this.prisma.journalEntry.findFirst({
+      where: { id: entryId, userId },
+      select: {
+        id: true,
+        userId: true,
+        sessionId: true,
+        measuredAt: true,
+        systolicBP: true,
+        diastolicBP: true,
+        pulse: true,
+        weight: true,
+        singleReadingFinalized: true,
+      },
+    })
+    if (!entry) {
+      throw new NotFoundException('Journal entry not found')
+    }
+    if (entry.singleReadingFinalized) {
+      return {
+        statusCode: 200,
+        message: 'Already finalized — no-op.',
+      }
+    }
+
+    await this.prisma.journalEntry.update({
+      where: { id: entryId },
+      data: { singleReadingFinalized: true },
+    })
+
+    // Re-trigger evaluation. AlertEngineService.handleEntryUpdated subscribes.
+    this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
+      userId: entry.userId,
+      entryId: entry.id,
+      measuredAt: entry.measuredAt,
+      systolicBP: entry.systolicBP,
+      diastolicBP: entry.diastolicBP,
+      pulse: entry.pulse,
+      weight: entry.weight != null ? Number(entry.weight) : null,
+      sessionId: entry.sessionId,
+    })
+
+    return {
+      statusCode: 202,
+      message:
+        'Session finalized as single-reading. Background re-analysis in progress.',
+    }
+  }
+
   async delete(userId: string, id: string) {
     const entry = await this.prisma.journalEntry.findFirst({
       where: { id, userId },
@@ -1009,6 +1075,48 @@ export class DailyJournalService {
    * Form-shape rows that already include medicationId + drugClass pass
    * through unchanged (still filtered for AS_NEEDED via the lookup).
    */
+  /**
+   * Cluster 6 Q2 frontend hint. Same gating semantics as the engine but
+   * computed synchronously at create time so the response can carry it
+   * without forcing the patient app to poll. Conservative — when in
+   * doubt (e.g. profile lookup fails), returns false so we don't show
+   * the prompt for someone whose AFib status was unknown.
+   */
+  private async computePendingSecondReading(
+    userId: string,
+    entry: { id: string; sessionId: string | null; measuredAt: Date },
+  ): Promise<boolean> {
+    const SESSION_WINDOW_MS = 30 * 60 * 1000
+    const PRE_DAY_3_THRESHOLD = 7
+
+    const [siblingCount, profile, lifetimeReadingCount] = await Promise.all([
+      this.prisma.journalEntry.count({
+        where: {
+          userId,
+          id: { not: entry.id },
+          ...(entry.sessionId
+            ? { sessionId: entry.sessionId }
+            : {
+                sessionId: null,
+                measuredAt: {
+                  gte: new Date(entry.measuredAt.getTime() - SESSION_WINDOW_MS),
+                  lte: new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS),
+                },
+              }),
+        },
+      }),
+      this.prisma.patientProfile
+        .findUnique({ where: { userId }, select: { hasAFib: true } })
+        .catch(() => null),
+      this.prisma.journalEntry.count({ where: { userId } }),
+    ])
+
+    if (siblingCount > 0) return false
+    if (profile?.hasAFib) return false
+    if (lifetimeReadingCount < PRE_DAY_3_THRESHOLD) return false
+    return true
+  }
+
   private async resolveMissedMedications(
     userId: string,
     raw: unknown,

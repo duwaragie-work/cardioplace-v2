@@ -50,12 +50,14 @@ function buildSession(over: Partial<SessionAverage> = {}): SessionAverage {
     diastolicBP: 78,
     pulse: 72,
     weight: null,
-    readingCount: 1,
+    // Cluster 6 Q2 default — ≥2 readings to bypass the single-reading gate.
+    readingCount: 2,
     symptoms: noSymptoms(),
     suboptimalMeasurement: false,
     sessionId: null,
     medicationTaken: null,
     missedMedications: [],
+    singleReadingFinalized: false,
     ...over,
   }
 }
@@ -160,6 +162,8 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
       notification: {
         create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
       },
+      // Cluster 6 bug #11 — persistAlert wraps writes in $transaction.
+      $transaction: ((fn: any) => Promise.resolve(fn(prisma))) as any,
     }
     eventEmitter = { emit: jest.fn() }
     profileResolver = { resolve: jest.fn() as jest.Mock<any> }

@@ -183,6 +183,9 @@ const de: Record<TranslationKey, string> = {
   'checkin.b3.symptomSyncope': 'Kürzlich Ohnmachtsanfall oder Beinahe-Ohnmacht',
   'checkin.b3.symptomPalpitations': 'Herz rast oder flattert',
   'checkin.b3.symptomLegSwelling': 'Schwellung in Beinen/Füßen oder schnelle Gewichtszunahme',
+  'checkin.confirm.takeSecondReading': 'Nehmen Sie in etwa 1 Minute eine zweite Messung vor',
+  'checkin.confirm.takeSecondReadingHint':
+    'Eine einzelne Messung kann ungenau sein — eine zweite hilft Ihrem Behandlungsteam, das Gesamtbild zu sehen. Wir warten ein paar Minuten.',
   'checkin.b3.otherLabel': 'Noch etwas? (optional)',
   'checkin.b3.otherPlaceholder': 'In Ihren eigenen Worten…',
 

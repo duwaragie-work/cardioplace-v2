@@ -82,6 +82,12 @@ export interface AlertContext {
   /** Cluster 6 — patient first name (when available). Used by caregiver
    *  message templates for the new HF / adherence rules. */
   patientName?: string | null
+
+  /** Cluster 6 Q2 (Manisha 5/9/26) — true when the alert fired against a
+   *  single-reading session that was finalized by the 5-min timeout
+   *  (i.e. the patient didn't log a second reading to confirm). Drives a
+   *  "— confirm with next reading" annotation on the physician message. */
+  singleReadingSession?: boolean
 }
 
 export type MessageBuilder = (ctx: AlertContext) => string
@@ -114,8 +120,13 @@ function hr(ctx: AlertContext): string {
 }
 
 function physSuffix(ctx: AlertContext): string {
-  if (!ctx.physicianAnnotations.length) return ''
-  return ' | ' + ctx.physicianAnnotations.join(' | ')
+  const parts: string[] = []
+  if (ctx.physicianAnnotations.length) parts.push(...ctx.physicianAnnotations)
+  // Cluster 6 Q2 (Manisha 5/9/26) — single-reading-session caveat.
+  if (ctx.singleReadingSession) {
+    parts.push('Single-reading session — confirm with next reading')
+  }
+  return parts.length ? ` | ${parts.join(' | ')}` : ''
 }
 
 function preDaySuffix(ctx: AlertContext): string {
@@ -192,11 +203,9 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   },
 
   RULE_SYMPTOM_OVERRIDE_PREGNANCY: {
-    // TODO(Dr. Singal): "preeclampsia" in the patient-facing line may be too
-    // clinical for the silent-literacy audience per CLINICAL_SPEC §V2-E.
-    // Suggested plain-language alternative pending her review:
-    //   `You reported a symptom that needs urgent attention during pregnancy at ${bp(ctx)}.${EMERGENCY_CTA}`
-    // Caregiver + physician wording keeps the clinical term intentionally.
+    // Cluster 6 Q6 (Manisha 5/9/26): current patient-facing wording approved
+    // — keep "preeclampsia" since pregnant patients routinely encounter the
+    // term in prenatal care. Caregiver + physician wording stays as-is.
     patientMessage: (ctx) =>
       `You reported a symptom that may signal preeclampsia at ${bp(ctx)}.${EMERGENCY_CTA}`,
     caregiverMessage: (ctx) =>

@@ -106,6 +106,11 @@ export class OutputGeneratorService implements OnModuleInit {
       adherenceDaysWithMiss: result.metadata.adherenceDaysWithMiss,
       adherenceDaysWithMissOver7d: result.metadata.adherenceDaysWithMissOver7d,
       adherenceBetaBlockerCarveOut: result.metadata.adherenceBetaBlockerCarveOut,
+      // Cluster 6 Q2 (Manisha 5/9/26) — true when alert fired on a single-
+      // reading session finalized by the 5-min timeout. Drives the
+      // "— confirm with next reading" physician-message annotation.
+      singleReadingSession:
+        session.singleReadingFinalized && session.readingCount < 2,
     }
   }
 }

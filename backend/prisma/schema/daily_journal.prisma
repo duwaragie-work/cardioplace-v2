@@ -40,6 +40,14 @@ model JournalEntry {
   palpitations Boolean @default(false)
   legSwelling  Boolean @default(false)
 
+  // Cluster 6 Q2 (Manisha 5/9/26) — flag flipped by the 5-min finalize
+  // endpoint after the patient's first reading times out without a second
+  // reading arriving. Bypasses the non-emergency single-reading gate so the
+  // rule engine fires on the lone reading with a "confirm with next session"
+  // annotation. Default false; only true on entries that finalized as
+  // single-reading sessions.
+  singleReadingFinalized Boolean @default(false)
+
   otherSymptoms String[]
 
   teachBackAnswer  String?
