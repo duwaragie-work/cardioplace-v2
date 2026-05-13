@@ -523,6 +523,72 @@ test.describe('Cluster 6 — engine via API (Manisha 5/9)', () => {
     }
   })
 
+  test('5/10 — adherence rolling 2-of-3-day window fires RULE_MEDICATION_MISSED', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    await seedHistoryToClearPreDay3(tc, u.id)
+    // Attach a verified ARB so missedMedications has a real drug to reference.
+    await tc.setUserMedication(u.id, {
+      drugName: 'Losartan',
+      drugClass: 'ARB',
+      frequency: 'ONCE_DAILY',
+      verificationStatus: 'VERIFIED',
+    })
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    try {
+      const day = 24 * 60 * 60 * 1000
+      const now = Date.now()
+      // Two prior days with missed-medication entries. The adherence window
+      // is computed relative to the current entry's measuredAt, so these
+      // populate the lookback.
+      for (const offsetDays of [2, 1]) {
+        const res = await api.post('daily-journal', {
+          data: {
+            measuredAt: new Date(now - offsetDays * day).toISOString(),
+            systolicBP: 124,
+            diastolicBP: 78,
+            pulse: 72,
+            position: 'SITTING',
+            medicationTaken: false,
+            missedMedications: [
+              { drugName: 'Losartan', drugClass: 'ARB', missedDoses: 1, reason: 'FORGOT' },
+            ],
+            sessionId: randomUUID(),
+          },
+        })
+        expect(res.status(), `POST failed: ${await res.text()}`).toBe(202)
+      }
+
+      // Current entry — engine evaluates the 3-day window and sees 2 prior
+      // miss-days → adherence threshold tripped → fires RULE_MEDICATION_MISSED.
+      const res = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date(now).toISOString(),
+          systolicBP: 124,
+          diastolicBP: 78,
+          pulse: 72,
+          position: 'SITTING',
+          medicationTaken: true,
+          sessionId: randomUUID(),
+        },
+      })
+      expect(res.status()).toBe(202)
+
+      const alerts = await waitForAlerts(tc, u.id, (xs) =>
+        xs.some((a) => a.status === 'OPEN' && a.ruleId === 'RULE_MEDICATION_MISSED'),
+      )
+      const openRuleIds = alerts.filter((a) => a.status === 'OPEN').map((a) => a.ruleId)
+      expect(
+        openRuleIds,
+        `expected RULE_MEDICATION_MISSED with 2-of-3-day miss pattern (got: [${openRuleIds.join(', ')}])`,
+      ).toContain('RULE_MEDICATION_MISSED')
+    } finally {
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
+
   test('5/10 — bradycardia + AMS co-fires HR-axis brady AND emergency axis symptom override', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
@@ -567,6 +633,62 @@ test.describe('Cluster 6 — engine via API (Manisha 5/9)', () => {
       )
     } finally {
       await tc.setUserCondition(u.id, 'hasBradycardia', false)
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
+
+  test('Bug #11 — concurrent emergency POSTs all persist (deadlock-retry integration)', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    // Settle window after the previous spec's resetUser/teardown — under
+    // serializable isolation an in-flight engine evaluation from another
+    // test could otherwise race our reset and produce an FK rollback that
+    // looks like a real bug.
+    await new Promise((r) => setTimeout(r, 1500))
+    await seedHistoryToClearPreDay3(tc, u.id)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    try {
+      // Three concurrent absolute-emergency POSTs in different sessions.
+      // Each fires absoluteEmergencyRule (Stage B, bypasses Q2). Pre-deadlock-
+      // retry, parallel DeviationAlert.create + EscalationEvent.create writes
+      // would contend on FK locks and silently roll back one of the alerts
+      // under serializable isolation — exactly the patient-safety bug Manisha
+      // flagged. The withDeadlockRetry wrappers on persistAlert + dispatchStep
+      // must catch P2034/40P01 and retry so ALL three rows persist.
+      const t0 = Date.now()
+      const posts = [0, 1000, 2000].map((offsetMs) =>
+        api.post('daily-journal', {
+          data: {
+            measuredAt: new Date(t0 + offsetMs).toISOString(),
+            systolicBP: 195,
+            diastolicBP: 130,
+            pulse: 88,
+            position: 'SITTING',
+            sessionId: randomUUID(),
+          },
+        }),
+      )
+      const results = await Promise.all(posts)
+      for (const r of results) {
+        expect(r.status(), `concurrent POST failed: ${await r.text()}`).toBe(202)
+      }
+
+      // All three emergency rows must end up persisted. The retry catches
+      // transient deadlocks; the assertion catches any that escaped.
+      const alerts = await waitForAlerts(
+        tc,
+        u.id,
+        (xs) => xs.filter((a) => a.status === 'OPEN' && a.tier === 'BP_LEVEL_2').length >= 3,
+        20_000,
+      )
+      const l2Open = alerts.filter((a) => a.status === 'OPEN' && a.tier === 'BP_LEVEL_2')
+      expect(
+        l2Open.length,
+        `expected 3 BP_LEVEL_2 rows, got ${l2Open.length} (deadlock retry didn't recover all writes)`,
+      ).toBeGreaterThanOrEqual(3)
+    } finally {
       await api.dispose()
       await tc.dispose()
     }
