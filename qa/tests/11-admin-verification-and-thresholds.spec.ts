@@ -49,7 +49,16 @@ test.describe('Admin verification — profile', () => {
     // idempotent against the shared seed DB. A fixed offset would resolve to
     // the same calendar day on consecutive runs, leaving nothing to change
     // and tripping the "No corrections supplied" guard.
-    const dayOffset = Math.floor(Date.now() / 1000) % (365 * 30) // 0..30y window
+    //
+    // DOB constraint: 65–90 years ago. Aisha is seeded at age 67 and shard 3
+    // also runs spec 13's bug #6/#7 test which depends on her being in the
+    // 65+ ageGroup to fire RULE_AGE_65_LOW on a 90/55 reading. A wider random
+    // window (e.g. 0–30y) silently dropped Aisha to age 20 between specs and
+    // broke spec 13 in CI shard 3. The new range stays inside the seed's
+    // intended elderly bracket so cross-spec assumptions hold.
+    const DOB_FLOOR_DAYS = 65 * 365  // 65 years
+    const DOB_RANGE_DAYS = 25 * 365  // up to 90 years old
+    const dayOffset = DOB_FLOOR_DAYS + (Math.floor(Date.now() / 1000) % DOB_RANGE_DAYS)
     const newDob = new Date(Date.now() - dayOffset * 86_400_000)
       .toISOString()
       .slice(0, 10)

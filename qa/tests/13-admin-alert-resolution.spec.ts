@@ -296,9 +296,20 @@ test.describe('Bug #6/#7 — clean reading does NOT auto-resolve open BP L1 aler
       pulse: 72,
       sessionId: session2,
     })
-    await new Promise((r) => setTimeout(r, 1500))
 
-    const before = await tc.listAlerts(u.id)
+    // Poll for BOTH alerts to land. The engine is event-driven and the
+    // persistAlert SERIALIZABLE transactions can deadlock under load (Cluster
+    // 6 bug #11 retry — up to 3× 100ms backoff), pushing persistence past
+    // any fixed sleep. A 1500ms wait was racy in CI; this poll waits up to
+    // ~15s for both rows to materialize before asserting.
+    let before = await tc.listAlerts(u.id)
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const haveHigh = before.some((a) => a.tier === 'BP_LEVEL_1_HIGH')
+      const haveLow = before.some((a) => a.tier === 'BP_LEVEL_1_LOW')
+      if (haveHigh && haveLow) break
+      await new Promise((r) => setTimeout(r, 500))
+      before = await tc.listAlerts(u.id)
+    }
     const highAlert = before.find((a) => a.tier === 'BP_LEVEL_1_HIGH')
     const lowAlert = before.find((a) => a.tier === 'BP_LEVEL_1_LOW')
     expect(highAlert, `expected BP_LEVEL_1_HIGH; got tiers: [${before.map((a) => a.tier).join(',')}]`).toBeDefined()
