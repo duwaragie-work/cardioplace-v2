@@ -40,6 +40,15 @@ model JournalEntry {
   palpitations Boolean @default(false)
   legSwelling  Boolean @default(false)
 
+  // Cluster 7 (Manisha 5/11/26) — Appendix A side-effect + interaction inputs.
+  // fatigue + shortnessOfBreath + dryCough feed β-blocker / ACE / HF rules.
+  // nsaidUse captures the per-reading "took NSAID recently" checkbox driving
+  // A.3 NSAID + antihypertensive interaction warning.
+  fatigue           Boolean @default(false)
+  shortnessOfBreath Boolean @default(false)
+  dryCough          Boolean @default(false)
+  nsaidUse          Boolean @default(false)
+
   // Cluster 6 Q2 (Manisha 5/9/26) — flag flipped by the 5-min finalize
   // endpoint after the patient's first reading times out without a second
   // reading arriving. Bypasses the non-emergency single-reading gate so the

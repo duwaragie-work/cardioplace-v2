@@ -37,6 +37,11 @@ export type RecipientRole =
   | 'BACKUP_PROVIDER'
   | 'MEDICAL_DIRECTOR'
   | 'HEALPLACE_OPS'
+  // Cluster 7 A.6 — dispatch path stays gated behind
+  // CAREGIVER_DISPATCH_ENABLED until Lakshitha Gap 5 ships the
+  // PatientCaregiver relation + admin UI. Adding the type now so the
+  // engine + Notification rows can carry it idempotently.
+  | 'CAREGIVER'
 
 export type NotificationChannel = 'PUSH' | 'EMAIL' | 'DASHBOARD' | 'PHONE'
 

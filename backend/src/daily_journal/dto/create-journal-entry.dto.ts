@@ -189,6 +189,16 @@ export class CreateJournalEntryDto {
   @IsOptional() @IsBoolean() palpitations?: boolean
   @IsOptional() @IsBoolean() legSwelling?: boolean
 
+  // Cluster 7 (Manisha 5/11/26) — Appendix A side-effect + interaction inputs.
+  // fatigue + shortnessOfBreath feed β-blocker rules (A.1, A.2 HF/non-HF).
+  // dryCough feeds the ACE-inhibitor side-effect (A.4). nsaidUse captures the
+  // per-reading "took NSAID recently" checkbox driving A.3 NSAID +
+  // antihypertensive interaction warning.
+  @IsOptional() @IsBoolean() fatigue?: boolean
+  @IsOptional() @IsBoolean() shortnessOfBreath?: boolean
+  @IsOptional() @IsBoolean() dryCough?: boolean
+  @IsOptional() @IsBoolean() nsaidUse?: boolean
+
   // Patient's freeform "anything else" — sent as String[] so the schema
   // column can hold multiple notes if a future UI captures more than one.
   @IsOptional()
