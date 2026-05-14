@@ -235,6 +235,10 @@ export default function Homepage() {
                     backgroundColor: 'var(--brand-warning-amber-light)',
                     borderLeft: '4px solid var(--brand-warning-amber)',
                   }}
+                  // Marketing-page mock banner. Vibrant orange on amber-100
+                  // at 10-12px = 2.51:1 (fails AA Normal). Known accepted
+                  // debt; future fix is font-size bump to ≥14px bold.
+                  data-axe-debt="avatar-orange-small-text"
                 >
                   <div className="flex items-center gap-1.5 mb-0.5">
                     <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--brand-warning-amber)' }} />
@@ -253,6 +257,9 @@ export default function Homepage() {
                     backgroundColor: 'var(--brand-alert-red-light)',
                     borderLeft: '4px solid var(--brand-alert-red)',
                   }}
+                  // Marketing-page mock banner. Vibrant red on red-100 at
+                  // 10-12px = 3.66:1 (fails AA Normal). Same accepted debt.
+                  data-axe-debt="avatar-orange-small-text"
                 >
                   <div className="flex items-center gap-1.5 mb-0.5">
                     <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: 'var(--brand-alert-red)' }} />

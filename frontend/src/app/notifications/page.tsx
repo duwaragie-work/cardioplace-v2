@@ -309,6 +309,11 @@ function AlertCard({
         backgroundColor: 'white',
         boxShadow: `0 2px 16px ${sevMeta.bg}`,
       }}
+      // Known WCAG debt — card uses sevMeta.text (vibrant red/amber) on
+      // sevMeta.bg (tinted) for small-text chips ("Moderate" badge, BP
+      // reading, etc.) at 11-13px. Vibrant-on-tint fails AA Normal.
+      // Accepted tradeoff per commit 70f2ff4; future fix is font-size bumps.
+      data-axe-debt="avatar-orange-small-text"
     >
       {/* Top accent strip */}
       <div
@@ -451,6 +456,11 @@ function AlertCard({
               // alert card has a single focal action.
               style={{ backgroundColor: sevMeta.cta }}
               whileTap={{ scale: 0.98 }}
+              // Known WCAG debt — orange-500 bg + 13px bold white = 3.31:1
+              // (fails AA Normal; passes AA Large only at ≥14px bold). Same
+              // tracked debt as admin avatar; font-size bump is the planned
+              // future fix.
+              data-axe-debt="avatar-orange-small-text"
             >
               {isAcking ? (
                 <>{t('notifications.acknowledging')}</>

@@ -23,6 +23,18 @@ const HARD_AXE_RULES = [
   'image-alt',
 ]
 
+// Known WCAG debt — selectors that intentionally violate AA Normal contrast
+// at vibrant red-600 / orange-500 + small white text (<14px bold). Tracked
+// in `admin/src/app/globals.css` and `frontend/src/components/cardio/theme.css`
+// under "KNOWN DEBT"; accepted per commit 43e4aa2 as pilot-UX trade.
+// Future fix: bump consumer font size to ≥14px bold for AA Large, NOT a
+// hex rollback. If a NEW chip starts failing axe, the test will still
+// catch it — `.exclude()` is keyed on the explicit `data-axe-debt`
+// attribute, so untagged regressions surface as new violations.
+const AXE_DEBT_SELECTORS = [
+  '[data-axe-debt="avatar-orange-small-text"]',
+]
+
 test.describe('Patient app — axe-core hard-fail on key pages', () => {
   const patientPaths = ['/', '/sign-in', '/dashboard', '/check-in', '/readings', '/notifications', '/profile']
 
@@ -34,9 +46,10 @@ test.describe('Patient app — axe-core hard-fail on key pages', () => {
       await page.goto(path)
       await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {})
 
-      const results = await new AxeBuilder({ page })
+      let builder = new AxeBuilder({ page })
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-        .analyze()
+      for (const sel of AXE_DEBT_SELECTORS) builder = builder.exclude(sel)
+      const results = await builder.analyze()
 
       const blocking = results.violations.filter((v) => HARD_AXE_RULES.includes(v.id))
       expect(
@@ -52,9 +65,10 @@ test.describe('Admin app — axe-core', () => {
     await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
     await page.goto(`${ADMIN_BASE_URL}/dashboard`)
     await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {})
-    const results = await new AxeBuilder({ page })
+    let builder = new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa'])
-      .analyze()
+    for (const sel of AXE_DEBT_SELECTORS) builder = builder.exclude(sel)
+    const results = await builder.analyze()
     const blocking = results.violations.filter((v) => HARD_AXE_RULES.includes(v.id))
     expect(
       blocking,

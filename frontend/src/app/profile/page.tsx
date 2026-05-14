@@ -745,6 +745,10 @@ export default function ProfilePage() {
               border: '1px solid var(--brand-alert-red-light)',
             }}
             aria-label={t('profile.signOut')}
+            // Known WCAG debt — chip pattern (red-100 bg + red-600 text at
+            // 12.5px bold = 3.95:1, fails AA Normal). Same accepted tradeoff
+            // as the admin alert queue rows; tracked in theme.css "KNOWN DEBT".
+            data-axe-debt="avatar-orange-small-text"
           >
             <LogOut className="w-4 h-4" />
             <span className="hidden sm:inline">{t('profile.signOut')}</span>

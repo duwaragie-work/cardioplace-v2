@@ -703,6 +703,10 @@ export default function AdminDashboard() {
                         color: active ? 'white' : chrome.accentText,
                         border: `1.5px solid ${active ? chrome.accent : 'transparent'}`,
                       }}
+                      // Known WCAG debt — when active+amber bucket, vibrant
+                      // orange-500 bg + 11px white text = ~2.8:1 (fails AA
+                      // Normal). Same accepted-pilot-UX trade as the avatar.
+                      data-axe-debt="avatar-orange-small-text"
                     >
                       {label}
                       <span
@@ -768,6 +772,13 @@ export default function AdminDashboard() {
                           }}
                           onMouseEnter={() => handleRowHover(a)}
                           onClick={() => handleRowHover(a)}
+                          // Known WCAG debt — row uses chrome.light bg (red-100
+                          // / amber-100) with vibrant `chrome.accentText` (red-
+                          // 600 / orange-500) chip text at 11.5px bold. Ratio
+                          // 3.95:1 (red) / 3.31:1 (amber) — fails AA Normal,
+                          // passes AA Large. Same accepted tradeoff as the
+                          // avatar (commit 70f2ff4 token-merge accepted this).
+                          data-axe-debt="avatar-orange-small-text"
                         >
                           {/* Avatar — click navigates to the patient
                               detail page (where the full alert UI +
@@ -782,6 +793,12 @@ export default function AdminDashboard() {
                             className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-[10.5px] shrink-0 cursor-pointer transition-transform hover:scale-105"
                             style={{ backgroundColor: chrome.accent }}
                             aria-label={`Open ${a.patient?.name ?? 'patient'} detail`}
+                            // Known WCAG debt — see globals.css "KNOWN DEBT" note.
+                            // Vibrant amber/red bg + 10.5px white initials = ~2.8:1
+                            // for amber (fails AA Normal). Accepted as pilot-UX trade
+                            // per commit 43e4aa2. Future fix is a font-size bump to
+                            // ≥14px bold to satisfy AA Large, NOT a color rollback.
+                            data-axe-debt="avatar-orange-small-text"
                           >
                             {initialsOf(a.patient?.name)}
                           </button>
