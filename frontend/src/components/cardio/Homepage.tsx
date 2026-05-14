@@ -219,26 +219,51 @@ export default function Homepage() {
               <div className="mt-4 sm:mt-5 rounded-xl overflow-hidden relative h-24 sm:h-28 md:h-32 lg:h-36 bg-white shadow-sm">
                 <Image src="/BP Trend.png" alt="7-day BP trend with escalation point" fill sizes="(max-width: 768px) 100vw, 25vw" className="object-cover rounded-xl" />
                 {/* Escalation marker */}
-                <div className="absolute top-2 right-2 flex items-center gap-1 bg-[#DC2626] px-2 py-0.5 rounded-full">
+                <div
+                  className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-full"
+                  style={{ backgroundColor: 'var(--brand-alert-red)' }}
+                >
                   <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                   <span className="text-white text-[8px] sm:text-[9px] font-bold uppercase">Alert</span>
                 </div>
               </div>
 
               <div className="mt-3 sm:mt-4 flex gap-3">
-                <div className="flex-1 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3" style={{ backgroundColor: '#FEF3C7', borderLeft: '4px solid #F59E0B' }}>
+                <div
+                  className="flex-1 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3"
+                  style={{
+                    backgroundColor: 'var(--brand-warning-amber-light)',
+                    borderLeft: '4px solid var(--brand-warning-amber)',
+                  }}
+                >
                   <div className="flex items-center gap-1.5 mb-0.5">
-                    <div className="w-2 h-2 rounded-full bg-[#F59E0B]" />
-                    <p className="text-[#B45309] text-[10px] sm:text-xs font-bold uppercase tracking-wider">Level 1</p>
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--brand-warning-amber)' }} />
+                    <p
+                      className="text-[10px] sm:text-xs font-bold uppercase tracking-wider"
+                      style={{ color: 'var(--brand-warning-amber-text)' }}
+                    >
+                      Level 1
+                    </p>
                   </div>
-                  <p className="text-[#92400E] text-[9px] sm:text-[10px]">24hr care team review</p>
+                  <p className="text-[9px] sm:text-[10px]" style={{ color: 'var(--brand-warning-amber-text)' }}>24hr care team review</p>
                 </div>
-                <div className="flex-1 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3" style={{ backgroundColor: '#FEE2E2', borderLeft: '4px solid #DC2626' }}>
+                <div
+                  className="flex-1 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3"
+                  style={{
+                    backgroundColor: 'var(--brand-alert-red-light)',
+                    borderLeft: '4px solid var(--brand-alert-red)',
+                  }}
+                >
                   <div className="flex items-center gap-1.5 mb-0.5">
-                    <div className="w-2 h-2 rounded-full bg-[#DC2626] animate-pulse" />
-                    <p className="text-[#B91C1C] text-[10px] sm:text-xs font-bold uppercase tracking-wider">Level 2</p>
+                    <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: 'var(--brand-alert-red)' }} />
+                    <p
+                      className="text-[10px] sm:text-xs font-bold uppercase tracking-wider"
+                      style={{ color: 'var(--brand-alert-red-text)' }}
+                    >
+                      Level 2
+                    </p>
                   </div>
-                  <p className="text-[#991B1B] text-[9px] sm:text-[10px]">Immediate 911 alert</p>
+                  <p className="text-[9px] sm:text-[10px]" style={{ color: 'var(--brand-alert-red-text)' }}>Immediate 911 alert</p>
                 </div>
               </div>
             </div>

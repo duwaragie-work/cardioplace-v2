@@ -362,7 +362,10 @@ export default function RegisterPage() {
                 />
                 {/* Inline email format error — quiet until user has typed */}
                 {showEmailError && (
-                  <p className="mt-1.5 text-[11px] lg:text-xs text-red-500">
+                  <p
+                    className="mt-1.5 text-[11px] lg:text-xs"
+                    style={{ color: 'var(--brand-alert-red)' }}
+                  >
                     {t('register.invalidEmail')}
                   </p>
                 )}
@@ -457,7 +460,8 @@ export default function RegisterPage() {
                 {(statusMessage || errorMessage) && (
                   <output
                     data-testid={errorMessage ? 'signin-error' : 'signin-status'}
-                    className={`block mt-2 text-xs lg:text-sm ${errorMessage ? "text-red-500" : "text-green-500"}`}
+                    className={`block mt-2 text-xs lg:text-sm ${errorMessage ? '' : 'text-green-500'}`}
+                    style={errorMessage ? { color: 'var(--brand-alert-red)' } : undefined}
                   >
                     {errorMessage || statusMessage}
                   </output>

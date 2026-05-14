@@ -1359,7 +1359,7 @@ function A8Categories({ state, setState }: StepProps) {
                       className="flex-1 h-11 px-4 rounded-lg text-[14px] outline-none transition box-border bg-white"
                       style={{
                         border: dupError
-                          ? '2px solid #b91c1c'
+                          ? '2px solid var(--brand-alert-red)'
                           : '2px solid var(--brand-border)',
                         color: 'var(--brand-text-primary)',
                       }}
@@ -1376,7 +1376,7 @@ function A8Categories({ state, setState }: StepProps) {
                     <p
                       role="alert"
                       className="mt-1.5 text-[12px] leading-snug"
-                      style={{ color: '#b91c1c' }}
+                      style={{ color: 'var(--brand-alert-red)' }}
                     >
                       {dupError}
                     </p>

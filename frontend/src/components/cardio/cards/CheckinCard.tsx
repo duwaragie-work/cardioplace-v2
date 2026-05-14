@@ -86,7 +86,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
               aria-hidden="true"
             />
           ) : (
-            <AlertCircle className="w-5 h-5 text-red-500 shrink-0" aria-hidden="true" />
+            <AlertCircle className="w-5 h-5 shrink-0" style={{ color: "var(--brand-alert-red)" }} aria-hidden="true" />
           )}
           <div className="min-w-0">
             <p

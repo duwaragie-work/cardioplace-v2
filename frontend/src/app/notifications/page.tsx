@@ -118,11 +118,27 @@ const TIER_META: Record<
 
 // Cluster-3 / B10: severity foregrounds were -600 shades on -50/-100 backs,
 // all 3.0–3.95:1 ratios — fails AA. Bumped to -800 shades (~6:1+) while
-// keeping the same hue families. Same fix applied to the notifications
-// SEVERITY_META below for foreground-on-light pairs.
+// keeping the same hue families.
+//
+// Follow-up #3 (Cluster 6+): HIGH + MEDIUM swapped from hardcoded hex to
+// brand tokens so the vibrant-red/amber CTA family applies here too — the
+// border uses the vibrant `*` token at full saturation per the border
+// policy, the chip text stays on `*-text` (dark -800) for AA, and the bg
+// uses `*-light` (tinted -100). LOW kept on hardcoded green hex — green is
+// explicitly out of scope for the vibrant migration.
 const SEVERITY_META = {
-  HIGH: { label: 'Urgent', bg: '#FEE2E2', text: '#991B1B', border: '#FECACA' },
-  MEDIUM: { label: 'Moderate', bg: '#FFF7ED', text: '#9A3412', border: '#FED7AA' },
+  HIGH: {
+    label: 'Urgent',
+    bg: 'var(--brand-alert-red-light)',
+    text: 'var(--brand-alert-red-text)',
+    border: 'var(--brand-alert-red)',
+  },
+  MEDIUM: {
+    label: 'Moderate',
+    bg: 'var(--brand-warning-amber-light)',
+    text: 'var(--brand-warning-amber-text)',
+    border: 'var(--brand-warning-amber)',
+  },
   LOW: { label: 'Low', bg: '#F0FDF4', text: '#166534', border: '#BBF7D0' },
 };
 
@@ -319,7 +335,10 @@ function AlertCard({
                 {effectiveSeverity ? (sevLabels[effectiveSeverity] ?? effectiveSeverity) : '—'}
               </span>
               {alert.escalated && (
-                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-600 text-white shrink-0 flex items-center gap-1">
+                <span
+                  className="px-2 py-0.5 rounded-full text-[11px] font-bold text-white shrink-0 flex items-center gap-1"
+                  style={{ backgroundColor: 'var(--brand-alert-red)' }}
+                >
                   <Zap className="w-3 h-3" />
                   {t('notifications.escalated')}
                 </span>

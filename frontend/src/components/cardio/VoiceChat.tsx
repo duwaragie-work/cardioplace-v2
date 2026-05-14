@@ -550,11 +550,11 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
                   className="flex items-center gap-2 px-3 py-2 rounded-xl w-full max-w-sm"
                   style={{
                     backgroundColor: 'var(--brand-alert-red-light)',
-                    border: '1px solid rgba(239,68,68,0.2)',
+                    border: '1px solid var(--brand-alert-red)',
                   }}
                 >
-                  <PhoneCall className="w-3.5 h-3.5 shrink-0" style={{ color: '#ef4444' }} />
-                  <p className="text-[11px]" style={{ color: '#b91c1c' }}>
+                  <PhoneCall className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-alert-red)' }} />
+                  <p className="text-[11px]" style={{ color: 'var(--brand-alert-red-text)' }}>
                     If you feel chest pain or severe shortness of breath, call 911 immediately.
                   </p>
                 </motion.div>

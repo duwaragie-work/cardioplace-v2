@@ -44,7 +44,7 @@ export default function DeleteCard({ summary, onDismiss }: Props) {
             aria-hidden="true"
           />
         ) : (
-          <AlertCircle className="w-5 h-5 text-red-500 shrink-0" aria-hidden="true" />
+          <AlertCircle className="w-5 h-5 shrink-0" style={{ color: "var(--brand-alert-red)" }} aria-hidden="true" />
         )}
         <p
           className="font-bold text-[15px]"
@@ -112,7 +112,7 @@ export default function DeleteCard({ summary, onDismiss }: Props) {
           onClick={onDismiss}
           className="flex-1 h-11 rounded-xl font-semibold text-[13px] text-white transition hover:opacity-90"
           style={{
-            background: 'linear-gradient(135deg, #DC2626, #EF4444)',
+            background: 'linear-gradient(135deg, var(--brand-alert-red), #EF4444)',
             boxShadow: '0 4px 14px rgba(220,38,38,0.28)',
           }}
         >

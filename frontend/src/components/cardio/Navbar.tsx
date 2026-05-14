@@ -235,7 +235,7 @@ export default function Navbar() {
               style={{
                 color:
                   alertCount > 0
-                    ? '#fbbf24'
+                    ? 'var(--brand-warning-amber)'
                     : 'rgba(255,255,255,0.7)',
               }}
             />

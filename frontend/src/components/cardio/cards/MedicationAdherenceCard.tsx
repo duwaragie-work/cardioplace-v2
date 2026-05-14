@@ -50,7 +50,7 @@ export default function MedicationAdherenceCard({ summary, onDismiss }: Props) {
               aria-hidden="true"
             />
           ) : (
-            <AlertCircle className="w-5 h-5 text-red-500 shrink-0" aria-hidden="true" />
+            <AlertCircle className="w-5 h-5 shrink-0" style={{ color: "var(--brand-alert-red)" }} aria-hidden="true" />
           )}
           <p
             className="font-bold text-[15px]"

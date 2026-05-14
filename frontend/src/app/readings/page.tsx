@@ -479,7 +479,10 @@ function EntryCard({
             {entry.symptoms && entry.symptoms.length > 0 && (
               <span
                 className="text-[11px] px-2 py-0.5 rounded-md font-medium flex items-center gap-1"
-                style={{ backgroundColor: '#FEE2E2', color: '#DC2626' }}
+                style={{
+                  backgroundColor: 'var(--brand-alert-red-light)',
+                  color: 'var(--brand-alert-red-text)',
+                }}
               >
                 <AlertTriangle aria-hidden="true" className="w-3 h-3" />
                 {entry.symptoms.length} symptom{entry.symptoms.length > 1 ? 's' : ''}
@@ -523,10 +526,10 @@ function EntryCard({
           <button
             onClick={onDelete}
             className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
-            style={{ backgroundColor: '#FEE2E2' }}
+            style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
             aria-label={t('accessibility.deleteReading')}
           >
-            <Trash2 className="w-3.5 h-3.5 text-red-500" />
+            <Trash2 className="w-3.5 h-3.5" style={{ color: 'var(--brand-alert-red)' }} />
           </button>
         </div>
       </div>
@@ -1264,9 +1267,9 @@ function DeleteConfirm({
       >
         <div
           className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4"
-          style={{ backgroundColor: '#FEE2E2' }}
+          style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
         >
-          <Trash2 aria-hidden="true" className="w-5 h-5 text-red-500" />
+          <Trash2 aria-hidden="true" className="w-5 h-5" style={{ color: 'var(--brand-alert-red)' }} />
         </div>
         <h3 className="text-[16px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
           {t('readings.deleteReading')}
@@ -1294,7 +1297,7 @@ function DeleteConfirm({
             onClick={onConfirm}
             disabled={deleting}
             className="flex-1 h-11 rounded-full text-white text-sm font-bold disabled:opacity-60"
-            style={{ backgroundColor: '#DC2626' }}
+            style={{ backgroundColor: 'var(--brand-alert-red)' }}
           >
             {deleting ? t('common.deleting') : t('common.delete')}
           </button>
