@@ -15,37 +15,37 @@
   --brand-accent-teal: #115E59;
   --brand-accent-teal-light: #CCFBF1;
 
-  /* SEMANTIC PALETTE — role-split tokens for red + amber.
+  /* SEMANTIC PALETTE — vibrant single-shade for red + amber.
      Green stays single-token (chips only, no button-bg variant). Teal too.
-     - `*` (no suffix): used as BACKGROUND with white foreground (buttons,
-       banners, severity pills). Vibrant shade.
-     - `*-text`: used as FOREGROUND/TEXT on top of `*-light` BG (chips,
-       inline annotations). Deep -800 shade.
-     - `*-light`: shared -100 bg for chips and subtle fills.
-     Split because chip-text and button-bg have inverted contrast
-     requirements and can't share one hex.
 
-     USAGE RULES:
-     RED — split:
-     - `bg: var(--brand-alert-red)` + `color: white` → vibrant emergency CTA
-       (red-600/white at 4.83:1, AA Normal at any text size)
-     - `bg: var(--brand-alert-red-light)` + `color: var(--brand-alert-red-text)`
-       → subtle chip (red-100/red-800 at 9.43:1, AAA)
-     AMBER:
-     - `bg: var(--brand-warning-amber)` + `color: white` → vibrant orange CTA
-       (orange-500/white at 3.31:1, AA LARGE ONLY — text must be ≥14px bold-700
-       or ≥18px regular).
-     - KNOWN DEBT: small-text consumers (avatars, status dots <14px) WILL fail
-       axe at this hex. Tracked for later fix (font-size bump, not color change).
-     - `bg: var(--brand-warning-amber-light)` + `color: var(--brand-warning-amber-text)`
-       → subtle chip (amber-100/amber-800 at 7.1:1, AAA ✓).
-     NEVER pair a `*-light` BG with the bare `*` token as foreground — the bg
-     token is tuned for white-on-color, not dark-on-light. */
-  --brand-alert-red: #DC2626;        /* red-600 — button/banner BG; white text = 4.83:1 (AA Normal ✓) */
-  --brand-alert-red-text: #991B1B;   /* red-800 — chip text on red-100 bg = 9.43:1 (AAA ✓) */
+     The `*-text` tokens used to hold deep -800 shades for WCAG-AAA chip text
+     on `*-light` backgrounds. Pilot users consistently read those as "muddy"
+     next to the vibrant `*` button/border shades on the same card, so the
+     `*-text` tokens are now aliased to the same vibrant value as `*`. This
+     gives uniform vibrancy across CTAs, borders, badges, and chip text on
+     every alert/notification surface.
+
+     - `*`        : vibrant primary shade. Used as BG (button/banner/severity
+                    pill) with white text AND as FG (chip text / icon color)
+                    on `*-light` or white backgrounds.
+     - `*-text`   : alias for `*` — kept as a token so existing consumers
+                    keep working. Prefer `*` in new code; treat `*-text` as
+                    deprecated.
+     - `*-light`  : -100 chip background.
+
+     WCAG NOTES (accepted debt — pilot UX trumps strict AA at small sizes):
+     RED — red-600 (#DC2626) on white = 4.83:1 → AA Normal at any size ✓.
+           red-600 on red-100 (#FEE2E2) = 3.66:1 → AA Large only (≥14px bold /
+           ≥18px regular). Small chip text technically fails AA Normal.
+     AMBER — orange-500 (#F97316) on white = 3.31:1 → AA Large only.
+             Avatar / filter-pill / status-dot consumers <14px bold KNOWN to
+             fail axe — accepted as visual-priority debt, font-size bump is
+             the planned remediation, not a hex change. */
+  --brand-alert-red: #DC2626;        /* red-600 — vibrant for both BG and FG */
+  --brand-alert-red-text: #DC2626;   /* alias for --brand-alert-red (deprecated; kept for back-compat) */
   --brand-alert-red-light: #FEE2E2;  /* red-100 — chip background */
-  --brand-warning-amber: #F97316;        /* orange-500 — vibrant button/banner BG; white text = 3.31:1 (AA Large only — KNOWN DEBT: avatar/pill consumers under 14px fail. To resolve later by bumping consumer font size, not by changing this hex.) */
-  --brand-warning-amber-text: #92400E;   /* amber-800 — chip text on amber-100 bg = 7.1:1 (AAA ✓) */
+  --brand-warning-amber: #F97316;        /* orange-500 — vibrant for both BG and FG */
+  --brand-warning-amber-text: #F97316;   /* alias for --brand-warning-amber (deprecated; kept for back-compat) */
   --brand-warning-amber-light: #FEF3C7;  /* amber-100 — chip background */
   /* GREEN: unchanged — scoped to red + amber only this round.
      Single token, used for chip text on green-100 (7.3:1). */

@@ -132,14 +132,25 @@ const SEVERITY_META = {
     bg: 'var(--brand-alert-red-light)',
     text: 'var(--brand-alert-red-text)',
     border: 'var(--brand-alert-red)',
+    // Vibrant CTA bg (white text on it) — used for the Acknowledge button so
+    // the card has a clear focal action, matching the patient dashboard's
+    // top-alert "View details" pattern.
+    cta: 'var(--brand-alert-red)',
   },
   MEDIUM: {
     label: 'Moderate',
     bg: 'var(--brand-warning-amber-light)',
     text: 'var(--brand-warning-amber-text)',
     border: 'var(--brand-warning-amber)',
+    cta: 'var(--brand-warning-amber)',
   },
-  LOW: { label: 'Low', bg: '#F0FDF4', text: '#166534', border: '#BBF7D0' },
+  LOW: {
+    label: 'Low',
+    bg: '#F0FDF4',
+    text: '#166534',
+    border: '#BBF7D0',
+    cta: 'var(--brand-success-green)',
+  },
 };
 
 function timeAgo(dateStr: string, t: TFn): string {
@@ -434,8 +445,11 @@ function AlertCard({
             <motion.button
               onClick={() => onAcknowledge(alert.id)}
               disabled={isAcking}
-              className="flex-1 h-10 rounded-xl text-[13px] font-bold flex items-center justify-center gap-2 transition disabled:opacity-60 cursor-pointer"
-              style={{ backgroundColor: sevMeta.bg, color: sevMeta.text, border: `1px solid ${sevMeta.border}` }}
+              className="flex-1 h-10 rounded-xl text-[13px] font-bold flex items-center justify-center gap-2 text-white transition disabled:opacity-60 cursor-pointer"
+              // Vibrant CTA: severity color BG + white text. Matches the
+              // patient dashboard top-alert "View details" pattern so each
+              // alert card has a single focal action.
+              style={{ backgroundColor: sevMeta.cta }}
               whileTap={{ scale: 0.98 }}
             >
               {isAcking ? (

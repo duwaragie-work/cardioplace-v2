@@ -11,17 +11,21 @@
   --brand-accent-teal: #115E59;
   --brand-accent-teal-light: #CCFBF1;
 
-  /* SEMANTIC PALETTE — role-split tokens for red + amber (admin globals.css
-     has the full USAGE RULES comment block; kept terse here to match the
+  /* SEMANTIC PALETTE — vibrant single-shade for red + amber (admin globals.css
+     has the full rationale + WCAG notes; kept terse here to match the
      monorepo two-source-of-truth pattern):
-     - `*` (no suffix): BACKGROUND with white foreground (buttons/banners) — vibrant
-     - `*-text`: FOREGROUND on `*-light` BG (chips/inline) — deep -800
-     Green + Teal: single-token (chips only, no button-bg variant). */
-  --brand-alert-red: #DC2626;        /* red-600 — button/banner BG; white = 4.83:1 (AA Normal ✓) */
-  --brand-alert-red-text: #991B1B;   /* red-800 — chip text on red-100 = 9.43:1 (AAA ✓) */
+     - `*`         : vibrant primary shade — used as BG (button/banner) AND
+                     as FG (chip text / icon) on `*-light` or white bg
+     - `*-text`    : alias for `*` (deprecated; kept for back-compat)
+     - `*-light`   : -100 chip background
+     KNOWN DEBT: small-text consumers on `*-light` bg may fail AA Normal at
+     these vibrant shades — accepted as a pilot-UX trade-off; font-size bump
+     is the planned remediation, not a hex change. */
+  --brand-alert-red: #DC2626;        /* red-600 — vibrant for both BG and FG */
+  --brand-alert-red-text: #DC2626;   /* alias for --brand-alert-red (deprecated) */
   --brand-alert-red-light: #FEE2E2;
-  --brand-warning-amber: #F97316;        /* orange-500 — vibrant button/banner BG; white = 3.31:1 (AA Large only — KNOWN DEBT: avatar/pill consumers <14px fail. Resolve later by bumping consumer font size, not by changing this hex.) */
-  --brand-warning-amber-text: #92400E;   /* amber-800 — chip text on amber-100 = 7.1:1 (AAA ✓) */
+  --brand-warning-amber: #F97316;        /* orange-500 — vibrant for both BG and FG */
+  --brand-warning-amber-text: #F97316;   /* alias for --brand-warning-amber (deprecated) */
   --brand-warning-amber-light: #FEF3C7;
   --brand-success-green: #166534;    /* unchanged — single token, chips only */
   --brand-success-green-light: #DCFCE7;
