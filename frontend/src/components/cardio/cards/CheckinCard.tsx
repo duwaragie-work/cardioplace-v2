@@ -86,7 +86,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
               aria-hidden="true"
             />
           ) : (
-            <AlertCircle className="w-5 h-5 text-red-500 shrink-0" aria-hidden="true" />
+            <AlertCircle className="w-5 h-5 shrink-0" style={{ color: "var(--brand-alert-red)" }} aria-hidden="true" />
           )}
           <div className="min-w-0">
             <p
@@ -290,7 +290,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
                 className="text-[11px] px-2 py-1 rounded-md font-semibold inline-flex items-center gap-1"
                 style={{
                   backgroundColor: 'var(--brand-alert-red-light)',
-                  color: 'var(--brand-alert-red)',
+                  color: 'var(--brand-alert-red-text)',
                 }}
               >
                 <AlertTriangle className="w-3 h-3" aria-hidden="true" />
@@ -303,7 +303,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
                 className="text-[11px] px-2 py-1 rounded-md font-medium"
                 style={{
                   backgroundColor: 'var(--brand-warning-amber-light)',
-                  color: 'var(--brand-warning-amber)',
+                  color: 'var(--brand-warning-amber-text)',
                 }}
               >
                 {s}
@@ -363,21 +363,21 @@ function bpStatus(
   if (sbp >= 180 || dbp >= 120) {
     return {
       label: 'Critical',
-      color: 'var(--brand-alert-red)',
+      color: 'var(--brand-alert-red-text)',
       pillBg: 'var(--brand-alert-red-light)',
     };
   }
   if (sbp >= 140 || dbp >= 90) {
     return {
       label: 'Elevated',
-      color: 'var(--brand-warning-amber)',
+      color: 'var(--brand-warning-amber-text)',
       pillBg: 'var(--brand-warning-amber-light)',
     };
   }
   if (sbp < 90 || dbp < 60) {
     return {
       label: 'Low',
-      color: 'var(--brand-warning-amber)',
+      color: 'var(--brand-warning-amber-text)',
       pillBg: 'var(--brand-warning-amber-light)',
     };
   }

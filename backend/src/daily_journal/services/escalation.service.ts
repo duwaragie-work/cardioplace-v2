@@ -51,6 +51,7 @@ import {
 export class EscalationService {
   private readonly logger = new Logger(EscalationService.name)
   private readonly adminBaseUrl: string
+  private readonly patientBaseUrl: string
 
   constructor(
     private readonly prisma: PrismaService,
@@ -58,11 +59,15 @@ export class EscalationService {
     private readonly emailService: EmailService,
     config: ConfigService,
   ) {
-    // Used by escalation emails to deep-link providers to the alert in the
-    // admin app. Defaults to the local admin port so dev emails are clickable
-    // even without the env var set.
+    // Used by escalation emails to deep-link recipients into the right app.
+    // Provider/admin recipients → admin app (/patients/{userId}?alert={id});
+    // PATIENT recipients → patient app (/alerts/{id}). Defaults match the
+    // local dev ports so emails are clickable even without env vars set.
     this.adminBaseUrl = config
       .get<string>('ADMIN_BASE_URL', 'http://localhost:3001')
+      .replace(/\/+$/, '')
+    this.patientBaseUrl = config
+      .get<string>('PATIENT_BASE_URL', 'http://localhost:3000')
       .replace(/\/+$/, '')
   }
 
@@ -771,6 +776,7 @@ export class EscalationService {
               role,
               message: body,
               adminBaseUrl: this.adminBaseUrl,
+              patientBaseUrl: this.patientBaseUrl,
               afterHours: args.afterHours,
               now: args.now,
             })
@@ -1054,10 +1060,11 @@ function escalationEmailBody(args: {
   role: RecipientRole
   message: string
   adminBaseUrl: string
+  patientBaseUrl: string
   afterHours: boolean
   now: Date
 }): { subject: string; html: string } {
-  const { alert, step, role, message, adminBaseUrl, afterHours, now } = args
+  const { alert, step, role, message, adminBaseUrl, patientBaseUrl, afterHours, now } = args
 
   const patientName = alert.user.name?.trim() || 'Patient (name unknown)'
   const patientEmail = alert.user.email ?? ''
@@ -1082,7 +1089,14 @@ function escalationEmailBody(args: {
 
   const stepPill = `${humanStep(step)}${afterHours ? ' (after-hours queued)' : ''}`
   const ackFooter = ackFooterFor(alert.tier)
-  const dashboardUrl = `${adminBaseUrl}/patients/${encodeURIComponent(alert.userId)}?alert=${encodeURIComponent(alert.id)}`
+  // Route patient recipients into the patient app's alert detail page; all
+  // other recipients (provider/admin) deep-link into the admin dashboard.
+  // Same admin URL for a patient-role recipient would land them on a 403/404
+  // since /patients/{userId} is provider-only.
+  const dashboardUrl = isPatient
+    ? `${patientBaseUrl}/alerts/${encodeURIComponent(alert.id)}`
+    : `${adminBaseUrl}/patients/${encodeURIComponent(alert.userId)}?alert=${encodeURIComponent(alert.id)}`
+  const ctaLabel = isPatient ? 'View your alert →' : 'View in dashboard →'
 
   // Recipient role banner — clarifies why THIS person is getting THIS email.
   // Skipped for PATIENT-role to avoid alarming wording like "as the patient".
@@ -1147,7 +1161,7 @@ function escalationEmailBody(args: {
   ${afterHoursBlock}
   ${metaStrip}
   ${createdLine}
-  <div style="margin-top:22px"><a href="${escapeAttr(dashboardUrl)}" style="display:inline-block;padding:11px 20px;background:${tierColor};color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px">View in dashboard →</a></div>
+  <div style="margin-top:22px"><a href="${escapeAttr(dashboardUrl)}" style="display:inline-block;padding:11px 20px;background:${tierColor};color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px">${escapeHtml(ctaLabel)}</a></div>
   ${ackFooter ? `<div style="margin-top:18px;padding:12px 14px;background:#fef3c7;border-radius:6px;font-size:12.5px;color:#78350f"><strong>Acknowledgment expected.</strong> ${escapeHtml(ackFooter)}</div>` : ''}
   ${idFooter}
   <hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb"/>

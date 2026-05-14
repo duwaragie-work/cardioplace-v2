@@ -205,6 +205,47 @@ test.describe('Alert resolution', () => {
     await adminApi.dispose()
     await tc.dispose()
   })
+
+  test('provider resolve populates DeviationAlert.resolvedAt for JCAHO audit footer', async () => {
+    // Regression — original handler set status/resolvedBy/resolutionAction
+    // on DeviationAlert but NOT resolvedAt. The 15-field audit footer reads
+    // resolutionTimestamp from DeviationAlert.resolvedAt, so the "Resolved"
+    // row stayed blank (—) even though the event-level resolvedAt was
+    // populated correctly. Symmetric to the existing acknowledgedAt write.
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.james.email)
+    await tc.resetUser(u.id)
+
+    const patientApi = await authedApi(API_BASE_URL, PATIENTS.james.email)
+    await postJournalEntry(patientApi, {
+      measuredAt: new Date().toISOString(),
+      systolicBP: 118,
+      diastolicBP: 74,
+      pulse: 68,
+    })
+    await new Promise((r) => setTimeout(r, 1500))
+    const tier1 = (await tc.listAlerts(u.id)).find((a) => a.tier === 'TIER_1_CONTRAINDICATION')
+    expect(tier1).toBeDefined()
+
+    const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+    const beforeResolve = Date.now()
+    await adminResolveAlert(adminApi, tier1!.id, {
+      resolutionAction: 'TIER1_FALSE_POSITIVE',
+      resolutionRationale: 'qa-test: resolvedAt audit regression',
+    })
+
+    const audit = await adminAuditAlert(adminApi, tier1!.id)
+    expect(audit.resolutionAction, 'resolutionAction should round-trip').toBe('TIER1_FALSE_POSITIVE')
+    expect(audit.resolutionTimestamp, 'resolutionTimestamp must NOT be null after resolve').not.toBeNull()
+    expect(audit.resolutionTimestamp).toBeDefined()
+    const resolvedMs = new Date(audit.resolutionTimestamp as string).getTime()
+    expect(resolvedMs).toBeGreaterThanOrEqual(beforeResolve - 1_000)
+    expect(resolvedMs).toBeLessThanOrEqual(Date.now() + 1_000)
+
+    await patientApi.dispose()
+    await adminApi.dispose()
+    await tc.dispose()
+  })
 })
 
 test.describe('Bug #6/#7 — clean reading does NOT auto-resolve open BP L1 alerts', () => {
@@ -255,9 +296,20 @@ test.describe('Bug #6/#7 — clean reading does NOT auto-resolve open BP L1 aler
       pulse: 72,
       sessionId: session2,
     })
-    await new Promise((r) => setTimeout(r, 1500))
 
-    const before = await tc.listAlerts(u.id)
+    // Poll for BOTH alerts to land. The engine is event-driven and the
+    // persistAlert SERIALIZABLE transactions can deadlock under load (Cluster
+    // 6 bug #11 retry — up to 3× 100ms backoff), pushing persistence past
+    // any fixed sleep. A 1500ms wait was racy in CI; this poll waits up to
+    // ~15s for both rows to materialize before asserting.
+    let before = await tc.listAlerts(u.id)
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const haveHigh = before.some((a) => a.tier === 'BP_LEVEL_1_HIGH')
+      const haveLow = before.some((a) => a.tier === 'BP_LEVEL_1_LOW')
+      if (haveHigh && haveLow) break
+      await new Promise((r) => setTimeout(r, 500))
+      before = await tc.listAlerts(u.id)
+    }
     const highAlert = before.find((a) => a.tier === 'BP_LEVEL_1_HIGH')
     const lowAlert = before.find((a) => a.tier === 'BP_LEVEL_1_LOW')
     expect(highAlert, `expected BP_LEVEL_1_HIGH; got tiers: [${before.map((a) => a.tier).join(',')}]`).toBeDefined()

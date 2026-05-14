@@ -339,7 +339,7 @@ function DeleteConfirmModal({
             className="w-14 h-14 mx-auto mb-3 rounded-full flex items-center justify-center"
             style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
           >
-            <Trash2 className="w-6 h-6" style={{ color: 'var(--brand-alert-red)' }} />
+            <Trash2 className="w-6 h-6" style={{ color: 'var(--brand-alert-red-text)' }} />
           </div>
           <p className="text-[15px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
             Delete conversation?
@@ -461,7 +461,7 @@ function SidebarContent({
                   {/* Delete button — visible on hover */}
                   <button
                     onClick={(e) => { e.stopPropagation(); onDeleteSession(s.id); }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg flex items-center justify-center hover:bg-red-50 transition-colors"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg flex items-center justify-center hover:bg-[var(--brand-alert-red-light)] transition-colors"
                     title="Delete"
                   >
                     <Trash2 className="w-3 h-3" style={{ color: 'var(--brand-alert-red)' }} />
@@ -521,7 +521,7 @@ function VoiceCallBar({
         </span>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px]" style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#b91c1c' }}>
+        <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px]" style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}>
           <PhoneCall className="w-3 h-3" />
           <span>{t('chat.emergencyCall')}</span>
         </div>
@@ -811,7 +811,7 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
               )}
               <div className="rounded-xl p-2.5 text-center" style={{ backgroundColor: pendingCheckin.medicationTaken ? 'var(--brand-success-green-light)' : 'var(--brand-alert-red-light)' }}>
                 <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Meds</p>
-                <p className="text-[13px] font-bold" style={{ color: pendingCheckin.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red)' }}>{pendingCheckin.medicationTaken ? 'Taken' : 'Missed'}</p>
+                <p className="text-[13px] font-bold" style={{ color: pendingCheckin.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red-text)' }}>{pendingCheckin.medicationTaken ? 'Taken' : 'Missed'}</p>
               </div>
             </div>
 
@@ -951,10 +951,10 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 className="flex items-center gap-2 px-3 py-2 rounded-xl max-w-sm mt-5"
-                style={{ backgroundColor: 'var(--brand-alert-red-light)', border: '1px solid rgba(239,68,68,0.15)' }}
+                style={{ backgroundColor: 'var(--brand-alert-red-light)', border: '1px solid var(--brand-alert-red)' }}
               >
-                <PhoneCall className="w-3.5 h-3.5 shrink-0" style={{ color: '#ef4444' }} />
-                <p className="text-[10px]" style={{ color: '#b91c1c' }}>Chest pain or severe shortness of breath? Call 911 immediately.</p>
+                <PhoneCall className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-alert-red)' }} />
+                <p className="text-[10px]" style={{ color: 'var(--brand-alert-red-text)' }}>Chest pain or severe shortness of breath? Call 911 immediately.</p>
               </motion.div>
             )}
           </motion.div>
@@ -979,7 +979,7 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
               <div className="flex items-center gap-2 mb-2">
                 {pendingUpdate.updated
                   ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-accent-teal)' }} />
-                  : <AlertCircle className="w-5 h-5 text-red-500" />}
+                  : <AlertCircle className="w-5 h-5" style={{ color: "var(--brand-alert-red)" }} />}
                 <p className="font-bold text-[14px]" style={{ color: 'var(--brand-text-primary)' }}>
                   {pendingUpdate.updated ? 'Reading updated!' : 'Could not update reading'}
                 </p>
@@ -1016,8 +1016,8 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
             >
               <div className="flex items-center gap-2 mb-2">
                 {pendingDelete.success
-                  ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-alert-red)' }} />
-                  : <AlertCircle className="w-5 h-5 text-red-500" />}
+                  ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-alert-red-text)' }} />
+                  : <AlertCircle className="w-5 h-5" style={{ color: "var(--brand-alert-red)" }} />}
                 <p className="font-bold text-[14px]" style={{ color: 'var(--brand-text-primary)' }}>
                   {pendingDelete.success
                     ? (pendingDelete.deletedCount === 1 ? 'Reading deleted' : `${pendingDelete.deletedCount} readings deleted`)
@@ -1026,7 +1026,7 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
               </div>
               <div className="rounded-xl p-2.5 text-center mb-2" style={{ backgroundColor: 'var(--brand-alert-red-light)' }}>
                 <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Removed</p>
-                <p className="text-[14px] font-bold" style={{ color: 'var(--brand-alert-red)' }}>
+                <p className="text-[14px] font-bold" style={{ color: 'var(--brand-alert-red-text)' }}>
                   {pendingDelete.deletedCount} entry{pendingDelete.deletedCount === 1 ? '' : 'ies'}
                   {pendingDelete.failedCount > 0 ? ` (${pendingDelete.failedCount} failed)` : ''}
                 </p>
@@ -1692,7 +1692,11 @@ export default function AIChatInterface() {
           {voiceState === 'error' && voiceError && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="shrink-0 px-4 lg:px-6 py-2 text-[12px]"
-              style={{ backgroundColor: '#FEF2F2', borderBottom: '1px solid #FECACA', color: '#b91c1c' }}
+              style={{
+                backgroundColor: 'var(--brand-alert-red-light)',
+                borderBottom: '1px solid var(--brand-alert-red)',
+                color: 'var(--brand-alert-red-text)',
+              }}
             >
               Voice error: {voiceError}
             </motion.div>
@@ -2007,7 +2011,7 @@ export default function AIChatInterface() {
           className="fixed bottom-32 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full text-[12px] font-semibold shadow-lg"
           style={{
             backgroundColor: 'var(--brand-alert-red-light)',
-            color: 'var(--brand-alert-red)',
+            color: 'var(--brand-alert-red-text)',
             border: '1px solid var(--brand-alert-red)',
           }}
         >

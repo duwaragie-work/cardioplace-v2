@@ -344,14 +344,14 @@ export default function PatientDetailShell({ patientId }: Props) {
       return {
         label: 'Corrected by admin',
         bg: 'var(--brand-warning-amber-light)',
-        fg: 'var(--brand-warning-amber)',
+        fg: 'var(--brand-warning-amber-text)',
         icon: <ShieldAlert className="w-3 h-3" />,
       };
     }
     return {
       label: 'Profile unverified',
       bg: 'var(--brand-alert-red-light)',
-      fg: 'var(--brand-alert-red)',
+      fg: 'var(--brand-alert-red-text)',
       icon: <ShieldAlert className="w-3 h-3" />,
     };
   })();
@@ -512,7 +512,7 @@ export default function PatientDetailShell({ patientId }: Props) {
                                       : 'var(--brand-background)',
                                   color:
                                     pp > 60
-                                      ? 'var(--brand-warning-amber)'
+                                      ? 'var(--brand-warning-amber-text)'
                                       : 'var(--brand-text-secondary)',
                                 }}
                                 title="Pulse pressure (SBP − DBP). >60 mmHg flagged amber."
@@ -556,7 +556,7 @@ export default function PatientDetailShell({ patientId }: Props) {
                     style={{
                       color:
                         (header.activeAlertsCount ?? 0) > 0
-                          ? 'var(--brand-alert-red)'
+                          ? 'var(--brand-alert-red-text)'
                           : 'var(--brand-success-green)',
                     }}
                   >
@@ -731,7 +731,7 @@ function LoadErrorBanner({ message, onRetry }: { message: string; onRetry: () =>
       }}
       role="alert"
     >
-      <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--brand-alert-red)' }} />
+      <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--brand-alert-red-text)' }} />
       <div className="flex-1 min-w-0">
         <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
           Couldn&apos;t load this tab

@@ -153,12 +153,12 @@ function timeAgo(dateStr: string): string {
 const RISK_STYLES: Record<string, { bg: string; color: string; border: string }> = {
   HIGH: {
     bg: 'var(--brand-alert-red-light)',
-    color: 'var(--brand-alert-red)',
+    color: 'var(--brand-alert-red-text)',
     border: 'var(--brand-alert-red)',
   },
   ELEVATED: {
     bg: 'var(--brand-warning-amber-light)',
-    color: 'var(--brand-warning-amber)',
+    color: 'var(--brand-warning-amber-text)',
     border: 'var(--brand-warning-amber)',
   },
   STANDARD: {
@@ -290,14 +290,14 @@ function tierChrome(tier: string | null): {
   switch (tier) {
     case 'BP_LEVEL_2':
     case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
-      return { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)', label: 'BP L2', short: 'L2' };
+      return { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)', label: 'BP L2', short: 'L2' };
     case 'TIER_1_CONTRAINDICATION':
-      return { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)', label: 'Tier 1', short: 'T1' };
+      return { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)', label: 'Tier 1', short: 'T1' };
     case 'TIER_2_DISCREPANCY':
-      return { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)', label: 'Tier 2', short: 'T2' };
+      return { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)', label: 'Tier 2', short: 'T2' };
     case 'BP_LEVEL_1_HIGH':
     case 'BP_LEVEL_1_LOW':
-      return { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)', label: 'BP L1', short: 'L1' };
+      return { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)', label: 'BP L1', short: 'L1' };
     case 'TIER_3_INFO':
       return { bg: 'var(--brand-accent-teal-light)', color: 'var(--brand-accent-teal)', label: 'Tier 3', short: 'T3' };
     default:
@@ -499,7 +499,7 @@ function OnboardingCell({
           onMouseEnter={() => setShowTip(true)}
           onMouseLeave={() => setShowTip(false)}
           className="w-5 h-5 rounded-full flex items-center justify-center cursor-help"
-          style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }}
+          style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
         >
           <Info className="w-3 h-3" />
         </button>
@@ -650,7 +650,7 @@ function PatientModal({
 
                 <div className="p-3 rounded-xl" style={{ backgroundColor: '#FAFBFF' }}>
                   <div className="flex items-center gap-1.5 mb-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5" style={{ color: 'var(--brand-warning-amber)' }} />
+                    <AlertTriangle className="w-3.5 h-3.5" style={{ color: 'var(--brand-warning-amber-text)' }} />
                     <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>
                       {t('provider.activeAlerts')}
                     </p>
@@ -885,7 +885,7 @@ export default function PatientsPage() {
             className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
             style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
           >
-            <Shield className="w-7 h-7" style={{ color: 'var(--brand-alert-red)' }} />
+            <Shield className="w-7 h-7" style={{ color: 'var(--brand-alert-red-text)' }} />
           </div>
           <h1 className="text-xl font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
             403 Access Denied
@@ -1129,7 +1129,7 @@ export default function PatientsPage() {
                             >
                               <Heart
                                 className="w-3 h-3"
-                                style={{ color: 'var(--brand-warning-amber)' }}
+                                style={{ color: 'var(--brand-warning-amber-text)' }}
                                 aria-hidden
                               />
                             </span>

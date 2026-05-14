@@ -210,7 +210,7 @@ export default function Navbar() {
                           className="px-1.5 py-0.5 rounded text-[10px] font-bold"
                           style={{
                             backgroundColor: 'var(--brand-warning-amber-light)',
-                            color: 'var(--brand-warning-amber)',
+                            color: 'var(--brand-warning-amber-text)',
                           }}
                         >
                           {t('common.comingSoon')}
@@ -235,7 +235,7 @@ export default function Navbar() {
               style={{
                 color:
                   alertCount > 0
-                    ? '#fbbf24'
+                    ? 'var(--brand-warning-amber)'
                     : 'rgba(255,255,255,0.7)',
               }}
             />
@@ -324,7 +324,7 @@ export default function Navbar() {
                         >
                           <span className="text-base">{l.flag}</span>
                           <span className="flex-1">{l.nativeName}</span>
-                          {!supported && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold" style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }}>Soon</span>}
+                          {!supported && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold" style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}>Soon</span>}
                         </button>
                       );
                     })}

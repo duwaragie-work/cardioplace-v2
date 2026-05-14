@@ -357,12 +357,15 @@ export default function RegisterPage() {
                   autoComplete="email"
                   aria-invalid={showEmailError}
                   className={`w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] rounded-lg text-base text-[#171717] placeholder:text-[#737373] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all border ${
-                    showEmailError ? 'border-red-400' : 'border-[#e5d9f2]'
+                    showEmailError ? 'border-[var(--brand-alert-red)]' : 'border-[#e5d9f2]'
                   }`}
                 />
                 {/* Inline email format error — quiet until user has typed */}
                 {showEmailError && (
-                  <p className="mt-1.5 text-[11px] lg:text-xs text-red-500">
+                  <p
+                    className="mt-1.5 text-[11px] lg:text-xs"
+                    style={{ color: 'var(--brand-alert-red)' }}
+                  >
                     {t('register.invalidEmail')}
                   </p>
                 )}
@@ -457,7 +460,8 @@ export default function RegisterPage() {
                 {(statusMessage || errorMessage) && (
                   <output
                     data-testid={errorMessage ? 'signin-error' : 'signin-status'}
-                    className={`block mt-2 text-xs lg:text-sm ${errorMessage ? "text-red-500" : "text-green-500"}`}
+                    className={`block mt-2 text-xs lg:text-sm ${errorMessage ? '' : 'text-green-500'}`}
+                    style={errorMessage ? { color: 'var(--brand-alert-red)' } : undefined}
                   >
                     {errorMessage || statusMessage}
                   </output>

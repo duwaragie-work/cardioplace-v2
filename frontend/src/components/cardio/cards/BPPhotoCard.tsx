@@ -44,7 +44,7 @@ export default function BPPhotoCard({
         }}
       >
         <div className="px-5 py-4 flex items-start gap-2">
-          <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" aria-hidden="true" />
+          <AlertCircle className="w-5 h-5 shrink-0" style={{ color: "var(--brand-alert-red)" }} aria-hidden="true" />
           <div className="flex-1">
             <p
               className="font-bold text-[15px]"

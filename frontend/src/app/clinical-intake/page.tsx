@@ -1359,7 +1359,7 @@ function A8Categories({ state, setState }: StepProps) {
                       className="flex-1 h-11 px-4 rounded-lg text-[14px] outline-none transition box-border bg-white"
                       style={{
                         border: dupError
-                          ? '2px solid #b91c1c'
+                          ? '2px solid var(--brand-alert-red)'
                           : '2px solid var(--brand-border)',
                         color: 'var(--brand-text-primary)',
                       }}
@@ -1376,7 +1376,7 @@ function A8Categories({ state, setState }: StepProps) {
                     <p
                       role="alert"
                       className="mt-1.5 text-[12px] leading-snug"
-                      style={{ color: '#b91c1c' }}
+                      style={{ color: 'var(--brand-alert-red)' }}
                     >
                       {dupError}
                     </p>
@@ -1575,7 +1575,7 @@ function A10Review({ state, goTo }: StepProps) {
         className="rounded-2xl p-4 flex items-start gap-3"
         style={{ backgroundColor: 'var(--brand-warning-amber-light)', border: '1.5px solid #FCD34D' }}
       >
-        <Shield className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-warning-amber)' }} />
+        <Shield className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-warning-amber-text)' }} />
         <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
           {t('intake.a10.reviewBanner')}
         </p>
@@ -1897,7 +1897,7 @@ function ExitSaveModal({
           <p
             className="text-[12px] mb-4 px-3 py-2 rounded-lg"
             style={{
-              color: 'var(--brand-alert-red)',
+              color: 'var(--brand-alert-red-text)',
               backgroundColor: 'var(--brand-alert-red-light)',
             }}
           >
@@ -2438,7 +2438,7 @@ function ClinicalIntakeWizard() {
           <div className="max-w-3xl mx-auto px-4 sm:px-6 py-3 flex items-start gap-3">
             <Shield
               className="w-4 h-4 shrink-0 mt-0.5"
-              style={{ color: 'var(--brand-warning-amber)' }}
+              style={{ color: 'var(--brand-warning-amber-text)' }}
               aria-hidden
             />
             <p
@@ -2496,7 +2496,7 @@ function ClinicalIntakeWizard() {
         {submitError && (
           <p
             className="mt-5 text-[13px] text-center font-semibold px-4 py-2 rounded-lg"
-            style={{ color: 'var(--brand-alert-red)', backgroundColor: 'var(--brand-alert-red-light)' }}
+            style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
           >
             {(() => {
               if (submitError.kind === 'raw') return submitError.text;

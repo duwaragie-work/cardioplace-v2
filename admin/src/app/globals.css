@@ -15,12 +15,40 @@
   --brand-accent-teal: #115E59;
   --brand-accent-teal-light: #CCFBF1;
 
-  /* Cluster-3 / B11+B12: semantic chip foregrounds bumped to -800 shades
-     so the "color on -100 light bg" pairs clear WCAG AA. Hue preserved. */
-  --brand-alert-red: #991B1B;
-  --brand-alert-red-light: #FEE2E2;
-  --brand-warning-amber: #92400E;
-  --brand-warning-amber-light: #FEF3C7;
+  /* SEMANTIC PALETTE — vibrant single-shade for red + amber.
+     Green stays single-token (chips only, no button-bg variant). Teal too.
+
+     The `*-text` tokens used to hold deep -800 shades for WCAG-AAA chip text
+     on `*-light` backgrounds. Pilot users consistently read those as "muddy"
+     next to the vibrant `*` button/border shades on the same card, so the
+     `*-text` tokens are now aliased to the same vibrant value as `*`. This
+     gives uniform vibrancy across CTAs, borders, badges, and chip text on
+     every alert/notification surface.
+
+     - `*`        : vibrant primary shade. Used as BG (button/banner/severity
+                    pill) with white text AND as FG (chip text / icon color)
+                    on `*-light` or white backgrounds.
+     - `*-text`   : alias for `*` — kept as a token so existing consumers
+                    keep working. Prefer `*` in new code; treat `*-text` as
+                    deprecated.
+     - `*-light`  : -100 chip background.
+
+     WCAG NOTES (accepted debt — pilot UX trumps strict AA at small sizes):
+     RED — red-600 (#DC2626) on white = 4.83:1 → AA Normal at any size ✓.
+           red-600 on red-100 (#FEE2E2) = 3.66:1 → AA Large only (≥14px bold /
+           ≥18px regular). Small chip text technically fails AA Normal.
+     AMBER — orange-500 (#F97316) on white = 3.31:1 → AA Large only.
+             Avatar / filter-pill / status-dot consumers <14px bold KNOWN to
+             fail axe — accepted as visual-priority debt, font-size bump is
+             the planned remediation, not a hex change. */
+  --brand-alert-red: #DC2626;        /* red-600 — vibrant for both BG and FG */
+  --brand-alert-red-text: #DC2626;   /* alias for --brand-alert-red (deprecated; kept for back-compat) */
+  --brand-alert-red-light: #FEE2E2;  /* red-100 — chip background */
+  --brand-warning-amber: #F97316;        /* orange-500 — vibrant for both BG and FG */
+  --brand-warning-amber-text: #F97316;   /* alias for --brand-warning-amber (deprecated; kept for back-compat) */
+  --brand-warning-amber-light: #FEF3C7;  /* amber-100 — chip background */
+  /* GREEN: unchanged — scoped to red + amber only this round.
+     Single token, used for chip text on green-100 (7.3:1). */
   --brand-success-green: #166534;
   --brand-success-green-light: #DCFCE7;
 

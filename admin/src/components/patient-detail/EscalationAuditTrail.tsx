@@ -136,7 +136,7 @@ function channelChrome(c: NotificationChannel): {
     case 'PHONE':
       return {
         label: 'Phone',
-        color: 'var(--brand-warning-amber)',
+        color: 'var(--brand-warning-amber-text)',
         bg: 'var(--brand-warning-amber-light)',
         icon: <PhoneCall className="w-2.5 h-2.5" />,
       };
@@ -226,6 +226,7 @@ export default function EscalationAuditTrail({ alert, heightCm }: Props) {
                 key={step.code}
                 step={step}
                 events={events}
+                alertStatus={alert.status}
                 isLast={last && extras.length === 0}
               />
             );
@@ -240,6 +241,7 @@ export default function EscalationAuditTrail({ alert, heightCm }: Props) {
                 hint: e.triggeredByResolution ? 'Retry triggered by resolution' : 'Off-ladder escalation',
               }}
               events={[e]}
+              alertStatus={alert.status}
               isLast={i === extras.length - 1}
             />
           ))}
@@ -257,10 +259,12 @@ export default function EscalationAuditTrail({ alert, heightCm }: Props) {
 function Step({
   step,
   events,
+  alertStatus,
   isLast,
 }: {
   step: LadderStep;
   events: PatientAlertEscalationEvent[];
+  alertStatus: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
   isLast: boolean;
 }) {
   const triggered = events.length > 0;
@@ -272,6 +276,11 @@ function Step({
   let nodeBg: string;
   let nodeIcon: React.ReactNode;
   let nodeLabel: string;
+  // For untriggered steps, copy depends on whether the alert is still open
+  // (the rung might still fire) vs. closed (the rung will never fire because
+  // the ladder advances are cancelled on ack/resolve). Misleading to keep
+  // saying "Not yet triggered" once the alert is closed.
+  let untriggeredHint: string | null = null;
 
   if (allResolved) {
     nodeColor = 'var(--brand-success-green)';
@@ -288,6 +297,18 @@ function Step({
     nodeBg = 'var(--brand-alert-red-light)';
     nodeIcon = <AlertCircle className="w-3 h-3" />;
     nodeLabel = 'Awaiting acknowledgment';
+  } else if (alertStatus === 'ACKNOWLEDGED') {
+    nodeColor = 'var(--brand-text-muted)';
+    nodeBg = 'var(--brand-background)';
+    nodeIcon = <Check className="w-3 h-3" />;
+    nodeLabel = 'Not required';
+    untriggeredHint = 'Not required — alert acknowledged before this rung';
+  } else if (alertStatus === 'RESOLVED') {
+    nodeColor = 'var(--brand-text-muted)';
+    nodeBg = 'var(--brand-background)';
+    nodeIcon = <Check className="w-3 h-3" />;
+    nodeLabel = 'Not required';
+    untriggeredHint = 'Not required — alert resolved before this rung';
   } else {
     nodeColor = 'var(--brand-text-muted)';
     nodeBg = 'var(--brand-background)';
@@ -339,8 +360,11 @@ function Step({
 
       {/* Per-event detail blocks */}
       {events.length === 0 ? (
-        <p className="text-[11.5px] mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>
-          No notifications dispatched for this step yet.
+        <p
+          className={`text-[11.5px] mt-1.5${untriggeredHint ? ' italic' : ''}`}
+          style={{ color: 'var(--brand-text-muted)' }}
+        >
+          {untriggeredHint ?? 'No notifications dispatched for this step yet.'}
         </p>
       ) : (
         <div className="mt-2 space-y-2">
@@ -442,7 +466,7 @@ function EventDetail({ event }: { event: PatientAlertEscalationEvent }) {
         {event.afterHours && (
           <span
             className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded"
-            style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' }}
+            style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
             title="Triggered outside business hours — backup recipient list applied"
           >
             <Moon className="w-2.5 h-2.5" />

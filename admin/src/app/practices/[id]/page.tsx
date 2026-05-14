@@ -249,7 +249,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
               {error && (
                 <div
                   className="rounded-lg px-3 py-2 text-[12px] font-semibold"
-                  style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)' }}
+                  style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
                 >
                   {error}
                 </div>
@@ -401,7 +401,7 @@ function slotChrome(slot: StaffSlot): { label: string; color: string; bg: string
     case 'BACKUP':
       return { label: 'Backup', color: 'var(--brand-accent-teal)', bg: 'var(--brand-accent-teal-light)' };
     case 'MEDICAL_DIRECTOR':
-      return { label: 'Med director', color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)' };
+      return { label: 'Med director', color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
   }
 }
 

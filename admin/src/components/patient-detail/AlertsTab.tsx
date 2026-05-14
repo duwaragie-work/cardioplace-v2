@@ -48,10 +48,10 @@ function tierBucket(t: string | null): TierBucket {
 
 function bucketChromeFilter(b: TierBucket): { color: string; bg: string } {
   switch (b) {
-    case 'BP_L2': return { color: 'var(--brand-alert-red)', bg: 'var(--brand-alert-red-light)' };
-    case 'TIER_1': return { color: 'var(--brand-alert-red)', bg: 'var(--brand-alert-red-light)' };
-    case 'TIER_2': return { color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)' };
-    case 'BP_L1': return { color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)' };
+    case 'BP_L2': return { color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)' };
+    case 'TIER_1': return { color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)' };
+    case 'TIER_2': return { color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
+    case 'BP_L1': return { color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
     case 'TIER_3': return { color: 'var(--brand-accent-teal)', bg: 'var(--brand-accent-teal-light)' };
     default: return { color: 'var(--brand-text-muted)', bg: 'var(--brand-background)' };
   }

@@ -227,7 +227,7 @@ export default function MedicationRejectModal({ med, open, onClose, onConfirmed 
                 <p
                   className="text-[12.5px] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
                   style={{
-                    color: 'var(--brand-alert-red)',
+                    color: 'var(--brand-alert-red-text)',
                     backgroundColor: 'var(--brand-alert-red-light)',
                   }}
                 >

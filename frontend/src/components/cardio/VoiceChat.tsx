@@ -330,7 +330,7 @@ function CheckinCard({
           </p>
           <p
             className="text-[14px] font-bold"
-            style={{ color: summary.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red)' }}
+            style={{ color: summary.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red-text)' }}
           >
             {summary.medicationTaken ? 'Taken' : 'Missed'}
           </p>
@@ -341,7 +341,7 @@ function CheckinCard({
             <p className="text-[10px] font-semibold uppercase tracking-wide mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
               Symptoms
             </p>
-            <p className="text-[11px] font-semibold" style={{ color: 'var(--brand-warning-amber)' }}>
+            <p className="text-[11px] font-semibold" style={{ color: 'var(--brand-warning-amber-text)' }}>
               {summary.symptoms.slice(0, 2).join(', ')}
               {summary.symptoms.length > 2 && ` +${summary.symptoms.length - 2}`}
             </p>
@@ -550,11 +550,11 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
                   className="flex items-center gap-2 px-3 py-2 rounded-xl w-full max-w-sm"
                   style={{
                     backgroundColor: 'var(--brand-alert-red-light)',
-                    border: '1px solid rgba(239,68,68,0.2)',
+                    border: '1px solid var(--brand-alert-red)',
                   }}
                 >
-                  <PhoneCall className="w-3.5 h-3.5 shrink-0" style={{ color: '#ef4444' }} />
-                  <p className="text-[11px]" style={{ color: '#b91c1c' }}>
+                  <PhoneCall className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-alert-red)' }} />
+                  <p className="text-[11px]" style={{ color: 'var(--brand-alert-red-text)' }}>
                     If you feel chest pain or severe shortness of breath, call 911 immediately.
                   </p>
                 </motion.div>
