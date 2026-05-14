@@ -97,7 +97,7 @@ export default function PracticesPage() {
               ))}
             </div>
           ) : error ? (
-            <div className="p-8 text-center text-[13px]" style={{ color: 'var(--brand-alert-red-text)' }}>
+            <div className="p-8 text-center text-[13px]" style={{ color: 'var(--brand-alert-red)' }}>
               {error}
             </div>
           ) : practices.length === 0 ? (
@@ -400,7 +400,7 @@ function Field({ label, required, children }: { label: string; required?: boolea
     <label className="block">
       <span className="block text-[10.5px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--brand-text-muted)' }}>
         {label}
-        {required && <span style={{ color: 'var(--brand-alert-red-text)' }}> *</span>}
+        {required && <span style={{ color: 'var(--brand-alert-red)' }}> *</span>}
       </span>
       {children}
     </label>

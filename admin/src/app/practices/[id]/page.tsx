@@ -135,7 +135,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
         {loading || !practice || !form ? (
           <div className="bg-white rounded-2xl p-8 text-center" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
             {error ? (
-              <p className="text-[13px]" style={{ color: 'var(--brand-alert-red-text)' }}>{error}</p>
+              <p className="text-[13px]" style={{ color: 'var(--brand-alert-red)' }}>{error}</p>
             ) : (
               <Loader2 className="w-5 h-5 mx-auto animate-spin" style={{ color: 'var(--brand-text-muted)' }} />
             )}
@@ -410,7 +410,7 @@ function Field({ label, required, children }: { label: React.ReactNode; required
     <label className="block">
       <span className="block text-[10.5px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--brand-text-muted)' }}>
         {label}
-        {required && <span style={{ color: 'var(--brand-alert-red-text)' }}> *</span>}
+        {required && <span style={{ color: 'var(--brand-alert-red)' }}> *</span>}
       </span>
       {children}
     </label>

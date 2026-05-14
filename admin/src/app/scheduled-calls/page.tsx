@@ -406,7 +406,7 @@ function CallDetailModal({
                   disabled={acting}
                   onClick={() => handleAction('delete')}
                   className="w-full h-9 rounded-xl text-[12px] font-semibold flex items-center justify-center gap-1.5 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
-                  style={{ color: 'var(--brand-alert-red-text)' }}
+                  style={{ color: 'var(--brand-alert-red)' }}
                 >
                   {t('provider.deleteCall')}
                 </button>

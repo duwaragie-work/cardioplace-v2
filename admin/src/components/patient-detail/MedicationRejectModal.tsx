@@ -202,7 +202,7 @@ export default function MedicationRejectModal({ med, open, onClose, onConfirmed 
                     style={{ color: 'var(--brand-text-secondary)' }}
                   >
                     Clinical rationale
-                    <span style={{ color: 'var(--brand-alert-red-text)' }}> · required</span>
+                    <span style={{ color: 'var(--brand-alert-red)' }}> · required</span>
                   </label>
                   <textarea
                     value={rationale}

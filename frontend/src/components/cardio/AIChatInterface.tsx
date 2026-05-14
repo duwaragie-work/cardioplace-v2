@@ -464,7 +464,7 @@ function SidebarContent({
                     className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg flex items-center justify-center hover:bg-red-50 transition-colors"
                     title="Delete"
                   >
-                    <Trash2 className="w-3 h-3" style={{ color: 'var(--brand-alert-red-text)' }} />
+                    <Trash2 className="w-3 h-3" style={{ color: 'var(--brand-alert-red)' }} />
                   </button>
                 </div>
               );

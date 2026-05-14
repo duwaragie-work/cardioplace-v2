@@ -1275,7 +1275,7 @@ function DeleteConfirm({
           {t('readings.deleteWarning')}
         </p>
         {error && (
-          <p className="text-[13px] mb-4 text-center" style={{ color: 'var(--brand-alert-red-text)' }}>
+          <p className="text-[13px] mb-4 text-center" style={{ color: 'var(--brand-alert-red)' }}>
             {error}
           </p>
         )}

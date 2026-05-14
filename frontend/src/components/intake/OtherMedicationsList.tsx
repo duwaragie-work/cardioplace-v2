@@ -199,7 +199,7 @@ function OtherMedTile({
         >
           <Trash2
             className="w-4 h-4"
-            style={{ color: 'var(--brand-alert-red-text)' }}
+            style={{ color: 'var(--brand-alert-red)' }}
             aria-hidden="true"
           />
         </button>

@@ -176,7 +176,7 @@ export default function OtherMedEditModal({
               <p
                 role="alert"
                 className="text-[12px] mt-0.5 leading-snug"
-                style={{ color: 'var(--brand-alert-red-text)' }}
+                style={{ color: 'var(--brand-alert-red)' }}
               >
                 {error}
               </p>

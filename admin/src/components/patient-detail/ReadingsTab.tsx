@@ -427,7 +427,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
                   className="text-[12px] inline-flex items-center gap-1.5"
                   style={{ color: 'var(--brand-text-secondary)' }}
                 >
-                  <Pill className="w-3 h-3 shrink-0" style={{ color: 'var(--brand-alert-red-text)' }} />
+                  <Pill className="w-3 h-3 shrink-0" style={{ color: 'var(--brand-alert-red)' }} />
                   <span className="font-semibold">{m.drugName}</span>
                   {m.missedDoses != null && (
                     <span style={{ color: 'var(--brand-text-muted)' }}>
@@ -633,7 +633,7 @@ function ErrorBanner({ message }: { message: string }) {
       }}
       role="alert"
     >
-      <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--brand-alert-red-text)' }} />
+      <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--brand-alert-red)' }} />
       <div className="flex-1">
         <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
           Couldn&apos;t load readings

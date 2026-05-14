@@ -343,7 +343,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                   >
                     Clinical rationale
                     {rationaleRequired ? (
-                      <span style={{ color: 'var(--brand-alert-red-text)' }}> · required</span>
+                      <span style={{ color: 'var(--brand-alert-red)' }}> · required</span>
                     ) : (
                       <span className="font-normal" style={{ color: 'var(--brand-text-muted)' }}> · optional</span>
                     )}

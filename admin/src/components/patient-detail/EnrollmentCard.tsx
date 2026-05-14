@@ -170,7 +170,7 @@ export default function EnrollmentCard({
           {error && !blocked && (
             <p
               className="mt-2 text-[11.5px] font-semibold"
-              style={{ color: 'var(--brand-alert-red-text)' }}
+              style={{ color: 'var(--brand-alert-red)' }}
             >
               {error}
             </p>

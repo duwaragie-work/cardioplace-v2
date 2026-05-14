@@ -217,7 +217,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
         >
           <AlertTriangle
             className="w-12 h-12"
-            style={{ color: 'var(--brand-alert-red-text)' }}
+            style={{ color: 'var(--brand-alert-red)' }}
             strokeWidth={2.5}
           />
         </motion.div>
@@ -267,7 +267,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
               className="block w-full text-center rounded-full py-4 sm:py-5 font-extrabold text-[20px] sm:text-[22px] active:scale-[0.98] transition"
               style={{
                 backgroundColor: 'white',
-                color: 'var(--brand-alert-red-text)',
+                color: 'var(--brand-alert-red)',
                 boxShadow: '0 8px 24px rgba(0,0,0,0.22)',
               }}
               aria-label={t('alerts.emergency.callAria')}
@@ -297,7 +297,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
               className="rounded-full py-4 font-extrabold text-[16px] flex items-center justify-center gap-2 cursor-pointer transition active:scale-[0.98]"
               style={{
                 backgroundColor: 'white',
-                color: 'var(--brand-alert-red-text)',
+                color: 'var(--brand-alert-red)',
                 boxShadow: '0 8px 24px rgba(0,0,0,0.22)',
               }}
             >

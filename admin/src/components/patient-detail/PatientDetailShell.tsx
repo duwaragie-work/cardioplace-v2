@@ -395,7 +395,7 @@ export default function PatientDetailShell({ patientId }: Props) {
               </div>
             </div>
           ) : headerError ? (
-            <div className="text-[13px]" style={{ color: 'var(--brand-alert-red-text)' }}>
+            <div className="text-[13px]" style={{ color: 'var(--brand-alert-red)' }}>
               {headerError}{' '}
               <Link href="/patients" className="underline">Back</Link>
             </div>
@@ -746,7 +746,7 @@ function LoadErrorBanner({ message, onRetry }: { message: string; onRetry: () =>
         className="shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12px] font-semibold cursor-pointer"
         style={{
           backgroundColor: 'white',
-          color: 'var(--brand-alert-red-text)',
+          color: 'var(--brand-alert-red)',
           border: '1.5px solid var(--brand-alert-red)',
         }}
       >

@@ -437,7 +437,7 @@ export default function AdminDashboard() {
           fontFamily: 'var(--font-sans, system-ui, sans-serif)',
         }}
       >
-        <h1 style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--brand-alert-red-text)' }}>
+        <h1 style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--brand-alert-red)' }}>
           {t('provider.accessDenied')}
         </h1>
         <p style={{ fontSize: '1.125rem', color: 'var(--brand-text-secondary)' }}>
@@ -574,9 +574,9 @@ export default function AdminDashboard() {
               <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
                 <div className="flex items-start justify-between mb-2">
                   <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>BP L2 emergencies</span>
-                  <ShieldAlert className="w-5 h-5" style={{ color: 'var(--brand-alert-red-text)' }} />
+                  <ShieldAlert className="w-5 h-5" style={{ color: 'var(--brand-alert-red)' }} />
                 </div>
-                <div className="text-4xl font-bold mb-2" style={{ color: 'var(--brand-alert-red-text)' }}>
+                <div className="text-4xl font-bold mb-2" style={{ color: 'var(--brand-alert-red)' }}>
                   {bpL2Alerts.length}
                 </div>
                 <span className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>
@@ -588,9 +588,9 @@ export default function AdminDashboard() {
               <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
                 <div className="flex items-start justify-between mb-2">
                   <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>Tier 1 contraindications</span>
-                  <Pill className="w-5 h-5" style={{ color: 'var(--brand-alert-red-text)' }} />
+                  <Pill className="w-5 h-5" style={{ color: 'var(--brand-alert-red)' }} />
                 </div>
-                <div className="text-4xl font-bold mb-2" style={{ color: 'var(--brand-alert-red-text)' }}>
+                <div className="text-4xl font-bold mb-2" style={{ color: 'var(--brand-alert-red)' }}>
                   {tier1Alerts.length}
                 </div>
                 <span className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>
@@ -602,9 +602,9 @@ export default function AdminDashboard() {
               <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
                 <div className="flex items-start justify-between mb-2">
                   <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>Tier 2 discrepancies</span>
-                  <ArrowUp className="w-5 h-5" style={{ color: 'var(--brand-warning-amber-text)' }} />
+                  <ArrowUp className="w-5 h-5" style={{ color: 'var(--brand-warning-amber)' }} />
                 </div>
-                <div className="text-4xl font-bold mb-2" style={{ color: 'var(--brand-warning-amber-text)' }}>
+                <div className="text-4xl font-bold mb-2" style={{ color: 'var(--brand-warning-amber)' }}>
                   {tier2Alerts.length}
                 </div>
                 <span className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>
@@ -616,9 +616,9 @@ export default function AdminDashboard() {
               <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
                 <div className="flex items-start justify-between mb-2">
                   <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>{t('provider.patientsNeedingAttention')}</span>
-                  <AlertTriangle className="w-5 h-5" style={{ color: 'var(--brand-warning-amber-text)' }} />
+                  <AlertTriangle className="w-5 h-5" style={{ color: 'var(--brand-warning-amber)' }} />
                 </div>
-                <div className="text-4xl font-bold mb-2" style={{ color: 'var(--brand-warning-amber-text)' }}>
+                <div className="text-4xl font-bold mb-2" style={{ color: 'var(--brand-warning-amber)' }}>
                   {stats.patientsNeedingAttention}
                 </div>
                 <span className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>

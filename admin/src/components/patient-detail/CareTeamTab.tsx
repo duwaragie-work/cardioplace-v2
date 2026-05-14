@@ -408,7 +408,7 @@ function ProviderSlot({
         <span className="text-[10.5px] font-bold uppercase tracking-wider inline-flex items-center gap-1" style={{ color: accent }}>
           {icon}
           {label}
-          <span style={{ color: 'var(--brand-alert-red-text)' }}> *</span>
+          <span style={{ color: 'var(--brand-alert-red)' }}> *</span>
         </span>
         {requiredRoleHint && (
           <span className="text-[10px] italic" style={{ color: 'var(--brand-text-muted)' }}>
@@ -522,7 +522,7 @@ function Field({
     <label className="block">
       <span className="block text-[10.5px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--brand-text-muted)' }}>
         {label}
-        {required && <span style={{ color: 'var(--brand-alert-red-text)' }}> *</span>}
+        {required && <span style={{ color: 'var(--brand-alert-red)' }}> *</span>}
       </span>
       {children}
     </label>
