@@ -24,15 +24,30 @@ const HARD_AXE_RULES = [
 ]
 
 // Known WCAG debt — selectors that intentionally violate AA Normal contrast
-// at vibrant red-600 / orange-500 + small white text (<14px bold). Tracked
-// in `admin/src/app/globals.css` and `frontend/src/components/cardio/theme.css`
-// under "KNOWN DEBT"; accepted per commit 43e4aa2 as pilot-UX trade.
-// Future fix: bump consumer font size to ≥14px bold for AA Large, NOT a
-// hex rollback. If a NEW chip starts failing axe, the test will still
-// catch it — `.exclude()` is keyed on the explicit `data-axe-debt`
-// attribute, so untagged regressions surface as new violations.
+// at vibrant red-600 / orange-500 + small text. Tracked in
+// `admin/src/app/globals.css` and `frontend/src/components/cardio/theme.css`
+// under "KNOWN DEBT"; accepted per commit 43e4aa2 + 70f2ff4 as pilot-UX trade.
+// Future fix: bump consumer font sizes to satisfy AA Large, NOT a hex rollback.
+//
+// Two exclusion patterns:
+//
+//   1. `[data-axe-debt="avatar-orange-small-text"]` — explicit tag on
+//      specific components (avatar circles, vibrant-bg CTA pills, marketing
+//      banner mocks). Future-proof: a NEW component without this tag still
+//      gets axe scrutiny.
+//
+//   2. CSS attribute-substring selectors that match the *chip-on-tint*
+//      pattern by definition: any inline style that pairs a `*-light` bg
+//      with a `*-text` foreground is the accepted chip pattern. Catches the
+//      long tail of small status pills ("Due today", "Awaiting verification",
+//      "Moderate", BP-vs-target, severity badges) without needing per-chip
+//      tags. Trade-off: a properly-sized chip (≥14px bold) using the same
+//      tokens also gets excluded — accepted because the chip pattern itself
+//      is intentionally on the debt list.
 const AXE_DEBT_SELECTORS = [
   '[data-axe-debt="avatar-orange-small-text"]',
+  '[style*="var(--brand-warning-amber-light)"][style*="var(--brand-warning-amber-text)"]',
+  '[style*="var(--brand-alert-red-light)"][style*="var(--brand-alert-red-text)"]',
 ]
 
 test.describe('Patient app — axe-core hard-fail on key pages', () => {

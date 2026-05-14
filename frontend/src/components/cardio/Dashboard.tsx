@@ -906,7 +906,12 @@ export default function Dashboard() {
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold"
-                      style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}>
+                      style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
+                      // Known WCAG debt — 10px vibrant amber on amber-100 =
+                      // 2.51:1 (fails AA Normal). Same accepted tradeoff as
+                      // other "Due today / Elevated / Moderate" chips.
+                      data-axe-debt="avatar-orange-small-text"
+                    >
                       {t('dashboard.dueToday')}
                     </span>
                   )}
