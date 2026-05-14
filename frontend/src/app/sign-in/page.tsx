@@ -357,7 +357,7 @@ export default function RegisterPage() {
                   autoComplete="email"
                   aria-invalid={showEmailError}
                   className={`w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] rounded-lg text-base text-[#171717] placeholder:text-[#737373] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all border ${
-                    showEmailError ? 'border-red-400' : 'border-[#e5d9f2]'
+                    showEmailError ? 'border-[var(--brand-alert-red)]' : 'border-[#e5d9f2]'
                   }`}
                 />
                 {/* Inline email format error — quiet until user has typed */}

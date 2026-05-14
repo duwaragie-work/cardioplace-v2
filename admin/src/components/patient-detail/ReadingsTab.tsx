@@ -370,9 +370,15 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
           <span
             className="ml-auto inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold"
             style={{
-              backgroundColor: 'var(--brand-warning-amber-bg, #FEF3C7)',
-              color: 'var(--brand-warning-amber, #92400E)',
-              border: '1px solid var(--brand-warning-amber, #D97706)',
+              // Chip pattern: amber-light bg + amber-800 chip text + vibrant
+              // amber-500 border. Author previously used the non-existent
+              // `--brand-warning-amber-bg` token (fell back to hex) and put
+              // the BG-role `--brand-warning-amber` token as the text color;
+              // after §B's revert to vibrant orange-500, that paired the chip
+              // bg with vibrant-orange text → 3.31:1, failing AA Normal.
+              backgroundColor: 'var(--brand-warning-amber-light)',
+              color: 'var(--brand-warning-amber-text)',
+              border: '1px solid var(--brand-warning-amber)',
             }}
             title="Threshold crossed on an unaveraged reading. Confirm with next session."
           >

@@ -345,7 +345,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
               title={isFullyVerified ? 'Reject (returns profile to unverified)' : 'Reject'}
               onClick={() => rejectField(field)}
               disabled={saving}
-              className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-red-50 cursor-pointer disabled:opacity-60"
+              className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-[var(--brand-alert-red-light)] cursor-pointer disabled:opacity-60"
               style={{
                 border: `1px solid ${status === 'rejected' ? 'var(--brand-alert-red)' : 'var(--brand-border)'}`,
                 backgroundColor: status === 'rejected' ? 'var(--brand-alert-red-light)' : 'white',
