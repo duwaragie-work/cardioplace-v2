@@ -62,12 +62,20 @@ test.describe('Admin verification — profile', () => {
     const newDob = new Date(Date.now() - dayOffset * 86_400_000)
       .toISOString()
       .slice(0, 10)
-    const flipHcm = Math.floor(Date.now() / 1000) % 2 === 0
+    // hasHCM is pinned false (not flipped). Earlier this test rolled
+    // hasHCM via `Math.floor(Date.now() / 1000) % 2 === 0` to force a
+    // PatientProfile change alongside the DOB change. When the dice landed
+    // true, shard 3's later spec 12 enrollment-check started failing with
+    // `threshold-required-for-condition` — Aisha has no seeded
+    // PatientThreshold row, and HCM-positive patients require one per the
+    // 4-piece enrollment gate. Pinning false matches the seed and keeps
+    // the test idempotent (DOB varies every run, which alone proves the
+    // User-table + PatientProfile split worked).
     const res = await api.post(`admin/users/${u.id}/correct-profile`, {
       data: {
         corrections: {
           dateOfBirth: newDob,
-          hasHCM: flipHcm,
+          hasHCM: false,
         },
         rationale: 'qa-test: admin DOB + condition correction',
       },
@@ -77,10 +85,11 @@ test.describe('Admin verification — profile', () => {
       `expected 200 from correct-profile, got ${res.status()}: ${await res.text()}`,
     ).toBe(200)
     const body = await res.json()
-    // dateOfBirth always varies (per-second granularity); hasHCM may or may
-    // not flip depending on previous state, so only the DOB field is
-    // guaranteed in `correctedFields`. That's enough to prove the User-table
-    // split worked (a pre-fix run would have 500'd on this exact payload).
+    // dateOfBirth always varies (per-second granularity); hasHCM stays
+    // false so it's only in `correctedFields` if Aisha was previously
+    // HCM-positive. Only the DOB field is guaranteed — that's enough to
+    // prove the User-table split worked (a pre-fix run would have 500'd
+    // on this exact payload).
     expect(body.correctedFields).toEqual(expect.arrayContaining(['dateOfBirth']))
     await api.dispose()
     await tc.dispose()
