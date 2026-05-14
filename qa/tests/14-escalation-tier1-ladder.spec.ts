@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { authedApi } from '../helpers/auth.js'
+import { authedApi, signInAdmin } from '../helpers/auth.js'
 import { PATIENTS, ADMINS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
 import { postJournalEntry, adminAcknowledgeAlert } from '../helpers/api.js'
 import { HOURS } from '../helpers/time.js'
-import { API_BASE_URL } from '../playwright.config.js'
+import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
 
 /**
  * Tier 1 escalation ladder (TESTING_FLOW_GUIDE §8.3).
@@ -109,6 +109,48 @@ test.describe('Tier 1 ladder progression via runScan', () => {
     await tc.runEscalationScan(new Date())
     const events = await tc.listEscalationEvents(tier1!.id)
     expect(events.some((e) => e.ladderStep === 'T4H'), 'ack should stop the ladder').toBeFalsy()
+
+    await patientApi.dispose()
+    await adminApi.dispose()
+    await tc.dispose()
+  })
+})
+
+test.describe('Escalation ladder copy after ack/resolve', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test('future ladder steps show "Not required" after admin acknowledges', async ({ page }) => {
+    // Bug from manual test: once an alert is ACKNOWLEDGED/RESOLVED, future
+    // ladder rungs (T+4h / T+8h / T+24h / T+48h) keep displaying "Not yet
+    // triggered" — misleading since the ladder advance is cancelled on ack.
+    // Fix swaps the copy to "Not required — alert acknowledged/resolved
+    // before this rung". This test verifies the swap from the admin UI.
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.james.email)
+    await tc.resetUser(u.id)
+
+    const patientApi = await authedApi(API_BASE_URL, PATIENTS.james.email)
+    await postJournalEntry(patientApi, {
+      measuredAt: new Date().toISOString(),
+      systolicBP: 118,
+      diastolicBP: 74,
+      pulse: 68,
+    })
+    await new Promise((r) => setTimeout(r, 1500))
+    const tier1 = (await tc.listAlerts(u.id)).find((a) => a.tier === 'TIER_1_CONTRAINDICATION')
+    expect(tier1, 'expected Tier 1 contraindication for james reset').toBeDefined()
+
+    const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+    await adminAcknowledgeAlert(adminApi, tier1!.id)
+
+    await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients/${u.id}?alert=${tier1!.id}`)
+
+    // After ack, untriggered rungs (T+4h, T+8h, etc.) should now read "Not
+    // required", NOT "Not yet triggered". Assert both directions to catch a
+    // regression where the swap is partially applied.
+    await expect(page.getByText('Not required — alert acknowledged before this rung').first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Not yet triggered')).toHaveCount(0)
 
     await patientApi.dispose()
     await adminApi.dispose()
