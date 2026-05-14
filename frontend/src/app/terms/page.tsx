@@ -64,15 +64,21 @@ export default function TermsPage() {
             </section>
 
             {/* 3. Important: not medical advice */}
-            <section className="p-4 bg-[#fee2e2] border border-[#fca5a5] rounded-lg">
-              <h2 className="font-semibold text-[#7f1d1d] text-xl mb-3">3. Cardioplace is not medical advice</h2>
-              <p className="mb-3 text-[#7f1d1d]">
+            <section
+              className="p-4 border rounded-lg"
+              style={{
+                backgroundColor: 'var(--brand-alert-red-light)',
+                borderColor: 'var(--brand-alert-red)',
+              }}
+            >
+              <h2 className="font-semibold text-xl mb-3" style={{ color: 'var(--brand-alert-red-text)' }}>3. Cardioplace is not medical advice</h2>
+              <p className="mb-3" style={{ color: 'var(--brand-alert-red-text)' }}>
                 Cardioplace does <strong>not</strong> diagnose, treat, or cure any
                 condition. The information you see in the app is for monitoring
                 and communication only. It is not a substitute for the judgement
                 of a licensed clinician.
               </p>
-              <p className="text-[#7f1d1d]">
+              <p style={{ color: 'var(--brand-alert-red-text)' }}>
                 <strong>If you think you are having an emergency — chest pain,
                 trouble breathing, sudden weakness, severe headache, or any
                 symptom that frightens you — call 911 or go to the nearest
