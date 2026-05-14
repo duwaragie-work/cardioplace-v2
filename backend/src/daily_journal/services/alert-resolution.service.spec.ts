@@ -37,6 +37,11 @@ describe('AlertResolutionService', () => {
       escalationEvent: {
         updateMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 0 }),
       },
+      notification: {
+        // Resolve handler fires a patient notification for Tier 1 + BP L2.
+        // Mocked here so the resolve path doesn't crash on undefined.
+        create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
+      },
     }
     ;(prisma.deviationAlert.findUnique as jest.Mock<any>).mockResolvedValue(
       baseAlert,
@@ -129,6 +134,31 @@ describe('AlertResolutionService', () => {
         resolutionRationale: 'Patient switched to labetalol',
       })
       expect(r.status).toBe('RESOLVED')
+    })
+
+    it('terminal resolve writes resolvedAt + resolvedBy + action to DeviationAlert (JCAHO audit)', async () => {
+      // Regression — original handler set status/resolvedBy/resolutionAction
+      // but NOT resolvedAt, leaving the canonical alert-level timestamp blank
+      // in the 15-field audit footer even though the EscalationEvent rows
+      // carried it. Symmetric to the acknowledge handler.
+      prisma.deviationAlert.findUnique.mockResolvedValue({
+        ...baseAlert,
+        tier: 'TIER_1_CONTRAINDICATION',
+      })
+      await service.resolve(alertId, adminId, {
+        resolutionAction: 'TIER1_DISCONTINUED',
+        resolutionRationale: 'Patient switched to labetalol',
+      })
+      expect(prisma.deviationAlert.update).toHaveBeenCalledWith({
+        where: { id: alertId },
+        data: expect.objectContaining({
+          status: 'RESOLVED',
+          resolvedAt: expect.any(Date),
+          resolvedBy: adminId,
+          resolutionAction: 'TIER1_DISCONTINUED',
+          resolutionRationale: 'Patient switched to labetalol',
+        }),
+      })
     })
 
     it('Tier 2 #1 (REVIEWED_NO_ACTION) no-rationale → 400', async () => {

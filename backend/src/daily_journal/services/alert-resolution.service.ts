@@ -129,10 +129,17 @@ export class AlertResolutionService {
     // Admin resolution is independent of patient acknowledgment: the patient
     // still gets to click "I've seen this" on their detail page when the
     // alert is dismissible. acknowledgedAt is patient-only state.
+    //
+    // `resolvedAt` on DeviationAlert is the canonical timestamp the JCAHO
+    // NPSG.03.06.01 15-field audit footer reads for the "Resolved" row.
+    // Symmetric to the ack handler's `acknowledgedAt` write — without it the
+    // alert-level audit shows a blank cell even though the event-level
+    // timestamps update correctly.
     await this.prisma.deviationAlert.update({
       where: { id: alertId },
       data: {
         status: 'RESOLVED',
+        resolvedAt: now,
         resolutionAction: dto.resolutionAction,
         resolutionRationale: dto.resolutionRationale ?? null,
         resolvedBy: adminId,
