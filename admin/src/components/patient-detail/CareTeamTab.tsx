@@ -197,7 +197,7 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
   if (practices.length === 0) {
     return (
       <div className="bg-white rounded-2xl p-8 text-center" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
-        <Building2 className="w-7 h-7 mx-auto mb-2" style={{ color: 'var(--brand-warning-amber)' }} />
+        <Building2 className="w-7 h-7 mx-auto mb-2" style={{ color: 'var(--brand-warning-amber-text)' }} />
         <p className="text-[14px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
           No practices configured
         </p>
@@ -221,7 +221,7 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
         {assignment ? (
           <ShieldCheck className="w-5 h-5 shrink-0" style={{ color: 'var(--brand-success-green)' }} />
         ) : (
-          <AlertTriangle className="w-5 h-5 shrink-0" style={{ color: 'var(--brand-warning-amber)' }} />
+          <AlertTriangle className="w-5 h-5 shrink-0" style={{ color: 'var(--brand-warning-amber-text)' }} />
         )}
         <div>
           <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
@@ -318,7 +318,7 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
         {error && (
           <div
             className="rounded-lg px-3 py-2 text-[12px] font-semibold"
-            style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)' }}
+            style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
           >
             {error}
           </div>

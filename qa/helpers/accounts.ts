@@ -39,6 +39,56 @@ export const PATIENTS = {
     archetype: 'Control — well-controlled HTN, no alerts',
     expectedRuleId: null,
   },
+
+  // ─── Bucket B personas (8 of 11) ─────────────────────────────────────────
+  carol: {
+    email: process.env.PATIENT_CAROL_EMAIL ?? 'carol.miller@cardioplace.test',
+    name: 'Carol Miller',
+    archetype: 'HFrEF + loop diuretic — clean (no NDHP)',
+    expectedRuleId: null,
+  },
+  mike: {
+    email: process.env.PATIENT_MIKE_EMAIL ?? 'mike.peterson@cardioplace.test',
+    name: 'Mike Peterson',
+    archetype: 'HFpEF — preserved EF, ARB regimen',
+    expectedRuleId: null,
+  },
+  olive: {
+    email: process.env.PATIENT_OLIVE_EMAIL ?? 'olive.thompson@cardioplace.test',
+    name: 'Olive Thompson',
+    archetype: 'Loop diuretic + age 70 — no HF',
+    expectedRuleId: null,
+  },
+  paul: {
+    email: process.env.PATIENT_PAUL_EMAIL ?? 'paul.davis@cardioplace.test',
+    name: 'Paul Davis',
+    archetype: 'CAD + age 65+',
+    expectedRuleId: null,
+  },
+  kate: {
+    email: process.env.PATIENT_KATE_EMAIL ?? 'kate.wong@cardioplace.test',
+    name: 'Kate Wong',
+    archetype: 'HCM + DHP-CCB — vasodilator concern',
+    expectedRuleId: null,
+  },
+  nora: {
+    email: process.env.PATIENT_NORA_EMAIL ?? 'nora.adams@cardioplace.test',
+    name: 'Nora Adams',
+    archetype: 'Bradycardia + BB — HR rule suppression',
+    expectedRuleId: null,
+  },
+  iris: {
+    email: process.env.PATIENT_IRIS_EMAIL ?? 'iris.kim@cardioplace.test',
+    name: 'Iris Kim',
+    archetype: 'AFib + anticoag + BB — single-reading HR exception target',
+    expectedRuleId: null,
+  },
+  jane: {
+    email: process.env.PATIENT_JANE_EMAIL ?? 'jane.smith@cardioplace.test',
+    name: 'Jane Smith',
+    archetype: '65+ control — no comorbidities, age threshold edges',
+    expectedRuleId: null,
+  },
 } as const
 
 export type SeedPatientKey = keyof typeof PATIENTS

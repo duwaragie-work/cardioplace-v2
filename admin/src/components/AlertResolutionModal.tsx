@@ -45,6 +45,7 @@ interface Props {
 
 function variantChromeFor(tier: AlertTier | string | null): {
   accent: string;
+  accentText: string;
   accentLight: string;
   icon: React.ReactNode;
   title: string;
@@ -54,6 +55,7 @@ function variantChromeFor(tier: AlertTier | string | null): {
   if (group === 'BP_LEVEL_2') {
     return {
       accent: 'var(--brand-alert-red)',
+      accentText: 'var(--brand-alert-red-text)',
       accentLight: 'var(--brand-alert-red-light)',
       icon: <AlertTriangle className="w-4 h-4" />,
       title: 'Resolve BP Level 2 alert',
@@ -63,6 +65,7 @@ function variantChromeFor(tier: AlertTier | string | null): {
   if (group === 'TIER_1') {
     return {
       accent: 'var(--brand-alert-red)',
+      accentText: 'var(--brand-alert-red-text)',
       accentLight: 'var(--brand-alert-red-light)',
       icon: <Pill className="w-4 h-4" />,
       title: 'Resolve Tier 1 contraindication',
@@ -72,6 +75,7 @@ function variantChromeFor(tier: AlertTier | string | null): {
   if (group === 'TIER_2') {
     return {
       accent: 'var(--brand-warning-amber)',
+      accentText: 'var(--brand-warning-amber-text)',
       accentLight: 'var(--brand-warning-amber-light)',
       icon: <ArrowUp className="w-4 h-4" />,
       title: 'Resolve Tier 2 discrepancy',
@@ -80,6 +84,7 @@ function variantChromeFor(tier: AlertTier | string | null): {
   }
   return {
     accent: 'var(--brand-text-muted)',
+    accentText: 'var(--brand-text-muted)',
     accentLight: 'var(--brand-background)',
     icon: <AlertTriangle className="w-4 h-4" />,
     title: 'Resolve alert',
@@ -209,7 +214,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                   <p className="text-[12px] mt-0.5 truncate" style={{ color: 'var(--brand-text-muted)' }}>
                     {alert.patient?.name ?? 'Unknown patient'}
                     {alert.journalEntry?.systolicBP != null && alert.journalEntry?.diastolicBP != null && (
-                      <span className="ml-2 font-semibold" style={{ color: variant.accent }}>
+                      <span className="ml-2 font-semibold" style={{ color: variant.accentText }}>
                         {alert.journalEntry.systolicBP}/{alert.journalEntry.diastolicBP} mmHg
                       </span>
                     )}
@@ -238,7 +243,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                     color: 'var(--brand-text-primary)',
                   }}
                 >
-                  <p className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: variant.accent }}>
+                  <p className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: variant.accentText }}>
                     Patient-facing message
                   </p>
                   {alert.patientMessage}
@@ -283,7 +288,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                               <p
                                 className="text-[13px] font-semibold leading-snug"
                                 style={{
-                                  color: selected ? variant.accent : 'var(--brand-text-primary)',
+                                  color: selected ? variant.accentText : 'var(--brand-text-primary)',
                                   wordBreak: 'break-word',
                                 }}
                               >
@@ -303,7 +308,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                                     className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
                                     style={{
                                       backgroundColor: 'var(--brand-warning-amber-light)',
-                                      color: 'var(--brand-warning-amber)',
+                                      color: 'var(--brand-warning-amber-text)',
                                     }}
                                   >
                                     Rationale required
@@ -370,7 +375,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
               {error && (
                 <p
                   className="text-[12.5px] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
-                  style={{ color: 'var(--brand-alert-red)', backgroundColor: 'var(--brand-alert-red-light)' }}
+                  style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
                 >
                   {error}
                 </p>

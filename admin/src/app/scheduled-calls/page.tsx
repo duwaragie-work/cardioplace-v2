@@ -105,7 +105,7 @@ const STATUS_META: Record<string, { label: string; bg: string; color: string; ic
   missed: {
     label: 'Missed',
     bg: 'var(--brand-alert-red-light)',
-    color: 'var(--brand-alert-red)',
+    color: 'var(--brand-alert-red-text)',
     icon: XCircle,
   },
   cancelled: {
@@ -117,8 +117,8 @@ const STATUS_META: Record<string, { label: string; bg: string; color: string; ic
 };
 
 const RISK_STYLES: Record<string, { bg: string; color: string }> = {
-  HIGH: { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)' },
-  ELEVATED: { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber)' },
+  HIGH: { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' },
+  ELEVATED: { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' },
   STANDARD: { bg: 'var(--brand-success-green-light)', color: 'var(--brand-success-green)' },
 };
 
@@ -375,7 +375,7 @@ function CallDetailModal({
                       disabled={acting}
                       onClick={() => handleAction('missed')}
                       className="w-full h-10 rounded-xl text-[13px] font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
-                      style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)', border: '1px solid var(--brand-alert-red)' }}
+                      style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)', border: '1px solid var(--brand-alert-red)' }}
                     >
                       <XCircle className="w-4 h-4" />
                       {t('provider.markMissed')}
@@ -479,7 +479,7 @@ export default function ScheduledCallsPage() {
             className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
             style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
           >
-            <Shield className="w-7 h-7" style={{ color: 'var(--brand-alert-red)' }} />
+            <Shield className="w-7 h-7" style={{ color: 'var(--brand-alert-red-text)' }} />
           </div>
           <h1 className="text-xl font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
             403 — Access Denied

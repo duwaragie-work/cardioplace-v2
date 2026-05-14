@@ -48,10 +48,10 @@ function tierBucket(t: string | null): TierBucket {
 
 function bucketChromeFilter(b: TierBucket): { color: string; bg: string } {
   switch (b) {
-    case 'BP_L2': return { color: 'var(--brand-alert-red)', bg: 'var(--brand-alert-red-light)' };
-    case 'TIER_1': return { color: 'var(--brand-alert-red)', bg: 'var(--brand-alert-red-light)' };
-    case 'TIER_2': return { color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)' };
-    case 'BP_L1': return { color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)' };
+    case 'BP_L2': return { color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)' };
+    case 'TIER_1': return { color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)' };
+    case 'TIER_2': return { color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
+    case 'BP_L1': return { color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
     case 'TIER_3': return { color: 'var(--brand-accent-teal)', bg: 'var(--brand-accent-teal-light)' };
     default: return { color: 'var(--brand-text-muted)', bg: 'var(--brand-background)' };
   }
@@ -109,6 +109,21 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
       return true;
     });
   }, [nonTier3Alerts, tierFilter, statusFilter]);
+
+  // Cluster 6 Q4 (Manisha 5/9/26) — group alerts that came off the same
+  // reading (matched on JournalEntry.measuredAt — proxy for journalEntryId
+  // since the API doesn't surface the id directly). The "2 active alerts"
+  // header makes it clear to the provider that the rows are independent
+  // findings on one event (e.g. pregnancy ACE + L2 BP + L1 high).
+  const groupCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const a of filtered) {
+      const key = a.journalEntry?.measuredAt;
+      if (!key) continue;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [filtered]);
 
   const resolvable: ResolvableAlert | null = useMemo(() => {
     if (!resolving) return null;
@@ -260,6 +275,14 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
           {filtered.map((a, idx) => {
             const expanded = expandedId === a.id;
             const toggle = () => setExpandedId(expanded ? null : a.id);
+            // Cluster 6 Q4 — render a "Same reading" group header above
+            // the first alert of any reading that produced ≥2 rows.
+            const measuredAtKey = a.journalEntry?.measuredAt ?? null;
+            const groupCount = measuredAtKey ? (groupCounts.get(measuredAtKey) ?? 1) : 1;
+            const prevMeasuredAtKey =
+              idx > 0 ? (filtered[idx - 1].journalEntry?.measuredAt ?? null) : null;
+            const isGroupStart =
+              groupCount >= 2 && measuredAtKey != null && measuredAtKey !== prevMeasuredAtKey;
             return (
               <div
                 key={a.id}
@@ -267,6 +290,18 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
                   borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none',
                 }}
               >
+                {isGroupStart && (
+                  <div
+                    className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider"
+                    style={{
+                      backgroundColor: 'var(--brand-background)',
+                      color: 'var(--brand-text-muted)',
+                      borderBottom: '1px solid var(--brand-border)',
+                    }}
+                  >
+                    {groupCount} alerts from the same reading — independently resolvable
+                  </div>
+                )}
                 <AlertCard
                   alert={a}
                   expanded={expanded}

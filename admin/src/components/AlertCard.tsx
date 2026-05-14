@@ -56,13 +56,13 @@ function tierBucket(t: string | null): TierBucket {
 function bucketChrome(b: TierBucket) {
   switch (b) {
     case 'BP_L2':
-      return { label: 'BP Level 2', color: 'var(--brand-alert-red)', bg: 'var(--brand-alert-red-light)', icon: <ShieldAlert className="w-3 h-3" /> };
+      return { label: 'BP Level 2', color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)', icon: <ShieldAlert className="w-3 h-3" /> };
     case 'TIER_1':
-      return { label: 'Tier 1', color: 'var(--brand-alert-red)', bg: 'var(--brand-alert-red-light)', icon: <Pill className="w-3 h-3" /> };
+      return { label: 'Tier 1', color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)', icon: <Pill className="w-3 h-3" /> };
     case 'TIER_2':
-      return { label: 'Tier 2', color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)', icon: <ArrowUp className="w-3 h-3" /> };
+      return { label: 'Tier 2', color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)', icon: <ArrowUp className="w-3 h-3" /> };
     case 'BP_L1':
-      return { label: 'BP Level 1', color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)', icon: <Activity className="w-3 h-3" /> };
+      return { label: 'BP Level 1', color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)', icon: <Activity className="w-3 h-3" /> };
     case 'TIER_3':
       return { label: 'Tier 3', color: 'var(--brand-accent-teal)', bg: 'var(--brand-accent-teal-light)', icon: <Bell className="w-3 h-3" /> };
     default:
@@ -228,7 +228,7 @@ export default function AlertCard({
             {alert.escalated && (
               <span
                 className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)' }}
+                style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
               >
                 Escalated
               </span>

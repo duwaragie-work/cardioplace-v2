@@ -631,13 +631,43 @@ export class IntakeService {
       }
 
       const patch = this.stripUndefined(dto.corrections)
+      // dateOfBirth lives on User, not PatientProfile. Pull it out so the
+      // patientProfile.update below doesn't try to write a column that
+      // doesn't exist on the table (Prisma rejects → 500). Mirrors the same
+      // split already used in upsertProfile (patient self-report path).
+      const dobPatch = patch.dateOfBirth
+      delete (patch as Partial<IntakeProfileDto>).dateOfBirth
+
       this.validatePregnancyShape(patch, existing)
 
       const changes = this.diffProfile(existing, patch)
-      if (!changes.length) {
+
+      // Track DOB changes separately so a DOB-only correction isn't falsely
+      // rejected as "no corrections supplied". User row is queried only when
+      // a DOB patch was actually provided.
+      const existingUser =
+        dobPatch !== undefined
+          ? await tx.user.findUnique({
+              where: { id: patientUserId },
+              select: { dateOfBirth: true },
+            })
+          : null
+      const dobChanged =
+        dobPatch !== undefined &&
+        this.normalizeDateForDiff(dobPatch) !==
+          this.normalizeDateForDiff(existingUser?.dateOfBirth ?? null)
+
+      if (!changes.length && !dobChanged) {
         throw new BadRequestException(
           'No corrections supplied. Use verify-profile to confirm without changes.',
         )
+      }
+
+      if (dobPatch !== undefined) {
+        await tx.user.update({
+          where: { id: patientUserId },
+          data: { dateOfBirth: dobPatch === null ? null : new Date(dobPatch) },
+        })
       }
 
       const updated = await tx.patientProfile.update({
@@ -661,11 +691,39 @@ export class IntakeService {
         rationale: dto.rationale,
       })
 
+      // Joint Commission NPSG.03.06.01 audit trail — DOB corrections need
+      // their own log row because dateOfBirth isn't in
+      // VERIFIABLE_PROFILE_FIELDS (lives on User, not PatientProfile).
+      if (dobChanged) {
+        await tx.profileVerificationLog.create({
+          data: {
+            userId: patientUserId,
+            fieldPath: 'user.dateOfBirth',
+            previousValue: existingUser?.dateOfBirth
+              ? (existingUser.dateOfBirth.toISOString() as Prisma.InputJsonValue)
+              : Prisma.JsonNull,
+            newValue:
+              dobPatch === null
+                ? Prisma.JsonNull
+                : (new Date(dobPatch).toISOString() as Prisma.InputJsonValue),
+            changedBy: adminId,
+            changedByRole: VerifierRole.ADMIN,
+            changeType: VerificationChangeType.ADMIN_CORRECT,
+            discrepancyFlag: true,
+            rationale: dto.rationale,
+          },
+        })
+      }
+
+      const correctedFields: string[] = [
+        ...changes.map((c) => c.field as string),
+        ...(dobChanged ? ['dateOfBirth'] : []),
+      ]
       return {
         statusCode: 200,
         message: 'Profile corrected',
         data: this.serializeProfile(updated),
-        correctedFields: changes.map((c) => c.field),
+        correctedFields,
       }
     }, TX_OPTIONS)
   }

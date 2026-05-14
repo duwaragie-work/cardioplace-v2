@@ -32,13 +32,14 @@ test.describe('Check-in wizard — UI spine', () => {
 
   test('Continue advances from step 1 to BP entry', async ({ page }) => {
     await page.goto('/check-in')
-    const continueBtn = page.locator(byTestId(T.checkin.next))
-      .or(page.getByRole('button', { name: /continue|next/i }))
-    await continueBtn.first().click()
-    // Step 2 should expose systolic/diastolic inputs.
-    const systolic = page.locator(byTestId(T.checkin.systolic))
-      .or(page.getByLabel(/systolic|top number/i).first())
-    await expect(systolic.first()).toBeVisible({ timeout: 10_000 })
+    // Wait for step 1 to actually mount + hydrate before clicking Next.
+    // Next 16 ships interactive DOM ahead of the React onClick attachment;
+    // a straight-to-click race occasionally swallows the goNext() call,
+    // leaving the wizard stuck on B1 long enough for the systolic-input
+    // assertion below to time out.
+    await expect(page.locator(byTestId(T.checkin.step(1)))).toBeVisible()
+    await page.locator(byTestId(T.checkin.next)).click()
+    await expect(page.locator(byTestId(T.checkin.systolic))).toBeVisible({ timeout: 10_000 })
   })
 })
 

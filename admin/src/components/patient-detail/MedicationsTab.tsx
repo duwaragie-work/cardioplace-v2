@@ -237,7 +237,7 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
       {error && (
         <div
           className="rounded-lg px-4 py-2.5 text-[12.5px] font-semibold"
-          style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)' }}
+          style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
         >
           {error}
         </div>
@@ -364,8 +364,8 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
                   borderTop: '1px solid var(--brand-border)',
                 }}
               >
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-warning-amber)' }} />
-                <p className="text-[11.5px] font-semibold" style={{ color: 'var(--brand-warning-amber)' }}>
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-warning-amber-text)' }} />
+                <p className="text-[11.5px] font-semibold" style={{ color: 'var(--brand-warning-amber-text)' }}>
                   Action required — confirm or reject the entry to reconcile this medication.
                 </p>
               </div>
@@ -424,7 +424,7 @@ function statusChrome(status: ReconStatus): {
       return {
         label: 'Discrepancy',
         bg: 'var(--brand-warning-amber-light)',
-        color: 'var(--brand-warning-amber)',
+        color: 'var(--brand-warning-amber-text)',
         icon: <AlertTriangle className="w-3 h-3" />,
       };
     case 'PENDING_PROVIDER_ENTRY':
@@ -442,7 +442,7 @@ function statusChrome(status: ReconStatus): {
       return {
         label: 'Rejected',
         bg: 'var(--brand-alert-red-light)',
-        color: 'var(--brand-alert-red)',
+        color: 'var(--brand-alert-red-text)',
         icon: <XIcon className="w-3 h-3" />,
       };
     case 'DISCONTINUED':
@@ -468,9 +468,9 @@ function verificationChrome(status: MedicationVerificationStatus): { label: stri
     case 'VERIFIED':
       return { label: 'Verified', color: 'var(--brand-success-green)', bg: 'var(--brand-success-green-light)' };
     case 'REJECTED':
-      return { label: 'Rejected', color: 'var(--brand-alert-red)', bg: 'var(--brand-alert-red-light)' };
+      return { label: 'Rejected', color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)' };
     case 'AWAITING_PROVIDER':
-      return { label: 'Awaiting provider', color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)' };
+      return { label: 'Awaiting provider', color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
     case 'UNVERIFIED':
     default:
       return { label: 'Unverified', color: 'var(--brand-text-muted)', bg: 'var(--brand-background)' };

@@ -86,10 +86,10 @@ function tierBucket(t: string | null): TierFilter | 'OTHER' {
 
 function tierChrome(b: TierFilter | 'OTHER'): { label: string; color: string; bg: string } {
   switch (b) {
-    case 'BP_L2': return { label: 'BP L2', color: 'var(--brand-alert-red)', bg: 'var(--brand-alert-red-light)' };
-    case 'TIER_1': return { label: 'Tier 1', color: 'var(--brand-alert-red)', bg: 'var(--brand-alert-red-light)' };
-    case 'TIER_2': return { label: 'Tier 2', color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)' };
-    case 'BP_L1': return { label: 'BP L1', color: 'var(--brand-warning-amber)', bg: 'var(--brand-warning-amber-light)' };
+    case 'BP_L2': return { label: 'BP L2', color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)' };
+    case 'TIER_1': return { label: 'Tier 1', color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)' };
+    case 'TIER_2': return { label: 'Tier 2', color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
+    case 'BP_L1': return { label: 'BP L1', color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
     case 'TIER_3': return { label: 'Tier 3', color: 'var(--brand-accent-teal)', bg: 'var(--brand-accent-teal-light)' };
     default: return { label: 'Other', color: 'var(--brand-text-muted)', bg: 'var(--brand-background)' };
   }
@@ -294,7 +294,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
               className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
               style={{
                 backgroundColor: 'var(--brand-warning-amber-light)',
-                color: 'var(--brand-warning-amber)',
+                color: 'var(--brand-warning-amber-text)',
               }}
               title="Patient missed at least one pre-measurement checklist item"
             >
@@ -362,6 +362,30 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
             icon={<WeightIcon className="w-3 h-3" />}
           />
         )}
+        {entry.singleReadingFinalized && (
+          // Cluster 6 Q2 (Manisha 5/9/26) — flag readings where the engine
+          // had to fire on a single-reading session (5-min timeout finalized
+          // before a second reading landed). Provider should treat the
+          // threshold cross as provisional until next session.
+          <span
+            className="ml-auto inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+            style={{
+              // Chip pattern: amber-light bg + amber-800 chip text + vibrant
+              // amber-500 border. Author previously used the non-existent
+              // `--brand-warning-amber-bg` token (fell back to hex) and put
+              // the BG-role `--brand-warning-amber` token as the text color;
+              // after §B's revert to vibrant orange-500, that paired the chip
+              // bg with vibrant-orange text → 3.31:1, failing AA Normal.
+              backgroundColor: 'var(--brand-warning-amber-light)',
+              color: 'var(--brand-warning-amber-text)',
+              border: '1px solid var(--brand-warning-amber)',
+            }}
+            title="Threshold crossed on an unaveraged reading. Confirm with next session."
+          >
+            <Clock className="w-3 h-3" />
+            Single-reading session
+          </span>
+        )}
       </div>
 
       {/* Medication row */}
@@ -388,7 +412,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
                 className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full"
                 style={{
                   backgroundColor: 'var(--brand-alert-red-light)',
-                  color: 'var(--brand-alert-red)',
+                  color: 'var(--brand-alert-red-text)',
                 }}
               >
                 <XCircle className="w-3 h-3" />
@@ -441,7 +465,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
                 className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full"
                 style={{
                   backgroundColor: 'var(--brand-alert-red-light)',
-                  color: 'var(--brand-alert-red)',
+                  color: 'var(--brand-alert-red-text)',
                 }}
               >
                 <Activity className="w-3 h-3" />
@@ -468,7 +492,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
       {/* Suboptimal — failed checklist items */}
       {entry.suboptimalMeasurement && entry.failedConditions.length > 0 && (
         <div className="mb-3">
-          <span className="text-[10px] font-bold uppercase tracking-wider block mb-1.5" style={{ color: 'var(--brand-warning-amber)' }}>
+          <span className="text-[10px] font-bold uppercase tracking-wider block mb-1.5" style={{ color: 'var(--brand-warning-amber-text)' }}>
             Failed checklist items
           </span>
           <div className="flex flex-wrap gap-1.5">
@@ -478,7 +502,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
                 className="text-[11px] font-medium px-2 py-0.5 rounded-full"
                 style={{
                   backgroundColor: 'var(--brand-warning-amber-light)',
-                  color: 'var(--brand-warning-amber)',
+                  color: 'var(--brand-warning-amber-text)',
                 }}
               >
                 {CONDITION_LABELS[c] ?? c}

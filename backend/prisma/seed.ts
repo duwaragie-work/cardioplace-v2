@@ -176,6 +176,10 @@ async function main() {
       heartFailureType?: 'HFREF' | 'HFPEF' | 'UNKNOWN' | 'NOT_APPLICABLE'
       hasAFib?: boolean
       hasCAD?: boolean
+      hasHCM?: boolean
+      hasDCM?: boolean
+      hasBradycardia?: boolean
+      hasTachycardia?: boolean
       diagnosedHypertension?: boolean
     }
     medications: Array<{
@@ -186,8 +190,10 @@ async function main() {
         | 'BETA_BLOCKER'
         | 'DHP_CCB'
         | 'NDHP_CCB'
+        | 'LOOP_DIURETIC'
         | 'STATIN'
         | 'ANTICOAGULANT'
+        | 'ANTIARRHYTHMIC'
       frequency: 'ONCE_DAILY' | 'TWICE_DAILY'
       verificationStatus: 'VERIFIED' | 'UNVERIFIED'
     }>
@@ -325,6 +331,220 @@ async function main() {
         { daysAgo: 13, sbp: 126, dbp: 78, pulse: 72 },
       ],
       archetype: 'Control — well-controlled HTN, no alerts',
+    },
+
+    // ─── Bucket B personas (8 of 11) ─────────────────────────────────────────
+    // Added for qa/tests/09 Bucket B coverage. Keep readings benign so they
+    // don't accidentally fire alerts on seed import — tests post the actual
+    // alert-triggering readings via the API. Defer Dana / Larry / Eve until
+    // Cluster 6 needs them; tests substitute closest existing persona or
+    // mark test.fixme with TODO.
+
+    {
+      email: 'carol.miller@cardioplace.test',
+      name: 'Carol Miller',
+      dateOfBirth: new Date('1958-09-12'),
+      gender: 'FEMALE',
+      heightCm: 165,
+      profile: {
+        hasHeartFailure: true,
+        heartFailureType: 'HFREF',
+      },
+      // HFrEF without the NDHP-CCB contraindication that James has — clean
+      // HFrEF persona for HF-rule tests that shouldn't be confounded by Tier 1.
+      medications: [
+        { drugName: 'Furosemide', drugClass: 'LOOP_DIURETIC', frequency: 'ONCE_DAILY', verificationStatus: 'VERIFIED' },
+        { drugName: 'Carvedilol', drugClass: 'BETA_BLOCKER', frequency: 'TWICE_DAILY', verificationStatus: 'VERIFIED' },
+      ],
+      threshold: {
+        sbpUpperTarget: 130,
+        sbpLowerTarget: 85,
+        dbpUpperTarget: 85,
+        dbpLowerTarget: 55,
+        notes: 'HFrEF conservative lower bound per §4.2.',
+      },
+      readings: [
+        { daysAgo: 0, sbp: 120, dbp: 76, pulse: 70 },
+        { daysAgo: 3, sbp: 122, dbp: 78, pulse: 72 },
+        { daysAgo: 6, sbp: 118, dbp: 74, pulse: 68 },
+        { daysAgo: 10, sbp: 124, dbp: 80, pulse: 74 },
+        { daysAgo: 13, sbp: 121, dbp: 76, pulse: 70 },
+      ],
+      archetype: 'HFrEF + loop diuretic — clean (no NDHP)',
+    },
+    {
+      email: 'mike.peterson@cardioplace.test',
+      name: 'Mike Peterson',
+      dateOfBirth: new Date('1962-03-08'),
+      gender: 'MALE',
+      heightCm: 178,
+      profile: {
+        hasHeartFailure: true,
+        heartFailureType: 'HFPEF',
+      },
+      // HFpEF — preserved EF, ARB-based regimen.
+      medications: [
+        { drugName: 'Losartan', drugClass: 'ARB', frequency: 'ONCE_DAILY', verificationStatus: 'VERIFIED' },
+      ],
+      threshold: {
+        sbpUpperTarget: 130,
+        sbpLowerTarget: 110,
+        dbpUpperTarget: 80,
+        dbpLowerTarget: 60,
+        notes: 'HFpEF lower bound 110 per §4.9.',
+      },
+      readings: [
+        { daysAgo: 0, sbp: 128, dbp: 76, pulse: 76 },
+        { daysAgo: 3, sbp: 124, dbp: 74, pulse: 74 },
+        { daysAgo: 6, sbp: 130, dbp: 78, pulse: 78 },
+        { daysAgo: 10, sbp: 126, dbp: 76, pulse: 76 },
+        { daysAgo: 13, sbp: 122, dbp: 74, pulse: 72 },
+      ],
+      archetype: 'HFpEF — preserved EF, ARB regimen',
+    },
+    {
+      email: 'olive.thompson@cardioplace.test',
+      name: 'Olive Thompson',
+      dateOfBirth: new Date('1955-06-20'),
+      gender: 'FEMALE',
+      heightCm: 160,
+      profile: {
+        diagnosedHypertension: true,
+      },
+      // Loop diuretic + age 70+ but no heart failure — orthostatic risk
+      // persona for the loop-diuretic SBP <90 / 90-92 band tests.
+      medications: [
+        { drugName: 'Furosemide', drugClass: 'LOOP_DIURETIC', frequency: 'ONCE_DAILY', verificationStatus: 'VERIFIED' },
+      ],
+      readings: [
+        { daysAgo: 0, sbp: 122, dbp: 70, pulse: 76 },
+        { daysAgo: 3, sbp: 118, dbp: 68, pulse: 74 },
+        { daysAgo: 6, sbp: 124, dbp: 72, pulse: 78 },
+        { daysAgo: 10, sbp: 120, dbp: 70, pulse: 76 },
+        { daysAgo: 13, sbp: 116, dbp: 66, pulse: 72 },
+      ],
+      archetype: 'Loop diuretic + age 70 — no HF',
+    },
+    {
+      email: 'paul.davis@cardioplace.test',
+      name: 'Paul Davis',
+      dateOfBirth: new Date('1957-04-15'),
+      gender: 'MALE',
+      heightCm: 175,
+      profile: {
+        hasCAD: true,
+      },
+      // CAD + 65+ — different from Rita (CAD younger), distinct edge case
+      // for age threshold deltas on top of CAD.
+      medications: [
+        { drugName: 'Atorvastatin', drugClass: 'STATIN', frequency: 'ONCE_DAILY', verificationStatus: 'VERIFIED' },
+        { drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER', frequency: 'TWICE_DAILY', verificationStatus: 'VERIFIED' },
+      ],
+      readings: [
+        { daysAgo: 0, sbp: 128, dbp: 76, pulse: 70 },
+        { daysAgo: 3, sbp: 124, dbp: 74, pulse: 68 },
+        { daysAgo: 6, sbp: 130, dbp: 78, pulse: 72 },
+        { daysAgo: 10, sbp: 126, dbp: 76, pulse: 70 },
+        { daysAgo: 13, sbp: 122, dbp: 74, pulse: 68 },
+      ],
+      archetype: 'CAD + age 65+',
+    },
+    {
+      email: 'kate.wong@cardioplace.test',
+      name: 'Kate Wong',
+      dateOfBirth: new Date('1969-11-30'),
+      gender: 'FEMALE',
+      heightCm: 162,
+      profile: {
+        hasHCM: true,
+      },
+      // HCM + DHP-CCB vasodilator — Amlodipine on HCM is the classic
+      // afterload-reduction concern for outflow obstruction.
+      medications: [
+        { drugName: 'Amlodipine', drugClass: 'DHP_CCB', frequency: 'ONCE_DAILY', verificationStatus: 'VERIFIED' },
+      ],
+      threshold: {
+        sbpUpperTarget: 130,
+        sbpLowerTarget: 110,
+        dbpUpperTarget: 80,
+        dbpLowerTarget: 60,
+        notes: 'HCM lower bound 110 — outflow obstruction risk.',
+      },
+      readings: [
+        { daysAgo: 0, sbp: 124, dbp: 76, pulse: 72 },
+        { daysAgo: 3, sbp: 128, dbp: 78, pulse: 74 },
+        { daysAgo: 6, sbp: 122, dbp: 74, pulse: 70 },
+        { daysAgo: 10, sbp: 126, dbp: 76, pulse: 72 },
+        { daysAgo: 13, sbp: 120, dbp: 72, pulse: 68 },
+      ],
+      archetype: 'HCM + DHP-CCB — vasodilator concern',
+    },
+    {
+      email: 'nora.adams@cardioplace.test',
+      name: 'Nora Adams',
+      dateOfBirth: new Date('1965-07-22'),
+      gender: 'FEMALE',
+      heightCm: 164,
+      profile: {
+        hasBradycardia: true,
+      },
+      // Bradycardia diagnosis + Metoprolol — HR rules suppressed within
+      // expected-on-BB band; floor still fires.
+      medications: [
+        { drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER', frequency: 'TWICE_DAILY', verificationStatus: 'VERIFIED' },
+      ],
+      readings: [
+        { daysAgo: 0, sbp: 122, dbp: 76, pulse: 58 },
+        { daysAgo: 3, sbp: 120, dbp: 74, pulse: 56 },
+        { daysAgo: 6, sbp: 124, dbp: 78, pulse: 60 },
+        { daysAgo: 10, sbp: 126, dbp: 76, pulse: 62 },
+        { daysAgo: 13, sbp: 118, dbp: 72, pulse: 56 },
+      ],
+      archetype: 'Bradycardia + BB — HR rule suppression',
+    },
+    {
+      email: 'iris.kim@cardioplace.test',
+      name: 'Iris Kim',
+      dateOfBirth: new Date('1960-02-14'),
+      gender: 'FEMALE',
+      heightCm: 168,
+      profile: {
+        hasAFib: true,
+      },
+      // Distinct from Charles — different demographics + retains AFib +
+      // anticoag + BB combo so single-reading HR exception (Q5) tests have
+      // a non-Charles target.
+      medications: [
+        { drugName: 'Apixaban', drugClass: 'ANTICOAGULANT', frequency: 'TWICE_DAILY', verificationStatus: 'VERIFIED' },
+        { drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER', frequency: 'TWICE_DAILY', verificationStatus: 'VERIFIED' },
+      ],
+      readings: [
+        { daysAgo: 0, sbp: 130, dbp: 80, pulse: 88 },
+        { daysAgo: 3, sbp: 128, dbp: 78, pulse: 86 },
+        { daysAgo: 6, sbp: 132, dbp: 82, pulse: 90 },
+        { daysAgo: 10, sbp: 126, dbp: 76, pulse: 84 },
+        { daysAgo: 13, sbp: 124, dbp: 78, pulse: 82 },
+      ],
+      archetype: 'AFib + anticoag + BB — single-reading HR exception target',
+    },
+    {
+      email: 'jane.smith@cardioplace.test',
+      name: 'Jane Smith',
+      dateOfBirth: new Date('1956-12-03'),
+      gender: 'FEMALE',
+      heightCm: 167,
+      profile: {},
+      // Pure 65+ control with NO comorbidities and NO meds. Lets us test
+      // age 65+ threshold deltas without confounders from any condition.
+      medications: [],
+      readings: [
+        { daysAgo: 0, sbp: 124, dbp: 76, pulse: 72 },
+        { daysAgo: 3, sbp: 128, dbp: 78, pulse: 74 },
+        { daysAgo: 6, sbp: 122, dbp: 74, pulse: 70 },
+        { daysAgo: 10, sbp: 126, dbp: 76, pulse: 72 },
+        { daysAgo: 13, sbp: 120, dbp: 72, pulse: 68 },
+      ],
+      archetype: '65+ control — no comorbidities, age threshold edges',
     },
   ]
 

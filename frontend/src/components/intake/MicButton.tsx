@@ -213,7 +213,7 @@ export default function MicButton({
           width: 44,
           height: 44,
           backgroundColor: listening
-            ? '#b91c1c' // red-700 — paired with text below so not colour-only
+            ? 'var(--brand-alert-red)' // vibrant red-600, paired with text below so not colour-only
             : 'var(--brand-primary-purple-light)',
           color: listening ? 'white' : 'var(--brand-primary-purple)',
         }}
@@ -235,13 +235,13 @@ export default function MicButton({
           // text label is the non-colour pairing required by WCAG 2.2 AA Task 8.
           role="status"
           className="text-[12px] font-medium"
-          style={{ color: '#b91c1c' }}
+          style={{ color: 'var(--brand-alert-red)' }}
         >
           {t('intake.audio.dictateListening')}
         </span>
       )}
       {errorMsg && !listening && (
-        <span role="alert" className="text-[12px]" style={{ color: '#b91c1c' }}>
+        <span role="alert" className="text-[12px]" style={{ color: 'var(--brand-alert-red)' }}>
           {errorMsg}
         </span>
       )}

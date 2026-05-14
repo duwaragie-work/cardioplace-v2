@@ -237,7 +237,7 @@ export default function MedicationPhotoConfirmModal({
                 {lowConfidence && (
                   <p
                     className="text-[11px] mt-1"
-                    style={{ color: 'var(--brand-warning-amber)' }}
+                    style={{ color: 'var(--brand-warning-amber-text)' }}
                   >
                     {t('ocr.med.lowConfidenceWarning')}
                   </p>
@@ -573,7 +573,7 @@ function MatchBadge({
       className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
       style={{
         backgroundColor: 'var(--brand-warning-amber-light)',
-        color: 'var(--brand-warning-amber)',
+        color: 'var(--brand-warning-amber-text)',
       }}
       title="Not in catalog — will be added as freeform with provider review"
     >

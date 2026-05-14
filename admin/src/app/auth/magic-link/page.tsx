@@ -74,8 +74,11 @@ function MagicLinkHandler() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-white px-4">
       <div className="text-center max-w-md">
-        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <span className="text-2xl">!</span>
+        <div
+          className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
+          style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
+        >
+          <span className="text-2xl" style={{ color: 'var(--brand-alert-red-text)' }}>!</span>
         </div>
         <h2 className="text-xl font-bold text-[#170c1d] mb-2">Link expired or invalid</h2>
         <p className="text-[#6b7280] mb-6">{error}</p>

@@ -181,6 +181,93 @@ export const dcmRule: RuleFunction = (session, ctx) => {
   return null
 }
 
+// ─── Cluster 6 — HF decompensation + DHP-CCB side-effect ─────────────────────
+
+const HF_WEIGHT_DELTA_LBS = 2
+const HF_WEIGHT_DELTA_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Fires when an HF patient reports leg swelling OR shows >2 lbs weight gain
+ * in 24h. The HF-ARC 2024 panel calls these out as primary decompensation
+ * indicators. Tier 2 alert on its own dedicated axis so it co-exists with
+ * any HFREF / HFPEF / DCM SBP rule that also fires.
+ */
+export const hfDecompensationRule: RuleFunction = (session, ctx) => {
+  const isHF =
+    ctx.profile.hasHeartFailure ||
+    ctx.profile.hasDCM ||
+    ctx.profile.resolvedHFType === 'HFREF' ||
+    ctx.profile.resolvedHFType === 'HFPEF'
+  if (!isHF) return null
+
+  const reasons: string[] = []
+  if (session.symptoms.legSwelling) reasons.push('leg-swelling')
+
+  const weightDeltaPounds = computeWeightDelta(session, ctx)
+  if (weightDeltaPounds != null && weightDeltaPounds > HF_WEIGHT_DELTA_LBS) {
+    reasons.push(`weight-+${weightDeltaPounds.toFixed(1)}lbs/24h`)
+  }
+  if (reasons.length === 0) return null
+
+  return {
+    ruleId: RULE_IDS.HF_DECOMPENSATION,
+    tier: 'BP_LEVEL_1_LOW',
+    mode: 'STANDARD',
+    pulsePressure: getPulsePressure(session.systolicBP, session.diastolicBP),
+    suboptimalMeasurement: session.suboptimalMeasurement,
+    actualValue: session.systolicBP,
+    reason: `HF decompensation signal: ${reasons.join(', ')}.`,
+    metadata: { conditionLabel: 'HF decompensation' },
+  }
+}
+
+/**
+ * DHP-CCB peripheral edema is a known and usually benign side effect, but
+ * the prescriber wants to know about it (dose adjustment / class switch).
+ * Tier 3 — physician-facing only. Suppressed for HF patients because the HF
+ * decompensation rule above already fires the patient-visible alert.
+ */
+export const dhpCcbLegSwellingRule: RuleFunction = (session, ctx) => {
+  if (!session.symptoms.legSwelling) return null
+  const isHF =
+    ctx.profile.hasHeartFailure ||
+    ctx.profile.hasDCM ||
+    ctx.profile.resolvedHFType === 'HFREF' ||
+    ctx.profile.resolvedHFType === 'HFPEF'
+  if (isHF) return null
+  const onDhpCcb = ctx.contextMeds.some((m) => m.drugClass === 'DHP_CCB')
+  if (!onDhpCcb) return null
+
+  return {
+    ruleId: RULE_IDS.DHP_CCB_LEG_SWELLING,
+    tier: 'TIER_3_INFO',
+    mode: 'STANDARD',
+    pulsePressure: getPulsePressure(session.systolicBP, session.diastolicBP),
+    suboptimalMeasurement: session.suboptimalMeasurement,
+    actualValue: null,
+    reason: 'Leg swelling reported on DHP-CCB — peripheral edema side-effect.',
+    metadata: { conditionLabel: 'DHP-CCB peripheral edema' },
+  }
+}
+
+/**
+ * Returns the pound difference between the current session's weight and the
+ * most-recent prior weight within 24h, or null if either side is missing.
+ * Reads from optional `priorWeight` / `priorWeightAt` fields populated by
+ * the orchestrator via a one-shot Prisma lookup (added in Step 4).
+ */
+function computeWeightDelta(
+  session: Parameters<RuleFunction>[0],
+  _ctx: Parameters<RuleFunction>[1],
+): number | null {
+  const currentWeight = session.weight
+  const priorWeight = session.priorWeight ?? null
+  const priorWeightAt = session.priorWeightAt ?? null
+  if (currentWeight == null || priorWeight == null || priorWeightAt == null) return null
+  if (session.measuredAt.getTime() - priorWeightAt.getTime() > HF_WEIGHT_DELTA_MS) return null
+  return currentWeight - priorWeight
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 function lowAlert(

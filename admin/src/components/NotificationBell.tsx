@@ -265,7 +265,7 @@ export default function NotificationBell() {
                   className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0"
                   style={{
                     backgroundColor: 'var(--brand-alert-red-light)',
-                    color: 'var(--brand-alert-red)',
+                    color: 'var(--brand-alert-red-text)',
                   }}
                 >
                   {count} unread

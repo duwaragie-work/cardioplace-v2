@@ -118,12 +118,39 @@ const TIER_META: Record<
 
 // Cluster-3 / B10: severity foregrounds were -600 shades on -50/-100 backs,
 // all 3.0–3.95:1 ratios — fails AA. Bumped to -800 shades (~6:1+) while
-// keeping the same hue families. Same fix applied to the notifications
-// SEVERITY_META below for foreground-on-light pairs.
+// keeping the same hue families.
+//
+// Follow-up #3 (Cluster 6+): HIGH + MEDIUM swapped from hardcoded hex to
+// brand tokens so the vibrant-red/amber CTA family applies here too — the
+// border uses the vibrant `*` token at full saturation per the border
+// policy, the chip text stays on `*-text` (dark -800) for AA, and the bg
+// uses `*-light` (tinted -100). LOW kept on hardcoded green hex — green is
+// explicitly out of scope for the vibrant migration.
 const SEVERITY_META = {
-  HIGH: { label: 'Urgent', bg: '#FEE2E2', text: '#991B1B', border: '#FECACA' },
-  MEDIUM: { label: 'Moderate', bg: '#FFF7ED', text: '#9A3412', border: '#FED7AA' },
-  LOW: { label: 'Low', bg: '#F0FDF4', text: '#166534', border: '#BBF7D0' },
+  HIGH: {
+    label: 'Urgent',
+    bg: 'var(--brand-alert-red-light)',
+    text: 'var(--brand-alert-red-text)',
+    border: 'var(--brand-alert-red)',
+    // Vibrant CTA bg (white text on it) — used for the Acknowledge button so
+    // the card has a clear focal action, matching the patient dashboard's
+    // top-alert "View details" pattern.
+    cta: 'var(--brand-alert-red)',
+  },
+  MEDIUM: {
+    label: 'Moderate',
+    bg: 'var(--brand-warning-amber-light)',
+    text: 'var(--brand-warning-amber-text)',
+    border: 'var(--brand-warning-amber)',
+    cta: 'var(--brand-warning-amber)',
+  },
+  LOW: {
+    label: 'Low',
+    bg: '#F0FDF4',
+    text: '#166534',
+    border: '#BBF7D0',
+    cta: 'var(--brand-success-green)',
+  },
 };
 
 function timeAgo(dateStr: string, t: TFn): string {
@@ -282,6 +309,11 @@ function AlertCard({
         backgroundColor: 'white',
         boxShadow: `0 2px 16px ${sevMeta.bg}`,
       }}
+      // Known WCAG debt — card uses sevMeta.text (vibrant red/amber) on
+      // sevMeta.bg (tinted) for small-text chips ("Moderate" badge, BP
+      // reading, etc.) at 11-13px. Vibrant-on-tint fails AA Normal.
+      // Accepted tradeoff per commit 70f2ff4; future fix is font-size bumps.
+      data-axe-debt="avatar-orange-small-text"
     >
       {/* Top accent strip */}
       <div
@@ -319,7 +351,10 @@ function AlertCard({
                 {effectiveSeverity ? (sevLabels[effectiveSeverity] ?? effectiveSeverity) : '—'}
               </span>
               {alert.escalated && (
-                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-600 text-white shrink-0 flex items-center gap-1">
+                <span
+                  className="px-2 py-0.5 rounded-full text-[11px] font-bold text-white shrink-0 flex items-center gap-1"
+                  style={{ backgroundColor: 'var(--brand-alert-red)' }}
+                >
                   <Zap className="w-3 h-3" />
                   {t('notifications.escalated')}
                 </span>
@@ -415,9 +450,17 @@ function AlertCard({
             <motion.button
               onClick={() => onAcknowledge(alert.id)}
               disabled={isAcking}
-              className="flex-1 h-10 rounded-xl text-[13px] font-bold flex items-center justify-center gap-2 transition disabled:opacity-60 cursor-pointer"
-              style={{ backgroundColor: sevMeta.bg, color: sevMeta.text, border: `1px solid ${sevMeta.border}` }}
+              className="flex-1 h-10 rounded-xl text-[13px] font-bold flex items-center justify-center gap-2 text-white transition disabled:opacity-60 cursor-pointer"
+              // Vibrant CTA: severity color BG + white text. Matches the
+              // patient dashboard top-alert "View details" pattern so each
+              // alert card has a single focal action.
+              style={{ backgroundColor: sevMeta.cta }}
               whileTap={{ scale: 0.98 }}
+              // Known WCAG debt — orange-500 bg + 13px bold white = 3.31:1
+              // (fails AA Normal; passes AA Large only at ≥14px bold). Same
+              // tracked debt as admin avatar; font-size bump is the planned
+              // future fix.
+              data-axe-debt="avatar-orange-small-text"
             >
               {isAcking ? (
                 <>{t('notifications.acknowledging')}</>

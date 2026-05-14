@@ -50,7 +50,7 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
-import { ClinicalIntakeRequiredError, createJournalEntry } from '@/lib/services/journal.service';
+import { ClinicalIntakeRequiredError, createJournalEntry, finalizeSingleReadingSession } from '@/lib/services/journal.service';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
 import { hasDraft, loadDraft } from '@/lib/intake/draft';
 import {
@@ -122,6 +122,12 @@ interface FormData {
   newOnsetHeadache: boolean;
   ruqPain: boolean;
   edema: boolean;
+  // Cluster 6 (Manisha 5/10/26) — patient-driven signals for brady-symptomatic,
+  // HF decomp, palpitations, and orthostatic rules.
+  dizziness: boolean;
+  syncope: boolean;
+  palpitations: boolean;
+  legSwelling: boolean;
   otherSymptomsText: string;
 }
 
@@ -178,6 +184,10 @@ function emptyForm(): FormData {
     newOnsetHeadache: false,
     ruqPain: false,
     edema: false,
+    dizziness: false,
+    syncope: false,
+    palpitations: false,
+    legSwelling: false,
     otherSymptomsText: '',
   };
 }
@@ -971,6 +981,12 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
     { key: 'chestPainOrDyspnea', icon: <Wind className="w-5 h-5" />, text: t('checkin.b3.symptomChestPain') },
     { key: 'focalNeuroDeficit', icon: <Zap className="w-5 h-5" />, text: t('checkin.b3.symptomNeuro') },
     { key: 'severeEpigastricPain', icon: <Stethoscope className="w-5 h-5" />, text: t('checkin.b3.symptomStomach') },
+    // Cluster 6 (Manisha 5/10/26) — feed brady-symptomatic, palpitations,
+    // orthostatic, and HF-decomp engine rules.
+    { key: 'dizziness', icon: <Activity className="w-5 h-5" />, text: t('checkin.b3.symptomDizziness') },
+    { key: 'syncope', icon: <Activity className="w-5 h-5" />, text: t('checkin.b3.symptomSyncope') },
+    { key: 'palpitations', icon: <Heart className="w-5 h-5" />, text: t('checkin.b3.symptomPalpitations') },
+    { key: 'legSwelling', icon: <Droplets className="w-5 h-5" />, text: t('checkin.b3.symptomLegSwelling') },
   ];
   const pregnancy: { key: keyof FormData; icon: React.ReactNode; text: string }[] = [
     { key: 'newOnsetHeadache', icon: <Brain className="w-5 h-5" />, text: t('checkin.b3.symptomNewHeadache') },
@@ -990,7 +1006,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
 
       <div className="rounded-xl p-3 flex items-start gap-3"
         style={{ backgroundColor: 'var(--brand-alert-red-light)' }}>
-        <Heart className="w-4 h-4 mt-0.5 shrink-0" style={{ color: 'var(--brand-alert-red)' }} />
+        <Heart className="w-4 h-4 mt-0.5 shrink-0" style={{ color: 'var(--brand-alert-red-text)' }} />
         <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
           {t('checkin.b3.alertBanner')}
         </p>
@@ -1084,6 +1100,8 @@ function ConfirmationScreen({
   missedMedNames,
   onAddAnother,
   onDone,
+  pendingFinalizeEntryId,
+  onFinalized,
 }: {
   lastReading: SessionReading;
   sessionReadings: SessionReading[];
@@ -1094,10 +1112,45 @@ function ConfirmationScreen({
   missedMedNames: string[];
   onAddAnother: () => void;
   onDone: () => void;
+  /** Cluster 6 Q2 — set when the just-saved entry is single-reading
+   *  non-emergency. Triggers the "Take a second reading" prompt and arms
+   *  a 5-min timer that POSTs the finalize endpoint. Null when the entry
+   *  doesn't need the prompt. */
+  pendingFinalizeEntryId: string | null;
+  /** Called when the timer fires + the finalize POST succeeds, OR when
+   *  the patient navigates away. Clears the timer in the parent. */
+  onFinalized: () => void;
 }) {
   const { t } = useLanguage();
   const total = sessionReadings.length;
   const aFibSatisfied = !hasAFib || total >= 3;
+
+  // Cluster 6 Q2 (Manisha 5/9/26) — 5-min finalize timer. Arms when the
+  // backend hint says this is a first-in-session non-AFib non-preDay3
+  // reading. If the patient logs a second reading (onAddAnother), the
+  // parent clears `pendingFinalizeEntryId` and our effect dependency
+  // change tears down the timer. If the 5 min elapses, we POST the
+  // finalize endpoint so the engine fires the held alert with a
+  // "single-reading session" annotation.
+  useEffect(() => {
+    if (!pendingFinalizeEntryId) return;
+    const entryId = pendingFinalizeEntryId;
+    const FIVE_MIN_MS = 5 * 60 * 1000;
+    const handle = setTimeout(() => {
+      finalizeSingleReadingSession(entryId)
+        .catch(() => {
+          // Network/server failure here is non-fatal — the engine will
+          // simply hold the alert until a second reading lands. The
+          // patient sees no error; ops sees a logged failure.
+        })
+        .finally(() => {
+          onFinalized();
+        });
+    }, FIVE_MIN_MS);
+    return () => {
+      clearTimeout(handle);
+    };
+  }, [pendingFinalizeEntryId, onFinalized]);
   // BMI is read-only and only shown when both weight (this reading) and
   // height (intake) are on file. Pulse pressure is intentionally NOT
   // shown on the patient app per Niva — clinically too easy to misread.
@@ -1216,7 +1269,7 @@ function ConfirmationScreen({
           className="w-full rounded-xl px-3 py-2 mb-3 flex items-start gap-2.5 text-left"
           style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}
         >
-          <Pill className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--brand-warning-amber)' }} />
+          <Pill className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--brand-warning-amber-text)' }} />
           <p className="text-[12px] leading-snug" style={{ color: 'var(--brand-text-primary)' }}>
             We noted you missed{' '}
             <span className="font-bold">{missedMedNames.join(', ')}</span>
@@ -1235,7 +1288,7 @@ function ConfirmationScreen({
         >
           <Activity
             className="w-4 h-4 shrink-0"
-            style={{ color: aFibSatisfied ? 'var(--brand-success-green)' : 'var(--brand-warning-amber)' }}
+            style={{ color: aFibSatisfied ? 'var(--brand-success-green)' : 'var(--brand-warning-amber-text)' }}
           />
           <p
             className="text-[12px] leading-snug"
@@ -1250,6 +1303,29 @@ function ConfirmationScreen({
         <p className="text-[12px] mb-3 leading-snug" style={{ color: 'var(--brand-text-muted)' }}>
           {t('checkin.confirm.nonAfib')}
         </p>
+      )}
+
+      {/* Cluster 6 Q2 (Manisha 5/9/26) — when this is the only reading
+         in the session and the patient isn't AFib<3 / preDay3, prompt
+         them to take a second one. Helps the engine fire on an averaged
+         BP instead of a one-off. 5-min timer (above) finalizes the
+         session as single-reading if they don't. */}
+      {pendingFinalizeEntryId && (
+        <div
+          className="w-full mb-3 rounded-2xl border-2 px-4 py-3 text-[13px] leading-snug"
+          style={{
+            backgroundColor: 'var(--brand-info-bg, #EEF2FF)',
+            borderColor: 'var(--brand-primary-purple)',
+            color: 'var(--brand-text-primary)',
+          }}
+        >
+          <div className="font-semibold mb-1">
+            {t('checkin.confirm.takeSecondReading')}
+          </div>
+          <div style={{ color: 'var(--brand-text-muted)' }}>
+            {t('checkin.confirm.takeSecondReadingHint')}
+          </div>
+        </div>
       )}
 
       {/* Actions */}
@@ -1330,6 +1406,10 @@ export default function CheckIn() {
   const [sessionReadings, setSessionReadings] = useState<SessionReading[]>([]);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [readingNumber, setReadingNumber] = useState(0); // count of submitted readings in session
+  // Cluster 6 Q2 — set to the entry id of a first-in-session non-AFib
+  // non-preDay3 reading. Drives the "Take a second reading" prompt + 5-min
+  // finalize timer in <ConfirmationScreen>. Null otherwise.
+  const [pendingFinalizeEntryId, setPendingFinalizeEntryId] = useState<string | null>(null);
 
   // Fetch patient profile to know isPregnant + hasAFib.
   useEffect(() => {
@@ -1490,7 +1570,7 @@ export default function CheckIn() {
 
     setSubmitting(true);
     try {
-      await createJournalEntry({
+      const created = await createJournalEntry({
         measuredAt: measuredAtIso,
         systolicBP: sys,
         diastolicBP: dia,
@@ -1511,6 +1591,11 @@ export default function CheckIn() {
         newOnsetHeadache: isPregnant ? form.newOnsetHeadache : false,
         ruqPain: isPregnant ? form.ruqPain : false,
         edema: isPregnant ? form.edema : false,
+        // Cluster 6 — universal (non-pregnancy) symptom signals.
+        dizziness: form.dizziness,
+        syncope: form.syncope,
+        palpitations: form.palpitations,
+        legSwelling: form.legSwelling,
         otherSymptoms: form.otherSymptomsText.trim() ? [form.otherSymptomsText.trim()] : undefined,
       });
 
@@ -1524,6 +1609,17 @@ export default function CheckIn() {
       setSessionReadings((prev) => [...prev, reading]);
       setReadingNumber((n) => n + 1);
       setShowConfirmation(true);
+      // Cluster 6 Q2 (Manisha 5/9/26) — backend tells us this is a first-
+      // in-session non-AFib non-preDay3 reading. Frontend shows "Take a
+      // second reading in about 1 minute" prompt + arms a 5-min timer
+      // that POSTs the finalize endpoint when it elapses without a 2nd
+      // reading. The actual UI lives in <ConfirmationScreen>; pass the
+      // entryId + flag down so it can manage the timer.
+      if (created.pendingSecondReading) {
+        setPendingFinalizeEntryId(created.entry.id);
+      } else {
+        setPendingFinalizeEntryId(null);
+      }
     } catch (e) {
       // Layer A journaling gate: patient hasn't completed clinical intake yet.
       // Route them into the intake flow instead of surfacing the raw 403.
@@ -1578,6 +1674,10 @@ export default function CheckIn() {
       weightUnit: prev.weightUnit,
     }));
     setShowConfirmation(false);
+    // Cluster 6 Q2 — second reading is being logged in the same session.
+    // Clear the finalize timer so it doesn't fire when the new reading
+    // averages with the first.
+    setPendingFinalizeEntryId(null);
     setStep('B2');
     setDirection(1);
   }
@@ -1666,6 +1766,8 @@ export default function CheckIn() {
               .map((m) => m.drugName)}
             onAddAnother={startAnotherReading}
             onDone={() => router.push('/dashboard')}
+            pendingFinalizeEntryId={pendingFinalizeEntryId}
+            onFinalized={() => setPendingFinalizeEntryId(null)}
           />
         </main>
       </div>
@@ -1735,7 +1837,7 @@ export default function CheckIn() {
         {error && (
           <p
             className="mt-5 text-[13px] text-center font-semibold px-4 py-2 rounded-lg"
-            style={{ color: 'var(--brand-alert-red)', backgroundColor: 'var(--brand-alert-red-light)' }}
+            style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
           >
             {error}
           </p>

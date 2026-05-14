@@ -33,6 +33,68 @@ test.describe('Admin verification — profile', () => {
     await tc.dispose()
   })
 
+  test('admin correct-profile with dateOfBirth + condition flag returns 200, not 500', async () => {
+    // Regression — dateOfBirth lives on User, not PatientProfile, so the
+    // original correctProfile() spread the whole DTO into
+    // patientProfile.update(), Prisma rejected the unknown column, and the
+    // endpoint returned 500. Fix splits User and PatientProfile updates into
+    // one $transaction. Both fields must come back in `correctedFields`.
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    // Reset to UNVERIFIED so correct-profile has something to flip to CORRECTED.
+    await tc.setProfileVerificationStatus(u.id, 'UNVERIFIED')
+
+    const api = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+    // Per-run-unique DOB + toggling condition flag so this test stays
+    // idempotent against the shared seed DB. A fixed offset would resolve to
+    // the same calendar day on consecutive runs, leaving nothing to change
+    // and tripping the "No corrections supplied" guard.
+    //
+    // DOB constraint: 65–90 years ago. Aisha is seeded at age 67 and shard 3
+    // also runs spec 13's bug #6/#7 test which depends on her being in the
+    // 65+ ageGroup to fire RULE_AGE_65_LOW on a 90/55 reading. A wider random
+    // window (e.g. 0–30y) silently dropped Aisha to age 20 between specs and
+    // broke spec 13 in CI shard 3. The new range stays inside the seed's
+    // intended elderly bracket so cross-spec assumptions hold.
+    const DOB_FLOOR_DAYS = 65 * 365  // 65 years
+    const DOB_RANGE_DAYS = 25 * 365  // up to 90 years old
+    const dayOffset = DOB_FLOOR_DAYS + (Math.floor(Date.now() / 1000) % DOB_RANGE_DAYS)
+    const newDob = new Date(Date.now() - dayOffset * 86_400_000)
+      .toISOString()
+      .slice(0, 10)
+    // hasHCM is pinned false (not flipped). Earlier this test rolled
+    // hasHCM via `Math.floor(Date.now() / 1000) % 2 === 0` to force a
+    // PatientProfile change alongside the DOB change. When the dice landed
+    // true, shard 3's later spec 12 enrollment-check started failing with
+    // `threshold-required-for-condition` — Aisha has no seeded
+    // PatientThreshold row, and HCM-positive patients require one per the
+    // 4-piece enrollment gate. Pinning false matches the seed and keeps
+    // the test idempotent (DOB varies every run, which alone proves the
+    // User-table + PatientProfile split worked).
+    const res = await api.post(`admin/users/${u.id}/correct-profile`, {
+      data: {
+        corrections: {
+          dateOfBirth: newDob,
+          hasHCM: false,
+        },
+        rationale: 'qa-test: admin DOB + condition correction',
+      },
+    })
+    expect(
+      res.status(),
+      `expected 200 from correct-profile, got ${res.status()}: ${await res.text()}`,
+    ).toBe(200)
+    const body = await res.json()
+    // dateOfBirth always varies (per-second granularity); hasHCM stays
+    // false so it's only in `correctedFields` if Aisha was previously
+    // HCM-positive. Only the DOB field is guaranteed — that's enough to
+    // prove the User-table split worked (a pre-fix run would have 500'd
+    // on this exact payload).
+    expect(body.correctedFields).toEqual(expect.arrayContaining(['dateOfBirth']))
+    await api.dispose()
+    await tc.dispose()
+  })
+
   test('PROVIDER role cannot write Practice (admin role boundary)', async () => {
     const api = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
     const res = await api.post('admin/practices', {

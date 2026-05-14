@@ -147,7 +147,7 @@ function NotFound({ reason }: { reason: string }) {
           <AlertCircle
             aria-hidden="true"
             className="w-8 h-8"
-            style={{ color: 'var(--brand-warning-amber)' }}
+            style={{ color: 'var(--brand-warning-amber-text)' }}
           />
         </div>
         <h1
@@ -190,6 +190,12 @@ export default function AlertDetailPage({ params }: PageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ackLoading, setAckLoading] = useState(false);
+  // Cluster 6 Q4 (Manisha 5/9/26) — when a pregnant patient at 175/115 fires
+  // both BP_LEVEL_2 + RULE_PREGNANCY_ACE_ARB, surface them sequentially:
+  // 911 screen first, then route to the Tier-1 ACE/ARB contraindication
+  // after the patient acknowledges the emergency. This is the id of that
+  // follow-up alert if it exists on the patient's active list.
+  const [nextActiveAlertId, setNextActiveAlertId] = useState<string | null>(null);
 
   // Auth gate
   useEffect(() => {
@@ -213,6 +219,23 @@ export default function AlertDetailPage({ params }: PageProps) {
           setError(t('alerts.notFound.body'));
         } else {
           setAlert(found);
+          // Cluster 6 Q4 — when the current view is the L2 emergency,
+          // look for a co-fired Tier-1 ACE/ARB pregnancy contraindication
+          // on the same patient. If one is OPEN/ACKNOWLEDGED, hold its id
+          // so the post-acknowledge handler can route the patient there
+          // after they've seen the 911 CTA.
+          const isCurrentEmergency =
+            found.tier === 'BP_LEVEL_2' ||
+            found.tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
+          if (isCurrentEmergency && Array.isArray(list)) {
+            const ace = list.find(
+              (a) =>
+                a.id !== found.id &&
+                a.ruleId === 'RULE_PREGNANCY_ACE_ARB' &&
+                (a.status === 'OPEN' || a.status === 'ACKNOWLEDGED'),
+            )
+            if (ace) setNextActiveAlertId(ace.id)
+          }
         }
       } catch (e) {
         if (!cancelled) {
@@ -248,6 +271,15 @@ export default function AlertDetailPage({ params }: PageProps) {
           ? { ...prev, status: 'ACKNOWLEDGED', acknowledgedAt: new Date().toISOString() }
           : prev,
       );
+      // Cluster 6 Q4 (Manisha 5/9/26) — sequential surface. After the
+      // patient acknowledges the BP-L2 911 screen, push them to the Tier-1
+      // ACE/ARB contraindication so they see both safety messages — but
+      // never simultaneously. Best-effort: if the follow-up alert is gone
+      // (provider resolved it between fetch and ack), fall through to the
+      // banner view here.
+      if (nextActiveAlertId) {
+        router.push(`/alerts/${nextActiveAlertId}`);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : t('alerts.notFound.ackError'));
     } finally {

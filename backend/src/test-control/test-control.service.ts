@@ -142,6 +142,54 @@ export class TestControlService {
     })
   }
 
+  /**
+   * Backdate every non-discontinued PatientMedication for a user. Drops the
+   * dependence on `me/medications` (which filters by verificationStatus, so a
+   * REJECTED med set up by an earlier test never gets touched) — the cron's
+   * latestTouch over patientMedications.where(discontinuedAt: null) needs all
+   * rows pushed past the cutoff for the test to be meaningful.
+   */
+  async backdateAllUserMedications(
+    userId: string,
+    deltaSeconds: number,
+  ): Promise<{ updated: number }> {
+    const meds = await this.prisma.patientMedication.findMany({
+      where: { userId, discontinuedAt: null },
+    })
+    let updated = 0
+    for (const m of meds) {
+      const reportedAt = m.reportedAt
+        ? new Date(m.reportedAt.getTime() - deltaSeconds * 1000)
+        : null
+      const verifiedAt = m.verifiedAt
+        ? new Date(m.verifiedAt.getTime() - deltaSeconds * 1000)
+        : null
+      await this.prisma.patientMedication.update({
+        where: { id: m.id },
+        data: { reportedAt: reportedAt ?? m.reportedAt, verifiedAt },
+      })
+      updated++
+    }
+    return { updated }
+  }
+
+  /**
+   * Backdate a User's `updatedAt`. The gap-alert cron uses
+   * `User.updatedAt <= cutoff` as the "enrollment completed ≥48h ago" proxy
+   * (see backend/src/crons/gap-alert.service.ts:51); resetUser doesn't touch
+   * the user row so without this helper the candidate filter never matches a
+   * just-seeded patient. Raw SQL is required because Prisma's `@updatedAt`
+   * decorator overrides any value passed via `update()`.
+   */
+  async backdateUserUpdatedAt(userId: string, deltaSeconds: number): Promise<void> {
+    const newUpdatedAt = new Date(Date.now() - deltaSeconds * 1000)
+    await this.prisma.$executeRaw`
+      UPDATE "User"
+      SET "updatedAt" = ${newUpdatedAt}
+      WHERE id = ${userId}
+    `
+  }
+
   // ─── State reset ────────────────────────────────────────────────────────
   /**
    * Wipe journal/alert/escalation/notification rows for every *.cardioplace.test
@@ -219,6 +267,123 @@ export class TestControlService {
     })
   }
 
+  /**
+   * Insert journal entries at exact timestamps. Used by tests that depend
+   * on session windows (e.g. tachycardia 8h cross-session, AFib ≥3-reading
+   * gate) — driving them via API + backdate is brittle when the tests
+   * also assert reading count / order. Skips the alert engine: this is
+   * raw fixture insertion, not a clinical event.
+   */
+  async seedReadingsAtTime(
+    userId: string,
+    readings: Array<{
+      measuredAt: string
+      systolicBP: number
+      diastolicBP: number
+      pulse: number
+      sessionId?: string
+    }>,
+  ): Promise<{ created: number }> {
+    let created = 0
+    for (const r of readings) {
+      await this.prisma.journalEntry.upsert({
+        where: {
+          userId_measuredAt: { userId, measuredAt: new Date(r.measuredAt) },
+        },
+        update: {
+          systolicBP: r.systolicBP,
+          diastolicBP: r.diastolicBP,
+          pulse: r.pulse,
+          sessionId: r.sessionId,
+        },
+        create: {
+          userId,
+          measuredAt: new Date(r.measuredAt),
+          systolicBP: r.systolicBP,
+          diastolicBP: r.diastolicBP,
+          pulse: r.pulse,
+          sessionId: r.sessionId,
+          position: 'SITTING',
+          source: 'MANUAL',
+        },
+      })
+      created++
+    }
+    return { created }
+  }
+
+  /**
+   * Flip a single PatientProfile boolean condition flag. Lets tests
+   * compose persona × condition combinations without reseeding (e.g. test
+   * the same patient with hasHCM toggled on and off).
+   *
+   * `heartFailureType` is honored only when `flag` is `hasHeartFailure`
+   * AND `value` is true — keeps the call site explicit about which type.
+   */
+  async setUserCondition(
+    userId: string,
+    flag:
+      | 'isPregnant'
+      | 'historyPreeclampsia'
+      | 'hasHeartFailure'
+      | 'hasAFib'
+      | 'hasCAD'
+      | 'hasHCM'
+      | 'hasDCM'
+      | 'hasBradycardia'
+      | 'hasTachycardia'
+      | 'diagnosedHypertension',
+    value: boolean,
+    heartFailureType?: 'HFREF' | 'HFPEF' | 'UNKNOWN' | 'NOT_APPLICABLE',
+  ): Promise<void> {
+    const data: Record<string, unknown> = { [flag]: value }
+    if (flag === 'hasHeartFailure') {
+      data.heartFailureType = value ? heartFailureType ?? 'UNKNOWN' : 'NOT_APPLICABLE'
+    }
+    await this.prisma.patientProfile.updateMany({ where: { userId }, data })
+    // ProfileResolverService doesn't cache today (one fresh user.findUnique
+    // per resolve), so this delay is defensive: if Cluster 6 introduces a
+    // profile cache for performance, tests that flip a flag immediately
+    // before submitting a reading would race the cache invalidation. A
+    // small post-write hold keeps those tests stable across the refactor.
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+
+  /**
+   * Attach a medication inline, bypassing admin verification. Tests can
+   * use this to compose med × condition scenarios without scripting the
+   * full /admin/medications/:id/verify flow.
+   *
+   * Default verificationStatus=VERIFIED so the alert engine's pre-gate
+   * rules (which check verifiedAt / verificationStatus) treat the row as
+   * actionable. Pass `UNVERIFIED` explicitly for tests that exercise the
+   * unverified-medication safety-net path.
+   */
+  async setUserMedication(
+    userId: string,
+    med: {
+      drugName: string
+      drugClass: string
+      frequency: 'ONCE_DAILY' | 'TWICE_DAILY' | 'THREE_TIMES_DAILY' | 'AS_NEEDED' | 'UNSURE'
+      verificationStatus?: 'VERIFIED' | 'UNVERIFIED'
+    },
+  ): Promise<{ id: string }> {
+    const status = med.verificationStatus ?? 'VERIFIED'
+    const created = await this.prisma.patientMedication.create({
+      data: {
+        userId,
+        drugName: med.drugName,
+        drugClass: med.drugClass as never,
+        frequency: med.frequency,
+        source: 'PATIENT_SELF_REPORT',
+        verificationStatus: status,
+        verifiedAt: status === 'VERIFIED' ? new Date() : null,
+      },
+      select: { id: true },
+    })
+    return { id: created.id }
+  }
+
   async setProfileVerificationStatus(
     userId: string,
     status: 'UNVERIFIED' | 'VERIFIED' | 'CORRECTED',
@@ -245,6 +410,8 @@ export class TestControlService {
         physicianMessage: true,
         createdAt: true,
         acknowledgedAt: true,
+        acknowledgedByUserId: true,
+        resolvedAt: true,
         resolvedBy: true,
         resolutionAction: true,
       },
@@ -263,6 +430,10 @@ export class TestControlService {
         afterHours: true,
         scheduledFor: true,
         notificationSentAt: true,
+        acknowledgedAt: true,
+        acknowledgedBy: true,
+        resolvedAt: true,
+        resolvedBy: true,
         triggeredByResolution: true,
         reason: true,
       },

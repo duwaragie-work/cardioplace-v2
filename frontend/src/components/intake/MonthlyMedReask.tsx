@@ -166,7 +166,7 @@ export default function MonthlyMedReask({ userId, hasMedications, intakeComplete
                 className="w-full h-12 rounded-full font-bold text-[14px] flex items-center justify-center gap-2 cursor-pointer transition"
                 style={{
                   backgroundColor: 'var(--brand-warning-amber-light)',
-                  color: 'var(--brand-warning-amber)',
+                  color: 'var(--brand-warning-amber-text)',
                   border: '1.5px solid var(--brand-warning-amber)',
                 }}
               >

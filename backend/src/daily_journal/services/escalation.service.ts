@@ -4,6 +4,7 @@ import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter'
 import { Cron } from '@nestjs/schedule'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
+import { withDeadlockRetry } from '../../common/deadlock-retry.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import type {
   AlertCreatedEvent,
@@ -50,6 +51,7 @@ import {
 export class EscalationService {
   private readonly logger = new Logger(EscalationService.name)
   private readonly adminBaseUrl: string
+  private readonly patientBaseUrl: string
 
   constructor(
     private readonly prisma: PrismaService,
@@ -57,11 +59,15 @@ export class EscalationService {
     private readonly emailService: EmailService,
     config: ConfigService,
   ) {
-    // Used by escalation emails to deep-link providers to the alert in the
-    // admin app. Defaults to the local admin port so dev emails are clickable
-    // even without the env var set.
+    // Used by escalation emails to deep-link recipients into the right app.
+    // Provider/admin recipients → admin app (/patients/{userId}?alert={id});
+    // PATIENT recipients → patient app (/alerts/{id}). Defaults match the
+    // local dev ports so emails are clickable even without env vars set.
     this.adminBaseUrl = config
       .get<string>('ADMIN_BASE_URL', 'http://localhost:3001')
+      .replace(/\/+$/, '')
+    this.patientBaseUrl = config
+      .get<string>('PATIENT_BASE_URL', 'http://localhost:3000')
       .replace(/\/+$/, '')
   }
 
@@ -561,54 +567,76 @@ export class EscalationService {
 
     if (shouldQueue && practice) {
       const scheduledFor = nextBusinessHoursStart(now, practice)
-      await this.prisma.escalationEvent.create({
-        data: {
-          alertId: alert.id,
-          userId: alert.userId,
-          escalationLevel: this.legacyLevelFor(args.ladderKind),
-          reason: `Queued for business hours — ${step.step}${dispatchReason.suffix}`,
-          ladderStep: step.step,
-          // Persist what we'd dispatch when the queue fires. The cron will
-          // re-resolve at fire time too (practice staff may change before
-          // then), but we keep the snapshot for audit.
-          recipientIds: resolved.recipientIds,
-          recipientRoles: resolved.recipientRoles,
-          notificationChannel: step.channels[0] ?? 'PUSH',
-          afterHours: true,
-          scheduledFor,
-        },
-      })
+      // Cluster 6 bug #11 — wrap EscalationEvent.create in deadlock retry.
+      // Same shape as the persistAlert retry: under concurrent dispatch +
+      // alert-resolution writes, this insert can deadlock against an
+      // in-flight Notification write. Lose the row silently and the step
+      // never fires.
+      await withDeadlockRetry(
+        `dispatchStep:queue:${alert.id}:${step.step}`,
+        () =>
+          this.prisma.escalationEvent.create({
+            data: {
+              alertId: alert.id,
+              userId: alert.userId,
+              escalationLevel: this.legacyLevelFor(args.ladderKind),
+              reason: `Queued for business hours — ${step.step}${dispatchReason.suffix}`,
+              ladderStep: step.step,
+              // Persist what we'd dispatch when the queue fires. The cron will
+              // re-resolve at fire time too (practice staff may change before
+              // then), but we keep the snapshot for audit.
+              recipientIds: resolved.recipientIds,
+              recipientRoles: resolved.recipientRoles,
+              notificationChannel: step.channels[0] ?? 'PUSH',
+              afterHours: true,
+              scheduledFor,
+            },
+          }),
+        this.logger,
+      )
       this.logger.log(
         `Queued ${step.step} for alert ${alert.id} until ${scheduledFor.toISOString()}`,
       )
       return
     }
 
-    const created = await this.prisma.escalationEvent.create({
-      data: {
-        alertId: alert.id,
-        userId: alert.userId,
-        escalationLevel: this.legacyLevelFor(args.ladderKind),
-        reason: `${step.step} dispatched${dispatchReason.suffix}`,
-        ladderStep: step.step,
-        recipientIds: resolved.recipientIds,
-        recipientRoles: resolved.recipientRoles,
-        notificationChannel: step.channels[0] ?? 'PUSH',
-        afterHours,
-        notificationSentAt: now,
-      },
-    })
+    // Cluster 6 bug #11 — wrap EscalationEvent.create + writeNotificationsAndEmit
+    // in a single deadlock-retry scope. writeNotificationsAndEmit also does
+    // Notification writes; if either side deadlocks, the whole pair retries.
+    // EmailService send inside writeNotificationsAndEmit stays outside the
+    // retry's transactional intent (idempotent at the Notification dedup
+    // layer), but a deadlock on the DB writes here will retry the whole.
+    await withDeadlockRetry(
+      `dispatchStep:fire:${alert.id}:${step.step}`,
+      async () => {
+        const created = await this.prisma.escalationEvent.create({
+          data: {
+            alertId: alert.id,
+            userId: alert.userId,
+            escalationLevel: this.legacyLevelFor(args.ladderKind),
+            reason: `${step.step} dispatched${dispatchReason.suffix}`,
+            ladderStep: step.step,
+            recipientIds: resolved.recipientIds,
+            recipientRoles: resolved.recipientRoles,
+            notificationChannel: step.channels[0] ?? 'PUSH',
+            afterHours,
+            notificationSentAt: now,
+          },
+        })
 
-    await this.writeNotificationsAndEmit({
-      eventId: created.id,
-      alert,
-      step,
-      recipientIds: resolved.recipientIds,
-      recipientRoles: resolved.recipientRoles,
-      afterHours,
-      now,
-      triggeredByResolution: false,
-    })
+        await this.writeNotificationsAndEmit({
+          eventId: created.id,
+          alert,
+          step,
+          recipientIds: resolved.recipientIds,
+          recipientRoles: resolved.recipientRoles,
+          afterHours,
+          now,
+          triggeredByResolution: false,
+        })
+      },
+      this.logger,
+    )
   }
 
   /**
@@ -645,27 +673,35 @@ export class EscalationService {
     const afterHours =
       args.practice != null && !isWithinBusinessHours(args.now, args.practice)
 
-    await this.prisma.escalationEvent.update({
-      where: { id: args.eventId },
-      data: {
-        notificationSentAt: args.now,
-        recipientIds: resolved.recipientIds,
-        recipientRoles: resolved.recipientRoles,
-        afterHours,
-        reason: `${args.step.step} dispatched${args.triggeredByResolution ? ' (retry)' : ''}${dispatchReason.suffix}`,
-      },
-    })
+    // Cluster 6 bug #11 — wrap update + write in deadlock retry. Same
+    // rationale as the dispatchStep wrappers above.
+    await withDeadlockRetry(
+      `dispatchForExistingEvent:${args.eventId}`,
+      async () => {
+        await this.prisma.escalationEvent.update({
+          where: { id: args.eventId },
+          data: {
+            notificationSentAt: args.now,
+            recipientIds: resolved.recipientIds,
+            recipientRoles: resolved.recipientRoles,
+            afterHours,
+            reason: `${args.step.step} dispatched${args.triggeredByResolution ? ' (retry)' : ''}${dispatchReason.suffix}`,
+          },
+        })
 
-    await this.writeNotificationsAndEmit({
-      eventId: args.eventId,
-      alert: args.alert,
-      step: args.step,
-      recipientIds: resolved.recipientIds,
-      recipientRoles: resolved.recipientRoles,
-      afterHours,
-      now: args.now,
-      triggeredByResolution: args.triggeredByResolution,
-    })
+        await this.writeNotificationsAndEmit({
+          eventId: args.eventId,
+          alert: args.alert,
+          step: args.step,
+          recipientIds: resolved.recipientIds,
+          recipientRoles: resolved.recipientRoles,
+          afterHours,
+          now: args.now,
+          triggeredByResolution: args.triggeredByResolution,
+        })
+      },
+      this.logger,
+    )
   }
 
   /**
@@ -740,6 +776,7 @@ export class EscalationService {
               role,
               message: body,
               adminBaseUrl: this.adminBaseUrl,
+              patientBaseUrl: this.patientBaseUrl,
               afterHours: args.afterHours,
               now: args.now,
             })
@@ -1023,10 +1060,11 @@ function escalationEmailBody(args: {
   role: RecipientRole
   message: string
   adminBaseUrl: string
+  patientBaseUrl: string
   afterHours: boolean
   now: Date
 }): { subject: string; html: string } {
-  const { alert, step, role, message, adminBaseUrl, afterHours, now } = args
+  const { alert, step, role, message, adminBaseUrl, patientBaseUrl, afterHours, now } = args
 
   const patientName = alert.user.name?.trim() || 'Patient (name unknown)'
   const patientEmail = alert.user.email ?? ''
@@ -1051,7 +1089,14 @@ function escalationEmailBody(args: {
 
   const stepPill = `${humanStep(step)}${afterHours ? ' (after-hours queued)' : ''}`
   const ackFooter = ackFooterFor(alert.tier)
-  const dashboardUrl = `${adminBaseUrl}/patients/${encodeURIComponent(alert.userId)}?alert=${encodeURIComponent(alert.id)}`
+  // Route patient recipients into the patient app's alert detail page; all
+  // other recipients (provider/admin) deep-link into the admin dashboard.
+  // Same admin URL for a patient-role recipient would land them on a 403/404
+  // since /patients/{userId} is provider-only.
+  const dashboardUrl = isPatient
+    ? `${patientBaseUrl}/alerts/${encodeURIComponent(alert.id)}`
+    : `${adminBaseUrl}/patients/${encodeURIComponent(alert.userId)}?alert=${encodeURIComponent(alert.id)}`
+  const ctaLabel = isPatient ? 'View your alert →' : 'View in dashboard →'
 
   // Recipient role banner — clarifies why THIS person is getting THIS email.
   // Skipped for PATIENT-role to avoid alarming wording like "as the patient".
@@ -1116,7 +1161,7 @@ function escalationEmailBody(args: {
   ${afterHoursBlock}
   ${metaStrip}
   ${createdLine}
-  <div style="margin-top:22px"><a href="${escapeAttr(dashboardUrl)}" style="display:inline-block;padding:11px 20px;background:${tierColor};color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px">View in dashboard →</a></div>
+  <div style="margin-top:22px"><a href="${escapeAttr(dashboardUrl)}" style="display:inline-block;padding:11px 20px;background:${tierColor};color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px">${escapeHtml(ctaLabel)}</a></div>
   ${ackFooter ? `<div style="margin-top:18px;padding:12px 14px;background:#fef3c7;border-radius:6px;font-size:12.5px;color:#78350f"><strong>Acknowledgment expected.</strong> ${escapeHtml(ackFooter)}</div>` : ''}
   ${idFooter}
   <hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb"/>

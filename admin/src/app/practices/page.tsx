@@ -373,7 +373,7 @@ function CreatePracticeModal({
           {error && (
             <div
               className="rounded-lg px-3 py-2 text-[12px] font-semibold"
-              style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red)' }}
+              style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
             >
               {error}
             </div>

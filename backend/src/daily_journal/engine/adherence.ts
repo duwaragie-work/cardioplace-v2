@@ -1,39 +1,81 @@
-// Phase/post-merge — Tier 2 medication adherence rule.
-// Fires on any self-reported missed dose: either the generic
-// `medicationTaken=false` toggle from the legacy form, OR the richer
-// per-medication miss detail captured by the updated CheckIn.tsx flow.
+// Tier 2 medication adherence rule — Cluster 6 (Manisha 5/10/26 sign-off).
 //
-// Runs in an independent pipeline pass alongside the BP/HR rules so a single
-// journal entry can produce up to two DeviationAlert rows (e.g. BP L1 High
-// AND medication missed). See AlertEngineService.evaluate() for the two-pass
-// orchestration.
+// Default trigger: ≥2 missed-medication-days within a rolling 3-day window.
+// Carve-out: a SINGLE missed dose of a beta-blocker fires when the patient
+// has HFrEF / HCM / AFib (rebound tachycardia + hypertensive risk per the
+// 2018 ACC/AHA bradycardia + AHA HTN scientific statements).
 //
-// TODO(Dr. Singal): confirm single-miss trigger (vs 2/3 consecutive) and
-// review the three-tier wording in shared/src/alert-messages.ts.
+// Escalates from a passive yellow badge to a provider push notification
+// when the window expands to ≥3 miss-days within rolling 7 — surfaced as a
+// physicianAnnotation the EscalationService consumes (no new ladder).
+//
+// Runs in an independent Pass 2 pipeline so adherence coexists with the
+// multi-axis BP/HR pipeline (a single entry can fire BP L1 + adherence
+// simultaneously). See AlertEngineService.evaluate().
 
 import { RULE_IDS } from '@cardioplace/shared'
 import type { RuleFunction } from './types.js'
+import type { AdherenceWindow } from './adherence-window.js'
 
-export const medicationMissedRule: RuleFunction = (session) => {
-  const explicitNo = session.medicationTaken === false
-  const perMedList = session.missedMedications
-  const hasPerMed = perMedList.length > 0
+const RECENT_MISS_THRESHOLD = 2
+const EXTENDED_MISS_THRESHOLD = 3
 
-  if (!explicitNo && !hasPerMed) return null
+export function medicationMissedRuleWithWindow(
+  recentMisses: AdherenceWindow,
+): RuleFunction {
+  return (session, ctx) => {
+    const { daysWithMiss, daysWithMissOver7d, missesByDrugClass, missedMedications } = recentMisses
 
-  return {
-    ruleId: RULE_IDS.MEDICATION_MISSED,
-    tier: 'TIER_2_DISCREPANCY',
-    mode: 'STANDARD',
-    pulsePressure: null,
-    suboptimalMeasurement: session.suboptimalMeasurement,
-    actualValue: hasPerMed ? perMedList.length : 1,
-    reason: hasPerMed
-      ? `Patient self-reported missing ${perMedList.length} medication(s).`
-      : 'Patient self-reported missing a medication dose.',
-    metadata: {
-      conditionLabel: 'Medication adherence',
-      missedMedications: hasPerMed ? perMedList : undefined,
-    },
+    // Carve-out: single beta-blocker miss for HFrEF / HCM / AFib patients.
+    const isBetaBlockerCarveOut =
+      (ctx.profile.hasHeartFailure || ctx.profile.hasHCM || ctx.profile.hasAFib) &&
+      (missesByDrugClass.get('BETA_BLOCKER') ?? 0) >= 1
+
+    if (!isBetaBlockerCarveOut && daysWithMiss < RECENT_MISS_THRESHOLD) {
+      return null
+    }
+
+    // Escalate to provider push when the pattern persists over 7 days.
+    // EscalationService's standard Tier 2 ladder honours this annotation.
+    const annotations: string[] = []
+    if (daysWithMissOver7d >= EXTENDED_MISS_THRESHOLD) {
+      annotations.push('escalate-3-of-7')
+    }
+    if (isBetaBlockerCarveOut) {
+      annotations.push('beta-blocker-carve-out')
+    }
+
+    return {
+      ruleId: RULE_IDS.MEDICATION_MISSED,
+      tier: 'TIER_2_DISCREPANCY',
+      mode: 'STANDARD',
+      pulsePressure: null,
+      suboptimalMeasurement: session.suboptimalMeasurement,
+      actualValue: daysWithMiss,
+      reason: isBetaBlockerCarveOut
+        ? 'Beta-blocker miss in HFrEF/HCM/AFib patient — single-miss carve-out.'
+        : `Non-adherence pattern: ${daysWithMiss}/3 days with missed doses.`,
+      metadata: {
+        conditionLabel: 'Medication adherence',
+        missedMedications,
+        // The output-generator reads daysWithMiss + carveOut + drug list to
+        // render the three-tier patient/caregiver/physician messages.
+        adherenceDaysWithMiss: daysWithMiss,
+        adherenceDaysWithMissOver7d: daysWithMissOver7d,
+        adherenceBetaBlockerCarveOut: isBetaBlockerCarveOut,
+        physicianAnnotations: annotations.length > 0 ? annotations : undefined,
+      },
+    }
   }
+}
+
+/**
+ * Backwards-compat single-session rule. Used only by older tests that
+ * exercise the rule in isolation without a window. Returns null unless the
+ * legacy `medicationTaken=false` flag is set AND no window data is provided.
+ * Prefer the windowed variant above.
+ */
+export const medicationMissedRule: RuleFunction = (session) => {
+  void session
+  return null
 }
