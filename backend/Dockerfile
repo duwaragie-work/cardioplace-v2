@@ -56,7 +56,11 @@ RUN npm install --no-save --workspaces=false tsx prisma
 # Built outputs
 COPY --from=builder /app/shared/dist ./shared/dist
 COPY --from=builder /app/backend/dist ./backend/dist
-COPY --from=builder /app/backend/proto ./backend/proto
+# `backend/proto` was the gRPC schema for the old Python `adk-service` voice
+# bridge. Voice now runs in-process inside Nest via `@google/genai` Live (PR
+# #32), so the proto dir was removed from the repo and this COPY line is no
+# longer needed. Leaving it in caused Railway dev/prod builds to fail with
+# "/app/backend/proto: not found" on first push after the merge.
 
 # Prisma schema + config required for `prisma migrate deploy` at startup
 COPY backend/prisma ./backend/prisma
