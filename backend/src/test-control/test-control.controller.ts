@@ -109,6 +109,19 @@ export class TestControlController {
     return { ok: true }
   }
 
+  // Cluster 7 C.1 — drive the ladder forward without waiting for the cron or
+  // the business-hours guard. Inserts already-dispatched EscalationEvent rows
+  // for steps[1..n] using the alert's createdAt anchor.
+  @Post('escalation/advance-ladder-steps')
+  @HttpCode(200)
+  async advanceLadderSteps(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { alertId: string; n: number },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.advanceLadderSteps(body.alertId, body.n)
+  }
+
   @Post('journal/backdate-latest')
   @HttpCode(200)
   async backdateLastJournalEntry(

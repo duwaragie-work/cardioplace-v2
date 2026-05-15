@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service.js'
 import { GapAlertService } from '../crons/gap-alert.service.js'
 import { MonthlyReaskService } from '../crons/monthly-reask.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
+import { ladderForTier } from '../daily_journal/escalation/ladder-defs.js'
+import type { LadderStep as LadderStepEnum } from '../generated/prisma/client.js'
 
 /**
  * Helpers backing the /test-control HTTP endpoints. Pure delegation —
@@ -438,6 +440,77 @@ export class TestControlService {
         reason: true,
       },
     })
+  }
+
+  /**
+   * Cluster 7 C.1 — walk N ladder rungs without sleeping. Writes
+   * `EscalationEvent` rows directly with `notificationSentAt = anchor + offset`
+   * and `afterHours = false` so the events look "already dispatched". Tests
+   * use this to drive the Tier 1 T+0 → T+4h → T+8h → T+24h → T+48h progression
+   * in a single tick without waiting for the cron + business-hours guard.
+   *
+   * Skips T+0 because it's written when the alert is created. Walks
+   * `steps[1..1+n]` in order. Idempotent: re-running with the same `n` is a
+   * no-op if those steps already exist (unique on alertId+ladderStep elsewhere
+   * is not enforced, so this helper checks before inserting).
+   */
+  async advanceLadderSteps(
+    alertId: string,
+    n: number,
+  ): Promise<{ advanced: number; steps: string[] }> {
+    if (n <= 0) return { advanced: 0, steps: [] }
+
+    const alert = await this.prisma.deviationAlert.findUnique({
+      where: { id: alertId },
+    })
+    if (!alert) {
+      throw new Error(`Alert ${alertId} not found`)
+    }
+    const ladder = ladderForTier(alert.tier)
+    if (!ladder) {
+      throw new Error(`Alert ${alertId} tier=${alert.tier} has no ladder`)
+    }
+
+    const existing = await this.prisma.escalationEvent.findMany({
+      where: { alertId },
+      select: { ladderStep: true },
+    })
+    const existingSteps = new Set(
+      existing.map((e) => e.ladderStep).filter((s): s is LadderStepEnum => s != null),
+    )
+
+    const anchor = alert.createdAt
+    const advanced: string[] = []
+
+    for (let i = 1; i <= n && i < ladder.steps.length; i++) {
+      const step = ladder.steps[i]
+      if (!step) continue
+      if (existingSteps.has(step.step as LadderStepEnum)) continue
+
+      const firedAt = new Date(anchor.getTime() + step.offsetMs)
+      await this.prisma.escalationEvent.create({
+        data: {
+          alertId,
+          userId: alert.userId,
+          escalationLevel: ladder.kind === 'TIER_2' || ladder.kind === 'BP_LEVEL_1'
+            ? 'LEVEL_1'
+            : 'LEVEL_2',
+          ladderStep: step.step as LadderStepEnum,
+          recipientIds: [],
+          recipientRoles: step.recipientRoles,
+          notificationChannel: step.channels[0] ?? null,
+          triggeredAt: firedAt,
+          notificationSentAt: firedAt,
+          scheduledFor: firedAt,
+          afterHours: false,
+          triggeredByResolution: false,
+          reason: 'test-control.advanceLadderSteps',
+        },
+      })
+      advanced.push(step.step)
+    }
+
+    return { advanced: advanced.length, steps: advanced }
   }
 
   async listNotifications(userId: string) {

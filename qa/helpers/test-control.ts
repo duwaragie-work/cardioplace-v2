@@ -101,6 +101,22 @@ export class TestControl {
     await this.post('test-control/retry-event/backdate', { alertId, deltaSeconds })
   }
 
+  /**
+   * Cluster 7 C.1 — drive `n` ladder rungs forward without sleeping. Inserts
+   * already-dispatched EscalationEvent rows for steps[1..n] anchored to the
+   * alert's createdAt. Returns the step IDs that were inserted (idempotent —
+   * pre-existing steps are skipped).
+   */
+  async advanceLadderSteps(
+    alertId: string,
+    n: number,
+  ): Promise<{ advanced: number; steps: string[] }> {
+    return this.post('test-control/escalation/advance-ladder-steps', {
+      alertId,
+      n,
+    })
+  }
+
   /** Backdate the latest JournalEntry for a user (for gap-alert + monthly-reask). */
   async backdateLastJournalEntry(userId: string, deltaSeconds: number): Promise<void> {
     await this.post('test-control/journal/backdate-latest', { userId, deltaSeconds })
