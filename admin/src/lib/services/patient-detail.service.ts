@@ -76,6 +76,7 @@ export type MedicationVerificationStatus =
   | 'VERIFIED'
   | 'REJECTED'
   | 'AWAITING_PROVIDER'
+  | 'HOLD'
 
 export interface PatientMedication {
   id: string
@@ -293,7 +294,7 @@ export async function getPatientMedications(userId: string): Promise<PatientMedi
 
 export async function verifyMedication(
   medicationId: string,
-  status: 'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER',
+  status: 'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER' | 'HOLD',
   rationale?: string,
 ): Promise<PatientMedication> {
   const res = await fetchWithAuth(`${API}/api/admin/medications/${medicationId}/verify`, {
