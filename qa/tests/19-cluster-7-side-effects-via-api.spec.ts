@@ -1,8 +1,8 @@
-import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { authedApi } from '../helpers/auth.js'
 import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl, type TestControl } from '../helpers/test-control.js'
+import { postSessionWithTwoReadings } from '../helpers/api.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
 /**
@@ -10,14 +10,24 @@ import { API_BASE_URL } from '../playwright.config.js'
  * (Manisha 5/11 sign-off).
  *
  * One Playwright test per new rule. Each composes a persona via test-control
- * (reset → seed history → set condition + medication), posts a daily-journal
- * entry carrying the relevant symptom flag, then polls listAlerts until the
- * expected ruleId appears.
+ * (reset → seed history → flip condition flags → set medication), posts a
+ * 2-reading journal session carrying the relevant symptom flag, then polls
+ * listAlerts until the expected ruleId appears.
  *
- * Personas:
- *   - aisha  — control, no condition flags, no meds. Used for non-HF variants.
- *   - mike   — HFpEF, used for HF-gated rules (A.2 HF, A.6 caregiver edema).
- *   - kate   — HCM, used for A.5 HCM low BP under-perfusion wording.
+ * NOTE — Cluster 7 side-effect rules are classified Stage C, so they inherit
+ * the Cluster 6 Q2 session-averaging gate (alert-engine.service.ts ~line 425).
+ * Tests submit TWO readings in the same `sessionId` (1 minute apart) via
+ * `postSessionWithTwoReadings` to satisfy the gate. If Manisha later decides
+ * side-effect rules should fire on a single reading, the engine changes —
+ * these tests still pass (2 readings still triggers the rule).
+ *
+ * PERSONA STRATEGY — Aisha + test-control flag flips.
+ *   The Cluster 6 persona expansion (Mike, Kate, Carol, Olive, Iris, Jane)
+ *   is not yet seeded on every dev DB. To stay portable, every test runs
+ *   against Aisha (always seeded) and flips `hasHeartFailure` / `hasHCM`
+ *   on her PatientProfile in setup, then restores the original flag value
+ *   in `finally`. Each test also calls `resetUser(u.id)` first to wipe
+ *   journal/alert/notification rows from prior runs.
  */
 
 type AlertRow = Awaited<ReturnType<TestControl['listAlerts']>>[number]
@@ -32,7 +42,7 @@ async function seedHistoryToClearPreDay3(
     systolicBP: 120,
     diastolicBP: 78,
     pulse: 72,
-    sessionId: randomUUID(),
+    sessionId: crypto.randomUUID(),
   }))
   await tc.seedReadingsAtTime(userId, readings)
 }
@@ -72,16 +82,12 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
     })
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
-      await api.post('daily-journal', {
-        data: {
-          measuredAt: new Date().toISOString(),
-          systolicBP: 124,
-          diastolicBP: 78,
-          pulse: 72,
-          position: 'SITTING',
-          fatigue: true,
-          sessionId: randomUUID(),
-        },
+      await postSessionWithTwoReadings(api, {
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        position: 'SITTING',
+        fatigue: true,
       })
       const alerts = await waitForAlerts(tc, u.id, (xs) =>
         xs.some((a) => a.ruleId === 'RULE_BETA_BLOCKER_FATIGUE'),
@@ -95,9 +101,11 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
 
   test('A.2 (HF variant) — SOB + HF + β-blocker → RULE_BETA_BLOCKER_SOB_HF Tier 2', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
-    const u = await tc.findUser(PATIENTS.mike.email)
+    const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
     await seedHistoryToClearPreDay3(tc, u.id)
+    // Flip HF flag on Aisha for this test; restore in finally so subsequent
+    // non-HF tests see her default state.
     await tc.setUserCondition(u.id, 'hasHeartFailure', true, 'HFPEF')
     await tc.setUserMedication(u.id, {
       drugName: 'Metoprolol',
@@ -105,18 +113,14 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
       frequency: 'ONCE_DAILY',
       verificationStatus: 'VERIFIED',
     })
-    const api = await authedApi(API_BASE_URL, PATIENTS.mike.email)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
-      await api.post('daily-journal', {
-        data: {
-          measuredAt: new Date().toISOString(),
-          systolicBP: 124,
-          diastolicBP: 78,
-          pulse: 72,
-          position: 'SITTING',
-          shortnessOfBreath: true,
-          sessionId: randomUUID(),
-        },
+      await postSessionWithTwoReadings(api, {
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        position: 'SITTING',
+        shortnessOfBreath: true,
       })
       const alerts = await waitForAlerts(tc, u.id, (xs) =>
         xs.some((a) => a.ruleId === 'RULE_BETA_BLOCKER_SOB_HF'),
@@ -124,6 +128,7 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
       const sobHfRow = alerts.find((a) => a.ruleId === 'RULE_BETA_BLOCKER_SOB_HF')
       expect(sobHfRow?.tier).toBe('TIER_2_DISCREPANCY')
     } finally {
+      await tc.setUserCondition(u.id, 'hasHeartFailure', false, 'NOT_APPLICABLE')
       await api.dispose()
       await tc.dispose()
     }
@@ -142,16 +147,12 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
     })
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
-      await api.post('daily-journal', {
-        data: {
-          measuredAt: new Date().toISOString(),
-          systolicBP: 124,
-          diastolicBP: 78,
-          pulse: 72,
-          position: 'SITTING',
-          shortnessOfBreath: true,
-          sessionId: randomUUID(),
-        },
+      await postSessionWithTwoReadings(api, {
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        position: 'SITTING',
+        shortnessOfBreath: true,
       })
       const alerts = await waitForAlerts(tc, u.id, (xs) =>
         xs.some((a) => a.ruleId === 'RULE_BETA_BLOCKER_SOB_NON_HF'),
@@ -177,16 +178,12 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
     })
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
-      await api.post('daily-journal', {
-        data: {
-          measuredAt: new Date().toISOString(),
-          systolicBP: 124,
-          diastolicBP: 78,
-          pulse: 72,
-          position: 'SITTING',
-          nsaidUse: true,
-          sessionId: randomUUID(),
-        },
+      await postSessionWithTwoReadings(api, {
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        position: 'SITTING',
+        nsaidUse: true,
       })
       const alerts = await waitForAlerts(tc, u.id, (xs) =>
         xs.some((a) => a.ruleId === 'RULE_NSAID_ANTIHTN_INTERACTION'),
@@ -211,16 +208,12 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
     })
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
-      await api.post('daily-journal', {
-        data: {
-          measuredAt: new Date().toISOString(),
-          systolicBP: 124,
-          diastolicBP: 78,
-          pulse: 72,
-          position: 'SITTING',
-          dryCough: true,
-          sessionId: randomUUID(),
-        },
+      await postSessionWithTwoReadings(api, {
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        position: 'SITTING',
+        dryCough: true,
       })
       const alerts = await waitForAlerts(tc, u.id, (xs) =>
         xs.some((a) => a.ruleId === 'RULE_ACE_COUGH'),
@@ -234,32 +227,18 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
 
   test('A.5 — HCM + SBP <100 → RULE_HCM_LOW carries under-perfusion patient wording', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
-    const u = await tc.findUser(PATIENTS.kate.email)
+    const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
     await seedHistoryToClearPreDay3(tc, u.id)
-    const api = await authedApi(API_BASE_URL, PATIENTS.kate.email)
+    // Flip HCM on Aisha; restore in finally so other tests see her default state.
+    await tc.setUserCondition(u.id, 'hasHCM', true)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
-      const sessionId = randomUUID()
-      // Two readings in same session → averaged → bypasses Q2 single-reading gate.
-      await api.post('daily-journal', {
-        data: {
-          measuredAt: new Date().toISOString(),
-          systolicBP: 96,
-          diastolicBP: 64,
-          pulse: 70,
-          position: 'SITTING',
-          sessionId,
-        },
-      })
-      await api.post('daily-journal', {
-        data: {
-          measuredAt: new Date(Date.now() + 60_000).toISOString(),
-          systolicBP: 94,
-          diastolicBP: 62,
-          pulse: 70,
-          position: 'SITTING',
-          sessionId,
-        },
+      await postSessionWithTwoReadings(api, {
+        systolicBP: 95,
+        diastolicBP: 63,
+        pulse: 70,
+        position: 'SITTING',
       })
       const alerts = await waitForAlerts(tc, u.id, (xs) =>
         xs.some((a) => a.ruleId === 'RULE_HCM_LOW'),
@@ -267,6 +246,7 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
       const hcmLow = alerts.find((a) => a.ruleId === 'RULE_HCM_LOW')
       expect(hcmLow?.patientMessage ?? '').toMatch(/low blood pressure can reduce blood flow/i)
     } finally {
+      await tc.setUserCondition(u.id, 'hasHCM', false)
       await api.dispose()
       await tc.dispose()
     }
@@ -274,28 +254,25 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
 
   test('A.6 — legSwelling + HF → RULE_HF_CAREGIVER_EDEMA fires alongside hfDecomp', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
-    const u = await tc.findUser(PATIENTS.mike.email)
+    const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
     await seedHistoryToClearPreDay3(tc, u.id)
     await tc.setUserCondition(u.id, 'hasHeartFailure', true, 'HFPEF')
-    const api = await authedApi(API_BASE_URL, PATIENTS.mike.email)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
-      await api.post('daily-journal', {
-        data: {
-          measuredAt: new Date().toISOString(),
-          systolicBP: 124,
-          diastolicBP: 78,
-          pulse: 72,
-          position: 'SITTING',
-          legSwelling: true,
-          sessionId: randomUUID(),
-        },
+      await postSessionWithTwoReadings(api, {
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        position: 'SITTING',
+        legSwelling: true,
       })
       const alerts = await waitForAlerts(tc, u.id, (xs) =>
         xs.some((a) => a.ruleId === 'RULE_HF_CAREGIVER_EDEMA'),
       )
       expect(alerts.map((a) => a.ruleId)).toContain('RULE_HF_CAREGIVER_EDEMA')
     } finally {
+      await tc.setUserCondition(u.id, 'hasHeartFailure', false, 'NOT_APPLICABLE')
       await api.dispose()
       await tc.dispose()
     }
@@ -310,22 +287,18 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
   // when the env flag is unset.
   test('A.6 caregiver dispatch — default OFF produces no "Caregiver update" Notification', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
-    const u = await tc.findUser(PATIENTS.mike.email)
+    const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
     await seedHistoryToClearPreDay3(tc, u.id)
     await tc.setUserCondition(u.id, 'hasHeartFailure', true, 'HFPEF')
-    const api = await authedApi(API_BASE_URL, PATIENTS.mike.email)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
-      await api.post('daily-journal', {
-        data: {
-          measuredAt: new Date().toISOString(),
-          systolicBP: 124,
-          diastolicBP: 78,
-          pulse: 72,
-          position: 'SITTING',
-          legSwelling: true,
-          sessionId: randomUUID(),
-        },
+      await postSessionWithTwoReadings(api, {
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        position: 'SITTING',
+        legSwelling: true,
       })
       // Confirm the rule fires before asserting the dispatch guard.
       const alerts = await waitForAlerts(tc, u.id, (xs) =>
@@ -343,6 +316,7 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
         `expected no "Caregiver update" notifications on patient inbox (CAREGIVER_DISPATCH_ENABLED unset). Got: ${JSON.stringify(caregiverFanout)}`,
       ).toHaveLength(0)
     } finally {
+      await tc.setUserCondition(u.id, 'hasHeartFailure', false, 'NOT_APPLICABLE')
       await api.dispose()
       await tc.dispose()
     }
