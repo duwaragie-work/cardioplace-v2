@@ -638,9 +638,9 @@ test.describe('Bucket B G2: Pulse pressure annotations', () => {
     ).toBeTruthy()
   })
 
-  // CLUSTER_6_RISK: narrow PP rule does not exist in the engine today
-  // (no RULE_PULSE_PRESSURE_NARROW or matching annotation hook). If
-  // Cluster 6 introduces it, swap the fixme for a real assertion.
+  // Re-audited Cluster 7 (Niva, 2026-05-15): narrow PP rule still not in
+  // the engine — Cluster 6 + Cluster 7 both shipped without it. Treat as
+  // post-MVP; leave fixme with the spec as a target if Manisha signs off.
   test.fixme(
     'Narrow PP (130/110, PP=20) → narrow-pulse-pressure annotation',
     async () => {
@@ -680,10 +680,11 @@ test.describe('Bucket B G2: Pulse pressure annotations', () => {
 
 // ─── Section 13 — Bucket B G3: Pre-Day-3 mode ──────────────────────────────
 //
-// CLUSTER_6_RISK: the engine today uses preDay3Mode (readingCount < 7) only
-// to switch the patient-facing message tone, NOT to suppress L1 alerts. Q2
-// is expected to add suppression of Level 1 alerts during the first 7
-// readings (educational mode). Until that lands, test 1 is fixme'd.
+// Re-audited Cluster 7 (Niva, 2026-05-15): preDay3 educational suppression
+// did NOT ship in Cluster 6 or Cluster 7 — preDay3Mode still only swaps the
+// patient-facing message tone, never suppresses the L1 row. Deferred to a
+// future Q2 revision. Leave the test below fixme'd until that decision
+// lands; spec stands as the target behavior.
 test.describe('Bucket B G3: Pre-Day-3 mode (educational suppression)', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
@@ -725,15 +726,13 @@ test.describe('Bucket B G3: Pre-Day-3 mode (educational suppression)', () => {
     expect(r.fired).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
   })
 
-  // TODO(niva, Cluster 6): Live full-suite run shows fired:[] here despite
-  // 7 backdated readings + a 145/95 alert-triggering POST. Two hypotheses
-  // worth checking when Q2 lands:
-  //   1. Engine's preDay3Mode count window may exclude readings older than
-  //      N days, so 14d-back fixtures don't move the count past 7.
-  //   2. Aisha is 65+ (DOB 1958) — STANDARD_L1_HIGH at 145/95 may be
-  //      preempted by a 65+ branch I haven't accounted for in the engine.
-  // Marked fixme until investigated; if Q2 changes preDay3 semantics this
-  // assertion will need revisiting anyway.
+  // Re-audited Cluster 7 (Niva, 2026-05-15): the underlying issue is
+  // STANDARD_L1_HIGH's threshold — the rule fires at SBP≥160 or DBP≥100
+  // (STANDARD_SEVERE_STAGE2_*), not at SBP≥140 or DBP≥90 as this test
+  // assumes. 145/95 sits in the (140,160)/(90,100) annotation band but
+  // doesn't trigger a row regardless of reading count. Same gap as Paul
+  // 145/92 above — needs Manisha sign-off on the Stage 1 threshold (140/90)
+  // before flipping. Leaving fixme until that decision lands.
   test.fixme('Post Day-3 (≥7 readings), 145/95 → STANDARD_L1_HIGH fires normally', async () => {
     // submitAndAssert calls tc.resetUser FIRST, which wipes seeded readings.
     // Seed in preSubmit so the 7 historical entries land between reset and
@@ -786,17 +785,15 @@ test.describe('Bucket B G4: Bradycardia × beta-blocker', () => {
     ).toEqual([])
   })
 
-  // TODO(niva, Cluster 6): Live run shows fired:[] at HR 45 for Nora
-  // (hasBradycardia=true + Metoprolol). Three things worth confirming
-  // when the brady rule gets cluster-6 attention:
-  //   1. Whether the rule's lower floor is <40 (not <50 as the spec
-  //      implies). At HR 45, neither asymptomatic nor symptomatic brady
-  //      fires today.
-  //   2. Whether `hasBradycardia=true` permanently suppresses the rule
-  //      regardless of HR (treats all brady as expected-on-BB).
-  //   3. Whether the AFib gate is somehow active for Nora despite no
-  //      hasAFib flag.
-  // Marked fixme — assertion stands as the post-Cluster-6 expectation.
+  // Re-audited Cluster 7 (Niva, 2026-05-15):
+  // Post-Cluster-6 the engine split brady into:
+  //   - bradyAbsoluteRule: HR<40 → RULE_BRADY_ABSOLUTE (Tier 1)
+  //   - bradySymptomaticRule: HR [40,50) + symptom → RULE_BRADY_HR_SYMPTOMATIC
+  // There is intentionally NO asymptomatic rule for HR [40,50) — the BB
+  // therapeutic band sits in [50,60). HR 45 with no symptoms is silent by
+  // design, so this test cannot be un-fixme'd without a new clinical rule.
+  // Leaving fixme + assertion stands as the spec we'd target if Manisha
+  // signs off on an asymptomatic-brady rule in the 40-50 band.
   test.fixme('Nora HR 45 → BRADY_HR_ASYMPTOMATIC fires (below suppression floor)', async () => {
     // Below the BB suppression band, the bradycardia rule fires regardless
     // of the patient's diagnosed-bradycardia status. The asymptomatic vs
@@ -905,14 +902,16 @@ test.describe('Bucket B G5: HFpEF thresholds and personalized override', () => {
 test.describe('Bucket B G6: Per-condition × age 65+ edges', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
-  // TODO(niva, Cluster 6): Live run shows fired:[] for Paul (CAD, 65+) at
-  // 145/92. Both STANDARD_L1_HIGH (SBP≥140 or DBP≥90) and CAD_HIGH should
-  // be candidates — neither fires. Likely something to check in the engine:
-  //   1. The CAD branch may require a threshold row that Paul's seed
-  //      doesn't have (unlike James/Mike/Carol/Kate who all have one).
-  //   2. The 65+ branch may suppress the standard-high path the way it
-  //      does the standard-low path, with no AGE_65_HIGH counterpart.
-  // Asserted post-Cluster-6 expectation; marked fixme until investigated.
+  // Re-audited Cluster 7 (Niva, 2026-05-15): confirmed real engine gap.
+  //   - standardL1HighRule fires only at SBP≥160 / DBP≥100 (Severe Stage 2)
+  //   - cadHighRule defaults to SBP≥160 unless ctx.threshold.sbpUpperTarget
+  //     overrides; Paul has no threshold seeded, so it falls back to 160 too
+  //   - 145/92 is in the (140,160) annotation band per getCadHtnUncontrolled-
+  //     Annotation but no DeviationAlert row fires
+  // Manisha question (open): should CAD patients get a default sbpUpperTarget
+  // of 140 (per AHA Stage 1 + CLINICAL_SPEC §4.3 130/80 treatment target)?
+  // Until signed off, leave fixme — bumping the default could fire stage-1
+  // alerts for every CAD patient in the cohort without ramp coordination.
   test.fixme('Paul (CAD, 65+) SBP 145 → STANDARD_L1_HIGH (or CAD_HIGH)', async () => {
     // Paul has CAD + DOB 1957 (~69yo). At SBP 145 we expect a bp-high
     // rule to fire — accept either standard or CAD-specific path since
