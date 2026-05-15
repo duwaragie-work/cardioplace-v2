@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { authedApi } from '../helpers/auth.js'
-import { PATIENTS } from '../helpers/accounts.js'
+import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl, type TestControl } from '../helpers/test-control.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
@@ -297,6 +297,97 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
       expect(alerts.map((a) => a.ruleId)).toContain('RULE_HF_CAREGIVER_EDEMA')
     } finally {
       await api.dispose()
+      await tc.dispose()
+    }
+  })
+
+  // A.6 follow-up — caregiver dispatch default-OFF guard. When the rule fires
+  // we must NOT write a caregiver-routed Notification on the patient's behalf
+  // (the caregiver dispatch path stays idle until Lakshitha Gap 5 ships the
+  // PatientCaregiver relation + CAREGIVER_DISPATCH_ENABLED is flipped on).
+  // Defensive — catches any regression that accidentally fans a "Caregiver
+  // update" row out under the patient userId, or wires the dispatch to fire
+  // when the env flag is unset.
+  test('A.6 caregiver dispatch — default OFF produces no "Caregiver update" Notification', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.mike.email)
+    await tc.resetUser(u.id)
+    await seedHistoryToClearPreDay3(tc, u.id)
+    await tc.setUserCondition(u.id, 'hasHeartFailure', true, 'HFPEF')
+    const api = await authedApi(API_BASE_URL, PATIENTS.mike.email)
+    try {
+      await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date().toISOString(),
+          systolicBP: 124,
+          diastolicBP: 78,
+          pulse: 72,
+          position: 'SITTING',
+          legSwelling: true,
+          sessionId: randomUUID(),
+        },
+      })
+      // Confirm the rule fires before asserting the dispatch guard.
+      const alerts = await waitForAlerts(tc, u.id, (xs) =>
+        xs.some((a) => a.ruleId === 'RULE_HF_CAREGIVER_EDEMA'),
+      )
+      expect(alerts.map((a) => a.ruleId)).toContain('RULE_HF_CAREGIVER_EDEMA')
+
+      // Give the event loop a beat in case dispatch happens asynchronously,
+      // then snapshot the patient's notifications.
+      await new Promise((r) => setTimeout(r, 500))
+      const notifications = await tc.listNotifications(u.id)
+      const caregiverFanout = notifications.filter((n) => n.title === 'Caregiver update')
+      expect(
+        caregiverFanout,
+        `expected no "Caregiver update" notifications on patient inbox (CAREGIVER_DISPATCH_ENABLED unset). Got: ${JSON.stringify(caregiverFanout)}`,
+      ).toHaveLength(0)
+    } finally {
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
+
+  // A.7 — admin marks a medication as HOLD → patient inbox receives the
+  // SYSTEM_MSG_MEDICATION_HOLD notification carrying the drug name. The
+  // admin-side endpoint already requires a rationale (mirroring REJECT).
+  test('A.7 — admin HOLD action dispatches system message to patient inbox', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    const med = await tc.setUserMedication(u.id, {
+      drugName: 'Lisinopril',
+      drugClass: 'ACE_INHIBITOR',
+      frequency: 'ONCE_DAILY',
+      verificationStatus: 'VERIFIED',
+    })
+
+    const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+    try {
+      const res = await adminApi.post(`admin/medications/${med.id}/verify`, {
+        data: {
+          status: 'HOLD',
+          rationale: 'Patient reports new GI bleed; hold pending in-person eval',
+        },
+      })
+      expect(res.ok(), `verify-medication HOLD failed: ${res.status()} ${await res.text()}`).toBeTruthy()
+
+      // Notification dispatch is best-effort (logged-not-rolled-back); allow
+      // a brief poll window so we don't race the prisma write.
+      const deadline = Date.now() + 4_000
+      let holdNotification: Awaited<ReturnType<TestControl['listNotifications']>>[number] | undefined
+      while (Date.now() < deadline) {
+        const notifications = await tc.listNotifications(u.id)
+        holdNotification = notifications.find(
+          (n) => n.title === 'Medication on hold' && n.body.includes('Lisinopril'),
+        )
+        if (holdNotification) break
+        await new Promise((r) => setTimeout(r, 200))
+      }
+      expect(holdNotification, 'expected SYSTEM_MSG_MEDICATION_HOLD notification in patient inbox').toBeDefined()
+      expect(holdNotification?.body).toMatch(/hold/i)
+    } finally {
+      await adminApi.dispose()
       await tc.dispose()
     }
   })
