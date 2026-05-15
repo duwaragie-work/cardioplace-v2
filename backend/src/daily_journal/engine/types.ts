@@ -103,6 +103,13 @@ export interface SessionSymptoms {
   syncope: boolean
   palpitations: boolean
   legSwelling: boolean
+  /** Cluster 7 (Appendix A) — side-effect + interaction inputs. fatigue +
+   *  shortnessOfBreath feed β-blocker rules; dryCough feeds the ACE
+   *  side-effect; nsaidUse feeds the NSAID + antihypertensive interaction. */
+  fatigue: boolean
+  shortnessOfBreath: boolean
+  dryCough: boolean
+  nsaidUse: boolean
   /** Freeform symptoms retained for context but not used in override logic. */
   otherSymptoms: string[]
 }

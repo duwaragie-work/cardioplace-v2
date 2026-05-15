@@ -108,6 +108,10 @@ export class SessionAveragerService {
       syncope: boolean
       palpitations: boolean
       legSwelling: boolean
+      fatigue: boolean
+      shortnessOfBreath: boolean
+      dryCough: boolean
+      nsaidUse: boolean
       otherSymptoms: string[]
       medicationTaken?: boolean | null
       missedMedications?: unknown
@@ -183,6 +187,10 @@ function orReduceSymptoms(
     syncope: boolean
     palpitations: boolean
     legSwelling: boolean
+    fatigue: boolean
+    shortnessOfBreath: boolean
+    dryCough: boolean
+    nsaidUse: boolean
     otherSymptoms: string[]
   }>,
 ): SessionSymptoms {
@@ -200,6 +208,10 @@ function orReduceSymptoms(
     syncope: false,
     palpitations: false,
     legSwelling: false,
+    fatigue: false,
+    shortnessOfBreath: false,
+    dryCough: false,
+    nsaidUse: false,
     otherSymptoms: [],
   }
   const otherSet = new Set<string>()
@@ -217,6 +229,10 @@ function orReduceSymptoms(
     merged.syncope ||= e.syncope
     merged.palpitations ||= e.palpitations
     merged.legSwelling ||= e.legSwelling
+    merged.fatigue ||= e.fatigue
+    merged.shortnessOfBreath ||= e.shortnessOfBreath
+    merged.dryCough ||= e.dryCough
+    merged.nsaidUse ||= e.nsaidUse
     for (const s of e.otherSymptoms) otherSet.add(s)
   }
   merged.otherSymptoms = [...otherSet]

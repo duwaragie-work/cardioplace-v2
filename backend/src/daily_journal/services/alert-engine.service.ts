@@ -39,8 +39,14 @@ import {
   hfrefRule,
 } from '../engine/condition-branches.js'
 import {
+  aceCoughRule,
   afibPalpitationsRule,
   betaBlockerDizzinessRule,
+  betaBlockerFatigueRule,
+  betaBlockerSobHfRule,
+  betaBlockerSobNonHfRule,
+  hfCaregiverEdemaRule,
+  nsaidAntihypertensiveRule,
   orthostaticHypotensionRule,
   palpitationsGeneralRule,
   syncopeGeneralRule,
@@ -118,6 +124,13 @@ type Axis =
   | 'orthostatic'
   | 'syncope'
   | 'med-side-effect'
+  // Cluster 7 — each Appendix A rule lives on its own axis so they
+  // coexist with BP / HR / other med-side-effect rows on the same reading.
+  | 'med-fatigue'
+  | 'med-sob'
+  | 'med-interaction'
+  | 'med-cough'
+  | 'hf-caregiver-edema'
   | 'info'
 
 const AXIS_PRIORITY: Axis[] = [
@@ -132,6 +145,11 @@ const AXIS_PRIORITY: Axis[] = [
   'palpitations',
   'syncope',
   'med-side-effect',
+  'med-fatigue',
+  'med-sob',
+  'med-interaction',
+  'med-cough',
+  'hf-caregiver-edema',
   'info',
 ]
 
@@ -170,6 +188,17 @@ function axisFor(r: RuleResult): Axis {
   ) {
     return 'med-side-effect'
   }
+  // Cluster 7 — Appendix A side-effect / interaction axes.
+  if (r.ruleId === 'RULE_BETA_BLOCKER_FATIGUE') return 'med-fatigue'
+  if (
+    r.ruleId === 'RULE_BETA_BLOCKER_SOB_HF' ||
+    r.ruleId === 'RULE_BETA_BLOCKER_SOB_NON_HF'
+  ) {
+    return 'med-sob'
+  }
+  if (r.ruleId === 'RULE_NSAID_ANTIHTN_INTERACTION') return 'med-interaction'
+  if (r.ruleId === 'RULE_ACE_COUGH') return 'med-cough'
+  if (r.ruleId === 'RULE_HF_CAREGIVER_EDEMA') return 'hf-caregiver-edema'
   if (r.tier === 'BP_LEVEL_1_LOW') return 'sbp-low'
   if (r.tier === 'BP_LEVEL_1_HIGH') return 'bp-high'
   return 'info'
@@ -460,6 +489,17 @@ export class AlertEngineService {
       tachyPalpitationsRule,
       palpitationsGeneralRule,
       syncopeGeneralRule,
+      // Cluster 7 (Manisha 5/11/26) — Appendix A side-effect + interaction
+      // rules. β-blocker fatigue/SOB (HF + non-HF), NSAID + antihypertensive,
+      // ACE cough, and HF caregiver edema sibling. Each claims its own
+      // distinct axis (see axisFor above) so they coexist with everything
+      // else on the same reading.
+      betaBlockerFatigueRule,
+      betaBlockerSobHfRule,
+      betaBlockerSobNonHfRule,
+      nsaidAntihypertensiveRule,
+      aceCoughRule,
+      hfCaregiverEdemaRule,
     ]
 
     // Stage C continues into the same `claimed` Map declared above so

@@ -122,6 +122,153 @@ export const syncopeGeneralRule: RuleFunction = (session, ctx) => {
   )
 }
 
+// ─── Cluster 7 (Manisha 5/11/26) — Appendix A side-effect + interaction rules ──
+//
+// Each rule below mirrors the Cluster 6 pattern: gate on a per-reading
+// symptom flag + medication or condition context, return TIER_3_INFO so the
+// row persists as patient-facing info without triggering an escalation
+// ladder (per EscalationService.fireT0 which excludes TIER_3). The HF
+// variant of β-blocker SOB is the exception — it escalates as Tier 2.
+
+const ANTIHYPERTENSIVE_CLASSES = new Set([
+  'ACE_INHIBITOR',
+  'ARB',
+  'BETA_BLOCKER',
+  'DHP_CCB',
+  'NDHP_CCB',
+  'LOOP_DIURETIC',
+  'THIAZIDE',
+  'MRA',
+  'ARNI',
+])
+
+// ── A.1 betaBlockerFatigueRule (Appendix A.2) ──────────────────────────────
+// Patient on any β-blocker reports fatigue → patient-facing side-effect.
+// Common, expected effect; clinical action is dose-review, not escalation.
+
+export const betaBlockerFatigueRule: RuleFunction = (session, ctx) => {
+  if (!session.symptoms.fatigue) return null
+  const onBetaBlocker = ctx.contextMeds.some((m) => m.drugClass === 'BETA_BLOCKER')
+  if (!onBetaBlocker) return null
+
+  return buildResult(
+    RULE_IDS.BETA_BLOCKER_FATIGUE,
+    'TIER_3_INFO',
+    session,
+    'Fatigue reported on β-blocker — common dose-dependent side effect.',
+    'β-blocker fatigue',
+  )
+}
+
+// ── A.2 betaBlockerSobHfRule (Appendix A.3 — HF variant) ──────────────────
+// Patient on β-blocker + hasHeartFailure flag + reports shortness of
+// breath → Tier 2 alert that escalates. New SOB in HF is decompensation
+// risk regardless of BP — provider gets a row, not the patient.
+
+export const betaBlockerSobHfRule: RuleFunction = (session, ctx) => {
+  if (!session.symptoms.shortnessOfBreath) return null
+  const hasHf =
+    ctx.profile.hasHeartFailure ||
+    ctx.profile.resolvedHFType === 'HFREF' ||
+    ctx.profile.resolvedHFType === 'HFPEF'
+  if (!hasHf) return null
+  const onBetaBlocker = ctx.contextMeds.some((m) => m.drugClass === 'BETA_BLOCKER')
+  if (!onBetaBlocker) return null
+
+  return buildResult(
+    RULE_IDS.BETA_BLOCKER_SOB_HF,
+    'TIER_2_DISCREPANCY',
+    session,
+    'Shortness of breath reported on β-blocker in HF patient — possible decompensation.',
+    'β-blocker SOB in HF',
+  )
+}
+
+// ── A.2 betaBlockerSobNonHfRule (Appendix A.3 — non-HF variant) ──────────
+// Same symptom + med, no HF flag → patient-facing side-effect only.
+
+export const betaBlockerSobNonHfRule: RuleFunction = (session, ctx) => {
+  if (!session.symptoms.shortnessOfBreath) return null
+  const hasHf =
+    ctx.profile.hasHeartFailure ||
+    ctx.profile.resolvedHFType === 'HFREF' ||
+    ctx.profile.resolvedHFType === 'HFPEF'
+  if (hasHf) return null
+  const onBetaBlocker = ctx.contextMeds.some((m) => m.drugClass === 'BETA_BLOCKER')
+  if (!onBetaBlocker) return null
+
+  return buildResult(
+    RULE_IDS.BETA_BLOCKER_SOB_NON_HF,
+    'TIER_3_INFO',
+    session,
+    'Shortness of breath reported on β-blocker (non-HF) — possible bronchospasm or exercise intolerance side-effect.',
+    'β-blocker SOB side-effect',
+  )
+}
+
+// ── A.3 nsaidAntihypertensiveRule (Appendix A.5) ──────────────────────────
+// NSAID use (per-reading flag OR chronic NSAID in med list) + any
+// antihypertensive → patient warning. NSAIDs blunt antihypertensive
+// efficacy + drive sodium retention.
+
+export const nsaidAntihypertensiveRule: RuleFunction = (session, ctx) => {
+  const nsaidThisReading = session.symptoms.nsaidUse
+  const nsaidInMedList = ctx.contextMeds.some((m) => m.drugClass === 'NSAID')
+  if (!nsaidThisReading && !nsaidInMedList) return null
+
+  const onAntihtn = ctx.contextMeds.some((m) => ANTIHYPERTENSIVE_CLASSES.has(m.drugClass))
+  if (!onAntihtn) return null
+
+  return buildResult(
+    RULE_IDS.NSAID_ANTIHTN_INTERACTION,
+    'TIER_3_INFO',
+    session,
+    'NSAID use reported alongside antihypertensive therapy — may blunt BP control.',
+    'NSAID + antihypertensive interaction',
+  )
+}
+
+// ── A.4 aceCoughRule (Appendix A.6 + B1.3) ────────────────────────────────
+// Patient on ACE inhibitor reports dry cough → patient-facing side-effect.
+// Bradykinin-mediated; usually resolves with ARB switch.
+
+export const aceCoughRule: RuleFunction = (session, ctx) => {
+  if (!session.symptoms.dryCough) return null
+  const onAce = ctx.contextMeds.some((m) => m.drugClass === 'ACE_INHIBITOR')
+  if (!onAce) return null
+
+  return buildResult(
+    RULE_IDS.ACE_COUGH,
+    'TIER_3_INFO',
+    session,
+    'Dry cough reported on ACE inhibitor — classic bradykinin side-effect.',
+    'ACE inhibitor cough',
+  )
+}
+
+// ── A.6 hfCaregiverEdemaRule (Appendix B1.5) ──────────────────────────────
+// HF patient + new ankle swelling → caregiver-routed message. Sits on its
+// own axis so it coexists with hfDecompensationRule (which is the Tier 2
+// physician escalation on the same trigger). Dispatch path is feature-
+// flagged behind CAREGIVER_DISPATCH_ENABLED — see escalation.service.ts.
+
+export const hfCaregiverEdemaRule: RuleFunction = (session, ctx) => {
+  if (!session.symptoms.legSwelling) return null
+  const hasHf =
+    ctx.profile.hasHeartFailure ||
+    ctx.profile.resolvedHFType === 'HFREF' ||
+    ctx.profile.resolvedHFType === 'HFPEF'
+  if (!hasHf) return null
+
+  return buildResult(
+    RULE_IDS.HF_CAREGIVER_EDEMA,
+    'TIER_3_INFO',
+    session,
+    'Ankle swelling in HF patient — caregiver should monitor weight + escalation per care plan.',
+    'HF caregiver edema watch',
+  )
+}
+
 // ── shared helper ───────────────────────────────────────────────────────────
 
 function buildResult(
