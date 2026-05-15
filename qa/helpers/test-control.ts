@@ -250,6 +250,36 @@ export class TestControl {
     await this.post('test-control/user/set-profile-verification', { userId, status })
   }
 
+  /**
+   * Spec 12 — clear businessHours on the practice attached to this user.
+   * Returns the prior values; pair with `restorePracticeBusinessHours` in a
+   * `finally` block so the seed state stays intact for other tests.
+   */
+  async clearPracticeBusinessHours(userId: string): Promise<{
+    practiceId: string
+    prior: {
+      businessHoursStart: string
+      businessHoursEnd: string
+      businessHoursTimezone: string
+    }
+  }> {
+    return this.post('test-control/practice/clear-business-hours', { userId })
+  }
+
+  async restorePracticeBusinessHours(
+    userId: string,
+    prior: {
+      businessHoursStart: string
+      businessHoursEnd: string
+      businessHoursTimezone: string
+    },
+  ): Promise<void> {
+    await this.post('test-control/practice/restore-business-hours', {
+      userId,
+      ...prior,
+    })
+  }
+
   // ─── Inspection ─────────────────────────────────────────────────────────
   /** List DeviationAlert rows for a user. */
   async listAlerts(userId: string): Promise<

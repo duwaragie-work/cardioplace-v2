@@ -552,4 +552,63 @@ export class TestControlService {
       profileVerificationStatus: user.patientProfile?.profileVerificationStatus ?? null,
     }
   }
+
+  // Spec 12 — clear the three businessHours fields on the practice attached
+  // to this user via PatientProviderAssignment. Practice columns are
+  // non-nullable strings, so we set to empty strings — the enrollment-gate
+  // truthiness check (`!p.businessHoursStart || …`) treats empty as missing.
+  // Returns the prior values so the test can restore them in a finally block.
+  async clearPracticeBusinessHours(userId: string): Promise<{
+    practiceId: string
+    prior: {
+      businessHoursStart: string
+      businessHoursEnd: string
+      businessHoursTimezone: string
+    }
+  }> {
+    const assignment = await this.prisma.patientProviderAssignment.findUnique({
+      where: { userId },
+      include: { practice: true },
+    })
+    if (!assignment?.practice) {
+      throw new Error(`No practice assignment found for user ${userId}`)
+    }
+    const prior = {
+      businessHoursStart: assignment.practice.businessHoursStart,
+      businessHoursEnd: assignment.practice.businessHoursEnd,
+      businessHoursTimezone: assignment.practice.businessHoursTimezone,
+    }
+    await this.prisma.practice.update({
+      where: { id: assignment.practice.id },
+      data: {
+        businessHoursStart: '',
+        businessHoursEnd: '',
+        businessHoursTimezone: '',
+      },
+    })
+    return { practiceId: assignment.practice.id, prior }
+  }
+
+  async restorePracticeBusinessHours(args: {
+    userId: string
+    businessHoursStart: string
+    businessHoursEnd: string
+    businessHoursTimezone: string
+  }): Promise<{ ok: true }> {
+    const assignment = await this.prisma.patientProviderAssignment.findUnique({
+      where: { userId: args.userId },
+    })
+    if (!assignment) {
+      throw new Error(`No practice assignment found for user ${args.userId}`)
+    }
+    await this.prisma.practice.update({
+      where: { id: assignment.practiceId },
+      data: {
+        businessHoursStart: args.businessHoursStart,
+        businessHoursEnd: args.businessHoursEnd,
+        businessHoursTimezone: args.businessHoursTimezone,
+      },
+    })
+    return { ok: true }
+  }
 }
