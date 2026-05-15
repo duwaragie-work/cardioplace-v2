@@ -49,6 +49,7 @@ export type MedicationVerificationStatusInput =
   | 'VERIFIED'
   | 'REJECTED'
   | 'AWAITING_PROVIDER'
+  | 'HOLD'
 
 export type ProfileVerificationStatusInput =
   | 'UNVERIFIED'
@@ -138,7 +139,7 @@ export interface CorrectProfilePayload {
 export interface VerifyMedicationPayload {
   status: Extract<
     MedicationVerificationStatusInput,
-    'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER'
+    'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER' | 'HOLD'
   >
   rationale?: string
 }
