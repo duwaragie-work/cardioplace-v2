@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   Users,
   Repeat,
+  Cpu,
 } from 'lucide-react';
 import type {
   PatientAlert,
@@ -474,15 +475,33 @@ function EventDetail({ event }: { event: PatientAlertEscalationEvent }) {
           </span>
         )}
 
-        {/* BP_L2 retry marker */}
-        {event.triggeredByResolution && (
+        {/* Dispatch attribution (JCAHO system-vs-human requirement).
+            Every escalation rung is machine-dispatched, but the audit must
+            distinguish WHO caused it: a triggeredByResolution rung was
+            SCHEDULED by an admin's BP_L2_UNABLE_TO_REACH_RETRY action;
+            every other rung is auto-fired by the escalation scheduler
+            (cron) with no human actor. Display-only — backend has no
+            dispatchedBySystem column, so this is derived from
+            triggeredByResolution. */}
+        {event.triggeredByResolution ? (
           <span
+            data-testid="audit-attribution-retry"
             className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded"
             style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
             title="Scheduled by an admin's BP_L2_UNABLE_TO_REACH_RETRY action"
           >
             <Repeat className="w-2.5 h-2.5" />
-            Retry
+            Retry · admin-scheduled
+          </span>
+        ) : (
+          <span
+            data-testid="audit-attribution-system"
+            className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+            style={{ backgroundColor: 'var(--brand-background)', color: 'var(--brand-text-secondary)' }}
+            title="Dispatched automatically by the escalation scheduler (cron) — no human actor"
+          >
+            <Cpu className="w-2.5 h-2.5" />
+            System (Cron)
           </span>
         )}
       </div>
@@ -511,26 +530,42 @@ function ResolutionAuditFooter({
   // the resolving clinician.
   const bmi = getBMI(heightCm ?? null, alert.journalEntry?.weight ?? null);
 
-  // The 15 Joint-Commission audit fields (per CLAUDE.md). We surface every
-  // field we currently have available; missing fields render as "—" so the
-  // structure stays predictable.
-  const fields: { label: string; value: string }[] = [
-    { label: 'Alert ID', value: alert.id },
-    { label: 'Tier', value: prettify(alert.tier) },
-    { label: 'Rule ID', value: alert.ruleId ?? '—' },
-    { label: 'Severity', value: prettify(alert.severity) },
-    { label: 'Mode', value: prettify(alert.mode) },
-    { label: 'Status', value: prettify(alert.status) },
-    { label: 'Created', value: fmtDateTime(alert.createdAt) },
-    { label: 'Resolved', value: fmtDateTime(alert.acknowledgedAt) },
-    { label: 'Resolved by', value: alert.resolvedByName ?? alert.resolvedBy ?? '—' },
-    { label: 'Resolution action', value: prettify(alert.resolutionAction) },
-    { label: 'Reading', value: alert.journalEntry?.systolicBP != null ? `${alert.journalEntry.systolicBP}/${alert.journalEntry.diastolicBP} mmHg` : '—' },
-    { label: 'Pulse pressure', value: alert.pulsePressure != null ? `${alert.pulsePressure} mmHg` : '—' },
-    { label: 'BMI', value: bmi != null ? bmi.toFixed(1) : '—' },
-    { label: 'Baseline value', value: alert.baselineValue != null ? String(alert.baselineValue) : '—' },
-    { label: 'Actual value', value: alert.actualValue != null ? String(alert.actualValue) : '—' },
-    { label: 'Escalation count', value: String(alert.escalationEvents.length) },
+  // The 15 Joint-Commission audit fields (per CLAUDE.md / CLINICAL_SPEC
+  // Part 13). We surface every field we currently have available; missing
+  // fields render as "—" so the structure stays predictable. `key` drives a
+  // stable `data-testid="audit-field-<key>"` for automated audit coverage.
+  //
+  // Acknowledged + Resolved are now distinct rows (each with actor display
+  // name). Previously a single "Resolved" row showed acknowledgedAt with no
+  // acknowledging actor — a patient ack rendered with no patient name, and
+  // the resolution timestamp was conflated with the acknowledgement one.
+  const fields: { key: string; label: string; value: string }[] = [
+    { key: 'alertId', label: 'Alert ID', value: alert.id },
+    { key: 'tier', label: 'Tier', value: prettify(alert.tier) },
+    { key: 'ruleId', label: 'Rule ID', value: alert.ruleId ?? '—' },
+    { key: 'severity', label: 'Severity', value: prettify(alert.severity) },
+    { key: 'mode', label: 'Mode', value: prettify(alert.mode) },
+    { key: 'status', label: 'Status', value: prettify(alert.status) },
+    { key: 'created', label: 'Created', value: fmtDateTime(alert.createdAt) },
+    { key: 'acknowledged', label: 'Acknowledged', value: fmtDateTime(alert.acknowledgedAt) },
+    {
+      key: 'acknowledgedBy',
+      label: 'Acknowledged by',
+      value: alert.acknowledgedByName ?? alert.acknowledgedBy ?? '—',
+    },
+    { key: 'resolved', label: 'Resolved', value: fmtDateTime(alert.resolvedAt) },
+    {
+      key: 'resolvedBy',
+      label: 'Resolved by',
+      value: alert.resolvedByName ?? alert.resolvedBy ?? '—',
+    },
+    { key: 'resolutionAction', label: 'Resolution action', value: prettify(alert.resolutionAction) },
+    { key: 'reading', label: 'Reading', value: alert.journalEntry?.systolicBP != null ? `${alert.journalEntry.systolicBP}/${alert.journalEntry.diastolicBP} mmHg` : '—' },
+    { key: 'pulsePressure', label: 'Pulse pressure', value: alert.pulsePressure != null ? `${alert.pulsePressure} mmHg` : '—' },
+    { key: 'bmi', label: 'BMI', value: bmi != null ? bmi.toFixed(1) : '—' },
+    { key: 'baselineValue', label: 'Baseline value', value: alert.baselineValue != null ? String(alert.baselineValue) : '—' },
+    { key: 'actualValue', label: 'Actual value', value: alert.actualValue != null ? String(alert.actualValue) : '—' },
+    { key: 'escalationCount', label: 'Escalation count', value: String(alert.escalationEvents.length) },
   ];
 
   return (
@@ -551,7 +586,11 @@ function ResolutionAuditFooter({
       {/* Fixed two-column key/value grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-1.5 mb-3">
         {fields.map((f) => (
-          <div key={f.label} className="flex items-baseline gap-2 min-w-0">
+          <div
+            key={f.key}
+            data-testid={`audit-field-${f.key}`}
+            className="flex items-baseline gap-2 min-w-0"
+          >
             <span className="text-[10px] font-bold uppercase tracking-wider shrink-0" style={{ color: 'var(--brand-text-muted)' }}>
               {f.label}
             </span>
@@ -562,9 +601,14 @@ function ResolutionAuditFooter({
         ))}
       </div>
 
-      {/* Free-form rationale */}
+      {/* Free-form rationale (15-field record field 11 — rendered separately
+          from the grid because it is long-form prose). */}
       {alert.resolutionRationale && (
-        <div className="rounded-md bg-white p-2.5" style={{ border: '1px solid var(--brand-border)' }}>
+        <div
+          data-testid="audit-field-resolutionRationale"
+          className="rounded-md bg-white p-2.5"
+          style={{ border: '1px solid var(--brand-border)' }}
+        >
           <p className="text-[10px] font-bold uppercase tracking-wider mb-0.5" style={{ color: 'var(--brand-success-green)' }}>
             Clinical rationale
           </p>

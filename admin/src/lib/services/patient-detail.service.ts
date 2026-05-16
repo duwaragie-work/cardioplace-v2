@@ -207,12 +207,21 @@ export interface PatientAlert {
   status: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
   resolutionAction: string | null
   resolutionRationale: string | null
+  /** Alert-level actor who acknowledged (patient on patient-ack, clinician on
+   *  provider-ack). Backed by DeviationAlert.acknowledgedByUserId. */
+  acknowledgedBy: string | null
+  /** Resolved display name for acknowledgedBy — fixes the observed bug where
+   *  a patient acknowledgement rendered "Acknowledged" with no name. */
+  acknowledgedByName: string | null
   resolvedBy: string | null
   /** Resolved display name for the alert-level resolvedBy — used by the
    *  15-field audit footer in EscalationAuditTrail. */
   resolvedByName: string | null
   createdAt: string
   acknowledgedAt: string | null
+  /** Distinct resolution timestamp (DeviationAlert.resolvedAt). The footer
+   *  previously showed acknowledgedAt mislabelled as "Resolved". */
+  resolvedAt: string | null
   journalEntry: {
     measuredAt: string | null
     systolicBP: number | null

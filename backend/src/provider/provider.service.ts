@@ -537,12 +537,14 @@ export class ProviderService {
       },
     })
 
-    // Resolve every "by" user-id appearing on either the alert (resolvedBy)
-    // or its escalation events (acknowledgedBy + resolvedBy) into a display
-    // name so the admin UI can show "Resolved by Dr. Singal" instead of a
-    // truncated UUID. One batched lookup, no N+1.
+    // Resolve every "by" user-id appearing on the alert (acknowledgedByUserId
+    // + resolvedBy) or its escalation events (acknowledgedBy + resolvedBy)
+    // into a display name so the admin UI can show "Acknowledged by Aisha
+    // Johnson" / "Resolved by Dr. Singal" instead of a truncated UUID. One
+    // batched lookup, no N+1.
     const idsToResolve: string[] = []
     for (const a of alerts) {
+      if (a.acknowledgedByUserId) idsToResolve.push(a.acknowledgedByUserId)
       if (a.resolvedBy) idsToResolve.push(a.resolvedBy)
       for (const e of a.escalationEvents) {
         if (e.acknowledgedBy) idsToResolve.push(e.acknowledgedBy)
@@ -573,10 +575,19 @@ export class ProviderService {
         status: a.status,
         resolutionAction: a.resolutionAction,
         resolutionRationale: a.resolutionRationale,
+        // Alert-level actor identity. acknowledgedByUserId is the patient (or
+        // clinician) who acked; resolvedBy is the clinician who resolved.
+        // Both resolved to display names so the 15-field audit footer shows
+        // "Acknowledged by …" / "Resolved by …" (bug: patient-ack name was
+        // previously missing). resolvedAt distinct from acknowledgedAt so the
+        // footer can show both timestamps instead of conflating them.
+        acknowledgedBy: a.acknowledgedByUserId,
+        acknowledgedByName: pickDisplayName(a.acknowledgedByUserId, names),
         resolvedBy: a.resolvedBy,
         resolvedByName: pickDisplayName(a.resolvedBy, names),
         createdAt: a.createdAt,
         acknowledgedAt: a.acknowledgedAt,
+        resolvedAt: a.resolvedAt,
         journalEntry: a.journalEntry
           ? {
               ...a.journalEntry,
@@ -1042,10 +1053,12 @@ export class ProviderService {
     }
 
     // Resolve every "by" UUID into a display name in one batched lookup so
-    // the audit footer + escalation timeline can render "Resolved by Dr.
-    // Singal" instead of a truncated UUID. Mirrors getPatientAlerts above.
+    // the audit footer + escalation timeline can render "Acknowledged by …"
+    // / "Resolved by Dr. Singal" instead of a truncated UUID. Mirrors
+    // getPatientAlerts above.
     const idsToResolve: string[] = []
     for (const a of alerts) {
+      if (a.acknowledgedByUserId) idsToResolve.push(a.acknowledgedByUserId)
       if (a.resolvedBy) idsToResolve.push(a.resolvedBy)
       for (const e of a.escalationEvents) {
         if (e.acknowledgedBy) idsToResolve.push(e.acknowledgedBy)
@@ -1087,10 +1100,16 @@ export class ProviderService {
           // expanded body / footer renders the same on both surfaces.
           resolutionAction: a.resolutionAction,
           resolutionRationale: a.resolutionRationale,
+          // Alert-level actor identity — mirrors getPatientAlerts so the
+          // inline audit footer on /admin/notifications shows the patient who
+          // acked + the clinician who resolved, plus a distinct resolvedAt.
+          acknowledgedBy: a.acknowledgedByUserId,
+          acknowledgedByName: pickDisplayName(a.acknowledgedByUserId, names),
           resolvedBy: a.resolvedBy,
           resolvedByName: pickDisplayName(a.resolvedBy, names),
           createdAt: a.createdAt,
           acknowledgedAt: a.acknowledgedAt,
+          resolvedAt: a.resolvedAt,
           followUpScheduledAt: followUp?.createdAt ?? null,
           followUpCallDate: followUp?.callDate ?? null,
           followUpCallTime: followUp?.callTime ?? null,
