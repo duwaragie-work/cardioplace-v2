@@ -298,13 +298,16 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   },
 
   // ── HCM ───────────────────────────────────────────────────────────────
+  // Cluster 7 A.5 (Manisha 5/11/26, Appendix B1.4): HCM patients are
+  // preload-dependent — low BP can reduce perfusion. Patient-facing wording
+  // names the symptoms to watch for so they know when to act.
   RULE_HCM_LOW: {
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is lower than the goal for you. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your blood pressure reading is ${bp(ctx)}, which is too low for you. With your heart condition, low blood pressure can reduce blood flow to your body — watch for dizziness, lightheadedness, or feeling faint. Please contact your care team today.${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's BP is low at ${bp(ctx)} (HCM).`,
+      `The patient's BP is low at ${bp(ctx)} (HCM). Watch for dizziness, lightheadedness, or fainting and help them contact their care team.`,
     physicianMessage: (ctx) =>
-      `BP Level 1 Low — HCM SBP < ${ctx.thresholdValue ?? 100}: ${bp(ctx)}. Dynamic LVOT obstruction risk.${physSuffix(ctx)}`,
+      `BP Level 1 Low — HCM SBP < ${ctx.thresholdValue ?? 100}: ${bp(ctx)}. Preload-dependent — under-perfusion + dynamic LVOT obstruction risk.${physSuffix(ctx)}`,
   },
   RULE_HCM_HIGH: {
     patientMessage: (ctx) =>
@@ -590,4 +593,73 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     physicianMessage: (ctx) =>
       `Tier 2 — Syncope/near-syncope reported. Consider cardiac vs. vasovagal etiology. ECG recommended.${physSuffix(ctx)}`,
   },
+
+  // ─── Cluster 7 (Manisha 5/11/26) — Appendix A side-effect/interaction ───
+  // Patient-facing copy pulled from MANISHA_MASTER_GUIDE_V3 Appendix A.2 /
+  // A.3 / A.5 / A.6 / B1.3 / B1.4 / B1.5. Tier 3 entries are informational —
+  // patient inbox surface, no escalation. Tier 2 BETA_BLOCKER_SOB_HF
+  // escalates via the standard Tier 2 ladder.
+
+  RULE_BETA_BLOCKER_FATIGUE: {
+    patientMessage: () =>
+      "You reported feeling more tired than usual. This can happen with your blood-pressure medicine, especially when you first start it or after a dose change. It usually gets better over a few weeks. If it's making your day harder, let your care team know — they may adjust the timing or dose.",
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) =>
+      `Tier 3 — Patient on β-blocker reports fatigue. Common dose-dependent side effect; consider dose review, evening dosing, or β1-selective alternative if persistent or limiting.${physSuffix(ctx)}`,
+  },
+
+  RULE_BETA_BLOCKER_SOB_HF: {
+    patientMessage: () =>
+      "You reported shortness of breath. Because of your heart condition, this is something your care team needs to know about today. Please contact them — and call 911 if you can't catch your breath at rest or it's getting worse quickly.",
+    caregiverMessage: (ctx) => {
+      const name = ctx.patientName?.trim() || 'The patient'
+      return `${name} reported new shortness of breath and is on a β-blocker for heart failure. Please help them contact their care team today; watch for worsening breathing at rest or sudden weight gain.`
+    },
+    physicianMessage: (ctx) =>
+      `Tier 2 — HF patient on β-blocker reports new shortness of breath. Decompensation risk — assess volume status, BNP/NT-proBNP, and consider in-person visit. Do NOT abruptly stop β-blocker.${physSuffix(ctx)}`,
+  },
+
+  RULE_BETA_BLOCKER_SOB_NON_HF: {
+    patientMessage: () =>
+      'You reported shortness of breath. This can sometimes happen with your blood-pressure medicine. Let your care team know at your next visit so they can check whether the medicine needs adjusting.',
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) =>
+      `Tier 3 — Patient on β-blocker (non-HF) reports shortness of breath. Possible bronchospasm or exercise intolerance; consider β1-selective switch and pulmonary review.${physSuffix(ctx)}`,
+  },
+
+  RULE_NSAID_ANTIHTN_INTERACTION: {
+    patientMessage: () =>
+      "You told us you've taken a pain reliever like ibuprofen, Advil, Aleve, or naproxen. These can raise your blood pressure and make your blood-pressure medicine work less well, especially if you take them often. If your pain needs a few days of relief, acetaminophen (Tylenol) is usually a safer choice — please check with your care team.",
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) =>
+      `Tier 3 — NSAID use reported alongside antihypertensive therapy. Blunts ACE/ARB/diuretic efficacy + drives sodium retention. Counsel patient on acetaminophen alternative; reassess BP trend.${physSuffix(ctx)}`,
+  },
+
+  RULE_ACE_COUGH: {
+    patientMessage: () =>
+      'You reported a dry, tickly cough. This is a common side effect of one of your blood-pressure medicines — it usually starts within the first few weeks of starting it. It is not dangerous, but if the cough is bothering you, please let your care team know. There is a related medicine that often does not cause this cough that they can switch you to.',
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) =>
+      `Tier 3 — ACE inhibitor cough reported. Bradykinin-mediated; consider ARB switch if persistent or limiting.${physSuffix(ctx)}`,
+  },
+
+  RULE_HF_CAREGIVER_EDEMA: {
+    patientMessage: () => '',
+    caregiverMessage: (ctx) => {
+      const name = ctx.patientName?.trim() || 'The patient'
+      return `${name} reported new swelling in their ankles or legs. With heart failure, this can be an early sign of fluid build-up. Please weigh them today and tomorrow morning — if they gain more than 2 pounds, or if breathing gets harder, contact their care team. Keep an eye on swelling, breathing, and weight over the next few days.`
+    },
+    physicianMessage: (ctx) =>
+      `Tier 3 — HF patient + new ankle edema, routed to caregiver for monitoring. Sibling row of HF_DECOMPENSATION (Tier 2 physician escalation).${physSuffix(ctx)}`,
+  },
+}
+
+/**
+ * Cluster 7 A.7 — system message dispatched directly to the patient's inbox
+ * when a provider marks a medication on "Hold" from the admin app. Not a
+ * RuleId — fires from the medication verification handler, not the alert
+ * engine. Quoted from MANISHA_MASTER_GUIDE_V3 Appendix B1.7.
+ */
+export function systemMsgMedicationHold(drugName: string): string {
+  return `Your care team has placed ${drugName} on hold while they review it. This means you should NOT take ${drugName} until they tell you it is safe to restart. If you have questions, call your care team. If you feel unwell after recently taking it — chest pain, severe weakness, fainting — call 911.`
 }

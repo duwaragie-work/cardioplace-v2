@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service.js'
 import { GapAlertService } from '../crons/gap-alert.service.js'
 import { MonthlyReaskService } from '../crons/monthly-reask.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
+import { ladderForTier } from '../daily_journal/escalation/ladder-defs.js'
+import type { LadderStep as LadderStepEnum } from '../generated/prisma/client.js'
 
 /**
  * Helpers backing the /test-control HTTP endpoints. Pure delegation —
@@ -369,6 +371,34 @@ export class TestControlService {
     },
   ): Promise<{ id: string }> {
     const status = med.verificationStatus ?? 'VERIFIED'
+
+    // Dedup on (userId, drugName): if a row already exists with the same
+    // name for this user, update it in place rather than inserting another
+    // duplicate. Prevents test-control from accumulating multiple "active"
+    // copies of the same medication across repeated calls (bug #19, observed
+    // 2026-05-15 — spec 19's sequential tests piled up Metoprolol/Lisinopril
+    // rows on Aisha). PatientMedication's only unique constraint is on `id`,
+    // so this is a findFirst → update|create rather than a native upsert;
+    // a composite unique index would need a migration and isn't worth it for
+    // a test-control-only path.
+    const existing = await this.prisma.patientMedication.findFirst({
+      where: { userId, drugName: med.drugName },
+      select: { id: true },
+    })
+
+    if (existing) {
+      await this.prisma.patientMedication.update({
+        where: { id: existing.id },
+        data: {
+          drugClass: med.drugClass as never,
+          frequency: med.frequency,
+          verificationStatus: status,
+          verifiedAt: status === 'VERIFIED' ? new Date() : null,
+        },
+      })
+      return { id: existing.id }
+    }
+
     const created = await this.prisma.patientMedication.create({
       data: {
         userId,
@@ -440,6 +470,77 @@ export class TestControlService {
     })
   }
 
+  /**
+   * Cluster 7 C.1 — walk N ladder rungs without sleeping. Writes
+   * `EscalationEvent` rows directly with `notificationSentAt = anchor + offset`
+   * and `afterHours = false` so the events look "already dispatched". Tests
+   * use this to drive the Tier 1 T+0 → T+4h → T+8h → T+24h → T+48h progression
+   * in a single tick without waiting for the cron + business-hours guard.
+   *
+   * Skips T+0 because it's written when the alert is created. Walks
+   * `steps[1..1+n]` in order. Idempotent: re-running with the same `n` is a
+   * no-op if those steps already exist (unique on alertId+ladderStep elsewhere
+   * is not enforced, so this helper checks before inserting).
+   */
+  async advanceLadderSteps(
+    alertId: string,
+    n: number,
+  ): Promise<{ advanced: number; steps: string[] }> {
+    if (n <= 0) return { advanced: 0, steps: [] }
+
+    const alert = await this.prisma.deviationAlert.findUnique({
+      where: { id: alertId },
+    })
+    if (!alert) {
+      throw new Error(`Alert ${alertId} not found`)
+    }
+    const ladder = ladderForTier(alert.tier)
+    if (!ladder) {
+      throw new Error(`Alert ${alertId} tier=${alert.tier} has no ladder`)
+    }
+
+    const existing = await this.prisma.escalationEvent.findMany({
+      where: { alertId },
+      select: { ladderStep: true },
+    })
+    const existingSteps = new Set(
+      existing.map((e) => e.ladderStep).filter((s): s is LadderStepEnum => s != null),
+    )
+
+    const anchor = alert.createdAt
+    const advanced: string[] = []
+
+    for (let i = 1; i <= n && i < ladder.steps.length; i++) {
+      const step = ladder.steps[i]
+      if (!step) continue
+      if (existingSteps.has(step.step as LadderStepEnum)) continue
+
+      const firedAt = new Date(anchor.getTime() + step.offsetMs)
+      await this.prisma.escalationEvent.create({
+        data: {
+          alertId,
+          userId: alert.userId,
+          escalationLevel: ladder.kind === 'TIER_2' || ladder.kind === 'BP_LEVEL_1'
+            ? 'LEVEL_1'
+            : 'LEVEL_2',
+          ladderStep: step.step as LadderStepEnum,
+          recipientIds: [],
+          recipientRoles: step.recipientRoles,
+          notificationChannel: step.channels[0] ?? null,
+          triggeredAt: firedAt,
+          notificationSentAt: firedAt,
+          scheduledFor: firedAt,
+          afterHours: false,
+          triggeredByResolution: false,
+          reason: 'test-control.advanceLadderSteps',
+        },
+      })
+      advanced.push(step.step)
+    }
+
+    return { advanced: advanced.length, steps: advanced }
+  }
+
   async listNotifications(userId: string) {
     return this.prisma.notification.findMany({
       where: { userId },
@@ -478,5 +579,64 @@ export class TestControlService {
       onboardingStatus: user.onboardingStatus,
       profileVerificationStatus: user.patientProfile?.profileVerificationStatus ?? null,
     }
+  }
+
+  // Spec 12 — clear the three businessHours fields on the practice attached
+  // to this user via PatientProviderAssignment. Practice columns are
+  // non-nullable strings, so we set to empty strings — the enrollment-gate
+  // truthiness check (`!p.businessHoursStart || …`) treats empty as missing.
+  // Returns the prior values so the test can restore them in a finally block.
+  async clearPracticeBusinessHours(userId: string): Promise<{
+    practiceId: string
+    prior: {
+      businessHoursStart: string
+      businessHoursEnd: string
+      businessHoursTimezone: string
+    }
+  }> {
+    const assignment = await this.prisma.patientProviderAssignment.findUnique({
+      where: { userId },
+      include: { practice: true },
+    })
+    if (!assignment?.practice) {
+      throw new Error(`No practice assignment found for user ${userId}`)
+    }
+    const prior = {
+      businessHoursStart: assignment.practice.businessHoursStart,
+      businessHoursEnd: assignment.practice.businessHoursEnd,
+      businessHoursTimezone: assignment.practice.businessHoursTimezone,
+    }
+    await this.prisma.practice.update({
+      where: { id: assignment.practice.id },
+      data: {
+        businessHoursStart: '',
+        businessHoursEnd: '',
+        businessHoursTimezone: '',
+      },
+    })
+    return { practiceId: assignment.practice.id, prior }
+  }
+
+  async restorePracticeBusinessHours(args: {
+    userId: string
+    businessHoursStart: string
+    businessHoursEnd: string
+    businessHoursTimezone: string
+  }): Promise<{ ok: true }> {
+    const assignment = await this.prisma.patientProviderAssignment.findUnique({
+      where: { userId: args.userId },
+    })
+    if (!assignment) {
+      throw new Error(`No practice assignment found for user ${args.userId}`)
+    }
+    await this.prisma.practice.update({
+      where: { id: assignment.practiceId },
+      data: {
+        businessHoursStart: args.businessHoursStart,
+        businessHoursEnd: args.businessHoursEnd,
+        businessHoursTimezone: args.businessHoursTimezone,
+      },
+    })
+    return { ok: true }
   }
 }

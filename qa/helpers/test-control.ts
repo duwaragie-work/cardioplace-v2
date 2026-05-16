@@ -101,6 +101,22 @@ export class TestControl {
     await this.post('test-control/retry-event/backdate', { alertId, deltaSeconds })
   }
 
+  /**
+   * Cluster 7 C.1 — drive `n` ladder rungs forward without sleeping. Inserts
+   * already-dispatched EscalationEvent rows for steps[1..n] anchored to the
+   * alert's createdAt. Returns the step IDs that were inserted (idempotent —
+   * pre-existing steps are skipped).
+   */
+  async advanceLadderSteps(
+    alertId: string,
+    n: number,
+  ): Promise<{ advanced: number; steps: string[] }> {
+    return this.post('test-control/escalation/advance-ladder-steps', {
+      alertId,
+      n,
+    })
+  }
+
   /** Backdate the latest JournalEntry for a user (for gap-alert + monthly-reask). */
   async backdateLastJournalEntry(userId: string, deltaSeconds: number): Promise<void> {
     await this.post('test-control/journal/backdate-latest', { userId, deltaSeconds })
@@ -232,6 +248,36 @@ export class TestControl {
     status: 'UNVERIFIED' | 'VERIFIED' | 'CORRECTED',
   ): Promise<void> {
     await this.post('test-control/user/set-profile-verification', { userId, status })
+  }
+
+  /**
+   * Spec 12 — clear businessHours on the practice attached to this user.
+   * Returns the prior values; pair with `restorePracticeBusinessHours` in a
+   * `finally` block so the seed state stays intact for other tests.
+   */
+  async clearPracticeBusinessHours(userId: string): Promise<{
+    practiceId: string
+    prior: {
+      businessHoursStart: string
+      businessHoursEnd: string
+      businessHoursTimezone: string
+    }
+  }> {
+    return this.post('test-control/practice/clear-business-hours', { userId })
+  }
+
+  async restorePracticeBusinessHours(
+    userId: string,
+    prior: {
+      businessHoursStart: string
+      businessHoursEnd: string
+      businessHoursTimezone: string
+    },
+  ): Promise<void> {
+    await this.post('test-control/practice/restore-business-hours', {
+      userId,
+      ...prior,
+    })
   }
 
   // ─── Inspection ─────────────────────────────────────────────────────────

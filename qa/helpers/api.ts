@@ -28,6 +28,16 @@ export type CreateJournalEntry = {
   newOnsetHeadache?: boolean
   ruqPain?: boolean
   edema?: boolean
+  // Cluster 6 symptom flags (Manisha 5/10/26)
+  dizziness?: boolean
+  syncope?: boolean
+  palpitations?: boolean
+  legSwelling?: boolean
+  // Cluster 7 symptom flags (Manisha 5/11/26 — Appendix A)
+  fatigue?: boolean
+  shortnessOfBreath?: boolean
+  dryCough?: boolean
+  nsaidUse?: boolean
   otherSymptoms?: string[]
   measurementConditions?: Record<string, boolean>
 }
@@ -42,6 +52,55 @@ export async function postJournalEntry(
   // Unwrap so callers can use `created.id` directly.
   const body = await res.json()
   return body?.data ?? body
+}
+
+/**
+ * Submit a two-reading session (1 minute apart, same sessionId, identical
+ * symptom flags). Satisfies the Cluster 6 Q2 single-reading gate so Stage C
+ * rules (β-blocker side-effects, NSAID interaction, ACE cough, HF caregiver
+ * edema, HCM low BP, etc.) can fire. Returns both created entry rows.
+ *
+ * Use this when the test is exercising a non-emergency Stage C rule that
+ * depends on a per-reading symptom flag. Emergency / Tier 1 contraindication
+ * tests should keep using single-reading `postJournalEntry` — those bypass
+ * the gate by design.
+ */
+export async function postSessionWithTwoReadings(
+  api: APIRequestContext,
+  base: Omit<CreateJournalEntry, 'measuredAt' | 'sessionId'> & {
+    sessionId?: string
+    firstMeasuredAt?: string
+  },
+): Promise<{
+  first: { id: string; measuredAt: string }
+  second: { id: string; measuredAt: string }
+  sessionId: string
+}> {
+  const sessionId = base.sessionId ?? cryptoRandomUUID()
+  const firstMeasuredAt = base.firstMeasuredAt ?? new Date().toISOString()
+  const secondMeasuredAt = new Date(
+    new Date(firstMeasuredAt).getTime() + 60_000,
+  ).toISOString()
+  // Strip our setup-only fields before forwarding the rest of the payload.
+  const { sessionId: _s, firstMeasuredAt: _f, ...payload } = base
+
+  const first = await postJournalEntry(api, {
+    ...payload,
+    sessionId,
+    measuredAt: firstMeasuredAt,
+  })
+  const second = await postJournalEntry(api, {
+    ...payload,
+    sessionId,
+    measuredAt: secondMeasuredAt,
+  })
+  return { first, second, sessionId }
+}
+
+// Local randomUUID — Playwright workers run in Node so `crypto.randomUUID` is
+// always available; avoid an extra import in helpers/api.ts.
+function cryptoRandomUUID(): string {
+  return globalThis.crypto.randomUUID()
 }
 
 export async function getActiveAlerts(

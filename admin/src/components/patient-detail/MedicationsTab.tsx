@@ -193,10 +193,30 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
       setRejecting(med);
       return;
     }
+    // Cluster 7 A.7 — HOLD also requires a rationale; admin enters it via a
+    // prompt so the patient notification can carry context-free wording while
+    // the audit log captures the why.
+    let rationale: string | undefined;
+    if (status === 'HOLD') {
+      const reason = typeof window !== 'undefined'
+        ? window.prompt(`Why is ${med.drugName} being placed on hold?`)
+        : null;
+      if (reason == null) return;
+      const trimmed = reason.trim();
+      if (trimmed.length === 0) {
+        setError('A reason is required to place a medication on hold.');
+        return;
+      }
+      rationale = trimmed;
+    }
     setSavingId(med.id);
     setError(null);
     try {
-      await verifyMedication(med.id, status as 'VERIFIED' | 'AWAITING_PROVIDER');
+      await verifyMedication(
+        med.id,
+        status as 'VERIFIED' | 'AWAITING_PROVIDER' | 'HOLD',
+        rationale,
+      );
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not update medication.');
@@ -471,6 +491,8 @@ function verificationChrome(status: MedicationVerificationStatus): { label: stri
       return { label: 'Rejected', color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)' };
     case 'AWAITING_PROVIDER':
       return { label: 'Awaiting provider', color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
+    case 'HOLD':
+      return { label: 'On hold', color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
     case 'UNVERIFIED':
     default:
       return { label: 'Unverified', color: 'var(--brand-text-muted)', bg: 'var(--brand-background)' };
@@ -563,13 +585,13 @@ function MedCard({ med, savingId, side, onSetStatus, canVerify }: MedCardProps) 
           />
           <StatusButton
             current={med.verificationStatus}
-            target="AWAITING_PROVIDER"
+            target="HOLD"
             actionLabel="Hold"
             activeLabel="On hold"
             color="var(--brand-warning-amber)"
             icon={<ClockIcon className="w-2.5 h-2.5" />}
             saving={saving}
-            onClick={() => onSetStatus(med, 'AWAITING_PROVIDER')}
+            onClick={() => onSetStatus(med, 'HOLD')}
           />
         </div>
       )}

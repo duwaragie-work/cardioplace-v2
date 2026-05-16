@@ -30,6 +30,15 @@ import {
 } from '../utils/business-hours.js'
 
 /**
+ * Cluster 7 A.6 — rules whose primary delivery channel is the caregiver
+ * dashboard rather than the standard provider escalation ladder. Each ruleId
+ * here is Tier 3 (no ladder) and the alert's caregiverMessage is the payload.
+ */
+const CAREGIVER_ROUTED_RULES: ReadonlySet<string> = new Set<string>([
+  'RULE_HF_CAREGIVER_EDEMA',
+])
+
+/**
  * Phase/7 EscalationService — the single owner of the ladder state machine.
  *
  * Responsibilities:
@@ -80,6 +89,17 @@ export class EscalationService {
     } catch (err) {
       this.logger.error(
         `T+0 dispatch failed for alert ${payload.alertId}`,
+        err instanceof Error ? err.stack : err,
+      )
+    }
+    // Cluster 7 A.6 — caregiver dispatch runs alongside the standard ladder.
+    // Tier 3 caregiver-routed rules (e.g. RULE_HF_CAREGIVER_EDEMA) have no
+    // ladder, so fireT0() exits early; this path is their only delivery.
+    try {
+      await this.dispatchCaregiverNotification(payload)
+    } catch (err) {
+      this.logger.error(
+        `Caregiver dispatch failed for alert ${payload.alertId}`,
         err instanceof Error ? err.stack : err,
       )
     }
@@ -902,6 +922,44 @@ export class EscalationService {
       select: { id: true },
     })
     return users.map((u) => u.id)
+  }
+
+  /**
+   * Cluster 7 A.6 — idle caregiver dispatch path. Writes a DASHBOARD
+   * Notification carrying the alert's caregiverMessage to every caregiver
+   * linked to the patient. Lakshitha's Gap 5 will populate the patient ↔
+   * caregiver relationship; until then `findCaregiverUserIds` returns [] and
+   * this method is a no-op. Gated behind CAREGIVER_DISPATCH_ENABLED=true so
+   * production stays silent until the UI ships.
+   */
+  private async dispatchCaregiverNotification(
+    payload: AlertCreatedEvent,
+  ): Promise<void> {
+    if (!CAREGIVER_ROUTED_RULES.has(payload.ruleId ?? '')) return
+    if (process.env.CAREGIVER_DISPATCH_ENABLED !== 'true') return
+
+    const caregiverUserIds = await this.findCaregiverUserIds(payload.userId)
+    if (caregiverUserIds.length === 0) return
+
+    const alert = await this.loadAlert(payload.alertId)
+    if (!alert?.caregiverMessage) return
+
+    for (const caregiverUserId of caregiverUserIds) {
+      await this.prisma.notification.create({
+        data: {
+          userId: caregiverUserId,
+          alertId: alert.id,
+          channel: 'DASHBOARD',
+          title: 'Caregiver update',
+          body: alert.caregiverMessage,
+        },
+      })
+    }
+  }
+
+  private async findCaregiverUserIds(_patientUserId: string): Promise<string[]> {
+    // Placeholder — PatientCaregiver model ships with Lakshitha's Gap 5.
+    return []
   }
 
   private pickMessageForRole(alert: AlertRow, role: RecipientRole): string | null {

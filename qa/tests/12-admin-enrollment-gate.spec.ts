@@ -70,6 +70,23 @@ test.describe('Enrollment gate — failure modes (TODO)', () => {
   })
 
   test('Practice missing business hours fails with practice-missing-business-hours', async () => {
-    test.skip(true, 'TODO(next-pass): test-control endpoint to null out practice business hours')
+    test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated — mutates practice businessHours then restores')
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    const api = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+
+    // Clear businessHours on the practice attached to Aisha's assignment.
+    // Capture the prior values so the `finally` block can restore them and
+    // keep the seed state intact for downstream tests.
+    const { prior } = await tc.clearPracticeBusinessHours(u.id)
+    try {
+      const result = await adminEnrollmentCheck(api, u.id)
+      expect(result.ready, `enrollment-check reasons: ${JSON.stringify(result.reasons)}`).toBe(false)
+      expect(result.reasons).toContain('practice-missing-business-hours')
+    } finally {
+      await tc.restorePracticeBusinessHours(u.id, prior)
+      await api.dispose()
+      await tc.dispose()
+    }
   })
 })

@@ -3,11 +3,13 @@ import { DrugEnrichmentService } from '../drug-enrichment/drug-enrichment.servic
 import {
   DrugClass,
   MedicationVerificationStatus,
+  NotificationChannel,
   Prisma,
   ProfileVerificationStatus,
   VerificationChangeType,
   VerifierRole,
 } from '../generated/prisma/client.js'
+import { systemMsgMedicationHold } from '@cardioplace/shared'
 import type {
   PatientMedication,
   PatientProfile,
@@ -751,6 +753,11 @@ export class IntakeService {
     if (changeType === VerificationChangeType.ADMIN_REJECT && !dto.rationale) {
       throw new BadRequestException('Rationale is required to reject a medication')
     }
+    // Cluster 7 A.7 — Hold also requires a rationale so the audit log
+    // captures the admin's reason for pausing the medication.
+    if (nextStatus === MedicationVerificationStatus.HOLD && !dto.rationale) {
+      throw new BadRequestException('Rationale is required to place a medication on hold')
+    }
 
     const [updated] = await this.prisma.$transaction([
       this.prisma.patientMedication.update({
@@ -775,6 +782,28 @@ export class IntakeService {
         },
       }),
     ])
+
+    // Cluster 7 A.7 — dispatch a system message to the patient inbox so they
+    // know NOT to take the held medication until the admin clears it. Failure
+    // to dispatch is logged but does not roll back the status change — the
+    // medication is on hold regardless of whether the notification landed.
+    if (nextStatus === MedicationVerificationStatus.HOLD) {
+      try {
+        await this.prisma.notification.create({
+          data: {
+            userId: med.userId,
+            channel: NotificationChannel.DASHBOARD,
+            title: 'Medication on hold',
+            body: systemMsgMedicationHold(med.drugName),
+          },
+        })
+      } catch (err) {
+        this.logger.error(
+          `HOLD notification failed for medication ${medicationId}`,
+          err instanceof Error ? err.stack : err,
+        )
+      }
+    }
 
     return {
       statusCode: 200,

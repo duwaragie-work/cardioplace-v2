@@ -64,6 +64,10 @@ function noSymptoms(): SessionSymptoms {
     syncope: false,
     palpitations: false,
     legSwelling: false,
+    fatigue: false,
+    shortnessOfBreath: false,
+    dryCough: false,
+    nsaidUse: false,
     otherSymptoms: [],
   }
 }
@@ -1386,6 +1390,182 @@ describe('bradySymptomaticRule unverified beta-blocker suppression (P gap)', () 
           }),
         ],
       }),
+    )
+    expect(r).toBeNull()
+  })
+})
+
+// ─── Cluster 7 (Manisha 5/11/26) — Appendix A side-effect rules ─────────────
+
+import {
+  aceCoughRule,
+  betaBlockerFatigueRule,
+  betaBlockerSobHfRule,
+  betaBlockerSobNonHfRule,
+  hfCaregiverEdemaRule,
+  nsaidAntihypertensiveRule,
+} from './symptom-rules.js'
+
+describe('Cluster 7 — betaBlockerFatigueRule (A.1)', () => {
+  it('fires on β-blocker + fatigue symptom', () => {
+    const r = betaBlockerFatigueRule(
+      session({ symptoms: { ...noSymptoms(), fatigue: true } }),
+      ctx({ contextMeds: [med({ drugClass: 'BETA_BLOCKER', drugName: 'Metoprolol' })] }),
+    )
+    expect(r?.ruleId).toBe('RULE_BETA_BLOCKER_FATIGUE')
+    expect(r?.tier).toBe('TIER_3_INFO')
+  })
+
+  it('does not fire without fatigue symptom', () => {
+    const r = betaBlockerFatigueRule(
+      session(),
+      ctx({ contextMeds: [med({ drugClass: 'BETA_BLOCKER' })] }),
+    )
+    expect(r).toBeNull()
+  })
+
+  it('does not fire without a β-blocker in the med list', () => {
+    const r = betaBlockerFatigueRule(
+      session({ symptoms: { ...noSymptoms(), fatigue: true } }),
+      ctx({ contextMeds: [med({ drugClass: 'ACE_INHIBITOR' })] }),
+    )
+    expect(r).toBeNull()
+  })
+})
+
+describe('Cluster 7 — betaBlockerSobHfRule (A.2 HF variant)', () => {
+  it('fires Tier 2 on HF + β-blocker + SOB', () => {
+    const r = betaBlockerSobHfRule(
+      session({ symptoms: { ...noSymptoms(), shortnessOfBreath: true } }),
+      ctx({
+        profile: { hasHeartFailure: true, resolvedHFType: 'HFREF' },
+        contextMeds: [med({ drugClass: 'BETA_BLOCKER' })],
+      }),
+    )
+    expect(r?.ruleId).toBe('RULE_BETA_BLOCKER_SOB_HF')
+    expect(r?.tier).toBe('TIER_2_DISCREPANCY')
+  })
+
+  it('does not fire for non-HF patient', () => {
+    const r = betaBlockerSobHfRule(
+      session({ symptoms: { ...noSymptoms(), shortnessOfBreath: true } }),
+      ctx({ contextMeds: [med({ drugClass: 'BETA_BLOCKER' })] }),
+    )
+    expect(r).toBeNull()
+  })
+})
+
+describe('Cluster 7 — betaBlockerSobNonHfRule (A.2 non-HF variant)', () => {
+  it('fires Tier 3 on non-HF + β-blocker + SOB', () => {
+    const r = betaBlockerSobNonHfRule(
+      session({ symptoms: { ...noSymptoms(), shortnessOfBreath: true } }),
+      ctx({ contextMeds: [med({ drugClass: 'BETA_BLOCKER' })] }),
+    )
+    expect(r?.ruleId).toBe('RULE_BETA_BLOCKER_SOB_NON_HF')
+    expect(r?.tier).toBe('TIER_3_INFO')
+  })
+
+  it('does not fire for HF patient (HF variant takes over)', () => {
+    const r = betaBlockerSobNonHfRule(
+      session({ symptoms: { ...noSymptoms(), shortnessOfBreath: true } }),
+      ctx({
+        profile: { hasHeartFailure: true, resolvedHFType: 'HFREF' },
+        contextMeds: [med({ drugClass: 'BETA_BLOCKER' })],
+      }),
+    )
+    expect(r).toBeNull()
+  })
+})
+
+describe('Cluster 7 — nsaidAntihypertensiveRule (A.3)', () => {
+  it('fires when patient flags nsaidUse + has antihypertensive', () => {
+    const r = nsaidAntihypertensiveRule(
+      session({ symptoms: { ...noSymptoms(), nsaidUse: true } }),
+      ctx({ contextMeds: [med({ drugClass: 'ACE_INHIBITOR' })] }),
+    )
+    expect(r?.ruleId).toBe('RULE_NSAID_ANTIHTN_INTERACTION')
+    expect(r?.tier).toBe('TIER_3_INFO')
+  })
+
+  it('fires when NSAID is in med list + antihypertensive present', () => {
+    const r = nsaidAntihypertensiveRule(
+      session(),
+      ctx({
+        contextMeds: [
+          med({ drugClass: 'NSAID', drugName: 'Ibuprofen' }),
+          med({ drugClass: 'BETA_BLOCKER' }),
+        ],
+      }),
+    )
+    expect(r?.ruleId).toBe('RULE_NSAID_ANTIHTN_INTERACTION')
+  })
+
+  it('does not fire without an antihypertensive', () => {
+    const r = nsaidAntihypertensiveRule(
+      session({ symptoms: { ...noSymptoms(), nsaidUse: true } }),
+      ctx({ contextMeds: [med({ drugClass: 'STATIN' })] }),
+    )
+    expect(r).toBeNull()
+  })
+
+  it('does not fire without NSAID surface', () => {
+    const r = nsaidAntihypertensiveRule(
+      session(),
+      ctx({ contextMeds: [med({ drugClass: 'ACE_INHIBITOR' })] }),
+    )
+    expect(r).toBeNull()
+  })
+})
+
+describe('Cluster 7 — aceCoughRule (A.4)', () => {
+  it('fires on ACE inhibitor + dryCough', () => {
+    const r = aceCoughRule(
+      session({ symptoms: { ...noSymptoms(), dryCough: true } }),
+      ctx({ contextMeds: [med({ drugClass: 'ACE_INHIBITOR' })] }),
+    )
+    expect(r?.ruleId).toBe('RULE_ACE_COUGH')
+    expect(r?.tier).toBe('TIER_3_INFO')
+  })
+
+  it('does not fire on ARB (different class)', () => {
+    const r = aceCoughRule(
+      session({ symptoms: { ...noSymptoms(), dryCough: true } }),
+      ctx({ contextMeds: [med({ drugClass: 'ARB' })] }),
+    )
+    expect(r).toBeNull()
+  })
+
+  it('does not fire without dryCough', () => {
+    const r = aceCoughRule(
+      session(),
+      ctx({ contextMeds: [med({ drugClass: 'ACE_INHIBITOR' })] }),
+    )
+    expect(r).toBeNull()
+  })
+})
+
+describe('Cluster 7 — hfCaregiverEdemaRule (A.6)', () => {
+  it('fires on HF + legSwelling', () => {
+    const r = hfCaregiverEdemaRule(
+      session({ symptoms: { ...noSymptoms(), legSwelling: true } }),
+      ctx({ profile: { hasHeartFailure: true, resolvedHFType: 'HFREF' } }),
+    )
+    expect(r?.ruleId).toBe('RULE_HF_CAREGIVER_EDEMA')
+    expect(r?.tier).toBe('TIER_3_INFO')
+  })
+
+  it('does not fire for non-HF patient (DHP-CCB rule handles those)', () => {
+    const r = hfCaregiverEdemaRule(
+      session({ symptoms: { ...noSymptoms(), legSwelling: true } }),
+      ctx(),
+    )
+    expect(r).toBeNull()
+  })
+
+  it('does not fire without legSwelling', () => {
+    const r = hfCaregiverEdemaRule(
+      session(),
+      ctx({ profile: { hasHeartFailure: true, resolvedHFType: 'HFREF' } }),
     )
     expect(r).toBeNull()
   })

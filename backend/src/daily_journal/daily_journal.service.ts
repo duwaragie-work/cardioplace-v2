@@ -97,6 +97,11 @@ export class DailyJournalService {
           syncope: dto.syncope ?? false,
           palpitations: dto.palpitations ?? false,
           legSwelling: dto.legSwelling ?? false,
+          // Cluster 7 — Appendix A side-effect symptom flags.
+          fatigue: dto.fatigue ?? false,
+          shortnessOfBreath: dto.shortnessOfBreath ?? false,
+          dryCough: dto.dryCough ?? false,
+          nsaidUse: dto.nsaidUse ?? false,
           otherSymptoms: [
             ...(dto.otherSymptoms ?? []),
             ...(dto.symptoms ?? []),
@@ -204,6 +209,11 @@ export class DailyJournalService {
       if (dto.syncope !== undefined) data.syncope = dto.syncope
       if (dto.palpitations !== undefined) data.palpitations = dto.palpitations
       if (dto.legSwelling !== undefined) data.legSwelling = dto.legSwelling
+      // Cluster 7 — Appendix A side-effect symptom flags on edit path.
+      if (dto.fatigue !== undefined) data.fatigue = dto.fatigue
+      if (dto.shortnessOfBreath !== undefined) data.shortnessOfBreath = dto.shortnessOfBreath
+      if (dto.dryCough !== undefined) data.dryCough = dto.dryCough
+      if (dto.nsaidUse !== undefined) data.nsaidUse = dto.nsaidUse
 
       if (dto.otherSymptoms !== undefined || dto.symptoms !== undefined) {
         data.otherSymptoms = [
@@ -1015,6 +1025,11 @@ export class DailyJournalService {
     syncope?: boolean
     palpitations?: boolean
     legSwelling?: boolean
+    // Cluster 7 — Appendix A side-effect symptoms.
+    fatigue?: boolean
+    shortnessOfBreath?: boolean
+    dryCough?: boolean
+    nsaidUse?: boolean
     otherSymptoms: string[]
     teachBackAnswer: string | null
     teachBackCorrect: boolean | null
@@ -1051,6 +1066,11 @@ export class DailyJournalService {
       syncope: entry.syncope ?? false,
       palpitations: entry.palpitations ?? false,
       legSwelling: entry.legSwelling ?? false,
+      // Cluster 7 — Appendix A side-effect symptoms.
+      fatigue: entry.fatigue ?? false,
+      shortnessOfBreath: entry.shortnessOfBreath ?? false,
+      dryCough: entry.dryCough ?? false,
+      nsaidUse: entry.nsaidUse ?? false,
       otherSymptoms: entry.otherSymptoms,
       teachBackAnswer: entry.teachBackAnswer,
       teachBackCorrect: entry.teachBackCorrect,

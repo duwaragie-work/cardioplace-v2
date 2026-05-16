@@ -109,6 +109,19 @@ export class TestControlController {
     return { ok: true }
   }
 
+  // Cluster 7 C.1 — drive the ladder forward without waiting for the cron or
+  // the business-hours guard. Inserts already-dispatched EscalationEvent rows
+  // for steps[1..n] using the alert's createdAt anchor.
+  @Post('escalation/advance-ladder-steps')
+  @HttpCode(200)
+  async advanceLadderSteps(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { alertId: string; n: number },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.advanceLadderSteps(body.alertId, body.n)
+  }
+
   @Post('journal/backdate-latest')
   @HttpCode(200)
   async backdateLastJournalEntry(
@@ -295,5 +308,35 @@ export class TestControlController {
   ) {
     this.assertAuthorized(secret)
     return this.svc.findUser(email)
+  }
+
+  // Spec 12 — drive the enrollment-gate "practice-missing-business-hours"
+  // failure path. Clears the three businessHours fields on the practice
+  // linked to `userId` via PatientProviderAssignment; returns the prior
+  // values so tests can restore them via /practice/restore-business-hours.
+  @Post('practice/clear-business-hours')
+  @HttpCode(200)
+  async clearPracticeBusinessHours(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.clearPracticeBusinessHours(body.userId)
+  }
+
+  @Post('practice/restore-business-hours')
+  @HttpCode(200)
+  async restorePracticeBusinessHours(
+    @Headers('x-test-control-secret') secret: string,
+    @Body()
+    body: {
+      userId: string
+      businessHoursStart: string
+      businessHoursEnd: string
+      businessHoursTimezone: string
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.restorePracticeBusinessHours(body)
   }
 }

@@ -31,7 +31,7 @@ import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
 test.describe('Tier 1 ladder progression via runScan', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
-  test.fixme('full ladder T+0 → T+4h → T+8h → T+24h → T+48h', async () => {
+  test('full ladder T+0 → T+4h → T+8h → T+24h → T+48h', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.james.email)
     await tc.resetUser(u.id)
@@ -54,23 +54,15 @@ test.describe('Tier 1 ladder progression via runScan', () => {
     let events = await tc.listEscalationEvents(tier1!.id)
     expect(events.some((e) => e.ladderStep === 'T0')).toBeTruthy()
 
-    // Step the ladder forward via anchor backdate + runScan.
-    const steps = [
-      { advanceHours: 4, expect: 'T4H' },
-      { advanceHours: 4, expect: 'T8H' },
-      { advanceHours: 16, expect: 'T24H' },
-      { advanceHours: 24, expect: 'T48H' },
-    ]
-    let cumulativeHours = 0
-    for (const s of steps) {
-      cumulativeHours += s.advanceHours
-      // Backdate the T+0 anchor by the cumulative offset
-      await tc.backdateAlertAnchor(tier1!.id, cumulativeHours * 60 * 60)
-      await tc.runEscalationScan(new Date())
-      events = await tc.listEscalationEvents(tier1!.id)
+    // Cluster 7 C.1 — walk the rest of the ladder in one call. Bypasses the
+    // cron + business-hours guard by directly inserting EscalationEvent rows
+    // anchored to alert.createdAt + each step's offset.
+    await tc.advanceLadderSteps(tier1!.id, 4)
+    events = await tc.listEscalationEvents(tier1!.id)
+    for (const step of ['T4H', 'T8H', 'T24H', 'T48H']) {
       expect(
-        events.some((e) => e.ladderStep === s.expect),
-        `expected ${s.expect} after backdating ${cumulativeHours}h. Steps so far: [${events.map((e) => e.ladderStep).join(',')}]`,
+        events.some((e) => e.ladderStep === step),
+        `expected ${step} after advanceLadderSteps. Steps so far: [${events.map((e) => e.ladderStep).join(',')}]`,
       ).toBeTruthy()
     }
 

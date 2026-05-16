@@ -24,6 +24,10 @@ function entry(over: Partial<any> = {}) {
     syncope: false,
     palpitations: false,
     legSwelling: false,
+    fatigue: false,
+    shortnessOfBreath: false,
+    dryCough: false,
+    nsaidUse: false,
     otherSymptoms: [] as string[],
     ...over,
   }
