@@ -47,6 +47,23 @@ describe('withDeadlockRetry', () => {
     expect(fn).toHaveBeenCalledTimes(2)
   })
 
+  it('retries on @prisma/adapter-pg DriverAdapterError TransactionWriteConflict (bug #20)', async () => {
+    // The pg driver adapter wraps Postgres 40P01 as a DriverAdapterError whose
+    // typed `code` is undefined — only the message carries the signal. Without
+    // the message-substring branch this error class never retried.
+    const driverErr = Object.assign(
+      new Error('DriverAdapterError: TransactionWriteConflict'),
+      { name: 'DriverAdapterError' },
+    )
+    const fn = jest
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(driverErr)
+      .mockResolvedValueOnce('ok')
+    const result = await withDeadlockRetry('test', fn, silentLogger, 3)
+    expect(result).toBe('ok')
+    expect(fn).toHaveBeenCalledTimes(2)
+  })
+
   it('surfaces non-deadlock errors immediately without retry', async () => {
     const err = new Error('not-a-deadlock')
     const fn = jest.fn<() => Promise<string>>().mockRejectedValue(err)
