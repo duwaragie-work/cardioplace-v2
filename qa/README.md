@@ -8,10 +8,9 @@ on the backend.
 > **Status (2026-05-15):** Mature. 18 spec files / ~195 `test()` declarations,
 > CI green on all shards (6 `test.fixme()` in spec 09 + accepted WCAG debt
 > excluded). Covers Cluster 6 + Cluster 7 engine rules, JCAHO 15-field audit,
-> escalation ladders, and the A1/B4 bug-fix cycle. Living run record is the
-> dated `qa/reports/STATUS_YYYY_MM_DD.md` snapshots (latest:
-> `qa/reports/STATUS_2026_05_15.md`); `qa/reports/RESULTS.md` is the
-> historical 2026-05-08 forensic log with a current-status header.
+> escalation ladders, and the A1/B4 bug-fix cycle. Single living run record:
+> **`qa/reports/RESULTS.md`** (one file, updated in place each cycle — old
+> dated `STATUS_*` snapshots were consolidated into it on 2026-05-15).
 
 ---
 
@@ -235,7 +234,7 @@ becomes a no-op and the assertion runs.
 1. ~~**Verify the suite runs end-to-end against a live backend.**~~
    **DONE** — run end-to-end across the Cluster 5/6/7 + A1/B4 cycles;
    selectors stabilized. (Local runs against the shared remote DB still hit
-   seed pollution — see the dated STATUS snapshots' "Known test-infra
+   seed pollution — see RESULTS.md's "Known test-infra
    issues".)
 2. **Add a "blank patient" seed archetype** (`backend/prisma/seed.ts`)
    — used by the onboarding-from-cold spec (03) so it can verify the
@@ -254,7 +253,7 @@ becomes a no-op and the assertion runs.
    β-blocker fatigue/SOB, NSAID interaction, ACE cough, HCM low, HF
    caregiver edema, HOLD, plus the multi-axis co-fire pipeline. Spec 09
    carries 6 `test.fixme()` for the remaining Cluster-7-cleanup
-   investigations (listed in the dated STATUS snapshot).
+   investigations (listed in RESULTS.md).
 5. **Mobile + i18n cross-cutting passes**. The matrix already exists
    (RUN_FULL_MATRIX=1 enables webkit/firefox/mobile), but no spec asserts
    touch target ≥44px, no spec switches language to ES/FR/DE/AM. Add a
