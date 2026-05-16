@@ -435,3 +435,55 @@ test.describe('Patient acknowledgement (bug #4: propagation to EscalationEvent)'
     await tc.dispose()
   })
 })
+
+test.describe('Test-control hygiene', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  // Bug #19 (observed 2026-05-15): `setUserMedication` used a bare
+  // `prisma.patientMedication.create`, so every call — even with the same
+  // drug for the same user — accumulated another active row. Spec 19 saw
+  // Aisha pile up duplicate Metoprolol / Lisinopril rows across its
+  // sequential tests. The fix dedups on (userId, drugName): repeat calls
+  // update the existing row in place instead of inserting a new one.
+  //
+  // Hermetic by construction: `resetUser` does NOT clear PatientMedication
+  // rows, so this test uses a unique drug name per run — zero prior rows
+  // regardless of accumulated seed/test state — and asserts exactly 1 row
+  // survives 3 identical setUserMedication calls.
+  test('Bug #19 — setUserMedication dedups on (userId, drugName), no row accumulation', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+
+    // Unique name so prior accumulated Lisinopril/Metoprolol rows on Aisha
+    // (resetUser doesn't touch meds) can't pollute the assertion.
+    const drugName = `DedupProbe-${randomUUID()}`
+    const medSpec = {
+      drugName,
+      drugClass: 'ACE_INHIBITOR' as const,
+      frequency: 'ONCE_DAILY' as const,
+      verificationStatus: 'VERIFIED' as const,
+    }
+
+    await tc.setUserMedication(u.id, medSpec)
+    await tc.setUserMedication(u.id, medSpec)
+    await tc.setUserMedication(u.id, medSpec)
+
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    try {
+      const res = await api.get('me/medications')
+      expect(res.ok(), `me/medications: ${res.status()} ${await res.text()}`).toBeTruthy()
+      const body = await res.json()
+      const meds: Array<{ drugName: string; verificationStatus: string }> =
+        body?.data ?? body
+      const probeRows = meds.filter((m) => m.drugName === drugName)
+      expect(
+        probeRows.length,
+        `expected exactly 1 ${drugName} row after 3 setUserMedication calls (dedup), got ${probeRows.length}`,
+      ).toBe(1)
+    } finally {
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
+})

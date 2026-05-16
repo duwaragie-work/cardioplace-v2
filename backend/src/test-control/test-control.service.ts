@@ -371,6 +371,34 @@ export class TestControlService {
     },
   ): Promise<{ id: string }> {
     const status = med.verificationStatus ?? 'VERIFIED'
+
+    // Dedup on (userId, drugName): if a row already exists with the same
+    // name for this user, update it in place rather than inserting another
+    // duplicate. Prevents test-control from accumulating multiple "active"
+    // copies of the same medication across repeated calls (bug #19, observed
+    // 2026-05-15 — spec 19's sequential tests piled up Metoprolol/Lisinopril
+    // rows on Aisha). PatientMedication's only unique constraint is on `id`,
+    // so this is a findFirst → update|create rather than a native upsert;
+    // a composite unique index would need a migration and isn't worth it for
+    // a test-control-only path.
+    const existing = await this.prisma.patientMedication.findFirst({
+      where: { userId, drugName: med.drugName },
+      select: { id: true },
+    })
+
+    if (existing) {
+      await this.prisma.patientMedication.update({
+        where: { id: existing.id },
+        data: {
+          drugClass: med.drugClass as never,
+          frequency: med.frequency,
+          verificationStatus: status,
+          verifiedAt: status === 'VERIFIED' ? new Date() : null,
+        },
+      })
+      return { id: existing.id }
+    }
+
     const created = await this.prisma.patientMedication.create({
       data: {
         userId,
