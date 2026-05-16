@@ -1,4 +1,5 @@
 import { type APIRequestContext, expect } from '@playwright/test'
+import type { TestControl } from './test-control.js'
 
 /**
  * Typed API helpers for write operations the suite drives without going
@@ -123,6 +124,37 @@ export async function getActiveAlerts(
   const body = await res.json()
   const unwrapped = body?.data ?? body
   return Array.isArray(unwrapped) ? unwrapped : (unwrapped?.alerts ?? [])
+}
+
+/** A single DeviationAlert row as returned by TestControl.listAlerts. */
+export type AlertRow = Awaited<ReturnType<TestControl['listAlerts']>>[number]
+
+/**
+ * Poll `tc.listAlerts(userId)` until `predicate` is satisfied or the timeout
+ * elapses, then return the last fetched alert list. Returns the last list on
+ * timeout (caller asserts on it) rather than throwing — preserves the
+ * descriptive `expect(...).toBeDefined()` messages already in the specs.
+ *
+ * Use this instead of a fixed `setTimeout(N)` + single `listAlerts()` check.
+ * The engine is event-driven and its persistAlert SERIALIZABLE transactions
+ * can retry under load (deadlock backoff), pushing persistence past any fixed
+ * sleep. On high-latency DBs (Prisma Cloud) a 1500ms wait races the write;
+ * this poll waits up to `timeoutMs` for the rows to materialize.
+ */
+export async function waitForAlerts(
+  tc: TestControl,
+  userId: string,
+  predicate: (alerts: AlertRow[]) => boolean,
+  timeoutMs = 12_000,
+): Promise<AlertRow[]> {
+  const deadline = Date.now() + timeoutMs
+  let last: AlertRow[] = []
+  while (Date.now() < deadline) {
+    last = await tc.listAlerts(userId)
+    if (predicate(last)) return last
+    await new Promise((r) => setTimeout(r, 200))
+  }
+  return last
 }
 
 export async function patchPatientAcknowledgeAlert(

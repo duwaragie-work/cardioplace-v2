@@ -48,6 +48,18 @@ test.describe('Patient dashboard — happy path (Aisha = no active alert)', () =
     await page.waitForURL(/\/notifications/, { timeout: 10_000 })
   })
 
+  test('a11y — dashboard has exactly one <h1> (the sr-only page heading)', async ({
+    page,
+  }) => {
+    // Bug fix (§H Problem A): the patient dashboard had ZERO <h1> (greeting
+    // is an intentional <h2>). A visually-hidden <h1>Dashboard</h1> was added
+    // so the page has exactly one top-level heading for screen readers.
+    await expect(page).toHaveURL(/\/dashboard/)
+    const h1s = page.locator('h1')
+    await expect(h1s).toHaveCount(1, { timeout: 15_000 })
+    await expect(h1s).toHaveText('Dashboard')
+  })
+
   test('console is clean during dashboard load', async ({ page }) => {
     const errors: string[] = []
     page.on('console', (msg) => {

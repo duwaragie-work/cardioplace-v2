@@ -5,8 +5,12 @@ End-to-end browser-level testing for the patient frontend (`:3000`), admin app
 escalation + cron flows driven through dev-only `/test-control/*` HTTP hooks
 on the backend.
 
-> **Status:** Foundation complete. Day-one specs cover the critical paths.
-> The "Known gaps" section at the bottom lists what the next session needs.
+> **Status (2026-05-15):** Mature. 18 spec files / ~195 `test()` declarations,
+> CI green on all shards (6 `test.fixme()` in spec 09 + accepted WCAG debt
+> excluded). Covers Cluster 6 + Cluster 7 engine rules, JCAHO 15-field audit,
+> escalation ladders, and the A1/B4 bug-fix cycle. Single living run record:
+> **`qa/reports/RESULTS.md`** (one file, updated in place each cycle — old
+> dated `STATUS_*` snapshots were consolidated into it on 2026-05-15).
 
 ---
 
@@ -34,18 +38,21 @@ qa/
     06-patient-readings-notifications.spec.ts     TZ day-grouping, day(s) plural, Apr3018:01 separator
     07-patient-chat.spec.ts                       empty state + 4 LLM-safety refusal evals (gated by RUN_LLM_TESTS)
     08-patient-profile.spec.ts                    care-team, conditions, meds visibility (Aisha + Priya)
-    09-rule-engine-via-ui.spec.ts                 8 rule branches × deterministic ruleId assertion + benign auto-resolve
-    10-admin-auth-and-dashboard.spec.ts           per-role admin sign-in + patient list
+    09-rule-engine-via-ui.spec.ts                 rule branches × deterministic ruleId assertion + benign auto-resolve (6 fixme — Cluster 7 cleanup)
+    10-admin-auth-and-dashboard.spec.ts           per-role admin sign-in + patient list + NotificationBell badge↔dropdown (bug #1) + h1 a11y
     11-admin-verification-and-thresholds.spec.ts  verify-profile, med reject + readd, threshold role boundaries
-    12-admin-enrollment-gate.spec.ts              4-piece gate happy path + idempotency
-    13-admin-alert-resolution.spec.ts             ack + resolve per tier, missing-rationale 400, BP_L2_UNABLE_TO_REACH_RETRY, audit 15-field
-    14-escalation-tier1-ladder.spec.ts            T+0 → T+4h → T+8h → T+24h → T+48h via runScan + ack-stops-cron
+    12-admin-enrollment-gate.spec.ts              4-piece gate happy path + idempotency + business-hours clear/restore
+    13-admin-alert-resolution.spec.ts             ack + resolve per tier, missing-rationale 400, BP_L2_UNABLE_TO_REACH_RETRY, audit 15-field, bug #19 med-dedup, AlertsTab Acknowledged pill (bug #3)
+    14-escalation-tier1-ladder.spec.ts            T+0 → T+4h → T+8h → T+24h → T+48h via advanceLadderSteps + ack-stops-cron (14:34 un-fixme'd)
     15-crons-gap-and-monthly-reask.spec.ts        gap-alert 48h trigger + 24h idempotency, monthly re-ask 30d
     16-cross-cutting-a11y-and-security.spec.ts    axe hard-fails on 7 patient pages + admin dashboard, no PHI in URL, no localStorage refresh token
+    17-cluster-6-engine-via-api.spec.ts           Cluster 6 engine coverage (Manisha 5/9 + 5/10 sign-off) — brady/symptom rules via API
+    19-cluster-7-side-effects-via-api.spec.ts     Cluster 7 Appendix A — β-blocker fatigue/SOB, NSAID, ACE cough, HCM low, HF caregiver edema, HOLD
 ```
 
-**~70 test cases across 16 spec files.** Counts will grow as tests fill in
-the TODO sections.
+**~195 `test()` declarations across 18 spec files** (write-side gated tests
+run only with `RUN_WRITE_TESTS=1`). Spec 18 is reserved; 17 + 19 are the
+Cluster 6 / Cluster 7 API-level engine suites.
 
 ---
 
@@ -140,10 +147,19 @@ GATED two ways:
 | `POST /test-control/cron/gap-alert/run` `{now?}` | GapAlertService.runScan(now) |
 | `POST /test-control/cron/monthly-reask/run` `{now?}` | MonthlyReaskService.runScan(now) |
 | `POST /test-control/anchor/backdate` `{alertId, deltaSeconds}` | Subtract from T+0 EscalationEvent timestamps — fast-forward the ladder |
+| `POST /test-control/retry-event/backdate` `{alertId, deltaSeconds}` | Backdate a `triggeredByResolution` retry event (BP L2 unable-to-reach) |
+| `POST /test-control/escalation/advance-ladder-steps` `{alertId, steps}` | Deterministically advance N ladder steps (unblocks the 14:34 fixme — no wall-clock faking) |
 | `POST /test-control/journal/backdate-latest` `{userId, deltaSeconds}` | Make a journal entry look older — for gap-alert |
+| `POST /test-control/journal/seed-at-time` `{userId, readings[]}` | Raw fixture insert at exact timestamps (skips the engine) — session-window tests |
 | `POST /test-control/medication/backdate-verified` `{medId, deltaSeconds}` | Make a med look stale — for monthly-reask |
+| `POST /test-control/medications/backdate-all-for-user` `{userId, deltaSeconds}` | Backdate every verified med for a user |
+| `POST /test-control/user/backdate-updated-at` `{userId, deltaSeconds}` | Stale `User.updatedAt` — for the gap-alert proxy (closed S13) |
+| `POST /test-control/user/set-condition` `{userId, flags}` | Flip PatientProfile condition flags (HF / HCM / AFib …) — Cluster 6/7 persona shaping |
+| `POST /test-control/user/set-medication` `{userId, med}` | Upsert a PatientMedication, dedups on (userId, drugName) (bug #19) |
+| `POST /test-control/practice/clear-business-hours` `{userId}` | Blank the linked practice's business hours — after-hours BP L2 (closed 14 after-hours) |
+| `POST /test-control/practice/restore-business-hours` `{userId}` | Restore prior business hours captured by clear |
 | `POST /test-control/reset/test-patients` | Wipe journal/alert/escalation/notification rows for ALL `*.cardioplace.test` patient seeds |
-| `POST /test-control/reset/user` `{userId}` | Same, scoped to one user |
+| `POST /test-control/reset/user` `{userId}` | Same, scoped to one user (serializable txn + deadlock retry — bug #11/#20) |
 | `POST /test-control/user/set-enrollment` `{userId, status}` | Force ENROLLED / NOT_ENROLLED |
 | `POST /test-control/user/set-profile-verification` `{userId, status}` | Force UNVERIFIED / VERIFIED / CORRECTED |
 | `GET /test-control/alerts?userId=` | Inspect DeviationAlert rows |
@@ -208,39 +224,46 @@ becomes a no-op and the assertion runs.
 
 ## Known gaps + next-pass TODOs
 
-**Foundation gaps the next session needs to fill:**
+> **Update 2026-05-15:** items 1, 3, 4, 6 below are largely resolved (the
+> suite has run end-to-end against live backends across multiple cycles;
+> the deferred test-control helpers landed; the rule-engine coverage now
+> spans Cluster 6 + 7 via specs 17 + 19; admin patient-detail UI walk has a
+> first slice via the AlertsTab/NotificationBell tests). Each is annotated
+> inline. Items 2, 5, 8 remain open.
 
-1. **Verify the suite runs end-to-end against a live backend.** This PR
-   was authored without booting the backend in the sandbox — selectors and
-   API contracts are best-effort against the source. Expect 5–10 selector
-   tweaks on first real run.
+1. ~~**Verify the suite runs end-to-end against a live backend.**~~
+   **DONE** — run end-to-end across the Cluster 5/6/7 + A1/B4 cycles;
+   selectors stabilized. (Local runs against the shared remote DB still hit
+   seed pollution — see RESULTS.md's "Known test-infra
+   issues".)
 2. **Add a "blank patient" seed archetype** (`backend/prisma/seed.ts`)
    — used by the onboarding-from-cold spec (03) so it can verify the
    /onboarding redirect + Layer A 403 deterministically without consuming
    the production OTP flow.
-3. **Extend `/test-control` with these helpers** for the failure-mode
-   enrollment-gate tests (12) and the after-hours BP L2 test (14):
-   - `POST /test-control/profile/wipe { userId }` — drop PatientProfile
-   - `POST /test-control/assignment/wipe { userId }` — drop assignment
-   - `POST /test-control/practice/null-business-hours { practiceId }`
-   - `POST /test-control/threshold/wipe { userId }` — drop threshold
-   - `POST /test-control/practice/set-business-hours-now { practiceId, mode: 'in-hours'|'after-hours' }`
-   - `GET  /test-control/medication/list-by-user { userId }` — for monthly-reask spec
-4. **Fill out the rule-engine spec** to cover every CLINICAL_SPEC branch.
-   Today it covers 8 (standard L1, BP L2, symptom override, pregnancy ACE,
-   pregnancy L1, NDHP+HFrEF, CAD critical, 65+ low override). Remaining:
-   AFib HR>110/<50 (with the ≥3-readings session gate), HFrEF/HFpEF
-   condition rules, HCM lower bound, vasodilator Tier 3, loop-diuretic
-   hypotension Tier 3, wide pulse pressure Tier 3, personalized mode
-   (≥7 readings + threshold), tachycardia 2-consecutive-readings rule,
-   bradycardia + beta-blocker suppression, suboptimal-measurement flag.
+3. ~~**Extend `/test-control` with these helpers**~~ **MOSTLY DONE** — the
+   business-hours clear/restore (`practice/clear-business-hours` +
+   `restore-business-hours`), `escalation/advance-ladder-steps`,
+   `journal/seed-at-time`, `user/set-condition`, `user/set-medication`,
+   `user/backdate-updated-at`, and `medications/backdate-all-for-user`
+   helpers all landed (see the test-control table above). Still open:
+   dedicated `profile/wipe`, `assignment/wipe`, `threshold/wipe` (the
+   failure-mode enrollment tests currently use other shaping).
+4. ~~**Fill out the rule-engine spec**~~ **LARGELY DONE** — Cluster 6
+   (spec 17) and Cluster 7 (spec 19) API suites cover brady/symptom rules,
+   β-blocker fatigue/SOB, NSAID interaction, ACE cough, HCM low, HF
+   caregiver edema, HOLD, plus the multi-axis co-fire pipeline. Spec 09
+   carries 6 `test.fixme()` for the remaining Cluster-7-cleanup
+   investigations (listed in RESULTS.md).
 5. **Mobile + i18n cross-cutting passes**. The matrix already exists
    (RUN_FULL_MATRIX=1 enables webkit/firefox/mobile), but no spec asserts
    touch target ≥44px, no spec switches language to ES/FR/DE/AM. Add a
    `17-cross-cutting-mobile.spec.ts` and `18-cross-cutting-i18n.spec.ts`.
-6. **Admin patient-detail UI walkthrough.** Today the verification specs
-   drive admin via API. Once the admin testids land, add a corresponding
-   UI-walk spec per tab (profile, medications, thresholds, alerts).
+6. **Admin patient-detail UI walkthrough.** PARTIAL — the AlertsTab
+   "Acknowledged" pill (bug #3) and NotificationBell (bug #1) tests are the
+   first UI-level admin slices. Full per-tab walk still pending; the
+   patient-detail tabs remain CSS-selector-volatile so UI-walk tests use
+   ARIA-role selectors and env-gate-skip when an unprovisioned local stack
+   can't reach them (matches the spec 11 header posture).
 7. **Tier 2 + BP Level 2 ladder.** Spec 14 covers Tier 1 fully and BP L2
    T+0 dual-fire; Tier 2 (T+0 → T+48h → T+7d → T+14d) and BP L2
    T+2h/T+4h ladder steps need their own tests.

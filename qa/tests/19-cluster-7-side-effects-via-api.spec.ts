@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { authedApi } from '../helpers/auth.js'
 import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl, type TestControl } from '../helpers/test-control.js'
-import { postSessionWithTwoReadings } from '../helpers/api.js'
+import { postSessionWithTwoReadings, waitForAlerts } from '../helpers/api.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
 /**
@@ -30,8 +30,6 @@ import { API_BASE_URL } from '../playwright.config.js'
  *   journal/alert/notification rows from prior runs.
  */
 
-type AlertRow = Awaited<ReturnType<TestControl['listAlerts']>>[number]
-
 async function seedHistoryToClearPreDay3(
   tc: TestControl,
   userId: string,
@@ -45,22 +43,6 @@ async function seedHistoryToClearPreDay3(
     sessionId: crypto.randomUUID(),
   }))
   await tc.seedReadingsAtTime(userId, readings)
-}
-
-async function waitForAlerts(
-  tc: TestControl,
-  userId: string,
-  predicate: (alerts: AlertRow[]) => boolean,
-  timeoutMs = 12_000,
-): Promise<AlertRow[]> {
-  const deadline = Date.now() + timeoutMs
-  let last: AlertRow[] = []
-  while (Date.now() < deadline) {
-    last = await tc.listAlerts(userId)
-    if (predicate(last)) return last
-    await new Promise((r) => setTimeout(r, 200))
-  }
-  return last
 }
 
 test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/11)', () => {

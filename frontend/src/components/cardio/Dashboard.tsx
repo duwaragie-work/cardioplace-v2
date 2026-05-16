@@ -239,12 +239,23 @@ export default function Dashboard() {
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayHasEntry = latestEntry?.measuredAt?.slice(0, 10) === todayStr;
 
-  const greeting = (() => {
+  // React #418 fix: the time-of-day greeting is derived from
+  // `new Date().getHours()`, which is LOCAL time — the server's timezone
+  // and the browser's can differ, so computing it during render makes the
+  // SSR markup and the first client render disagree and trips a hydration
+  // error on /dashboard. Compute it in an effect instead (after mount);
+  // the small subtitle line starts blank and fills in on the client.
+  const [greeting, setGreeting] = useState('');
+  useEffect(() => {
     const h = new Date().getHours();
-    if (h < 12) return t('dashboard.goodMorning');
-    if (h < 17) return t('dashboard.goodAfternoon');
-    return t('dashboard.goodEvening');
-  })();
+    setGreeting(
+      h < 12
+        ? t('dashboard.goodMorning')
+        : h < 17
+          ? t('dashboard.goodAfternoon')
+          : t('dashboard.goodEvening'),
+    );
+  }, [t]);
 
   const latestBP = latestEntry?.systolicBP && latestEntry?.diastolicBP
     ? `${latestEntry.systolicBP}/${latestEntry.diastolicBP}` : '--/--';
@@ -631,6 +642,10 @@ export default function Dashboard() {
             <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 bg-white" />
             <div className="absolute -bottom-8 -right-4 w-20 h-20 rounded-full opacity-10 bg-white" />
 
+            {/* a11y: every page needs exactly one <h1>. The visible heading
+                is the userName <h2> below (intentional visual hierarchy), so
+                the page-level <h1> is screen-reader-only. */}
+            <h1 className="sr-only">Dashboard</h1>
             <p data-testid="dashboard-greeting" className="text-white/70 text-xs font-medium mb-1">{greeting}</p>
             {loading ? (
               <Bone w={160} h={26} color="rgba(255,255,255,0.3)" />
