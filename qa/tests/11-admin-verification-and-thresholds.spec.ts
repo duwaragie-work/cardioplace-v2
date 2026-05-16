@@ -188,3 +188,108 @@ test.describe('Admin threshold editor', () => {
     await tc.dispose()
   })
 })
+
+// ─── Phase 1 — audit-trail role & cross-tenant boundary (§D/§E) ───────────────
+//
+// REPORT-FIRST findings. These tests encode the SECURE expected contract but
+// are marked test.fixme: per the Phase 1 investigation protocol the role-guard
+// fix is NOT applied here (P0 HIPAA — requires Duwaragie + security review).
+// They are the executable spec for whoever implements the guard; the
+// authoritative repro is the code-path proof in
+// qa/reports/RESULTS.md → "Phase 1 — REPORT-FIRST findings".
+//
+// Root cause (provider.controller.ts:95-102 → provider.service.ts:480-538):
+// GET /provider/patients/:userId/alerts takes a raw :userId, passes NO scope
+// and NO callerUserId. resolveScope() (controller:131-142) — which force-
+// scopes a PROVIDER-only caller to their assignments — is wired ONLY into
+// getPatients (l.63) and getAlerts (l.119), never the per-patient endpoints
+// (:userId/summary, :userId/journal, :userId/bp-trend, :userId/alerts) or
+// alerts/:alertId/detail. Any clinical-staff role (PROVIDER included) can
+// read any patient's full alert + escalation audit PHI by supplying an
+// arbitrary userId, across any practice (no Practice FK in any scope check).
+test.describe('Phase 1 — audit-trail role & cross-tenant boundary (§D/§E — REPORT-FIRST)', () => {
+  test.fixme(
+    'PROVIDER cannot fetch alerts for a patient they are not assigned to (P0 — pending Duwaragie)',
+    async () => {
+      const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+      const target = await tc.findUser(PATIENTS.aisha.email)
+      // primaryProvider is PROVIDER-only — must be force-scoped to their own
+      // assignments on EVERY alert-bearing endpoint, including per-patient.
+      const provApi = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
+      const res = await provApi.get(`provider/patients/${target.id}/alerts`)
+      // SECURE contract: an unassigned PROVIDER must be denied (403) or get
+      // an empty feed — never another patient's escalation audit PHI.
+      expect(
+        res.status() === 403 || res.status() === 404,
+        `unassigned PROVIDER got ${res.status()} for /provider/patients/:id/alerts — P0 HIPAA leak`,
+      ).toBe(true)
+      await provApi.dispose()
+      await tc.dispose()
+    },
+  )
+
+  test.fixme(
+    'PROVIDER in Practice A cannot fetch Practice B patient alerts (P0 cross-tenant — pending Duwaragie)',
+    async () => {
+      const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+      const target = await tc.findUser(PATIENTS.james.email)
+      const provApi = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
+      // No Practice FK participates in any alert-scope check today, so this
+      // is the same structural gap as the test above viewed cross-tenant.
+      const res = await provApi.get(`provider/patients/${target.id}/alerts`)
+      expect(
+        res.status() === 403 || res.status() === 404,
+        `cross-practice PROVIDER got ${res.status()} — P0 cross-tenant HIPAA leak`,
+      ).toBe(true)
+      await provApi.dispose()
+      await tc.dispose()
+    },
+  )
+})
+
+// ─── Phase 1 — audit immutability API surface (§G.1) ─────────────────────────
+//
+// These PASS: there is no DELETE endpoint on any of the five audit-bearing
+// tables (DeviationAlert, EscalationEvent, ProfileVerificationLog,
+// Notification, PatientMedication). Probed as the highest-privilege admin so
+// an absent route 404s rather than a role guard 403-masking it. The one
+// indirect erase path (DELETE /daily-journal/:id cascading JournalEntry →
+// DeviationAlert → EscalationEvent) is documented in RESULTS.md §G.1 and is
+// NOT exercised destructively here.
+test.describe('Phase 1 — audit immutability API surface (§G.1)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test('no DELETE endpoint exposed on audit-bearing tables', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    let u: Awaited<ReturnType<typeof tc.findUser>>
+    try {
+      u = await tc.findUser(PATIENTS.aisha.email)
+    } catch (err) {
+      test.skip(true, `test-control unprovisioned: ${(err as Error).message}`)
+      return
+    }
+    const api = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+    const fakeId = '00000000-0000-0000-0000-000000000000'
+
+    // Routes that MUST NOT exist (append-only audit). NestJS returns 404 for
+    // an unmatched route+method; we accept 404/405 and explicitly reject any
+    // 2xx (which would mean a destructive endpoint is wired).
+    const probes = [
+      `provider/alerts/${fakeId}`,
+      `provider/escalation-events/${fakeId}`,
+      `admin/alerts/${fakeId}`,
+      `admin/users/${u.id}/verification-logs/${fakeId}`,
+    ]
+    for (const path of probes) {
+      const res = await api.delete(path)
+      expect(
+        res.status() >= 400 && res.status() < 500,
+        `DELETE ${path} returned ${res.status()} — audit table must have no destructive endpoint`,
+      ).toBe(true)
+      expect(res.status(), `DELETE ${path} must not succeed`).not.toBe(200)
+      expect(res.status()).not.toBe(204)
+    }
+    await api.dispose()
+    await tc.dispose()
+  })
+})
