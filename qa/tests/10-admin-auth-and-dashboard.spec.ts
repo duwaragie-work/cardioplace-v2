@@ -83,6 +83,20 @@ test.describe('Admin app — NotificationBell (bug #1)', () => {
   })
 })
 
+test.describe('Admin app — a11y h1 hierarchy (bug §H Problem B)', () => {
+  // The persistent AdminTopBar rendered its title as <h1>, and every routed
+  // page also renders its own content <h1> — so every admin page had TWO
+  // <h1>s. AdminTopBar's was demoted to a styled <div>; each page must now
+  // expose exactly one <h1> (its content heading).
+  test('dashboard has exactly one <h1> after the top-bar demotion', async ({ page }) => {
+    await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
+    await expect(page).toHaveURL(new RegExp(`${ADMIN_BASE_URL}/dashboard`), {
+      timeout: 30_000,
+    })
+    await expect(page.locator('h1')).toHaveCount(1, { timeout: 20_000 })
+  })
+})
+
 test.describe('Admin app — patient list', () => {
   test('manisha sees the patient list with seeded archetypes', async ({ page }) => {
     await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
