@@ -3,7 +3,7 @@
 // Flow H3 — per-patient alerts tab.
 //
 // • Tier filter chips (All / BP L2 / Tier 1 / Tier 2 / BP L1 / Tier 3)
-// • Status filter (All / Open / Resolved)
+// • Status filter (Open / Acknowledged / Resolved / All)
 // • Each row uses the shared AlertCard (extracted Nov 2026 so the same
 //   inline expand + three-tier + Resolve / Acknowledge surface is reused
 //   on /admin/notifications per CLINICAL_SPEC V2-C Layer 1).
@@ -35,7 +35,7 @@ interface Props {
 }
 
 type TierBucket = 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'TIER_3' | 'OTHER';
-type StatusFilter = 'ALL' | 'OPEN' | 'RESOLVED';
+type StatusFilter = 'ALL' | 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
 
 function tierBucket(t: string | null): TierBucket {
   if (t === 'BP_LEVEL_2' || t === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'BP_L2';
@@ -193,7 +193,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
             className="inline-flex p-1 rounded-full"
             style={{ backgroundColor: 'var(--brand-background)', border: '1px solid var(--brand-border)' }}
           >
-            {(['OPEN', 'RESOLVED', 'ALL'] as StatusFilter[]).map((s) => {
+            {(['OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'ALL'] as StatusFilter[]).map((s) => {
               const active = statusFilter === s;
               return (
                 <button
@@ -207,7 +207,13 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
                     boxShadow: active ? 'var(--brand-shadow-card)' : 'none',
                   }}
                 >
-                  {s === 'OPEN' ? 'Open' : s === 'RESOLVED' ? 'Resolved' : 'All'}
+                  {s === 'OPEN'
+                    ? 'Open'
+                    : s === 'ACKNOWLEDGED'
+                      ? 'Acknowledged'
+                      : s === 'RESOLVED'
+                        ? 'Resolved'
+                        : 'All'}
                 </button>
               );
             })}

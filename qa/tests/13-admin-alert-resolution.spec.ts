@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
-import { authedApi } from '../helpers/auth.js'
+import { authedApi, signInAdmin } from '../helpers/auth.js'
 import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
 import {
@@ -10,7 +10,7 @@ import {
   adminAuditAlert,
   waitForAlerts,
 } from '../helpers/api.js'
-import { API_BASE_URL } from '../playwright.config.js'
+import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
 
 /**
  * Admin alert resolution + 15-field audit (TESTING_FLOW_GUIDE §8.4).
@@ -491,5 +491,46 @@ test.describe('Test-control hygiene', () => {
       await api.dispose()
       await tc.dispose()
     }
+  })
+})
+
+test.describe('AlertsTab — Acknowledged status filter (bug #3)', () => {
+  // Bug #3: the per-patient Alerts tab status control had Open / Resolved /
+  // All but no "Acknowledged" — acknowledged alerts were only reachable via
+  // the "All" view. Pure presentational regression guard: the pill must
+  // render and be selectable. No seeded acknowledged alert is required —
+  // asserting the control exists and activates is the deterministic proof
+  // the pill is back. ARIA-role selectors are used deliberately: the
+  // patient-detail tabs are CSS-selector-volatile (see spec 11 header), but
+  // role="tab" / accessible button names are stable.
+  test('Acknowledged pill renders in the AlertsTab status control and is selectable', async ({
+    page,
+  }) => {
+    await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients`)
+
+    // Open the first seeded patient's detail page.
+    const patientLink = page.getByText(PATIENTS.aisha.name).first()
+    await expect(patientLink).toBeVisible({ timeout: 15_000 })
+    await patientLink.click()
+    await expect(page).toHaveURL(/\/patients\/[^/]+$/, { timeout: 20_000 })
+
+    // Switch to the Alerts tab.
+    const alertsTab = page.getByRole('tab', { name: 'Alerts' })
+    await expect(alertsTab).toBeVisible({ timeout: 15_000 })
+    await alertsTab.click()
+
+    // The status segmented control must now expose "Acknowledged".
+    const ackPill = page.getByRole('button', { name: 'Acknowledged', exact: true })
+    await expect(
+      ackPill,
+      'Acknowledged status pill missing from AlertsTab (bug #3)',
+    ).toBeVisible({ timeout: 15_000 })
+
+    // Selecting it must not crash the tab — the status control (and its
+    // "Status" label) stays rendered after the filter switch.
+    await ackPill.click()
+    await expect(ackPill).toBeVisible()
+    await expect(page.getByText('Status', { exact: true })).toBeVisible()
   })
 })
