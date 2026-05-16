@@ -109,6 +109,40 @@ describe('SessionAveragerService.aggregate (C.1 session averaging)', () => {
     expect(r?.suboptimalMeasurement).toBe(false)
   })
 
+  // Bug #5 (confirmed live 2026-05-13) — the check-in form ALWAYS sends all
+  // 8 checklist keys, each defaulting to `false` when the box is unchecked.
+  // A patient who skips the optional pre-measurement checklist therefore
+  // sends an all-`false` object. That must NOT be flagged suboptimal: it
+  // means "checklist not completed", not "measured badly".
+  it('bug #5 — all-false 8-key checklist (patient skipped it) → suboptimalMeasurement=false', () => {
+    const a = entry({
+      id: 'a',
+      sessionId: 's1',
+      measurementConditions: {
+        noCaffeine: false,
+        noSmoking: false,
+        noExercise: false,
+        bladderEmpty: false,
+        seatedQuietly: false,
+        posturalSupport: false,
+        notTalking: false,
+        cuffOnBareArm: false,
+      },
+    })
+    const r = SessionAveragerService.aggregate(a, [a])
+    expect(r?.suboptimalMeasurement).toBe(false)
+  })
+
+  it('bug #5 — engaged checklist with ≥1 unmet item still → suboptimalMeasurement=true', () => {
+    const a = entry({
+      id: 'a',
+      sessionId: 's1',
+      measurementConditions: { noCaffeine: true, noSmoking: true, seatedQuietly: false },
+    })
+    const r = SessionAveragerService.aggregate(a, [a])
+    expect(r?.suboptimalMeasurement).toBe(true)
+  })
+
   it('empty siblings → null', () => {
     const a = entry({ id: 'a' })
     expect(SessionAveragerService.aggregate(a, [])).toBeNull()

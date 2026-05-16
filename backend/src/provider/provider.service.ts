@@ -787,10 +787,15 @@ export class ProviderService {
       statusCode: 200,
       message: 'Journal history retrieved successfully',
       data: entries.map((entry) => {
-        // Suboptimal = ANY checklist key in measurementConditions is false.
         // Mirrors session-averager.service.ts hasAnyFalseChecklistItem so
         // the admin Readings tab shows the same flag the rule engine
         // attached when it evaluated the session.
+        //
+        // Bug #5: the check-in form always sends all 8 checklist keys
+        // defaulting to `false`. An all-`false` object means the patient
+        // skipped the optional checklist ("not completed"), NOT a suboptimal
+        // measurement. Only flag suboptimal when the patient engaged with
+        // the checklist (confirmed ≥1 item `true`) and a condition was unmet.
         const conditions = (entry.measurementConditions ?? null) as
           | Record<string, unknown>
           | null
@@ -799,7 +804,11 @@ export class ProviderService {
               .filter(([, v]) => v === false)
               .map(([k]) => k)
           : []
-        const suboptimalMeasurement = failedConditions.length > 0
+        const engagedWithChecklist = conditions
+          ? Object.values(conditions).some((v) => v === true)
+          : false
+        const suboptimalMeasurement =
+          engagedWithChecklist && failedConditions.length > 0
         const pulsePressure =
           entry.systolicBP != null && entry.diastolicBP != null
             ? entry.systolicBP - entry.diastolicBP
