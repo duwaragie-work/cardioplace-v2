@@ -1,5 +1,57 @@
 # Cardioplace v2 — Playwright E2E Run Results
 
+> ## ⏱ CURRENT STATUS — 2026-05-15 (supersedes the 2026-05-08 run log below)
+>
+> **This file is now the historical forensic log.** The living run record is
+> the dated snapshot series `qa/reports/STATUS_YYYY_MM_DD.md` — latest:
+> **`qa/reports/STATUS_2026_05_15.md`**. The detailed 2026-05-08 narrative
+> below is retained verbatim for traceability (HIPAA-grade change history);
+> the numbers in it are historical.
+>
+> **Where things stand now (`duwaragie-dev`, 11 commits ahead of `origin/dev`):**
+>
+> | | 2026-05-08 (below) | 2026-05-15 (now) |
+> |---|---|---|
+> | Spec files | 16 | **18** (+`17-cluster-6`, +`19-cluster-7`) |
+> | `test()` declarations | ~119 run | **~195** |
+> | Active `test.fixme()` | mixed | **6** (all spec 09, Cluster-7 cleanup) |
+> | CI | advisory, 93/14/12 | **green on all shards** (fixmes + accepted WCAG debt excluded) |
+>
+> **Resolved since 2026-05-08:**
+> - **G1–G9 multi-alert question → ANSWERED + SHIPPED.** Dr. Singal's call was
+>   *multi-axis co-fire*. The engine now runs the axis-keyed co-fire pipeline
+>   (Cluster 6 + 7); contraindication + BP/symptom rows fire together. The
+>   old "single-primary suppresses BP" behavior is gone — those tests were
+>   rewritten, not relaxed.
+> - **B1 `severeEpigastricRuq` symptom-override miss** — addressed in the
+>   Cluster 6/7 symptom-override work; covered by specs 17/19.
+> - **Cluster 6** (brady/symptom rules, JCAHO 15-field audit `resolvedAt`,
+>   patient-ack propagation) and **Cluster 7** (β-blocker fatigue/SOB, NSAID
+>   interaction, ACE cough, HCM low, HF caregiver edema, HOLD) shipped via
+>   **PR #38** (Niva + 4 Duwaragie follow-ups) + **CLINICAL_SPEC v2.2 / PR #37**.
+> - **bug #19** setUserMedication dedup, **bug #20** deadlock-retry matcher
+>   widening, **bug #5** suboptimalMeasurement inverted-boolean, **bug #1**
+>   NotificationBell badge↔dropdown, **bug #3** AlertsTab Acknowledged pill,
+>   patient/admin **h1 a11y** + dashboard **hydration** — all landed in the
+>   A1/B4 cycle (this PR). See `STATUS_2026_05_15.md` for the test matrix.
+> - **spec 14:34** full-ladder fixme **un-fixme'd** via `advanceLadderSteps`.
+> - **spec 12:73** business-hours endpoint test **un-skipped**.
+>
+> **Still open / carried:**
+> - **B5 / B6 (HIPAA: refresh token in localStorage / non-HttpOnly cookie)** —
+>   NOT verified fixed in this cycle. Treat as **still open P0** until a
+>   security-focused pass confirms; tracked in the bug backlog.
+> - 6 spec-09 `test.fixme()` (Cluster-7 cleanup investigations).
+> - **ACE-angioedema rule (patient *and* caregiver) is unimplemented** — no
+>   `RULE_*_ANGIOEDEMA` in the engine. The caregiver string (translation
+>   package B1.6) is **DRAFT / PILOT BLOCKER** pending Dr. Singal sign-off.
+> - Accepted WCAG small-text debt (font-size pass, A1.6 — deferred, not a
+>   regression).
+>
+> ---
+
+## Historical run log — 2026-05-08
+
 **Run date:** 2026-05-08 (final run after clusters 1–4 + Phase B CI + Phase D polish)
 **Branch:** `claude/review-cardioplace-v2-fOTac` (HEAD `932593c`)
 **Engine:** chromium-desktop (1440×900)
