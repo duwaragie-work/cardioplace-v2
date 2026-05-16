@@ -2,9 +2,14 @@
 
 // Top-bar notification bell with badge + dropdown.
 //
-// Badge shows the SUM of (open clinical alerts) + (unread notifications) so
-// the admin sees a single "things to deal with" number — same pattern as
-// the patient-app navbar bell. A 30s silent poll keeps the count current
+// Badge shows the count of UNREAD notifications — the exact same source the
+// dropdown renders. Clinical alert escalations already surface here as
+// notification rows (each carries `alertId`), so they are still represented
+// in the count; the badge no longer adds a separate open-alert tally on top
+// (bug #1 — that inflated the badge to "9+" while the notifications-only
+// dropdown showed nothing, since an open alert without an unread notification
+// row had no dropdown entry). Badge predicate === dropdown predicate. A 30s
+// silent poll keeps the count current
 // without a visible refresh; mutations on /notifications (acknowledge,
 // resolve, mark-read) broadcast a window event so the bell refetches on
 // the same tick instead of waiting for the next poll. Mutations from
@@ -23,7 +28,6 @@ import { useRouter } from 'next/navigation';
 import { Bell, Check, CheckCheck, Loader2 } from 'lucide-react';
 import {
   getAdminNotifications,
-  getProviderAlerts,
   markAdminNotificationsReadBulk,
   type AdminNotificationDto,
 } from '@/lib/services/provider.service';
@@ -68,23 +72,24 @@ export default function NotificationBell() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
 
-  // Combined badge = open alerts + unread notifications. The notifications
-  // count is taken from the deduplicated list (one entry per logical event)
-  // rather than the server's unread-count endpoint, which over-counts when
-  // a single escalation step fans out to multiple channels (PUSH +
-  // DASHBOARD share an escalationEventId but each have their own row).
-  // State only updates when the value actually changes so React skips
-  // no-op re-renders — no visible blink while the user is mid-page.
+  // Badge = count of unread notifications, read from the SAME deduplicated
+  // source the dropdown renders (`getAdminNotifications`, one entry per
+  // logical event — not the server's raw unread-count endpoint, which
+  // over-counts when one escalation step fans out to PUSH + DASHBOARD rows
+  // sharing an escalationEventId). Bug #1: the badge previously also added
+  // `getProviderAlerts().length` on top, so open clinical alerts with no
+  // unread notification row inflated the badge while the dropdown (which
+  // never queries alerts) stayed empty. Alert escalations already arrive
+  // here as notification rows, so they remain counted — just once, via the
+  // same predicate the dropdown uses. State only updates when the value
+  // actually changes so React skips no-op re-renders.
   const refreshCount = useCallback(async () => {
     try {
-      const [alertData, unreadList] = await Promise.all([
-        getProviderAlerts().catch(() => [] as unknown[]),
-        getAdminNotifications({ status: 'unread' }).catch(() => [] as AdminNotificationDto[]),
-      ]);
+      const unreadList = await getAdminNotifications({ status: 'unread' }).catch(
+        () => [] as AdminNotificationDto[],
+      );
       if (!mountedRef.current) return;
-      const openAlertCount = Array.isArray(alertData) ? alertData.length : 0;
-      const unreadNotifCount = unreadList.length;
-      const next = openAlertCount + unreadNotifCount;
+      const next = unreadList.length;
       setCount((prev) => (prev === next ? prev : next));
     } catch {
       // Silent — bell shouldn't surface network noise. Next tick retries.
