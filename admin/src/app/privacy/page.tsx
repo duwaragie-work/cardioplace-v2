@@ -2,15 +2,15 @@
 
 // Admin-app-facing Privacy Policy for the Cardioplace v2 pilot.
 //
-// Drafted as a starting point for legal / compliance review. Covers the
-// data Cardioplace collects from providers and care-team members using
-// the admin app — distinct from the patient-facing privacy policy.
+// Counsel-reviewed content (v2026-05-08), reflecting
+// Cardioplace_Admin_Privacy_Policy.docx. Do not edit wording without
+// legal/compliance sign-off.
 
 import LandingHeader from '@/components/LandingHeader';
 import LandingFooter from '@/components/LandingFooter';
 
 export default function PrivacyPage() {
-  const lastUpdated = 'May 4, 2026';
+  const lastUpdated = 'May 8, 2026';
 
   return (
     <div className="bg-white flex flex-col min-h-screen">
@@ -20,7 +20,7 @@ export default function PrivacyPage() {
         <div className="max-w-[820px] mx-auto">
           <header className="mb-8 md:mb-10">
             <h1 className="font-bold text-[#170c1d] text-3xl sm:text-4xl lg:text-[44px] tracking-[-0.5px] mb-3">
-              Privacy Policy
+              Admin Privacy Policy
             </h1>
             <p className="text-[#6b7280] text-sm">
               Last updated: {lastUpdated}
@@ -30,139 +30,214 @@ export default function PrivacyPage() {
           <div className="space-y-8 text-[#1f2937] text-[15px] leading-relaxed">
 
             <section>
-              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">1. What this covers</h2>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">1. Introduction</h2>
               <p className="mb-3">
-                This policy describes the personal data Cardioplace collects
-                from you when you sign in to the Cardioplace admin app as a
-                provider, care-team member, practice administrator, or
-                Healplace operations staffer. It is separate from the
-                patient-facing privacy policy.
+                This Privacy Policy explains how Healplace.com, Inc.
+                (&quot;Healplace,&quot; &quot;we,&quot; &quot;our,&quot; or
+                &quot;us&quot;) collects, uses, stores, and protects
+                information relating to users of the Cardioplace admin
+                platform (&quot;Cardioplace&quot;). Cardioplace is a clinical
+                monitoring and escalation platform operated by Healplace.com,
+                Inc.
               </p>
-              <p>
-                This policy is in addition to (and does not replace) the
-                data-handling commitments in your practice&apos;s
-                participation agreement and any Business Associate Agreement.
+              <p className="mb-3">
+                This policy applies to clinicians, nurses, medical directors,
+                care coordinators, administrators, and authorized operations
+                personnel who access the Cardioplace admin platform.
               </p>
-            </section>
-
-            <section>
-              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">2. What we collect about you</h2>
+              <p className="mb-3">
+                This policy supplements, and does not replace:
+              </p>
               <ul className="list-disc pl-6 space-y-1.5">
-                <li><strong>Identity</strong> — your name, work email, and assigned practice.</li>
-                <li><strong>Role</strong> — your role in the system (PROVIDER, MEDICAL_DIRECTOR, HEALPLACE_OPS, SUPER_ADMIN) and the patient assignments tied to your account.</li>
-                <li><strong>Authentication</strong> — the device identifier in your browser, your timezone, the IP and user-agent of each sign-in, and the sign-in method (one-time code).</li>
-                <li><strong>Activity audit</strong> — every action you take that touches patient data: patient records opened, alerts acknowledged, thresholds edited, medication verifications, message and call activity, profile updates.</li>
-                <li><strong>Operational metadata</strong> — the timestamps of your actions, the duration of sessions, and any errors logged against your account for support purposes.</li>
+                <li>
+                  Any participation agreement between Healplace and your
+                  organization.
+                </li>
+                <li>Any applicable Business Associate Agreement (&quot;BAA&quot;).</li>
+                <li>Your organization&apos;s HIPAA and privacy policies.</li>
               </ul>
             </section>
 
             <section>
-              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">3. Why we collect it</h2>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">2. Information we collect</h2>
               <ul className="list-disc pl-6 space-y-1.5">
-                <li><strong>To authenticate and authorise you</strong> — to confirm who you are and what you are allowed to see.</li>
-                <li><strong>To provide the alert and escalation features</strong> — so the system knows who is on call and who has acknowledged each alert.</li>
-                <li><strong>To produce the audit trail</strong> required for Joint Commission compliance, patient-safety review, and the participating clinic&apos;s record-retention policy.</li>
-                <li><strong>To support you</strong> — to investigate problems you report and to keep the service running.</li>
-                <li><strong>To improve the service</strong> — using de-identified, aggregated activity statistics only.</li>
+                <li>
+                  <strong>Identity Information</strong> — name, work email
+                  address, organization and assigned practice, professional
+                  role and permissions.
+                </li>
+                <li>
+                  <strong>Authentication and Security Information</strong> —
+                  sign-in method, device identifiers, IP address, browser and
+                  user-agent data, session timestamps, timezone and
+                  approximate region.
+                </li>
+                <li>
+                  <strong>Operational and Audit Information</strong> — patient
+                  records accessed, alerts acknowledged or resolved, threshold
+                  modifications, medication verifications, chat and call
+                  activity, escalation actions, profile updates,
+                  administrative actions.
+                </li>
+                <li>
+                  <strong>System and Support Information</strong> — error
+                  logs, system diagnostics, session duration, technical
+                  support records.
+                </li>
               </ul>
             </section>
 
             <section>
-              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">4. Who can see your activity</h2>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">3. How we use information</h2>
+              <ul className="list-disc pl-6 space-y-1.5">
+                <li>Authenticate and authorize access.</li>
+                <li>Deliver clinical alerting and escalation workflows.</li>
+                <li>Maintain legally required audit trails.</li>
+                <li>Support patient-safety review and compliance obligations.</li>
+                <li>Investigate security incidents and suspected misuse.</li>
+                <li>Maintain system reliability and operational integrity.</li>
+                <li>
+                  Improve the platform using de-identified and aggregated
+                  information only.
+                </li>
+              </ul>
+            </section>
+
+            <section>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">4. Audit trails and accountability</h2>
               <p className="mb-3">
-                Your sign-in events and activity are visible to:
+                Cardioplace maintains immutable audit records of actions
+                performed within the platform. Audit trails are required for:
               </p>
               <ul className="list-disc pl-6 space-y-1.5 mb-3">
-                <li><strong>Your practice administrator</strong> at the participating clinic.</li>
-                <li><strong>The participating clinic&apos;s compliance and privacy officer</strong> when investigating an audit, complaint, or suspected breach.</li>
-                <li><strong>The Cardioplace operations team</strong> on a need-to-know basis (for support, security, and system reliability).</li>
-                <li><strong>Regulators</strong> (for example, the HHS Office for Civil Rights or the Joint Commission) when legally required.</li>
+                <li>HIPAA compliance.</li>
+                <li>Joint Commission review.</li>
+                <li>Patient-safety investigation.</li>
+                <li>Clinical accountability.</li>
               </ul>
-              <p>
-                We do not share your work email, role, or activity for
-                marketing purposes. We do not sell it.
-              </p>
-            </section>
-
-            <section>
-              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">5. Where it lives and how it&apos;s protected</h2>
-              <p>
-                Activity logs and your account record are stored in encrypted
-                databases hosted in the United States. Connections are
-                encrypted in transit (HTTPS / TLS). Access is role-based: for
-                example, ops staff cannot read free-text chat unless their
-                role explicitly grants it, and providers at one practice
-                cannot read providers at a different practice.
-              </p>
-            </section>
-
-            <section>
-              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">6. How long we keep it</h2>
-              <ul className="list-disc pl-6 space-y-1.5">
-                <li><strong>Account record</strong> — kept while you have an active account, then archived in line with your practice&apos;s record-retention policy.</li>
-                <li><strong>Audit logs</strong> — retained for at least the duration required by HIPAA, Joint Commission, and the participating clinic&apos;s policies (typically several years). Audit logs cannot be edited or deleted.</li>
-                <li><strong>Sign-in / device logs</strong> — retained for security review for at least 90 days, longer where required for an active investigation.</li>
-              </ul>
-            </section>
-
-            <section>
-              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">7. Your rights</h2>
-              <p className="mb-3">You can:</p>
+              <p className="mb-3">Audit records may include:</p>
               <ul className="list-disc pl-6 space-y-1.5 mb-3">
-                <li>See your own profile and ask us to correct any errors in it.</li>
-                <li>Request a copy of your audit log entries (subject to redaction of patient identifiers when required).</li>
-                <li>Withdraw your access from the pilot, by asking your practice administrator to disable your account.</li>
+                <li>User actions.</li>
+                <li>Alert resolutions.</li>
+                <li>Escalation timestamps.</li>
+                <li>Access events.</li>
+                <li>Communication activity.</li>
               </ul>
+              <p>Audit logs cannot be edited or deleted by end users.</p>
+            </section>
+
+            <section>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">5. Who may access your information</h2>
+              <p className="mb-3">Your activity may be accessible to:</p>
+              <ul className="list-disc pl-6 space-y-1.5 mb-3">
+                <li>Your organization&apos;s authorized administrators.</li>
+                <li>Privacy and compliance personnel.</li>
+                <li>
+                  Authorized Healplace support and security personnel on a
+                  strict need-to-know basis.
+                </li>
+                <li>
+                  Government regulators or legal authorities where required by
+                  law.
+                </li>
+              </ul>
+              <p>
+                We do not sell personal information and do not use admin
+                activity information for advertising or marketing.
+              </p>
+            </section>
+
+            <section>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">6. Security</h2>
+              <ul className="list-disc pl-6 space-y-1.5">
+                <li>Encryption in transit using HTTPS/TLS.</li>
+                <li>Encryption at rest.</li>
+                <li>Role-based access controls.</li>
+                <li>Session monitoring.</li>
+                <li>Access logging.</li>
+                <li>Least-privilege operational access.</li>
+              </ul>
+            </section>
+
+            <section>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">7. Data retention</h2>
+              <ul className="list-disc pl-6 space-y-1.5 mb-3">
+                <li>As required by HIPAA and applicable law.</li>
+                <li>In accordance with organizational retention policies.</li>
+                <li>
+                  As necessary for patient-safety review, compliance, legal
+                  obligations, and operational integrity.
+                </li>
+              </ul>
+              <p>
+                Security logs are generally retained for at least 90 days and
+                longer where required for investigation or compliance.
+              </p>
+            </section>
+
+            <section>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">8. Personal devices</h2>
+              <p>
+                Users may access Cardioplace only on devices permitted under
+                their organization&apos;s security policies. Shared,
+                unmanaged, or public devices should not be used to access
+                patient information.
+              </p>
+            </section>
+
+            <section>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">9. Your rights</h2>
               <p className="mb-3">
-                To exercise any of these rights, email{' '}
+                Subject to legal and operational limitations, you may:
+              </p>
+              <ul className="list-disc pl-6 space-y-1.5">
+                <li>Access your profile information.</li>
+                <li>Request correction of inaccurate information.</li>
+                <li>
+                  Request a copy of audit records associated with your
+                  account.
+                </li>
+                <li>Request account deactivation through your organization.</li>
+              </ul>
+              <p className="mt-3">
+                Requests may be submitted to{' '}
                 <a href="mailto:privacy@healplace.com" className="font-medium text-[#7B00E0] underline">
                   privacy@healplace.com
                 </a>
-                . We will respond within 30 days.
-              </p>
-              <p>
-                You cannot delete your audit log entries; they must be
-                retained for clinical record-keeping and patient-safety
-                review.
+                .
               </p>
             </section>
 
             <section>
-              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">8. Cookies and tracking</h2>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">10. Breach notification</h2>
               <p>
-                The admin app uses essential cookies to keep you signed in
-                and a device identifier in your browser to recognise the
-                device for security. We do not use advertising or
-                third-party analytics trackers in the admin app.
+                If a security incident affecting your information or
+                accessible patient information occurs, Healplace will provide
+                notification consistent with HIPAA breach notification
+                requirements and applicable law.
               </p>
             </section>
 
             <section>
-              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">9. Breach notification</h2>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">11. Changes to this policy</h2>
               <p>
-                If a security incident affects your data or any patient data
-                accessible from your account, we will notify you, your
-                practice administrator, and the participating clinic&apos;s
-                privacy officer in line with HIPAA breach-notification rules
-                and applicable state law.
+                We may update this policy periodically. Material changes will
+                be communicated through the platform or by email.
               </p>
             </section>
 
             <section>
-              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">10. Changes to this policy</h2>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">12. Contact</h2>
+              <p className="mb-2">Healplace.com, Inc.</p>
               <p>
-                We may update this policy as the pilot evolves. If we make a
-                meaningful change we will tell you in the admin app or by
-                email before the change takes effect.
+                <a href="mailto:privacy@healplace.com" className="font-medium text-[#7B00E0] underline">
+                  privacy@healplace.com
+                </a>
+                <br />
+                <a href="mailto:security@healplace.com" className="font-medium text-[#7B00E0] underline">
+                  security@healplace.com
+                </a>
               </p>
-            </section>
-
-            <section>
-              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">11. Contact</h2>
-              <ul className="list-disc pl-6 space-y-1.5">
-                <li>Privacy questions, requests, and complaints: <a href="mailto:privacy@healplace.com" className="font-medium text-[#7B00E0] underline">privacy@healplace.com</a></li>
-                <li>Security or breach reports: <a href="mailto:security@healplace.com" className="font-medium text-[#7B00E0] underline">security@healplace.com</a></li>
-              </ul>
             </section>
 
           </div>
