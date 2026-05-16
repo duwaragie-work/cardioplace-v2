@@ -8,6 +8,7 @@ import {
   adminAcknowledgeAlert,
   adminResolveAlert,
   adminAuditAlert,
+  waitForAlerts,
 } from '../helpers/api.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
@@ -40,8 +41,9 @@ test.describe('Alert resolution', () => {
       diastolicBP: 74,
       pulse: 68,
     })
-    await new Promise((r) => setTimeout(r, 1500))
-    const alerts = await tc.listAlerts(u.id)
+    const alerts = await waitForAlerts(tc, u.id, (xs) =>
+      xs.some((a) => a.tier === 'TIER_1_CONTRAINDICATION'),
+    )
     const tier1 = alerts.find((a) => a.tier === 'TIER_1_CONTRAINDICATION')
     expect(tier1, `expected TIER_1_CONTRAINDICATION in [${alerts.map((a) => a.tier).join(',')}]`).toBeDefined()
 
@@ -78,8 +80,9 @@ test.describe('Alert resolution', () => {
       diastolicBP: 74,
       pulse: 68,
     })
-    await new Promise((r) => setTimeout(r, 1500))
-    const alerts = await tc.listAlerts(u.id)
+    const alerts = await waitForAlerts(tc, u.id, (xs) =>
+      xs.some((a) => a.tier === 'TIER_1_CONTRAINDICATION'),
+    )
     const tier1 = alerts.find((a) => a.tier === 'TIER_1_CONTRAINDICATION')
     expect(tier1).toBeDefined()
 
@@ -115,8 +118,9 @@ test.describe('Alert resolution', () => {
       diastolicBP: 95,
       pulse: 88,
     })
-    await new Promise((r) => setTimeout(r, 1500))
-    const alerts = await tc.listAlerts(u.id)
+    const alerts = await waitForAlerts(tc, u.id, (xs) =>
+      xs.some((a) => a.tier === 'BP_LEVEL_2'),
+    )
     const bpL2 = alerts.find((a) => a.tier === 'BP_LEVEL_2')
     expect(bpL2).toBeDefined()
 
@@ -170,8 +174,7 @@ test.describe('Alert resolution', () => {
       diastolicBP: 100,
       pulse: 78,
     })
-    await new Promise((r) => setTimeout(r, 1500))
-    const alerts = await tc.listAlerts(u.id)
+    const alerts = await waitForAlerts(tc, u.id, (xs) => xs.length > 0)
     const a = alerts[0]
     expect(a).toBeDefined()
 
@@ -223,8 +226,11 @@ test.describe('Alert resolution', () => {
       diastolicBP: 74,
       pulse: 68,
     })
-    await new Promise((r) => setTimeout(r, 1500))
-    const tier1 = (await tc.listAlerts(u.id)).find((a) => a.tier === 'TIER_1_CONTRAINDICATION')
+    const tier1 = (
+      await waitForAlerts(tc, u.id, (xs) =>
+        xs.some((a) => a.tier === 'TIER_1_CONTRAINDICATION'),
+      )
+    ).find((a) => a.tier === 'TIER_1_CONTRAINDICATION')
     expect(tier1).toBeDefined()
 
     const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
@@ -380,9 +386,9 @@ test.describe('Patient acknowledgement (bug #4: propagation to EscalationEvent)'
       diastolicBP: 100,
       pulse: 78,
     })
-    await new Promise((r) => setTimeout(r, 1500))
-
-    const alerts = await tc.listAlerts(u.id)
+    const alerts = await waitForAlerts(tc, u.id, (xs) =>
+      xs.some((a) => a.tier === 'BP_LEVEL_1_HIGH'),
+    )
     const bpL1 = alerts.find((a) => a.tier === 'BP_LEVEL_1_HIGH')
     expect(bpL1, `expected BP_LEVEL_1_HIGH alert; got tiers: [${alerts.map((a) => a.tier).join(',')}]`).toBeDefined()
 
