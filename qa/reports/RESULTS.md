@@ -62,17 +62,22 @@ fresh DB per shard) is the authoritative full tally; targeted gates below all pa
 
 ---
 
+## ✅ Verified-fixed P0 HIPAA items (re-confirmed 2026-05-15)
+
+| # | Area | Resolution |
+|---|---|---|
+| **B5** | Security / HIPAA | Refresh token NO LONGER in `localStorage`. Fix landed via phase/cluster-1; verified by code (`frontend/src/lib/services/token.ts:10-11` — "deliberately do NOT persist to localStorage") + passing spec `qa/tests/16-cross-cutting-a11y-and-security.spec.ts:96` (`refresh token NOT in localStorage after sign-in`) + corroborating `qa/tests/02-auth.spec.ts:91`. Refresh token lives ONLY in backend's HttpOnly `refresh_token` cookie. **CLOSED.** |
+| **B6** | Security / HIPAA | `access_token` cookie IS `HttpOnly`. Verified by passing spec `qa/tests/16-cross-cutting-a11y-and-security.spec.ts:107` (`access_token cookie is HttpOnly`). **CLOSED.** |
+
+Note: spec 16 test descriptions still carry the legacy comment "currently FAILS in v1" — that's stale text from before the fix landed; the tests themselves now pass and assert the fixed state.
+
 ## 🔴 Real product issues still open (NOT fixed this cycle — triage)
 
 | # | Area | Issue | Severity |
 |---|---|---|---|
-| **B5** | Security / HIPAA | Refresh token in `localStorage` (`healplace_refresh_token`) — single XSS = 30-day account takeover. **Not verified fixed.** | **P0** |
-| **B6** | Security / HIPAA | `access_token` cookie JS-readable (not `HttpOnly`). **Not verified fixed.** | **P0** |
 | **AE** | Clinical / pilot | **ACE-inhibitor angioedema rule is unimplemented** — no `RULE_*_ANGIOEDEMA` in `rule-ids.ts`/engine, and no facial/lip/tongue-swelling symptom input. Patient string (translation item 1.7) AND caregiver string (item B1.6) are drafted copy with zero implementation. Caregiver B1.6 = **DRAFT / ⚠ PILOT BLOCKER**. | **P0 (pilot blocker)** |
 
-B5/B6 are carried from the 2026-05-08 forensic pass and must be re-checked by a
-security-focused cycle before pilot. **AE** needs Dr. Singal sign-off (wording + symptom
-trigger + tier + dispatch path) then an engineering ticket — see *Iteration plan*.
+**AE** needs Dr. Singal sign-off (wording + symptom trigger + tier + dispatch path) then an engineering ticket — see *Iteration plan*.
 
 ---
 
@@ -164,13 +169,15 @@ CLINICAL_SPEC v2.2 / PR #37.
    facial/lip/tongue-swelling input exists today) + tier + whether it routes via
    `CAREGIVER_DISPATCH_ENABLED`. Then engineering: add `RULE_ACE_ANGIOEDEMA`
    (patient + caregiver) to `rule-ids.ts` → `alert-messages.ts` → engine + symptom flag.
-2. **Security-focused cycle to re-verify B5/B6** (refresh token in localStorage,
-   non-HttpOnly access cookie). P0 HIPAA blockers — confirm fixed or fix.
-3. **Resolve the 6 spec-09 `test.fixme()`** (Cluster-7 cleanup) — verify against the
+2. **Resolve the 6 spec-09 `test.fixme()`** (Cluster-7 cleanup) — verify against the
    shipped multi-axis engine, delete/rewrite obsolete ones.
-4. **Translator vendor handoff** — `docs/CLINICAL_TRANSLATION_PACKAGE_EN.md` v2026-05-15
+3. **Translator vendor handoff** — `docs/CLINICAL_TRANSLATION_PACKAGE_EN.md` v2026-05-15
    is ready for Spanish + Amharic except B1.6 (DRAFT, blocked on #1).
-5. **Full provisioned CI run** to confirm write-gated §C/§G + the full matrix green.
+4. **Full provisioned CI run** to confirm write-gated §C/§G + the full matrix green.
+5. **Spec 16 cosmetic** — strip the stale "currently FAILS in v1" comment from the B5
+   refresh-token-localStorage test description (no behavior change; just doc hygiene
+   so future readers don't read the old comment and re-open B5 as "not fixed" again,
+   which is what happened on 2026-05-15).
 
 ---
 
