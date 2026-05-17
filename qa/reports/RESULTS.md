@@ -327,6 +327,72 @@ attribution is a REPORT-FIRST design question (see Finding 4).
 - **§L per-record-view access log** — HIPAA right-of-access; pilot clinics use
   their own EHR access logs. Add `RecordAccessLog` post-pilot.
 
+---
+
+# Phase 2 — REPORT-FIRST findings fixes
+
+**Branch:** `duwaragie-test-coverage` (continues Phase 1; HEAD was `7761e33`)
+**Date:** 2026-05-17 · **Scope:** the 5 Phase-1 REPORT-FIRST findings, fixed per
+Duwaragie-approved scope. One commit + test + row per finding. **No clinical-rule
+changes.**
+
+| # | Finding | Severity | Disposition | Commit | Test |
+|---|---|---|---|---|---|
+| 1+2 | Per-patient/per-alert provider endpoints had no assignment/practice scope (PHI leak) | P0 | **FIXED** — `canViewPatient` guard on all 5 endpoints (`provider.controller.ts`); self/SUPER_ADMIN/HEALPLACE_OPS allow, PROVIDER must be primary/backup on an assignment, MED_DIR must be MD on/of-practice; iterates ALL assignments (multi-practice-ready) | `98d2f11` | `qa/tests/11…:212` (boundary + positive + SUPER_ADMIN), `:311` (assigned positive) |
+| 3 | `DELETE /daily-journal/:id` cascades JournalEntry → DeviationAlert → EscalationEvent | P1 | **DOCUMENTED, NOT FIXED** — entangled with the CTO + Manisha + counsel reading-corrections architecture decision (§G.3 deferral). Behavior pinned by a regression-anchor test with a TODO for the soft-supersede outcome | `330564d` | `qa/tests/13…:768` (current-behavior anchor) |
+| 4 | Threshold + provider-assignment changes wrote no `ProfileVerificationLog` | P1 | **FIXED** — additive enum members `ADMIN_THRESHOLD_UPDATE` / `ADMIN_ASSIGNMENT_CHANGE` (migration `20260517120000`); `threshold.service` + `assignment.service` emit an actor + before/after row; assignment controller now threads `req.user.id` | `df122cd` | `qa/tests/11…` Finding-4 describe (threshold + assignment log rows via admin verification-logs endpoint) |
+| 5 | No persisted system-vs-human dispatch attribution on `EscalationEvent` | P2 | **FIXED** — additive `dispatchedBySystem Boolean @default(false)` column (migration `20260517120100`); set true at the 2 cron dispatch sites, false at the admin BP_L2 retry site; surfaced via provider DTO + test-control; admin chip now reads the column (legacy rows fall back to `!triggeredByResolution`) | `4ecf719` | `qa/tests/13…` Finding-5 describe (cron rung=true, admin retry=false) |
+| 6 | No admin per-patient notifications view | P2 | **DEFERRED (documented, no code)** — see below | — (doc only) | — |
+
+### Finding 6 — admin per-patient notifications view (P2, deferred)
+
+Admin needs a consolidated **"all notifications (push / email / dashboard) dispatched
+for this patient"** view. Today admins see alerts in the AlertsTab and notification
+rows only *nested under escalation events* in `EscalationAuditTrail`; there is no
+standalone per-patient notification log tab. The **data layer already supports it**
+(`Notification.userId` is indexed and queryable per patient — confirmed Phase 1 §M;
+test-control `listNotifications(userId)` already does exactly this query). Building a
+new admin UI surface is a feature, not a REPORT-FIRST fix, so it is **out of scope
+for this cycle**. Recommendation: build post-pilot, or in the Phase 3 admin-tabs
+scope if time permits. No code change this cycle.
+
+### Phase 2 acceptance gate
+
+- `npm run build -w @cardioplace/shared` → ✅ clean
+- backend / admin / frontend / qa `tsc --noEmit` → ✅ all clean (changed files 0
+  errors; Prisma client regenerated for the new enum members + `dispatchedBySystem`
+  column; pre-existing `*.spec.ts` `never`-typing noise on `dev` unchanged)
+- Prisma: two additive, idempotent migrations checked in (`20260517120000` enum,
+  `20260517120100` column). NOT applied via `migrate dev` against the shared remote
+  DB by design — `prisma generate` refreshes the client locally; CI/deploy applies
+  via `migrate deploy`.
+- `RUN_WRITE_TESTS=1 npx playwright test 11 13 --workers=1` (this sandbox): the
+  Phase-2 write-tests **skip cleanly** — the backend dev servers are not running
+  here (they were during Phase 1) so `apiSignIn` / `tc.findUser` can't reach
+  `:4000`; every Phase-2 test guards on this and `test.skip`s rather than false-red,
+  consistent with the established suite posture. Deterministic gate = the clean
+  builds + 4× tsc. Provisioned CI (servers + `ENABLE_TEST_CONTROL` + seed) is
+  authoritative for the write assertions; the §D/§E + Finding-4/5 tests are written
+  to PASS there.
+- §H visual walk-through (`MANUAL_VERIFY_PHASE_1.md`): **not executable in this
+  sandbox** — the 3 dev servers + DB are not running and cannot be provisioned from
+  the batch environment. Documented honestly; must be run by a human (or a
+  provisioned CI/preview) before pilot sign-off. The audit-panel changes are
+  type-checked + unit/integration-covered; the visual confirmation step remains
+  outstanding and is called out in the §I report.
+
+### Note on the §D/§E tests vs. the seed
+
+The seed assigns **every** test patient to ONE shared care team (primary-provider +
+backup-provider + medical-director @ seed-cedar-hill), so a real "unassigned /
+cross-practice" negative cannot be built from pure seed data and `apiSignIn` only
+works for seed emails (perma-OTP). The Phase-1 `test.fixme` placeholders were
+therefore replaced with a **self-contained** test that spins up an isolated
+Practice B, reassigns a dedicated probe patient (Charles) into it with a care team
+that excludes `primaryProvider`, asserts 403 across all 5 guarded endpoints +
+positive access for the assigned `backupProvider` and SUPER_ADMIN, then restores
+the original assignment in `finally` (sequential under `--workers=1`, hermetic).
+
 ## 🔴 Real product issues still open (NOT fixed this cycle — triage)
 
 | # | Area | Issue | Severity |
