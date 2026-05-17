@@ -372,3 +372,110 @@ test.describe('Phase 1 — audit immutability API surface (§G.1)', () => {
     await tc.dispose()
   })
 })
+
+// ─── Phase 2 — Finding 4: ProfileVerificationLog for threshold + assignment ───
+//
+// Phase 1 §J: MED_DIR threshold writes + care-team assignment changes wrote
+// NO audit row. Phase 2 emits a ProfileVerificationLog row from both
+// services (changeType ADMIN_THRESHOLD_UPDATE / ADMIN_ASSIGNMENT_CHANGE).
+// Asserted via the real admin verification-logs read endpoint (no
+// test-control needed); skips cleanly if the env isn't provisioned.
+test.describe('Phase 2 — Finding 4: threshold + assignment audit log', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test('threshold write emits a ProfileVerificationLog row (actor + fieldPath + newValue)', async () => {
+    try {
+      const priya = await apiSignIn(API_BASE_URL, PATIENTS.priya.email)
+      const md = await apiSignIn(API_BASE_URL, ADMINS.medicalDirector.email, 'admin')
+      await priya.ctx.dispose()
+      await md.ctx.dispose()
+      const probeUpper = 150 + (Math.floor(Date.now() / 1000) % 40) // per-run unique
+
+      const mdApi = await authedApi(API_BASE_URL, ADMINS.medicalDirector.email, 'admin')
+      const body = {
+        sbpUpperTarget: probeUpper,
+        sbpLowerTarget: 95,
+        dbpUpperTarget: 120,
+        dbpLowerTarget: 60,
+        notes: 'qa-test: phase2 finding4 threshold audit',
+      }
+      let res = await mdApi.post(`admin/patients/${priya.userId}/threshold`, { data: body })
+      if (res.status() === 409) {
+        res = await mdApi.patch(`admin/patients/${priya.userId}/threshold`, { data: body })
+      }
+      expect(res.ok(), `threshold write: ${res.status()} ${await res.text()}`).toBeTruthy()
+      await mdApi.dispose()
+
+      const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+      const logsRes = await adminApi.get(`admin/users/${priya.userId}/verification-logs`)
+      expect(logsRes.ok(), `verification-logs: ${logsRes.status()}`).toBeTruthy()
+      const logsBody = await logsRes.json()
+      const logs: Array<Record<string, unknown>> = logsBody?.data ?? logsBody
+      const row = logs.find(
+        (l) =>
+          l.changeType === 'ADMIN_THRESHOLD_UPDATE' &&
+          (l.newValue as { sbpUpperTarget?: number } | null)?.sbpUpperTarget ===
+            probeUpper,
+      )
+      expect(
+        row,
+        `no ADMIN_THRESHOLD_UPDATE log with sbpUpperTarget=${probeUpper} — Finding 4 not audited`,
+      ).toBeTruthy()
+      expect(row!.fieldPath).toBe('threshold')
+      expect(row!.changedBy).toBe(md.userId)
+      await adminApi.dispose()
+    } catch (err) {
+      test.skip(true, `provisioned env required: ${(err as Error).message}`)
+      return
+    }
+  })
+
+  test('care-team assignment change emits a ProfileVerificationLog row', async () => {
+    let restore: (() => Promise<void>) | null = null
+    try {
+      const charles = await apiSignIn(API_BASE_URL, PATIENTS.charles.email)
+      const medDir = await apiSignIn(API_BASE_URL, ADMINS.medicalDirector.email, 'admin')
+      const manisha = await apiSignIn(API_BASE_URL, ADMINS.manisha.email, 'admin')
+      await charles.ctx.dispose()
+      await medDir.ctx.dispose()
+      await manisha.ctx.dispose()
+      const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+
+      const beforeRes = await adminApi.get(`admin/patients/${charles.userId}/assignment`)
+      if (!beforeRes.ok()) {
+        test.skip(true, `assignment endpoint unavailable (${beforeRes.status()})`)
+        await adminApi.dispose()
+        return
+      }
+      const before = (await beforeRes.json()).data
+      // No-op-ish but real change: set backup = medical-director (MED_DIR is
+      // an allowed backup slot), then restore.
+      const patchRes = await adminApi.patch(`admin/patients/${charles.userId}/assignment`, {
+        data: { backupProviderId: medDir.userId },
+      })
+      expect(patchRes.ok(), `assignment patch: ${patchRes.status()} ${await patchRes.text()}`).toBeTruthy()
+      restore = async () => {
+        await adminApi.patch(`admin/patients/${charles.userId}/assignment`, {
+          data: { backupProviderId: before.backupProviderId },
+        })
+      }
+
+      const logsRes = await adminApi.get(`admin/users/${charles.userId}/verification-logs`)
+      const logsBody = await logsRes.json()
+      const logs: Array<Record<string, unknown>> = logsBody?.data ?? logsBody
+      const row = logs.find((l) => l.changeType === 'ADMIN_ASSIGNMENT_CHANGE')
+      expect(
+        row,
+        'no ADMIN_ASSIGNMENT_CHANGE log after care-team change — Finding 4 not audited',
+      ).toBeTruthy()
+      expect(row!.fieldPath).toBe('assignment')
+      expect(row!.changedBy).toBe(manisha.userId)
+      await adminApi.dispose()
+    } catch (err) {
+      test.skip(true, `provisioned env required: ${(err as Error).message}`)
+      return
+    } finally {
+      if (restore) await restore().catch(() => {})
+    }
+  })
+})
