@@ -6,6 +6,7 @@
 import { seedPractices } from './practices.js'
 import { seedAdmins } from './admins.js'
 import { seedPatients } from './patients.js'
+import { seedFillers } from './fillers.js'
 import { seedState } from './state.js'
 
 export async function runSeed() {
@@ -13,6 +14,7 @@ export async function runSeed() {
   const practices = await seedPractices()
   const admins = await seedAdmins()
   await seedPatients(practices, admins)
+  await seedFillers(practices, admins)
 
   // Pre-seeded alerts/notifications/audit are dev/test fixtures only —
   // a production seed must never insert them.
