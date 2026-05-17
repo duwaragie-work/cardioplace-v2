@@ -436,6 +436,19 @@ export class TestControlService {
     })
   }
 
+  /**
+   * Phase 4 §B.2 — set a User.dateOfBirth. Backs the age-bucket boundary
+   * tests (spec 20g.1): AGE_65_LOW must fire the day a patient turns 65 and
+   * NOT the day before, proving the cutoff is enforced at reading-evaluation
+   * time rather than at user-creation time.
+   */
+  async setUserDateOfBirth(userId: string, dob: Date): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { dateOfBirth: dob },
+    })
+  }
+
   // ─── Seed fixtures (Phase 0 §H) ─────────────────────────────────────────
   // Imperative test-only seeders (like seedReadingsAtTime). Not idempotent
   // by design — tests call them to compose a scenario then reset between

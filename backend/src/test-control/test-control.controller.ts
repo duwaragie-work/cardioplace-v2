@@ -273,6 +273,19 @@ export class TestControlController {
     return { ok: true }
   }
 
+  // Phase 4 §B.2 — age-bucket boundary tests (spec 20g.1).
+  @Post('user/set-date-of-birth')
+  @HttpCode(200)
+  async setUserDateOfBirth(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; dob: string },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.setUserDateOfBirth(body.userId, new Date(body.dob))
+    return { ok: true }
+  }
+
+
   // ─── Seed fixtures (Phase 0 §H) ─────────────────────────────────────────
   @Post('user/set-account-status')
   @HttpCode(200)

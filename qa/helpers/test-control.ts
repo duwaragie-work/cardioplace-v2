@@ -251,6 +251,18 @@ export class TestControl {
   }
 
   /**
+   * Phase 4 §B.2 — set a user's dateOfBirth. Used by the age-bucket boundary
+   * test (spec 20g.1): AGE_65_LOW must fire the day the patient turns 65 and
+   * NOT one day earlier, proving the cutoff is evaluated at reading time.
+   */
+  async setUserDateOfBirth(userId: string, dob: Date): Promise<void> {
+    await this.post('test-control/user/set-date-of-birth', {
+      userId,
+      dob: dob.toISOString(),
+    })
+  }
+
+  /**
    * Spec 12 — clear businessHours on the practice attached to this user.
    * Returns the prior values; pair with `restorePracticeBusinessHours` in a
    * `finally` block so the seed state stays intact for other tests.

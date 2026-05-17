@@ -140,6 +140,38 @@ describe('TestControlService — §H seed helpers', () => {
     })
   })
 
+  describe('setUserDateOfBirth (Phase 4 §B.2)', () => {
+    it('updates the user dateOfBirth with the supplied Date', async () => {
+      const prisma = mockPrisma()
+      prisma.user.update.mockResolvedValue({})
+      const svc = makeService(prisma)
+      const dob = new Date('1961-05-18T00:00:00.000Z')
+
+      await svc.setUserDateOfBirth('u1', dob)
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { dateOfBirth: dob },
+      })
+    })
+
+    it('forwards the exact Date instance (no coercion) for boundary dates', async () => {
+      const prisma = mockPrisma()
+      prisma.user.update.mockResolvedValue({})
+      const svc = makeService(prisma)
+      // The day a patient turns exactly 65 — boundary used by spec 20g.1.
+      const dob = new Date('1961-05-18T12:34:56.000Z')
+
+      await svc.setUserDateOfBirth('u2', dob)
+
+      const arg = prisma.user.update.mock.calls[0][0] as {
+        data: { dateOfBirth: Date }
+      }
+      expect(arg.data.dateOfBirth).toBe(dob)
+      expect(arg.data.dateOfBirth.toISOString()).toBe('1961-05-18T12:34:56.000Z')
+    })
+  })
+
   describe('seedAuditTrail', () => {
     it('creates one ProfileVerificationLog per event with role default ADMIN', async () => {
       const prisma = mockPrisma()
