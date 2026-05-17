@@ -250,7 +250,9 @@ export default function EscalationAuditTrail({ alert, heightCm }: Props) {
       )}
 
       {/* Resolution + 15-field audit footer */}
-      {alert.status === 'RESOLVED' && <ResolutionAuditFooter alert={alert} heightCm={heightCm} />}
+      {(alert.status === 'RESOLVED' || alert.status === 'ACKNOWLEDGED') && (
+        <AlertAuditFooter alert={alert} heightCm={heightCm} />
+      )}
     </div>
   );
 }
@@ -283,12 +285,17 @@ function Step({
   // saying "Not yet triggered" once the alert is closed.
   let untriggeredHint: string | null = null;
 
-  if (allResolved) {
+  // Phase 1 polish Finding 2 — a triggered step's badge must reflect the
+  // ALERT's status, not only this event row's own acknowledgedAt. Otherwise
+  // a T+0 rung stays red "Awaiting acknowledgment" after the admin acks
+  // (the event-level propagation can lag / be filtered). Defensive: alert
+  // ACKNOWLEDGED/RESOLVED ⇒ green, even if this row's timestamp is absent.
+  if (allResolved || (triggered && alertStatus === 'RESOLVED')) {
     nodeColor = 'var(--brand-success-green)';
     nodeBg = 'var(--brand-success-green-light)';
     nodeIcon = <CheckCircle2 className="w-3 h-3" />;
     nodeLabel = 'Completed';
-  } else if (acked) {
+  } else if (triggered && (acked || alertStatus === 'ACKNOWLEDGED')) {
     nodeColor = 'var(--brand-accent-teal)';
     nodeBg = 'var(--brand-accent-teal-light)';
     nodeIcon = <Check className="w-3 h-3" />;
@@ -402,13 +409,21 @@ function EventDetail({ event }: { event: PatientAlertEscalationEvent }) {
         )}
         <KV
           label="Acknowledged"
-          value={fmtDateTime(event.acknowledgedAt)}
+          value={
+            event.acknowledgedAt
+              ? `${fmtDateTime(event.acknowledgedAt)}${event.acknowledgedByName ? ` · ${event.acknowledgedByName}` : ''}`
+              : '—'
+          }
           valueColor={
             event.acknowledgedAt ? 'var(--brand-success-green)' : 'var(--brand-alert-red)'
           }
         />
         {event.resolvedAt && (
-          <KV label="Resolved" value={fmtDateTime(event.resolvedAt)} valueColor="var(--brand-success-green)" />
+          <KV
+            label="Resolved"
+            value={`${fmtDateTime(event.resolvedAt)}${event.resolvedByName ? ` · ${event.resolvedByName}` : ''}`}
+            valueColor="var(--brand-success-green)"
+          />
         )}
       </div>
 
@@ -517,27 +532,64 @@ function EventDetail({ event }: { event: PatientAlertEscalationEvent }) {
 
 // ─── 15-field audit footer ──────────────────────────────────────────────────
 
-function ResolutionAuditFooter({
+function AlertAuditFooter({
   alert,
   heightCm,
 }: {
   alert: PatientAlert;
   heightCm?: number | null;
 }) {
+  // Phase 1 polish — this footer now renders for ACKNOWLEDGED alerts too
+  // (Finding 4), not only RESOLVED. Acknowledgement is a real JCAHO
+  // state-change and deserves an audit record.
+  const isResolved = alert.status === 'RESOLVED';
+  const accent = isResolved
+    ? { line: 'var(--brand-success-green)', tint: 'var(--brand-success-green-light)' }
+    : { line: 'var(--brand-accent-teal)', tint: 'var(--brand-accent-teal-light)' };
+
   // BMI is computed from this alert's reading weight + the patient's
-  // intake-time height. Clinically valuable alongside pulse pressure for
-  // the resolving clinician.
+  // intake-time height. Clinically valuable alongside pulse pressure.
   const bmi = getBMI(heightCm ?? null, alert.journalEntry?.weight ?? null);
 
-  // The 15 Joint-Commission audit fields (per CLAUDE.md / CLINICAL_SPEC
-  // Part 13). We surface every field we currently have available; missing
-  // fields render as "—" so the structure stays predictable. `key` drives a
-  // stable `data-testid="audit-field-<key>"` for automated audit coverage.
-  //
-  // Acknowledged + Resolved are now distinct rows (each with actor display
-  // name). Previously a single "Resolved" row showed acknowledgedAt with no
-  // acknowledging actor — a patient ack rendered with no patient name, and
-  // the resolution timestamp was conflated with the acknowledgement one.
+  // Finding 5 — pulse pressure: the alert summary card + readings tab derive
+  // PP as SBP−DBP. The DB `pulsePressure` column is only populated for
+  // BP-tier rules, so profile-based alerts (e.g. RULE_NDHP_HFREF) showed
+  // "—" here despite the card showing "PP 44". Fall back to the same
+  // derivation so both surfaces agree.
+  const sbp = alert.journalEntry?.systolicBP ?? null;
+  const dbp = alert.journalEntry?.diastolicBP ?? null;
+  const pp =
+    alert.pulsePressure ?? (sbp != null && dbp != null ? sbp - dbp : null);
+
+  // Finding 6 — profile/medication/symptom-driven tiers fire on condition +
+  // med-list combinations, not a measured value, so a null actualValue is
+  // EXPECTED, not data-missing. BP-Level tiers are value-driven, so a null
+  // there is a genuine gap → keep "—".
+  const profileBasedTier =
+    alert.tier === 'TIER_1_CONTRAINDICATION' ||
+    alert.tier === 'TIER_2_DISCREPANCY' ||
+    alert.tier === 'TIER_3_INFO';
+
+  const NOT_RESOLVED = 'Not required — alert acknowledged, not yet resolved';
+  const RESOLVED_DIRECTLY = 'Not required — alert resolved directly';
+
+  // Finding 9 — when an alert is resolved directly (no prior ack), the
+  // Acknowledged rows are intentionally empty, not data-missing.
+  const ackValue = alert.acknowledgedAt
+    ? fmtDateTime(alert.acknowledgedAt)
+    : isResolved
+      ? RESOLVED_DIRECTLY
+      : '—';
+  const ackByValue = alert.acknowledgedAt
+    ? (alert.acknowledgedByName ?? alert.acknowledgedBy ?? '—')
+    : isResolved
+      ? RESOLVED_DIRECTLY
+      : '—';
+
+  // Joint-Commission audit fields (per CLAUDE.md / CLINICAL_SPEC Part 13).
+  // Finding 7 — the v1 "Baseline value" row was removed (v2 has no rolling
+  // baselines; the field was always "—"). Header no longer claims a fixed
+  // count to avoid drift. `key` drives `data-testid="audit-field-<key>"`.
   const fields: { key: string; label: string; value: string }[] = [
     { key: 'alertId', label: 'Alert ID', value: alert.id },
     { key: 'tier', label: 'Tier', value: prettify(alert.tier) },
@@ -546,39 +598,55 @@ function ResolutionAuditFooter({
     { key: 'mode', label: 'Mode', value: prettify(alert.mode) },
     { key: 'status', label: 'Status', value: prettify(alert.status) },
     { key: 'created', label: 'Created', value: fmtDateTime(alert.createdAt) },
-    { key: 'acknowledged', label: 'Acknowledged', value: fmtDateTime(alert.acknowledgedAt) },
+    { key: 'acknowledged', label: 'Acknowledged', value: ackValue },
+    { key: 'acknowledgedBy', label: 'Acknowledged by', value: ackByValue },
     {
-      key: 'acknowledgedBy',
-      label: 'Acknowledged by',
-      value: alert.acknowledgedByName ?? alert.acknowledgedBy ?? '—',
+      key: 'resolved',
+      label: 'Resolved',
+      value: isResolved ? fmtDateTime(alert.resolvedAt) : NOT_RESOLVED,
     },
-    { key: 'resolved', label: 'Resolved', value: fmtDateTime(alert.resolvedAt) },
     {
       key: 'resolvedBy',
       label: 'Resolved by',
-      value: alert.resolvedByName ?? alert.resolvedBy ?? '—',
+      value: isResolved
+        ? (alert.resolvedByName ?? alert.resolvedBy ?? '—')
+        : NOT_RESOLVED,
     },
-    { key: 'resolutionAction', label: 'Resolution action', value: prettify(alert.resolutionAction) },
-    { key: 'reading', label: 'Reading', value: alert.journalEntry?.systolicBP != null ? `${alert.journalEntry.systolicBP}/${alert.journalEntry.diastolicBP} mmHg` : '—' },
-    { key: 'pulsePressure', label: 'Pulse pressure', value: alert.pulsePressure != null ? `${alert.pulsePressure} mmHg` : '—' },
+    {
+      key: 'resolutionAction',
+      label: 'Resolution action',
+      value: isResolved ? prettify(alert.resolutionAction) : NOT_RESOLVED,
+    },
+    { key: 'reading', label: 'Reading', value: sbp != null ? `${sbp}/${dbp} mmHg` : '—' },
+    { key: 'pulsePressure', label: 'Pulse pressure', value: pp != null ? `${pp} mmHg` : '—' },
     { key: 'bmi', label: 'BMI', value: bmi != null ? bmi.toFixed(1) : '—' },
-    { key: 'baselineValue', label: 'Baseline value', value: alert.baselineValue != null ? String(alert.baselineValue) : '—' },
-    { key: 'actualValue', label: 'Actual value', value: alert.actualValue != null ? String(alert.actualValue) : '—' },
+    {
+      key: 'actualValue',
+      label: 'Actual value',
+      value:
+        alert.actualValue != null
+          ? String(alert.actualValue)
+          : profileBasedTier
+            ? 'Not applicable (profile-based rule)'
+            : '—',
+    },
     { key: 'escalationCount', label: 'Escalation count', value: String(alert.escalationEvents.length) },
   ];
 
   return (
     <div
+      data-testid="alert-audit-footer"
       className="mt-4 rounded-lg p-3.5"
-      style={{
-        backgroundColor: 'var(--brand-success-green-light)',
-        border: '1px solid var(--brand-success-green)',
-      }}
+      style={{ backgroundColor: accent.tint, border: `1px solid ${accent.line}` }}
     >
       <div className="flex items-center gap-1.5 mb-2">
-        <CheckCircle2 className="w-3.5 h-3.5" style={{ color: 'var(--brand-success-green)' }} />
-        <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-success-green)' }}>
-          Resolution audit · 15-field record
+        <CheckCircle2 className="w-3.5 h-3.5" style={{ color: accent.line }} />
+        <p
+          data-testid="alert-audit-header"
+          className="text-[11px] font-bold uppercase tracking-wider"
+          style={{ color: accent.line }}
+        >
+          {isResolved ? 'Resolution audit record' : 'Acknowledgment audit record'}
         </p>
       </div>
 
@@ -600,9 +668,9 @@ function ResolutionAuditFooter({
         ))}
       </div>
 
-      {/* Free-form rationale (15-field record field 11 — rendered separately
-          from the grid because it is long-form prose). */}
-      {alert.resolutionRationale && (
+      {/* Free-form rationale — only for RESOLVED alerts (an ack-only alert
+          has no resolution rationale yet). */}
+      {isResolved && alert.resolutionRationale && (
         <div
           data-testid="audit-field-resolutionRationale"
           className="rounded-md bg-white p-2.5"
