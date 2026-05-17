@@ -381,6 +381,31 @@ scope if time permits. No code change this cycle.
   type-checked + unit/integration-covered; the visual confirmation step remains
   outstanding and is called out in the §I report.
 
+### Manual UI verification (§H — MANUAL_VERIFY_PHASE_1.md)
+
+**Status: ⏳ NOT executed in this cycle — outstanding human/provisioned gate.**
+`MANUAL_VERIFY_PHASE_1.md` is an explicitly human walk-through (magic-link sign-in
+via Mailtrap, two parallel browser windows, screenshots). The 3 dev servers are not
+running in the batch environment and the DB/secrets/Mailtrap cannot be provisioned
+from it, so the visual steps were **not performed** — not marked ✓ to avoid
+fabricating unobserved results. Each checkpoint has automated coverage that gates
+the same behavior deterministically; the visual confirmation remains a pre-pilot
+human step (Duwaragie on local dev, or a provisioned CI/preview).
+
+| Step | Visual gate | Automated coverage backing it | Visual status |
+|---|---|---|---|
+| 1 | Patient submits Tier-1/L2 reading | `qa/tests/13` alert-creation flows | ⏳ pending human |
+| 2 | Admin 15-field audit panel renders | `qa/tests/13` §B panel UI (`audit-field-*` testids) + admin tsc (`PatientAlert` type) | ⏳ pending human |
+| 3 | Patient acknowledges | `qa/tests/13:371` patient-ack propagation | ⏳ pending human |
+| 4 | Admin sees "Acknowledged by Aisha Johnson" (THE bug) | `qa/tests/13:511` backend contract (`acknowledgedByName` resolved) | ⏳ pending human |
+| 5 | Admin resolves w/ rationale; distinct Resolved row | `qa/tests/13:212` resolvedAt + §B split-row UI test | ⏳ pending human |
+| 6 | Patient sees "Resolved by Dr. …" | resolver-name resolution (provider.service) | ⏳ pending human |
+| 7 | backupProvider 403 on unassigned patient (P0) | `qa/tests/11` Phase-2 guard test (403 on all 5 endpoints) | ⏳ pending human |
+| 8 | Cross-practice 403 (P0) | same Phase-2 test (isolated Practice B probe) | ⏳ pending human |
+
+Action: Duwaragie runs the 8-step walk on local dev (or a provisioned preview) and
+fills the ✓/✗ table per the doc before pilot sign-off.
+
 ### Note on the §D/§E tests vs. the seed
 
 The seed assigns **every** test patient to ONE shared care team (primary-provider +
