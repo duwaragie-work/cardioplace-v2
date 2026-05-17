@@ -670,6 +670,7 @@ export default function PatientDetailShell({ patientId }: Props) {
                   loading={alertsLoading}
                   onResolved={onAlertsResolved}
                   heightCm={profile?.heightCm ?? null}
+                  patientName={header?.name ?? null}
                 />
               </>
             )}

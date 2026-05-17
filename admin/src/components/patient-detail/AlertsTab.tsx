@@ -32,6 +32,11 @@ interface Props {
   /** PatientProfile.heightCm — passed through to EscalationAuditTrail
    *  so the resolution audit footer can compute BMI alongside PP. */
   heightCm?: number | null;
+  /** Patient display name — the per-patient alerts endpoint omits the
+   *  nested patient object (you're already in the patient's page), so the
+   *  resolve modal showed "Unknown patient". Thread it from the shell.
+   *  (Phase 1 polish Finding 8.) */
+  patientName?: string | null;
 }
 
 type TierBucket = 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'TIER_3' | 'OTHER';
@@ -69,7 +74,7 @@ function timeAgo(iso: string): string {
   return `${d}d ago`;
 }
 
-export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Props) {
+export default function AlertsTab({ alerts, loading, onResolved, heightCm, patientName }: Props) {
   const [tierFilter, setTierFilter] = useState<TierBucket>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('OPEN');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -130,7 +135,10 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
     return {
       id: resolving.id,
       tier: resolving.tier as AlertTier | null,
-      patient: { name: null },
+      // Finding 8 — the per-patient alerts feed omits the nested patient
+      // object; thread the name from the shell so the modal header reads
+      // "James Okafor · 118/74" not "Unknown patient · 118/74".
+      patient: { name: patientName ?? null },
       patientMessage: resolving.patientMessage,
       journalEntry: resolving.journalEntry
         ? {
@@ -141,7 +149,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
         : null,
       createdAt: resolving.createdAt,
     };
-  }, [resolving]);
+  }, [resolving, patientName]);
 
   const handleAcknowledge = useCallback(
     async (alertId: string) => {

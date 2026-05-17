@@ -173,6 +173,9 @@ export class EscalationService {
         recipientRoles: args.recipientRoles,
         scheduledFor,
         triggeredByResolution: true,
+        // Finding 5 — scheduled by an admin's BP_L2_UNABLE_TO_REACH_RETRY
+        // resolution action, not the cron scheduler. Human-attributed.
+        dispatchedBySystem: false,
         afterHours: false,
       },
     })
@@ -610,6 +613,9 @@ export class EscalationService {
               notificationChannel: step.channels[0] ?? 'PUSH',
               afterHours: true,
               scheduledFor,
+              // Finding 5 — queued by the escalation scheduler (cron); no
+              // human actor.
+              dispatchedBySystem: true,
             },
           }),
         this.logger,
@@ -641,6 +647,9 @@ export class EscalationService {
             notificationChannel: step.channels[0] ?? 'PUSH',
             afterHours,
             notificationSentAt: now,
+            // Finding 5 — fired by the escalation scheduler (cron); no
+            // human actor.
+            dispatchedBySystem: true,
           },
         })
 

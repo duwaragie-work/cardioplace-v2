@@ -27,4 +27,10 @@ enum VerificationChangeType {
   ADMIN_VERIFY
   ADMIN_CORRECT
   ADMIN_REJECT
+  // Phase 2 — Finding 4: clinical-staff actions that previously wrote no
+  // audit row. THRESHOLD_UPDATE = MED_DIR/SUPER_ADMIN set/changed a
+  // PatientThreshold; ASSIGNMENT_CHANGE = care-team (practice/primary/
+  // backup/MD) create or update.
+  ADMIN_THRESHOLD_UPDATE
+  ADMIN_ASSIGNMENT_CHANGE
 }

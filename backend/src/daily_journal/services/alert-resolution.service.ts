@@ -55,6 +55,10 @@ export class AlertResolutionService {
       data: {
         status: 'ACKNOWLEDGED',
         acknowledgedAt: now,
+        // Phase 1 polish Finding 1 — alert-level actor (symmetric with the
+        // /provider/alerts/:id/acknowledge path); was omitted so the audit
+        // footer showed "Acknowledged" with no name.
+        acknowledgedByUserId: adminId,
       },
     })
     // Mark open escalation events acknowledged so the cron skips them.

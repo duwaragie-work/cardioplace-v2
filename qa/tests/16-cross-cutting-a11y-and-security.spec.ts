@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { signInPatient, signInAdmin } from '../helpers/auth.js'
 import { PATIENTS, ADMINS } from '../helpers/accounts.js'
-import { ADMIN_BASE_URL } from '../playwright.config.js'
+import { ADMIN_BASE_URL, API_BASE_URL } from '../playwright.config.js'
 
 /**
  * Cross-cutting: accessibility (axe-core), security smoke (no PHI in URLs,
@@ -172,6 +172,88 @@ test.describe('HTTP / proxy smoke', () => {
       expect(res.headers()['content-type']).toMatch(/xml/)
     } else {
       test.fail(true, 'sitemap.xml should exist with content-type: application/xml')
+    }
+  })
+})
+
+// ─── Phase 1 — admin app PHI safety (§F) ─────────────────────────────────────
+//
+// Extends the existing patient-app PHI checks to the admin surface, where the
+// audit trail lives. PHI must not appear in the URL bar, the console, or
+// error-response bodies. Patient-detail URLs use opaque userIds (not PHI);
+// the leak shapes we guard are BP values (\d{2,3}/\d{2,3}), patient names,
+// and DOB-shaped strings.
+const PHI_NAME_RE = /Aisha|Johnson|James|Okafor|Priya|Menon|Rita|Washington|Charles|Brown/i
+const BP_SHAPE_RE = /\d{2,3}\/\d{2,3}/
+
+test.describe('Admin app — PHI safety (§F)', () => {
+  test('no PHI in admin URL bar across patient-detail walk', async ({ page }) => {
+    const urls: string[] = []
+    page.on('framenavigated', (f) => {
+      if (f === page.mainFrame()) urls.push(f.url())
+    })
+    try {
+      await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
+      await page.goto(`${ADMIN_BASE_URL}/patients`)
+      const link = page.getByText(PATIENTS.aisha.name).first()
+      await expect(link).toBeVisible({ timeout: 15_000 })
+      await link.click()
+      await expect(page).toHaveURL(/\/patients\/[^/]+$/, { timeout: 20_000 })
+      for (const tab of ['Alerts', 'Medications', 'Readings', 'Thresholds', 'Timeline']) {
+        const t = page.getByRole('tab', { name: tab })
+        if (await t.isVisible().catch(() => false)) await t.click()
+      }
+    } catch (err) {
+      test.skip(true, `admin UI walk not reachable: ${(err as Error).message}`)
+      return
+    }
+    for (const u of urls) {
+      expect(u, `BP-shaped string in admin URL: ${u}`).not.toMatch(BP_SHAPE_RE)
+      expect(u, `patient name in admin URL: ${u}`).not.toMatch(PHI_NAME_RE)
+    }
+  })
+
+  test('console error-free during admin patient-detail walk', async ({ page }) => {
+    const errors: string[] = []
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') errors.push(msg.text())
+    })
+    try {
+      await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
+      await page.goto(`${ADMIN_BASE_URL}/patients`)
+      const link = page.getByText(PATIENTS.aisha.name).first()
+      await expect(link).toBeVisible({ timeout: 15_000 })
+      await link.click()
+      await expect(page).toHaveURL(/\/patients\/[^/]+$/, { timeout: 20_000 })
+    } catch (err) {
+      test.skip(true, `admin UI walk not reachable: ${(err as Error).message}`)
+      return
+    }
+    const fatal = errors.filter(
+      (e) =>
+        !/ResizeObserver|preload|hydration|favicon|net::ERR_/i.test(e) &&
+        !/401|Unauthorized/i.test(e),
+    )
+    // Console must also not leak PHI even in benign log lines.
+    for (const e of errors) {
+      expect(e, `PHI name in admin console: ${e}`).not.toMatch(PHI_NAME_RE)
+    }
+    expect(fatal, fatal.join('\n')).toEqual([])
+  })
+
+  test('error responses do not leak other patients PHI', async ({ request }) => {
+    // An invalid/garbage alert id must not echo any other patient's name or
+    // BP into the error body or a stack trace.
+    const probes = [
+      `${API_BASE_URL}/api/provider/alerts/not-a-real-id/detail`,
+      `${API_BASE_URL}/api/provider/patients/not-a-real-id/alerts`,
+    ]
+    for (const url of probes) {
+      const res = await request.get(url).catch(() => null)
+      if (!res) continue
+      const body = await res.text()
+      expect(body, `PHI name leaked in error body for ${url}`).not.toMatch(PHI_NAME_RE)
+      expect(body, `BP-shaped string leaked in error body for ${url}`).not.toMatch(BP_SHAPE_RE)
     }
   })
 })

@@ -5,12 +5,29 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { Prisma } from '../generated/prisma/client.js'
+import {
+  VerifierRole,
+  VerificationChangeType,
+} from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import {
   pickDisplayName,
   resolveUserDisplays,
 } from '../common/user-name-resolver.js'
 import type { UpsertThresholdDto } from './dto/upsert-threshold.dto.js'
+
+// JCAHO audit snapshot — the clinically-meaningful threshold targets only
+// (no Prisma Date/internal columns), so previous/new diff cleanly in the
+// ProfileVerificationLog.
+interface ThresholdSnapshot {
+  sbpUpperTarget: number | null
+  sbpLowerTarget: number | null
+  dbpUpperTarget: number | null
+  dbpLowerTarget: number | null
+  hrUpperTarget: number | null
+  hrLowerTarget: number | null
+  notes: string | null
+}
 
 @Injectable()
 export class ThresholdService {
@@ -28,6 +45,14 @@ export class ThresholdService {
           ...dto,
         },
       })
+      // Finding 4 — JCAHO audit: a clinical-staff threshold write is a
+      // state-change action and must leave an actor + before/after trail.
+      await this.writeThresholdAudit(
+        patientUserId,
+        adminId,
+        Prisma.JsonNull,
+        this.thresholdSnapshot(threshold),
+      )
       return {
         statusCode: 201,
         message: 'Threshold created',
@@ -104,11 +129,59 @@ export class ThresholdService {
         setAt: new Date(),
       },
     })
+    // Finding 4 — JCAHO audit: capture the prior targets → new targets diff.
+    await this.writeThresholdAudit(
+      patientUserId,
+      adminId,
+      this.thresholdSnapshot(existing),
+      this.thresholdSnapshot(updated),
+    )
     return {
       statusCode: 200,
       message: 'Threshold updated',
       data: updated,
     }
+  }
+
+  private thresholdSnapshot(t: {
+    sbpUpperTarget: number | null
+    sbpLowerTarget: number | null
+    dbpUpperTarget: number | null
+    dbpLowerTarget: number | null
+    hrUpperTarget: number | null
+    hrLowerTarget: number | null
+    notes: string | null
+  }): ThresholdSnapshot {
+    return {
+      sbpUpperTarget: t.sbpUpperTarget ?? null,
+      sbpLowerTarget: t.sbpLowerTarget ?? null,
+      dbpUpperTarget: t.dbpUpperTarget ?? null,
+      dbpLowerTarget: t.dbpLowerTarget ?? null,
+      hrUpperTarget: t.hrUpperTarget ?? null,
+      hrLowerTarget: t.hrLowerTarget ?? null,
+      notes: t.notes ?? null,
+    }
+  }
+
+  private async writeThresholdAudit(
+    patientUserId: string,
+    adminId: string,
+    previousValue: ThresholdSnapshot | typeof Prisma.JsonNull,
+    newValue: ThresholdSnapshot,
+  ): Promise<void> {
+    await this.prisma.profileVerificationLog.create({
+      data: {
+        userId: patientUserId,
+        fieldPath: 'threshold',
+        previousValue:
+          previousValue as unknown as Prisma.InputJsonValue,
+        newValue: newValue as unknown as Prisma.InputJsonValue,
+        changedBy: adminId,
+        changedByRole: VerifierRole.ADMIN,
+        changeType: VerificationChangeType.ADMIN_THRESHOLD_UPDATE,
+        rationale: newValue.notes ?? null,
+      },
+    })
   }
 
   private async assertPatientExists(userId: string) {

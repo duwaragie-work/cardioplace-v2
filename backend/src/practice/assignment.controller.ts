@@ -7,12 +7,16 @@ import {
   Param,
   Patch,
   Post,
+  Req,
 } from '@nestjs/common'
+import type { Request } from 'express'
 import { Roles } from '../auth/decorators/roles.decorator.js'
 import { UserRole } from '../generated/prisma/enums.js'
 import { AssignmentService } from './assignment.service.js'
 import { CreateAssignmentDto } from './dto/create-assignment.dto.js'
 import { UpdateAssignmentDto } from './dto/update-assignment.dto.js'
+
+type AuthedReq = Request & { user: { id: string } }
 
 // Patient ↔ care-team assignment.
 //   • READ — open to all four admin roles. PROVIDER needs to see who the
@@ -35,10 +39,11 @@ export class AssignmentController {
   @HttpCode(HttpStatus.CREATED)
   @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.HEALPLACE_OPS)
   create(
+    @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,
     @Body() dto: CreateAssignmentDto,
   ) {
-    return this.service.create(patientUserId, dto)
+    return this.service.create(req.user.id, patientUserId, dto)
   }
 
   @Get()
@@ -49,9 +54,10 @@ export class AssignmentController {
   @Patch()
   @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.HEALPLACE_OPS)
   update(
+    @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,
     @Body() dto: UpdateAssignmentDto,
   ) {
-    return this.service.update(patientUserId, dto)
+    return this.service.update(req.user.id, patientUserId, dto)
   }
 }

@@ -477,6 +477,7 @@ export class TestControlService {
         resolvedAt: true,
         resolvedBy: true,
         triggeredByResolution: true,
+        dispatchedBySystem: true,
         reason: true,
       },
     })
