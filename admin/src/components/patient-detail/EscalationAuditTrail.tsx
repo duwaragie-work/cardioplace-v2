@@ -561,8 +561,17 @@ function AlertAuditFooter({
   const pp =
     alert.pulsePressure ?? (sbp != null && dbp != null ? sbp - dbp : null);
 
-  const NOT_RESOLVED = 'Not required — alert acknowledged, not yet resolved';
+  // The header already says "Acknowledgment audit record", so the
+  // resolution rows just need a short status token — repeating the full
+  // "Not required — alert acknowledged, not yet resolved" sentence on three
+  // consecutive rows was redundant noise (reviewer feedback 2026-05-17).
+  const PENDING_RESOLUTION = 'Pending resolution';
   const RESOLVED_DIRECTLY = 'Not required — alert resolved directly';
+  // Legacy acks (acknowledged before the Finding 1 audit fix) have a real
+  // acknowledgedAt but no persisted actor — the identity was never captured
+  // anywhere. Show that explicitly rather than a bare "—" (which reads as a
+  // bug). We do NOT fabricate an actor — JCAHO integrity.
+  const ACTOR_NOT_RECORDED = 'Not recorded (acknowledged before audit fix)';
 
   // Finding 9 — when an alert is resolved directly (no prior ack), the
   // Acknowledged rows are intentionally empty, not data-missing.
@@ -572,7 +581,7 @@ function AlertAuditFooter({
       ? RESOLVED_DIRECTLY
       : '—';
   const ackByValue = alert.acknowledgedAt
-    ? (alert.acknowledgedByName ?? alert.acknowledgedBy ?? '—')
+    ? (alert.acknowledgedByName ?? alert.acknowledgedBy ?? ACTOR_NOT_RECORDED)
     : isResolved
       ? RESOLVED_DIRECTLY
       : '—';
@@ -594,19 +603,19 @@ function AlertAuditFooter({
     {
       key: 'resolved',
       label: 'Resolved',
-      value: isResolved ? fmtDateTime(alert.resolvedAt) : NOT_RESOLVED,
+      value: isResolved ? fmtDateTime(alert.resolvedAt) : PENDING_RESOLUTION,
     },
     {
       key: 'resolvedBy',
       label: 'Resolved by',
       value: isResolved
         ? (alert.resolvedByName ?? alert.resolvedBy ?? '—')
-        : NOT_RESOLVED,
+        : PENDING_RESOLUTION,
     },
     {
       key: 'resolutionAction',
       label: 'Resolution action',
-      value: isResolved ? prettify(alert.resolutionAction) : NOT_RESOLVED,
+      value: isResolved ? prettify(alert.resolutionAction) : PENDING_RESOLUTION,
     },
     { key: 'reading', label: 'Reading', value: sbp != null ? `${sbp}/${dbp} mmHg` : '—' },
     { key: 'pulsePressure', label: 'Pulse pressure', value: pp != null ? `${pp} mmHg` : '—' },

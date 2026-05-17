@@ -507,6 +507,32 @@ for pilot per the plan §H note.
   AND ack paths end-to-end; the human screenshot walk remains the formal
   pre-pilot sign-off but is now de-risked by passing automation.
 
+### Reviewer feedback 2026-05-17 (post-Finding-10, same commit lineage)
+
+Chrome re-verification of an ACKNOWLEDGED alert surfaced two copy/UX nits in
+the `AlertAuditFooter` (both fixed in `EscalationAuditTrail.tsx`):
+
+1. **Legacy ack actor — "Acknowledged by —" (ambiguous).** Alerts
+   acknowledged *before* the Finding 1 fix have a real `acknowledgedAt` but
+   no persisted actor (the identity was never captured anywhere — alert,
+   events, or logs). The fix is **forward-only by design**: we must not
+   fabricate the actor (JCAHO integrity), and there is no source to backfill
+   from. Display now reads **"Not recorded (acknowledged before audit fix)"**
+   instead of a bare "—", so a reviewer sees an explained legacy gap, not a
+   bug. Post-fix acks show the real name (proven by the deterministic backend
+   contract test + live UI walk). NOTE: the running dev backend must be on
+   the fixed code for *new* acks to capture the actor — a pre-fix-running
+   server's acks are legacy data even if timestamped today.
+2. **Redundant verbose copy on ACK records.** The Resolved / Resolved by /
+   Resolution action rows repeated "Not required — alert acknowledged, not
+   yet resolved" three times, though the header already says "Acknowledgment
+   audit record". Collapsed to the concise status token **"Pending
+   resolution"** (audit completeness kept — fields still present). Verified
+   live (consolidated UI walk asserts "Pending resolution" present + the old
+   "not yet resolved" string absent). Legacy-actor display is UI-only with no
+   automatable path to synthesize legacy data — covered by this
+   manual-verification note per the standing requirement.
+
 ## 🔴 Real product issues still open (NOT fixed this cycle — triage)
 
 | # | Area | Issue | Severity |

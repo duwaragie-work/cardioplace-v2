@@ -1052,6 +1052,15 @@ test.describe('Phase 1 UI polish — audit panel display (Findings 2/4/5/6/7/8)'
     )
     // Finding 1 (UI) — acknowledged-by shows a name, not "—".
     await expect(page.locator('[data-testid="audit-field-acknowledgedBy"]')).not.toContainText('—')
+    // Reviewer feedback 2026-05-17 — the resolution rows on an ACK record
+    // use a concise "Pending resolution" token, NOT the old verbose
+    // "Not required — alert acknowledged, not yet resolved" repeated 3×.
+    await expect(page.locator('[data-testid="audit-field-resolved"]')).toContainText(
+      'Pending resolution',
+    )
+    await expect(page.locator('[data-testid="audit-field-resolved"]')).not.toContainText(
+      /not yet resolved/i,
+    )
     // Finding 2 — a triggered rung must not still read "Awaiting acknowledgment".
     await expect(page.getByText('Awaiting acknowledgment')).toHaveCount(0)
     // Finding 5 — pulse pressure derived (118/74 → 44), not "—".
