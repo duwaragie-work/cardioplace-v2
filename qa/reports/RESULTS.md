@@ -523,15 +523,32 @@ the `AlertAuditFooter` (both fixed in `EscalationAuditTrail.tsx`):
    contract test + live UI walk). NOTE: the running dev backend must be on
    the fixed code for *new* acks to capture the actor — a pre-fix-running
    server's acks are legacy data even if timestamped today.
-2. **Redundant verbose copy on ACK records.** The Resolved / Resolved by /
-   Resolution action rows repeated "Not required — alert acknowledged, not
-   yet resolved" three times, though the header already says "Acknowledgment
-   audit record". Collapsed to the concise status token **"Pending
-   resolution"** (audit completeness kept — fields still present). Verified
-   live (consolidated UI walk asserts "Pending resolution" present + the old
-   "not yet resolved" string absent). Legacy-actor display is UI-only with no
-   automatable path to synthesize legacy data — covered by this
-   manual-verification note per the standing requirement.
+2. **Resolution-row copy was redundant AND clinically wrong for some
+   tiers.** The Resolved / Resolved by / Resolution action rows repeated
+   "Not required — alert acknowledged, not yet resolved" 3×. First pass
+   collapsed it to "Pending resolution" — but a follow-up review caught a
+   clinical error: per **CLINICAL_SPEC Part 12 + Part 13 (line 570-573)**,
+   only **Tier 1 / Tier 2 / BP Level 2** have a resolution-action catalog
+   (`resolutionTierFor` → non-null) and genuinely need a provider
+   resolve+rationale step after ack. **BP Level 1 and Tier 3 have NO
+   resolution actions** — acknowledgment is their *terminal* state, there is
+   nothing to resolve. So "Pending resolution" on an acknowledged BP L1
+   alert (the reviewer's actual screen, `RULE_CAD_HIGH`) was misleading.
+   Footer is now **tier-aware** via `resolutionTierFor(alert.tier)`:
+   - Tier 1/2/BP L2, acknowledged-not-resolved → **"Pending resolution"**
+     (a real provider resolution + rationale is still required)
+   - BP L1 / Tier 3, acknowledged → **"Not applicable — closed on
+     acknowledgment"** (no resolution step exists for this tier)
+   Both branches verified live: the Tier-1 consolidated walk asserts
+   "Pending resolution"; the BP-L1 walk asserts "closed on acknowledgment"
+   + absence of "Pending resolution". Answers the reviewer's question
+   directly — **acknowledge-level (BP L1 / Tier 3) alerts have no
+   resolve/comment step; acknowledgment closes them.**
+
+Legacy-actor display (point 1) is UI-only with no automatable path to
+synthesize pre-fix legacy data — covered by this manual-verification note per
+the standing requirement; the tier-aware copy (point 2) has live test
+coverage on both branches.
 
 ## 🔴 Real product issues still open (NOT fixed this cycle — triage)
 

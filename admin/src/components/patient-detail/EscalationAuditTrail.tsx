@@ -30,6 +30,7 @@ import type {
   PatientAlertEscalationEvent,
   NotificationChannel,
 } from '@/lib/services/patient-detail.service';
+import { resolutionTierFor } from '@/lib/services/provider.service';
 import { getBMI, formatTriggeringValue } from '@cardioplace/shared';
 
 // ─── Canonical ladder ────────────────────────────────────────────────────────
@@ -561,11 +562,23 @@ function AlertAuditFooter({
   const pp =
     alert.pulsePressure ?? (sbp != null && dbp != null ? sbp - dbp : null);
 
-  // The header already says "Acknowledgment audit record", so the
-  // resolution rows just need a short status token — repeating the full
-  // "Not required — alert acknowledged, not yet resolved" sentence on three
-  // consecutive rows was redundant noise (reviewer feedback 2026-05-17).
+  // Clinical lifecycle (CLINICAL_SPEC Part 12 + Part 13, line 570-573):
+  // ONLY Tier 1 / Tier 2 / BP Level 2 have a resolution-action catalog —
+  // those alerts need a provider resolution (action + rationale) AFTER ack,
+  // so an ACKNOWLEDGED one is genuinely "Pending resolution".
+  // BP Level 1 and Tier 3 have NO resolution actions (`resolutionTierFor`
+  // → null); acknowledgment is their TERMINAL state — there is nothing to
+  // resolve. Showing "Pending resolution" for those is clinically wrong
+  // (reviewer feedback 2026-05-17), so they read "closed on acknowledgment".
+  const hasResolutionWorkflow = resolutionTierFor(alert.tier) !== null;
   const PENDING_RESOLUTION = 'Pending resolution';
+  const CLOSED_ON_ACK = 'Not applicable — closed on acknowledgment';
+  // Placeholder for the three resolution rows when the alert is not (yet)
+  // resolved: a real pending step for Tier 1/2/BP L2, or "n/a — this tier
+  // closes on ack" for BP L1 / Tier 3.
+  const resolutionPlaceholder = hasResolutionWorkflow
+    ? PENDING_RESOLUTION
+    : CLOSED_ON_ACK;
   const RESOLVED_DIRECTLY = 'Not required — alert resolved directly';
   // Legacy acks (acknowledged before the Finding 1 audit fix) have a real
   // acknowledgedAt but no persisted actor — the identity was never captured
@@ -603,19 +616,19 @@ function AlertAuditFooter({
     {
       key: 'resolved',
       label: 'Resolved',
-      value: isResolved ? fmtDateTime(alert.resolvedAt) : PENDING_RESOLUTION,
+      value: isResolved ? fmtDateTime(alert.resolvedAt) : resolutionPlaceholder,
     },
     {
       key: 'resolvedBy',
       label: 'Resolved by',
       value: isResolved
         ? (alert.resolvedByName ?? alert.resolvedBy ?? '—')
-        : PENDING_RESOLUTION,
+        : resolutionPlaceholder,
     },
     {
       key: 'resolutionAction',
       label: 'Resolution action',
-      value: isResolved ? prettify(alert.resolutionAction) : PENDING_RESOLUTION,
+      value: isResolved ? prettify(alert.resolutionAction) : resolutionPlaceholder,
     },
     { key: 'reading', label: 'Reading', value: sbp != null ? `${sbp}/${dbp} mmHg` : '—' },
     { key: 'pulsePressure', label: 'Pulse pressure', value: pp != null ? `${pp} mmHg` : '—' },

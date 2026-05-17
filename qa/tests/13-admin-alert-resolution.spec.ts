@@ -1231,6 +1231,15 @@ test.describe('Phase 1 polish — Finding 10: TRIGGERING VALUE in footer (UI)', 
     await expect(tv).toBeVisible({ timeout: 15_000 })
     await expect(tv).toContainText(/mmHg \(systolic\)/i)
     await expect(tv).toContainText(/\d/)
+
+    // Reviewer feedback 2026-05-17 — this is an ACKNOWLEDGED BP Level 1
+    // alert. Per CLINICAL_SPEC Part 12, BP L1 has NO resolution-action
+    // catalog (resolutionTierFor → null): acknowledgment is its terminal
+    // state. The resolution rows must read "closed on acknowledgment", NOT
+    // "Pending resolution" (which only applies to Tier 1/2/BP L2).
+    const resolvedRow = page.locator('[data-testid="audit-field-resolved"]')
+    await expect(resolvedRow).toContainText(/closed on acknowledgment/i)
+    await expect(resolvedRow).not.toContainText(/pending resolution/i)
     await tc.dispose()
   })
 })
