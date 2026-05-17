@@ -436,6 +436,146 @@ export class TestControlService {
     })
   }
 
+  // ─── Seed fixtures (Phase 0 §H) ─────────────────────────────────────────
+  // Imperative test-only seeders (like seedReadingsAtTime). Not idempotent
+  // by design — tests call them to compose a scenario then reset between
+  // runs. The 4 endpoints the pre-Phase-0 controller was missing.
+
+  /**
+   * Force a User.accountStatus. AccountStatus has NO `INACTIVE` member —
+   * valid values are ACTIVE | BLOCKED | SUSPENDED (schema-verified).
+   */
+  async setAccountStatus(
+    email: string,
+    status: 'ACTIVE' | 'BLOCKED' | 'SUSPENDED',
+  ): Promise<{ id: string; email: string; accountStatus: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    })
+    if (!user) throw new Error(`User not found: ${email}`)
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { accountStatus: status },
+    })
+    return { id: user.id, email, accountStatus: status }
+  }
+
+  /**
+   * Seed N alerts in specific states. DeviationAlert.journalEntryId is
+   * required, so each alert auto-creates its own backing JournalEntry.
+   */
+  async seedAlerts(
+    userId: string,
+    alerts: Array<{
+      tier: string
+      status?: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
+      ruleId?: string
+      createdAtIso?: string
+      acknowledgedByUserId?: string
+      resolvedBy?: string
+      resolutionAction?: string
+      resolutionRationale?: string
+    }>,
+  ): Promise<{ created: number; alertIds: string[] }> {
+    const alertIds: string[] = []
+    for (const a of alerts) {
+      const je = await this.prisma.journalEntry.create({
+        data: {
+          userId,
+          measuredAt: new Date(),
+          systolicBP: 150,
+          diastolicBP: 95,
+          pulse: 80,
+          position: 'SITTING',
+          source: 'MANUAL',
+        },
+        select: { id: true },
+      })
+      const status = a.status ?? 'OPEN'
+      const created = await this.prisma.deviationAlert.create({
+        data: {
+          userId,
+          journalEntryId: je.id,
+          tier: a.tier as never,
+          mode: 'STANDARD',
+          ruleId: a.ruleId ?? 'TEST_SEED',
+          status,
+          dismissible: true,
+          createdAt: a.createdAtIso ? new Date(a.createdAtIso) : new Date(),
+          acknowledgedAt: status === 'ACKNOWLEDGED' ? new Date() : null,
+          acknowledgedByUserId: a.acknowledgedByUserId ?? null,
+          resolvedAt: status === 'RESOLVED' ? new Date() : null,
+          resolvedBy: a.resolvedBy ?? null,
+          resolutionAction: a.resolutionAction ?? null,
+          resolutionRationale: a.resolutionRationale ?? null,
+        },
+        select: { id: true },
+      })
+      alertIds.push(created.id)
+    }
+    return { created: alertIds.length, alertIds }
+  }
+
+  /** Seed N notifications for a user (badge / list fixtures). */
+  async seedNotifications(
+    userId: string,
+    count: number,
+    channel: 'PUSH' | 'EMAIL' | 'PHONE' | 'DASHBOARD' = 'DASHBOARD',
+  ): Promise<{ created: number }> {
+    for (let i = 1; i <= count; i++) {
+      await this.prisma.notification.create({
+        data: {
+          userId,
+          channel,
+          title: `Test notification ${i}`,
+          body: `Seeded test notification ${i}.`,
+          tips: [],
+        },
+      })
+    }
+    return { created: count }
+  }
+
+  /**
+   * Seed audit events. changeType must be a VerificationChangeType member
+   * (PATIENT_REPORT | ADMIN_VERIFY | ADMIN_CORRECT | ADMIN_REJECT |
+   * ADMIN_THRESHOLD_UPDATE | ADMIN_ASSIGNMENT_CHANGE) — there are NO
+   * ALERT_* members; alert lifecycle audit lives on DeviationAlert.
+   */
+  async seedAuditTrail(
+    userId: string,
+    events: Array<{
+      changeType: string
+      fieldPath: string
+      changedBy: string
+      changedByRole?: 'PATIENT' | 'ADMIN' | 'PROVIDER'
+      previousValue?: unknown
+      newValue?: unknown
+      rationale?: string
+      discrepancyFlag?: boolean
+      createdAtIso?: string
+    }>,
+  ): Promise<{ created: number }> {
+    for (const e of events) {
+      await this.prisma.profileVerificationLog.create({
+        data: {
+          userId,
+          fieldPath: e.fieldPath,
+          changedBy: e.changedBy,
+          changedByRole: (e.changedByRole ?? 'ADMIN') as never,
+          changeType: e.changeType as never,
+          previousValue: (e.previousValue ?? undefined) as never,
+          newValue: (e.newValue ?? undefined) as never,
+          discrepancyFlag: e.discrepancyFlag ?? false,
+          rationale: e.rationale ?? null,
+          ...(e.createdAtIso ? { createdAt: new Date(e.createdAtIso) } : {}),
+        },
+      })
+    }
+    return { created: events.length }
+  }
+
   // ─── Inspection ─────────────────────────────────────────────────────────
   async listAlerts(userId: string) {
     return this.prisma.deviationAlert.findMany({

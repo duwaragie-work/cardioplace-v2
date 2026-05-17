@@ -280,6 +280,59 @@ export class TestControl {
     })
   }
 
+  // ─── Seed fixtures (Phase 0 §H) ─────────────────────────────────────────
+  /** Force a user's accountStatus (ACTIVE | BLOCKED | SUSPENDED). */
+  async setAccountStatus(
+    email: string,
+    status: 'ACTIVE' | 'BLOCKED' | 'SUSPENDED',
+  ): Promise<{ id: string; email: string; accountStatus: string }> {
+    return this.post('test-control/user/set-account-status', { email, status })
+  }
+
+  /** Seed N alerts in specific states (each auto-creates its JournalEntry). */
+  async seedAlerts(
+    userId: string,
+    alerts: Array<{
+      tier: string
+      status?: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
+      ruleId?: string
+      createdAtIso?: string
+      acknowledgedByUserId?: string
+      resolvedBy?: string
+      resolutionAction?: string
+      resolutionRationale?: string
+    }>,
+  ): Promise<{ created: number; alertIds: string[] }> {
+    return this.post('test-control/seed/alerts', { userId, alerts })
+  }
+
+  /** Seed N notifications for a user. */
+  async seedNotifications(
+    userId: string,
+    count: number,
+    channel?: 'PUSH' | 'EMAIL' | 'PHONE' | 'DASHBOARD',
+  ): Promise<{ created: number }> {
+    return this.post('test-control/seed/notifications', { userId, count, channel })
+  }
+
+  /** Seed audit events (ProfileVerificationLog rows). */
+  async seedAuditTrail(
+    userId: string,
+    events: Array<{
+      changeType: string
+      fieldPath: string
+      changedBy: string
+      changedByRole?: 'PATIENT' | 'ADMIN' | 'PROVIDER'
+      previousValue?: unknown
+      newValue?: unknown
+      rationale?: string
+      discrepancyFlag?: boolean
+      createdAtIso?: string
+    }>,
+  ): Promise<{ created: number }> {
+    return this.post('test-control/seed/audit-trail', { userId, events })
+  }
+
   // ─── Inspection ─────────────────────────────────────────────────────────
   /** List DeviationAlert rows for a user. */
   async listAlerts(userId: string): Promise<

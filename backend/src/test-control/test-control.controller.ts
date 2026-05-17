@@ -273,6 +273,79 @@ export class TestControlController {
     return { ok: true }
   }
 
+  // ─── Seed fixtures (Phase 0 §H) ─────────────────────────────────────────
+  @Post('user/set-account-status')
+  @HttpCode(200)
+  async setAccountStatus(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { email: string; status: 'ACTIVE' | 'BLOCKED' | 'SUSPENDED' },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.setAccountStatus(body.email, body.status)
+  }
+
+  @Post('seed/alerts')
+  @HttpCode(200)
+  async seedAlerts(
+    @Headers('x-test-control-secret') secret: string,
+    @Body()
+    body: {
+      userId: string
+      alerts: Array<{
+        tier: string
+        status?: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
+        ruleId?: string
+        createdAtIso?: string
+        acknowledgedByUserId?: string
+        resolvedBy?: string
+        resolutionAction?: string
+        resolutionRationale?: string
+      }>
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.seedAlerts(body.userId, body.alerts ?? [])
+  }
+
+  @Post('seed/notifications')
+  @HttpCode(200)
+  async seedNotifications(
+    @Headers('x-test-control-secret') secret: string,
+    @Body()
+    body: {
+      userId: string
+      count: number
+      channel?: 'PUSH' | 'EMAIL' | 'PHONE' | 'DASHBOARD'
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.seedNotifications(body.userId, body.count, body.channel)
+  }
+
+  @Post('seed/audit-trail')
+  @HttpCode(200)
+  async seedAuditTrail(
+    @Headers('x-test-control-secret') secret: string,
+    @Body()
+    body: {
+      userId: string
+      events: Array<{
+        changeType: string
+        fieldPath: string
+        changedBy: string
+        changedByRole?: 'PATIENT' | 'ADMIN' | 'PROVIDER'
+        previousValue?: unknown
+        newValue?: unknown
+        rationale?: string
+        discrepancyFlag?: boolean
+        createdAtIso?: string
+      }>
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.seedAuditTrail(body.userId, body.events ?? [])
+  }
+
   // ─── Inspection ─────────────────────────────────────────────────────────
   @Get('alerts')
   async listAlerts(
