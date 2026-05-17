@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
-import { authedApi, signInAdmin } from '../helpers/auth.js'
+import { authedApi, signInAdmin, apiSignIn } from '../helpers/auth.js'
 import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
 import {
@@ -612,6 +612,7 @@ test.describe('Phase 1 — 15-field audit panel UI (§B/§C/§H)', () => {
   test('audit footer renders all 15 data-testid fields, distinct ack/resolve actors, System(Cron) attribution', async ({
     page,
   }) => {
+    test.setTimeout(150_000) // trigger + ack + resolve + admin browser walk
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
 
     try {
@@ -648,6 +649,10 @@ test.describe('Phase 1 — 15-field audit panel UI (§B/§C/§H)', () => {
       const alertsTab = page.getByRole('tab', { name: 'Alerts' })
       await expect(alertsTab).toBeVisible({ timeout: 15_000 })
       await alertsTab.click()
+      // The alert is RESOLVED; AlertsTab defaults to the OPEN filter, so
+      // switch to "All" before locating it, then expand the card.
+      await page.getByRole('button', { name: 'All', exact: true }).first().click()
+      await page.getByRole('button', { name: 'Expand alert' }).first().click()
     } catch (err) {
       test.skip(
         true,
@@ -658,16 +663,14 @@ test.describe('Phase 1 — 15-field audit panel UI (§B/§C/§H)', () => {
     }
 
     // ── Real assertions (env provisioned) ────────────────────────────────
-    // Expand the resolved alert so the 15-field footer mounts. The alert
-    // card is the clickable element that contains the tier label.
-    const card = page.getByText('TIER 1', { exact: false }).first()
-    await card.click().catch(() => {})
 
-    // §B — every one of the 15 audit fields renders with a stable testid.
+    // §B — every audit field renders with a stable testid. NOTE: Phase 1
+    // polish Finding 7 removed the v1-vestigial 'baselineValue' row (v2 has
+    // no rolling baselines) — it is intentionally absent here now.
     const FIELD_KEYS = [
       'alertId', 'tier', 'ruleId', 'severity', 'mode', 'status', 'created',
       'acknowledged', 'acknowledgedBy', 'resolved', 'resolvedBy',
-      'resolutionAction', 'reading', 'pulsePressure', 'baselineValue',
+      'resolutionAction', 'reading', 'pulsePressure',
       'escalationCount',
     ]
     for (const k of FIELD_KEYS) {
@@ -912,6 +915,215 @@ test.describe('Phase 2 — Finding 5: dispatchedBySystem attribution', () => {
 
     await aishaApi.dispose()
     await adminApi.dispose()
+    await tc.dispose()
+  })
+})
+
+// ─── Phase 1 UI polish — Chrome-walkthrough fixes (Findings 1-9) ─────────────
+
+test.describe('Phase 1 UI polish — admin ack actor + audit footer', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  // Findings 1 + 3 (deterministic backend contract). The admin AlertsTab
+  // "Acknowledge" button hits PATCH /provider/alerts/:id/acknowledge — that
+  // path previously set only status+acknowledgedAt (no actor, no event
+  // propagation). Now it must write acknowledgedByUserId AND propagate to
+  // every open EscalationEvent.
+  test('admin ack via /provider/alerts/:id/acknowledge writes actor + propagates to events', async () => {
+    test.setTimeout(120_000) // reset + OTP + waitForAlerts + ack + reads
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    let u: Awaited<ReturnType<typeof tc.findUser>>
+    try {
+      u = await tc.findUser(PATIENTS.aisha.email)
+      await tc.resetUser(u.id)
+    } catch (err) {
+      test.skip(true, `test-control unprovisioned: ${(err as Error).message}`)
+      return
+    }
+    const manisha = await apiSignIn(API_BASE_URL, ADMINS.manisha.email, 'admin')
+    await manisha.ctx.dispose()
+
+    const patientApi = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    await postJournalEntry(patientApi, {
+      measuredAt: new Date().toISOString(),
+      systolicBP: 165,
+      diastolicBP: 100,
+      pulse: 78,
+    })
+    const bpL1 = (
+      await waitForAlerts(tc, u.id, (xs) =>
+        xs.some((a) => a.tier === 'BP_LEVEL_1_HIGH'),
+      )
+    ).find((a) => a.tier === 'BP_LEVEL_1_HIGH')
+    expect(bpL1).toBeDefined()
+
+    const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+    const ackRes = await adminApi.patch(`provider/alerts/${bpL1!.id}/acknowledge`)
+    expect(ackRes.ok(), `admin ack: ${ackRes.status()} ${await ackRes.text()}`).toBeTruthy()
+    await new Promise((r) => setTimeout(r, 400))
+
+    // Finding 1 — alert-level actor resolves to a display name.
+    const alertsRes = await adminApi.get(`provider/patients/${u.id}/alerts`)
+    const alert = ((await alertsRes.json()).data ?? []).find(
+      (a: { id: string }) => a.id === bpL1!.id,
+    )
+    expect(alert.status).toBe('ACKNOWLEDGED')
+    expect(alert.acknowledgedBy, 'alert-level acknowledgedBy must be the admin').toBe(
+      manisha.userId,
+    )
+    expect(
+      typeof alert.acknowledgedByName === 'string' && alert.acknowledgedByName.length > 0,
+      `acknowledgedByName must resolve to a name, got ${JSON.stringify(alert.acknowledgedByName)}`,
+    ).toBe(true)
+    expect(alert.acknowledgedByName).not.toBe(manisha.userId)
+
+    // Finding 3 — every open EscalationEvent picks up the ack actor.
+    const events = await tc.listEscalationEvents(bpL1!.id)
+    expect(events.length).toBeGreaterThanOrEqual(1)
+    for (const e of events) {
+      expect(
+        (e as { acknowledgedAt?: string | null }).acknowledgedAt,
+        `event ${e.ladderStep} acknowledgedAt must propagate`,
+      ).not.toBeNull()
+      expect((e as { acknowledgedBy?: string | null }).acknowledgedBy).toBe(manisha.userId)
+    }
+
+    await patientApi.dispose()
+    await adminApi.dispose()
+    await tc.dispose()
+  })
+})
+
+test.describe('Phase 1 UI polish — audit panel display (Findings 2/4/5/6/7/8)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test('ACKNOWLEDGED Tier-1 alert: footer renders, badge green, PP derived, actualValue n/a, no baseline, modal name', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000) // API setup + admin browser walk
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    try {
+      const u = await tc.findUser(PATIENTS.james.email)
+      await tc.resetUser(u.id)
+      const patientApi = await authedApi(API_BASE_URL, PATIENTS.james.email)
+      await postJournalEntry(patientApi, {
+        measuredAt: new Date().toISOString(),
+        systolicBP: 118,
+        diastolicBP: 74,
+        pulse: 68,
+      })
+      const tier1 = (
+        await waitForAlerts(tc, u.id, (xs) =>
+          xs.some((a) => a.tier === 'TIER_1_CONTRAINDICATION'),
+        )
+      ).find((a) => a.tier === 'TIER_1_CONTRAINDICATION')
+      expect(tier1).toBeDefined()
+      const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+      const ackRes = await adminApi.patch(`provider/alerts/${tier1!.id}/acknowledge`)
+      expect(ackRes.ok()).toBeTruthy()
+      await patientApi.dispose()
+      await adminApi.dispose()
+
+      await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
+      await page.goto(`${ADMIN_BASE_URL}/patients`)
+      const link = page.getByText(PATIENTS.james.name).first()
+      await expect(link).toBeVisible({ timeout: 15_000 })
+      await link.click()
+      await expect(page).toHaveURL(/\/patients\/[^/]+$/, { timeout: 20_000 })
+      const alertsTab = page.getByRole('tab', { name: 'Alerts' })
+      await expect(alertsTab).toBeVisible({ timeout: 15_000 })
+      await alertsTab.click()
+      // AlertsTab defaults to the OPEN status filter — an ACKNOWLEDGED alert
+      // is hidden until we switch to "All".
+      await page.getByRole('button', { name: 'All', exact: true }).first().click()
+      // Expand the alert card so the audit footer mounts.
+      await page.getByRole('button', { name: 'Expand alert' }).first().click()
+    } catch (err) {
+      test.skip(true, `admin UI walk not reachable: ${(err as Error).message}`)
+      return
+    }
+
+    // Finding 4 — footer renders for ACKNOWLEDGED (not just RESOLVED).
+    const footer = page.locator('[data-testid="alert-audit-footer"]')
+    await expect(footer).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('[data-testid="alert-audit-header"]')).toContainText(
+      /acknowledgment audit/i,
+    )
+    // Finding 1 (UI) — acknowledged-by shows a name, not "—".
+    await expect(page.locator('[data-testid="audit-field-acknowledgedBy"]')).not.toContainText('—')
+    // Finding 2 — a triggered rung must not still read "Awaiting acknowledgment".
+    await expect(page.getByText('Awaiting acknowledgment')).toHaveCount(0)
+    // Finding 5 — pulse pressure derived (118/74 → 44), not "—".
+    await expect(page.locator('[data-testid="audit-field-pulsePressure"]')).toContainText('44')
+    // Finding 6 — Tier-1 profile-based rule → "Not applicable", not "—".
+    await expect(page.locator('[data-testid="audit-field-actualValue"]')).toContainText(
+      /not applicable/i,
+    )
+    // Finding 7 — vestigial baseline row removed.
+    await expect(page.locator('[data-testid="audit-field-baselineValue"]')).toHaveCount(0)
+
+    // Finding 8 — resolve modal shows the patient name, not "Unknown patient".
+    const resolveBtn = page.getByRole('button', { name: /resolve/i }).first()
+    if (await resolveBtn.isVisible().catch(() => false)) {
+      await resolveBtn.click()
+      await expect(page.getByText(/unknown patient/i)).toHaveCount(0)
+      await expect(page.getByText(PATIENTS.james.name)).toBeVisible({ timeout: 10_000 })
+    }
+    await tc.dispose()
+  })
+})
+
+test.describe('Phase 1 UI polish — Finding 9: resolved-directly ack copy', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test('alert resolved without prior ack shows "Not required — alert resolved directly"', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000) // API setup + admin browser walk
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    try {
+      const u = await tc.findUser(PATIENTS.james.email)
+      await tc.resetUser(u.id)
+      const patientApi = await authedApi(API_BASE_URL, PATIENTS.james.email)
+      await postJournalEntry(patientApi, {
+        measuredAt: new Date().toISOString(),
+        systolicBP: 118,
+        diastolicBP: 74,
+        pulse: 68,
+      })
+      const tier1 = (
+        await waitForAlerts(tc, u.id, (xs) =>
+          xs.some((a) => a.tier === 'TIER_1_CONTRAINDICATION'),
+        )
+      ).find((a) => a.tier === 'TIER_1_CONTRAINDICATION')
+      expect(tier1).toBeDefined()
+      const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+      // Resolve DIRECTLY — no prior acknowledge.
+      await adminResolveAlert(adminApi, tier1!.id, {
+        resolutionAction: 'TIER1_FALSE_POSITIVE',
+        resolutionRationale: 'qa-test: phase1-polish finding9 resolved directly',
+      })
+      await patientApi.dispose()
+      await adminApi.dispose()
+
+      await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
+      await page.goto(`${ADMIN_BASE_URL}/patients`)
+      const link = page.getByText(PATIENTS.james.name).first()
+      await expect(link).toBeVisible({ timeout: 15_000 })
+      await link.click()
+      await expect(page).toHaveURL(/\/patients\/[^/]+$/, { timeout: 20_000 })
+      const alertsTab = page.getByRole('tab', { name: 'Alerts' })
+      await alertsTab.click()
+      // RESOLVED alert is hidden under the default OPEN filter — switch to All.
+      await page.getByRole('button', { name: 'All', exact: true }).first().click()
+      await page.getByRole('button', { name: 'Expand alert' }).first().click()
+    } catch (err) {
+      test.skip(true, `admin UI walk not reachable: ${(err as Error).message}`)
+      return
+    }
+    await expect(page.locator('[data-testid="audit-field-acknowledged"]')).toContainText(
+      /not required — alert resolved directly/i,
+    )
     await tc.dispose()
   })
 })
