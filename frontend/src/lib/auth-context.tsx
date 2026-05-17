@@ -14,6 +14,11 @@ import {
   clearTokenState,
   rehydrateFromCookie,
 } from '@/lib/services/token';
+import {
+  AUTH_MARKER_COOKIE,
+  AUTH_ROLE_COOKIE,
+  LEGACY_MARKER_COOKIES,
+} from '@/lib/cookie-names';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -93,14 +98,19 @@ const AuthContext = createContext<AuthContextType>({
 // rejects unauthenticated API calls regardless.
 function writeAuthMarkers(roles: string[]) {
   if (typeof document === 'undefined') return;
-  document.cookie = `auth_marker=1; path=/; max-age=2592000; SameSite=Lax`;
-  document.cookie = `auth_role=${encodeURIComponent(roles.join(','))}; path=/; max-age=2592000; SameSite=Lax`;
+  document.cookie = `${AUTH_MARKER_COOKIE}=1; path=/; max-age=2592000; SameSite=Lax`;
+  document.cookie = `${AUTH_ROLE_COOKIE}=${encodeURIComponent(roles.join(','))}; path=/; max-age=2592000; SameSite=Lax`;
 }
 
 function clearAuthMarkers() {
   if (typeof document === 'undefined') return;
-  document.cookie = 'auth_marker=; path=/; max-age=0; SameSite=Lax';
-  document.cookie = 'auth_role=; path=/; max-age=0; SameSite=Lax';
+  document.cookie = `${AUTH_MARKER_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
+  document.cookie = `${AUTH_ROLE_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
+  // Clear pre-fix unscoped names too so a local session created before the
+  // app-scoped rename doesn't leave a stale "logged in" marker behind.
+  for (const name of LEGACY_MARKER_COOKIES) {
+    document.cookie = `${name}=; path=/; max-age=0; SameSite=Lax`;
+  }
 }
 
 async function fetchProfile(accessToken: string): Promise<AuthUser | null> {

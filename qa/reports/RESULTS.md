@@ -39,6 +39,25 @@ fresh DB per shard) is the authoritative full tally; targeted gates below all pa
 
 ---
 
+## Cookie pollution + sign-in a11y (2026-05-17)
+
+Branch `duwaragie-test-coverage` (synced to `origin/dev`, 2 commits on top). Two
+focused fixes — no engine / schema / clinical-rule changes. Verified live:
+**`02-auth` 13/13 passed** (`RUN_WRITE_TESTS=1`, chromium-desktop, 1.8m) — the 6
+new tests below plus all 7 pre-existing auth tests still green (no regression on
+the cross-app bridge or sign-out flows). Shared build + backend(build)/frontend/
+admin/qa `tsc --noEmit` all clean.
+
+| Bug | Fix | Verified |
+|---|---|---|
+| Cross-app cookie pollution on shared localhost — admin session leaked to the patient app and vice versa (shared API-origin token cookie + same `localhost` host meant signing into one app contaminated the other; required incognito/2nd browser for side-by-side role testing) | App-scoped cookie names `cp_patient_*` / `cp_admin_*`: backend `scopeForRoles()` (fresh sign-in, role-based — handles the patient→admin bridge) + `deriveCookieScope()` from Origin (refresh/logout); per-app `cookie-names.ts` for the JS marker cookies; legacy unscoped names still read + cleared on logout | 2 Playwright tests (admin sign-in doesn't pollute patient tab; patient sign-out leaves admin session intact) + 13/13 `02-auth` live |
+| Sign-in forms ignored the Enter key (WCAG 2.1.1 Keyboard violation) — Send OTP / Send Magic Link / Continue were mouse-click only, on both patient + admin | `onKeyDown` on the email + OTP inputs submits the active flow (patient: OTP send/resend vs magic-link by mode; admin: OTP-only); `e.preventDefault()`, same pattern both apps | 4 Playwright tests (patient + admin × email→Send OTP + OTP→Continue) |
+
+Production behavior unchanged — the two apps are already on separate subdomains
+in prod, so cookies were isolated there; the prefixed names are additive.
+
+---
+
 ## ✅ Passing highlights
 
 - **§B (bug #20)** — `withDeadlockRetry` + `test-control.service.ts` now catch the
