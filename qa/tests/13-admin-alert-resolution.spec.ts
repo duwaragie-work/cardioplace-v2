@@ -509,17 +509,25 @@ test.describe('Phase 1 — 15-field audit-trail backend contract (§B/§C)', () 
   // `acknowledgedByName`, and it had no distinct `resolvedAt` (the footer
   // showed acknowledgedAt mislabelled "Resolved"). This is the deterministic
   // proof of the §B/§C fix at the API contract layer (no UI env required).
-  test('per-patient alerts endpoint surfaces alert-level acknowledgedBy + acknowledgedByName + resolvedAt', async () => {
+  // Split (2026-05-17): the original single test asserted acknowledgedBy +
+  // acknowledgedByName + resolvedAt on ONE alert — clinically impossible.
+  // Per CLINICAL_SPEC Part 12: BP Level 1 is patient-dismissable but has NO
+  // resolution catalog (can be acked, never resolved); Tier 1 is
+  // patient-non-dismissable (resolved by a provider action, never
+  // patient-acked). The old test resolved a BP L1 alert with an invalid
+  // `BP_L1_REVIEWED_NO_ACTION` enum value (no such action exists by design)
+  // → backend 400 → CI red. Split into the two valid workflows.
+
+  test('per-patient endpoint surfaces alert-level acknowledgedBy + acknowledgedByName (BP L1 patient ack)', async () => {
+    test.setTimeout(120_000)
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     let u: Awaited<ReturnType<typeof tc.findUser>>
     try {
       u = await tc.findUser(PATIENTS.aisha.email)
       await tc.resetUser(u.id)
     } catch (err) {
-      // Backend without ENABLE_TEST_CONTROL=true — same env gate the
-      // pre-existing spec 13 write-tests need. Skip cleanly (qa README:
-      // never silently no-op) rather than false-red the audit gate; the
-      // assertions still execute under a provisioned CI run.
+      // Backend without ENABLE_TEST_CONTROL=true — skip cleanly (qa README:
+      // never silently no-op); assertions still run in provisioned CI.
       test.skip(true, `test-control unprovisioned: ${(err as Error).message}`)
       return
     }
@@ -538,22 +546,21 @@ test.describe('Phase 1 — 15-field audit-trail backend contract (§B/§C)', () 
     ).find((a) => a.tier === 'BP_LEVEL_1_HIGH')
     expect(bpL1, 'expected BP_LEVEL_1_HIGH alert').toBeDefined()
 
-    // Patient self-acknowledges — this is the exact path the observed bug
-    // was about (patient as the acking actor).
+    // Patient self-acknowledges — the exact path the observed bug was about
+    // (patient as the acking actor). BP L1 is dismissable; this is its
+    // terminal state (no resolution step exists for the tier).
     const ackRes = await patientApi.patch(`daily-journal/alerts/${bpL1!.id}/acknowledge`)
     expect(ackRes.ok(), `patient ack: ${ackRes.status()}`).toBeTruthy()
     await new Promise((r) => setTimeout(r, 500))
 
     const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
-
-    // ── §C: alert-level acknowledgedBy + acknowledgedByName now present ──
     const afterAckRes = await adminApi.get(`provider/patients/${u.id}/alerts`)
     expect(afterAckRes.ok(), `GET alerts: ${afterAckRes.status()}`).toBeTruthy()
     const afterAckBody = await afterAckRes.json()
     const ackedAlert = (afterAckBody.data ?? afterAckBody).find(
       (a: { id: string }) => a.id === bpL1!.id,
     )
-    expect(ackedAlert, 'resolved alert must be in per-patient feed').toBeDefined()
+    expect(ackedAlert, 'acked alert must be in per-patient feed').toBeDefined()
     expect(
       ackedAlert.acknowledgedBy,
       'alert-level acknowledgedBy must be the patient userId (was absent pre-fix)',
@@ -563,22 +570,59 @@ test.describe('Phase 1 — 15-field audit-trail backend contract (§B/§C)', () 
         ackedAlert.acknowledgedByName.length > 0,
       `acknowledgedByName must resolve to a display name, got: ${JSON.stringify(ackedAlert.acknowledgedByName)}`,
     ).toBe(true)
-    // A resolved display name, NOT a raw UUID echoed back.
     expect(
       ackedAlert.acknowledgedByName,
       'acknowledgedByName must not be the raw userId',
     ).not.toBe(u.id)
 
-    // ── §B: resolve, then assert resolvedAt is distinct + actor resolved ──
-    await adminResolveAlert(adminApi, bpL1!.id, {
-      resolutionAction: 'BP_L1_REVIEWED_NO_ACTION',
-      resolutionRationale: 'qa-test: phase1 §B/§C audit contract',
+    await patientApi.dispose()
+    await adminApi.dispose()
+    await tc.dispose()
+  })
+
+  test('per-patient endpoint surfaces distinct resolvedAt + resolvedByName (Tier 1 admin resolve)', async () => {
+    test.setTimeout(120_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    let u: Awaited<ReturnType<typeof tc.findUser>>
+    try {
+      u = await tc.findUser(PATIENTS.james.email)
+      await tc.resetUser(u.id)
+    } catch (err) {
+      test.skip(true, `test-control unprovisioned: ${(err as Error).message}`)
+      return
+    }
+
+    const patientApi = await authedApi(API_BASE_URL, PATIENTS.james.email)
+    // James (NDHP + HFrEF) → RULE_NDHP_HFREF → TIER_1_CONTRAINDICATION.
+    // Tier 1 is patient-non-dismissable; the provider resolves it with a
+    // catalog action + rationale (TIER1_FALSE_POSITIVE = no clinical action
+    // implied, just "false alarm" — a safe default for the contract test).
+    await postJournalEntry(patientApi, {
+      measuredAt: new Date().toISOString(),
+      systolicBP: 118,
+      diastolicBP: 74,
+      pulse: 68,
     })
+    const tier1 = (
+      await waitForAlerts(tc, u.id, (xs) =>
+        xs.some((a) => a.tier === 'TIER_1_CONTRAINDICATION'),
+      )
+    ).find((a) => a.tier === 'TIER_1_CONTRAINDICATION')
+    expect(tier1, 'expected TIER_1_CONTRAINDICATION alert').toBeDefined()
+
+    const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+    await adminResolveAlert(adminApi, tier1!.id, {
+      resolutionAction: 'TIER1_FALSE_POSITIVE',
+      resolutionRationale: 'qa-test: phase1 §B/§C resolve contract',
+    })
+
     const afterResolveRes = await adminApi.get(`provider/patients/${u.id}/alerts`)
+    expect(afterResolveRes.ok(), `GET alerts: ${afterResolveRes.status()}`).toBeTruthy()
     const afterResolveBody = await afterResolveRes.json()
     const resolvedAlert = (afterResolveBody.data ?? afterResolveBody).find(
-      (a: { id: string }) => a.id === bpL1!.id,
+      (a: { id: string }) => a.id === tier1!.id,
     )
+    expect(resolvedAlert, 'resolved alert must be in per-patient feed').toBeDefined()
     expect(resolvedAlert.status).toBe('RESOLVED')
     expect(
       resolvedAlert.resolvedAt,
@@ -590,10 +634,14 @@ test.describe('Phase 1 — 15-field audit-trail backend contract (§B/§C)', () 
         resolvedAlert.resolvedByName.length > 0,
       'resolvedByName must resolve to a clinician display name',
     ).toBe(true)
-    // Acknowledged (patient) and Resolved (admin) are now distinct actors —
-    // proves the rows are no longer conflated.
-    expect(resolvedAlert.acknowledgedBy).toBe(u.id)
-    expect(resolvedAlert.resolvedBy).not.toBe(u.id)
+    expect(
+      resolvedAlert.resolvedByName,
+      'resolvedByName must not be the raw userId',
+    ).not.toBe(resolvedAlert.resolvedBy)
+    // resolvedAt is a DISTINCT field — Tier 1 is not patient-acked, so
+    // acknowledgedAt stays null while resolvedAt populates (proves the
+    // footer no longer conflates the two timestamps).
+    expect(resolvedAlert.resolvedAt).not.toBe(resolvedAlert.acknowledgedAt)
 
     await patientApi.dispose()
     await adminApi.dispose()
