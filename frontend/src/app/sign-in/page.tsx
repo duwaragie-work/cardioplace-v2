@@ -353,6 +353,19 @@ export default function RegisterPage() {
                     if (statusKey) setStatusKey(null);
                     if (errorKey) setErrorKey(null);
                   }}
+                  onKeyDown={(e) => {
+                    // WCAG 2.1.1 (Keyboard): Enter on the email field submits
+                    // whichever flow is currently active — Magic Link or OTP
+                    // (send vs resend) — instead of doing nothing.
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    if (authMode === "otp") {
+                      if (otpSent) handleResendOtp();
+                      else handleSendOtp();
+                    } else {
+                      handleSendMagicLink();
+                    }
+                  }}
                   placeholder={t('register.emailPlaceholder')}
                   autoComplete="email"
                   aria-invalid={showEmailError}
@@ -411,6 +424,14 @@ export default function RegisterPage() {
                               setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH));
                               if (statusKey) setStatusKey(null);
                               if (errorKey) setErrorKey(null);
+                            }}
+                            onKeyDown={(e) => {
+                              // WCAG 2.1.1: Enter on the OTP field triggers
+                              // Continue (verify) once 6 digits are entered.
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleVerifyOtp();
+                              }
                             }}
                             placeholder="••••••"
                             maxLength={OTP_LENGTH}

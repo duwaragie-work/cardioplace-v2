@@ -245,6 +245,15 @@ export default function RegisterPage() {
                     if (statusKey) setStatusKey(null);
                     if (errorKey) setErrorKey(null);
                   }}
+                  onKeyDown={(e) => {
+                    // WCAG 2.1.1 (Keyboard): Enter on the email field sends
+                    // (or resends) the OTP instead of doing nothing. Admin
+                    // app is OTP-only — no magic-link branch.
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    if (otpSent) handleResendOtp();
+                    else handleSendOtp();
+                  }}
                   placeholder={t('register.emailPlaceholder')}
                   autoComplete="email"
                   aria-invalid={showEmailError}
@@ -301,6 +310,14 @@ export default function RegisterPage() {
                           setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH));
                           if (statusKey) setStatusKey(null);
                           if (errorKey) setErrorKey(null);
+                        }}
+                        onKeyDown={(e) => {
+                          // WCAG 2.1.1: Enter on the OTP field triggers
+                          // Continue (verify) once 6 digits are entered.
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleVerifyOtp();
+                          }
                         }}
                         placeholder="••••••"
                         maxLength={OTP_LENGTH}
