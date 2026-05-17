@@ -830,3 +830,88 @@ test.describe('Phase 2 — Finding 3: journal-delete cascade (current behavior, 
     await tc.dispose()
   })
 })
+
+// ─── Phase 2 — Finding 5: EscalationEvent.dispatchedBySystem attribution ──────
+//
+// Phase 1 §H labelled cron rungs "System (Cron)" via a UI heuristic. Phase 2
+// adds a persisted EscalationEvent.dispatchedBySystem column (source of
+// truth). Cron-fired rungs set it true; an admin BP_L2 retry sets it false.
+test.describe('Phase 2 — Finding 5: dispatchedBySystem attribution', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test('cron-dispatched rung is dispatchedBySystem=true; admin BP_L2 retry is false', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    let james: Awaited<ReturnType<typeof tc.findUser>>
+    let aisha: Awaited<ReturnType<typeof tc.findUser>>
+    try {
+      james = await tc.findUser(PATIENTS.james.email)
+      aisha = await tc.findUser(PATIENTS.aisha.email)
+      await tc.resetUser(james.id)
+      await tc.resetUser(aisha.id)
+    } catch (err) {
+      test.skip(true, `test-control unprovisioned: ${(err as Error).message}`)
+      return
+    }
+
+    // ── Part A — system path: James Tier 1 → T+0 dispatched by the
+    //    escalation service (cron path), not a human. ──
+    const jamesApi = await authedApi(API_BASE_URL, PATIENTS.james.email)
+    await postJournalEntry(jamesApi, {
+      measuredAt: new Date().toISOString(),
+      systolicBP: 118,
+      diastolicBP: 74,
+      pulse: 68,
+    })
+    const tier1 = (
+      await waitForAlerts(tc, james.id, (xs) =>
+        xs.some((a) => a.tier === 'TIER_1_CONTRAINDICATION'),
+      )
+    ).find((a) => a.tier === 'TIER_1_CONTRAINDICATION')
+    expect(tier1).toBeDefined()
+    const sysEvents = await tc.listEscalationEvents(tier1!.id)
+    expect(sysEvents.length, 'expected ≥1 cron-dispatched escalation event').toBeGreaterThanOrEqual(1)
+    for (const e of sysEvents) {
+      expect(
+        (e as { dispatchedBySystem?: boolean }).dispatchedBySystem,
+        `cron rung ${e.ladderStep} must be dispatchedBySystem=true`,
+      ).toBe(true)
+      expect((e as { triggeredByResolution?: boolean }).triggeredByResolution).toBe(false)
+    }
+    await jamesApi.dispose()
+
+    // ── Part B — human path: Aisha BP_L2 → admin BP_L2_UNABLE_TO_REACH_RETRY
+    //    schedules a retry event attributed to the admin action. ──
+    const aishaApi = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    await postJournalEntry(aishaApi, {
+      measuredAt: new Date().toISOString(),
+      systolicBP: 185,
+      diastolicBP: 95,
+      pulse: 88,
+    })
+    const bpL2 = (
+      await waitForAlerts(tc, aisha.id, (xs) =>
+        xs.some((a) => a.tier === 'BP_LEVEL_2'),
+      )
+    ).find((a) => a.tier === 'BP_LEVEL_2')
+    expect(bpL2).toBeDefined()
+    const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+    await adminAcknowledgeAlert(adminApi, bpL2!.id)
+    await adminResolveAlert(adminApi, bpL2!.id, {
+      resolutionAction: 'BP_L2_UNABLE_TO_REACH_RETRY',
+      resolutionRationale: 'qa-test: phase2 finding5 dispatch attribution',
+    })
+    const retryEvents = await tc.listEscalationEvents(bpL2!.id)
+    const retry = retryEvents.find(
+      (e) => (e as { triggeredByResolution?: boolean }).triggeredByResolution === true,
+    )
+    expect(retry, 'expected a triggeredByResolution retry event').toBeTruthy()
+    expect(
+      (retry as { dispatchedBySystem?: boolean }).dispatchedBySystem,
+      'admin-scheduled BP_L2 retry must be dispatchedBySystem=false',
+    ).toBe(false)
+
+    await aishaApi.dispose()
+    await adminApi.dispose()
+    await tc.dispose()
+  })
+})

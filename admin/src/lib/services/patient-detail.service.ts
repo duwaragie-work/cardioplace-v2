@@ -184,6 +184,10 @@ export interface PatientAlertEscalationEvent {
   resolvedByName: string | null
   afterHours: boolean
   triggeredByResolution: boolean
+  /** Finding 5 — explicit system-vs-human dispatch attribution. true =
+   *  auto-dispatched by the escalation scheduler (cron); false = scheduled
+   *  by an admin action (BP_L2 retry). Source of truth for the audit chip. */
+  dispatchedBySystem: boolean
   notifications: EscalationNotification[]
 }
 

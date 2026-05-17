@@ -521,6 +521,7 @@ export class ProviderService {
             resolvedBy: true,
             afterHours: true,
             triggeredByResolution: true,
+            dispatchedBySystem: true,
             notifications: {
               orderBy: { sentAt: 'asc' },
               select: {
@@ -1007,6 +1008,7 @@ export class ProviderService {
             resolvedBy: true,
             afterHours: true,
             triggeredByResolution: true,
+            dispatchedBySystem: true,
             notifications: {
               orderBy: { sentAt: 'asc' },
               select: {

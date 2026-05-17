@@ -23,6 +23,12 @@ model EscalationEvent {
   scheduledFor           DateTime?
   triggeredByResolution  Boolean   @default(false)
 
+  // Phase 2 — Finding 5: explicit system-vs-human dispatch attribution
+  // (JCAHO). true = auto-dispatched by the escalation scheduler (cron) with
+  // no human actor; false = scheduled by an admin action (BP_L2 retry).
+  // Replaces the prior admin-UI heuristic with a persisted, queryable fact.
+  dispatchedBySystem     Boolean   @default(false)
+
   alert         DeviationAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   notifications Notification[]

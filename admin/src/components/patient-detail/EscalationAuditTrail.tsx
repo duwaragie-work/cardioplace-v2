@@ -476,24 +476,13 @@ function EventDetail({ event }: { event: PatientAlertEscalationEvent }) {
         )}
 
         {/* Dispatch attribution (JCAHO system-vs-human requirement).
-            Every escalation rung is machine-dispatched, but the audit must
-            distinguish WHO caused it: a triggeredByResolution rung was
-            SCHEDULED by an admin's BP_L2_UNABLE_TO_REACH_RETRY action;
-            every other rung is auto-fired by the escalation scheduler
-            (cron) with no human actor. Display-only — backend has no
-            dispatchedBySystem column, so this is derived from
-            triggeredByResolution. */}
-        {event.triggeredByResolution ? (
-          <span
-            data-testid="audit-attribution-retry"
-            className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded"
-            style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
-            title="Scheduled by an admin's BP_L2_UNABLE_TO_REACH_RETRY action"
-          >
-            <Repeat className="w-2.5 h-2.5" />
-            Retry · admin-scheduled
-          </span>
-        ) : (
+            Finding 5 — now backed by the persisted EscalationEvent
+            .dispatchedBySystem column (source of truth) instead of the
+            old triggeredByResolution heuristic. Legacy rows predating the
+            column default false, so fall back to "not a retry ⇒ system"
+            (the only non-system creation path is the admin BP_L2 retry,
+            which always sets triggeredByResolution=true). */}
+        {event.dispatchedBySystem || !event.triggeredByResolution ? (
           <span
             data-testid="audit-attribution-system"
             className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded"
@@ -502,6 +491,16 @@ function EventDetail({ event }: { event: PatientAlertEscalationEvent }) {
           >
             <Cpu className="w-2.5 h-2.5" />
             System (Cron)
+          </span>
+        ) : (
+          <span
+            data-testid="audit-attribution-retry"
+            className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+            style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
+            title="Scheduled by an admin's BP_L2_UNABLE_TO_REACH_RETRY action"
+          >
+            <Repeat className="w-2.5 h-2.5" />
+            Retry · admin-scheduled
           </span>
         )}
       </div>
