@@ -30,7 +30,7 @@ import type {
   PatientAlertEscalationEvent,
   NotificationChannel,
 } from '@/lib/services/patient-detail.service';
-import { getBMI } from '@cardioplace/shared';
+import { getBMI, formatTriggeringValue } from '@cardioplace/shared';
 
 // ─── Canonical ladder ────────────────────────────────────────────────────────
 // Mirrors the LadderStep enum from
@@ -561,15 +561,6 @@ function AlertAuditFooter({
   const pp =
     alert.pulsePressure ?? (sbp != null && dbp != null ? sbp - dbp : null);
 
-  // Finding 6 — profile/medication/symptom-driven tiers fire on condition +
-  // med-list combinations, not a measured value, so a null actualValue is
-  // EXPECTED, not data-missing. BP-Level tiers are value-driven, so a null
-  // there is a genuine gap → keep "—".
-  const profileBasedTier =
-    alert.tier === 'TIER_1_CONTRAINDICATION' ||
-    alert.tier === 'TIER_2_DISCREPANCY' ||
-    alert.tier === 'TIER_3_INFO';
-
   const NOT_RESOLVED = 'Not required — alert acknowledged, not yet resolved';
   const RESOLVED_DIRECTLY = 'Not required — alert resolved directly';
 
@@ -621,14 +612,12 @@ function AlertAuditFooter({
     { key: 'pulsePressure', label: 'Pulse pressure', value: pp != null ? `${pp} mmHg` : '—' },
     { key: 'bmi', label: 'BMI', value: bmi != null ? bmi.toFixed(1) : '—' },
     {
-      key: 'actualValue',
-      label: 'Actual value',
-      value:
-        alert.actualValue != null
-          ? String(alert.actualValue)
-          : profileBasedTier
-            ? 'Not applicable (profile-based rule)'
-            : '—',
+      // Finding 10 — was the ambiguous "ACTUAL VALUE 165". Now axis +
+      // unit-labelled via the shared RULE_AXIS map so a reviewer reads
+      // "165 mmHg (systolic)" / "45 bpm (heart rate)" / the profile copy.
+      key: 'triggeringValue',
+      label: 'Triggering value',
+      value: formatTriggeringValue(alert.ruleId, alert.actualValue),
     },
     { key: 'escalationCount', label: 'Escalation count', value: String(alert.escalationEvents.length) },
   ];

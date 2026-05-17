@@ -108,3 +108,117 @@ export function isNonDismissable(tier: AlertTierValue): boolean {
     tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
   )
 }
+
+// ─── Triggering-value axis (Phase 1 polish — Finding 10) ─────────────────────
+//
+// The audit footer's "TRIGGERING VALUE" (formerly the ambiguous "ACTUAL
+// VALUE 165") needs an axis + unit so a reviewer knows whether 165 is
+// systolic, diastolic, or heart rate without cross-referencing the rule ID.
+//
+// Every value in RULE_IDS is mapped. Classification:
+//   • 'hr'        — heart-rate threshold rules (bpm)
+//   • 'diastolic' — rules that compare against the diastolic target (mmHg)
+//   • 'systolic'  — BP rules; systolic is the primary axis even when the
+//                   rule can also fire on diastolic (single-axis is fine for
+//                   pilot — dual-axis is future-spec per the plan §H note)
+//   • 'profile'   — contraindication / medication / symptom-driven rules
+//                   whose actualValue is null (no measured trigger value)
+//
+// ⚠ Clinical-review flags (best-effort, pilot-safe defaults):
+//   - RULE_PULSE_PRESSURE_WIDE: labelled systolic-derived (PP = SBP−DBP);
+//     a dedicated "pulse pressure" axis could be added if Dr. Singal wants.
+//   - RULE_ORTHOSTATIC_HYPOTENSION: classed 'profile' (postural/symptom-
+//     driven) though it involves a positional BP delta.
+//   - RULE_SYMPTOM_OVERRIDE_*: value-derived but symptom-triggered; kept
+//     'systolic' per the plan's mapping.
+export type RuleAxis = 'systolic' | 'diastolic' | 'hr' | 'profile'
+
+export const RULE_AXIS: Record<RuleId, RuleAxis> = {
+  // Heart-rate rules
+  [RULE_IDS.AFIB_HR_HIGH]: 'hr',
+  [RULE_IDS.AFIB_HR_LOW]: 'hr',
+  [RULE_IDS.TACHY_HR]: 'hr',
+  [RULE_IDS.BRADY_ABSOLUTE]: 'hr',
+  [RULE_IDS.BRADY_HR_SYMPTOMATIC]: 'hr',
+  [RULE_IDS.BRADY_HR_ASYMPTOMATIC]: 'hr',
+
+  // Diastolic-axis rule
+  [RULE_IDS.CAD_DBP_CRITICAL]: 'diastolic',
+
+  // Systolic-axis BP rules (primary axis = systolic)
+  [RULE_IDS.STANDARD_L1_HIGH]: 'systolic',
+  [RULE_IDS.STANDARD_L1_LOW]: 'systolic',
+  [RULE_IDS.ABSOLUTE_EMERGENCY]: 'systolic',
+  [RULE_IDS.PERSONALIZED_HIGH]: 'systolic',
+  [RULE_IDS.PERSONALIZED_LOW]: 'systolic',
+  [RULE_IDS.HFREF_LOW]: 'systolic',
+  [RULE_IDS.HFREF_HIGH]: 'systolic',
+  [RULE_IDS.HFPEF_LOW]: 'systolic',
+  [RULE_IDS.HFPEF_HIGH]: 'systolic',
+  [RULE_IDS.CAD_HIGH]: 'systolic',
+  [RULE_IDS.HCM_LOW]: 'systolic',
+  [RULE_IDS.HCM_HIGH]: 'systolic',
+  [RULE_IDS.DCM_LOW]: 'systolic',
+  [RULE_IDS.DCM_HIGH]: 'systolic',
+  [RULE_IDS.AGE_65_LOW]: 'systolic',
+  [RULE_IDS.PREGNANCY_L1_HIGH]: 'systolic',
+  [RULE_IDS.PREGNANCY_L2]: 'systolic',
+  [RULE_IDS.SYMPTOM_OVERRIDE_GENERAL]: 'systolic',
+  [RULE_IDS.SYMPTOM_OVERRIDE_PREGNANCY]: 'systolic',
+  [RULE_IDS.LOOP_DIURETIC_HYPOTENSION]: 'systolic',
+  [RULE_IDS.PULSE_PRESSURE_WIDE]: 'systolic',
+
+  // Profile / medication / symptom-driven rules (actualValue is null)
+  [RULE_IDS.NDHP_HFREF]: 'profile',
+  [RULE_IDS.PREGNANCY_ACE_ARB]: 'profile',
+  [RULE_IDS.HCM_VASODILATOR]: 'profile',
+  [RULE_IDS.ACE_COUGH]: 'profile',
+  [RULE_IDS.BETA_BLOCKER_FATIGUE]: 'profile',
+  [RULE_IDS.BETA_BLOCKER_SOB_HF]: 'profile',
+  [RULE_IDS.BETA_BLOCKER_SOB_NON_HF]: 'profile',
+  [RULE_IDS.BETA_BLOCKER_DIZZINESS]: 'profile',
+  [RULE_IDS.NSAID_ANTIHTN_INTERACTION]: 'profile',
+  [RULE_IDS.HF_CAREGIVER_EDEMA]: 'profile',
+  [RULE_IDS.HF_DECOMPENSATION]: 'profile',
+  [RULE_IDS.MEDICATION_MISSED]: 'profile',
+  [RULE_IDS.DHP_CCB_LEG_SWELLING]: 'profile',
+  [RULE_IDS.ORTHOSTATIC_HYPOTENSION]: 'profile',
+  [RULE_IDS.AFIB_PALPITATIONS]: 'profile',
+  [RULE_IDS.TACHY_WITH_PALPITATIONS]: 'profile',
+  [RULE_IDS.PALPITATIONS_GENERAL]: 'profile',
+  [RULE_IDS.SYNCOPE_GENERAL]: 'profile',
+}
+
+const AXIS_LABEL: Record<RuleAxis, string> = {
+  systolic: 'systolic',
+  diastolic: 'diastolic',
+  hr: 'heart rate',
+  profile: '',
+}
+
+const AXIS_UNIT: Record<RuleAxis, string> = {
+  systolic: 'mmHg',
+  diastolic: 'mmHg',
+  hr: 'bpm',
+  profile: '',
+}
+
+/**
+ * Format the audit footer's TRIGGERING VALUE with axis + unit context:
+ *   "165 mmHg (systolic)" · "45 bpm (heart rate)" ·
+ *   "Not applicable — profile-based rule" (profile rules / null) ·
+ *   "—" (value-based rule with a genuinely missing value)
+ * Unmapped rule ids fall back to 'systolic' (safe for any future BP rule
+ * before its RULE_AXIS entry lands). Display-only — does not touch the
+ * `actualValue` data model.
+ */
+export function formatTriggeringValue(
+  ruleId: string | null | undefined,
+  actualValue: number | null | undefined,
+): string {
+  const axis: RuleAxis =
+    (ruleId ? RULE_AXIS[ruleId as RuleId] : undefined) ?? 'systolic'
+  if (axis === 'profile') return 'Not applicable — profile-based rule'
+  if (actualValue === null || actualValue === undefined) return '—'
+  return `${actualValue} ${AXIS_UNIT[axis]} (${AXIS_LABEL[axis]})`
+}

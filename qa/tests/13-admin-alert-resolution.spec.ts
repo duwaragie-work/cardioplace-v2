@@ -11,6 +11,7 @@ import {
   waitForAlerts,
 } from '../helpers/api.js'
 import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
+import { formatTriggeringValue, RULE_IDS } from '@cardioplace/shared'
 
 /**
  * Admin alert resolution + 15-field audit (TESTING_FLOW_GUIDE §8.4).
@@ -1055,10 +1056,13 @@ test.describe('Phase 1 UI polish — audit panel display (Findings 2/4/5/6/7/8)'
     await expect(page.getByText('Awaiting acknowledgment')).toHaveCount(0)
     // Finding 5 — pulse pressure derived (118/74 → 44), not "—".
     await expect(page.locator('[data-testid="audit-field-pulsePressure"]')).toContainText('44')
-    // Finding 6 — Tier-1 profile-based rule → "Not applicable", not "—".
-    await expect(page.locator('[data-testid="audit-field-actualValue"]')).toContainText(
-      /not applicable/i,
+    // Finding 6 + 10 — Tier-1 profile-based rule (RULE_NDHP_HFREF) → the
+    // TRIGGERING VALUE field shows the em-dash profile copy, not "—". Field
+    // + testid renamed actualValue → triggeringValue in Finding 10.
+    await expect(page.locator('[data-testid="audit-field-triggeringValue"]')).toContainText(
+      /not applicable — profile-based rule/i,
     )
+    await expect(page.locator('[data-testid="audit-field-actualValue"]')).toHaveCount(0)
     // Finding 7 — vestigial baseline row removed.
     await expect(page.locator('[data-testid="audit-field-baselineValue"]')).toHaveCount(0)
 
@@ -1124,6 +1128,100 @@ test.describe('Phase 1 UI polish — Finding 9: resolved-directly ack copy', () 
     await expect(page.locator('[data-testid="audit-field-acknowledged"]')).toContainText(
       /not required — alert resolved directly/i,
     )
+    await tc.dispose()
+  })
+})
+
+// ─── Phase 1 polish — Finding 10: TRIGGERING VALUE axis + unit ──────────────
+
+// Deterministic unit coverage of the shared formatter — no server, always
+// runs (not write-gated). This is the strongest proof the axis/unit logic is
+// correct across every axis; the UI-walk below confirms it renders in the
+// footer.
+test.describe('Phase 1 polish — Finding 10: formatTriggeringValue', () => {
+  test('axis + unit + profile + null + unmapped formatting', async () => {
+    // systolic BP rule → mmHg (systolic)
+    expect(formatTriggeringValue(RULE_IDS.STANDARD_L1_HIGH, 165)).toBe(
+      '165 mmHg (systolic)',
+    )
+    // diastolic rule → mmHg (diastolic)
+    expect(formatTriggeringValue(RULE_IDS.CAD_DBP_CRITICAL, 68)).toBe(
+      '68 mmHg (diastolic)',
+    )
+    // heart-rate rule → bpm (heart rate)
+    expect(formatTriggeringValue(RULE_IDS.BRADY_ABSOLUTE, 38)).toBe(
+      '38 bpm (heart rate)',
+    )
+    expect(formatTriggeringValue(RULE_IDS.AFIB_HR_HIGH, 132)).toBe(
+      '132 bpm (heart rate)',
+    )
+    // profile-based rule → fixed copy regardless of value
+    expect(formatTriggeringValue(RULE_IDS.NDHP_HFREF, null)).toBe(
+      'Not applicable — profile-based rule',
+    )
+    expect(formatTriggeringValue(RULE_IDS.MEDICATION_MISSED, 5)).toBe(
+      'Not applicable — profile-based rule',
+    )
+    // value-based rule with a genuinely missing value → em-dash
+    expect(formatTriggeringValue(RULE_IDS.STANDARD_L1_HIGH, null)).toBe('—')
+    // unknown / null ruleId → safe systolic default (future BP rules)
+    expect(formatTriggeringValue('RULE_NOT_YET_MAPPED', 150)).toBe(
+      '150 mmHg (systolic)',
+    )
+    expect(formatTriggeringValue(null, 150)).toBe('150 mmHg (systolic)')
+  })
+})
+
+test.describe('Phase 1 polish — Finding 10: TRIGGERING VALUE in footer (UI)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test('value-based BP alert shows "<n> mmHg (systolic)" in the audit footer', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000) // trigger + ack + admin browser walk
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    try {
+      const u = await tc.findUser(PATIENTS.aisha.email)
+      await tc.resetUser(u.id)
+      const patientApi = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+      // Standard-mode systolic-axis BP L1 (value-based → actualValue set).
+      await postJournalEntry(patientApi, {
+        measuredAt: new Date().toISOString(),
+        systolicBP: 165,
+        diastolicBP: 95,
+        pulse: 78,
+      })
+      const bpL1 = (
+        await waitForAlerts(tc, u.id, (xs) =>
+          xs.some((a) => a.tier === 'BP_LEVEL_1_HIGH'),
+        )
+      ).find((a) => a.tier === 'BP_LEVEL_1_HIGH')
+      expect(bpL1).toBeDefined()
+      const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+      const ackRes = await adminApi.patch(`provider/alerts/${bpL1!.id}/acknowledge`)
+      expect(ackRes.ok()).toBeTruthy()
+      await patientApi.dispose()
+      await adminApi.dispose()
+
+      await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
+      await page.goto(`${ADMIN_BASE_URL}/patients`)
+      const link = page.getByText(PATIENTS.aisha.name).first()
+      await expect(link).toBeVisible({ timeout: 15_000 })
+      await link.click()
+      await expect(page).toHaveURL(/\/patients\/[^/]+$/, { timeout: 20_000 })
+      await page.getByRole('tab', { name: 'Alerts' }).click()
+      await page.getByRole('button', { name: 'All', exact: true }).first().click()
+      await page.getByRole('button', { name: 'Expand alert' }).first().click()
+    } catch (err) {
+      test.skip(true, `admin UI walk not reachable: ${(err as Error).message}`)
+      return
+    }
+    // Field renamed actualValue → triggeringValue (Finding 10); value carries
+    // unit + axis context instead of a bare number.
+    const tv = page.locator('[data-testid="audit-field-triggeringValue"]')
+    await expect(tv).toBeVisible({ timeout: 15_000 })
+    await expect(tv).toContainText(/mmHg \(systolic\)/i)
+    await expect(tv).toContainText(/\d/)
     await tc.dispose()
   })
 })

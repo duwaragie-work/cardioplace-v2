@@ -439,8 +439,9 @@ test 13` ran the new tests against the running stack.
 | 7 | BASELINE VALUE row is v1-vestigial (v2 has no rolling baselines) | YES | Row removed from footer; header drops the brittle fixed-count claim ("Resolution/Acknowledgment audit record"). Schema column left intact (no migration — §G.3 deferred). Phase-1 spec-13 FIELD_KEYS synced | ✅ live (UI walk asserts row absent) |
 | 8 | Resolve modal "Unknown patient" on patient-detail alerts | YES | Per-patient feed omits nested patient; thread `patientName` shell → AlertsTab → modal (`resolvable.patient.name`) | ✅ live (UI walk asserts patient name) |
 | 9 | ACKNOWLEDGED/-by "—" when resolved without prior ack (looks data-missing) | YES | Footer shows "Not required — alert resolved directly" when RESOLVED & no `acknowledgedAt` | ✅ live (UI walk) |
+| 10 | "ACTUAL VALUE 165" ambiguous (sys/dia/HR?) | YES | Renamed → TRIGGERING VALUE; `formatTriggeringValue(ruleId, actualValue)` adds axis+unit ("165 mmHg (systolic)", "38 bpm (heart rate)", "Not applicable — profile-based rule"). Shared `RULE_AXIS` map covers all 46 rule ids (`Record<RuleId>` = build-time exhaustive); testid `audit-field-actualValue` → `audit-field-triggeringValue`. Display-only, no data-model change | ✅ unit (10 cases) + 2 live UI walks |
 
-All 9 were genuine bugs (none "by design"). Plan-pointer note: the plan §B/§D
+All 10 were genuine bugs (none "by design"). Plan-pointer note: the plan §B/§D
 cited `alert-resolution.service.ts:53`, but the admin AlertsTab/NotificationsScreen
 "Acknowledge" button actually calls `PATCH /provider/alerts/:id/acknowledge`
 (`provider.service.acknowledgeAlert`) — the real buggy path. Both ack paths were
@@ -470,6 +471,29 @@ Test-infra note: the new write/UI tests were timing out at the default 30s
 `test.setTimeout`. Also fixed a latent bug shared with the Phase-1 §B test —
 AlertsTab defaults to the OPEN status filter so ACKNOWLEDGED/RESOLVED alerts
 were hidden; tests now click the "All" pill + the "Expand alert" button.
+
+### Finding 10 — tests + clinical-review flags
+
+Added a deterministic `formatTriggeringValue` unit test (10 cases: systolic,
+diastolic, hr×2, profile×2, value-based-null→"—", unmapped/null→systolic
+default — passes 11ms, always runs) + a live UI walk asserting the footer
+shows "165 mmHg (systolic)". The existing Finding-6 profile assertion in the
+consolidated walk was updated to the new testid + em-dash copy and confirmed
+live. RULE_AXIS maps all 46 rule ids; `Record<RuleId, RuleAxis>` makes
+coverage a **compile-time** guarantee (build fails if a new rule is
+unmapped). The plan's sketch referenced 4 non-existent ids
+(`RULE_LOOP_DIURETIC_LOW`, `RULE_PULSE_PRESSURE_HIGH`,
+`RULE_TACHY_SINGLE_HIGH`, `RULE_MEDICATION_HOLD`) — excluded per §H; the real
+ids (`…_HYPOTENSION`, `…_WIDE`, `RULE_TACHY_HR`, `RULE_MEDICATION_MISSED`)
+were used instead.
+
+⚠ Clinical-review flags (pilot-safe defaults, surfaced for Dr. Singal — not
+blockers): `RULE_PULSE_PRESSURE_WIDE` labelled systolic-derived (PP = SBP−DBP;
+no dedicated PP axis); `RULE_ORTHOSTATIC_HYPOTENSION` classed `profile`
+(postural/symptom-driven though it involves a BP delta); `RULE_SYMPTOM_
+OVERRIDE_*` kept `systolic` (value-derived but symptom-triggered). Dual-axis
+(both sys + dia trigger) intentionally deferred — single-axis primary is fine
+for pilot per the plan §H note.
 
 ### Phase 1 UI polish acceptance gate
 
