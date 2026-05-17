@@ -22,5 +22,5 @@
     "strictBindCallApply": true,
     "noFallthroughCasesInSwitch": true
   },
-  "exclude": ["prisma/seed.ts", "scripts/**"]
+  "exclude": ["prisma/seed.ts", "prisma/seed/**", "scripts/**"]
 }
