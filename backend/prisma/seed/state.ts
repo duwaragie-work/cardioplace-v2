@@ -61,6 +61,11 @@ export async function seedState(
   const { medicalDirector, supportAdmin, manishaPatel, primaryProvider } =
     admins
 
+  // run.ts only invokes us when SEED_TEST_FIXTURES=true && NODE_ENV !== 'production'.
+  // medicalDirector/manishaPatel/supportAdmin/primaryProvider are baseline rows
+  // (always present), so no narrowing needed for those. filler-alert-* lookups
+  // below assume fillers ran — also guaranteed by run.ts ordering.
+
   const byEmail = async (email: string) => {
     const u = await prisma.user.findUnique({ where: { email }, select: { id: true } })
     if (!u) throw new Error(`seedState: user not found ${email}`)
