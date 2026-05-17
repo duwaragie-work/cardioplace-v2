@@ -444,14 +444,20 @@ export async function seedPatients(
       },
     })
 
+    // Wipe + recreate readings each run. measuredAt is Date.now()-relative
+    // (daysAgo), so an upsert keyed on userId_measuredAt never matches across
+    // runs and stacks duplicates (65 → 130 → …) — the pre-Phase-0 monolith
+    // had this bug. Mirroring the meds wipe-then-recreate keeps the count
+    // stable AND the timestamps recent. DeviationAlert has onDelete:Cascade
+    // on journalEntry, so any §G alert bound to these entries is cascaded
+    // here and recreated by seedState (which runs after seedPatients in
+    // run.ts) — net state stays idempotent.
+    await prisma.journalEntry.deleteMany({ where: { userId: user.id } })
     for (const r of p.readings) {
-      const measuredAt = daysAgo(r.daysAgo)
-      await prisma.journalEntry.upsert({
-        where: { userId_measuredAt: { userId: user.id, measuredAt } },
-        update: {},
-        create: {
+      await prisma.journalEntry.create({
+        data: {
           userId: user.id,
-          measuredAt,
+          measuredAt: daysAgo(r.daysAgo),
           systolicBP: r.sbp,
           diastolicBP: r.dbp,
           pulse: r.pulse,
