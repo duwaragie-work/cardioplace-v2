@@ -418,6 +418,71 @@ that excludes `primaryProvider`, asserts 403 across all 5 guarded endpoints +
 positive access for the assigned `backupProvider` and SUPER_ADMIN, then restores
 the original assignment in `finally` (sequential under `--workers=1`, hermetic).
 
+---
+
+# Phase 1 UI polish — Chrome walkthrough fixes (2026-05-17)
+
+**Branch:** `duwaragie-test-coverage` (continues Phase 2). A manual Chrome
+walkthrough of the admin resolve + ack flows surfaced 9 LOW-severity UI/audit
+gaps; all fixed. **Notable:** the dev servers were up this cycle, so every fix
+was **verified live end-to-end** (not skipped) — `RUN_WRITE_TESTS=1 playwright
+test 13` ran the new tests against the running stack.
+
+| # | Finding | Present? | Fix | Verified |
+|---|---|---|---|---|
+| 1 | Admin ack didn't show actor — `PATCH /provider/alerts/:id/acknowledge` (the AlertsTab path) set only status+acknowledgedAt, no `acknowledgedByUserId` | YES | Thread `adminId` (controller `@Req`); write `acknowledgedByUserId`; symmetric fix in `alert-resolution.service` ack | ✅ live (backend contract test, 35s) |
+| 2 | T+0 badge stuck red "Awaiting acknowledgment" after ack | YES (symptom of #3) | `Step` badge now reads alert status: triggered + ACKNOWLEDGED ⇒ green "Acknowledged"; + RESOLVED ⇒ "Completed" (defensive vs propagation lag) | ✅ live (UI walk) |
+| 3 | Admin ack didn't propagate to `EscalationEvent` rows (provider path) | YES | `escalationEvent.updateMany` propagation added to `provider.service.acknowledgeAlert` (mirrors patient-ack + alert-resolution.service) | ✅ live (backend contract test) |
+| 4 | 15-field record absent for ACKNOWLEDGED alerts (footer was RESOLVED-only) | YES | `ResolutionAuditFooter` → `AlertAuditFooter`, renders for ACKNOWLEDGED too; teal "Acknowledgment audit record" header; resolved/resolvedBy/action show "Not required — alert acknowledged, not yet resolved" | ✅ live (UI walk) |
+| 5 | PULSE PRESSURE "—" despite real value (e.g. James 118/74) | YES | DB `pulsePressure` is BP-tier-only; footer now falls back to SBP−DBP (matches AlertCard + ReadingsTab) | ✅ live (UI walk asserts "44") |
+| 6 | ACTUAL VALUE "—" for profile-based rules (ambiguous) | YES | Profile/med/symptom tiers (Tier 1/2/3) with null actualValue → "Not applicable (profile-based rule)"; BP-Level tiers keep "—" (genuine gap). Tier-based, no engine/rule-ids change | ✅ live (UI walk asserts "Not applicable") |
+| 7 | BASELINE VALUE row is v1-vestigial (v2 has no rolling baselines) | YES | Row removed from footer; header drops the brittle fixed-count claim ("Resolution/Acknowledgment audit record"). Schema column left intact (no migration — §G.3 deferred). Phase-1 spec-13 FIELD_KEYS synced | ✅ live (UI walk asserts row absent) |
+| 8 | Resolve modal "Unknown patient" on patient-detail alerts | YES | Per-patient feed omits nested patient; thread `patientName` shell → AlertsTab → modal (`resolvable.patient.name`) | ✅ live (UI walk asserts patient name) |
+| 9 | ACKNOWLEDGED/-by "—" when resolved without prior ack (looks data-missing) | YES | Footer shows "Not required — alert resolved directly" when RESOLVED & no `acknowledgedAt` | ✅ live (UI walk) |
+
+All 9 were genuine bugs (none "by design"). Plan-pointer note: the plan §B/§D
+cited `alert-resolution.service.ts:53`, but the admin AlertsTab/NotificationsScreen
+"Acknowledge" button actually calls `PATCH /provider/alerts/:id/acknowledge`
+(`provider.service.acknowledgeAlert`) — the real buggy path. Both ack paths were
+fixed for consistency.
+
+### Commit grouping
+
+The plan listed 9 per-finding commits; Findings 2/4/5/6/7/9 + the event-actor
+display all live in **one file** (`EscalationAuditTrail.tsx`) and are one
+cohesive change, so they ship as 4 logical commits (each compiling, each citing
+its findings) rather than 7 interleaved same-file commits — consistent with the
+"one logical change per commit" standard:
+`b8cf1ca` (backend ack 1+3) · `f0c26af` (audit footer 2,4,5,6,7,9) ·
+`cfb9caa` (modal name 8) · `6b022d3` (tests 1-9) · doc commit (this section).
+
+### Tests added (3 new + 1 synced)
+
+| File:line | Test | Live result |
+|---|---|---|
+| `qa/tests/13…:931` | Findings 1+3 — admin ack writes actor + propagates to events (deterministic API) | ✅ pass (35s) |
+| `qa/tests/13…:1000` | Findings 2/4/5/6/7/8 — ACKNOWLEDGED footer/badge/PP/actualValue/baseline/modal (UI walk) | ✅ pass (40s) |
+| `qa/tests/13…:1079` | Finding 9 — resolved-directly ack copy (UI walk) | ✅ pass (37s) |
+| `qa/tests/13…:612` | Phase-1 §B footer test — synced (dropped `baselineValue` key per Finding 7; fixed latent OPEN-filter/expand bug; now runs + passes live, 45s) | ✅ pass |
+
+Test-infra note: the new write/UI tests were timing out at the default 30s
+(reset + OTP + waitForAlerts + admin browser walk); raised to 120–150s via
+`test.setTimeout`. Also fixed a latent bug shared with the Phase-1 §B test —
+AlertsTab defaults to the OPEN status filter so ACKNOWLEDGED/RESOLVED alerts
+were hidden; tests now click the "All" pill + the "Expand alert" button.
+
+### Phase 1 UI polish acceptance gate
+
+- `npm run build -w @cardioplace/shared` → ✅ clean
+- backend / admin / frontend / qa `tsc --noEmit` → ✅ all 0 errors
+- `RUN_WRITE_TESTS=1 npx playwright test 13 11 --workers=1` (servers UP this
+  cycle): the 4 Phase-1-polish tests **pass live**; Phase 2 Finding-4 threshold +
+  assignment audit tests also **passed live** (retroactively confirming Phase 2);
+  no regressions introduced.
+- §H `MANUAL_VERIFY_PHASE_1.md`: the automated UI walks now exercise the resolve
+  AND ack paths end-to-end; the human screenshot walk remains the formal
+  pre-pilot sign-off but is now de-risked by passing automation.
+
 ## 🔴 Real product issues still open (NOT fixed this cycle — triage)
 
 | # | Area | Issue | Severity |
