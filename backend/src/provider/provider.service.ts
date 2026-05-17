@@ -1438,7 +1438,7 @@ export class ProviderService {
 
   // ─── PATCH /provider/alerts/:alertId/acknowledge ──────────────────────────────
 
-  async acknowledgeAlert(alertId: string) {
+  async acknowledgeAlert(alertId: string, adminId: string) {
     const alert = await this.prisma.deviationAlert.findUnique({
       where: { id: alertId },
     })
@@ -1457,9 +1457,24 @@ export class ProviderService {
       }
     }
 
+    const now = new Date()
     const updated = await this.prisma.deviationAlert.update({
       where: { id: alertId },
-      data: { status: 'ACKNOWLEDGED', acknowledgedAt: new Date() },
+      data: {
+        status: 'ACKNOWLEDGED',
+        acknowledgedAt: now,
+        // Phase 1 polish Finding 1 — record WHO acked at the alert level so
+        // the 15-field audit footer resolves "Acknowledged by Dr. …". Was
+        // omitted: only patient-ack (daily_journal.service) set this.
+        acknowledgedByUserId: adminId,
+      },
+    })
+    // Phase 1 polish Finding 3 — propagate the ack to every open
+    // EscalationEvent so the audit timeline + step badges reflect it
+    // (mirrors the patient-ack propagation + alert-resolution.service).
+    await this.prisma.escalationEvent.updateMany({
+      where: { alertId, acknowledgedAt: null, resolvedAt: null },
+      data: { acknowledgedAt: now, acknowledgedBy: adminId },
     })
 
     return {

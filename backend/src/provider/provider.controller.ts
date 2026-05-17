@@ -258,8 +258,14 @@ export class ProviderController {
   }
 
   @Patch('alerts/:alertId/acknowledge')
-  acknowledgeAlert(@Param('alertId') alertId: string) {
-    return this.providerService.acknowledgeAlert(alertId)
+  acknowledgeAlert(
+    @Req() req: AuthedReq,
+    @Param('alertId') alertId: string,
+  ) {
+    // Phase 1 polish Finding 1+3 — thread the acting clinician so the ack
+    // writes DeviationAlert.acknowledgedByUserId + propagates the actor to
+    // the EscalationEvent rows (was: anonymous, no propagation).
+    return this.providerService.acknowledgeAlert(alertId, req.user.id)
   }
 
   @Get('scheduled-calls')
