@@ -40,6 +40,20 @@ export const T = {
     next: 'intake-next-btn',
     back: 'intake-back-btn',
     submit: 'intake-submit-btn',
+    // Phase 4 §B.4 — the real sticky CTA that drives goNext()/submit, plus
+    // the catalog-card condition testids the wizard actually renders
+    // (token-keyed, NOT the aspirational hasX form above).
+    cta: 'intake-submit',
+    conditionCard: (
+      key: 'HEART_FAILURE' | 'CAD' | 'HCM' | 'AFIB' | 'BRADYCARDIA',
+    ) => `intake-condition-${key}`,
+    genderCard: (v: 'male' | 'female' | 'non_binary') => `intake-gender-${v}`,
+    pregnancyYes: 'intake-pregnancy-yes',
+    pregnancyNo: 'intake-pregnancy-no',
+    medAddBtn: 'intake-medication-add-button',
+    medSaveBtn: 'intake-medication-save-button',
+    medDeleteBtn: 'intake-medication-delete-button',
+    medPhotoButton: 'intake-medication-photo-button',
     // A1: gender + height + DOB
     genderRadio: (v: 'MALE' | 'FEMALE' | 'OTHER') => `intake-gender-${v.toLowerCase()}`,
     heightFt: 'intake-height-ft',
@@ -97,6 +111,33 @@ export const T = {
     hearSummaryCta: 'hear-summary-cta',
     notificationBell: 'notification-bell',
     notificationBellBadge: 'notification-bell-badge',
+    // Phase 4 §B.4 — MonthlyMedReask modal rendered over the dashboard.
+    monthlyMedReask: 'dashboard-monthly-med-reask',
+  },
+
+  // ─── Patient: alert detail / emergency (Phase 4 §B.4) ────────────────────
+  alertDetail: {
+    tierBadge: 'alert-detail-tier-badge',
+    statusBadge: 'alert-status-badge',
+    // Patient frontend renders ONLY the patient-tier message — caregiver /
+    // physician tiers are admin-facing in v2 (see §B report anomaly).
+    messagePatient: 'alert-message-patient',
+    messageCaregiver: 'alert-message-caregiver',
+    messagePhysician: 'alert-message-physician',
+    acknowledgeBtn: 'alert-acknowledge-button',
+    resolvedBy: 'alert-resolved-by',
+  },
+  emergency: {
+    screen: 'emergency-screen',
+    message: 'emergency-screen-message',
+    call911: 'emergency-call-911-button',
+  },
+
+  // ─── Patient: language selector (Phase 4 §B.4) ───────────────────────────
+  language: {
+    button: 'language-selector-button',
+    option: (code: 'en' | 'es' | 'am' | 'fr' | 'de') =>
+      `language-selector-option-${code}`,
   },
 
   // ─── Patient: check-in ──────────────────────────────────────────────────
@@ -116,6 +157,12 @@ export const T = {
     submit: 'checkin-submit-btn',
     success: 'checkin-success',
     summary: 'checkin-summary',
+    // Phase 4 §B.4 — BP-photo OCR entry + two-reading session prompt.
+    bpPhotoButton: 'check-in-bp-photo-button',
+    medicationYes: 'check-in-medication-yes',
+    medicationNo: 'check-in-medication-no',
+    pendingSecondReading: 'pending-second-reading',
+    addSecondReading: 'add-second-reading',
   },
 
   // ─── Patient: readings ──────────────────────────────────────────────────

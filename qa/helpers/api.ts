@@ -1,5 +1,6 @@
-import { type APIRequestContext, expect } from '@playwright/test'
+import { type APIRequestContext, type Page, expect } from '@playwright/test'
 import type { TestControl } from './test-control.js'
+import { byTestId, T } from './selectors.js'
 
 /**
  * Typed API helpers for write operations the suite drives without going
@@ -224,4 +225,303 @@ export async function adminEnrollmentCheck(
     ready: payload.ready ?? payload.ok ?? false,
     reasons: payload.reasons ?? [],
   }
+}
+
+// ─── Phase 4 §B.3 — UI-driving helpers ─────────────────────────────────────
+//
+// These drive real patient/admin surfaces through Playwright (not the API)
+// so Phase 4 keeps UI-level coverage. They target the *real* testids in
+// `selectors.ts` (the Phase 4 doc's idealised names were reconciled against
+// the existing registry in §B.4 — see the §B report). The wizard-walking
+// helpers (submitReadingViaUI / completeIntakeViaUI) and the OCR/admin
+// helpers are written defensively and will be hardened against each concrete
+// flow when first exercised in §C–§N.
+
+/**
+ * Drive `/check-in` end to end. The check-in flow is a 3–5 step wizard
+ * advanced by a single sticky CTA (`checkin-next-btn` → `checkin-submit-btn`
+ * on the final step). We walk it with a bounded loop: on every visible step,
+ * set whatever inputs that step exposes, then advance.
+ *
+ * NOTE (§B report): the patient check-in checklist only renders a subset of
+ * symptom flags as discrete inputs — CHEST_PAIN, DIZZINESS, SYNCOPE,
+ * PALPITATIONS, LEG_SWELLING. SOB / FATIGUE / COUGH are NOT separate inputs
+ * (SOB is folded into chest-pain/dyspnea). Symptoms requested here that have
+ * no discrete input are silently skipped; rules depending on them must be
+ * exercised via a UI path that exposes them or flagged in RESULTS.md.
+ */
+export async function submitReadingViaUI(
+  page: Page,
+  reading: {
+    systolic: number
+    diastolic: number
+    heartRate: number
+    position?: 'SITTING' | 'STANDING' | 'LYING'
+    symptoms?: string[]
+    medicationTaken?: boolean
+  },
+): Promise<void> {
+  await page.goto('/check-in')
+  const visible = (sel: string) =>
+    page.locator(byTestId(sel)).first().isVisible().catch(() => false)
+
+  for (let step = 0; step < 10; step++) {
+    // B2 reading step — BP + pulse + position.
+    if (await visible(T.checkin.systolic)) {
+      await page.locator(byTestId(T.checkin.systolic)).fill(String(reading.systolic))
+      await page.locator(byTestId(T.checkin.diastolic)).fill(String(reading.diastolic))
+      await page.locator(byTestId(T.checkin.pulse)).fill(String(reading.heartRate))
+      const pos = reading.position ?? 'SITTING'
+      const posSel =
+        pos === 'STANDING'
+          ? 'check-in-position-standing'
+          : pos === 'LYING'
+            ? 'check-in-position-lying'
+            : 'check-in-position-sitting'
+      await page.locator(byTestId(posSel)).click().catch(() => {})
+    }
+    // Medication step — per-medication yes/no (apply to the first group).
+    if (await visible(T.checkin.medicationYes)) {
+      const taken = reading.medicationTaken ?? true
+      await page
+        .locator(byTestId(taken ? T.checkin.medicationYes : T.checkin.medicationNo))
+        .first()
+        .click()
+        .catch(() => {})
+    }
+    // B3 symptoms — click any requested symptom input that exists.
+    for (const s of reading.symptoms ?? []) {
+      const loc = page.locator(byTestId(`check-in-symptom-${s}`)).first()
+      if (await loc.isVisible().catch(() => false)) {
+        await loc.click().catch(() => {})
+      }
+    }
+    // Advance, or submit on the final step.
+    if (await visible(T.checkin.submit)) {
+      await page.locator(byTestId(T.checkin.submit)).click()
+      break
+    }
+    if (await visible(T.checkin.next)) {
+      await page.locator(byTestId(T.checkin.next)).click()
+      continue
+    }
+    break
+  }
+  // Settle on the confirmation screen / second-reading prompt / dashboard.
+  await page.waitForURL(/\/(dashboard|check-in)/, { timeout: 15_000 }).catch(() => {})
+}
+
+/** Patient acknowledges an alert via the `/alerts/[id]` UI. */
+export async function acknowledgeAlertViaUI(
+  page: Page,
+  alertId: string,
+): Promise<void> {
+  await page.goto(`/alerts/${alertId}`)
+  const ack = page.locator(byTestId(T.alertDetail.acknowledgeBtn))
+  await ack.waitFor({ state: 'visible', timeout: 15_000 })
+  await ack.click()
+}
+
+/**
+ * Admin resolves an alert via the AlertResolutionModal. Admin-side testids
+ * already exist in `selectors.ts` (`T.admin.alertResolve*`); the alert card
+ * deep-links into the resolution context. Hardened in §H (20f.3) against the
+ * concrete admin alert-resolution flow.
+ */
+export async function resolveAlertViaUI(
+  adminPage: Page,
+  alertId: string,
+  body: { resolutionAction: string; rationale: string },
+): Promise<void> {
+  // Open the alert from the admin alert list (deep-links into the modal).
+  await adminPage.locator(byTestId(T.admin.alertCard(alertId))).click().catch(() => {})
+  const action = adminPage.locator(byTestId(T.admin.alertResolveAction))
+  await action.waitFor({ state: 'visible', timeout: 15_000 })
+  await action.selectOption(body.resolutionAction).catch(async () => {
+    // Some builds render the action as buttons rather than a <select>.
+    await action.click().catch(() => {})
+  })
+  await adminPage
+    .locator(byTestId(T.admin.alertResolveRationale))
+    .fill(body.rationale)
+  await adminPage.locator(byTestId(T.admin.alertResolveBtn)).click()
+}
+
+/** Wait for the patient app to land on the full-screen Absolute Emergency screen. */
+export async function waitForEmergencyScreen(page: Page): Promise<void> {
+  await page
+    .locator(byTestId(T.emergency.screen))
+    .waitFor({ state: 'visible', timeout: 20_000 })
+}
+
+/**
+ * Complete the `/clinical-intake` wizard from scratch. Driven by the single
+ * sticky CTA (`intake-submit`). Sets gender / height / pregnancy / condition
+ * cards as they become visible, then advances.
+ *
+ * NOTE (§B report): there is no BRADYCARDIA self-report condition card
+ * (catalog is HEART_FAILURE / CAD / HCM / AFIB / DCM / None). Requested
+ * conditions with no card are skipped. Medications in the wizard are catalog
+ * cards, not free-form; best-effort card match by drug name.
+ */
+export async function completeIntakeViaUI(
+  page: Page,
+  profile: {
+    gender: 'MALE' | 'FEMALE' | 'NON_BINARY'
+    heightCm: number
+    isPregnant?: boolean
+    conditions: string[]
+    medications: Array<{ drugName: string; dosage?: string; frequency: string }>
+  },
+): Promise<void> {
+  await page.goto('/clinical-intake')
+  const genderToken: 'male' | 'female' | 'non_binary' =
+    profile.gender === 'MALE'
+      ? 'male'
+      : profile.gender === 'FEMALE'
+        ? 'female'
+        : 'non_binary'
+  const visible = (sel: string) =>
+    page.locator(byTestId(sel)).first().isVisible().catch(() => false)
+
+  for (let step = 0; step < 16; step++) {
+    if (await visible(T.intake.genderCard(genderToken))) {
+      await page.locator(byTestId(T.intake.genderCard(genderToken))).click().catch(() => {})
+      if (await visible(T.intake.heightCm)) {
+        await page.locator(byTestId(T.intake.heightCm)).fill(String(profile.heightCm)).catch(() => {})
+      }
+    }
+    if (await visible(T.intake.pregnancyYes)) {
+      await page
+        .locator(byTestId(profile.isPregnant ? T.intake.pregnancyYes : T.intake.pregnancyNo))
+        .click()
+        .catch(() => {})
+    }
+    for (const c of profile.conditions) {
+      const loc = page.locator(byTestId(`intake-condition-${c}`)).first()
+      if (await loc.isVisible().catch(() => false)) {
+        await loc.click().catch(() => {})
+      }
+    }
+    for (const m of profile.medications) {
+      const card = page.locator(byTestId(T.intake.medCard(m.drugName))).first()
+      if (await card.isVisible().catch(() => false)) {
+        await card.click().catch(() => {})
+      }
+    }
+    if (await visible(T.intake.cta)) {
+      await page.locator(byTestId(T.intake.cta)).click().catch(() => {})
+    } else {
+      break
+    }
+    if (/\/dashboard/.test(page.url())) break
+  }
+  await page.waitForURL(/\/dashboard/, { timeout: 20_000 }).catch(() => {})
+}
+
+/**
+ * Stub the OCR endpoint, then upload a fake BP-cuff photo via the `/check-in`
+ * BpPhotoButton so the confirm modal pre-fills systolic/diastolic. The
+ * confirm-modal buttons currently have no testid (clicked by accessible
+ * name). Hardened in §G (20e.4) against the real OCR route + modal.
+ */
+export async function uploadBpPhotoViaUI(
+  page: Page,
+  ocrResult: { systolic: number; diastolic: number },
+): Promise<void> {
+  await page.route('**/*ocr*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        systolic: ocrResult.systolic,
+        diastolic: ocrResult.diastolic,
+        pulse: 72,
+      }),
+    })
+  })
+  await page.goto('/check-in')
+  // Walk to the reading step where BpPhotoButton renders.
+  for (let step = 0; step < 6; step++) {
+    if (await page.locator(byTestId(T.checkin.bpPhotoButton)).first().isVisible().catch(() => false)) {
+      break
+    }
+    const next = page.locator(byTestId(T.checkin.next))
+    if (await next.isVisible().catch(() => false)) await next.click().catch(() => {})
+    else break
+  }
+  const fileInput = page.locator('input[type="file"]').first()
+  await fileInput.setInputFiles({
+    name: 'bp.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    ),
+  })
+  await page.getByRole('button', { name: /confirm|use|accept|looks good/i }).click().catch(() => {})
+}
+
+/**
+ * Stub OCR, then upload a fake medication-label photo via the clinical-intake
+ * MedicationPhotoButton. Hardened in §D (20b.6) against the real route/modal.
+ */
+export async function uploadMedPhotoViaUI(
+  page: Page,
+  ocrResult: { drugName: string },
+): Promise<void> {
+  await page.route('**/*ocr*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ drugName: ocrResult.drugName }),
+    })
+  })
+  const btn = page.locator(byTestId(T.intake.medPhotoButton)).first()
+  await btn.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
+  const fileInput = page.locator('input[type="file"]').first()
+  await fileInput.setInputFiles({
+    name: 'med.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    ),
+  })
+  await page.getByRole('button', { name: /confirm|add|use|accept/i }).click().catch(() => {})
+}
+
+/**
+ * Force the MonthlyMedReask card to render by backdating its localStorage
+ * timestamp. The card keys off `cardioplace_med_reask_at:{userId}` (ms epoch)
+ * with a 30-day interval; setting every matching key 31 days into the past
+ * makes the next dashboard visit fire the modal (still also requires
+ * hasMedications && intakeComplete — data state, not handled here).
+ */
+export async function forceMonthlyMedReask(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const cutoff = Date.now() - 31 * 24 * 60 * 60 * 1000
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith('cardioplace_med_reask_at:')) {
+        localStorage.setItem(k, String(cutoff))
+      }
+    }
+  })
+}
+
+/** Switch the patient app language via the LanguageSelector dropdown. */
+export async function switchLanguageViaUI(
+  page: Page,
+  locale: 'en' | 'es' | 'am' | 'fr' | 'de',
+): Promise<void> {
+  await page.locator(byTestId(T.language.button)).first().click()
+  await page.locator(byTestId(T.language.option(locale))).first().click()
+}
+
+/** Sign out via the patient profile page (the real sign-out control). */
+export async function signOutViaUI(page: Page): Promise<void> {
+  await page.goto('/profile')
+  await page.locator(byTestId(T.profile.signOut)).click()
+  await page.waitForURL(/\/(sign-in|$)/, { timeout: 15_000 }).catch(() => {})
 }
