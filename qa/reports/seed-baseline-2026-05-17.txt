@@ -1,0 +1,50 @@
+Phase 0 §B — pre-Phase-0 seed baseline row counts (audit snapshot)
+================================================================
+
+Branch:    duwaragie-test-coverage @ 452ecf8  (== origin/dev, post-§A reset)
+DB:        db.prisma.io:5432/postgres  (shared v2 DEVELOPMENT database)
+Procedure: npx prisma migrate reset --force   (reset + 16 migrations applied)
+           npx prisma db seed                 (tsx prisma/seed.ts — "phase/19 demo seed", 665 LOC)
+Captured:  2026-05-17T13:14:20Z
+
+Model                        Rows
+---------------------------  ----
+User                           19
+PatientProfile                 13
+Practice                        1
+PatientMedication              20
+PatientThreshold                4
+PatientProviderAssignment      13
+JournalEntry                   65
+OtpCode                        19
+DeviationAlert                  0
+Notification                    0
+ProfileVerificationLog          0
+EscalationEvent                 0
+EmergencyEvent                  0
+
+User by role (roles[] has):
+PATIENT            13
+PROVIDER            4
+MEDICAL_DIRECTOR    2
+HEALPLACE_OPS       1
+SUPER_ADMIN         2
+(roles overlap — sums exceed 19: support@healplace.com has SUPER_ADMIN+PROVIDER+
+ MEDICAL_DIRECTOR; manisha.patel@cardioplace.test has PROVIDER+SUPER_ADMIN.)
+
+Operational notes
+-----------------
+- Prisma 7 `migrate reset` NO LONGER auto-runs the configured seed; the seed
+  must be invoked explicitly via `npx prisma db seed`. (`--skip-seed` flag was
+  also removed in Prisma 7.)
+- Prisma 7's AI-agent guardrail blocks `migrate reset` unless
+  PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION carries the user's explicit
+  consent text. User consented in-session ("yes proceed").
+- DeviationAlert / Notification / ProfileVerificationLog / EscalationEvent /
+  EmergencyEvent are all ZERO — confirms Phase 0 §G state fixtures
+  (mixed-state alerts, notifications, audit trail) are genuinely missing and
+  remain real Phase 0 work.
+- All 10 clinical personas + the provider/ops roster the plan calls "net-new"
+  ALREADY exist under firstname.lastname@cardioplace.test (not the plan's
+  +pw@ scheme). See STATUS_2026_05_17.md "Schema/plan delta" for the full gap
+  analysis driving the plan rewrite.
