@@ -6,6 +6,13 @@
  * same PrismaClient the seed uses and runs the modular seed. Skipped when
  * DATABASE_URL is absent so a DB-less environment doesn't hard-fail.
  *
+ * IMPORTANT: this spec asserts row counts that ONLY hold with the test
+ * cohort seeded (Practice B + 30 fillers + 12 alerts/27 notifs/5 audit).
+ * We force SEED_TEST_FIXTURES='true' in beforeAll so the spec is
+ * self-contained — running it does NOT require the developer to remember
+ * the flag. Baseline-only seed verification lives in a separate (faster,
+ * unit-style) spec.
+ *
  * Run: `npm test -- seed.spec` (jest rootDir is src, so this lives under
  * src/ even though the seed code lives in prisma/seed/).
  *
@@ -79,13 +86,23 @@ async function resetUserRows(userId: string) {
   ])
 }
 
-d('Phase 0 seed', () => {
+d('Phase 0 seed (test cohort)', () => {
+  const previousSeedFlag = process.env.SEED_TEST_FIXTURES
+
   beforeAll(async () => {
+    // Force the test cohort on; the asserted counts below assume Practice B
+    // + 30 fillers + 12 alerts/27 notifs/5 audit are present.
+    process.env.SEED_TEST_FIXTURES = 'true'
     // Normalize to canonical seeded state before assertions.
     await runSeed()
   }, SEED_TIMEOUT)
 
   afterAll(async () => {
+    if (previousSeedFlag === undefined) {
+      delete process.env.SEED_TEST_FIXTURES
+    } else {
+      process.env.SEED_TEST_FIXTURES = previousSeedFlag
+    }
     await prisma.$disconnect()
   })
 

@@ -129,6 +129,7 @@ Dev roles (see `docs/BUILD_PLAN.md` for detail):
 - `/frontend` is patient-only. `/admin` is provider/care-team only.
 - Voice runs inside the NestJS backend (`backend/src/voice/`) via `@google/genai` Live. No separate Python service. Tool dispatch calls `DailyJournalService` / `GeminiService` directly — no internal HTTP loopback.
 - Live production app is at `www.cardioplaceai.com` (v1) — this repo targets separate domains and a separate database
+- **Seed test cohort is opt-in.** `npx prisma db seed` seeds the BASELINE only (Practice A + 6 admins + 13 personas). To also seed Practice B + 4 matrix admins + 30 fillers + 12 alerts/27 notifs/5 audit, set `SEED_TEST_FIXTURES=true`. NEVER set in dev/staging/prod environments — those rows are Playwright fixtures, not real data.
 
 ## Clinical authority
 

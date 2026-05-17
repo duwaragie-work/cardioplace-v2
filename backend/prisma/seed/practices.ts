@@ -2,8 +2,9 @@
 //
 // Practice A (`seed-cedar-hill`) is copied verbatim from the pre-Phase-0
 // seed.ts — same stable id + fields so existing assignments/tests are
-// unaffected. Practice B (`seed-river-east`, §D) gives SUPER_ADMIN
-// cross-practice tests + PROVIDER scope-to-practice tests a second practice.
+// unaffected. Practice B (`seed-river-east`, §D) is a TEST-ONLY second
+// practice for SUPER_ADMIN cross-practice tests + PROVIDER scope-to-practice
+// tests; it is seeded only when run.ts calls us with includeTestPractices.
 //
 // NOTE: the Prisma `Practice` model has NO default-threshold columns
 // (defaultSbpUpperTarget etc. do not exist — see STATUS_2026_05_17.md §2).
@@ -12,7 +13,7 @@
 // id/name + business hours, which is enough for practice-scoping tests.
 import { prisma } from './helpers.js'
 
-export async function seedPractices() {
+export async function seedPractices(options: { includeTestPractices: boolean }) {
   const practiceA = await prisma.practice.upsert({
     where: { id: 'seed-cedar-hill' },
     update: {},
@@ -26,6 +27,12 @@ export async function seedPractices() {
         'Route urgent alerts to the on-call line; defer non-urgent to next business day.',
     },
   })
+  console.log(`  practice: ${practiceA.name}`)
+
+  if (!options.includeTestPractices) {
+    return { practiceA, practiceB: undefined }
+  }
+
   const practiceB = await prisma.practice.upsert({
     where: { id: 'seed-river-east' },
     update: {},
@@ -41,8 +48,7 @@ export async function seedPractices() {
         'Ward 8 after-hours: page the on-call cardiologist for urgent BP L2; queue all else to next business day.',
     },
   })
-  console.log(`  practice: ${practiceA.name}`)
-  console.log(`  practice: ${practiceB.name}`)
+  console.log(`  practice: ${practiceB.name} [test-only]`)
 
   return { practiceA, practiceB }
 }

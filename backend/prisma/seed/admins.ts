@@ -1,12 +1,14 @@
 // Phase 0 §C — admin / provider / ops roster.
 //
 // The six rows below are copied verbatim from the pre-Phase-0 seed.ts
-// (back-compat admins + provider trio + ops). §E adds the missing matrix
+// (back-compat admins + provider trio + ops). §E adds 4 TEST-ONLY matrix
 // rows (Practice B MD/provider, unassigned secondary, SUSPENDED provider)
-// under the same firstname.lastname@ / role@ scheme — no recreation.
+// gated behind `includeTestMatrix`. The baseline 6 rows are unchanged so
+// dev/staging/prod environments running the seed see exactly what they
+// saw pre-Phase-0.
 import { prisma, DEMO_OTP, hashPassword, hashOtp, seedPermaOtp } from './helpers.js'
 
-export async function seedAdmins() {
+export async function seedAdmins(options: { includeTestMatrix: boolean }) {
   const pwdhash = await hashPassword('demo-password')
   const otpHash = await hashOtp(DEMO_OTP)
 
@@ -111,12 +113,31 @@ export async function seedAdmins() {
   )
   console.log(`  ops: ${opsUser.email}`)
 
-  // ─── §E — missing admin-matrix rows (add-only, same scheme) ──────────────
+  // ─── §E — missing admin-matrix rows (TEST-ONLY) ──────────────────────────
   // Phase 3 needs: a Practice B medical director + Practice B provider
   // (cross-practice / scope tests), an unassigned PROVIDER (negative-case:
   // sees no patients), and a SUSPENDED provider (status-filter + reactivate
   // flow). CAREGIVER is intentionally absent — no such UserRole exists
   // (decision 3); the caregiver cohort/matrix row is dropped, not migrated.
+  //
+  // These 4 rows are only seeded when SEED_TEST_FIXTURES=true. Without them
+  // the return shape stays compatible (matrix keys are undefined) so the
+  // baseline seed still satisfies the SeededAdmins type.
+  if (!options.includeTestMatrix) {
+    return {
+      manishaPatel,
+      supportAdmin,
+      primaryProvider,
+      backupProvider,
+      medicalDirector,
+      opsUser,
+      medicalDirectorB: undefined,
+      providerB: undefined,
+      secondaryProvider: undefined,
+      suspendedProvider: undefined,
+    }
+  }
+
   const medicalDirectorB = await prisma.user.upsert({
     where: { email: 'medical-director-b@cardioplace.test' },
     update: {},

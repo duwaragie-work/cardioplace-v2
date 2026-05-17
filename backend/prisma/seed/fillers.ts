@@ -69,6 +69,14 @@ export async function seedFillers(
     medicalDirectorB,
   } = admins
 
+  // run.ts only invokes us when SEED_TEST_FIXTURES=true, which guarantees
+  // Practice B + matrix admins were seeded. Narrow the optional types here.
+  if (!practiceB || !providerB || !medicalDirectorB) {
+    throw new Error(
+      'seedFillers: SEED_TEST_FIXTURES=true is required (Practice B + matrix admins must exist).',
+    )
+  }
+
   let globalIdx = 0
   for (const g of GROUPS) {
     for (let n = 1; n <= g.count; n++) {
