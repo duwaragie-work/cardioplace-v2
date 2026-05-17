@@ -13,12 +13,24 @@ export interface JwtPayload {
   exp?: number
 }
 
-// Read the access token from the HttpOnly access_token cookie. This lets the
+// Read the access token from the HttpOnly access cookie. This lets the
 // frontend stop persisting the JWT in JS-readable storage (closes B6 — XSS
 // can no longer exfiltrate the access token).
+//
+// Cookies are app-scoped (`cp_patient_*` / `cp_admin_*`) to stop the patient
+// and admin apps polluting each other's session on a shared localhost host
+// (see auth/cookie-scope.ts). Auth is by JWT signature, not cookie name, so
+// accepting any of the candidate names — including the pre-fix unscoped
+// `access_token` — is safe and keeps legacy sessions working.
 function fromAccessCookie(req: Request): string | null {
   const cookies = req?.cookies as Record<string, string> | undefined
-  return cookies?.['access_token'] ?? null
+  if (!cookies) return null
+  return (
+    cookies['cp_patient_access_token'] ??
+    cookies['cp_admin_access_token'] ??
+    cookies['access_token'] ??
+    null
+  )
 }
 
 @Injectable()

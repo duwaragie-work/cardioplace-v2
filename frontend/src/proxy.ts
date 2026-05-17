@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { AUTH_MARKER_COOKIE, AUTH_ROLE_COOKIE } from '@/lib/cookie-names'
 
 const PUBLIC_ROUTES = ['/', '/home', '/about', '/contact', '/welcome', '/sign-in', '/terms', '/privacy', '/auth/callback', '/auth/magic-link']
 
@@ -12,9 +13,14 @@ const ADMIN_URL = process.env.NEXT_PUBLIC_ADMIN_URL || 'http://localhost:3001'
 // without seeing the JWT, so the frontend writes two non-token marker
 // cookies on login:
 //
-//   auth_marker   — opaque "logged in" boolean ("1" or empty). Read here.
-//   auth_role     — comma-separated role list. Read here for the admin-app
-//                   bridge. Carries no PII / no credential.
+//   cp_patient_auth_marker — opaque "logged in" boolean ("1" or empty). Read
+//                            here.
+//   cp_patient_auth_role   — comma-separated role list. Read here for the
+//                            admin-app bridge. Carries no PII / no credential.
+//
+// The `cp_patient_` prefix scopes these to the patient app — the admin app
+// uses `cp_admin_*` — so the two apps don't pollute each other's session on
+// a shared localhost host (see lib/cookie-names.ts).
 //
 // Both are written by AuthProvider.login() via document.cookie. They're
 // cleared by AuthProvider.logout(). They're tamperable from the client by
@@ -47,8 +53,8 @@ function buildAdminBridgeUrl(): URL {
 }
 
 export function proxy(request: NextRequest) {
-  const marker = request.cookies.get('auth_marker')?.value
-  const rolesValue = request.cookies.get('auth_role')?.value
+  const marker = request.cookies.get(AUTH_MARKER_COOKIE)?.value
+  const rolesValue = request.cookies.get(AUTH_ROLE_COOKIE)?.value
   const path = request.nextUrl.pathname
 
   const isPublic = PUBLIC_ROUTES.some(

@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { AUTH_MARKER_COOKIE, AUTH_ROLE_COOKIE } from '@/lib/cookie-names';
 
 // Phase/cluster-1 (B5/B6): same model as the patient proxy. The JWT lives
 // in (a) the backend's HttpOnly access_token cookie scoped to the API origin
@@ -6,14 +7,16 @@ import { NextResponse, type NextRequest } from 'next/server';
 // gate page navigation without seeing the JWT, so AuthProvider.login()
 // writes two non-token marker cookies on the admin origin:
 //
-//   admin_auth_marker — opaque "logged in" boolean ("1" or empty)
-//   admin_auth_role   — comma-separated role list (e.g. "PROVIDER,SUPER_ADMIN")
+//   cp_admin_auth_marker — opaque "logged in" boolean ("1" or empty)
+//   cp_admin_auth_role   — comma-separated role list (e.g. "PROVIDER,SUPER_ADMIN")
 //
 // They carry no credential. They're tamperable by client design — they
 // only choose which page renders, not whether API calls succeed (the
-// backend rejects unauthenticated requests regardless).
-const MARKER_COOKIE = 'admin_auth_marker';
-const ROLE_COOKIE = 'admin_auth_role';
+// backend rejects unauthenticated requests regardless). The `cp_admin_`
+// prefix scopes them to the admin app so the patient app (`cp_patient_*`)
+// can't pollute the admin session on a shared localhost host.
+const MARKER_COOKIE = AUTH_MARKER_COOKIE;
+const ROLE_COOKIE = AUTH_ROLE_COOKIE;
 
 // Any role on this list can reach the admin app. The backend `@Roles()`
 // decorators on individual endpoints are the real authorization — per-tab
