@@ -449,6 +449,62 @@ export class TestControlService {
     })
   }
 
+  /**
+   * Phase 4 §B.2 — upsert a PatientThreshold for personalized-mode tests
+   * (spec 20g.21–22). `PatientThreshold.setByProviderId` is a required
+   * column, so resolve it server-side: prefer the patient's assigned
+   * medical director, then primary / backup provider, then any
+   * MEDICAL_DIRECTOR / SUPER_ADMIN user. Tests assert only on the threshold
+   * targets, never on attribution — but the column must be populated for the
+   * create path to succeed.
+   */
+  async setPatientThreshold(
+    userId: string,
+    override: {
+      sbpUpperTarget?: number
+      sbpLowerTarget?: number
+      dbpUpperTarget?: number
+      dbpLowerTarget?: number
+    },
+  ): Promise<{ userId: string }> {
+    const assignment = await this.prisma.patientProviderAssignment.findUnique({
+      where: { userId },
+      select: {
+        medicalDirectorId: true,
+        primaryProviderId: true,
+        backupProviderId: true,
+      },
+    })
+    let setByProviderId: string | null =
+      assignment?.medicalDirectorId ??
+      assignment?.primaryProviderId ??
+      assignment?.backupProviderId ??
+      null
+    if (!setByProviderId) {
+      const admin = await this.prisma.user.findFirst({
+        where: {
+          OR: [
+            { roles: { has: 'MEDICAL_DIRECTOR' } },
+            { roles: { has: 'SUPER_ADMIN' } },
+          ],
+        },
+        select: { id: true },
+      })
+      setByProviderId = admin?.id ?? null
+    }
+    if (!setByProviderId) {
+      throw new Error(
+        `setPatientThreshold: no provider available to attribute threshold for user ${userId}`,
+      )
+    }
+    await this.prisma.patientThreshold.upsert({
+      where: { userId },
+      update: { ...override },
+      create: { userId, setByProviderId, ...override },
+    })
+    return { userId }
+  }
+
   // ─── Seed fixtures (Phase 0 §H) ─────────────────────────────────────────
   // Imperative test-only seeders (like seedReadingsAtTime). Not idempotent
   // by design — tests call them to compose a scenario then reset between

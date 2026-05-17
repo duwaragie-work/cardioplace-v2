@@ -263,6 +263,23 @@ export class TestControl {
   }
 
   /**
+   * Phase 4 §B.2 — upsert a PatientThreshold for personalized-mode tests
+   * (spec 20g.21–22). `setByProviderId` is resolved server-side from the
+   * patient's assignment, so callers only pass the target overrides.
+   */
+  async setPatientThreshold(
+    userId: string,
+    override: {
+      sbpUpperTarget?: number
+      sbpLowerTarget?: number
+      dbpUpperTarget?: number
+      dbpLowerTarget?: number
+    },
+  ): Promise<{ userId: string }> {
+    return this.post('test-control/user/set-threshold', { userId, override })
+  }
+
+  /**
    * Spec 12 — clear businessHours on the practice attached to this user.
    * Returns the prior values; pair with `restorePracticeBusinessHours` in a
    * `finally` block so the seed state stays intact for other tests.

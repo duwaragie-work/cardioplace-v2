@@ -285,6 +285,26 @@ export class TestControlController {
     return { ok: true }
   }
 
+  // Phase 4 §B.2 — personalized-mode threshold tests (spec 20g.21–22).
+  @Post('user/set-threshold')
+  @HttpCode(200)
+  async setPatientThreshold(
+    @Headers('x-test-control-secret') secret: string,
+    @Body()
+    body: {
+      userId: string
+      override: {
+        sbpUpperTarget?: number
+        sbpLowerTarget?: number
+        dbpUpperTarget?: number
+        dbpLowerTarget?: number
+      }
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.setPatientThreshold(body.userId, body.override ?? {})
+  }
+
 
   // ─── Seed fixtures (Phase 0 §H) ─────────────────────────────────────────
   @Post('user/set-account-status')
