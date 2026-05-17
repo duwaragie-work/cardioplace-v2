@@ -460,6 +460,7 @@ function B2Reading({ form, setField }: StepProps) {
             selected={form.position === 'SITTING'}
             onClick={() => setField('position', 'SITTING')}
             audioText={t('checkin.b2.positionSitting')}
+            testId="check-in-position-sitting"
             compact
           />
           <ChoiceCard
@@ -468,6 +469,7 @@ function B2Reading({ form, setField }: StepProps) {
             selected={form.position === 'STANDING'}
             onClick={() => setField('position', 'STANDING')}
             audioText={t('checkin.b2.positionStanding')}
+            testId="check-in-position-standing"
             compact
           />
           <ChoiceCard
@@ -476,6 +478,7 @@ function B2Reading({ form, setField }: StepProps) {
             selected={form.position === 'LYING'}
             onClick={() => setField('position', 'LYING')}
             audioText={t('checkin.b2.positionLying')}
+            testId="check-in-position-lying"
             compact
           />
         </div>
@@ -500,7 +503,7 @@ function B2Reading({ form, setField }: StepProps) {
           </span>
         </label>
         <div className="flex items-end gap-3">
-          <div className="flex-1">
+          <div data-testid="check-in-systolic" className="flex-1">
             <input
               data-testid="checkin-systolic"
               id="checkin-systolic"
@@ -531,7 +534,7 @@ function B2Reading({ form, setField }: StepProps) {
             </div>
           </div>
           <div className="pb-7 text-[32px] font-light" style={{ color: 'var(--brand-text-muted)' }}>/</div>
-          <div className="flex-1">
+          <div data-testid="check-in-diastolic" className="flex-1">
             <input
               data-testid="checkin-diastolic"
               id="checkin-diastolic"
@@ -571,7 +574,7 @@ function B2Reading({ form, setField }: StepProps) {
           <span className="flex items-center gap-2"><Heart className="w-4 h-4" /> {t('checkin.b2.pulseLabel')}</span>
           <AudioButton text={t('checkin.b2.pulseAudio')} size="sm" />
         </label>
-        <div className="flex items-center gap-2">
+        <div data-testid="check-in-heart-rate" className="flex items-center gap-2">
           <input
             data-testid="checkin-pulse"
             id="checkin-pulse"
@@ -859,6 +862,13 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                       <motion.button
                         key={opt.value}
                         type="button"
+                        data-testid={
+                          opt.value === 'yes'
+                            ? 'check-in-medication-yes'
+                            : opt.value === 'no'
+                              ? 'check-in-medication-no'
+                              : undefined
+                        }
                         onClick={() => setTaken(med.id, opt.value)}
                         className="h-11 rounded-xl text-[12px] font-semibold border-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                         style={{
@@ -974,19 +984,19 @@ interface SymptomsStepProps extends StepProps {
 
 function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
   const { t } = useLanguage();
-  const core: { key: keyof FormData; icon: React.ReactNode; text: string }[] = [
+  const core: { key: keyof FormData; icon: React.ReactNode; text: string; testId?: string }[] = [
     { key: 'severeHeadache', icon: <Brain className="w-5 h-5" />, text: t('checkin.b3.symptomSevereHeadache') },
     { key: 'visualChanges', icon: <Eye className="w-5 h-5" />, text: t('checkin.b3.symptomVision') },
     { key: 'alteredMentalStatus', icon: <Brain className="w-5 h-5" />, text: t('checkin.b3.symptomConfusion') },
-    { key: 'chestPainOrDyspnea', icon: <Wind className="w-5 h-5" />, text: t('checkin.b3.symptomChestPain') },
+    { key: 'chestPainOrDyspnea', icon: <Wind className="w-5 h-5" />, text: t('checkin.b3.symptomChestPain'), testId: 'check-in-symptom-CHEST_PAIN' },
     { key: 'focalNeuroDeficit', icon: <Zap className="w-5 h-5" />, text: t('checkin.b3.symptomNeuro') },
     { key: 'severeEpigastricPain', icon: <Stethoscope className="w-5 h-5" />, text: t('checkin.b3.symptomStomach') },
     // Cluster 6 (Manisha 5/10/26) — feed brady-symptomatic, palpitations,
     // orthostatic, and HF-decomp engine rules.
-    { key: 'dizziness', icon: <Activity className="w-5 h-5" />, text: t('checkin.b3.symptomDizziness') },
-    { key: 'syncope', icon: <Activity className="w-5 h-5" />, text: t('checkin.b3.symptomSyncope') },
-    { key: 'palpitations', icon: <Heart className="w-5 h-5" />, text: t('checkin.b3.symptomPalpitations') },
-    { key: 'legSwelling', icon: <Droplets className="w-5 h-5" />, text: t('checkin.b3.symptomLegSwelling') },
+    { key: 'dizziness', icon: <Activity className="w-5 h-5" />, text: t('checkin.b3.symptomDizziness'), testId: 'check-in-symptom-DIZZINESS' },
+    { key: 'syncope', icon: <Activity className="w-5 h-5" />, text: t('checkin.b3.symptomSyncope'), testId: 'check-in-symptom-SYNCOPE' },
+    { key: 'palpitations', icon: <Heart className="w-5 h-5" />, text: t('checkin.b3.symptomPalpitations'), testId: 'check-in-symptom-PALPITATIONS' },
+    { key: 'legSwelling', icon: <Droplets className="w-5 h-5" />, text: t('checkin.b3.symptomLegSwelling'), testId: 'check-in-symptom-LEG_SWELLING' },
   ];
   const pregnancy: { key: keyof FormData; icon: React.ReactNode; text: string }[] = [
     { key: 'newOnsetHeadache', icon: <Brain className="w-5 h-5" />, text: t('checkin.b3.symptomNewHeadache') },
@@ -1021,6 +1031,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
             audioText={s.text}
             checked={Boolean(form[s.key])}
             onToggle={() => setField(s.key, !form[s.key] as FormData[typeof s.key])}
+            testId={s.testId}
           />
         ))}
       </div>
@@ -1312,6 +1323,7 @@ function ConfirmationScreen({
          session as single-reading if they don't. */}
       {pendingFinalizeEntryId && (
         <div
+          data-testid="pending-second-reading"
           className="w-full mb-3 rounded-2xl border-2 px-4 py-3 text-[13px] leading-snug"
           style={{
             backgroundColor: 'var(--brand-info-bg, #EEF2FF)',
@@ -1332,6 +1344,7 @@ function ConfirmationScreen({
       <div className="w-full space-y-2">
         <motion.button
           type="button"
+          data-testid="add-second-reading"
           onClick={onAddAnother}
           className="w-full h-11 rounded-full font-bold text-white text-[13.5px] flex items-center justify-center gap-2 cursor-pointer"
           style={{
@@ -1853,7 +1866,7 @@ export default function CheckIn() {
           paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)',
         }}
       >
-        <div className="max-w-3xl mx-auto">
+        <div data-testid="check-in-submit" className="max-w-3xl mx-auto">
           <motion.button
             type="button"
             data-testid={step === 'B3' ? 'checkin-submit-btn' : 'checkin-next-btn'}

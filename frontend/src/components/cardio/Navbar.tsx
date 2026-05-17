@@ -251,6 +251,7 @@ export default function Navbar() {
 
           <Link
             href="/profile"
+            data-testid="navbar-sign-out-button"
             className="w-9 h-9 rounded-full flex items-center justify-center font-semibold text-sm shrink-0"
             style={{ backgroundColor: 'rgba(255,255,255,0.2)', color: 'white', border: '1.5px solid rgba(255,255,255,0.3)' }}
           >

@@ -317,7 +317,7 @@ export default function RegisterPage() {
             {/* Form */}
             <div className="space-y-6 w-full">
               {/* Auth mode toggle */}
-              <div className="w-full max-w-105 flex rounded-lg border border-[#e5d9f2] overflow-hidden">
+              <div data-testid="signin-magic-link-mode-toggle" className="w-full max-w-105 flex rounded-lg border border-[#e5d9f2] overflow-hidden">
                 <button
                   type="button"
                   data-testid="signin-magic-tab"

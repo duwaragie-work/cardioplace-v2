@@ -230,6 +230,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
                       Until Dr. Singal signs off per-locale, they stay English so screen
                       readers and TTS don't try to pronounce English as the page locale. */}
                   <h1
+                    data-testid="alert-detail-tier-badge"
                     lang="en"
                     className="text-[20px] sm:text-[22px] font-bold leading-tight"
                     style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
@@ -252,6 +253,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
                 )}
 
                 <p
+                  data-testid="alert-message-patient"
                   lang="en"
                   className="text-[14.5px] sm:text-[15px] mt-3 leading-relaxed"
                   style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
@@ -325,6 +327,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
           if (hasResolution) {
             statusPanel = (
               <div
+                data-testid="alert-resolved-by"
                 className="rounded-xl px-4 py-3 flex items-start gap-3"
                 style={{ backgroundColor: 'var(--brand-success-green-light)' }}
               >
@@ -392,6 +395,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
           } else if (isPatientAcked) {
             statusPanel = (
               <div
+                data-testid="alert-status-badge"
                 className="rounded-xl px-4 py-3 flex items-center gap-3"
                 style={{ backgroundColor: 'var(--brand-success-green-light)' }}
               >
@@ -412,6 +416,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
               {canAck && (
                 <motion.button
                   type="button"
+                  data-testid="alert-acknowledge-button"
                   onClick={onAcknowledge}
                   disabled={acknowledging}
                   className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer transition"

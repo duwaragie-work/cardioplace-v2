@@ -194,6 +194,7 @@ function SectionCard({
   onEdit,
   scrollable = false,
   audioText,
+  editTestId,
   children,
 }: {
   title: string;
@@ -212,6 +213,8 @@ function SectionCard({
       the header that reads this composed summary aloud. Defaults to the
       title alone if omitted. */
   audioText?: string;
+  /** Optional test hook forwarded to the Edit link/button for Playwright. */
+  editTestId?: string;
   children: React.ReactNode;
 }) {
   const { t } = useLanguage();
@@ -253,6 +256,7 @@ function SectionCard({
         {editHref && (
           <Link
             href={editHref}
+            data-testid={editTestId}
             className="shrink-0 inline-flex items-center gap-1 h-8 px-3 rounded-full text-[12px] font-bold cursor-pointer transition hover:opacity-85"
             style={{
               backgroundColor: 'var(--brand-primary-purple-light)',
@@ -266,6 +270,7 @@ function SectionCard({
         {onEdit && !editHref && (
           <button
             type="button"
+            data-testid={editTestId}
             onClick={onEdit}
             className="shrink-0 inline-flex items-center gap-1 h-8 px-3 rounded-full text-[12px] font-bold cursor-pointer transition hover:opacity-85"
             style={{
@@ -351,9 +356,9 @@ function MedVerifiedBadge({ status }: { status: PatientMedicationDto['verificati
   return <VerifiedBadge status="UNVERIFIED" />;
 }
 
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+function Row({ label, value, testId }: { label: string; value: React.ReactNode; testId?: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 py-2">
+    <div data-testid={testId} className="flex items-baseline justify-between gap-3 py-2">
       <span className="text-[12.5px] shrink-0" style={{ color: 'var(--brand-text-muted)' }}>
         {label}
       </span>
@@ -521,6 +526,7 @@ function PersonalInfoModal({
                   <button
                     key={opt.label}
                     type="button"
+                    data-testid={`profile-comm-preference-${opt.value ?? 'null'}`}
                     onClick={() => setCommPref(opt.value)}
                     className="h-10 rounded-xl border-2 text-[12.5px] font-semibold transition cursor-pointer"
                     style={{
@@ -827,6 +833,7 @@ export default function ProfilePage() {
               title={t('profile.personalInfoSection')}
               icon={<UserIcon className="w-4 h-4" />}
               onEdit={authProfile ? () => setShowPersonalEdit(true) : undefined}
+              editTestId="profile-name-edit-button"
               audioText={[
                 `${t('profile.personalInfoSection')}.`,
                 `${t('profile.nameLabel')}: ${authProfile?.name || t('profile.notSet')}.`,
@@ -845,6 +852,7 @@ export default function ProfilePage() {
               title={t('profile.aboutYou')}
               icon={<Info className="w-4 h-4" />}
               editHref={profile ? '/clinical-intake?step=A1' : undefined}
+              editTestId="profile-edit-clinical-link"
               audioText={[
                 `${t('profile.aboutYou')}.`,
                 `${t('profile.gender')}: ${genderLabel(profile?.gender, t)}.`,
@@ -887,6 +895,7 @@ export default function ProfilePage() {
                 })()}
               >
                 <Row
+                  testId="profile-pregnancy"
                   label={t('profile.currentlyPregnant')}
                   value={
                     profile?.isPregnant === true

@@ -218,6 +218,7 @@ export default function OtherMedEditModal({
         >
           <button
             type="button"
+            data-testid="intake-medication-save-button"
             onClick={handleSave}
             className="flex-1 h-11 rounded-xl font-bold text-white cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--brand-primary-purple)]"
             style={{

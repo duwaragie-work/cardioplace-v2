@@ -104,6 +104,7 @@ export default function MedicationPhotoButton({
     <>
       <motion.button
         type="button"
+        data-testid="intake-medication-photo-button"
         onClick={() => fileInputRef.current?.click()}
         aria-label={uploading ? t('ocr.med.uploading') : buttonLabel}
         aria-pressed={uploading}

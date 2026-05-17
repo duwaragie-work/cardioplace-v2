@@ -555,6 +555,7 @@ export default function Dashboard() {
           <div data-testid="active-alert-banner" className="relative mb-3 md:mb-4">
           <button
             type="button"
+            data-testid="dashboard-alert-banner"
             onClick={() => router.push(`/alerts/${topAlert.id}`)}
             className="w-full text-left rounded-2xl p-4 cursor-pointer transition-all flex items-center gap-3 active:scale-[0.99]"
             style={{
@@ -934,7 +935,7 @@ export default function Dashboard() {
                 <p className="text-[11px] mb-3 text-white">{t('dashboard.takesAbout')}</p>
               </div>
 
-              <div>
+              <div data-testid="dashboard-cta-checkin">
                 {/* Check-in is gated on intake being fully complete —
                     routes to /clinical-intake instead so the patient
                     finishes onboarding before logging readings the rule

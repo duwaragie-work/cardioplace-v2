@@ -23,6 +23,8 @@ interface Props {
   /** When true, uses red selection color (used for "None of these" style negative options). */
   destructiveSelected?: boolean;
   className?: string;
+  /** Optional test hook forwarded to the root element for Playwright. */
+  testId?: string;
 }
 
 export default function ChoiceCard({
@@ -36,6 +38,7 @@ export default function ChoiceCard({
   compact = false,
   destructiveSelected = false,
   className,
+  testId,
 }: Props) {
   const accent = destructiveSelected
     ? 'var(--brand-alert-red)'
@@ -48,6 +51,7 @@ export default function ChoiceCard({
     // div+role=button (not <button>) so the nested AudioButton doesn't
     // produce <button>-inside-<button> hydration warnings.
     <motion.div
+      data-testid={testId}
       role="button"
       tabIndex={0}
       onClick={onClick}
