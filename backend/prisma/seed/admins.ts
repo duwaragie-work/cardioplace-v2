@@ -111,6 +111,82 @@ export async function seedAdmins() {
   )
   console.log(`  ops: ${opsUser.email}`)
 
+  // ─── §E — missing admin-matrix rows (add-only, same scheme) ──────────────
+  // Phase 3 needs: a Practice B medical director + Practice B provider
+  // (cross-practice / scope tests), an unassigned PROVIDER (negative-case:
+  // sees no patients), and a SUSPENDED provider (status-filter + reactivate
+  // flow). CAREGIVER is intentionally absent — no such UserRole exists
+  // (decision 3); the caregiver cohort/matrix row is dropped, not migrated.
+  const medicalDirectorB = await prisma.user.upsert({
+    where: { email: 'medical-director-b@cardioplace.test' },
+    update: {},
+    create: {
+      email: 'medical-director-b@cardioplace.test',
+      pwdhash,
+      name: 'Dr. Robert Jones',
+      roles: ['MEDICAL_DIRECTOR'],
+      isVerified: true,
+      onboardingStatus: 'COMPLETED',
+      timezone: 'America/New_York',
+    },
+  })
+  await seedPermaOtp('medical-director-b@cardioplace.test', otpHash)
+
+  const providerB = await prisma.user.upsert({
+    where: { email: 'provider-b@cardioplace.test' },
+    update: {},
+    create: {
+      email: 'provider-b@cardioplace.test',
+      pwdhash,
+      name: 'Dr. Sarah Smith',
+      roles: ['PROVIDER'],
+      isVerified: true,
+      onboardingStatus: 'COMPLETED',
+      timezone: 'America/New_York',
+    },
+  })
+  await seedPermaOtp('provider-b@cardioplace.test', otpHash)
+
+  // Practice A PROVIDER deliberately NOT named on any PatientProviderAssignment
+  // — drives the "provider sees zero assigned patients" negative-case tests.
+  const secondaryProvider = await prisma.user.upsert({
+    where: { email: 'secondary-provider@cardioplace.test' },
+    update: {},
+    create: {
+      email: 'secondary-provider@cardioplace.test',
+      pwdhash,
+      name: 'Dr. Sam Secondary',
+      roles: ['PROVIDER'],
+      isVerified: true,
+      onboardingStatus: 'COMPLETED',
+      timezone: 'America/New_York',
+    },
+  })
+  await seedPermaOtp('secondary-provider@cardioplace.test', otpHash)
+
+  // SUSPENDED (decision 4 — AccountStatus has no INACTIVE; map to SUSPENDED).
+  // `update` re-asserts SUSPENDED so a test that reactivates this user then
+  // re-seeds gets the fixture back to its seeded state.
+  const suspendedProvider = await prisma.user.upsert({
+    where: { email: 'suspended-provider@cardioplace.test' },
+    update: { accountStatus: 'SUSPENDED' },
+    create: {
+      email: 'suspended-provider@cardioplace.test',
+      pwdhash,
+      name: 'Dr. Pat Suspended',
+      roles: ['PROVIDER'],
+      isVerified: true,
+      onboardingStatus: 'COMPLETED',
+      accountStatus: 'SUSPENDED',
+      timezone: 'America/New_York',
+    },
+  })
+  await seedPermaOtp('suspended-provider@cardioplace.test', otpHash)
+
+  console.log(
+    `  +matrix: ${medicalDirectorB.email} (MD/B), ${providerB.email} (PROV/B), ${secondaryProvider.email} (unassigned), ${suspendedProvider.email} (SUSPENDED)`,
+  )
+
   return {
     manishaPatel,
     supportAdmin,
@@ -118,6 +194,10 @@ export async function seedAdmins() {
     backupProvider,
     medicalDirector,
     opsUser,
+    medicalDirectorB,
+    providerB,
+    secondaryProvider,
+    suspendedProvider,
   }
 }
 
