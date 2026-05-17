@@ -753,3 +753,80 @@ test.describe('AlertsTab — Acknowledged status filter (bug #3)', () => {
     await expect(page.getByText('Status', { exact: true })).toBeVisible()
   })
 })
+
+// ─── Phase 2 — Finding 3: DELETE /daily-journal/:id cascade (CTO-deferred) ────
+//
+// Phase 1 §G.1 flagged that DELETE /daily-journal/:id (JWT + ownership only,
+// not test-gated) cascades JournalEntry → DeviationAlert → EscalationEvent via
+// FK onDelete: Cascade — a patient can erase a JCAHO escalation audit trail by
+// deleting the originating reading. This is NOT fixed here: it is entangled
+// with the CTO + Manisha + counsel reading-corrections architecture decision
+// (Phase 1 §G.3 deferral — soft-supersede vs strict append-only). This test
+// pins the CURRENT behavior so the decision has a regression anchor; when the
+// soft-supersede contract lands, this test is updated/replaced with the new
+// expectation.
+test.describe('Phase 2 — Finding 3: journal-delete cascade (current behavior, CTO-deferred)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
+
+  test('DELETE /daily-journal/:id cascades to linked DeviationAlert + EscalationEvent (flagged for CTO review)', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    let u: Awaited<ReturnType<typeof tc.findUser>>
+    try {
+      u = await tc.findUser(PATIENTS.james.email)
+      await tc.resetUser(u.id)
+    } catch (err) {
+      test.skip(true, `test-control unprovisioned: ${(err as Error).message}`)
+      return
+    }
+
+    const patientApi = await authedApi(API_BASE_URL, PATIENTS.james.email)
+    // James (NDHP + HFrEF) → TIER_1_CONTRAINDICATION on any reading.
+    const je = await postJournalEntry(patientApi, {
+      measuredAt: new Date().toISOString(),
+      systolicBP: 118,
+      diastolicBP: 74,
+      pulse: 68,
+    })
+    const journalEntryId = je.id
+    const tier1 = (
+      await waitForAlerts(tc, u.id, (xs) =>
+        xs.some((a) => a.tier === 'TIER_1_CONTRAINDICATION'),
+      )
+    ).find((a) => a.tier === 'TIER_1_CONTRAINDICATION')
+    expect(tier1, 'expected a Tier 1 alert linked to the reading').toBeDefined()
+    const alertId = tier1!.id
+
+    const eventsBefore = await tc.listEscalationEvents(alertId)
+
+    // Patient deletes the originating reading.
+    const delRes = await patientApi.delete(`daily-journal/${journalEntryId}`)
+    expect(
+      delRes.ok(),
+      `DELETE /daily-journal/${journalEntryId}: ${delRes.status()} ${await delRes.text()}`,
+    ).toBeTruthy()
+    await new Promise((r) => setTimeout(r, 500))
+
+    // CURRENT BEHAVIOR (documented, not endorsed): the linked DeviationAlert
+    // is cascade-deleted...
+    const alertsAfter = await tc.listAlerts(u.id)
+    expect(
+      alertsAfter.some((a) => a.id === alertId),
+      'CURRENT cascade behavior: DeviationAlert is removed when its JournalEntry is deleted',
+    ).toBe(false)
+
+    // ...and so are its EscalationEvent rows (the audit trail).
+    const eventsAfter = await tc.listEscalationEvents(alertId)
+    expect(
+      eventsAfter.length,
+      `CURRENT cascade behavior: EscalationEvent rows removed (had ${eventsBefore.length})`,
+    ).toBe(0)
+
+    // TODO(CTO + Manisha + counsel — Phase 1 §G.3): if the architecture moves
+    // to soft-supersede (reading correction keeps prior alert as historical
+    // evidence), update this test to assert the alert/escalation rows PERSIST
+    // (marked superseded) instead of being erased.
+
+    await patientApi.dispose()
+    await tc.dispose()
+  })
+})
