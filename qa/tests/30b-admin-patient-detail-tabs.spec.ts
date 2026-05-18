@@ -116,9 +116,13 @@ test.describe('Phase 3 §E — patient-detail tabs (Readings/CareTeam/Meds/Alert
         return s.options[s.selectedIndex]?.textContent?.trim() ?? ''
       })
       .catch(() => '')
+    // Alternate between two BASELINE-seeded clinicians (always present
+    // without SEED_TEST_FIXTURES — CI on dev has no fixtures cohort, so
+    // "Dr. Sarah Smith" et al. don't exist there). Both are in the
+    // provider pool; neither is the primary (Okonkwo) or MD (Raman) slot.
     const backupName = curBackup.includes('Reyes')
-      ? 'Dr. Sarah Smith'
-      : ADMINS.backupProvider.name // Dr. Elena Reyes
+      ? ADMINS.manisha.name // Dr. Manisha Patel (PROVIDER, baseline)
+      : ADMINS.backupProvider.name // Dr. Elena Reyes (PROVIDER, baseline)
     await selectClinician(backupSel, backupName)
     await selectClinician(page.locator(byTestId(T.admin.careTeamMdSelect)), ADMINS.medicalDirector.name)
 
