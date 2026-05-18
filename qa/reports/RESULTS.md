@@ -721,3 +721,101 @@ cd qa && npx playwright show-report playwright-report
 > This file is the single living QA results doc. The previously-separate dated
 > `STATUS_2026_05_14.md` / `STATUS_2026_05_15.md` snapshots were consolidated here on
 > 2026-05-15 — one file, updated in place each cycle.
+
+---
+
+## Phase 4 — Patient UI Full Coverage (v3) — 2026-05-18
+
+UI-level coverage of the patient app + Cluster 6/7 alert-engine adds. All
+tests use baseline personas (incl. new Taylor Brown, 18–29 bucket) and seed
+state via test-control. No qa-fixtures dependency.
+
+**Environment caveat:** the shared Prisma Cloud dev DB (`db.prisma.io`)
+intermittently 500s / times out under concurrent alert-engine load (same root
+cause the `resetUser` deadlock-retry handles). Phase 4 write specs set
+`test.describe.configure({ retries: 1 })` to absorb transient blips. A clean
+single-pass "all green" run is not reliable against the shared remote DB;
+each section below was verified green individually.
+
+### Infrastructure (committed)
+- `feat(seed)`: Taylor Brown persona (18–29 bucket, gender OTHER — `NON_BINARY`
+  is not a valid `Gender`/PatientSeed value; doc snippet corrected).
+- `feat(test-control)`: `setUserDateOfBirth`, `setPatientThreshold`,
+  `setOnboardingStatus` endpoints (+ mock-Prisma unit specs, jest 16/16).
+- `feat(patient)`: ~58 `data-testid` selectors across 18 files (additive;
+  4 optional `testId` props). `LanguageSelector` real path is
+  `components/cardio/` (doc said `intake/`).
+- `feat(qa)`: Phase 4 helpers in `qa/helpers/api.ts` + `T` registry extensions.
+
+### Phase 4a — Auth + onboarding (spec 20a) — 5/5 PASS
+| 20a.1 | new user (onboarding≠COMPLETED) → /onboarding | PASS |
+| 20a.2 | onboarding completion → /dashboard | PASS |
+| 20a.3 | Layer A gate blocks /check-in pre-onboarding | PASS |
+| 20a.4 | sign-out clears patient cookies → landing | PASS |
+| 20a.5 | returning user skips onboarding | PASS |
+
+### Phase 4b — Clinical intake (spec 20b) — 1 PASS / 6 documented-skip
+20b.7 submit→dashboard PASS. 20b.1/.2/.3/.4/.5/.6 skipped — intake E3
+edit-flow + catalog-card med CRUD not reliably drivable without dedicated
+wizard testids (no profile-wipe test-control endpoint; same gap as spec 03).
+Pregnancy/condition rule behavior covered API-side (spec 09) + admin (11).
+
+### Phase 4c — Profile (spec 08, extended) — 3/3 PASS
+20c.1 sections render · 20c.2 inline name/comm-pref edit · 20c.3 clinical deep-link.
+
+### Phase 4d — Medication CRUD + monthly re-ask (spec 20d) — 2 PASS / 4 skip
+20d.5 monthly re-ask renders · 20d.6 confirm-unchanged dismisses+bumps — PASS.
+20d.1/.2/.3 catalog-card CRUD documented-skip (no med-CRUD testids; covered
+API-side spec 19). 20d.4 OCR gated on `NEXT_PUBLIC_MED_OCR_ENABLED`.
+
+### Phase 4e — Readings + delete + OCR (spec 20e) — 3 PASS / 2 skip
+20e.1 standard reading no-alert · 20e.2 history renders · 20e.3 delete via
+confirm modal — PASS. 20e.4 OCR gated on `NEXT_PUBLIC_BP_OCR_ENABLED`.
+20e.5 sort/pagination not implemented in v2 (documented).
+
+### Phase 4f — Alert lifecycle (spec 20f) — 4/4 PASS
+20f.1 patient-tier message + tier badge (reframed per directive B) · 20f.2
+patient ack · 20f.3 resolved-view cross-view · 20f.5 escalation deep-link.
+**20f.4 DROPPED** — patient app renders only the patient tier (no caregiver
+section in TierAlertView); 3-tier display is Phase 3 admin scope.
+
+### Phase 4g — Alert-engine additive Cluster 6/7 + boundary (spec 20g) — 23 tests
+Correct-by-construction (recipes mirror passing specs 09/17/19). Subset
+verified GREEN: 20g.2 (young-adult no-alert), 20g.3 (BRADY_ABSOLUTE),
+20g.8 (BETA_BLOCKER_FATIGUE), 20g.16 (TACHY_HR). Fixed 2 recipe bugs
+(brady/tachy need 2-reading sessions; tachy needs hasTachycardia). Full
+23-case sweep not run end-to-end in one pass (shared-DB load + runtime);
+`retries:1` absorbs transient DB 500s. 20g.4 (orthostatic) / 20g.23
+(med-missed) self-skip with reason if the engine shape differs.
+RULE_BRADY_HR_ASYMPTOMATIC intentionally not covered (post-MVP, doc §I note).
+
+### Phase 4h — Notifications (spec 06, extended) — 2 PASS / 1 skip
+20h.1 seed round-trip + inbox loads · 20h.3 alert-card deep-link — PASS.
+20h.2 mark-read skipped — raw seeded Notification rows don't fan out as
+NotifCards (needs the escalation→notification pipeline).
+
+### Phase 4i — Chat text (spec 07, extended) — 3 LLM-gated
+20i.1/.2/.3 written; gated behind `RUN_LLM_TESTS=1` (paid Gemini quota —
+existing codebase convention). Voice chat out of scope.
+
+### Phase 4l — Localization (spec 20l) — 2/2 PASS
+20l.1 en→es landing copy + persist · 20l.2 en→am OTP sign-in completes.
+
+### Phase 4m — Accessibility (spec 16, extended) — 4/4 PASS
+20m.1 keyboard focus reaches check-in controls · 20m.2 aria-live region ·
+20m.3 emergency operability (911 tel: link); emergency red palette is
+pre-existing accepted WCAG debt (≈4.46:1, theme.css KNOWN DEBT) — out of
+Phase-4 scope, not asserted as a hard fail · 20m.4 modal focus management.
+
+### Tally
+~29 PASS, ~13 documented-skip (infra/feature gaps), 3 LLM-gated, 23
+correct-by-construction (4 subset-verified). tsc clean ×4
+(backend/frontend/admin/qa). jest test-control.seed 16/16.
+
+### Anomalies / blockers (full list in the PR description)
+- Doc selector scheme ≠ real `selectors.ts` registry → tests use the registry.
+- Patient app is single-tier (no caregiver/physician on /alerts) → 20f.4 dropped.
+- SOB/FATIGUE/COUGH have no check-in inputs (chat quick-log doesn't recognize
+  them either) → §I injects the symptom via the journal API (real engine path).
+- Shared dev DB instability under load → `retries:1` on write specs.
+- Intake wizard + med-catalog CRUD lack dedicated testids → documented skips.
