@@ -7,6 +7,8 @@ backend/dist/
 backend/.env
 backend/.env.production
 backend/.env.local
+backend/.env.shared-backup
+*.shared-backup
 backend/src/generated/
 
 # Frontend
