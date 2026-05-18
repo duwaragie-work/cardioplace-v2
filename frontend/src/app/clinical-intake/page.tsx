@@ -357,6 +357,7 @@ function A1Demographics({ state, setState }: StepProps) {
         <SectionLabel text={t('intake.a1.dobQuestion')} audio={t('intake.a1.dobQuestion')} />
         <input
           id="intake-a1-dob"
+          data-testid="intake-dob"
           type="date"
           value={state.dateOfBirth ?? ''}
           max={maxDobIso()}
@@ -773,6 +774,7 @@ function A4HFType({ state, setState }: StepProps) {
           selected={state.heartFailureType === 'HFREF'}
           onClick={() => setState((p) => ({ ...p, heartFailureType: 'HFREF' }))}
           audioText={t('intake.a4.hfrefAudio')}
+          testId="intake-hf-type-hfref"
         />
         <ChoiceCard
           icon={<Heart className="w-6 h-6" />}
@@ -781,6 +783,7 @@ function A4HFType({ state, setState }: StepProps) {
           selected={state.heartFailureType === 'HFPEF'}
           onClick={() => setState((p) => ({ ...p, heartFailureType: 'HFPEF' }))}
           audioText={t('intake.a4.hfpefAudio')}
+          testId="intake-hf-type-hfpef"
         />
         <ChoiceCard
           icon={<Asterisk className="w-6 h-6" />}
