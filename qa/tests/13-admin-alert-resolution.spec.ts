@@ -9,8 +9,11 @@ import {
   adminResolveAlert,
   adminAuditAlert,
   waitForAlerts,
+  resolveAlertViaModal,
+  gotoPatientAlertsTab,
 } from '../helpers/api.js'
 import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
+import { byTestId, T } from '../helpers/selectors.js'
 import { formatTriggeringValue, RULE_IDS } from '@cardioplace/shared'
 
 /**
@@ -1289,5 +1292,137 @@ test.describe('Phase 1 polish — Finding 10: TRIGGERING VALUE in footer (UI)', 
     await expect(resolvedRow).toContainText(/closed on acknowledgment/i)
     await expect(resolvedRow).not.toContainText(/pending resolution/i)
     await tc.dispose()
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// Phase 3 §G — AlertResolutionModal end-to-end (30g.1–30g.5)
+//
+// Reality (Phase 3 §B audit): the 3-tier patient/caregiver/physician message
+// cards live in the EXPANDED AlertCard on the Alerts tab — NOT in the modal.
+// AlertResolutionModal shows the patient-facing message + a tier-filtered
+// button-list of resolution actions + a rationale textarea. Tier 1 actions
+// all require a rationale (provider.service RESOLUTION_CATALOG).
+// ───────────────────────────────────────────────────────────────────────────
+test.describe('Phase 3 §G — alert resolution modal', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Phase 3 admin write/e2e gated')
+
+  test('30g.1 — Tier 1 alert exposes all 3 message tiers in the expanded AlertCard', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(aisha.id)
+    const { alertIds } = await tc.seedAlerts(aisha.id, [{ tier: 'TIER_1_CONTRAINDICATION', status: 'OPEN' }])
+    const id = alertIds[0]
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    await gotoPatientAlertsTab(page, aisha.id)
+    await page.locator(byTestId(T.admin.alertExpand(id))).click()
+
+    // 3-tier display is the expanded card (Category-A: doc said "modal").
+    await expect(page.locator(byTestId(T.admin.alertMsgPatient(id)))).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(byTestId(T.admin.alertMsgCaregiver(id)))).toBeVisible()
+    await expect(page.locator(byTestId(T.admin.alertMsgPhysician(id)))).toBeVisible()
+
+    // The modal itself opens with the action catalog (patient msg + actions).
+    await page.locator(byTestId(T.admin.alertResolveBtnFor(id))).click()
+    await expect(page.locator(byTestId(T.admin.resolveModal))).toBeVisible({ timeout: 15_000 })
+    await expect(
+      page.locator(byTestId(T.admin.resolveAction('TIER1_FALSE_POSITIVE'))),
+    ).toBeVisible()
+  })
+
+  test('30g.2 — resolution modal shows only tier-appropriate actions (Tier 1)', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(aisha.id)
+    const { alertIds } = await tc.seedAlerts(aisha.id, [{ tier: 'TIER_1_CONTRAINDICATION', status: 'OPEN' }])
+    const id = alertIds[0]
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    await gotoPatientAlertsTab(page, aisha.id)
+    await page.locator(byTestId(T.admin.alertResolveBtnFor(id))).click()
+    await expect(page.locator(byTestId(T.admin.resolveModal))).toBeVisible({ timeout: 15_000 })
+
+    for (const a of ['TIER1_DISCONTINUED', 'TIER1_CHANGE_ORDERED', 'TIER1_FALSE_POSITIVE', 'TIER1_ACKNOWLEDGED', 'TIER1_DEFERRED']) {
+      await expect(page.locator(byTestId(T.admin.resolveAction(a))), `Tier 1 action ${a}`).toBeVisible()
+    }
+    // No Tier 2 / BP L2 actions leak into a Tier 1 resolution.
+    await expect(page.locator(byTestId(T.admin.resolveAction('TIER2_REVIEWED_NO_ACTION')))).toHaveCount(0)
+    await expect(page.locator(byTestId(T.admin.resolveAction('BP_L2_CONTACTED_RECHECK')))).toHaveCount(0)
+  })
+
+  test('30g.3 — confirm is disabled until a required rationale is provided', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(aisha.id)
+    const { alertIds } = await tc.seedAlerts(aisha.id, [{ tier: 'TIER_1_CONTRAINDICATION', status: 'OPEN' }])
+    const id = alertIds[0]
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    await gotoPatientAlertsTab(page, aisha.id)
+    await page.locator(byTestId(T.admin.alertResolveBtnFor(id))).click()
+    await expect(page.locator(byTestId(T.admin.resolveModal))).toBeVisible({ timeout: 15_000 })
+
+    await page.locator(byTestId(T.admin.resolveAction('TIER1_FALSE_POSITIVE'))).click()
+    const confirm = page.locator(byTestId(T.admin.alertResolveBtn))
+    await expect(confirm, 'confirm disabled before rationale').toBeDisabled()
+    await page.locator(byTestId(T.admin.alertResolveRationale)).fill('qa: reviewed — no clinical concern')
+    await expect(confirm, 'confirm enabled after rationale').toBeEnabled()
+  })
+
+  test('30g.4 — resolving via the modal flips the alert to RESOLVED', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(aisha.id)
+    const { alertIds } = await tc.seedAlerts(aisha.id, [{ tier: 'TIER_1_CONTRAINDICATION', status: 'OPEN' }])
+    const id = alertIds[0]
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    await gotoPatientAlertsTab(page, aisha.id)
+    await resolveAlertViaModal(page, id, {
+      resolutionAction: 'TIER1_FALSE_POSITIVE',
+      rationale: 'qa: medication corrected after re-review',
+    })
+
+    const alerts = await tc.listAlerts(aisha.id)
+    const resolved = alerts.find((a) => a.id === id)
+    expect(resolved?.status, `alert ${id} status`).toBe('RESOLVED')
+  })
+
+  test('30g.5 — a modal-resolved alert is consistently RESOLVED on Alerts-tab refresh', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(aisha.id)
+    const { alertIds } = await tc.seedAlerts(aisha.id, [{ tier: 'TIER_1_CONTRAINDICATION', status: 'OPEN' }])
+    const id = alertIds[0]
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    await gotoPatientAlertsTab(page, aisha.id)
+    await resolveAlertViaModal(page, id, {
+      resolutionAction: 'TIER1_FALSE_POSITIVE',
+      rationale: 'qa: reviewed — no clinical concern',
+    })
+
+    // Category-A reality: a Tier 1 resolved DIRECTLY (no prior ack — Tier 1
+    // is resolve-only, no UI ack) leaves DeviationAlert.acknowledgedAt null,
+    // and TimelineTab gates its "alert resolved" entry on acknowledgedAt
+    // ("Finding 9"). So the cross-surface consistency signal is the Alerts
+    // tab itself on a fresh load: the alert must persist as RESOLVED under
+    // the RESOLVED status filter.
+    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.locator(byTestId(T.admin.detailTab('alerts'))).click()
+    await page
+      .locator(byTestId(T.admin.alertsStatusFilter('RESOLVED')))
+      .waitFor({ state: 'visible', timeout: 25_000 })
+    await page.locator(byTestId(T.admin.alertsStatusFilter('RESOLVED'))).click()
+    await expect(page.locator(byTestId(T.admin.alertRow(id)))).toBeVisible({ timeout: 20_000 })
+    await expect(
+      page.locator(byTestId(T.admin.alertStatusBadge(id))),
+    ).toContainText(/resolved/i)
   })
 })

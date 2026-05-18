@@ -557,13 +557,16 @@ export async function resolveAlertViaModal(
   await adminPage
     .locator(byTestId(T.admin.resolveAction(body.resolutionAction)))
     .click()
+  // The rationale textarea renders only AFTER an action is selected (React
+  // state update) — and it renders for EVERY tier/action (required for
+  // Tier 1, optional for some Tier 2). Wait for it (this also confirms the
+  // action selection registered), then always fill so confirm enables.
   const rationale = adminPage.locator(byTestId(T.admin.alertResolveRationale))
-  // Rationale field only renders once an action is picked; required for
-  // most Tier-1 actions, optional for some Tier-2 — fill if present.
-  if (await rationale.isVisible().catch(() => false)) {
-    await rationale.fill(body.rationale)
-  }
-  await adminPage.locator(byTestId(T.admin.alertResolveBtn)).click()
+  await rationale.waitFor({ state: 'visible', timeout: 15_000 })
+  await rationale.fill(body.rationale)
+  const confirm = adminPage.locator(byTestId(T.admin.alertResolveBtn))
+  await expect(confirm).toBeEnabled({ timeout: 10_000 })
+  await confirm.click()
   await adminPage
     .locator(byTestId(T.admin.resolveModal))
     .waitFor({ state: 'hidden', timeout: 15_000 })
