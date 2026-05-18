@@ -253,74 +253,211 @@ export const T = {
     medicationStatus: (id: string) => `medication-status-${id}`,
   },
 
-  // ─── Admin: shared ──────────────────────────────────────────────────────
+  // ─── Admin (Phase 3) ────────────────────────────────────────────────────
+  //
+  // Reconciled against the REAL admin DOM (Phase 3 §B audit), NOT the Phase 3
+  // doc's idealised names. Notable reality deltas baked in here (see §B
+  // report / RESULTS.md Phase 3 anomalies):
+  //   • Dashboard is stat-cards + tier-filter chips + a flat queue — there is
+  //     NO 3-layer red/yellow/green panel. Tier 3 is excluded from it.
+  //   • The 3-tier (patient/caregiver/physician) message cards live in the
+  //     EXPANDED AlertCard, NOT in AlertResolutionModal (modal shows only the
+  //     patient-facing message + the resolution-action catalog).
+  //   • Patient-detail tab key is `careteam` (one word), matching TabKey.
+  //   • Patient list has risk-tier + awaiting-verification filters, NOT an
+  //     ENROLLED/NOT_ENROLLED/SUSPENDED status filter.
+  //   • Medication HOLD collects its rationale via window.prompt (not a
+  //     modal); REJECT uses MedicationRejectModal.
+  //   • CareTeam reassignment is an inline <select> editor, not a modal.
+  //   • Escalation rungs are keyed by ladder CODE (T0/T4H/T8H/T24H/T48H/
+  //     T2H/T72H/T7D/TIER2_48H/TIER2_7D/TIER2_14D), not the "T+0" label.
+  //   • The 15-field audit footer renders ~17 `audit-field-<key>` rows with
+  //     keys: alertId,tier,ruleId,severity,mode,status,created,acknowledged,
+  //     acknowledgedBy,resolved,resolvedBy,resolutionAction,reading,
+  //     pulsePressure,bmi,triggeringValue,escalationCount (+ resolutionRationale).
   admin: {
+    // Sign-in (already wired pre-Phase-3 — names locked, used by auth.ts)
     signInEmail: 'admin-signin-email',
     signInSendOtp: 'admin-signin-send-otp',
     signInOtp: 'admin-signin-otp',
     signInVerify: 'admin-signin-verify',
     signInError: 'admin-signin-error',
 
-    dashboardAlertsRed: 'admin-dashboard-alerts-red',
-    dashboardAlertsYellow: 'admin-dashboard-alerts-yellow',
-    dashboardAlertsGreen: 'admin-dashboard-alerts-green',
+    // Shared shell
+    notificationBell: 'admin-notification-bell',
+    notificationBellCount: 'admin-notification-bell-count',
 
-    patientListSearch: 'admin-patient-list-search',
-    patientListRow: (userId: string) => `admin-patient-row-${userId}`,
-    patientListAwaitingFilter: 'admin-patient-list-awaiting-filter',
+    // Dashboard (AdminDashboard.tsx) — triage queue, NOT a 3-layer panel
+    dashboardStat: (
+      key: 'total-patients' | 'bp-l2' | 'tier-1' | 'tier-2' | 'attention',
+    ) => `admin-dashboard-stat-${key}`,
+    dashboardTierFilter: (
+      key: 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1',
+    ) => `admin-dashboard-tier-filter-${key}`,
+    dashboardSearch: 'admin-dashboard-search',
+    dashboardQueue: 'admin-dashboard-queue',
+    dashboardQueueEmpty: 'admin-dashboard-queue-empty',
+    dashboardAlertRow: (alertId: string) => `admin-dashboard-alert-row-${alertId}`,
+    dashboardAlertOpen: (alertId: string) => `admin-dashboard-alert-open-${alertId}`,
 
+    // Patient list (/patients)
+    patientListSearch: 'admin-patient-search-input',
+    patientRiskFilter: 'admin-patient-risk-filter',
+    patientAwaitingFilter: 'admin-patient-awaiting-filter',
+    patientListRow: (userId: string) => `admin-patient-list-row-${userId}`,
+    patientListEmpty: 'admin-patient-list-empty',
+    patientListAccessDenied: 'admin-access-denied',
+
+    // Patient-detail shell
     detailHeader: 'admin-patient-detail-header',
-    detailTab: (key: 'profile' | 'medications' | 'thresholds' | 'alerts' | 'readings' | 'timeline' | 'care-team') =>
-      `admin-tab-${key}`,
+    patientName: 'admin-patient-name',
+    verificationBadge: 'admin-patient-verification-badge',
+    detailTab: (
+      key:
+        | 'profile'
+        | 'medications'
+        | 'alerts'
+        | 'readings'
+        | 'thresholds'
+        | 'careteam'
+        | 'timeline',
+    ) => `admin-tab-${key}`,
 
+    // ProfileTab
+    profileStatusBanner: 'admin-profile-status-banner',
     profileField: (key: string) => `admin-profile-field-${key}`,
-    profileFieldConfirm: (key: string) => `admin-profile-field-confirm-${key}`,
-    profileFieldCorrect: (key: string) => `admin-profile-field-correct-${key}`,
-    profileFieldReject: (key: string) => `admin-profile-field-reject-${key}`,
+    profileConfirm: (key: string) => `admin-profile-confirm-${key}`,
+    profileCorrect: (key: string) => `admin-profile-correct-${key}`,
+    profileReject: (key: string) => `admin-profile-reject-${key}`,
+    profileEditInput: (key: string) => `admin-profile-edit-input-${key}`,
+    profileEditSave: (key: string) => `admin-profile-edit-save-${key}`,
     profileVerifyComplete: 'admin-profile-verify-complete',
-    profileRejectionRationale: 'admin-profile-rejection-rationale',
+    profileVerifyRationale: 'admin-profile-verify-rationale',
+    profileVerifyConfirm: 'admin-profile-verify-confirm',
 
-    medRow: (id: string) => `admin-med-row-${id}`,
-    medVerify: (id: string) => `admin-med-verify-${id}`,
-    medReject: (id: string) => `admin-med-reject-${id}`,
-    medRejectionRationale: 'admin-med-rejection-rationale',
-    medRejectionConfirm: 'admin-med-rejection-confirm',
+    // MedicationsTab (cards keyed by med.id; tests filter by visible drugName)
+    medGroup: (drugClass: string) => `admin-med-group-${drugClass}`,
+    medCard: (medId: string) => `admin-med-card-${medId}`,
+    medStatus: (medId: string) => `admin-med-status-${medId}`,
+    medVerify: (medId: string) => `admin-med-verify-${medId}`,
+    medReject: (medId: string) => `admin-med-reject-${medId}`,
+    medHold: (medId: string) => `admin-med-hold-${medId}`,
+    medEmpty: 'admin-med-empty',
+    // MedicationRejectModal
+    medRejectModal: 'admin-med-reject-modal',
+    medRejectQuickPick: (key: string) => `admin-med-reject-pick-${key}`,
+    medRejectRationale: 'admin-med-reject-rationale',
+    medRejectConfirm: 'admin-med-reject-confirm',
 
+    // ThresholdsTab
+    thresholdReadonlyBanner: 'admin-threshold-readonly',
     thresholdSbpUpper: 'admin-threshold-sbp-upper',
     thresholdSbpLower: 'admin-threshold-sbp-lower',
     thresholdDbpUpper: 'admin-threshold-dbp-upper',
     thresholdDbpLower: 'admin-threshold-dbp-lower',
+    thresholdHrUpper: 'admin-threshold-hr-upper',
+    thresholdHrLower: 'admin-threshold-hr-lower',
     thresholdNotes: 'admin-threshold-notes',
     thresholdSave: 'admin-threshold-save',
 
-    enrollmentCard: 'admin-enrollment-card',
-    enrollmentCheckBtn: 'admin-enrollment-check-btn',
-    enrollmentCompleteBtn: 'admin-enrollment-complete-btn',
-    enrollmentReason: (reason: string) => `admin-enrollment-reason-${reason}`,
+    // CareTeamTab (inline <select> editor, NOT a modal)
+    careTeamStatus: 'admin-careteam-status',
+    careTeamPracticeSelect: 'admin-careteam-practice-select',
+    careTeamPrimarySelect: 'admin-careteam-primary-select',
+    careTeamBackupSelect: 'admin-careteam-backup-select',
+    careTeamMdSelect: 'admin-careteam-md-select',
+    careTeamSave: 'admin-careteam-save',
+    careTeamReadonly: 'admin-careteam-readonly',
+    careTeamCurrent: (role: 'primary' | 'backup' | 'md' | 'practice') =>
+      `admin-careteam-current-${role}`,
 
-    practiceCreate: 'admin-practice-create',
-    practiceName: 'admin-practice-name',
+    // EnrollmentCard (no unenroll affordance — Category C, see report)
+    enrollmentCard: 'admin-enrollment-card',
+    enrollmentStatus: 'admin-enrollment-status',
+    enrollmentEnrollBtn: 'admin-enrollment-enroll-button',
+
+    // ReadingsTab (cards, NOT a table)
+    readingsList: 'admin-readings-list',
+    readingsCard: (entryId: string) => `admin-readings-card-${entryId}`,
+    readingsDateFilter: (key: 'ALL' | '7D' | '30D' | '90D') =>
+      `admin-readings-date-filter-${key}`,
+    readingsTierFilter: (
+      key: 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'TIER_3',
+    ) => `admin-readings-tier-filter-${key}`,
+    readingsEmpty: 'admin-readings-empty',
+
+    // TimelineTab
+    timelineList: 'admin-timeline-list',
+    timelineEntry: (id: string) => `admin-timeline-entry-${id}`,
+    timelineFilter: (key: 'ALL' | 'PROFILE' | 'MEDICATION' | 'ALERT') =>
+      `admin-timeline-filter-${key}`,
+    timelineEmpty: 'admin-timeline-empty',
+
+    // AlertsTab + shared AlertCard
+    alertsStatusFilter: (
+      key: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'ALL',
+    ) => `admin-alerts-status-filter-${key}`,
+    alertsTierFilter: (
+      key: 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1',
+    ) => `admin-alerts-tier-filter-${key}`,
+    alertsEmpty: 'admin-alerts-empty',
+    alertCard: (id: string) => `admin-alert-card-${id}`,
+    alertRow: (id: string) => `admin-alert-row-${id}`,
+    alertTierBadge: (id: string) => `admin-alert-tier-badge-${id}`,
+    alertStatusBadge: (id: string) => `admin-alert-status-badge-${id}`,
+    alertAckBtn: (id: string) => `admin-alert-ack-button-${id}`,
+    alertResolveBtnFor: (id: string) => `admin-alert-resolve-button-${id}`,
+    alertExpand: (id: string) => `admin-alert-expand-${id}`,
+    alertMsgPatient: (id: string) => `admin-alert-msg-patient-${id}`,
+    alertMsgCaregiver: (id: string) => `admin-alert-msg-caregiver-${id}`,
+    alertMsgPhysician: (id: string) => `admin-alert-msg-physician-${id}`,
+
+    // AlertResolutionModal (patient-facing message + action catalog only)
+    resolveModal: 'admin-resolve-modal',
+    resolvePatientMessage: 'admin-resolve-patient-message',
+    resolveAction: (key: string) => `admin-resolve-action-${key}`,
+    alertResolveRationale: 'admin-resolve-rationale',
+    alertResolveBtn: 'admin-resolve-confirm',
+    resolveCancel: 'admin-resolve-cancel',
+    // Legacy alias kept so api.ts's defensive helper keeps compiling; the
+    // real action picker is a button list (resolveAction(key)), not a select.
+    alertResolveAction: 'admin-resolve-action-select',
+
+    // EscalationAuditTrail — rungs keyed by ladder CODE; footer/fields
+    // already shipped pre-Phase-3 (kept verbatim).
+    escalationRung: (code: string) => `admin-escalation-rung-${code}`,
+    escalationRungStatus: (code: string) => `admin-escalation-rung-status-${code}`,
+    auditFooter: 'alert-audit-footer',
+    auditHeader: 'alert-audit-header',
+    auditField: (key: string) => `audit-field-${key}`,
+    auditRationale: 'audit-field-resolutionRationale',
+    auditAttributionSystem: 'audit-attribution-system',
+    auditAttributionRetry: 'audit-attribution-retry',
+
+    // Practices list (/practices)
+    practiceList: 'admin-practice-list',
+    practiceListRow: (practiceId: string) => `admin-practice-row-${practiceId}`,
+    practiceCreateButton: 'admin-practice-create-button',
+    practiceCreateModal: 'admin-practice-create-modal',
+    practiceCreateName: 'admin-practice-create-name',
+    practiceCreateHoursStart: 'admin-practice-create-hours-start',
+    practiceCreateHoursEnd: 'admin-practice-create-hours-end',
+    practiceCreateTz: 'admin-practice-create-tz',
+    practiceCreateProtocol: 'admin-practice-create-protocol',
+    practiceCreateSubmit: 'admin-practice-create-submit',
+    // Practice detail (/practices/[id])
+    practiceNameInput: 'admin-practice-name-input',
     practiceHoursStart: 'admin-practice-hours-start',
     practiceHoursEnd: 'admin-practice-hours-end',
-    practiceTz: 'admin-practice-tz',
+    practiceTzInput: 'admin-practice-tz-input',
+    practiceProtocolInput: 'admin-practice-protocol-input',
     practiceSave: 'admin-practice-save',
+    practiceReadonly: 'admin-practice-readonly',
+    practiceStaffList: 'admin-practice-staff-list',
 
-    assignmentPracticeSelect: 'admin-assignment-practice',
-    assignmentPrimary: 'admin-assignment-primary',
-    assignmentBackup: 'admin-assignment-backup',
-    assignmentMd: 'admin-assignment-md',
-    assignmentSave: 'admin-assignment-save',
-
-    alertCard: (id: string) => `admin-alert-card-${id}`,
-    alertTier: (id: string) => `admin-alert-tier-${id}`,
-    alertRuleId: (id: string) => `admin-alert-rule-${id}`,
-    alertPatientMsg: (id: string) => `admin-alert-patient-msg-${id}`,
-    alertPhysicianMsg: (id: string) => `admin-alert-physician-msg-${id}`,
-    alertAckBtn: (id: string) => `admin-alert-ack-${id}`,
-    alertResolveAction: 'admin-alert-resolve-action',
-    alertResolveRationale: 'admin-alert-resolve-rationale',
-    alertResolveBtn: 'admin-alert-resolve-btn',
-    alertAuditField: (i: number) => `admin-alert-audit-field-${i}`,
+    // NotificationsScreen (/notifications)
+    notificationRow: (notifId: string) => `admin-notification-row-${notifId}`,
+    notificationsList: 'admin-notifications-list',
   },
 } as const
 
