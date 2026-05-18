@@ -139,3 +139,74 @@ test.describe('Phase 4i — chat text (20i)', () => {
     ).toBeVisible({ timeout: 30_000 })
   })
 })
+
+// ─── Phase 4 v3.1 (§C) — voice chat ────────────────────────────────────────
+//
+// ARCHITECTURE FINDINGS (differ from the continuation doc's assumptions):
+//   • Voice is hosted INLINE in AIChatInterface via useVoiceSession, NOT the
+//     standalone VoiceChat.tsx (legacy/unused on /chat).
+//   • Transport is socket.io (`io('<api>/voice')`, engine.io framing) — NOT a
+//     raw WebSocket. The doc's `page.routeWebSocket(/voice\/session/)` plan
+//     does not apply (no such raw WS; socket.io adds its own handshake +
+//     packet protocol that a hand-rolled stub can't reliably emulate for a
+//     "must-pass" gate).
+//   • Starting voice requires getUserMedia + AudioContext.audioWorklet
+//     (`/voice-capture-worklet.js`). Headless Chromium has no microphone, so
+//     a real OR stubbed voice *session* cannot be driven deterministically.
+//   • There is NO hold-to-talk button; it is a session model
+//     (idle→connecting→ready→listening→agent_speaking→processing).
+//
+// 20i.4 is a genuine passing UI test of the voice ENTRY affordance + state
+// surface. 20i.5 / 20i.6 are documented Category-C blockers (concrete unblock
+// path in the §H report): they need either a backend dev-mode
+// transcript-injection test-control hook or a non-headless/mic-capable runner.
+test.describe('Phase 4 — voice chat (20i.4–20i.6)', () => {
+  test('20i.4 — voice entry affordance + state surface on /chat', async ({
+    page,
+  }) => {
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/chat')
+    const mic = page.locator(byTestId(T.voice.micButton))
+    await expect(mic).toBeVisible({ timeout: 12_000 })
+    await expect(mic).toBeEnabled()
+    // Entering voice: clicking the mic starts a session. In headless there is
+    // no microphone, so the session surfaces a state (connecting→error) via
+    // the voice-active bar / state label rather than a live transcript. The
+    // assertion is that the voice surface is reachable + reflects a state,
+    // proving the entry wiring + UI states render (not a faked transcript).
+    await mic.click()
+    // Voice surface renders (entry wiring + state UI). The bar carries the
+    // live session state via data-voice-state.
+    await expect(page.locator(byTestId(T.voice.activeBar))).toBeVisible({
+      timeout: 15_000,
+    })
+    await expect(page.locator(byTestId(T.voice.stateLabel))).toBeVisible()
+    await expect(page.locator(byTestId(T.voice.endButton))).toBeVisible()
+  })
+
+  test('20i.5 — voice WS stub → mock AI transcript', async () => {
+    test.skip(
+      true,
+      'Category C (architecture mismatch — see §H report): voice transport is ' +
+        'socket.io (namespace /voice, engine.io framing), not a raw WebSocket, ' +
+        'so the doc\'s page.routeWebSocket(/voice\/session/) stub is ' +
+        'inapplicable; and starting a session needs getUserMedia + AudioWorklet ' +
+        'which headless Chromium lacks. Reliable coverage needs a backend ' +
+        'dev-mode transcript-injection test-control hook (recommended) or a ' +
+        'mic-capable non-headless runner. Voice transcript RENDERING is still ' +
+        'covered structurally (chat-message-ai/-patient bubbles, isVoice).',
+    )
+  })
+
+  test('20i.6 — real Gemini voice round-trip (gated)', async () => {
+    test.skip(
+      !process.env.RUN_LLM_TESTS ||
+        true /* mic hardware unavailable in headless — doc §J explicitly
+                 permits documenting + skipping this */,
+      'Gated by RUN_LLM_TESTS=1 AND requires real microphone input — headless ' +
+        'Chromium cannot supply mic audio frames (doc §J: "Don\'t simulate ' +
+        'microphone hardware ... document it as skipped"). Manual-verify only ' +
+        'until a mic-capable runner or a backend dev text→voice path exists.',
+    )
+  })
+})
