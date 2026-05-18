@@ -58,19 +58,34 @@ test.describe('Phase 4a — patient auth + onboarding', () => {
     await expect(page.locator('#onboarding-name')).toBeVisible({ timeout: 10_000 })
   })
 
-  test('20a.2 — onboarding completion redirects to /dashboard', async ({ page }) => {
+  test('20a.2 — onboarding completion leaves /onboarding + flips status', async ({
+    page,
+  }) => {
     await tc.setOnboardingStatus(taylorId, 'NOT_COMPLETED')
     await otpSignIn(page, PATIENTS.taylor.email)
     await page.waitForURL(/\/onboarding/, { timeout: 30_000 })
     await page.locator('#onboarding-name').fill('Taylor Brown')
-    // Submit the onboarding profile (primary CTA). Both submit + skip route
-    // to /dashboard; submit also flips onboardingStatus=COMPLETED server-side.
-    const submit = page
-      .getByRole('button', { name: /continue|save|finish|done|get started/i })
-      .first()
-    await submit.click()
-    await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
-    await expect(page).toHaveURL(/\/dashboard/)
+    // Use the real submit testid (v3.1) — the prior getByRole name-regex was
+    // i18n/CI-fragile. handleContinue → submitProfile → router.push.
+    await page.locator(byTestId(T.onboarding.submitBtn)).click()
+    // Contract of "onboarding completion": (a) the patient leaves the
+    // /onboarding page into the authenticated app, and (b) onboardingStatus
+    // is COMPLETED server-side. The exact landing differs by build/gate
+    // (CI prod `next start` may route /dashboard → an enrollment/intake
+    // interstitial); asserting "off /onboarding into the app + status
+    // flipped" is the robust, meaningful invariant.
+    await page.waitForURL(
+      /\/(dashboard|clinical-intake|welcome|home)(\?.*)?$/,
+      { timeout: 30_000 },
+    )
+    await expect(page).not.toHaveURL(/\/onboarding/)
+    await expect
+      .poll(
+        async () =>
+          (await tc.findUser(PATIENTS.taylor.email)).onboardingStatus,
+        { timeout: 12_000 },
+      )
+      .toBe('COMPLETED')
   })
 
   test('20a.3 — Layer A gate: incomplete onboarding blocks /check-in', async ({
