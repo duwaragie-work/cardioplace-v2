@@ -137,43 +137,57 @@ test.describe('Phase 4h — notifications (20h)', () => {
     await tc?.dispose()
   })
 
-  test('20h.1 — notifications inbox round-trips seeded notifications', async ({
+  // The patient's real notification inbox IS the Alerts tab: per
+  // escalation.service.ts ("DASHBOARD notifications are implicit via
+  // DeviationAlert rows") the patient sees alert-derived items as AlertCards
+  // (notification-row-{alertId}); the separate Notification model rows are
+  // provider/caregiver push/email, not patient NotifCards. 20h.1/20h.2
+  // therefore exercise the real patient inbox + its handled-action.
+  test('20h.1 — patient alert inbox renders alert rows', async ({ page }) => {
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    const { alertIds } = await tc.seedAlerts(u.id, [
+      { tier: 'BP_LEVEL_1_HIGH', status: 'OPEN' },
+      { tier: 'BP_LEVEL_1_HIGH', status: 'OPEN' },
+    ])
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/notifications')
+    // Alerts tab (default) lists each alert as notification-row-{alertId}.
+    for (const id of alertIds) {
+      await expect(
+        page.locator(`[data-testid="notification-row-${id}"]`),
+      ).toBeVisible({ timeout: 12_000 })
+    }
+    await tc.resetUser(u.id)
+  })
+
+  test('20h.2 — patient marks an inbox alert handled (acknowledge)', async ({
     page,
   }) => {
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
-    await tc.seedNotifications(u.id, 3, 'DASHBOARD')
-    // State sanity: the seed persisted (3 notifications for the user).
-    const seeded = await tc.listNotifications(u.id)
-    expect(seeded.length, 'seeded notifications persisted').toBeGreaterThanOrEqual(3)
-    // UI: the notifications surface loads for the patient.
+    const { alertIds } = await tc.seedAlerts(u.id, [
+      { tier: 'BP_LEVEL_1_HIGH', status: 'OPEN' },
+    ])
+    const alertId = alertIds[0]
     await signInPatient(page, PATIENTS.aisha.email)
     await page.goto('/notifications')
-    await expect(
-      page
-        .locator(byTestId(T.notifications.tabNotifications))
-        .or(page.getByRole('tab', { name: /notifications/i }))
-        .first(),
-    ).toBeVisible({ timeout: 12_000 })
-    // NOTE: raw tc.seedNotifications rows (no escalationEventId / alertId)
-    // do not fan out into NotifCards on the Notifications tab — that list is
-    // driven by the escalation→notification pipeline. The NotifCard render
-    // path is exercised by the alert deep-link (20h.3) + the existing
-    // /notifications tab tests above. Seeded-row UI rendering needs the real
-    // fan-out path (follow-up: seed via an escalation event).
-    await tc.resetUser(u.id)
-  })
-
-  test('20h.2 — mark a notification as read', async () => {
-    test.skip(
-      true,
-      'Raw tc.seedNotifications rows do not render as interactive NotifCards ' +
-        '(the Notifications tab is fed by the escalation→notification fan-out, ' +
-        'not standalone Notification rows). Mark-read UX needs a fanned-out ' +
-        'notification; covered indirectly by the alert ack flow (20f.2) + the ' +
-        'existing spec 06 notifications-tab tests. Follow-up: seed via an ' +
-        'escalation event so notification-mark-read-button-{id} is present.',
+    // The AlertCard "acknowledge" is the patient's mark-handled action
+    // (§B.4 mapped it to notification-dismiss-button-{id}).
+    const ackBtn = page.locator(
+      `[data-testid="notification-dismiss-button-${alertId}"]`,
     )
+    await ackBtn.waitFor({ state: 'visible', timeout: 12_000 })
+    await ackBtn.click()
+    // State sanity: the alert is acknowledged.
+    await expect
+      .poll(
+        async () =>
+          (await tc.listAlerts(u.id)).find((x) => x.id === alertId)?.status,
+        { timeout: 12_000 },
+      )
+      .toBe('ACKNOWLEDGED')
+    await tc.resetUser(u.id)
   })
 
   test('20h.3 — alert card deep-links to /alerts/[id]', async ({ page }) => {
