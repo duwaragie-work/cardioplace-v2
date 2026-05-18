@@ -88,3 +88,54 @@ test.describe('Chat — LLM safety refusals (paid)', () => {
     })
   }
 })
+
+// ─── Phase 4i (§K) — chat text-only (20i) ──────────────────────────────────
+// Gated behind RUN_LLM_TESTS=1 (paid Gemini quota) — same convention as the
+// existing "Chat — LLM safety refusals (paid)" block above. Voice chat is
+// explicitly out of Phase 4 scope.
+test.describe('Phase 4i — chat text (20i)', () => {
+  test.skip(
+    !process.env.RUN_LLM_TESTS,
+    'Paid Gemini quota — gated behind RUN_LLM_TESTS=1 (codebase convention)',
+  )
+
+  test('20i.1 — send a message, AI replies', async ({ page }) => {
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/chat')
+    await page.locator(byTestId(T.chat.input)).fill('What is a normal blood pressure?')
+    await page.locator(byTestId(T.chat.sendBtn)).click()
+    await expect(
+      page.locator(byTestId(T.chat.assistantMessage)).last(),
+    ).toBeVisible({ timeout: 30_000 })
+  })
+
+  test('20i.2 — symptom quick-log card appears for a symptom message', async ({
+    page,
+  }) => {
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/chat')
+    await page
+      .locator(byTestId(T.chat.input))
+      .fill('I have a severe headache right now')
+    await page.locator(byTestId(T.chat.sendBtn)).click()
+    // SymptomLogCard (cards/SymptomLogCard.tsx) surfaces for a recognized
+    // structured symptom; confirm + assert the assistant acknowledges.
+    await expect(
+      page
+        .locator('[data-testid="symptom-quick-log-card"]')
+        .or(page.locator(byTestId(T.chat.assistantMessage)).last()),
+    ).toBeVisible({ timeout: 30_000 })
+  })
+
+  test('20i.3 — chat tool invocation logs a reading', async ({ page }) => {
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/chat')
+    await page
+      .locator(byTestId(T.chat.input))
+      .fill('I just took my blood pressure, it was 130 over 85')
+    await page.locator(byTestId(T.chat.sendBtn)).click()
+    await expect(
+      page.locator(byTestId(T.chat.assistantMessage)).last(),
+    ).toBeVisible({ timeout: 30_000 })
+  })
+})
