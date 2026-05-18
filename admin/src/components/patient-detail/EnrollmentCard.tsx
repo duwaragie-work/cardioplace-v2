@@ -123,6 +123,7 @@ export default function EnrollmentCard({
       }}
       role="region"
       aria-label="Enrollment"
+      data-testid="admin-enrollment-card"
     >
       <div className="flex items-start gap-3 md:gap-4">
         <div
@@ -140,7 +141,7 @@ export default function EnrollmentCard({
           {blocked ? <ShieldAlert className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[13.5px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
+          <p className="text-[13.5px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }} data-testid="admin-enrollment-status">
             Patient not enrolled
           </p>
           <p className="text-[11.5px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
@@ -181,6 +182,7 @@ export default function EnrollmentCard({
           <button
             type="button"
             onClick={handleEnroll}
+            data-testid="admin-enrollment-enroll-button"
             disabled={blocked || enrolling || checkLoading}
             className="h-9 px-3.5 rounded-lg text-[12px] font-semibold inline-flex items-center gap-1.5 transition-all hover:brightness-95 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             style={{
