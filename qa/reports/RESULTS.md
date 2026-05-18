@@ -928,3 +928,125 @@ All testid infrastructure is DONE and committed (`intake-cat-tile-*`,
 Category-C (accepted) · 20i.3 LLM-gated · 1 clinical fixme. Environment
 restored to shared DB; pgvector container removed; `.env.shared-backup`
 gitignored.
+
+---
+
+## Phase 3 — Admin UI Full Coverage — 2026-05-18
+
+Closes the admin-app UI gap (was ~30%). Extends PR #43 (Phase 4 v3.1 +
+Phase 3 land together; one merge to dev). All tests written against the
+**real** admin DOM via the `T.admin.*` registry (reconciled in §B) — the
+mega-doc's idealised selectors/flows were adapted to reality per the v3.1
+"verify actual rendering" lesson.
+
+### Bottom line
+**57 Phase 3 tests** on `duwaragie-test-coverage` (specs 10/11/12/13/14/16
+extended + new 30b/30k/30l/30o) — each section verified live
+(`--workers=1`, real servers) and committed per scenario. **+2** cross-
+practice tests (§N) on `duwaragie-qa-fixtures` (force-pushed; never merges
+to dev). Foundation: admin `data-testid` 11→**115** across 18 components,
+full `T.admin.*` registry rewrite, **9** UI helpers in `qa/helpers/api.ts`,
+**0** new test-control endpoints. tsc clean (admin + qa).
+
+### Per-section tally (all PASS)
+| § | Scenarios | File | n |
+|---|---|---|---|
+| C | 30a.1–30a.5 | spec 10 (ext) | 5 |
+| D | 30d.1–30d.4 | spec 10 (ext) | 4 |
+| E | 30e.1/.2/.9/.10 | spec 11 (ext) | 4 |
+| E | 30e.3–.8/.11/.12 | 30b (new) | 8 |
+| F | 30f.1–30f.2 | spec 12 (ext) | 2 |
+| G | 30g.1–30g.5 | spec 13 (ext) | 5 |
+| H | 30h.1–30h.3 | spec 13 (ext) | 3 |
+| I | 30i.1–30i.4 | spec 14 (ext) | 4 |
+| J | 30j.1–30j.2 | spec 13 (ext) | 2 |
+| K | 30k.1–30k.3 | 30k (new) | 3 |
+| L | 30l.1–30l.4 | 30l (new) | 4 |
+| M | 30m.1–30m.7 | spec 16 (ext) | 7 |
+| O | 30o.1–30o.2 | 30o (new) | 2 |
+| P | 30p.1–30p.4 | spec 16 (ext) | 4 |
+| **Σ** | | | **57** |
+| N | 30n.1–30n.2 | 30n (new, qa-fixtures) | 2 |
+
+### Category-A — test/infra fixes (no product change)
+- **§B git-contention residue.** Parallel subagent fan-out in §B ran a
+  `git stash` that swept other agents' edits; 6 testids were never wired
+  and surfaced later via audit-first checks: 3 in `CareTeamTab`
+  (`admin-careteam-status/practice-select/save`, recovered prior session) +
+  the 3 `ProviderSlot` select call-sites (§E.4 prep) + all 3 `EnrollmentCard`
+  testids (§F prep, commit `44ca327`). Lesson logged: never parallelise
+  multi-file agent edits on a shared tree.
+- **Doc role-matrix corrected to `roleGates.ts`** (§M): MEDICAL_DIRECTOR
+  *can* manage practices; HEALPLACE_OPS *can* resolve alerts (real OPS
+  limits: no profile-verify, no threshold-edit); PROVIDER sees /practices
+  read-only (not 403).
+- **Helper hardening:** `correctProfileFieldViaUI` (wait for profile load
+  before per-field click + wait for save POST before return — a 2nd nav was
+  aborting the admin auth `/me` bootstrap); `resolveAlertViaModal` (wait for
+  the rationale textarea to render before fill — React state race).
+- **Idempotency:** per-run-unique values where a no-op is rejected/disabled
+  — heightCm (correctProfile 400s zero-diff), SBP target (Save `dirty`-gated),
+  care-team backup-provider alternation, unique reject drug name.
+- **Selector/timing:** `selectClinician` rewritten deterministic (wait for
+  `<option>` attached → select by value); dual-UI-signin tests bumped to
+  120s; engine-persist races replaced fixed sleeps with `waitForAlerts`
+  poll; ack POST race fixed with `waitForAlerts`.
+
+### Category-C — product gaps (reported, not faked)
+- **§F.3 unenroll workflow — NOT IMPLEMENTED.** EnrollmentCard only admits
+  and returns `null` once ENROLLED; there is no unenroll affordance anywhere
+  in the admin UI. §F.3 dropped from the count (§F = 2 tests). No fake skip.
+
+### Product-behavior discoveries (reality ≠ mega-doc; tests adapted)
+- Profile correction uses an **audit-override model**: the patient-reported
+  cell keeps the original self-report; the override flips
+  `profileVerificationStatus → CORRECTED` (intake.service.correctProfile).
+- **Rejected medications drop from the active meds list** (doc's "will not
+  be re-added" confirmed) — verified via the Timeline audit row, not a card.
+- A **directly-resolved Tier 1** (no prior ack; Tier 1 is resolve-only,
+  non-dismissable modal) leaves `acknowledgedAt` null; `TimelineTab` gates
+  its "alert resolved" entry on `acknowledgedAt` ("Finding 9"), so a UI
+  resolve never produces a Timeline "resolved" entry — §G.5/§O.1 reframed to
+  the observable signal (Alerts-tab RESOLVED-filter state propagation).
+- The **resolution modal does not close on Esc** (clinical-safety: explicit
+  Cancel/action required, not only Tier 1) — §P.2 uses the focusable Cancel.
+- Dashboard is **stat-cards + tier-filter chips + flat queue** (Tier 3
+  excluded) — no 3-layer panel; the 3-tier patient/caregiver/physician cards
+  live in the **expanded AlertCard**, not the resolution modal.
+- Tier badge conveys the tier via visible **text** (its accessible name),
+  not an `aria-label` (§P.3).
+- Audit footer renders the **real ~17 `audit-field-*`** keys, not the
+  doc's idealised 15 (§J asserts the real keys).
+
+### Shared-DB flakiness — mitigated test-side
+- `listClinicians` (the care-team provider/MD pools) intermittently returns
+  empty under combined load on the shared Prisma Cloud dev DB (the v3.1
+  shared-DB lesson). Mitigation: §E.4 reload-retries until both pools load.
+  This was the **only** test hitting the pattern — no Category-B escalation
+  needed (threshold was >2 tests).
+
+### §N — cross-practice (qa-fixtures branch only)
+`30n-admin-cross-practice.spec.ts` on `duwaragie-qa-fixtures` (rebased onto
+all Phase 3 work + the 6 fixtures commits, force-pushed). 30n.1/30n.2 assert
+the API 403 security boundary + the admin patient-detail UI never rendering
+the cross-practice patient. Gated on `SEED_TEST_FIXTURES` + `RUN_WRITE_TESTS`
+— **does not run in CI-on-dev, by design**. Verified locally 2/2 PASS against
+the seeded cohort (Practice B `seed-river-east` + `provider-b@` +
+`filler-b-*`).
+
+### §R acceptance sweep
+Full combined sweep `10 11 12 13 14 16 30b 30k 30l 30o -g "Phase 3"
+--workers=1` on the **shared Prisma Cloud dev DB**:
+**57/57 PASS · 0 fail · 0 flaky · 17.0m** (chromium-desktop).
+No `listClinicians`-empty flake hit this run — the §E.4 reload-retry
+mitigation held under combined load. `tsc --noEmit` clean for admin + qa;
+test-control jest spec green. (A local-pgvector re-run remains the pristine
+pre-merge option per the handoff; the shared-DB sweep was clean here.)
+
+### Net
+57 Phase 3 UI tests + 2 §N cross-practice (qa-fixtures) · 0 new test-control
+endpoints · §F.3 unenroll the only Category-C (product gap, documented) ·
+all Category-A adaptations are reality-corrections, not skips. Container
+re-run of §R recommended pre-merge for pristine numbers (commands in the
+handoff); shared-DB sweep carries the documented `listClinicians` flake
+risk, mitigated test-side.
