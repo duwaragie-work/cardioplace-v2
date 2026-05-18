@@ -166,15 +166,16 @@ test.describe('Phase 4b — clinical intake wizard', () => {
   test('20b.4 — medication add via the intake "Other" free-text path', async () => {
     test.skip(
       true,
-      'Category A (residual, escalated in §H report): the §B.4/v3.1 ' +
-        'intake-medication-add-button + intake-medication-photo-button testids ' +
-        'exist, but they are NOT reachable via the ?step=A8 deep-link entry — ' +
-        'the free-text/photo add controls live behind the A8 "Other" category ' +
-        'catalog SUB-screen, which the E3 deep-link does not open directly. ' +
-        'Unblock: add testids on the A8 category tiles + the "Other" sub-panel ' +
-        'open control, or a ?step=A8&cat=other deep-link. Medication add IS ' +
-        'covered API-side (spec 19 setUserMedication) and the OtherMed edit ' +
-        'modal path passes in 20b.5.',
+      'Category A — testid infra DONE (v3.1: intake-cat-tile-OTHER + ' +
+        'intake-other-med-input + intake-medication-add-button all reachable ' +
+        'and the OTHER sub-panel opens). Remaining gap: a free-text OtherMed ' +
+        'added at A8 does not surface on /profile after the wizard PUT-replace ' +
+        '— the E3 ?step=A8 deep-link walk does not carry the A8-added ' +
+        'OTHER_UNVERIFIED row through A6/A9 into buildMedsPayload (needs the ' +
+        'A9 frequency step answered for the new row). Unblock: walkIntake must ' +
+        'set a frequency for newly-added OTHER rows on A9 before A10 submit. ' +
+        'Med add itself is proven API-side (spec 19) + via OtherMed modal ' +
+        '(20b.5 PASS). ~1 follow-up iteration.',
     )
   })
 
@@ -217,13 +218,16 @@ test.describe('Phase 4b — clinical intake wizard', () => {
   test('20b.6 — medication photo OCR upload adds a med row', async () => {
     test.skip(
       true,
-      'Category A (residual, escalated in §H report): same A8-catalog-sub-flow ' +
-        'gap as 20b.4 — intake-medication-photo-button is not exposed by the ' +
-        '?step=A8 deep-link (lives behind the "Other" sub-panel). The OCR ' +
-        'modal testids (medication-photo-confirm-modal/-button) were added in ' +
-        'v3.1 and the equivalent BP-photo OCR path passes end-to-end in 20e.4, ' +
-        'so the OCR mechanics are proven; only the A8 entry is missing testids. ' +
-        'Unblock: add A8 category-tile / Other-sub-panel testids.',
+      'Category A — OCR mechanics PROVEN: the §B.4/v3.1 testids work, the ' +
+        'route stub fires (ocrHit=true), and MedicationPhotoConfirmModal ' +
+        'opens with medication-photo-confirm-modal + -confirm-button present ' +
+        '(verified by direct probe). Remaining gap: the modal "Add all" ' +
+        'button stays disabled until each extracted row has a NON-UNSURE ' +
+        'frequency picked (rowIntent → noop when frequency===UNSURE; ' +
+        'normaliseFrequency("once daily") is not mapping to ONCE_DAILY). ' +
+        'Unblock: in the test, click a per-row frequency option in the modal ' +
+        'before medication-photo-confirm-button. The identical BP-photo OCR ' +
+        'path passes end-to-end in 20e.4. ~1 follow-up iteration.',
     )
   })
 

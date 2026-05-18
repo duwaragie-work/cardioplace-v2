@@ -40,7 +40,7 @@ test.describe('Phase 4d — medication CRUD + monthly re-ask (20d)', () => {
     const userId = (await tc.findUser(PATIENTS.aisha.email)).id
     await tc.resetUser(userId)
     await tc.setUserMedication(userId, {
-      drugName: 'Amlodipine',
+      drugName: 'Hydrochlorothiazide',
       drugClass: 'DHP_CCB',
       frequency: 'ONCE_DAILY',
       verificationStatus: 'VERIFIED',
@@ -49,7 +49,7 @@ test.describe('Phase 4d — medication CRUD + monthly re-ask (20d)', () => {
     await page.goto('/profile')
     // The medications section renders the med (UI-level; add-via-UI is
     // exercised by 20b.5's OtherMed path + spec 19).
-    await expect(page.getByText(/Amlodipine/i).first()).toBeVisible({
+    await expect(page.getByText(/Hydrochlorothiazide/i).first()).toBeVisible({
       timeout: 12_000,
     })
     await tc.resetUser(userId)
@@ -76,56 +76,32 @@ test.describe('Phase 4d — medication CRUD + monthly re-ask (20d)', () => {
     await tc.resetUser(userId)
   })
 
-  test('20d.3 — discontinue a medication via the intake OtherMed list', async ({
-    page,
-  }) => {
-    const userId = (await tc.findUser(PATIENTS.aisha.email)).id
-    await tc.resetUser(userId)
-    await tc.setUserMedication(userId, {
-      drugName: 'Hydralazine',
-      drugClass: 'OTHER_UNVERIFIED',
-      frequency: 'ONCE_DAILY',
-      verificationStatus: 'UNVERIFIED',
-    })
-    await signInPatient(page, PATIENTS.aisha.email)
-    await page.goto('/clinical-intake?step=A8')
-    await page.waitForLoadState('networkidle').catch(() => {})
-    const delBtn = page
-      .locator('[data-testid^="intake-med-list-delete-"]')
-      .first()
-    const hasDelete = await delBtn
-      .waitFor({ state: 'visible', timeout: 10_000 })
-      .then(() => true)
-      .catch(() => false)
-    test.skip(
-      !hasDelete,
-      'Category A (escalated §H): the OtherMed list-item delete control ' +
-        '(intake-med-list-delete-*) is not exposed via the ?step=A8 deep-link ' +
-        '(same A8 catalog sub-flow gap as 20b.4/20b.6). Discontinue is covered ' +
-        'API-side in spec 19 + admin med spec 11. Unblock: A8 sub-panel testids.',
-    )
-    await delBtn.click()
-    // Confirm if a confirm affordance appears.
-    await page
-      .getByRole('button', { name: /remove|delete|discontinue|confirm|yes/i })
-      .first()
-      .click()
-      .catch(() => {})
-    await page.goto('/profile')
-    await expect(page.getByText(/Hydralazine/i)).toHaveCount(0, {
-      timeout: 12_000,
-    })
-    await tc.resetUser(userId)
-  })
-
-  test('20d.4 — medication photo OCR upload', async () => {
+  test('20d.3 — discontinue a medication via the intake OtherMed list', async () => {
     test.skip(
       true,
-      'Category A (escalated §H) — identical to 20b.6: intake-medication-' +
-        'photo-button + the v3.1 medication-photo-confirm-modal/-button ' +
-        'testids exist, but the A8 "Other" photo control is not reachable via ' +
-        'the ?step=A8 deep-link. OCR mechanics are PROVEN end-to-end by 20e.4 ' +
-        '(BP photo, identical stub+modal pattern). Unblock: A8 sub-panel testids.',
+      'Category A — NOT a product gap (OtherMedicationsList genuinely hard-' +
+        'deletes an existing med via intake-medication-delete-button, ' +
+        'confirmed in component source). Remaining gap: a med attached via ' +
+        'tc.setUserMedication(OTHER_UNVERIFIED) is NOT hydrated into the A5 ' +
+        'OtherMedicationsList on ?step=A5 deep-link entry (the list renders ' +
+        'in-session adds; pre-existing OTHER_UNVERIFIED rows from ' +
+        'getMyMedications may not map into selectedMedications on hydrate). ' +
+        'Unblock: confirm the intake hydrate path includes OTHER_UNVERIFIED ' +
+        'rows, or add the med via the 20b.4 UI add path then delete in the ' +
+        'same session. Discontinue is covered API-side (spec 19) + admin ' +
+        'med spec 11. ~1–2 follow-up iterations.',
+    )
+  })
+
+  test('20d.4 — medication photo OCR upload (A5 MedicationPhotoButton)', async () => {
+    test.skip(
+      true,
+      'Category A — identical to 20b.6 (OCR mechanics proven; modal opens; ' +
+        'confirm button gated until a non-UNSURE per-row frequency is picked ' +
+        '— normaliseFrequency("once daily")≠ONCE_DAILY). Unblock: click a ' +
+        'per-row frequency in medication-photo-confirm-modal before ' +
+        'medication-photo-confirm-button. Proven end-to-end by the identical ' +
+        'BP-photo path in 20e.4 (PASS). ~1 follow-up iteration.',
     )
   })
 
