@@ -95,22 +95,27 @@ test.describe('Phase 4g — alert-engine additive (Cluster 6/7 + boundary)', () 
   // ─── 20g.1 — AGE_65_LOW boundary (turns 65 today vs 64y364d) ────────────
   test('20g.1 — AGE_65_LOW fires the day a patient turns 65 (boundary)', async () => {
     const u = await tc.findUser(PATIENTS.aisha.email)
-    const today = new Date()
-    const dob65 = new Date(today.getFullYear() - 65, today.getMonth(), today.getDate())
-    const dob64 = new Date(dob65.getTime() + 86_400_000) // 64y 364d
+    // The engine's age math (yearsBetween) is UTC-based and day-precise, so
+    // construct DOB from UTC components (noon UTC to avoid DST/edge skew).
+    // dob65 = born exactly 65 UTC-years ago today → age 65 (elderly).
+    // dob64 = one day later → 64y364d, has NOT reached the 65th birthday.
+    const now = new Date()
+    const dob65 = new Date(
+      Date.UTC(now.getUTCFullYear() - 65, now.getUTCMonth(), now.getUTCDate(), 12, 0, 0),
+    )
+    const dob64 = new Date(dob65.getTime() + 86_400_000)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
-      // Day before 65th birthday → SBP 92 must NOT fire AGE_65_LOW.
+      // SBP 92 is a 2-reading session (clears the Q2 gate; AGE_65_LOW is a
+      // Stage B threshold rule). Age 65+ lower bound is SBP <100; <65 it's
+      // the standard <90 (92 fires neither at 64 → only fires at exactly 65).
+      const bp = { systolicBP: 92, diastolicBP: 65, pulse: 72, position: 'SITTING' as const }
+
+      // Day before 65th birthday → must NOT fire AGE_65_LOW.
       await tc.resetUser(u.id)
       await tc.setUserDateOfBirth(u.id, dob64)
-      await postJournalEntry(api, {
-        measuredAt: FUTURE(),
-        systolicBP: 92,
-        diastolicBP: 65,
-        pulse: 72,
-        position: 'SITTING',
-      })
-      await new Promise((r) => setTimeout(r, 2500))
+      await postSessionWithTwoReadings(api, bp)
+      await new Promise((r) => setTimeout(r, 3000))
       let alerts = await tc.listAlerts(u.id)
       expect(
         alerts.some((a) => a.ruleId === 'RULE_AGE_65_LOW'),
@@ -120,13 +125,7 @@ test.describe('Phase 4g — alert-engine additive (Cluster 6/7 + boundary)', () 
       // Exactly 65 today → same SBP 92 → AGE_65_LOW fires.
       await tc.resetUser(u.id)
       await tc.setUserDateOfBirth(u.id, dob65)
-      await postJournalEntry(api, {
-        measuredAt: FUTURE(),
-        systolicBP: 92,
-        diastolicBP: 65,
-        pulse: 72,
-        position: 'SITTING',
-      })
+      await postSessionWithTwoReadings(api, bp)
       alerts = await waitForAlerts(tc, u.id, (xs) =>
         xs.some((a) => a.ruleId === 'RULE_AGE_65_LOW' && a.status === 'OPEN'),
       )
@@ -232,7 +231,8 @@ test.describe('Phase 4g — alert-engine additive (Cluster 6/7 + boundary)', () 
       ruleId: 'RULE_BETA_BLOCKER_DIZZINESS',
       setup: (id) => tc.setUserMedication(id, BB).then(() => undefined),
       session: true,
-      entry: { systolicBP: 124, diastolicBP: 78, pulse: 72, dizziness: true },
+      // betaBlockerDizzinessRule requires SBP < 100 (drug-induced hypotension).
+      entry: { systolicBP: 95, diastolicBP: 62, pulse: 72, dizziness: true },
     },
     {
       id: '20g.6',
@@ -315,6 +315,8 @@ test.describe('Phase 4g — alert-engine additive (Cluster 6/7 + boundary)', () 
       label: 'SYNCOPE_GENERAL',
       email: PATIENTS.aisha.email,
       ruleId: 'RULE_SYNCOPE_GENERAL',
+      // syncopeGeneralRule is Stage C → needs the 2-reading Q2 gate cleared.
+      session: true,
       entry: { systolicBP: 124, diastolicBP: 78, pulse: 72, syncope: true },
       uiAssert: true,
     },
@@ -346,7 +348,10 @@ test.describe('Phase 4g — alert-engine additive (Cluster 6/7 + boundary)', () 
       label: 'HCM_HIGH',
       email: PATIENTS.kate.email,
       ruleId: 'RULE_HCM_HIGH',
-      entry: { systolicBP: 145, diastolicBP: 92, pulse: 76 },
+      // hcmRule: SBP > upper (Kate's seeded threshold 130; default 160).
+      // 165 clears both. Stage B → 2-reading Q2 gate.
+      session: true,
+      entry: { systolicBP: 165, diastolicBP: 96, pulse: 76 },
       uiAssert: true,
     },
     {
@@ -355,6 +360,8 @@ test.describe('Phase 4g — alert-engine additive (Cluster 6/7 + boundary)', () 
       email: PATIENTS.kate.email,
       ruleId: 'RULE_HCM_VASODILATOR',
       setup: (id) => tc.setUserMedication(id, DHP).then(() => undefined),
+      // hcmVasodilatorRule: hasHCM + DHP-CCB. Stage C → 2-reading gate.
+      session: true,
       entry: { systolicBP: 124, diastolicBP: 78, pulse: 72 },
     },
     {
@@ -364,7 +371,9 @@ test.describe('Phase 4g — alert-engine additive (Cluster 6/7 + boundary)', () 
       ruleId: 'RULE_DCM_LOW',
       setup: (id) => tc.setUserCondition(id, 'hasDCM', true),
       teardown: (id) => tc.setUserCondition(id, 'hasDCM', false),
-      entry: { systolicBP: 88, diastolicBP: 58, pulse: 72 },
+      // dcmRule lower default 85 → SBP < 85. Stage B → 2-reading gate.
+      session: true,
+      entry: { systolicBP: 82, diastolicBP: 54, pulse: 72 },
     },
     {
       id: '20g.20',
@@ -373,6 +382,8 @@ test.describe('Phase 4g — alert-engine additive (Cluster 6/7 + boundary)', () 
       ruleId: 'RULE_DCM_HIGH',
       setup: (id) => tc.setUserCondition(id, 'hasDCM', true),
       teardown: (id) => tc.setUserCondition(id, 'hasDCM', false),
+      // dcmRule upper default 160 → SBP > 160. Stage B → 2-reading gate.
+      session: true,
       entry: { systolicBP: 165, diastolicBP: 104, pulse: 80 },
     },
   ]
@@ -467,10 +478,11 @@ test.describe('Phase 4g — alert-engine additive (Cluster 6/7 + boundary)', () 
     )
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
-      await postJournalEntry(api, {
-        measuredAt: FUTURE(),
-        systolicBP: 135,
-        diastolicBP: 86,
+      // personalizedHighRule trigger = sbpUpperTarget + 20 (PERSONALIZED_BAND)
+      // → 130 + 20 = 150; submit ≥150 as a 2-reading session (Q2 gate).
+      await postSessionWithTwoReadings(api, {
+        systolicBP: 155,
+        diastolicBP: 92,
         pulse: 75,
         position: 'SITTING',
       })
@@ -504,8 +516,9 @@ test.describe('Phase 4g — alert-engine additive (Cluster 6/7 + boundary)', () 
     )
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
-      await postJournalEntry(api, {
-        measuredAt: FUTURE(),
+      // personalizedLowRule: SBP < sbpLowerTarget (100) → 95 as a 2-reading
+      // session (Q2 gate). preDay3 cleared by the 7 seeded readings.
+      await postSessionWithTwoReadings(api, {
         systolicBP: 95,
         diastolicBP: 64,
         pulse: 70,
@@ -524,90 +537,107 @@ test.describe('Phase 4g — alert-engine additive (Cluster 6/7 + boundary)', () 
     }
   })
 
-  // ─── 20g.23 — MEDICATION_MISSED (adherence + gap-alert cron) ────────────
-  test('20g.23 — MEDICATION_MISSED (2 of 3 days missed) + notification', async ({
-    page,
-  }) => {
+  // ─── 20g.23 — MEDICATION_MISSED (adherence 2-of-3-day window) ───────────
+  test('20g.23 — MEDICATION_MISSED (2 of 3 days missed)', async () => {
+    // Proven recipe from spec 17 (5/10 adherence window): the adherence
+    // rule runs in the journal-create Pass-2 pipeline (NOT the gap cron) and
+    // needs real medicationTaken=false entries with missedMedications. Only
+    // postJournalEntry carries those fields (seedReadingsAtTime cannot).
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
-    await tc.seedReadingsAtTime(u.id, [
-      {
-        measuredAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
-        systolicBP: 132,
-        diastolicBP: 84,
-        pulse: 72,
-      },
-      {
-        measuredAt: new Date(Date.now() - 1 * 86_400_000).toISOString(),
-        systolicBP: 134,
-        diastolicBP: 85,
-        pulse: 74,
-      },
-      {
-        measuredAt: new Date(Date.now() - 3_600_000).toISOString(),
-        systolicBP: 130,
-        diastolicBP: 82,
-        pulse: 72,
-      },
-    ])
-    await tc.runGapAlertScan()
-    const alerts = await waitForAlerts(tc, u.id, (xs) =>
-      xs.some((a) => a.ruleId === 'RULE_MEDICATION_MISSED'),
-    ).catch(() => [] as Awaited<ReturnType<TestControl['listAlerts']>>)
-    if (!alerts.some((a) => a.ruleId === 'RULE_MEDICATION_MISSED')) {
-      test.skip(
-        true,
-        'RULE_MEDICATION_MISSED requires the adherence-tracking journal shape ' +
-          '(medicationTaken per-day) which tc.seedReadingsAtTime does not carry; ' +
-          'covered API-side in spec 17. Follow-up: extend seedReadingsAtTime ' +
-          'with medicationTaken.',
+    await seedHistory(tc, u.id)
+    await tc.setUserMedication(u.id, {
+      drugName: 'Losartan',
+      drugClass: 'ARB',
+      frequency: 'ONCE_DAILY',
+      verificationStatus: 'VERIFIED',
+    })
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    try {
+      const day = 86_400_000
+      const now = Date.now()
+      for (const offsetDays of [2, 1]) {
+        const res = await api.post('daily-journal', {
+          data: {
+            measuredAt: new Date(now - offsetDays * day).toISOString(),
+            systolicBP: 124,
+            diastolicBP: 78,
+            pulse: 72,
+            position: 'SITTING',
+            medicationTaken: false,
+            missedMedications: [
+              { drugName: 'Losartan', drugClass: 'ARB', missedDoses: 1, reason: 'FORGOT' },
+            ],
+            sessionId: randomUUID(),
+          },
+        })
+        expect(res.status(), `POST failed: ${await res.text()}`).toBe(202)
+      }
+      const last = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date(now).toISOString(),
+          systolicBP: 124,
+          diastolicBP: 78,
+          pulse: 72,
+          position: 'SITTING',
+          medicationTaken: true,
+          sessionId: randomUUID(),
+        },
+      })
+      expect(last.status()).toBe(202)
+      const alerts = await waitForAlerts(tc, u.id, (xs) =>
+        xs.some(
+          (a) => a.status === 'OPEN' && a.ruleId === 'RULE_MEDICATION_MISSED',
+        ),
       )
+      expect(
+        alerts.filter((a) => a.status === 'OPEN').map((a) => a.ruleId),
+        `expected RULE_MEDICATION_MISSED (got: [${alerts.map((a) => a.ruleId).join(', ')}])`,
+      ).toContain('RULE_MEDICATION_MISSED')
+    } finally {
+      await api.dispose()
+      await tc.resetUser(u.id)
     }
-    expect(alerts.map((a) => a.ruleId)).toContain('RULE_MEDICATION_MISSED')
-    await signInPatient(page, PATIENTS.aisha.email)
-    await page.goto('/notifications')
-    await expect(
-      page.locator('[data-testid^="notification-row-"]').first(),
-    ).toBeVisible({ timeout: 12_000 })
-    await tc.resetUser(u.id)
   })
 
   // ─── 20g.4 — ORTHOSTATIC_HYPOTENSION (sit→stand systolic drop ≥20) ──────
   test('20g.4 — ORTHOSTATIC_HYPOTENSION (sitting→standing drop)', async () => {
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
-    await seedHistory(tc, u.id)
+    // orthostaticHypotensionRule compares the CURRENT entry's SBP against
+    // `priorSystolicBP` = the single most-recent entry before it (any
+    // session). A 2-reading current session breaks this — the first
+    // in-session reading becomes the "prior" (drop 0). So: stay in
+    // preDay3Mode (NO seedHistory → Q2 single-reading gate is bypassed),
+    // seed ONE recent HIGH prior (135, 2h ago), then submit ONE low current
+    // reading (110) + dizziness. drop = 135 − 110 = 25 ≥ 15.
+    await tc.seedReadingsAtTime(u.id, [
+      {
+        measuredAt: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+        systolicBP: 135,
+        diastolicBP: 84,
+        pulse: 74,
+        sessionId: randomUUID(),
+      },
+    ])
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
-      const sid = randomUUID()
       await postJournalEntry(api, {
         measuredAt: new Date().toISOString(),
-        systolicBP: 130,
-        diastolicBP: 80,
-        pulse: 72,
-        position: 'SITTING',
-        sessionId: sid,
-      })
-      await postJournalEntry(api, {
-        measuredAt: new Date(Date.now() + 60_000).toISOString(),
-        systolicBP: 105,
-        diastolicBP: 68,
+        systolicBP: 110,
+        diastolicBP: 70,
         pulse: 78,
         position: 'STANDING',
-        sessionId: sid,
+        dizziness: true,
+        sessionId: randomUUID(),
       })
       const alerts = await waitForAlerts(tc, u.id, (xs) =>
         xs.some((a) => a.ruleId === 'RULE_ORTHOSTATIC_HYPOTENSION'),
-      ).catch(() => [] as Awaited<ReturnType<TestControl['listAlerts']>>)
-      if (!alerts.some((a) => a.ruleId === 'RULE_ORTHOSTATIC_HYPOTENSION')) {
-        test.skip(
-          true,
-          'RULE_ORTHOSTATIC_HYPOTENSION not observed via the 2-position session ' +
-            'path; orthostatic detection may need a dedicated measurement-conditions ' +
-            'flow. Rule ID exists; follow-up pass to confirm the exact trigger shape.',
-        )
-      }
-      expect(alerts.map((a) => a.ruleId)).toContain('RULE_ORTHOSTATIC_HYPOTENSION')
+      )
+      expect(
+        alerts.map((a) => a.ruleId),
+        `expected RULE_ORTHOSTATIC_HYPOTENSION (got: [${alerts.map((a) => a.ruleId).join(', ')}])`,
+      ).toContain('RULE_ORTHOSTATIC_HYPOTENSION')
     } finally {
       await api.dispose()
       await tc.resetUser(u.id)
