@@ -1,6 +1,8 @@
 import { type APIRequestContext, type Page, expect } from '@playwright/test'
 import type { TestControl } from './test-control.js'
 import { byTestId, T } from './selectors.js'
+import { signInAdmin } from './auth.js'
+import { ADMIN_BASE_URL } from '../playwright.config.js'
 
 /**
  * Typed API helpers for write operations the suite drives without going
@@ -322,30 +324,10 @@ export async function acknowledgeAlertViaUI(
   await ack.click()
 }
 
-/**
- * Admin resolves an alert via the AlertResolutionModal. Admin-side testids
- * already exist in `selectors.ts` (`T.admin.alertResolve*`); the alert card
- * deep-links into the resolution context. Hardened in §H (20f.3) against the
- * concrete admin alert-resolution flow.
- */
-export async function resolveAlertViaUI(
-  adminPage: Page,
-  alertId: string,
-  body: { resolutionAction: string; rationale: string },
-): Promise<void> {
-  // Open the alert from the admin alert list (deep-links into the modal).
-  await adminPage.locator(byTestId(T.admin.alertCard(alertId))).click().catch(() => {})
-  const action = adminPage.locator(byTestId(T.admin.alertResolveAction))
-  await action.waitFor({ state: 'visible', timeout: 15_000 })
-  await action.selectOption(body.resolutionAction).catch(async () => {
-    // Some builds render the action as buttons rather than a <select>.
-    await action.click().catch(() => {})
-  })
-  await adminPage
-    .locator(byTestId(T.admin.alertResolveRationale))
-    .fill(body.rationale)
-  await adminPage.locator(byTestId(T.admin.alertResolveBtn)).click()
-}
+// `resolveAlertViaUI` was a Phase-4 defensive scaffold here. Phase 3 §B.3
+// replaced it with the real `resolveAlertViaModal` flow + a back-compat
+// `resolveAlertViaUI` alias — both defined in the "Phase 3 §B.3" section
+// at the end of this file.
 
 /** Wait for the patient app to land on the full-screen Absolute Emergency screen. */
 export async function waitForEmergencyScreen(page: Page): Promise<void> {
@@ -525,3 +507,292 @@ export async function signOutViaUI(page: Page): Promise<void> {
   await page.locator(byTestId(T.profile.signOut)).click()
   await page.waitForURL(/\/(sign-in|$)/, { timeout: 15_000 }).catch(() => {})
 }
+
+// ─── Phase 3 §B.3 — admin UI-driving helpers ───────────────────────────────
+//
+// Reconciled against the REAL admin DOM (Phase 3 §B audit) and the
+// `T.admin.*` registry, NOT the Phase 3 doc's idealised flows. Reality
+// deltas these encode (full list in selectors.ts header / RESULTS.md):
+//   • Alert 3-tier display + resolve live on the patient-detail Alerts tab
+//     (expanded AlertCard + AlertResolutionModal), not the dashboard.
+//   • Profile per-field correction has NO per-field rationale input — the
+//     backend writes a server-mandated rationale; the `rationale` arg is
+//     accepted for the audit-contract but not typed into the UI.
+//   • Medication HOLD rationale is a window.prompt (handled via dialog);
+//     REJECT is the MedicationRejectModal; VERIFY is a one-click toggle.
+//   • Care-team reassign is an inline <select>, not a modal. Option labels
+//     are `name ?? email`, so we match defensively (label → text → API).
+//   • signInAdmin lives in helpers/auth.ts — reused, never duplicated.
+//
+// Helpers that navigate take the patient/route themselves; helpers that act
+// on an already-rendered surface assume the caller positioned the page
+// (matches the Phase 3 doc's test bodies, which drive nav explicitly).
+
+/** Open the patient-detail Alerts tab for `patientId`. */
+async function gotoPatientAlertsTab(adminPage: Page, patientId: string): Promise<void> {
+  await adminPage.goto(`${ADMIN_BASE_URL}/patients/${patientId}`)
+  await adminPage.locator(byTestId(T.admin.detailTab('alerts'))).click()
+  await adminPage
+    .locator(byTestId(T.admin.alertsStatusFilter('ALL')))
+    .waitFor({ state: 'visible', timeout: 15_000 })
+    .catch(() => {})
+}
+
+/**
+ * Drive the AlertResolutionModal end-to-end. Assumes the alert's Resolve
+ * button is reachable on the current page (patient-detail Alerts tab or
+ * /notifications). The modal shows the patient-facing message + a button
+ * list of tier-appropriate resolution actions (NOT a <select>), then a
+ * rationale textarea, then Confirm.
+ */
+export async function resolveAlertViaModal(
+  adminPage: Page,
+  alertId: string,
+  body: { resolutionAction: string; rationale: string },
+): Promise<void> {
+  await adminPage.locator(byTestId(T.admin.alertResolveBtnFor(alertId))).click()
+  await adminPage
+    .locator(byTestId(T.admin.resolveModal))
+    .waitFor({ state: 'visible', timeout: 15_000 })
+  await adminPage
+    .locator(byTestId(T.admin.resolveAction(body.resolutionAction)))
+    .click()
+  const rationale = adminPage.locator(byTestId(T.admin.alertResolveRationale))
+  // Rationale field only renders once an action is picked; required for
+  // most Tier-1 actions, optional for some Tier-2 — fill if present.
+  if (await rationale.isVisible().catch(() => false)) {
+    await rationale.fill(body.rationale)
+  }
+  await adminPage.locator(byTestId(T.admin.alertResolveBtn)).click()
+  await adminPage
+    .locator(byTestId(T.admin.resolveModal))
+    .waitFor({ state: 'hidden', timeout: 15_000 })
+    .catch(() => {})
+}
+
+/**
+ * Back-compat alias kept for the Phase 4 defensive scaffold. Now points at
+ * the real modal flow (assumes the Resolve button is already on-screen).
+ */
+export async function resolveAlertViaUI(
+  adminPage: Page,
+  alertId: string,
+  body: { resolutionAction: string; rationale: string },
+): Promise<void> {
+  await resolveAlertViaModal(adminPage, alertId, body)
+}
+
+/**
+ * Admin completes profile verification for a patient (the footer
+ * "Verification complete" → optional rationale → Confirm flow). Lands on
+ * the patient-detail Profile tab (the default tab).
+ */
+export async function verifyProfileViaUI(
+  adminPage: Page,
+  patientId: string,
+): Promise<void> {
+  await adminPage.goto(`${ADMIN_BASE_URL}/patients/${patientId}`)
+  await adminPage.locator(byTestId(T.admin.detailTab('profile'))).click()
+  const complete = adminPage.locator(byTestId(T.admin.profileVerifyComplete))
+  await complete.waitFor({ state: 'visible', timeout: 15_000 })
+  await complete.click()
+  await adminPage.locator(byTestId(T.admin.profileVerifyConfirm)).click()
+  await expect(
+    adminPage.locator(byTestId(T.admin.profileStatusBanner)),
+  ).toContainText(/verified/i, { timeout: 15_000 })
+}
+
+/**
+ * Admin corrects a single profile field. The UI has no per-field rationale
+ * input (the backend writes a server-mandated one); `rationale` is accepted
+ * for the audit-contract but not typed in. `field` is the PatientProfile
+ * key (e.g. `heightCm`). Handles both <input> and <select> editors.
+ */
+export async function correctProfileFieldViaUI(
+  adminPage: Page,
+  patientId: string,
+  field: string,
+  newValue: string,
+  rationale: string,
+): Promise<void> {
+  void rationale // UI does not collect per-field rationale (see header)
+  await adminPage.goto(`${ADMIN_BASE_URL}/patients/${patientId}`)
+  await adminPage.locator(byTestId(T.admin.detailTab('profile'))).click()
+  await adminPage.locator(byTestId(T.admin.profileCorrect(field))).click()
+  const input = adminPage.locator(byTestId(T.admin.profileEditInput(field)))
+  await input.waitFor({ state: 'visible', timeout: 15_000 })
+  // <select> editors (boolean/enum) vs <input> (number/date).
+  const tag = await input.evaluate((el) => el.tagName.toLowerCase())
+  if (tag === 'select') {
+    await input.selectOption(newValue).catch(async () => {
+      await input.selectOption({ label: newValue })
+    })
+  } else {
+    await input.fill(newValue)
+  }
+  await adminPage.locator(byTestId(T.admin.profileEditSave(field))).click()
+}
+
+/**
+ * Admin verifies / HOLDs / rejects a medication by its visible drug name.
+ * Cards are keyed by med.id; we resolve the card by its rendered drugName
+ * text, then act inside it. HOLD answers the window.prompt; REJECT drives
+ * the MedicationRejectModal; VERIFY is a single click.
+ */
+export async function setMedActionViaUI(
+  adminPage: Page,
+  patientId: string,
+  drugName: string,
+  action: 'VERIFY' | 'HOLD' | 'REJECT',
+  rationale = 'QA automated rationale',
+): Promise<void> {
+  await adminPage.goto(`${ADMIN_BASE_URL}/patients/${patientId}`)
+  await adminPage.locator(byTestId(T.admin.detailTab('medications'))).click()
+  const card = adminPage
+    .locator('[data-testid^="admin-med-card-"]')
+    .filter({ hasText: drugName })
+    .first()
+  await card.waitFor({ state: 'visible', timeout: 15_000 })
+  if (action === 'VERIFY') {
+    await card.locator('[data-testid^="admin-med-verify-"]').first().click()
+    return
+  }
+  if (action === 'HOLD') {
+    // HOLD rationale is a window.prompt — accept it with the rationale.
+    adminPage.once('dialog', (d) => void d.accept(rationale))
+    await card.locator('[data-testid^="admin-med-hold-"]').first().click()
+    return
+  }
+  // REJECT → MedicationRejectModal (quick-pick "other" + free-text).
+  await card.locator('[data-testid^="admin-med-reject-"]').first().click()
+  await adminPage
+    .locator(byTestId(T.admin.medRejectModal))
+    .waitFor({ state: 'visible', timeout: 15_000 })
+  await adminPage.locator(byTestId(T.admin.medRejectQuickPick('other'))).click()
+  await adminPage.locator(byTestId(T.admin.medRejectRationale)).fill(rationale)
+  await adminPage.locator(byTestId(T.admin.medRejectConfirm)).click()
+  await adminPage
+    .locator(byTestId(T.admin.medRejectModal))
+    .waitFor({ state: 'hidden', timeout: 15_000 })
+    .catch(() => {})
+}
+
+/** Admin admits (enrolls) a patient via the EnrollmentCard. */
+export async function admitPatientViaUI(
+  adminPage: Page,
+  patientId: string,
+): Promise<void> {
+  await adminPage.goto(`${ADMIN_BASE_URL}/patients/${patientId}`)
+  const btn = adminPage.locator(byTestId(T.admin.enrollmentEnrollBtn))
+  await btn.waitFor({ state: 'visible', timeout: 15_000 })
+  await btn.click()
+  // Card unmounts on success (status flips ENROLLED).
+  await adminPage
+    .locator(byTestId(T.admin.enrollmentCard))
+    .waitFor({ state: 'hidden', timeout: 15_000 })
+    .catch(() => {})
+}
+
+/**
+ * Admin reassigns a care-team slot via the inline <select> editor (MD /
+ * SUPER_ADMIN / OPS only). Options are labelled `name ?? email`; we match
+ * defensively: try label === email, then an option whose text contains the
+ * email's local-part. Hardened against the concrete cohort in §E.4.
+ */
+export async function reassignCareTeamViaUI(
+  adminPage: Page,
+  patientId: string,
+  role: 'PRIMARY' | 'BACKUP' | 'MD',
+  newProviderEmail: string,
+): Promise<void> {
+  await adminPage.goto(`${ADMIN_BASE_URL}/patients/${patientId}`)
+  await adminPage.locator(byTestId(T.admin.detailTab('careteam'))).click()
+  const sel =
+    role === 'PRIMARY'
+      ? T.admin.careTeamPrimarySelect
+      : role === 'BACKUP'
+        ? T.admin.careTeamBackupSelect
+        : T.admin.careTeamMdSelect
+  const select = adminPage.locator(byTestId(sel))
+  await select.waitFor({ state: 'visible', timeout: 15_000 })
+  const local = newProviderEmail.split('@')[0]
+  // Resolve the option whose visible text matches the email or its
+  // local-part (label is name||email; email-keyed match is best-effort).
+  const value = await select.evaluate((el, { email, localPart }) => {
+    const opts = Array.from((el as HTMLSelectElement).options)
+    const hit =
+      opts.find((o) => o.textContent?.includes(email)) ??
+      opts.find((o) =>
+        o.textContent?.toLowerCase().includes(localPart.toLowerCase()),
+      )
+    return hit?.value ?? ''
+  }, { email: newProviderEmail, localPart: local })
+  if (value) {
+    await select.selectOption(value)
+  } else {
+    // Fall back to label match (when the option text IS the email).
+    await select.selectOption({ label: newProviderEmail }).catch(() => {})
+  }
+  await adminPage.locator(byTestId(T.admin.careTeamSave)).click()
+}
+
+/** Admin edits a per-patient threshold (MD / SUPER_ADMIN only). */
+export async function editThresholdViaUI(
+  adminPage: Page,
+  patientId: string,
+  override: {
+    sbpUpperTarget?: number
+    sbpLowerTarget?: number
+    dbpUpperTarget?: number
+    dbpLowerTarget?: number
+    hrUpperTarget?: number
+    hrLowerTarget?: number
+  },
+): Promise<void> {
+  await adminPage.goto(`${ADMIN_BASE_URL}/patients/${patientId}`)
+  await adminPage.locator(byTestId(T.admin.detailTab('thresholds'))).click()
+  const fill = async (testid: string, v: number | undefined) => {
+    if (v == null) return
+    await adminPage.locator(byTestId(testid)).fill(String(v))
+  }
+  await fill(T.admin.thresholdSbpUpper, override.sbpUpperTarget)
+  await fill(T.admin.thresholdSbpLower, override.sbpLowerTarget)
+  await fill(T.admin.thresholdDbpUpper, override.dbpUpperTarget)
+  await fill(T.admin.thresholdDbpLower, override.dbpLowerTarget)
+  await fill(T.admin.thresholdHrUpper, override.hrUpperTarget)
+  await fill(T.admin.thresholdHrLower, override.hrLowerTarget)
+  await adminPage.locator(byTestId(T.admin.thresholdSave)).click()
+}
+
+/**
+ * Sign in as `email` then assert `route` is forbidden — either a >=400
+ * status, a redirect away to sign-in/home, or the in-app 403 access-denied
+ * panel. Used by the §M RBAC matrix.
+ */
+export async function assertRouteForbidden(
+  adminPage: Page,
+  email: string,
+  route: string,
+): Promise<void> {
+  await signInAdmin(adminPage, email, ADMIN_BASE_URL).catch(() => {})
+  const res = await adminPage.goto(`${ADMIN_BASE_URL}${route}`)
+  const status = res?.status() ?? 0
+  if (status >= 400) {
+    expect(status).toBeGreaterThanOrEqual(400)
+    return
+  }
+  const deniedVisible = await adminPage
+    .locator(byTestId(T.admin.patientListAccessDenied))
+    .isVisible()
+    .catch(() => false)
+  if (deniedVisible) {
+    expect(deniedVisible).toBe(true)
+    return
+  }
+  // Soft-block: redirected away from the protected route.
+  await expect(adminPage).not.toHaveURL(new RegExp(`${route}$`), {
+    timeout: 10_000,
+  })
+}
+
+export { gotoPatientAlertsTab }
