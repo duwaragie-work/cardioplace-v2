@@ -3,6 +3,7 @@ import { signInPatient, authedApi } from '../helpers/auth.js'
 import { PATIENTS } from '../helpers/accounts.js'
 import { byTestId, T } from '../helpers/selectors.js'
 import { postJournalEntry } from '../helpers/api.js'
+import { newTestControl, type TestControl } from '../helpers/test-control.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
 /**
@@ -120,5 +121,79 @@ test.describe('/notifications — alerts vs notifications tabs', () => {
         `concatenation regression: "${text}"`,
       ).toMatch(/\d{1,2}[\s,]+\d{1,2}:\d{2}/)
     }
+  })
+})
+
+// ─── Phase 4h (§J) — notifications inbox + mark-read + deep-link ───────────
+test.describe('Phase 4h — notifications (20h)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated by RUN_WRITE_TESTS=1')
+  test.describe.configure({ retries: 1 })
+
+  let tc: TestControl
+  test.beforeAll(async () => {
+    tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+  })
+  test.afterAll(async () => {
+    await tc?.dispose()
+  })
+
+  test('20h.1 — notifications inbox round-trips seeded notifications', async ({
+    page,
+  }) => {
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    await tc.seedNotifications(u.id, 3, 'DASHBOARD')
+    // State sanity: the seed persisted (3 notifications for the user).
+    const seeded = await tc.listNotifications(u.id)
+    expect(seeded.length, 'seeded notifications persisted').toBeGreaterThanOrEqual(3)
+    // UI: the notifications surface loads for the patient.
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/notifications')
+    await expect(
+      page
+        .locator(byTestId(T.notifications.tabNotifications))
+        .or(page.getByRole('tab', { name: /notifications/i }))
+        .first(),
+    ).toBeVisible({ timeout: 12_000 })
+    // NOTE: raw tc.seedNotifications rows (no escalationEventId / alertId)
+    // do not fan out into NotifCards on the Notifications tab — that list is
+    // driven by the escalation→notification pipeline. The NotifCard render
+    // path is exercised by the alert deep-link (20h.3) + the existing
+    // /notifications tab tests above. Seeded-row UI rendering needs the real
+    // fan-out path (follow-up: seed via an escalation event).
+    await tc.resetUser(u.id)
+  })
+
+  test('20h.2 — mark a notification as read', async () => {
+    test.skip(
+      true,
+      'Raw tc.seedNotifications rows do not render as interactive NotifCards ' +
+        '(the Notifications tab is fed by the escalation→notification fan-out, ' +
+        'not standalone Notification rows). Mark-read UX needs a fanned-out ' +
+        'notification; covered indirectly by the alert ack flow (20f.2) + the ' +
+        'existing spec 06 notifications-tab tests. Follow-up: seed via an ' +
+        'escalation event so notification-mark-read-button-{id} is present.',
+    )
+  })
+
+  test('20h.3 — alert card deep-links to /alerts/[id]', async ({ page }) => {
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    const { alertIds } = await tc.seedAlerts(u.id, [
+      { tier: 'BP_LEVEL_1_HIGH', status: 'OPEN' },
+    ])
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/notifications')
+    // Alerts tab (default) → the seeded alert's "View details" deep-link.
+    const link = page.locator(`[data-testid="notification-link-${alertIds[0]}"]`)
+    await link.waitFor({ state: 'visible', timeout: 12_000 })
+    await link.click()
+    await page.waitForURL(new RegExp(`/alerts/${alertIds[0]}`), {
+      timeout: 12_000,
+    })
+    await expect(
+      page.locator('[data-testid="alert-message-patient"]'),
+    ).toBeVisible({ timeout: 12_000 })
+    await tc.resetUser(u.id)
   })
 })
