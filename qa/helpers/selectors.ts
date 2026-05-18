@@ -212,6 +212,18 @@ export const T = {
     userMessage: 'user-message',
   },
 
+  // ─── Patient: voice chat (Phase 4 v3.1 §B) ──────────────────────────────
+  // Voice is hosted INLINE in AIChatInterface via useVoiceSession (socket.io
+  // transport, namespace /voice). The standalone VoiceChat.tsx is legacy/
+  // unused on /chat. Mic toggle enters voice; the voice-active bar shows
+  // session state; transcript renders as chat-message-{ai,patient} bubbles.
+  voice: {
+    micButton: 'voice-mic-button',
+    activeBar: 'voice-active-bar',
+    stateLabel: 'voice-state-label',
+    endButton: 'voice-end-button',
+  },
+
   // ─── Patient: profile ───────────────────────────────────────────────────
   profile: {
     name: 'profile-name',

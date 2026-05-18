@@ -501,6 +501,8 @@ function VoiceCallBar({
 
   return (
     <motion.div
+      data-testid="voice-active-bar"
+      data-voice-state={state}
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
@@ -519,7 +521,11 @@ function VoiceCallBar({
         <span className="text-[12px] font-semibold" style={{ color: 'var(--brand-primary-purple)' }}>
           {t('chat.voiceMode')}
         </span>
-        <span className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
+        <span
+          data-testid="voice-state-label"
+          className="text-[12px]"
+          style={{ color: 'var(--brand-text-muted)' }}
+        >
           · {stateLabel[state] ?? state}
         </span>
       </div>
@@ -529,6 +535,7 @@ function VoiceCallBar({
           <span>{t('chat.emergencyCall')}</span>
         </div>
         <button
+          data-testid="voice-end-button"
           onClick={onStop}
           className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-semibold transition hover:opacity-80"
           style={{ backgroundColor: '#ef4444', color: 'white' }}
@@ -1929,6 +1936,7 @@ export default function AIChatInterface() {
                 - amber-outline + warning title: prewarm failed, click to retry
                 - purple: idle / ready */}
             <motion.button
+              data-testid="voice-mic-button"
               onClick={() => void handleMicClick()}
               disabled={!token || isSending}
               className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition disabled:opacity-40"
