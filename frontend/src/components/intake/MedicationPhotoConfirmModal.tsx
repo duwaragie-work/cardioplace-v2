@@ -180,6 +180,7 @@ export default function MedicationPhotoConfirmModal({
         onClick={onCancel}
       />
       <motion.div
+        data-testid="medication-photo-confirm-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="med-confirm-title"
@@ -281,6 +282,7 @@ export default function MedicationPhotoConfirmModal({
         >
           <button
             type="button"
+            data-testid="medication-photo-confirm-button"
             onClick={handleConfirm}
             disabled={actionableCount === 0}
             className="flex-1 h-11 rounded-xl font-bold text-white cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--brand-primary-purple)] disabled:opacity-50 disabled:cursor-not-allowed"
