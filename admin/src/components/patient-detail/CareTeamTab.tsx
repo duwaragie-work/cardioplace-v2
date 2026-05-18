@@ -277,6 +277,7 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
         {/* Three provider slots */}
         <ProviderSlot
           label="Primary provider"
+          testId="admin-careteam-primary-select"
           icon={<Stethoscope className="w-2.5 h-2.5" />}
           accent="var(--brand-primary-purple)"
           options={providerOrMdPool}
@@ -290,6 +291,7 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
         />
         <ProviderSlot
           label="Backup provider"
+          testId="admin-careteam-backup-select"
           icon={<UserCheck className="w-2.5 h-2.5" />}
           accent="var(--brand-accent-teal)"
           options={providerOrMdPool}
@@ -303,6 +305,7 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
         />
         <ProviderSlot
           label="Medical director"
+          testId="admin-careteam-md-select"
           icon={<ShieldCheck className="w-2.5 h-2.5" />}
           accent="var(--brand-warning-amber)"
           options={medicalDirectors}
