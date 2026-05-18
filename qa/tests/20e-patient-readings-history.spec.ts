@@ -114,25 +114,88 @@ test.describe('Phase 4e — readings history + delete + OCR (20e)', () => {
   })
 
   test('20e.4 — BP photo OCR pre-fills the check-in form', async ({ page }) => {
-    test.skip(
-      !process.env.NEXT_PUBLIC_BP_OCR_ENABLED,
-      'BpPhotoButton renders only when NEXT_PUBLIC_BP_OCR_ENABLED=true; the ' +
-        'OCR backend route is not stubbable end-to-end in this env. ' +
-        'check-in-bp-photo-button presence is verified in the §B DOM spot-check.',
-    )
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    // Stub the real OCR backend route (ocr.service.ts → /api/v2/ocr/bp);
+    // BpOcrSuccess = { sbp, dbp, pulse }.
+    await page.route('**/api/v2/ocr/bp', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ sbp: 138, dbp: 88, pulse: 72 }),
+      })
+    })
     await signInPatient(page, PATIENTS.aisha.email)
     await page.goto('/check-in')
+    await page.waitForLoadState('networkidle').catch(() => {})
+    // Walk B1 checklist → B2 reading step where BpPhotoButton renders.
+    const photoBtn = page.locator('[data-testid="check-in-bp-photo-button"]')
+    for (let i = 0; i < 6; i++) {
+      if (await photoBtn.isVisible().catch(() => false)) break
+      const next = page.locator('[data-testid="checkin-next-btn"]')
+      if (await next.isVisible().catch(() => false)) {
+        await next.click().catch(() => {})
+        // Framer-motion step transition — give it time to settle.
+        await page.waitForTimeout(800)
+      } else break
+    }
+    await expect(photoBtn).toBeVisible({ timeout: 10_000 })
+    // Set the hidden file input (BpPhotoButton). A 1px JPEG is enough — the
+    // OCR response is stubbed.
+    await page
+      .locator('input[type="file"]')
+      .first()
+      .setInputFiles({
+        name: 'cuff.jpg',
+        mimeType: 'image/jpeg',
+        buffer: Buffer.from(
+          '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==',
+          'base64',
+        ),
+      })
     await expect(
-      page.locator('[data-testid="check-in-bp-photo-button"]'),
-    ).toBeVisible({ timeout: 10_000 })
+      page.locator('[data-testid="bp-photo-confirm-modal"]'),
+    ).toBeVisible({ timeout: 12_000 })
+    await page.locator('[data-testid="bp-photo-confirm-button"]').click()
+    // OCR values pre-fill the real BP inputs (checkin-systolic/-diastolic
+    // are the inputs; check-in-systolic is the §B.4 wrapper).
+    await expect(page.locator('[data-testid="checkin-systolic"]')).toHaveValue(
+      '138',
+      { timeout: 10_000 },
+    )
+    await expect(page.locator('[data-testid="checkin-diastolic"]')).toHaveValue(
+      '88',
+    )
+    await tc.resetUser(u.id)
   })
 
-  test('20e.5 — reading list sort / pagination', async () => {
-    test.skip(
-      true,
-      'Readings page is a flat date-grouped card list (no sort control / ' +
-        'pagination implemented in v2). Nothing to assert — documented per ' +
-        'the codebase skip convention.',
+  test('20e.5 — readings list renders 10 seeded readings newest-first', async ({
+    page,
+  }) => {
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    await tc.seedReadingsAtTime(
+      u.id,
+      Array.from({ length: 10 }).map((_, i) => ({
+        // i=0 → 10 days ago (SBP 120); i=9 → 1 day ago (SBP 129)
+        measuredAt: new Date(Date.now() - (10 - i) * 86_400_000).toISOString(),
+        systolicBP: 120 + i,
+        diastolicBP: 80 + (i % 3),
+        pulse: 70 + (i % 5),
+        sessionId: randomUUID(),
+      })),
     )
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/readings')
+    await expect(
+      page.locator('[data-testid="readings-table"]'),
+    ).toBeVisible({ timeout: 12_000 })
+    const rows = page.locator('[data-testid^="readings-row-"]')
+    await expect(rows.first()).toBeVisible({ timeout: 12_000 })
+    await expect(rows).toHaveCount(10, { timeout: 12_000 })
+    // Newest-first: the first card shows the most recent reading (SBP 129,
+    // 1 day ago); the last shows the oldest (SBP 120, 10 days ago).
+    await expect(rows.first()).toContainText('129')
+    await expect(rows.last()).toContainText('120')
   })
 })
