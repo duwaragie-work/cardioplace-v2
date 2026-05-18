@@ -3,6 +3,11 @@ import { byTestId, T } from '../helpers/selectors.js'
 import { PATIENTS } from '../helpers/accounts.js'
 import { signInPatient } from '../helpers/auth.js'
 import { newTestControl, type TestControl } from '../helpers/test-control.js'
+import {
+  uploadMedPhotoViaUI,
+  confirmOcrMedsViaUI,
+  advanceIntakeToDashboard,
+} from '../helpers/api.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
 /**
@@ -215,20 +220,37 @@ test.describe('Phase 4b — clinical intake wizard', () => {
     await tc.resetUser(userId)
   })
 
-  test('20b.6 — medication photo OCR upload adds a med row', async () => {
-    test.skip(
-      true,
-      'Category A — OCR mechanics PROVEN: the §B.4/v3.1 testids work, the ' +
-        'route stub fires (ocrHit=true), and MedicationPhotoConfirmModal ' +
-        'opens with medication-photo-confirm-modal + -confirm-button present ' +
-        '(verified by direct probe). Remaining gap: the modal "Add all" ' +
-        'button stays disabled until each extracted row has a NON-UNSURE ' +
-        'frequency picked (rowIntent → noop when frequency===UNSURE; ' +
-        'normaliseFrequency("once daily") is not mapping to ONCE_DAILY). ' +
-        'Unblock: in the test, click a per-row frequency option in the modal ' +
-        'before medication-photo-confirm-button. The identical BP-photo OCR ' +
-        'path passes end-to-end in 20e.4. ~1 follow-up iteration.',
-    )
+  test('20b.6 — medication photo OCR upload adds a med row', async ({
+    page,
+  }) => {
+    // OCR upload + confirm modal + full A5→A11 wizard walk + /profile
+    // assertion runs past the 30s default; give it room.
+    test.setTimeout(60_000)
+    const userId = (await tc.findUser(PATIENTS.aisha.email)).id
+    await tc.resetUser(userId)
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/clinical-intake?step=A5')
+    await page.waitForLoadState('networkidle').catch(() => {})
+    // Hydrochlorothiazide is NOT in Aisha's baseline (Lisinopril +
+    // Amlodipine) → the OCR row classifies as a new `add`, not an
+    // already-listed `noop` that would keep "Add all" disabled.
+    await uploadMedPhotoViaUI(page, {
+      drugName: 'Hydrochlorothiazide',
+      frequency: 'once daily',
+      doseText: '25 mg',
+    })
+    // Picking a non-UNSURE per-row frequency is what flips the gated
+    // confirm button from disabled → enabled.
+    await confirmOcrMedsViaUI(page, ['ONCE_DAILY'])
+    // Walk the rest of the wizard (A8/A6/A9/A10) so the OCR-added row is
+    // carried through the medication PUT-replace on submit. A9-aware so a
+    // hydrated med without a frequency doesn't trap the walk.
+    await advanceIntakeToDashboard(page)
+    await page.goto('/profile')
+    await expect(
+      page.getByText(/Hydrochlorothiazide/i).first(),
+    ).toBeVisible({ timeout: 12_000 })
+    await tc.resetUser(userId)
   })
 
   test('20b.7 — submit returns to dashboard', async ({ page }) => {
