@@ -1538,3 +1538,86 @@ test.describe('Phase 3 §H — alert acknowledgement', () => {
     }
   })
 })
+
+// ───────────────────────────────────────────────────────────────────────────
+// Phase 3 §J — JCAHO audit footer (30j.1, 30j.2)
+//
+// Reality (Phase 3 §B audit): the footer renders ~17 `audit-field-<key>`
+// rows — NOT the doc's idealised 15 with keys rule-id/patient-name/
+// discrepancy-flag/escalation-rungs/dispatched-by-system/patient-message.
+// The REAL keys (EscalationAuditTrail.AlertAuditFooter): alertId, tier,
+// ruleId, severity, mode, status, created, acknowledged, acknowledgedBy,
+// resolved, resolvedBy, resolutionAction, reading, pulsePressure, bmi,
+// triggeringValue, escalationCount (+ conditional resolutionRationale).
+// Footer renders inside the EXPANDED AlertCard for RESOLVED/ACKNOWLEDGED.
+// ───────────────────────────────────────────────────────────────────────────
+const AUDIT_FIELD_KEYS = [
+  'alertId', 'tier', 'ruleId', 'severity', 'mode', 'status', 'created',
+  'acknowledged', 'acknowledgedBy', 'resolved', 'resolvedBy',
+  'resolutionAction', 'reading', 'pulsePressure', 'bmi', 'triggeringValue',
+  'escalationCount',
+] as const
+
+test.describe('Phase 3 §J — JCAHO audit footer', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Phase 3 admin write/e2e gated')
+
+  test('30j.1 — resolved alert renders the full audit footer (real ~17 fields + rationale)', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    const md = await tc.findUser(ADMINS.medicalDirector.email)
+    await tc.resetUser(aisha.id)
+    const { alertIds } = await tc.seedAlerts(aisha.id, [{
+      tier: 'TIER_1_CONTRAINDICATION',
+      status: 'RESOLVED',
+      resolvedBy: md.id,
+      resolutionAction: 'TIER1_FALSE_POSITIVE',
+      resolutionRationale: 'qa: reviewed — no clinical concern',
+    }])
+    const id = alertIds[0]
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    await gotoPatientAlertsTab(page, aisha.id)
+    await page.locator(byTestId(T.admin.alertsStatusFilter('RESOLVED'))).click()
+    await page.locator(byTestId(T.admin.alertExpand(id))).click()
+
+    const footer = page.locator(byTestId(T.admin.auditFooter))
+    await expect(footer).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator(byTestId(T.admin.auditHeader))).toContainText(/resolution audit record/i)
+    for (const key of AUDIT_FIELD_KEYS) {
+      await expect(
+        footer.locator(`[data-testid="audit-field-${key}"]`),
+        `audit field ${key}`,
+      ).toBeVisible()
+    }
+    await expect(page.locator(byTestId(T.admin.auditRationale))).toContainText('no clinical concern')
+    await tc.dispose()
+  })
+
+  test('30j.2 — legacy ack (no recorded actor) renders the "Not recorded" copy', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(aisha.id)
+    // ACKNOWLEDGED with NO acknowledgedByUserId simulates pre-audit-fix
+    // legacy data → acknowledgedBy field reads the explicit "Not recorded".
+    const { alertIds } = await tc.seedAlerts(aisha.id, [{
+      tier: 'BP_LEVEL_1_HIGH',
+      status: 'ACKNOWLEDGED',
+    }])
+    const id = alertIds[0]
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    await gotoPatientAlertsTab(page, aisha.id)
+    await page.locator(byTestId(T.admin.alertsStatusFilter('ACKNOWLEDGED'))).click()
+    await page.locator(byTestId(T.admin.alertExpand(id))).click()
+
+    const footer = page.locator(byTestId(T.admin.auditFooter))
+    await expect(footer).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator(byTestId(T.admin.auditHeader))).toContainText(/acknowledgment audit record/i)
+    await expect(
+      footer.locator('[data-testid="audit-field-acknowledgedBy"]'),
+    ).toContainText(/not recorded.*audit fix/i)
+    await tc.dispose()
+  })
+})
