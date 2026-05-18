@@ -1282,6 +1282,7 @@ function A8Categories({ state, setState }: StepProps) {
         {categories.map((cat) => (
           <ChoiceCard
             key={cat.key}
+            testId={`intake-cat-tile-${cat.key}`}
             icon={cat.icon}
             title={cat.label}
             selected={activeCategories.has(cat.key)}
@@ -1360,6 +1361,7 @@ function A8Categories({ state, setState }: StepProps) {
                   <div className="flex items-center gap-2">
                     <input
                       id="intake-a8-other"
+                      data-testid="intake-other-med-input"
                       type="text"
                       value={otherText}
                       onChange={(e) => {

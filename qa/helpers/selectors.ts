@@ -54,6 +54,18 @@ export const T = {
     medSaveBtn: 'intake-medication-save-button',
     medDeleteBtn: 'intake-medication-delete-button',
     medPhotoButton: 'intake-medication-photo-button',
+    // Phase 4 v3.1 — A8 medication-catalog category tiles (the OTHER tile
+    // opens the free-text/photo sub-panel) + the A8 free-text input.
+    catTile: (
+      key:
+        | 'WATER_PILL'
+        | 'BLOOD_THINNER'
+        | 'CHOLESTEROL'
+        | 'HEART_RHYTHM'
+        | 'SGLT2'
+        | 'OTHER',
+    ) => `intake-cat-tile-${key}`,
+    otherMedInput: 'intake-other-med-input',
     // A1: gender + height + DOB
     genderRadio: (v: 'MALE' | 'FEMALE' | 'OTHER') => `intake-gender-${v.toLowerCase()}`,
     heightFt: 'intake-height-ft',
