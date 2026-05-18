@@ -4,6 +4,8 @@ import { signInPatient, signInAdmin } from '../helpers/auth.js'
 import { PATIENTS, ADMINS } from '../helpers/accounts.js'
 import { newTestControl, type TestControl } from '../helpers/test-control.js'
 import { ADMIN_BASE_URL, API_BASE_URL } from '../playwright.config.js'
+import { byTestId, T } from '../helpers/selectors.js'
+import { assertRouteForbidden } from '../helpers/api.js'
 
 /**
  * Cross-cutting: accessibility (axe-core), security smoke (no PHI in URLs,
@@ -412,5 +414,108 @@ test.describe('Phase 4m — accessibility (20m)', () => {
       expect(focusInModal).toBe(true)
     }
     await tc.resetUser(u.id)
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// Phase 3 §M — RBAC matrix (30m.1–30m.7; §M.8 cross-practice → §N qa-fixtures)
+//
+// Asserted against the REAL admin/src/lib/roleGates.ts — the Phase 3 doc's
+// role matrix has errors (Category-A, documented in RESULTS.md):
+//   • MEDICAL_DIRECTOR *CAN* manage practices (canManagePractices includes
+//     MED_DIR) — doc said "cannot CRUD practices".
+//   • HEALPLACE_OPS *CAN* resolve alerts (canResolveAlerts includes OPS) —
+//     doc said "cannot ack/resolve". OPS's real limits are: cannot verify
+//     profiles (canVerifyProfile excludes OPS) and cannot edit thresholds
+//     (canEditThresholds = SUPER_ADMIN/MED_DIR only).
+//   • PROVIDER is NOT blocked from /practices — it sees a read-only view
+//     (no create/edit) rather than a 403/redirect.
+// ───────────────────────────────────────────────────────────────────────────
+test.describe('Phase 3 §M — RBAC matrix', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Phase 3 admin write/e2e gated')
+
+  test('30m.1 — PATIENT cannot reach any admin route', async ({ page }) => {
+    test.setTimeout(120_000)
+    for (const route of ['/dashboard', '/patients', '/practices', '/notifications']) {
+      await page.context().clearCookies()
+      await assertRouteForbidden(page, PATIENTS.aisha.email, route)
+    }
+  })
+
+  test('30m.2 — PROVIDER cannot manage practices (read-only, no create)', async ({ page }) => {
+    test.setTimeout(90_000)
+    await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/practices`)
+    await expect(page.locator(byTestId(T.admin.practiceList))).toBeVisible({ timeout: 25_000 })
+    await expect(page.locator(byTestId(T.admin.practiceCreateButton))).toHaveCount(0)
+  })
+
+  test('30m.3 — PROVIDER thresholds tab is read-only', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const james = await tc.findUser(PATIENTS.james.email) // assigned to primaryProvider
+    await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients/${james.id}`)
+    await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
+    await expect(page.locator(byTestId(T.admin.thresholdReadonlyBanner))).toBeVisible({ timeout: 25_000 })
+    await expect(page.locator(byTestId(T.admin.thresholdSave))).toHaveCount(0)
+    await tc.dispose()
+  })
+
+  test('30m.4 — MEDICAL_DIRECTOR can edit thresholds AND manage practices', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    // Thresholds editor renders (canEditThresholds includes MED_DIR).
+    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
+    await expect(page.locator(byTestId(T.admin.thresholdSave))).toBeVisible({ timeout: 25_000 })
+    // Practice management IS allowed for MED_DIR (doc matrix was wrong).
+    await page.goto(`${ADMIN_BASE_URL}/practices`)
+    await expect(page.locator(byTestId(T.admin.practiceCreateButton)).first()).toBeVisible({ timeout: 20_000 })
+    await tc.dispose()
+  })
+
+  test('30m.5 — HEALPLACE_OPS can manage practices but cannot verify profiles or edit thresholds', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    await signInAdmin(page, ADMINS.ops.email, ADMIN_BASE_URL)
+    // CAN manage practices.
+    await page.goto(`${ADMIN_BASE_URL}/practices`)
+    await expect(page.locator(byTestId(T.admin.practiceCreateButton)).first()).toBeVisible({ timeout: 25_000 })
+    // CANNOT verify profiles (no verify-complete) nor edit thresholds.
+    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.locator(byTestId(T.admin.detailTab('profile'))).click()
+    await expect(page.locator(byTestId(T.admin.profileStatusBanner))).toBeVisible({ timeout: 25_000 })
+    await expect(page.locator(byTestId(T.admin.profileVerifyComplete))).toHaveCount(0)
+    await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
+    await expect(page.locator(byTestId(T.admin.thresholdReadonlyBanner))).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator(byTestId(T.admin.thresholdSave))).toHaveCount(0)
+    await tc.dispose()
+  })
+
+  test('30m.6 — SUPER_ADMIN has full access (practices + thresholds + verify)', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    await tc.setProfileVerificationStatus(aisha.id, 'UNVERIFIED')
+    await signInAdmin(page, ADMINS.support.email, ADMIN_BASE_URL) // SUPER_ADMIN
+    await page.goto(`${ADMIN_BASE_URL}/practices`)
+    await expect(page.locator(byTestId(T.admin.practiceCreateButton)).first()).toBeVisible({ timeout: 25_000 })
+    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
+    await expect(page.locator(byTestId(T.admin.thresholdSave))).toBeVisible({ timeout: 20_000 })
+    await page.locator(byTestId(T.admin.detailTab('profile'))).click()
+    await expect(page.locator(byTestId(T.admin.profileVerifyComplete))).toBeVisible({ timeout: 20_000 })
+    await tc.dispose()
+  })
+
+  test('30m.7 — unauthenticated user is redirected away from admin routes', async ({ page }) => {
+    test.setTimeout(60_000)
+    await page.context().clearCookies()
+    await page.goto(`${ADMIN_BASE_URL}/dashboard`)
+    await expect(page).toHaveURL(/\/sign-in/, { timeout: 20_000 })
   })
 })
