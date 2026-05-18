@@ -618,7 +618,14 @@ export async function correctProfileFieldViaUI(
   void rationale // UI does not collect per-field rationale (see header)
   await adminPage.goto(`${ADMIN_BASE_URL}/patients/${patientId}`)
   await adminPage.locator(byTestId(T.admin.detailTab('profile'))).click()
-  await adminPage.locator(byTestId(T.admin.profileCorrect(field))).click()
+  // ProfileTab fetches async — wait for it to render before reaching for a
+  // per-field control (the status banner is always present once loaded).
+  await adminPage
+    .locator(byTestId(T.admin.profileStatusBanner))
+    .waitFor({ state: 'visible', timeout: 25_000 })
+  await adminPage
+    .locator(byTestId(T.admin.profileCorrect(field)))
+    .click({ timeout: 20_000 })
   const input = adminPage.locator(byTestId(T.admin.profileEditInput(field)))
   await input.waitFor({ state: 'visible', timeout: 15_000 })
   // <select> editors (boolean/enum) vs <input> (number/date).
@@ -630,7 +637,12 @@ export async function correctProfileFieldViaUI(
   } else {
     await input.fill(newValue)
   }
-  await adminPage.locator(byTestId(T.admin.profileEditSave(field))).click()
+  const saveBtn = adminPage.locator(byTestId(T.admin.profileEditSave(field)))
+  await saveBtn.click()
+  // saveCorrection awaits the correctProfile POST before exiting edit mode
+  // (status → 'confirmed' hides the Save button). Waiting for it removes the
+  // race where the caller navigates away mid-POST and aborts the request.
+  await saveBtn.waitFor({ state: 'hidden', timeout: 20_000 }).catch(() => {})
 }
 
 /**
