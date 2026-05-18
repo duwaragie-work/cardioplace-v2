@@ -212,6 +212,7 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
     <div className="space-y-4">
       {/* Status banner */}
       <div
+        data-testid="admin-careteam-status"
         className="rounded-2xl p-4 flex items-start gap-3"
         style={{
           backgroundColor: assignment ? 'var(--brand-success-green-light)' : 'var(--brand-warning-amber-light)',
@@ -261,6 +262,7 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
         >
           <select
             value={form.practiceId}
+            data-testid="admin-careteam-practice-select"
             onChange={(e) => set('practiceId', e.target.value)}
             className="w-full px-3 h-9 rounded-lg text-[13px] outline-none bg-white"
             style={{ border: '1px solid var(--brand-border)' }}
@@ -275,6 +277,7 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
         {/* Three provider slots */}
         <ProviderSlot
           label="Primary provider"
+          testId="admin-careteam-primary-select"
           icon={<Stethoscope className="w-2.5 h-2.5" />}
           accent="var(--brand-primary-purple)"
           options={providerOrMdPool}
@@ -288,6 +291,7 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
         />
         <ProviderSlot
           label="Backup provider"
+          testId="admin-careteam-backup-select"
           icon={<UserCheck className="w-2.5 h-2.5" />}
           accent="var(--brand-accent-teal)"
           options={providerOrMdPool}
@@ -301,6 +305,7 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
         />
         <ProviderSlot
           label="Medical director"
+          testId="admin-careteam-md-select"
           icon={<ShieldCheck className="w-2.5 h-2.5" />}
           accent="var(--brand-warning-amber)"
           options={medicalDirectors}
@@ -333,7 +338,7 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
         )}
 
         <div className="flex justify-end">
-          <button type="button" onClick={save} disabled={!canSubmit} className="btn-admin-primary">
+          <button type="button" onClick={save} disabled={!canSubmit} className="btn-admin-primary" data-testid="admin-careteam-save">
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
             {assignment ? 'Update assignment' : 'Assign care team'}
           </button>
@@ -343,7 +348,7 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
 
       {/* Current assignment summary */}
       {assignment && (
-        <div className="bg-white rounded-2xl p-5" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+        <div className="bg-white rounded-2xl p-5" style={{ boxShadow: 'var(--brand-shadow-card)' }} data-testid="admin-careteam-readonly">
           <p className="text-[10.5px] font-bold uppercase tracking-wider mb-2.5" style={{ color: 'var(--brand-text-muted)' }}>
             Current care team
           </p>
@@ -352,22 +357,26 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
               label="Primary"
               accent="var(--brand-primary-purple)"
               clinician={providerOrMdPool.find((c) => c.id === assignment.primaryProviderId) ?? null}
+              testId="admin-careteam-current-primary"
             />
             <ResolvedRow
               label="Backup"
               accent="var(--brand-accent-teal)"
               clinician={providerOrMdPool.find((c) => c.id === assignment.backupProviderId) ?? null}
+              testId="admin-careteam-current-backup"
             />
             <ResolvedRow
               label="Medical director"
               accent="var(--brand-warning-amber)"
               clinician={medicalDirectors.find((c) => c.id === assignment.medicalDirectorId) ?? null}
+              testId="admin-careteam-current-md"
             />
             <ResolvedRow
               label="Practice"
               accent="var(--brand-text-secondary)"
               clinician={null}
               practiceName={practices.find((p) => p.id === assignment.practiceId)?.name ?? null}
+              testId="admin-careteam-current-practice"
             />
           </div>
         </div>
@@ -389,6 +398,7 @@ interface ProviderSlotProps {
   disabledHint?: string | null;
   /** Optional sub-line under the label, e.g. role restriction. */
   requiredRoleHint?: string;
+  testId?: string;
 }
 
 function ProviderSlot({
@@ -400,6 +410,7 @@ function ProviderSlot({
   onChange,
   disabledHint,
   requiredRoleHint,
+  testId,
 }: ProviderSlotProps) {
   const selected = options.find((o) => o.id === value) ?? null;
   return (
@@ -424,6 +435,7 @@ function ProviderSlot({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={options.length === 0}
+          data-testid={testId}
           className="w-full px-3 h-9 text-[13px] outline-none bg-white disabled:opacity-60"
           style={{ color: 'var(--brand-text-primary)' }}
         >
@@ -464,15 +476,18 @@ function ResolvedRow({
   accent,
   clinician,
   practiceName,
+  testId,
 }: {
   label: string;
   accent: string;
   clinician: Clinician | null;
   practiceName?: string | null;
+  testId?: string;
 }) {
   return (
     <div
       className="rounded-lg p-2.5 flex items-center gap-3"
+      data-testid={testId}
       style={{ backgroundColor: 'var(--brand-background)', border: '1px solid var(--brand-border)' }}
     >
       <span

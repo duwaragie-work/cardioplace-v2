@@ -227,6 +227,7 @@ export default function NotificationBell() {
     <div ref={containerRef} className="relative">
       <button
         type="button"
+        data-testid="admin-notification-bell"
         onClick={handleToggle}
         className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-gray-100 cursor-pointer transition-colors relative"
         style={{ color: 'var(--brand-text-secondary)' }}
@@ -237,6 +238,7 @@ export default function NotificationBell() {
         <Bell className="w-4 h-4" />
         {hasUnread && (
           <span
+            data-testid="admin-notification-bell-count"
             className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold text-white flex items-center justify-center"
             style={{ backgroundColor: 'var(--brand-alert-red)' }}
             aria-hidden

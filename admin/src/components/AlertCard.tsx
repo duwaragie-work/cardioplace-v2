@@ -153,6 +153,7 @@ export default function AlertCard({
     <div>
       {/* Row */}
       <div
+        data-testid={`admin-alert-row-${alert.id}`}
         role={rowClickable ? 'button' : undefined}
         tabIndex={rowClickable ? 0 : undefined}
         onClick={rowClickable ? onRowClick : undefined}
@@ -201,6 +202,7 @@ export default function AlertCard({
               </span>
             )}
             <span
+              data-testid={`admin-alert-tier-badge-${alert.id}`}
               className="inline-flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
               style={{ backgroundColor: chrome.bg, color: chrome.color }}
             >
@@ -209,6 +211,7 @@ export default function AlertCard({
             </span>
             {alert.status === 'RESOLVED' && (
               <span
+                data-testid={`admin-alert-status-badge-${alert.id}`}
                 className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
                 style={{ backgroundColor: 'var(--brand-success-green-light)', color: 'var(--brand-success-green)' }}
               >
@@ -218,6 +221,7 @@ export default function AlertCard({
             )}
             {alert.status === 'ACKNOWLEDGED' && (
               <span
+                data-testid={`admin-alert-status-badge-${alert.id}`}
                 className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
                 style={{ backgroundColor: 'var(--brand-accent-teal-light)', color: 'var(--brand-accent-teal)' }}
               >
@@ -289,6 +293,7 @@ export default function AlertCard({
         <div className="flex items-center gap-2 shrink-0">
           {showAcknowledge && (
             <button
+              data-testid={`admin-alert-ack-button-${alert.id}`}
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
@@ -310,6 +315,7 @@ export default function AlertCard({
           )}
           {showResolve && (
             <button
+              data-testid={`admin-alert-resolve-button-${alert.id}`}
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
@@ -324,6 +330,7 @@ export default function AlertCard({
             </button>
           )}
           <button
+            data-testid={`admin-alert-expand-${alert.id}`}
             type="button"
             onClick={(e) => {
               e.stopPropagation();
@@ -355,18 +362,21 @@ export default function AlertCard({
               icon={<UserIcon className="w-3 h-3" />}
               message={alert.patientMessage}
               color="var(--brand-primary-purple)"
+              testId={`admin-alert-msg-patient-${alert.id}`}
             />
             <ThreeTierMessageCard
               title="Caregiver"
               icon={<Users className="w-3 h-3" />}
               message={alert.caregiverMessage}
               color="var(--brand-accent-teal)"
+              testId={`admin-alert-msg-caregiver-${alert.id}`}
             />
             <ThreeTierMessageCard
               title="Physician"
               icon={<Stethoscope className="w-3 h-3" />}
               message={alert.physicianMessage}
               color="var(--brand-text-secondary)"
+              testId={`admin-alert-msg-physician-${alert.id}`}
             />
           </div>
 
@@ -382,14 +392,17 @@ function ThreeTierMessageCard({
   icon,
   message,
   color,
+  testId,
 }: {
   title: string;
   icon: React.ReactNode;
   message: string | null;
   color: string;
+  testId?: string;
 }) {
   return (
     <div
+      data-testid={testId}
       className="rounded-lg p-3"
       style={{
         backgroundColor: 'white',

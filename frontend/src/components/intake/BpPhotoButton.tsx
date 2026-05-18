@@ -82,6 +82,7 @@ export default function BpPhotoButton({ onConfirm, className }: Props) {
     <>
       <motion.button
         type="button"
+        data-testid="check-in-bp-photo-button"
         onClick={() => fileInputRef.current?.click()}
         aria-label={uploading ? t('ocr.bp.uploading') : t('ocr.bp.cameraLabel')}
         aria-pressed={uploading}

@@ -326,7 +326,7 @@ function Step({
   }
 
   return (
-    <li className="relative pl-9 pb-4">
+    <li data-testid={`admin-escalation-rung-${step.code}`} className="relative pl-9 pb-4">
       {/* Vertical connector line */}
       {!isLast && (
         <span
@@ -359,6 +359,7 @@ function Step({
           </p>
         </div>
         <span
+          data-testid={`admin-escalation-rung-status-${step.code}`}
           className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
           style={{ backgroundColor: nodeBg, color: nodeColor }}
         >

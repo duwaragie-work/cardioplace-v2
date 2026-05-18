@@ -180,6 +180,7 @@ export default function ReadingsTab({ patientId }: Props) {
                     key={key}
                     type="button"
                     onClick={() => setDateFilter(key)}
+                    data-testid={`admin-readings-date-filter-${key}`}
                     className="px-2.5 h-7 rounded-full text-[11px] font-semibold transition-all cursor-pointer"
                     style={{
                       backgroundColor: active ? 'var(--brand-primary-purple)' : 'var(--brand-primary-purple-light)',
@@ -216,6 +217,7 @@ export default function ReadingsTab({ patientId }: Props) {
                     key={key}
                     type="button"
                     onClick={() => setTierFilter(key)}
+                    data-testid={`admin-readings-tier-filter-${key}`}
                     className="px-2.5 h-7 rounded-full text-[11px] font-semibold transition-all cursor-pointer"
                     style={{
                       backgroundColor: active ? chrome.color : chrome.bg,
@@ -247,7 +249,7 @@ export default function ReadingsTab({ patientId }: Props) {
       ) : filtered.length === 0 ? (
         <EmptyCard hasReadings={entries.length > 0} />
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2" data-testid="admin-readings-list">
           {filtered.map((entry) => (
             <ReadingCard key={entry.id} entry={entry} />
           ))}
@@ -275,6 +277,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
   return (
     <div
       className="bg-white rounded-2xl p-4 md:p-5"
+      data-testid={`admin-readings-card-${entry.id}`}
       style={{ boxShadow: 'var(--brand-shadow-card)' }}
     >
       {/* Header — date + time + source + suboptimal flag */}
@@ -609,6 +612,7 @@ function EmptyCard({ hasReadings }: { hasReadings: boolean }) {
   return (
     <div
       className="bg-white rounded-2xl p-8 text-center"
+      data-testid="admin-readings-empty"
       style={{ boxShadow: 'var(--brand-shadow-card)' }}
     >
       <div

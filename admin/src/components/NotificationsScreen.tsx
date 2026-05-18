@@ -498,12 +498,14 @@ export default function NotificationsScreen() {
               <EmptyNotifCard filter={notifFilter} hasNotifs={notifs.length > 0} />
             ) : (
               <div
+                data-testid="admin-notifications-list"
                 className="bg-white rounded-2xl overflow-hidden"
                 style={{ boxShadow: 'var(--brand-shadow-card)' }}
               >
                 {filteredNotifs.map((n, idx) => (
                   <div
                     key={n.id}
+                    data-testid={`admin-notification-row-${n.id}`}
                     style={{ borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none' }}
                   >
                     <NotifCard

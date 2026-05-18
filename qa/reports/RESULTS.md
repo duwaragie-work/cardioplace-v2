@@ -721,3 +721,332 @@ cd qa && npx playwright show-report playwright-report
 > This file is the single living QA results doc. The previously-separate dated
 > `STATUS_2026_05_14.md` / `STATUS_2026_05_15.md` snapshots were consolidated here on
 > 2026-05-15 — one file, updated in place each cycle.
+
+---
+
+## Phase 4 — Patient UI Full Coverage (v3) — 2026-05-18
+
+UI-level coverage of the patient app + Cluster 6/7 alert-engine adds. All
+tests use baseline personas (incl. new Taylor Brown, 18–29 bucket) and seed
+state via test-control. No qa-fixtures dependency.
+
+**Environment caveat:** the shared Prisma Cloud dev DB (`db.prisma.io`)
+intermittently 500s / times out under concurrent alert-engine load (same root
+cause the `resetUser` deadlock-retry handles). Phase 4 write specs set
+`test.describe.configure({ retries: 1 })` to absorb transient blips. A clean
+single-pass "all green" run is not reliable against the shared remote DB;
+each section below was verified green individually.
+
+### Infrastructure (committed)
+- `feat(seed)`: Taylor Brown persona (18–29 bucket, gender OTHER — `NON_BINARY`
+  is not a valid `Gender`/PatientSeed value; doc snippet corrected).
+- `feat(test-control)`: `setUserDateOfBirth`, `setPatientThreshold`,
+  `setOnboardingStatus` endpoints (+ mock-Prisma unit specs, jest 16/16).
+- `feat(patient)`: ~58 `data-testid` selectors across 18 files (additive;
+  4 optional `testId` props). `LanguageSelector` real path is
+  `components/cardio/` (doc said `intake/`).
+- `feat(qa)`: Phase 4 helpers in `qa/helpers/api.ts` + `T` registry extensions.
+
+### Phase 4a — Auth + onboarding (spec 20a) — 5/5 PASS
+| 20a.1 | new user (onboarding≠COMPLETED) → /onboarding | PASS |
+| 20a.2 | onboarding completion → /dashboard | PASS |
+| 20a.3 | Layer A gate blocks /check-in pre-onboarding | PASS |
+| 20a.4 | sign-out clears patient cookies → landing | PASS |
+| 20a.5 | returning user skips onboarding | PASS |
+
+### Phase 4b — Clinical intake (spec 20b) — 1 PASS / 6 documented-skip
+20b.7 submit→dashboard PASS. 20b.1/.2/.3/.4/.5/.6 skipped — intake E3
+edit-flow + catalog-card med CRUD not reliably drivable without dedicated
+wizard testids (no profile-wipe test-control endpoint; same gap as spec 03).
+Pregnancy/condition rule behavior covered API-side (spec 09) + admin (11).
+
+### Phase 4c — Profile (spec 08, extended) — 3/3 PASS
+20c.1 sections render · 20c.2 inline name/comm-pref edit · 20c.3 clinical deep-link.
+
+### Phase 4d — Medication CRUD + monthly re-ask (spec 20d) — 2 PASS / 4 skip
+20d.5 monthly re-ask renders · 20d.6 confirm-unchanged dismisses+bumps — PASS.
+20d.1/.2/.3 catalog-card CRUD documented-skip (no med-CRUD testids; covered
+API-side spec 19). 20d.4 OCR gated on `NEXT_PUBLIC_MED_OCR_ENABLED`.
+
+### Phase 4e — Readings + delete + OCR (spec 20e) — 3 PASS / 2 skip
+20e.1 standard reading no-alert · 20e.2 history renders · 20e.3 delete via
+confirm modal — PASS. 20e.4 OCR gated on `NEXT_PUBLIC_BP_OCR_ENABLED`.
+20e.5 sort/pagination not implemented in v2 (documented).
+
+### Phase 4f — Alert lifecycle (spec 20f) — 4/4 PASS
+20f.1 patient-tier message + tier badge (reframed per directive B) · 20f.2
+patient ack · 20f.3 resolved-view cross-view · 20f.5 escalation deep-link.
+**20f.4 DROPPED** — patient app renders only the patient tier (no caregiver
+section in TierAlertView); 3-tier display is Phase 3 admin scope.
+
+### Phase 4g — Alert-engine additive Cluster 6/7 + boundary (spec 20g) — 23 tests
+Correct-by-construction (recipes mirror passing specs 09/17/19). Subset
+verified GREEN: 20g.2 (young-adult no-alert), 20g.3 (BRADY_ABSOLUTE),
+20g.8 (BETA_BLOCKER_FATIGUE), 20g.16 (TACHY_HR). Fixed 2 recipe bugs
+(brady/tachy need 2-reading sessions; tachy needs hasTachycardia). Full
+23-case sweep not run end-to-end in one pass (shared-DB load + runtime);
+`retries:1` absorbs transient DB 500s. 20g.4 (orthostatic) / 20g.23
+(med-missed) self-skip with reason if the engine shape differs.
+RULE_BRADY_HR_ASYMPTOMATIC intentionally not covered (post-MVP, doc §I note).
+
+### Phase 4h — Notifications (spec 06, extended) — 2 PASS / 1 skip
+20h.1 seed round-trip + inbox loads · 20h.3 alert-card deep-link — PASS.
+20h.2 mark-read skipped — raw seeded Notification rows don't fan out as
+NotifCards (needs the escalation→notification pipeline).
+
+### Phase 4i — Chat text (spec 07, extended) — 3 LLM-gated
+20i.1/.2/.3 written; gated behind `RUN_LLM_TESTS=1` (paid Gemini quota —
+existing codebase convention). Voice chat out of scope.
+
+### Phase 4l — Localization (spec 20l) — 2/2 PASS
+20l.1 en→es landing copy + persist · 20l.2 en→am OTP sign-in completes.
+
+### Phase 4m — Accessibility (spec 16, extended) — 4/4 PASS
+20m.1 keyboard focus reaches check-in controls · 20m.2 aria-live region ·
+20m.3 emergency operability (911 tel: link); emergency red palette is
+pre-existing accepted WCAG debt (≈4.46:1, theme.css KNOWN DEBT) — out of
+Phase-4 scope, not asserted as a hard fail · 20m.4 modal focus management.
+
+### Tally
+~29 PASS, ~13 documented-skip (infra/feature gaps), 3 LLM-gated, 23
+correct-by-construction (4 subset-verified). tsc clean ×4
+(backend/frontend/admin/qa). jest test-control.seed 16/16.
+
+### Anomalies / blockers (full list in the PR description)
+- Doc selector scheme ≠ real `selectors.ts` registry → tests use the registry.
+- Patient app is single-tier (no caregiver/physician on /alerts) → 20f.4 dropped.
+- SOB/FATIGUE/COUGH have no check-in inputs (chat quick-log doesn't recognize
+  them either) → §I injects the symptom via the journal API (real engine path).
+- Shared dev DB instability under load → `retries:1` on write specs.
+- Intake wizard + med-catalog CRUD lack dedicated testids → documented skips.
+
+---
+
+## Phase 4 v3.1 — un-skip + voice + §F local-pgvector engine sweep (FINAL) — 2026-05-18
+
+Supersedes the v3 tally above. v3.1 un-skipped the 13 v3 documented skips,
+added voice-chat coverage, and ran the §I 23-case alert-engine sweep
+**end-to-end against a local pgvector Postgres container** to bypass the
+shared Prisma Cloud instability.
+
+### Headline — §F alert engine ✅
+**§I 20g — 23/23 PASS end-to-end on local pgvector Postgres** (Docker
+`pgvector/pgvector:pg16`, deterministic, ~34s). Nine real recipe bugs were
+found+fixed by reading engine source: HCM upper=160 / DCM lower=85 defaults;
+the Cluster-6 Q2 two-reading gate; `PERSONALIZED_BAND=20` (trigger =
+sbpUpperTarget+20); `personalizedEligible = threshold!=null && !preDay3`;
+UTC-precise `yearsBetween` age math (AGE_65_LOW boundary); `betaBlocker
+DizzinessRule` requires SBP<100; `syncopeGeneralRule` is Stage-C (needs the
+2-reading gate); orthostatic uses the most-recent PRIOR entry vs current
+(single low reading in preDay3, not a 2-reading session); MEDICATION_MISSED
+runs the journal-create Pass-2 pipeline (not the gap cron).
+`RULE_BRADY_HR_ASYMPTOMATIC` remains the only clinical fixme (post-MVP,
+pending Manisha threshold sign-off).
+
+### Final tally (~52 PASS)
+| Spec | Result |
+|---|---|
+| 20a auth/onboarding | 5/5 PASS |
+| 20b clinical intake | 5 PASS (20b.1/.2/.3/.5/.7) · 20b.4/20b.6 Category-A |
+| 08 profile (20c) | 3/3 PASS |
+| 20d med CRUD + re-ask | 4 PASS (20d.1/.2/.5/.6) · 20d.3/20d.4 Category-A |
+| 20e readings + OCR | 5/5 PASS (incl. 20e.4 BP-photo OCR end-to-end) |
+| 20f alert lifecycle | 4/4 PASS (20f.4 dropped — single-tier patient app) |
+| **20g alert engine** | **23/23 PASS (local pgvector)** |
+| 06 notifications (20h) | 3/3 PASS |
+| 07 chat (20i.1/20i.2) | 2/2 PASS un-gated (stubbed; no Gemini) |
+| 07 voice (20i.4) | PASS |
+| 20l localization | 2/2 PASS |
+| 16 a11y (20m) | 4/4 PASS |
+tsc clean ×4 (backend/frontend/admin/qa). jest test-control.seed 16/16.
+
+### 4 documented Category-A residuals (precise root cause — ZERO re-discovery cost)
+All testid infrastructure is DONE and committed (`intake-cat-tile-*`,
+`intake-other-med-input`, `intake-dob`, `intake-hf-type-*`,
+`medication-photo-confirm-modal/-button`). None are product gaps (verified):
+
+1. **20b.6 / 20d.4 — med-photo OCR.** OCR mechanics PROVEN: route stub fires
+   (`ocrHit=true`), `MedicationPhotoConfirmModal` opens with its testids
+   (direct probe confirmed). Blocker: the modal "Add all" button stays
+   disabled until each extracted row has a **non-UNSURE frequency** picked
+   (`rowIntent → 'noop'` when `frequency===UNSURE`; `normaliseFrequency(
+   "once daily")` is not mapping to `ONCE_DAILY`, and an already-in-list med
+   is also `noop`). **Unblock (~1 iteration):** in the test, click a per-row
+   frequency option in the modal, and stub a drug NOT in the persona's
+   baseline, before clicking `medication-photo-confirm-button`. The identical
+   BP-photo OCR path passes end-to-end in **20e.4 (PASS)**.
+2. **20b.4 — A8 free-text "Other" med add.** `intake-cat-tile-OTHER` opens
+   the sub-panel; `intake-other-med-input` + `intake-medication-add-button`
+   work. Blocker: a med added at A8 does not surface on `/profile` after the
+   wizard PUT-replace — the E3 `?step=A8` walk doesn't carry the new
+   OTHER_UNVERIFIED row through A6/A9 into `buildMedsPayload` (needs the A9
+   frequency answered for the new row). **Unblock (~1 iteration):**
+   `walkIntake` must set a frequency for newly-added OTHER rows on A9.
+3. **20d.3 — discontinue via A5 OtherMed list.** NOT a product gap:
+   `OtherMedicationsList` genuinely hard-deletes an existing med via
+   `intake-medication-delete-button` (confirmed in component source).
+   Blocker: a med attached via `tc.setUserMedication(OTHER_UNVERIFIED)` is
+   not hydrated into the A5 list on `?step=A5` deep-link (list renders
+   in-session adds; pre-existing OTHER_UNVERIFIED from `getMyMedications`
+   may not map into `selectedMedications` on hydrate). **Unblock (~1–2
+   iterations):** confirm the intake hydrate path includes OTHER_UNVERIFIED
+   rows, or add via the 20b.4 UI path then delete in-session. Discontinue is
+   covered API-side (spec 19) + admin med spec 11.
+
+### Voice — 2 Category-C (accepted by Duwaragie)
+- **20i.5 / 20i.6** — voice transport is **socket.io** (`io('/voice')`,
+  engine.io framing), NOT a raw WebSocket → the doc's
+  `page.routeWebSocket(/voice\/session/)` plan is inapplicable; and a session
+  needs `getUserMedia` + `AudioWorklet`, which **headless Chromium cannot
+  supply**. Unblock: a backend dev-mode transcript-injection test-control
+  hook, or a mic-capable non-headless runner. `20i.4` (voice entry + state
+  surface) PASSES as a real UI test.
+
+### Gated / fixme (intentional, not failures)
+- **20i.3** real-Gemini chat tool dispatch — gated behind `RUN_LLM_TESTS=1`
+  (paid quota). `GOOGLE_API_KEY` + infra are in place; runs on demand.
+- **RULE_BRADY_HR_ASYMPTOMATIC** — clinical fixme, post-MVP, blocked on
+  Manisha threshold sign-off (unchanged since v3 §I).
+
+### Known shared-DB flakiness
+- In the FINAL v3.1 combined `20b 20d` run against the **shared Prisma Cloud
+  dev DB**, 4 otherwise-green tests flaked under concurrent load.
+- **Root cause:** shared Prisma Cloud DB instability under concurrent test
+  load — the same constraint that mandated §F's local-pgvector approach for
+  the engine sweep (the `resetUser` deadlock-retry code documents the same
+  40P01/TransactionWriteConflict root cause).
+- **Mitigation / evidence:** every one of those tests passed **individually**
+  in this session; `test.describe.configure({ retries: 1 })` is set on the
+  v3.1 write specs to absorb transient blips.
+- **Future follow-up:** run the full Phase 4 write-suite against a
+  containerized Postgres (as §F did) in CI for deterministic green, rather
+  than the shared Prisma Cloud dev DB.
+
+### Net
+~52 PASS · §F 23/23 engine on local pgvector · 4 Category-A documented
+(each ~1 follow-up iteration, precise root cause + unblock above) · 2 voice
+Category-C (accepted) · 20i.3 LLM-gated · 1 clinical fixme. Environment
+restored to shared DB; pgvector container removed; `.env.shared-backup`
+gitignored.
+
+---
+
+## Phase 3 — Admin UI Full Coverage — 2026-05-18
+
+Closes the admin-app UI gap (was ~30%). Extends PR #43 (Phase 4 v3.1 +
+Phase 3 land together; one merge to dev). All tests written against the
+**real** admin DOM via the `T.admin.*` registry (reconciled in §B) — the
+mega-doc's idealised selectors/flows were adapted to reality per the v3.1
+"verify actual rendering" lesson.
+
+### Bottom line
+**57 Phase 3 tests** on `duwaragie-test-coverage` (specs 10/11/12/13/14/16
+extended + new 30b/30k/30l/30o) — each section verified live
+(`--workers=1`, real servers) and committed per scenario. **+2** cross-
+practice tests (§N) on `duwaragie-qa-fixtures` (force-pushed; never merges
+to dev). Foundation: admin `data-testid` 11→**115** across 18 components,
+full `T.admin.*` registry rewrite, **9** UI helpers in `qa/helpers/api.ts`,
+**0** new test-control endpoints. tsc clean (admin + qa).
+
+### Per-section tally (all PASS)
+| § | Scenarios | File | n |
+|---|---|---|---|
+| C | 30a.1–30a.5 | spec 10 (ext) | 5 |
+| D | 30d.1–30d.4 | spec 10 (ext) | 4 |
+| E | 30e.1/.2/.9/.10 | spec 11 (ext) | 4 |
+| E | 30e.3–.8/.11/.12 | 30b (new) | 8 |
+| F | 30f.1–30f.2 | spec 12 (ext) | 2 |
+| G | 30g.1–30g.5 | spec 13 (ext) | 5 |
+| H | 30h.1–30h.3 | spec 13 (ext) | 3 |
+| I | 30i.1–30i.4 | spec 14 (ext) | 4 |
+| J | 30j.1–30j.2 | spec 13 (ext) | 2 |
+| K | 30k.1–30k.3 | 30k (new) | 3 |
+| L | 30l.1–30l.4 | 30l (new) | 4 |
+| M | 30m.1–30m.7 | spec 16 (ext) | 7 |
+| O | 30o.1–30o.2 | 30o (new) | 2 |
+| P | 30p.1–30p.4 | spec 16 (ext) | 4 |
+| **Σ** | | | **57** |
+| N | 30n.1–30n.2 | 30n (new, qa-fixtures) | 2 |
+
+### Category-A — test/infra fixes (no product change)
+- **§B git-contention residue.** Parallel subagent fan-out in §B ran a
+  `git stash` that swept other agents' edits; 6 testids were never wired
+  and surfaced later via audit-first checks: 3 in `CareTeamTab`
+  (`admin-careteam-status/practice-select/save`, recovered prior session) +
+  the 3 `ProviderSlot` select call-sites (§E.4 prep) + all 3 `EnrollmentCard`
+  testids (§F prep, commit `44ca327`). Lesson logged: never parallelise
+  multi-file agent edits on a shared tree.
+- **Doc role-matrix corrected to `roleGates.ts`** (§M): MEDICAL_DIRECTOR
+  *can* manage practices; HEALPLACE_OPS *can* resolve alerts (real OPS
+  limits: no profile-verify, no threshold-edit); PROVIDER sees /practices
+  read-only (not 403).
+- **Helper hardening:** `correctProfileFieldViaUI` (wait for profile load
+  before per-field click + wait for save POST before return — a 2nd nav was
+  aborting the admin auth `/me` bootstrap); `resolveAlertViaModal` (wait for
+  the rationale textarea to render before fill — React state race).
+- **Idempotency:** per-run-unique values where a no-op is rejected/disabled
+  — heightCm (correctProfile 400s zero-diff), SBP target (Save `dirty`-gated),
+  care-team backup-provider alternation, unique reject drug name.
+- **Selector/timing:** `selectClinician` rewritten deterministic (wait for
+  `<option>` attached → select by value); dual-UI-signin tests bumped to
+  120s; engine-persist races replaced fixed sleeps with `waitForAlerts`
+  poll; ack POST race fixed with `waitForAlerts`.
+
+### Category-C — product gaps (reported, not faked)
+- **§F.3 unenroll workflow — NOT IMPLEMENTED.** EnrollmentCard only admits
+  and returns `null` once ENROLLED; there is no unenroll affordance anywhere
+  in the admin UI. §F.3 dropped from the count (§F = 2 tests). No fake skip.
+
+### Product-behavior discoveries (reality ≠ mega-doc; tests adapted)
+- Profile correction uses an **audit-override model**: the patient-reported
+  cell keeps the original self-report; the override flips
+  `profileVerificationStatus → CORRECTED` (intake.service.correctProfile).
+- **Rejected medications drop from the active meds list** (doc's "will not
+  be re-added" confirmed) — verified via the Timeline audit row, not a card.
+- A **directly-resolved Tier 1** (no prior ack; Tier 1 is resolve-only,
+  non-dismissable modal) leaves `acknowledgedAt` null; `TimelineTab` gates
+  its "alert resolved" entry on `acknowledgedAt` ("Finding 9"), so a UI
+  resolve never produces a Timeline "resolved" entry — §G.5/§O.1 reframed to
+  the observable signal (Alerts-tab RESOLVED-filter state propagation).
+- The **resolution modal does not close on Esc** (clinical-safety: explicit
+  Cancel/action required, not only Tier 1) — §P.2 uses the focusable Cancel.
+- Dashboard is **stat-cards + tier-filter chips + flat queue** (Tier 3
+  excluded) — no 3-layer panel; the 3-tier patient/caregiver/physician cards
+  live in the **expanded AlertCard**, not the resolution modal.
+- Tier badge conveys the tier via visible **text** (its accessible name),
+  not an `aria-label` (§P.3).
+- Audit footer renders the **real ~17 `audit-field-*`** keys, not the
+  doc's idealised 15 (§J asserts the real keys).
+
+### Shared-DB flakiness — mitigated test-side
+- `listClinicians` (the care-team provider/MD pools) intermittently returns
+  empty under combined load on the shared Prisma Cloud dev DB (the v3.1
+  shared-DB lesson). Mitigation: §E.4 reload-retries until both pools load.
+  This was the **only** test hitting the pattern — no Category-B escalation
+  needed (threshold was >2 tests).
+
+### §N — cross-practice (qa-fixtures branch only)
+`30n-admin-cross-practice.spec.ts` on `duwaragie-qa-fixtures` (rebased onto
+all Phase 3 work + the 6 fixtures commits, force-pushed). 30n.1/30n.2 assert
+the API 403 security boundary + the admin patient-detail UI never rendering
+the cross-practice patient. Gated on `SEED_TEST_FIXTURES` + `RUN_WRITE_TESTS`
+— **does not run in CI-on-dev, by design**. Verified locally 2/2 PASS against
+the seeded cohort (Practice B `seed-river-east` + `provider-b@` +
+`filler-b-*`).
+
+### §R acceptance sweep
+Full combined sweep `10 11 12 13 14 16 30b 30k 30l 30o -g "Phase 3"
+--workers=1` on the **shared Prisma Cloud dev DB**:
+**57/57 PASS · 0 fail · 0 flaky · 17.0m** (chromium-desktop).
+No `listClinicians`-empty flake hit this run — the §E.4 reload-retry
+mitigation held under combined load. `tsc --noEmit` clean for admin + qa;
+test-control jest spec green. (A local-pgvector re-run remains the pristine
+pre-merge option per the handoff; the shared-DB sweep was clean here.)
+
+### Net
+57 Phase 3 UI tests + 2 §N cross-practice (qa-fixtures) · 0 new test-control
+endpoints · §F.3 unenroll the only Category-C (product gap, documented) ·
+all Category-A adaptations are reality-corrections, not skips. Container
+re-run of §R recommended pre-merge for pristine numbers (commands in the
+handoff); shared-DB sweep carries the documented `listClinicians` flake
+risk, mitigated test-side.

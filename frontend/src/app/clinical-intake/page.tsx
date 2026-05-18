@@ -329,6 +329,7 @@ function A1Demographics({ state, setState }: StepProps) {
             selected={state.gender === 'MALE'}
             onClick={() => setState((p) => ({ ...p, gender: 'MALE' }))}
             audioText={t('intake.a1.genderMale')}
+            testId="intake-gender-male"
             compact
           />
           <ChoiceCard
@@ -337,6 +338,7 @@ function A1Demographics({ state, setState }: StepProps) {
             selected={state.gender === 'FEMALE'}
             onClick={() => setState((p) => ({ ...p, gender: 'FEMALE' }))}
             audioText={t('intake.a1.genderFemale')}
+            testId="intake-gender-female"
             compact
           />
           <ChoiceCard
@@ -345,6 +347,7 @@ function A1Demographics({ state, setState }: StepProps) {
             selected={state.gender === 'OTHER'}
             onClick={() => setState((p) => ({ ...p, gender: 'OTHER' }))}
             audioText={t('intake.a1.genderOther')}
+            testId="intake-gender-non_binary"
             compact
           />
         </div>
@@ -354,6 +357,7 @@ function A1Demographics({ state, setState }: StepProps) {
         <SectionLabel text={t('intake.a1.dobQuestion')} audio={t('intake.a1.dobQuestion')} />
         <input
           id="intake-a1-dob"
+          data-testid="intake-dob"
           type="date"
           value={state.dateOfBirth ?? ''}
           max={maxDobIso()}
@@ -490,6 +494,7 @@ function A1Demographics({ state, setState }: StepProps) {
                   <div className="flex-1 relative">
                     <input
                       id="intake-a1-height-cm"
+                      data-testid="intake-height-cm"
                       type="number"
                       inputMode="numeric"
                       min={100}
@@ -576,12 +581,14 @@ function A2Pregnancy({ state, setState }: StepProps) {
             selected={state.isPregnant === true}
             onClick={() => setState((p) => ({ ...p, isPregnant: true }))}
             audioText={t('intake.a2.yesAudio')}
+            testId="intake-pregnancy-yes"
           />
           <ChoiceCard
             icon={<Heart className="w-6 h-6" />}
             title={t('intake.a2.noTitle')}
             description={t('intake.a2.noDesc')}
             selected={state.isPregnant === false}
+            testId="intake-pregnancy-no"
             onClick={() =>
               setState((p) => ({
                 ...p,
@@ -679,6 +686,7 @@ function A3Conditions({ state, setState }: StepProps) {
           selected={has('hasHeartFailure')}
           onClick={() => set('hasHeartFailure', !state.hasHeartFailure)}
           audioText={t('intake.a3.hfAudio')}
+          testId="intake-condition-HEART_FAILURE"
         />
         <ChoiceCard
           icon={<Activity className="w-6 h-6" />}
@@ -687,6 +695,7 @@ function A3Conditions({ state, setState }: StepProps) {
           selected={has('hasAFib')}
           onClick={() => set('hasAFib', !state.hasAFib)}
           audioText={t('intake.a3.afAudio')}
+          testId="intake-condition-AFIB"
         />
         <ChoiceCard
           icon={<Stethoscope className="w-6 h-6" />}
@@ -695,6 +704,7 @@ function A3Conditions({ state, setState }: StepProps) {
           selected={has('hasCAD')}
           onClick={() => set('hasCAD', !state.hasCAD)}
           audioText={t('intake.a3.cadAudio')}
+          testId="intake-condition-CAD"
         />
         <ChoiceCard
           icon={<Sparkles className="w-6 h-6" />}
@@ -703,6 +713,7 @@ function A3Conditions({ state, setState }: StepProps) {
           selected={has('hasHCM')}
           onClick={() => set('hasHCM', !state.hasHCM)}
           audioText={t('intake.a3.hcmAudio')}
+          testId="intake-condition-HCM"
         />
         <ChoiceCard
           icon={<Sparkles className="w-6 h-6" />}
@@ -763,6 +774,7 @@ function A4HFType({ state, setState }: StepProps) {
           selected={state.heartFailureType === 'HFREF'}
           onClick={() => setState((p) => ({ ...p, heartFailureType: 'HFREF' }))}
           audioText={t('intake.a4.hfrefAudio')}
+          testId="intake-hf-type-hfref"
         />
         <ChoiceCard
           icon={<Heart className="w-6 h-6" />}
@@ -771,6 +783,7 @@ function A4HFType({ state, setState }: StepProps) {
           selected={state.heartFailureType === 'HFPEF'}
           onClick={() => setState((p) => ({ ...p, heartFailureType: 'HFPEF' }))}
           audioText={t('intake.a4.hfpefAudio')}
+          testId="intake-hf-type-hfpef"
         />
         <ChoiceCard
           icon={<Asterisk className="w-6 h-6" />}
@@ -1269,6 +1282,7 @@ function A8Categories({ state, setState }: StepProps) {
         {categories.map((cat) => (
           <ChoiceCard
             key={cat.key}
+            testId={`intake-cat-tile-${cat.key}`}
             icon={cat.icon}
             title={cat.label}
             selected={activeCategories.has(cat.key)}
@@ -1347,6 +1361,7 @@ function A8Categories({ state, setState }: StepProps) {
                   <div className="flex items-center gap-2">
                     <input
                       id="intake-a8-other"
+                      data-testid="intake-other-med-input"
                       type="text"
                       value={otherText}
                       onChange={(e) => {
@@ -1383,6 +1398,7 @@ function A8Categories({ state, setState }: StepProps) {
                   )}
                   <button
                     type="button"
+                    data-testid="intake-medication-add-button"
                     onClick={() => addOther('PATIENT_VOICE', otherText)}
                     disabled={!otherText.trim()}
                     className="mt-2 px-4 py-1.5 rounded-full text-white text-[12px] font-bold disabled:opacity-50 cursor-pointer"
@@ -2473,6 +2489,7 @@ function ClinicalIntakeWizard() {
         <AnimatePresence mode="wait" custom={direction}>
           <motion.div
             key={step}
+            data-testid={isIntro || isComplete ? undefined : `intake-step-${visibleIndex}`}
             custom={direction}
             initial={{ x: direction > 0 ? 60 : -60, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
@@ -2525,6 +2542,7 @@ function ClinicalIntakeWizard() {
           <div className="max-w-3xl mx-auto">
             <motion.button
               type="button"
+              data-testid="intake-submit"
               onClick={goNext}
               disabled={submitting}
               className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"

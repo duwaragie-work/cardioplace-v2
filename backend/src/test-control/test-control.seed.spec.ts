@@ -13,11 +13,17 @@ type AnyFn = jest.Mock<(...args: any[]) => any>
 
 function mockPrisma() {
   return {
-    user: { findUnique: jest.fn() as AnyFn, update: jest.fn() as AnyFn },
+    user: {
+      findUnique: jest.fn() as AnyFn,
+      findFirst: jest.fn() as AnyFn,
+      update: jest.fn() as AnyFn,
+    },
     journalEntry: { create: jest.fn() as AnyFn },
     deviationAlert: { create: jest.fn() as AnyFn },
     notification: { create: jest.fn() as AnyFn },
     profileVerificationLog: { create: jest.fn() as AnyFn },
+    patientProviderAssignment: { findUnique: jest.fn() as AnyFn },
+    patientThreshold: { upsert: jest.fn() as AnyFn },
   }
 }
 
@@ -137,6 +143,109 @@ describe('TestControlService — §H seed helpers', () => {
         data: Record<string, unknown>
       }
       expect(arg.data).toMatchObject({ channel: 'DASHBOARD' })
+    })
+  })
+
+  describe('setUserDateOfBirth (Phase 4 §B.2)', () => {
+    it('updates the user dateOfBirth with the supplied Date', async () => {
+      const prisma = mockPrisma()
+      prisma.user.update.mockResolvedValue({})
+      const svc = makeService(prisma)
+      const dob = new Date('1961-05-18T00:00:00.000Z')
+
+      await svc.setUserDateOfBirth('u1', dob)
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { dateOfBirth: dob },
+      })
+    })
+
+    it('forwards the exact Date instance (no coercion) for boundary dates', async () => {
+      const prisma = mockPrisma()
+      prisma.user.update.mockResolvedValue({})
+      const svc = makeService(prisma)
+      // The day a patient turns exactly 65 — boundary used by spec 20g.1.
+      const dob = new Date('1961-05-18T12:34:56.000Z')
+
+      await svc.setUserDateOfBirth('u2', dob)
+
+      const arg = prisma.user.update.mock.calls[0][0] as {
+        data: { dateOfBirth: Date }
+      }
+      expect(arg.data.dateOfBirth).toBe(dob)
+      expect(arg.data.dateOfBirth.toISOString()).toBe('1961-05-18T12:34:56.000Z')
+    })
+  })
+
+  describe('setOnboardingStatus (Phase 4 §C)', () => {
+    it('updates onboardingStatus to NOT_COMPLETED', async () => {
+      const prisma = mockPrisma()
+      prisma.user.update.mockResolvedValue({})
+      const svc = makeService(prisma)
+
+      await svc.setOnboardingStatus('u1', 'NOT_COMPLETED')
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { onboardingStatus: 'NOT_COMPLETED' },
+      })
+    })
+
+    it('updates onboardingStatus to COMPLETED', async () => {
+      const prisma = mockPrisma()
+      prisma.user.update.mockResolvedValue({})
+      const svc = makeService(prisma)
+
+      await svc.setOnboardingStatus('u2', 'COMPLETED')
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u2' },
+        data: { onboardingStatus: 'COMPLETED' },
+      })
+    })
+  })
+
+  describe('setPatientThreshold (Phase 4 §B.2)', () => {
+    it('upserts using setByProviderId resolved from the assigned medical director', async () => {
+      const prisma = mockPrisma()
+      prisma.patientProviderAssignment.findUnique.mockResolvedValue({
+        medicalDirectorId: 'md1',
+        primaryProviderId: 'pp1',
+        backupProviderId: 'bp1',
+      })
+      prisma.patientThreshold.upsert.mockResolvedValue({})
+      const svc = makeService(prisma)
+
+      const res = await svc.setPatientThreshold('u1', { sbpUpperTarget: 130 })
+
+      expect(prisma.user.findFirst).not.toHaveBeenCalled()
+      expect(prisma.patientThreshold.upsert).toHaveBeenCalledWith({
+        where: { userId: 'u1' },
+        update: { sbpUpperTarget: 130 },
+        create: { userId: 'u1', setByProviderId: 'md1', sbpUpperTarget: 130 },
+      })
+      expect(res).toEqual({ userId: 'u1' })
+    })
+
+    it('falls back to any MEDICAL_DIRECTOR / SUPER_ADMIN when no assignment exists', async () => {
+      const prisma = mockPrisma()
+      prisma.patientProviderAssignment.findUnique.mockResolvedValue(null)
+      prisma.user.findFirst.mockResolvedValue({ id: 'admin9' })
+      prisma.patientThreshold.upsert.mockResolvedValue({})
+      const svc = makeService(prisma)
+
+      await svc.setPatientThreshold('u2', { sbpLowerTarget: 95 })
+
+      expect(prisma.user.findFirst).toHaveBeenCalled()
+      const arg = prisma.patientThreshold.upsert.mock.calls[0][0] as {
+        create: Record<string, unknown>
+      }
+      expect(arg.create).toMatchObject({
+        userId: 'u2',
+        setByProviderId: 'admin9',
+        sbpLowerTarget: 95,
+      })
     })
   })
 

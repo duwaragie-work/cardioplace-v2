@@ -262,6 +262,18 @@ export class TestControlController {
     return { ok: true }
   }
 
+  // Phase 4 §C — auth-onboarding spec (20a) onboarding-state control.
+  @Post('user/set-onboarding-status')
+  @HttpCode(200)
+  async setOnboardingStatus(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; status: 'NOT_COMPLETED' | 'COMPLETED' },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.setOnboardingStatus(body.userId, body.status)
+    return { ok: true }
+  }
+
   @Post('user/set-profile-verification')
   @HttpCode(200)
   async setProfileVerification(
@@ -272,6 +284,39 @@ export class TestControlController {
     await this.svc.setProfileVerificationStatus(body.userId, body.status)
     return { ok: true }
   }
+
+  // Phase 4 §B.2 — age-bucket boundary tests (spec 20g.1).
+  @Post('user/set-date-of-birth')
+  @HttpCode(200)
+  async setUserDateOfBirth(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; dob: string },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.setUserDateOfBirth(body.userId, new Date(body.dob))
+    return { ok: true }
+  }
+
+  // Phase 4 §B.2 — personalized-mode threshold tests (spec 20g.21–22).
+  @Post('user/set-threshold')
+  @HttpCode(200)
+  async setPatientThreshold(
+    @Headers('x-test-control-secret') secret: string,
+    @Body()
+    body: {
+      userId: string
+      override: {
+        sbpUpperTarget?: number
+        sbpLowerTarget?: number
+        dbpUpperTarget?: number
+        dbpLowerTarget?: number
+      }
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.setPatientThreshold(body.userId, body.override ?? {})
+  }
+
 
   // ─── Seed fixtures (Phase 0 §H) ─────────────────────────────────────────
   @Post('user/set-account-status')

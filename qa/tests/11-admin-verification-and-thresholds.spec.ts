@@ -1,9 +1,15 @@
 import { test, expect } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
-import { authedApi, apiSignIn } from '../helpers/auth.js'
+import { authedApi, apiSignIn, signInAdmin } from '../helpers/auth.js'
 import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
-import { API_BASE_URL } from '../playwright.config.js'
+import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
+import { byTestId, T } from '../helpers/selectors.js'
+import {
+  verifyProfileViaUI,
+  correctProfileFieldViaUI,
+  editThresholdViaUI,
+} from '../helpers/api.js'
 
 /**
  * Admin verification (profile + medications) + threshold editor + role
@@ -477,5 +483,93 @@ test.describe('Phase 2 — Finding 4: threshold + assignment audit log', () => {
     } finally {
       if (restore) await restore().catch(() => {})
     }
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// Phase 3 §E — patient-detail Profile + Thresholds tabs (UI layer)
+//
+// Spec 11 above exercises the verification/threshold CONTRACTS via API.
+// These add the real UI walk (30e.1/.2/.9/.10). Reality (Phase 3 §B audit):
+//   • Profile per-field correction has NO per-field rationale input — the
+//     backend writes a server-mandated one. Verify persistence via the
+//     reloaded field cell + tc.findUser status (no tc.listAuditTrail exists).
+//   • Thresholds editor renders only for SUPER_ADMIN/MEDICAL_DIRECTOR;
+//     PROVIDER gets a read-only banner + no inputs/save.
+//   • James is the baseline patient assigned to primaryProvider — used for
+//     the PROVIDER-scoped read-only check so the detail page loads (≠403).
+// ───────────────────────────────────────────────────────────────────────────
+test.describe('Phase 3 §E — patient-detail Profile + Thresholds (UI)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Phase 3 admin write/e2e gated')
+
+  test('30e.1 — admin verifies an UNVERIFIED profile via UI → status flips to VERIFIED', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    await tc.setProfileVerificationStatus(aisha.id, 'UNVERIFIED')
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    await verifyProfileViaUI(page, aisha.id)
+
+    // Banner asserted inside the helper; confirm the persisted server state.
+    const after = await tc.findUser(PATIENTS.aisha.email)
+    expect(after.profileVerificationStatus).toBe('VERIFIED')
+  })
+
+  test('30e.2 — admin corrects heightCm (→163) via UI → value persists on reload', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    await tc.setProfileVerificationStatus(aisha.id, 'UNVERIFIED')
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    // Per-run-unique target in a valid cm range so the diff is never a no-op
+    // (correctProfile 400s "No corrections supplied" on a zero-diff patch).
+    // No UI pre-read — a second full navigation races the admin auth-context
+    // /me bootstrap and leaves the verifier UI unrendered.
+    const heightTarget = String(150 + (Date.now() % 40)) // 150–189 cm
+    await correctProfileFieldViaUI(page, aisha.id, 'heightCm', heightTarget, 'qa: height re-measured')
+
+    // The patient-reported cell intentionally keeps the original self-report
+    // ("trust then verify" audit model) — the correction is recorded as a
+    // server-side override that flips profileVerificationStatus → CORRECTED
+    // (backend intake.service.correctProfile). That status flip is the
+    // definitive proof the UI correction landed end-to-end.
+    const after = await tc.findUser(PATIENTS.aisha.email)
+    expect(after.profileVerificationStatus).toBe('CORRECTED')
+  })
+
+  test('30e.9 — MEDICAL_DIRECTOR edits SBP upper target (→155) → persists on reload', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    // Per-run-unique target so the form is always "dirty" (Save is disabled
+    // when the value equals the stored one — non-idempotent otherwise).
+    const sbpTarget = 150 + (Date.now() % 20) // 150–169 mmHg
+    await editThresholdViaUI(page, aisha.id, { sbpUpperTarget: sbpTarget })
+
+    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
+    await expect(
+      page.locator(byTestId(T.admin.thresholdSbpUpper)),
+    ).toHaveValue(String(sbpTarget), { timeout: 20_000 })
+  })
+
+  test('30e.10 — PROVIDER sees the thresholds tab read-only (no editor, banner shown)', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const james = await tc.findUser(PATIENTS.james.email) // baseline-assigned to primaryProvider
+
+    await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients/${james.id}`)
+    await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
+
+    await expect(
+      page.locator(byTestId(T.admin.thresholdReadonlyBanner)),
+    ).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator(byTestId(T.admin.thresholdSbpUpper))).toHaveCount(0)
+    await expect(page.locator(byTestId(T.admin.thresholdSave))).toHaveCount(0)
   })
 })

@@ -53,6 +53,16 @@ export default defineConfig({
     video: 'retain-on-failure',
     actionTimeout: 10_000,
     navigationTimeout: 30_000,
+    // Emulate the DC Ward 7/8 pilot timezone. The onboarding profile submit
+    // sends the browser-derived `Intl…timeZone`; on a UTC host (CI Linux
+    // runners) that is literal "UTC", which the backend
+    // POST /api/v2/auth/profile DTO rejects with 400 ("timezone must be a
+    // valid IANA identifier"), so onboarding never completes (20a.2). Pinning
+    // a real IANA zone makes the suite deterministic + matches real pilot
+    // users (no DC patient is in literal UTC). NOTE for backend: the
+    // profile-DTO arguably should accept "UTC" (it IS a valid IANA zone) —
+    // flagged in the PR; non-blocking since the pilot cohort is ET.
+    timezoneId: 'America/New_York',
     extraHTTPHeaders: {
       'X-Test-Run': '1',
     },

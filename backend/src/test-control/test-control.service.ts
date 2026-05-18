@@ -282,6 +282,22 @@ export class TestControlService {
   }
 
   /**
+   * Phase 4 §C — flip a user's onboardingStatus. Seed personas are all
+   * COMPLETED; the auth-onboarding spec (20a) needs to roll one back to
+   * NOT_COMPLETED to exercise the new-user → /onboarding redirect and the
+   * returning-user skip. Mirrors setEnrollment (test-infra only).
+   */
+  async setOnboardingStatus(
+    userId: string,
+    status: 'NOT_COMPLETED' | 'COMPLETED',
+  ): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { onboardingStatus: status },
+    })
+  }
+
+  /**
    * Insert journal entries at exact timestamps. Used by tests that depend
    * on session windows (e.g. tachycardia 8h cross-session, AFib ≥3-reading
    * gate) — driving them via API + backdate is brittle when the tests
@@ -434,6 +450,75 @@ export class TestControlService {
       where: { userId },
       data: { profileVerificationStatus: status },
     })
+  }
+
+  /**
+   * Phase 4 §B.2 — set a User.dateOfBirth. Backs the age-bucket boundary
+   * tests (spec 20g.1): AGE_65_LOW must fire the day a patient turns 65 and
+   * NOT the day before, proving the cutoff is enforced at reading-evaluation
+   * time rather than at user-creation time.
+   */
+  async setUserDateOfBirth(userId: string, dob: Date): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { dateOfBirth: dob },
+    })
+  }
+
+  /**
+   * Phase 4 §B.2 — upsert a PatientThreshold for personalized-mode tests
+   * (spec 20g.21–22). `PatientThreshold.setByProviderId` is a required
+   * column, so resolve it server-side: prefer the patient's assigned
+   * medical director, then primary / backup provider, then any
+   * MEDICAL_DIRECTOR / SUPER_ADMIN user. Tests assert only on the threshold
+   * targets, never on attribution — but the column must be populated for the
+   * create path to succeed.
+   */
+  async setPatientThreshold(
+    userId: string,
+    override: {
+      sbpUpperTarget?: number
+      sbpLowerTarget?: number
+      dbpUpperTarget?: number
+      dbpLowerTarget?: number
+    },
+  ): Promise<{ userId: string }> {
+    const assignment = await this.prisma.patientProviderAssignment.findUnique({
+      where: { userId },
+      select: {
+        medicalDirectorId: true,
+        primaryProviderId: true,
+        backupProviderId: true,
+      },
+    })
+    let setByProviderId: string | null =
+      assignment?.medicalDirectorId ??
+      assignment?.primaryProviderId ??
+      assignment?.backupProviderId ??
+      null
+    if (!setByProviderId) {
+      const admin = await this.prisma.user.findFirst({
+        where: {
+          OR: [
+            { roles: { has: 'MEDICAL_DIRECTOR' } },
+            { roles: { has: 'SUPER_ADMIN' } },
+          ],
+        },
+        select: { id: true },
+      })
+      setByProviderId = admin?.id ?? null
+    }
+    if (!setByProviderId) {
+      throw new Error(
+        `setPatientThreshold: no provider available to attribute threshold for user ${userId}`,
+      )
+    }
+    await this.prisma.patientThreshold.upsert({
+      where: { userId },
+      update: { ...override },
+      create: { userId, setByProviderId, ...override },
+    })
+    return { userId }
   }
 
   // ─── Seed fixtures (Phase 0 §H) ─────────────────────────────────────────

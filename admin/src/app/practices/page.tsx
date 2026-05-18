@@ -81,7 +81,7 @@ export default function PracticesPage() {
             </div>
           </div>
           {canManage && (
-            <button type="button" onClick={() => setShowCreate(true)} className="btn-admin-primary">
+            <button type="button" data-testid="admin-practice-create-button" onClick={() => setShowCreate(true)} className="btn-admin-primary">
               <Plus className="w-3.5 h-3.5" />
               Add practice
             </button>
@@ -112,17 +112,18 @@ export default function PracticesPage() {
                   : 'Practices will appear here once an administrator adds them.'}
               </p>
               {canManage && (
-                <button type="button" onClick={() => setShowCreate(true)} className="btn-admin-primary mt-4">
+                <button type="button" data-testid="admin-practice-create-button" onClick={() => setShowCreate(true)} className="btn-admin-primary mt-4">
                   <Plus className="w-3.5 h-3.5" />
                   Add practice
                 </button>
               )}
             </div>
           ) : (
-            <ul>
+            <ul data-testid="admin-practice-list">
               {practices.map((p, idx) => (
                 <li
                   key={p.id}
+                  data-testid={`admin-practice-row-${p.id}`}
                   style={{
                     borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none',
                   }}
@@ -281,6 +282,7 @@ function CreatePracticeModal({
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: 60, opacity: 0 }}
         transition={{ type: 'spring', stiffness: 340, damping: 30 }}
+        data-testid="admin-practice-create-modal"
         className="relative w-full sm:max-w-lg bg-white sm:rounded-2xl rounded-t-2xl flex flex-col overflow-hidden"
         style={{ maxHeight: '92dvh', boxShadow: '0 8px 48px rgba(0,0,0,0.18)' }}
       >
@@ -317,6 +319,7 @@ function CreatePracticeModal({
           <Field label="Practice name" required>
             <input
               type="text"
+              data-testid="admin-practice-create-name"
               value={form.name}
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="e.g. Cedar Hill Family Medicine"
@@ -329,6 +332,7 @@ function CreatePracticeModal({
             <Field label="Business hours start">
               <input
                 type="time"
+                data-testid="admin-practice-create-hours-start"
                 value={form.businessHoursStart}
                 onChange={(e) => setForm((p) => ({ ...p, businessHoursStart: e.target.value }))}
                 className="w-full px-3 h-9 rounded-lg text-[13px] outline-none"
@@ -338,6 +342,7 @@ function CreatePracticeModal({
             <Field label="Business hours end">
               <input
                 type="time"
+                data-testid="admin-practice-create-hours-end"
                 value={form.businessHoursEnd}
                 onChange={(e) => setForm((p) => ({ ...p, businessHoursEnd: e.target.value }))}
                 className="w-full px-3 h-9 rounded-lg text-[13px] outline-none"
@@ -348,6 +353,7 @@ function CreatePracticeModal({
 
           <Field label="Timezone">
             <select
+              data-testid="admin-practice-create-tz"
               value={form.businessHoursTimezone}
               onChange={(e) => setForm((p) => ({ ...p, businessHoursTimezone: e.target.value }))}
               className="w-full px-3 h-9 rounded-lg text-[13px] outline-none bg-white"
@@ -361,6 +367,7 @@ function CreatePracticeModal({
 
           <Field label="After-hours protocol">
             <textarea
+              data-testid="admin-practice-create-protocol"
               value={form.afterHoursProtocol ?? ''}
               onChange={(e) => setForm((p) => ({ ...p, afterHoursProtocol: e.target.value }))}
               rows={3}
@@ -385,7 +392,7 @@ function CreatePracticeModal({
           <button type="button" onClick={onClose} className="btn-admin-secondary flex-1">
             Cancel
           </button>
-          <button type="button" onClick={submit} disabled={!canSubmit} className="btn-admin-primary flex-1">
+          <button type="button" data-testid="admin-practice-create-submit" onClick={submit} disabled={!canSubmit} className="btn-admin-primary flex-1">
             {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
             Create practice
           </button>

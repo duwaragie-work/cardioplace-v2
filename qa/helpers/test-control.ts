@@ -242,12 +242,53 @@ export class TestControl {
     await this.post('test-control/user/set-enrollment', { userId, status })
   }
 
+  /**
+   * Phase 4 §C — flip a user's onboardingStatus. Seed personas are all
+   * COMPLETED; spec 20a rolls one back to NOT_COMPLETED to exercise the
+   * new-user → /onboarding redirect.
+   */
+  async setOnboardingStatus(
+    userId: string,
+    status: 'NOT_COMPLETED' | 'COMPLETED',
+  ): Promise<void> {
+    await this.post('test-control/user/set-onboarding-status', { userId, status })
+  }
+
   /** Force a user's `profileVerificationStatus` (UNVERIFIED/VERIFIED/CORRECTED). */
   async setProfileVerificationStatus(
     userId: string,
     status: 'UNVERIFIED' | 'VERIFIED' | 'CORRECTED',
   ): Promise<void> {
     await this.post('test-control/user/set-profile-verification', { userId, status })
+  }
+
+  /**
+   * Phase 4 §B.2 — set a user's dateOfBirth. Used by the age-bucket boundary
+   * test (spec 20g.1): AGE_65_LOW must fire the day the patient turns 65 and
+   * NOT one day earlier, proving the cutoff is evaluated at reading time.
+   */
+  async setUserDateOfBirth(userId: string, dob: Date): Promise<void> {
+    await this.post('test-control/user/set-date-of-birth', {
+      userId,
+      dob: dob.toISOString(),
+    })
+  }
+
+  /**
+   * Phase 4 §B.2 — upsert a PatientThreshold for personalized-mode tests
+   * (spec 20g.21–22). `setByProviderId` is resolved server-side from the
+   * patient's assignment, so callers only pass the target overrides.
+   */
+  async setPatientThreshold(
+    userId: string,
+    override: {
+      sbpUpperTarget?: number
+      sbpLowerTarget?: number
+      dbpUpperTarget?: number
+      dbpLowerTarget?: number
+    },
+  ): Promise<{ userId: string }> {
+    return this.post('test-control/user/set-threshold', { userId, override })
   }
 
   /**

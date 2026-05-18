@@ -174,6 +174,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
 
   return (
     <motion.div
+      data-testid="emergency-screen"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -235,7 +236,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
             >
               {MESSAGE_TITLE}
             </h1>
-            <p lang="en" className="text-[16px] sm:text-[18px] leading-relaxed mb-3 opacity-95">
+            <p data-testid="emergency-screen-message" lang="en" className="text-[16px] sm:text-[18px] leading-relaxed mb-3 opacity-95">
               If you have <b>chest pain</b>, <b>severe headache</b>, <b>difficulty breathing</b>, or <b>vision changes</b>, call 911 now.
             </p>
             <p lang="en" className="text-[13px] sm:text-[14px] opacity-90">{REASSURANCE}</p>
@@ -264,6 +265,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
           <div className="max-w-md mx-auto space-y-3">
             <a
               href="tel:911"
+              data-testid="emergency-call-911-button"
               className="block w-full text-center rounded-full py-4 sm:py-5 font-extrabold text-[20px] sm:text-[22px] active:scale-[0.98] transition"
               style={{
                 backgroundColor: 'white',
@@ -279,6 +281,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
             </a>
             <button
               type="button"
+              data-testid="alert-acknowledge-button"
               onClick={handleUnderstand}
               className="w-full rounded-full py-3 font-bold text-[14px] cursor-pointer transition"
               style={{

@@ -352,6 +352,35 @@ const patients: PatientSeed[] = [
     ],
     archetype: '65+ control — no comorbidities, age threshold edges',
   },
+
+  // ─── Phase 4 §B.1 — young-adult persona (18–29 bucket) ──────────────────
+  // Added for Phase 4 age-bucket coverage (spec 20g.2). General adult HTN
+  // cohort, no special condition flags — exercises the standard-threshold /
+  // SBP <90 lower path with PREVENT-not-validated (<30) UX. Gender 'OTHER':
+  // the Gender enum + PatientSeed type are MALE|FEMALE|OTHER (no NON_BINARY).
+  // Benign readings so seed import never fires an alert (tests post the
+  // alert-triggering reading via the UI).
+  {
+    email: 'taylor.brown@cardioplace.test',
+    name: 'Taylor Brown',
+    dateOfBirth: new Date('2002-04-12'), // age ~24 at 2026-05-18
+    gender: 'OTHER',
+    heightCm: 170,
+    profile: {
+      diagnosedHypertension: true,
+    },
+    medications: [
+      { drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR', frequency: 'ONCE_DAILY', verificationStatus: 'VERIFIED' },
+    ],
+    readings: [
+      { daysAgo: 0, sbp: 122, dbp: 78, pulse: 70 },
+      { daysAgo: 3, sbp: 126, dbp: 80, pulse: 72 },
+      { daysAgo: 6, sbp: 120, dbp: 76, pulse: 68 },
+      { daysAgo: 10, sbp: 124, dbp: 80, pulse: 72 },
+      { daysAgo: 13, sbp: 123, dbp: 78, pulse: 70 },
+    ],
+    archetype: 'Young adult (18–29 bucket) — general adult HTN, no PREVENT validation',
+  },
 ]
 
 export async function seedPatients(

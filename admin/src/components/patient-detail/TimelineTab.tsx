@@ -499,6 +499,7 @@ export default function TimelineTab({ logs, alerts, medications, logsLoading, al
               key={key}
               type="button"
               onClick={() => setFilter(key)}
+              data-testid={`admin-timeline-filter-${key}`}
               className="px-2.5 h-7 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 cursor-pointer"
               style={{
                 backgroundColor: active ? color : bg,
@@ -532,7 +533,7 @@ export default function TimelineTab({ logs, alerts, medications, logsLoading, al
           </p>
         </div>
       ) : filtered.length === 0 ? (
-        <div className="bg-white rounded-2xl p-8 text-center" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+        <div className="bg-white rounded-2xl p-8 text-center" style={{ boxShadow: 'var(--brand-shadow-card)' }} data-testid="admin-timeline-empty">
           <Clock className="w-7 h-7 mx-auto mb-2" style={{ color: 'var(--brand-text-muted)' }} />
           <p className="text-[14px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
             No history yet
@@ -542,7 +543,7 @@ export default function TimelineTab({ logs, alerts, medications, logsLoading, al
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3" data-testid="admin-timeline-list">
           {groups.map(([dk, entries]) => (
             <div key={dk} className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
               <div className="px-5 py-2.5" style={{ backgroundColor: 'var(--brand-background)', borderBottom: '1px solid var(--brand-border)' }}>
@@ -555,6 +556,7 @@ export default function TimelineTab({ logs, alerts, medications, logsLoading, al
                   <li
                     key={e.id}
                     className="px-5 py-3 flex items-start gap-3"
+                    data-testid={`admin-timeline-entry-${e.id}`}
                     style={{
                       borderTop: i > 0 ? '1px solid var(--brand-border)' : 'none',
                     }}

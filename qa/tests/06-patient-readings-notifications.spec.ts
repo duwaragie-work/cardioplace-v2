@@ -3,6 +3,7 @@ import { signInPatient, authedApi } from '../helpers/auth.js'
 import { PATIENTS } from '../helpers/accounts.js'
 import { byTestId, T } from '../helpers/selectors.js'
 import { postJournalEntry } from '../helpers/api.js'
+import { newTestControl, type TestControl } from '../helpers/test-control.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
 /**
@@ -120,5 +121,93 @@ test.describe('/notifications — alerts vs notifications tabs', () => {
         `concatenation regression: "${text}"`,
       ).toMatch(/\d{1,2}[\s,]+\d{1,2}:\d{2}/)
     }
+  })
+})
+
+// ─── Phase 4h (§J) — notifications inbox + mark-read + deep-link ───────────
+test.describe('Phase 4h — notifications (20h)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated by RUN_WRITE_TESTS=1')
+  test.describe.configure({ retries: 1 })
+
+  let tc: TestControl
+  test.beforeAll(async () => {
+    tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+  })
+  test.afterAll(async () => {
+    await tc?.dispose()
+  })
+
+  // The patient's real notification inbox IS the Alerts tab: per
+  // escalation.service.ts ("DASHBOARD notifications are implicit via
+  // DeviationAlert rows") the patient sees alert-derived items as AlertCards
+  // (notification-row-{alertId}); the separate Notification model rows are
+  // provider/caregiver push/email, not patient NotifCards. 20h.1/20h.2
+  // therefore exercise the real patient inbox + its handled-action.
+  test('20h.1 — patient alert inbox renders alert rows', async ({ page }) => {
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    const { alertIds } = await tc.seedAlerts(u.id, [
+      { tier: 'BP_LEVEL_1_HIGH', status: 'OPEN' },
+      { tier: 'BP_LEVEL_1_HIGH', status: 'OPEN' },
+    ])
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/notifications')
+    // Alerts tab (default) lists each alert as notification-row-{alertId}.
+    for (const id of alertIds) {
+      await expect(
+        page.locator(`[data-testid="notification-row-${id}"]`),
+      ).toBeVisible({ timeout: 12_000 })
+    }
+    await tc.resetUser(u.id)
+  })
+
+  test('20h.2 — patient marks an inbox alert handled (acknowledge)', async ({
+    page,
+  }) => {
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    const { alertIds } = await tc.seedAlerts(u.id, [
+      { tier: 'BP_LEVEL_1_HIGH', status: 'OPEN' },
+    ])
+    const alertId = alertIds[0]
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/notifications')
+    // The AlertCard "acknowledge" is the patient's mark-handled action
+    // (§B.4 mapped it to notification-dismiss-button-{id}).
+    const ackBtn = page.locator(
+      `[data-testid="notification-dismiss-button-${alertId}"]`,
+    )
+    await ackBtn.waitFor({ state: 'visible', timeout: 12_000 })
+    await ackBtn.click()
+    // State sanity: the alert is acknowledged.
+    await expect
+      .poll(
+        async () =>
+          (await tc.listAlerts(u.id)).find((x) => x.id === alertId)?.status,
+        { timeout: 12_000 },
+      )
+      .toBe('ACKNOWLEDGED')
+    await tc.resetUser(u.id)
+  })
+
+  test('20h.3 — alert card deep-links to /alerts/[id]', async ({ page }) => {
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    const { alertIds } = await tc.seedAlerts(u.id, [
+      { tier: 'BP_LEVEL_1_HIGH', status: 'OPEN' },
+    ])
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/notifications')
+    // Alerts tab (default) → the seeded alert's "View details" deep-link.
+    const link = page.locator(`[data-testid="notification-link-${alertIds[0]}"]`)
+    await link.waitFor({ state: 'visible', timeout: 12_000 })
+    await link.click()
+    await page.waitForURL(new RegExp(`/alerts/${alertIds[0]}`), {
+      timeout: 12_000,
+    })
+    await expect(
+      page.locator('[data-testid="alert-message-patient"]'),
+    ).toBeVisible({ timeout: 12_000 })
+    await tc.resetUser(u.id)
   })
 })

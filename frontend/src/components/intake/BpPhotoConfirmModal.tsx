@@ -60,6 +60,7 @@ export default function BpPhotoConfirmModal({
         onClick={onCancel}
       />
       <motion.div
+        data-testid="bp-photo-confirm-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="bp-confirm-title"
@@ -149,6 +150,7 @@ export default function BpPhotoConfirmModal({
         >
           <button
             type="button"
+            data-testid="bp-photo-confirm-button"
             onClick={onConfirm}
             className="flex-1 h-11 rounded-xl font-bold text-white cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--brand-primary-purple)]"
             style={{ backgroundColor: 'var(--brand-primary-purple)' }}

@@ -1,9 +1,14 @@
 import { test, expect } from '@playwright/test'
-import { authedApi } from '../helpers/auth.js'
+import { authedApi, signInAdmin } from '../helpers/auth.js'
 import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
-import { adminEnrollmentCheck, adminCompleteEnrollment } from '../helpers/api.js'
-import { API_BASE_URL } from '../playwright.config.js'
+import {
+  adminEnrollmentCheck,
+  adminCompleteEnrollment,
+  admitPatientViaUI,
+} from '../helpers/api.js'
+import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
+import { byTestId, T } from '../helpers/selectors.js'
 
 /**
  * Admin enrollment gate (TESTING_FLOW_GUIDE §6.2). The 4-piece gate at
@@ -88,5 +93,55 @@ test.describe('Enrollment gate — failure modes (TODO)', () => {
       await api.dispose()
       await tc.dispose()
     }
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// Phase 3 §F — enrollment workflow UI (30f.1, 30f.2)
+//
+// §F.3 (unenroll) is DROPPED: there is NO unenroll affordance anywhere in
+// the admin UI — EnrollmentCard only admits and returns null once ENROLLED.
+// Documented as a Category-C product gap in RESULTS.md (no fake skip).
+//
+// PATIENTS.aisha is the canonical enrollable patient (passes the gate with
+// reasons:[] per the happy-path test above). The enrollment status flip is
+// the audit-backed proof (no tc.listAuditTrail endpoint exists).
+// ───────────────────────────────────────────────────────────────────────────
+test.describe('Phase 3 §F — enrollment workflow (UI)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Phase 3 admin write/e2e gated')
+
+  test('30f.1 — admit a NOT_ENROLLED patient via EnrollmentCard → status flips ENROLLED', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    // Deterministic setup: verified profile + NOT_ENROLLED. Aisha already
+    // has a care-team assignment (no mandatory threshold — control/HTN).
+    await tc.setProfileVerificationStatus(aisha.id, 'VERIFIED')
+    await tc.setEnrollment(aisha.id, 'NOT_ENROLLED')
+
+    // Confirm the gate is open (button would be disabled otherwise).
+    const api = await authedApi(API_BASE_URL, ADMINS.medicalDirector.email, 'admin')
+    const chk = await adminEnrollmentCheck(api, aisha.id)
+    await api.dispose()
+    expect(chk.ready, `enrollment gate blocked: ${JSON.stringify(chk.reasons)}`).toBe(true)
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    await admitPatientViaUI(page, aisha.id) // clicks enroll, waits card to unmount
+
+    const after = await tc.findUser(PATIENTS.aisha.email)
+    expect(after.enrollmentStatus).toBe('ENROLLED')
+  })
+
+  test('30f.2 — an ENROLLED patient shows the "Enrolled" pill in the /patients list', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    await tc.setEnrollment(aisha.id, 'ENROLLED')
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients`)
+    const row = page.locator(byTestId(T.admin.patientListRow(aisha.id)))
+    await expect(row).toBeVisible({ timeout: 20_000 })
+    await expect(row).toContainText(/enrolled/i)
   })
 })
