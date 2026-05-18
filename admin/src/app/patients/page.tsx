@@ -880,7 +880,7 @@ export default function PatientsPage() {
   if (!hasAdminRole(user)) {
     return (
       <div className="h-full flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
-        <div className="text-center p-8 rounded-2xl bg-white" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+        <div className="text-center p-8 rounded-2xl bg-white" style={{ boxShadow: 'var(--brand-shadow-card)' }} data-testid="admin-access-denied">
           <div
             className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
             style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
@@ -947,6 +947,7 @@ export default function PatientsPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={t('provider.searchPatients')}
+                data-testid="admin-patient-search-input"
                 className="flex-1 text-[12px] outline-none bg-transparent min-w-0"
                 style={{ color: 'var(--brand-text-primary)' }}
               />
@@ -970,6 +971,7 @@ export default function PatientsPage() {
                 <select
                   value={riskFilter}
                   onChange={(e) => setRiskFilter(e.target.value)}
+                  data-testid="admin-patient-risk-filter"
                   className="appearance-none h-9 pl-3 pr-7 rounded-full text-[12px] font-semibold outline-none cursor-pointer"
                   style={{
                     backgroundColor: 'white',
@@ -999,6 +1001,7 @@ export default function PatientsPage() {
                   <button
                     type="button"
                     onClick={() => setAwaitingVerificationOnly((v) => !v)}
+                    data-testid="admin-patient-awaiting-filter"
                     aria-pressed={active}
                     aria-label={active ? 'Showing only unverified patients' : 'Filter to unverified patients'}
                     className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap"
@@ -1067,7 +1070,7 @@ export default function PatientsPage() {
               <TableSkeleton />
             </div>
           ) : filtered.length === 0 ? (
-            <div className="py-16 text-center">
+            <div className="py-16 text-center" data-testid="admin-patient-list-empty">
               <Users className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--brand-border)' }} />
               <p className="text-sm font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('provider.noPatients')}
@@ -1084,6 +1087,7 @@ export default function PatientsPage() {
                   // biome-ignore lint/a11y/useSemanticElements: row contains block-level children (grid columns), which would be invalid inside a <button>. Keyboard support handled below.
                   <div
                     key={p.id}
+                    data-testid={`admin-patient-list-row-${p.id}`}
                     onClick={() => router.push(`/patients/${p.id}`)}
                     role="button"
                     tabIndex={0}

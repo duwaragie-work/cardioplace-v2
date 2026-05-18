@@ -206,6 +206,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
               return (
                 <button
                   key={s}
+                  data-testid={`admin-alerts-status-filter-${s}`}
                   type="button"
                   onClick={() => setStatusFilter(s)}
                   className="px-2.5 h-6 rounded-full text-[10.5px] font-semibold transition-all cursor-pointer"
@@ -246,6 +247,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
             return (
               <button
                 key={key}
+                data-testid={`admin-alerts-tier-filter-${key}`}
                 type="button"
                 onClick={() => setTierFilter(key)}
                 className="px-2.5 h-7 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 cursor-pointer"
@@ -275,7 +277,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
 
       {/* Empty state */}
       {filtered.length === 0 ? (
-        <div className="bg-white rounded-2xl p-8 text-center" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+        <div data-testid="admin-alerts-empty" className="bg-white rounded-2xl p-8 text-center" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
           <CheckCircle2 className="w-7 h-7 mx-auto mb-2" style={{ color: 'var(--brand-success-green)' }} />
           <p className="text-[14px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
             No alerts match your filter

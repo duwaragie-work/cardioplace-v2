@@ -557,7 +557,7 @@ export default function AdminDashboard() {
           ) : (
             <>
               {/* Total Patients */}
-              <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+              <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }} data-testid="admin-dashboard-stat-total-patients">
                 <div className="flex items-start justify-between mb-2">
                   <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>{t('provider.totalPatients')}</span>
                   <Users className="w-5 h-5" style={{ color: 'var(--brand-primary-purple)' }} />
@@ -571,7 +571,7 @@ export default function AdminDashboard() {
               </div>
 
               {/* BP L2 emergencies */}
-              <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+              <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }} data-testid="admin-dashboard-stat-bp-l2">
                 <div className="flex items-start justify-between mb-2">
                   <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>BP L2 emergencies</span>
                   <ShieldAlert className="w-5 h-5" style={{ color: 'var(--brand-alert-red)' }} />
@@ -585,7 +585,7 @@ export default function AdminDashboard() {
               </div>
 
               {/* Tier 1 */}
-              <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+              <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }} data-testid="admin-dashboard-stat-tier-1">
                 <div className="flex items-start justify-between mb-2">
                   <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>Tier 1 contraindications</span>
                   <Pill className="w-5 h-5" style={{ color: 'var(--brand-alert-red)' }} />
@@ -599,7 +599,7 @@ export default function AdminDashboard() {
               </div>
 
               {/* Tier 2 */}
-              <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+              <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }} data-testid="admin-dashboard-stat-tier-2">
                 <div className="flex items-start justify-between mb-2">
                   <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>Tier 2 discrepancies</span>
                   <ArrowUp className="w-5 h-5" style={{ color: 'var(--brand-warning-amber)' }} />
@@ -613,7 +613,7 @@ export default function AdminDashboard() {
               </div>
 
               {/* Patients needing attention */}
-              <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+              <div className="bg-white p-5 rounded-2xl" style={{ boxShadow: 'var(--brand-shadow-card)' }} data-testid="admin-dashboard-stat-attention">
                 <div className="flex items-start justify-between mb-2">
                   <span className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>{t('provider.patientsNeedingAttention')}</span>
                   <AlertTriangle className="w-5 h-5" style={{ color: 'var(--brand-warning-amber)' }} />
@@ -663,6 +663,7 @@ export default function AdminDashboard() {
                     value={alertSearch}
                     onChange={(e) => setAlertSearch(e.target.value)}
                     placeholder="Search patient or BP"
+                    data-testid="admin-dashboard-search"
                     className="flex-1 text-[11px] outline-none bg-transparent min-w-0"
                     style={{ color: 'var(--brand-text-primary)' }}
                   />
@@ -697,6 +698,7 @@ export default function AdminDashboard() {
                       key={key}
                       type="button"
                       onClick={() => setTierFilter(key)}
+                      data-testid={`admin-dashboard-tier-filter-${key}`}
                       className="px-2.5 h-7 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 cursor-pointer"
                       style={{
                         backgroundColor: active ? chrome.accent : chrome.light,
@@ -734,7 +736,7 @@ export default function AdminDashboard() {
                 ))}
               </div>
             ) : queueAlerts.length === 0 ? (
-              <div className="py-10 flex flex-col items-center text-center">
+              <div className="py-10 flex flex-col items-center text-center" data-testid="admin-dashboard-queue-empty">
                 <CheckCircle2 className="w-8 h-8 mb-2" style={{ color: 'var(--brand-success-green)' }} />
                 <p className="text-[13px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
                   {tierFilter === 'ALL' ? 'No open alerts' : 'No alerts in this tier'}
@@ -744,7 +746,7 @@ export default function AdminDashboard() {
                 </p>
               </div>
             ) : (
-              <div className="overflow-y-auto admin-scroll" style={{ maxHeight: '60vh' }}>
+              <div className="overflow-y-auto admin-scroll" style={{ maxHeight: '60vh' }} data-testid="admin-dashboard-queue">
                 <ul className="space-y-2">
                   {queueAlerts.map((a) => {
                     const bucket = tierBucket(a);
@@ -763,6 +765,7 @@ export default function AdminDashboard() {
                     return (
                       <li key={a.id}>
                         <div
+                          data-testid={`admin-dashboard-alert-row-${a.id}`}
                           className={`group rounded-xl p-3 flex items-center gap-3 cursor-pointer transition-[filter] duration-150 ${
                             isSelected ? 'brightness-[0.92]' : 'hover:brightness-[0.96]'
                           }`}
@@ -790,6 +793,7 @@ export default function AdminDashboard() {
                               e.stopPropagation();
                               if (a.patient?.id) router.push(`/patients/${a.patient.id}`);
                             }}
+                            data-testid={`admin-dashboard-alert-open-${a.id}`}
                             className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-[10.5px] shrink-0 cursor-pointer transition-transform hover:scale-105"
                             style={{ backgroundColor: chrome.accent }}
                             aria-label={`Open ${a.patient?.name ?? 'patient'} detail`}

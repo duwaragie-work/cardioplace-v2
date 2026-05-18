@@ -170,6 +170,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
             aria-hidden
           />
           <motion.div
+            data-testid="admin-resolve-modal"
             initial={{ y: 60, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 60, opacity: 0 }}
@@ -237,6 +238,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
             <div className="flex-1 overflow-y-auto thin-scrollbar p-5 space-y-4">
               {alert.patientMessage && (
                 <div
+                  data-testid="admin-resolve-patient-message"
                   className="rounded-lg p-3 text-[12.5px] leading-relaxed"
                   style={{
                     backgroundColor: variant.accentLight,
@@ -266,6 +268,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                       return (
                         <button
                           key={key}
+                          data-testid={`admin-resolve-action-${key}`}
                           type="button"
                           onClick={() => setAction(key)}
                           className="w-full text-left rounded-lg p-3 transition-colors cursor-pointer"
@@ -349,6 +352,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                     )}
                   </label>
                   <textarea
+                    data-testid="admin-resolve-rationale"
                     value={rationale}
                     onChange={(e) => setRationale(e.target.value)}
                     placeholder={
@@ -382,6 +386,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
               )}
               <div className="flex gap-3">
                 <button
+                  data-testid="admin-resolve-cancel"
                   type="button"
                   onClick={onClose}
                   className="btn-admin-secondary flex-1"
@@ -389,6 +394,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                   Cancel
                 </button>
                 <button
+                  data-testid="admin-resolve-confirm"
                   type="button"
                   onClick={handleSubmit}
                   disabled={!canSubmit}

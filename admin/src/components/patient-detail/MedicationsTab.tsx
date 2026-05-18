@@ -240,7 +240,7 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
 
   if (medications.length === 0) {
     return (
-      <div className="bg-white rounded-2xl p-8 text-center" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+      <div className="bg-white rounded-2xl p-8 text-center" style={{ boxShadow: 'var(--brand-shadow-card)' }} data-testid="admin-med-empty">
         <Pill className="w-7 h-7 mx-auto mb-2" style={{ color: 'var(--brand-text-muted)' }} />
         <p className="text-[14px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
           No medications on file
@@ -267,7 +267,7 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
         const chrome = statusChrome(row.status);
         const tier3Notes = tier3ByDrugClass.get(row.drugClassKey) ?? [];
         return (
-          <div key={row.drugClassKey} className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+          <div key={row.drugClassKey} className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }} data-testid={`admin-med-group-${row.drugClassKey}`}>
             {/* Row header */}
             <div className="px-5 py-3 flex items-center justify-between gap-3 flex-wrap" style={{ borderBottom: '1px solid var(--brand-border)' }}>
               <div className="flex items-center gap-2.5 min-w-0">
@@ -517,6 +517,7 @@ function MedCard({ med, savingId, side, onSetStatus, canVerify }: MedCardProps) 
   return (
     <div
       className="rounded-lg p-3"
+      data-testid={`admin-med-card-${med.id}`}
       style={{
         backgroundColor: isDiscontinued ? 'var(--brand-background)' : 'white',
         border: '1px solid var(--brand-border)',
@@ -542,6 +543,7 @@ function MedCard({ med, savingId, side, onSetStatus, canVerify }: MedCardProps) 
         </div>
         <span
           className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0"
+          data-testid={`admin-med-status-${med.id}`}
           style={{ backgroundColor: v.bg, color: v.color }}
         >
           {v.label}
@@ -572,6 +574,7 @@ function MedCard({ med, savingId, side, onSetStatus, canVerify }: MedCardProps) 
               : <Check className="w-2.5 h-2.5" />}
             saving={saving}
             onClick={() => onSetStatus(med, 'VERIFIED')}
+            testId={`admin-med-verify-${med.id}`}
           />
           <StatusButton
             current={med.verificationStatus}
@@ -582,6 +585,7 @@ function MedCard({ med, savingId, side, onSetStatus, canVerify }: MedCardProps) 
             icon={<XIcon className="w-2.5 h-2.5" />}
             saving={saving}
             onClick={() => onSetStatus(med, 'REJECTED')}
+            testId={`admin-med-reject-${med.id}`}
           />
           <StatusButton
             current={med.verificationStatus}
@@ -592,6 +596,7 @@ function MedCard({ med, savingId, side, onSetStatus, canVerify }: MedCardProps) 
             icon={<ClockIcon className="w-2.5 h-2.5" />}
             saving={saving}
             onClick={() => onSetStatus(med, 'HOLD')}
+            testId={`admin-med-hold-${med.id}`}
           />
         </div>
       )}
@@ -610,6 +615,7 @@ interface StatusButtonProps {
   icon: React.ReactNode;
   saving: boolean;
   onClick: () => void;
+  testId?: string;
 }
 
 /**
@@ -627,12 +633,14 @@ function StatusButton({
   icon,
   saving,
   onClick,
+  testId,
 }: StatusButtonProps) {
   const active = current === target;
   return (
     <button
       type="button"
       onClick={onClick}
+      data-testid={testId}
       disabled={saving || active}
       aria-pressed={active}
       title={active ? activeLabel : actionLabel}
