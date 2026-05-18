@@ -242,6 +242,18 @@ export class TestControl {
     await this.post('test-control/user/set-enrollment', { userId, status })
   }
 
+  /**
+   * Phase 4 §C — flip a user's onboardingStatus. Seed personas are all
+   * COMPLETED; spec 20a rolls one back to NOT_COMPLETED to exercise the
+   * new-user → /onboarding redirect.
+   */
+  async setOnboardingStatus(
+    userId: string,
+    status: 'NOT_COMPLETED' | 'COMPLETED',
+  ): Promise<void> {
+    await this.post('test-control/user/set-onboarding-status', { userId, status })
+  }
+
   /** Force a user's `profileVerificationStatus` (UNVERIFIED/VERIFIED/CORRECTED). */
   async setProfileVerificationStatus(
     userId: string,

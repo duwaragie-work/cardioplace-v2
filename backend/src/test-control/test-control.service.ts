@@ -282,6 +282,22 @@ export class TestControlService {
   }
 
   /**
+   * Phase 4 §C — flip a user's onboardingStatus. Seed personas are all
+   * COMPLETED; the auth-onboarding spec (20a) needs to roll one back to
+   * NOT_COMPLETED to exercise the new-user → /onboarding redirect and the
+   * returning-user skip. Mirrors setEnrollment (test-infra only).
+   */
+  async setOnboardingStatus(
+    userId: string,
+    status: 'NOT_COMPLETED' | 'COMPLETED',
+  ): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { onboardingStatus: status },
+    })
+  }
+
+  /**
    * Insert journal entries at exact timestamps. Used by tests that depend
    * on session windows (e.g. tachycardia 8h cross-session, AFib ≥3-reading
    * gate) — driving them via API + backdate is brittle when the tests

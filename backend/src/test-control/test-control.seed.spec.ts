@@ -178,6 +178,34 @@ describe('TestControlService — §H seed helpers', () => {
     })
   })
 
+  describe('setOnboardingStatus (Phase 4 §C)', () => {
+    it('updates onboardingStatus to NOT_COMPLETED', async () => {
+      const prisma = mockPrisma()
+      prisma.user.update.mockResolvedValue({})
+      const svc = makeService(prisma)
+
+      await svc.setOnboardingStatus('u1', 'NOT_COMPLETED')
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { onboardingStatus: 'NOT_COMPLETED' },
+      })
+    })
+
+    it('updates onboardingStatus to COMPLETED', async () => {
+      const prisma = mockPrisma()
+      prisma.user.update.mockResolvedValue({})
+      const svc = makeService(prisma)
+
+      await svc.setOnboardingStatus('u2', 'COMPLETED')
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u2' },
+        data: { onboardingStatus: 'COMPLETED' },
+      })
+    })
+  })
+
   describe('setPatientThreshold (Phase 4 §B.2)', () => {
     it('upserts using setByProviderId resolved from the assigned medical director', async () => {
       const prisma = mockPrisma()

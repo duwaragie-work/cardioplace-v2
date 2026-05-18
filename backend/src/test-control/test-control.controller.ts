@@ -262,6 +262,18 @@ export class TestControlController {
     return { ok: true }
   }
 
+  // Phase 4 §C — auth-onboarding spec (20a) onboarding-state control.
+  @Post('user/set-onboarding-status')
+  @HttpCode(200)
+  async setOnboardingStatus(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; status: 'NOT_COMPLETED' | 'COMPLETED' },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.setOnboardingStatus(body.userId, body.status)
+    return { ok: true }
+  }
+
   @Post('user/set-profile-verification')
   @HttpCode(200)
   async setProfileVerification(
