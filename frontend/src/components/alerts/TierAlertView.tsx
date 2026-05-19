@@ -64,6 +64,22 @@ function deriveTier(alert: DeviationAlertDto): AlertTier {
 
 function variantFor(tier: AlertTier | null | undefined): Variant {
   switch (tier) {
+    // Cluster 8 — ACE-angioedema airway emergency. Most urgent red treatment;
+    // the registry patientMessage (passed as the alert body) carries the
+    // exact approved 911 wording — these are the fallback strings.
+    case 'TIER_1_ANGIOEDEMA':
+      return {
+        accent: 'var(--brand-alert-red)',
+        accentLight: 'var(--brand-alert-red-light)',
+        icon: <AlertTriangle className="w-7 h-7" strokeWidth={2.4} />,
+        title: 'Urgent — get medical help now.',
+        defaultBody:
+          'You reported swelling of your face, lips, or tongue, or throat tightness. If you have trouble breathing or your throat feels tight, call 911 now. Otherwise go to the nearest emergency room now.',
+        footer:
+          'This can be a dangerous reaction. Your care team has been notified. Do not take any more of your blood pressure medicine until your doctor tells you it is safe.',
+        followUp:
+          'Do not wait. Call 911 or go to the emergency room now if you have any trouble breathing or throat tightness.',
+      };
     case 'BP_LEVEL_2':
     case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
       return {

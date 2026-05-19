@@ -213,6 +213,8 @@ export type AlertTier =
   | 'BP_LEVEL_1_LOW'
   | 'BP_LEVEL_2'
   | 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
+  // Cluster 8 — ACE-angioedema airway emergency (non-dismissable Tier 1).
+  | 'TIER_1_ANGIOEDEMA'
 
 export interface DeviationAlertDto {
   id: string
