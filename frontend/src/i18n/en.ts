@@ -178,6 +178,9 @@ const en = {
   'checkin.b3.symptomSyncope': 'Felt faint or passed out recently',
   'checkin.b3.symptomPalpitations': "Heart feels like it's racing or fluttering",
   'checkin.b3.symptomLegSwelling': 'Swelling in your legs or feet, or gained weight quickly',
+  // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
+  'checkin.b3.symptomFaceSwelling': 'Swelling of your face, lips, or tongue',
+  'checkin.b3.symptomThroatTightness': 'Throat feels tight or hard to swallow',
   // Cluster 6 Q2 (Manisha 5/9/26) — single-reading session prompt.
   'checkin.confirm.takeSecondReading': 'Take a second reading in about 1 minute',
   'checkin.confirm.takeSecondReadingHint':

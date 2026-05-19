@@ -45,6 +45,8 @@ import {
   Home,
   Volume2,
   ClipboardCheck,
+  Frown,
+  AlertTriangle,
 } from 'lucide-react';
 
 import { useAuth } from '@/lib/auth-context';
@@ -128,6 +130,9 @@ interface FormData {
   syncope: boolean;
   palpitations: boolean;
   legSwelling: boolean;
+  // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
+  faceSwelling: boolean;
+  throatTightness: boolean;
   otherSymptomsText: string;
 }
 
@@ -188,6 +193,8 @@ function emptyForm(): FormData {
     syncope: false,
     palpitations: false,
     legSwelling: false,
+    faceSwelling: false,
+    throatTightness: false,
     otherSymptomsText: '',
   };
 }
@@ -997,6 +1004,11 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
     { key: 'syncope', icon: <Activity className="w-5 h-5" />, text: t('checkin.b3.symptomSyncope'), testId: 'check-in-symptom-SYNCOPE' },
     { key: 'palpitations', icon: <Heart className="w-5 h-5" />, text: t('checkin.b3.symptomPalpitations'), testId: 'check-in-symptom-PALPITATIONS' },
     { key: 'legSwelling', icon: <Droplets className="w-5 h-5" />, text: t('checkin.b3.symptomLegSwelling'), testId: 'check-in-symptom-LEG_SWELLING' },
+    // Cluster 8 (Manisha 5/18/26, P0) — Button 12 + 13. ACE-angioedema
+    // airway emergency. Either fires RULE_(ACE|GENERIC)_ANGIOEDEMA Tier 1
+    // for ALL patients regardless of medication profile.
+    { key: 'faceSwelling', icon: <Frown className="w-5 h-5" />, text: t('checkin.b3.symptomFaceSwelling'), testId: 'check-in-symptom-FACE_SWELLING' },
+    { key: 'throatTightness', icon: <AlertTriangle className="w-5 h-5" />, text: t('checkin.b3.symptomThroatTightness'), testId: 'check-in-symptom-THROAT_TIGHTNESS' },
   ];
   const pregnancy: { key: keyof FormData; icon: React.ReactNode; text: string }[] = [
     { key: 'newOnsetHeadache', icon: <Brain className="w-5 h-5" />, text: t('checkin.b3.symptomNewHeadache') },
@@ -1609,6 +1621,9 @@ export default function CheckIn() {
         syncope: form.syncope,
         palpitations: form.palpitations,
         legSwelling: form.legSwelling,
+        // Cluster 8 — ACE-angioedema airway-emergency flags.
+        faceSwelling: form.faceSwelling,
+        throatTightness: form.throatTightness,
         otherSymptoms: form.otherSymptomsText.trim() ? [form.otherSymptomsText.trim()] : undefined,
       });
 

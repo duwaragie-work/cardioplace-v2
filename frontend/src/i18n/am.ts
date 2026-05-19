@@ -185,6 +185,9 @@ const am: Record<TranslationKey, string> = {
   'checkin.b3.symptomSyncope': 'በቅርቡ ራስን መሳት ወይም ሊወድቅ የነበረበት ስሜት',
   'checkin.b3.symptomPalpitations': 'ልብ የሚሮጥ ወይም የሚዳክም ስሜት',
   'checkin.b3.symptomLegSwelling': 'በእግሮች/ጫማ ላይ እብጠት ወይም በፍጥነት ክብደት መጨመር',
+  // Cluster 8 (Manisha 5/18/26, P0) — የአንጂኦኤዴማ የመተንፈሻ ድንገተኛ አደጋ።
+  'checkin.b3.symptomFaceSwelling': 'የፊትዎ፣ የከንፈርዎ ወይም የምላስዎ እብጠት',
+  'checkin.b3.symptomThroatTightness': 'ጉሮሮ ይጠብባል ወይም መዋጥ ይከብዳል',
   'checkin.confirm.takeSecondReading': 'በ1 ደቂቃ ውስጥ ሁለተኛ ንባብ ይውሰዱ',
   'checkin.confirm.takeSecondReadingHint':
     'አንድ ብቻ ንባብ ሊሳሳት ይችላል — ሁለተኛ ንባብ የእንክብካቤ ቡድንዎ ሙሉ ስዕል እንዲያይ ይረዳል። ጥቂት ደቂቃዎችን እንጠብቃለን።',

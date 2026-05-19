@@ -36,6 +36,8 @@ const baseSession: SessionAverage = {
     shortnessOfBreath: false,
     dryCough: false,
     nsaidUse: false,
+    faceSwelling: false,
+    throatTightness: false,
     otherSymptoms: [],
   },
   suboptimalMeasurement: false,

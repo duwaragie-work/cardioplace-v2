@@ -183,6 +183,9 @@ const es: Record<TranslationKey, string> = {
   'checkin.b3.symptomSyncope': 'Se desmayó o estuvo a punto de desmayarse recientemente',
   'checkin.b3.symptomPalpitations': 'Siente que el corazón se acelera o le palpita',
   'checkin.b3.symptomLegSwelling': 'Hinchazón en piernas o pies, o aumento rápido de peso',
+  // Cluster 8 (Manisha 5/18/26, P0) — emergencia de vía aérea por angioedema.
+  'checkin.b3.symptomFaceSwelling': 'Hinchazón de la cara, los labios o la lengua',
+  'checkin.b3.symptomThroatTightness': 'La garganta se siente apretada o cuesta tragar',
   'checkin.confirm.takeSecondReading': 'Tome una segunda medición en aproximadamente 1 minuto',
   'checkin.confirm.takeSecondReadingHint':
     'Una sola medición puede ser inexacta — una segunda ayuda a su equipo de atención a ver el panorama completo. Esperaremos unos minutos.',

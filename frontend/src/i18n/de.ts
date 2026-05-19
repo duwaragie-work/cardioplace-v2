@@ -183,6 +183,9 @@ const de: Record<TranslationKey, string> = {
   'checkin.b3.symptomSyncope': 'Kürzlich Ohnmachtsanfall oder Beinahe-Ohnmacht',
   'checkin.b3.symptomPalpitations': 'Herz rast oder flattert',
   'checkin.b3.symptomLegSwelling': 'Schwellung in Beinen/Füßen oder schnelle Gewichtszunahme',
+  // Cluster 8 (Manisha 5/18/26, P0) — Atemwegsnotfall (Angioödem).
+  'checkin.b3.symptomFaceSwelling': 'Schwellung von Gesicht, Lippen oder Zunge',
+  'checkin.b3.symptomThroatTightness': 'Engegefühl im Hals oder Schluckbeschwerden',
   'checkin.confirm.takeSecondReading': 'Nehmen Sie in etwa 1 Minute eine zweite Messung vor',
   'checkin.confirm.takeSecondReadingHint':
     'Eine einzelne Messung kann ungenau sein — eine zweite hilft Ihrem Behandlungsteam, das Gesamtbild zu sehen. Wir warten ein paar Minuten.',

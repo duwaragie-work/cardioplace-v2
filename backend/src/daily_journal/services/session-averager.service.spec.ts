@@ -28,6 +28,8 @@ function entry(over: Partial<any> = {}) {
     shortnessOfBreath: false,
     dryCough: false,
     nsaidUse: false,
+    faceSwelling: false,
+    throatTightness: false,
     otherSymptoms: [] as string[],
     ...over,
   }

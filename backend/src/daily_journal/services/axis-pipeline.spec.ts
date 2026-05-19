@@ -41,6 +41,8 @@ function noSymptoms(): SessionSymptoms {
     shortnessOfBreath: false,
     dryCough: false,
     nsaidUse: false,
+    faceSwelling: false,
+    throatTightness: false,
     otherSymptoms: [],
   }
 }

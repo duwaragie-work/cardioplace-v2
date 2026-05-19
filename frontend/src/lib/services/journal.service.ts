@@ -60,6 +60,9 @@ export interface JournalEntryPayload {
   syncope?: boolean
   palpitations?: boolean
   legSwelling?: boolean
+  // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
+  faceSwelling?: boolean
+  throatTightness?: boolean
   /** Patient's "anything else" freeform notes — stored as String[]. */
   otherSymptoms?: string[]
   notes?: string

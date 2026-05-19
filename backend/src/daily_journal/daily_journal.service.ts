@@ -102,6 +102,9 @@ export class DailyJournalService {
           shortnessOfBreath: dto.shortnessOfBreath ?? false,
           dryCough: dto.dryCough ?? false,
           nsaidUse: dto.nsaidUse ?? false,
+          // Cluster 8 — ACE-angioedema airway-emergency flags.
+          faceSwelling: dto.faceSwelling ?? false,
+          throatTightness: dto.throatTightness ?? false,
           otherSymptoms: [
             ...(dto.otherSymptoms ?? []),
             ...(dto.symptoms ?? []),
@@ -214,6 +217,9 @@ export class DailyJournalService {
       if (dto.shortnessOfBreath !== undefined) data.shortnessOfBreath = dto.shortnessOfBreath
       if (dto.dryCough !== undefined) data.dryCough = dto.dryCough
       if (dto.nsaidUse !== undefined) data.nsaidUse = dto.nsaidUse
+      // Cluster 8 — ACE-angioedema airway-emergency flags on edit path.
+      if (dto.faceSwelling !== undefined) data.faceSwelling = dto.faceSwelling
+      if (dto.throatTightness !== undefined) data.throatTightness = dto.throatTightness
 
       if (dto.otherSymptoms !== undefined || dto.symptoms !== undefined) {
         data.otherSymptoms = [
@@ -1030,6 +1036,9 @@ export class DailyJournalService {
     shortnessOfBreath?: boolean
     dryCough?: boolean
     nsaidUse?: boolean
+    // Cluster 8 — ACE-angioedema airway-emergency symptoms.
+    faceSwelling?: boolean
+    throatTightness?: boolean
     otherSymptoms: string[]
     teachBackAnswer: string | null
     teachBackCorrect: boolean | null
@@ -1071,6 +1080,9 @@ export class DailyJournalService {
       shortnessOfBreath: entry.shortnessOfBreath ?? false,
       dryCough: entry.dryCough ?? false,
       nsaidUse: entry.nsaidUse ?? false,
+      // Cluster 8 — ACE-angioedema airway-emergency symptoms.
+      faceSwelling: entry.faceSwelling ?? false,
+      throatTightness: entry.throatTightness ?? false,
       otherSymptoms: entry.otherSymptoms,
       teachBackAnswer: entry.teachBackAnswer,
       teachBackCorrect: entry.teachBackCorrect,
