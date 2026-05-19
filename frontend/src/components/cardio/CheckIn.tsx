@@ -45,8 +45,6 @@ import {
   Home,
   Volume2,
   ClipboardCheck,
-  Frown,
-  AlertTriangle,
 } from 'lucide-react';
 
 import { useAuth } from '@/lib/auth-context';
@@ -985,6 +983,58 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
   );
 }
 
+// Cluster 8 Q2 (Manisha 5/18/26, P0) — bespoke angioedema symptom icons.
+// The sign-off specifies a "face silhouette with swelling indicators at
+// lips/cheeks" + a "neck/throat silhouette with constriction indicator";
+// no lucide glyph conveys either, so two small inline SVGs (currentColor,
+// stroke-based so they inherit the checklist-row color like lucide).
+function FaceSwellingIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* face outline */}
+      <path d="M12 3a7 7 0 0 1 7 7c0 4-2.5 7.5-7 11-4.5-3.5-7-7-7-11a7 7 0 0 1 7-7Z" />
+      {/* swollen cheeks */}
+      <path d="M6.5 11.5c1 1.4 1 2.6 0 4M17.5 11.5c-1 1.4-1 2.6 0 4" />
+      {/* swollen lips */}
+      <path d="M9.5 14.5c1.6 1.2 3.4 1.2 5 0" />
+      <circle cx="9.3" cy="9.5" r="0.6" fill="currentColor" stroke="none" />
+      <circle cx="14.7" cy="9.5" r="0.6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function ThroatTightnessIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* head + neck */}
+      <circle cx="12" cy="5.5" r="3" />
+      <path d="M9 9c0 2 0 3 0 4M15 9c0 2 0 3 0 4" />
+      {/* throat constriction (inward pinch) */}
+      <path d="M9 14.5c1.2-1.4 4.8-1.4 6 0" />
+      <path d="M9 18c1.2 1.4 4.8 1.4 6 0" />
+      <path d="M7.5 16.25h2M14.5 16.25h2" />
+    </svg>
+  );
+}
+
 interface SymptomsStepProps extends StepProps {
   isPregnant: boolean;
 }
@@ -1007,8 +1057,8 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
     // Cluster 8 (Manisha 5/18/26, P0) — Button 12 + 13. ACE-angioedema
     // airway emergency. Either fires RULE_(ACE|GENERIC)_ANGIOEDEMA Tier 1
     // for ALL patients regardless of medication profile.
-    { key: 'faceSwelling', icon: <Frown className="w-5 h-5" />, text: t('checkin.b3.symptomFaceSwelling'), testId: 'check-in-symptom-FACE_SWELLING' },
-    { key: 'throatTightness', icon: <AlertTriangle className="w-5 h-5" />, text: t('checkin.b3.symptomThroatTightness'), testId: 'check-in-symptom-THROAT_TIGHTNESS' },
+    { key: 'faceSwelling', icon: <FaceSwellingIcon className="w-5 h-5" />, text: t('checkin.b3.symptomFaceSwelling'), testId: 'check-in-symptom-FACE_SWELLING' },
+    { key: 'throatTightness', icon: <ThroatTightnessIcon className="w-5 h-5" />, text: t('checkin.b3.symptomThroatTightness'), testId: 'check-in-symptom-THROAT_TIGHTNESS' },
   ];
   const pregnancy: { key: keyof FormData; icon: React.ReactNode; text: string }[] = [
     { key: 'newOnsetHeadache', icon: <Brain className="w-5 h-5" />, text: t('checkin.b3.symptomNewHeadache') },
