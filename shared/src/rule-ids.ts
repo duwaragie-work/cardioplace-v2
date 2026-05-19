@@ -94,6 +94,12 @@ export const RULE_IDS = {
   // Tier 3 physician-only chart event; auto-escalates to Tier 2 when the
   // mean HR has been ≤45 across 3+ consecutive sessions.
   BRADY_SURVEILLANCE: 'RULE_BRADY_SURVEILLANCE',
+
+  // Cluster 8 Q3 (Manisha 5/18/26) — one-time first-month educational
+  // adherence nudge. Tier 3, patient-only, fires once ever within 30 days
+  // of enrollment after the first reported missed dose. The 2-of-3 default
+  // window is unchanged — this is purely additive.
+  FIRST_MONTH_ADHERENCE_NUDGE: 'RULE_FIRST_MONTH_ADHERENCE_NUDGE',
 } as const
 
 export type RuleId = (typeof RULE_IDS)[keyof typeof RULE_IDS]
@@ -214,6 +220,7 @@ export const RULE_AXIS: Record<RuleId, RuleAxis> = {
   // "TRIGGERING VALUE" axis label in the audit footer.
   [RULE_IDS.ACE_ANGIOEDEMA]: 'profile',
   [RULE_IDS.GENERIC_ANGIOEDEMA]: 'profile',
+  [RULE_IDS.FIRST_MONTH_ADHERENCE_NUDGE]: 'profile',
 }
 
 const AXIS_LABEL: Record<RuleAxis, string> = {

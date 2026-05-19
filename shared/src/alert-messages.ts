@@ -722,6 +722,16 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       return `Tier 3 — Surveillance: resting HR ${hr} bpm (asymptomatic). Patient is on ${med} (${cls}). Consider: is this the therapeutic target? Trend review recommended. If HR persists ≤45 on multiple sessions, consider ECG and medication-dose review.${physSuffix(ctx)}`
     },
   },
+
+  // ── Cluster 8 Q3 — first-month educational adherence nudge ─────────────
+  // Patient-only, Tier 3, one-time. Verbatim from the sign-off (doc p.7).
+  // No provider/caregiver message — educational, not clinical.
+  RULE_FIRST_MONTH_ADHERENCE_NUDGE: {
+    patientMessage: () =>
+      'Starting a new medicine can take some getting used to. If you missed a dose, try to take your next one on time. Taking your medicine every day helps keep your blood pressure steady. Your care team is here to help if anything makes it hard to stay on schedule.',
+    caregiverMessage: () => '',
+    physicianMessage: () => '',
+  },
 }
 
 /**

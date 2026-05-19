@@ -78,7 +78,10 @@ import {
   getLoopDiureticAnnotation,
   loopDiureticHypotensionRule,
 } from '../engine/loop-diuretic.js'
-import { medicationMissedRuleWithWindow } from '../engine/adherence.js'
+import {
+  firstMonthAdherenceNudge,
+  medicationMissedRuleWithWindow,
+} from '../engine/adherence.js'
 import { loadAdherenceWindow } from '../engine/adherence-window.js'
 import { loadBradyPatternWindow } from '../engine/hr-pattern-window.js'
 
@@ -340,6 +343,23 @@ export class AlertEngineService {
     )(session, ctx)
     if (bradySurveillanceResult) {
       await this.persistAlert(session, ctx, bradySurveillanceResult)
+    }
+
+    // Pass 4 — Cluster 8 Q3 first-month educational adherence nudge.
+    // One-time per patient ever: only fires when NO prior nudge alert
+    // exists for the user (mirrors the CAD-ramp one-time-notice guard).
+    // Reuses the adherence window — no extra query.
+    const nudgeResult = firstMonthAdherenceNudge(adherenceWindow)(session, ctx)
+    if (nudgeResult) {
+      const priorNudges = await this.prisma.deviationAlert.count({
+        where: {
+          userId: session.userId,
+          ruleId: 'RULE_FIRST_MONTH_ADHERENCE_NUDGE',
+        },
+      })
+      if (priorNudges === 0) {
+        await this.persistAlert(session, ctx, nudgeResult)
+      }
     }
 
     // Bug #6/#7 fix: the silent auto-resolve sweep was removed. A clean
