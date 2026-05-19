@@ -186,6 +186,13 @@ const de: Record<TranslationKey, string> = {
   // Cluster 8 (Manisha 5/18/26, P0) — Atemwegsnotfall (Angioödem).
   'checkin.b3.symptomFaceSwelling': 'Schwellung von Gesicht, Lippen oder Zunge',
   'checkin.b3.symptomThroatTightness': 'Engegefühl im Hals oder Schluckbeschwerden',
+  // Cluster 8 (Manisha 5/18/26, P0) — Angioödem-Warntexte.
+  'alert.angioedema.patientAce':
+    'Sie haben eine Schwellung von Gesicht, Lippen oder Zunge oder ein Engegefühl im Hals gemeldet. Dies erfordert dringende ärztliche Hilfe. Wenn Sie zusätzlich Atemnot oder ein Engegefühl im Hals haben, rufen Sie jetzt 911 an. Andernfalls gehen Sie jetzt zur nächsten Notaufnahme. Nehmen Sie Ihr Blutdruckmedikament nicht mehr ein, bis Ihr Arzt sagt, dass es sicher ist.',
+  'alert.angioedema.patientGeneric':
+    'Sie haben eine Schwellung von Gesicht, Lippen oder Zunge oder ein Engegefühl im Hals gemeldet. Dies erfordert dringende ärztliche Hilfe. Wenn Sie zusätzlich Atemnot oder ein Engegefühl im Hals haben, rufen Sie jetzt 911 an. Andernfalls gehen Sie jetzt zur nächsten Notaufnahme.',
+  'alert.angioedema.caregiver':
+    'Er/sie hat eine Schwellung von Gesicht, Lippen oder Zunge gemeldet. Dies kann eine gefährliche Reaktion auf eines der Blutdruckmedikamente sein. Bei Atemnot oder Engegefühl im Hals rufen Sie jetzt 911 an. Andernfalls bringen Sie ihn/sie jetzt zur nächsten Notaufnahme. Lassen Sie ihn/sie keine weitere Dosis dieses Medikaments einnehmen.',
   'checkin.confirm.takeSecondReading': 'Nehmen Sie in etwa 1 Minute eine zweite Messung vor',
   'checkin.confirm.takeSecondReadingHint':
     'Eine einzelne Messung kann ungenau sein — eine zweite hilft Ihrem Behandlungsteam, das Gesamtbild zu sehen. Wir warten ein paar Minuten.',

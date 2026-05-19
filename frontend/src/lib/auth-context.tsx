@@ -67,6 +67,9 @@ type AuthUser = {
   accountStatus?: string;
   onboardingStatus?: string;
   onboardingRequired?: boolean;
+  // Cluster 8 Gap 1 — surfaced so LanguageProvider can default the locale
+  // to the patient's account language (es/am pilot cohort).
+  preferredLanguage?: string | null;
 };
 
 interface AuthContextType {
@@ -130,6 +133,7 @@ async function fetchProfile(accessToken: string): Promise<AuthUser | null> {
       riskTier: data.riskTier,
       accountStatus: data.accountStatus,
       onboardingStatus: data.onboardingStatus,
+      preferredLanguage: data.preferredLanguage ?? null,
     };
   } catch {
     return null;

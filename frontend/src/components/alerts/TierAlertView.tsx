@@ -180,12 +180,24 @@ function formatTime(iso: string): string {
 
 export default function TierAlertView({ alert, acknowledging, onAcknowledge }: Props) {
   const router = useRouter();
-  const { t } = useLanguage();
+  const { t, locale } = useLanguage();
   // Use the rule engine's tier when present; otherwise derive one from the
   // legacy fields so v1 alerts still render meaningfully.
   const effectiveTier = alert.tier ?? deriveTier(alert);
   const v = variantFor(effectiveTier);
-  const body = (alert.patientMessage?.trim() || v.defaultBody);
+  // Cluster 8 Gap 1 (Manisha 5/18/26, P0) — the angioedema emergency text is
+  // a Priority-1 translation. The backend persists the English string (kept
+  // as the fallback + the JCAHO audit record); the patient app renders it
+  // locale-aware by ruleId so es/am pilot patients see their language.
+  const angioedemaKey =
+    alert.ruleId === 'RULE_ACE_ANGIOEDEMA'
+      ? 'alert.angioedema.patientAce'
+      : alert.ruleId === 'RULE_GENERIC_ANGIOEDEMA'
+        ? 'alert.angioedema.patientGeneric'
+        : null;
+  const body = angioedemaKey
+    ? (t(angioedemaKey) || alert.patientMessage?.trim() || v.defaultBody)
+    : (alert.patientMessage?.trim() || v.defaultBody);
   const bp = formatBp(alert);
   const measuredAtLabel = alert.journalEntry?.measuredAt
     ? formatTime(alert.journalEntry.measuredAt)
@@ -270,7 +282,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
 
                 <p
                   data-testid="alert-message-patient"
-                  lang="en"
+                  lang={angioedemaKey ? locale : 'en'}
                   className="text-[14.5px] sm:text-[15px] mt-3 leading-relaxed"
                   style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
                 >

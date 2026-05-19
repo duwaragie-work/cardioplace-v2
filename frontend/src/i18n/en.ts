@@ -181,6 +181,15 @@ const en = {
   // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
   'checkin.b3.symptomFaceSwelling': 'Swelling of your face, lips, or tongue',
   'checkin.b3.symptomThroatTightness': 'Throat feels tight or hard to swallow',
+  // Cluster 8 (Manisha 5/18/26, P0) — angioedema alert bodies, Priority-1
+  // translation. The patient app renders these locale-aware by ruleId; the
+  // backend-persisted English string stays the fallback + JCAHO audit record.
+  'alert.angioedema.patientAce':
+    'You reported swelling of your face, lips, or tongue, or that your throat feels tight. This needs urgent medical attention. If you also have trouble breathing or feel tightness in your throat, call 911 now. If not, go to the nearest emergency room now. Do not take any more of your blood pressure medicine until your doctor tells you it is safe.',
+  'alert.angioedema.patientGeneric':
+    'You reported swelling of your face, lips, or tongue, or that your throat feels tight. This needs urgent medical attention. If you also have trouble breathing or feel tightness in your throat, call 911 now. If not, go to the nearest emergency room now.',
+  'alert.angioedema.caregiver':
+    'They reported swelling of their face, lips, or tongue. This can be a dangerous reaction to one of their blood pressure medicines. If they have trouble breathing or throat tightness, call 911 now. If not, take them to the nearest emergency room now. Do not let them take another dose of that medicine.',
   // Cluster 6 Q2 (Manisha 5/9/26) — single-reading session prompt.
   'checkin.confirm.takeSecondReading': 'Take a second reading in about 1 minute',
   'checkin.confirm.takeSecondReadingHint':
