@@ -185,6 +185,10 @@ const am: Record<TranslationKey, string> = {
   'checkin.b3.symptomSyncope': 'በቅርቡ ራስን መሳት ወይም ሊወድቅ የነበረበት ስሜት',
   'checkin.b3.symptomPalpitations': 'ልብ የሚሮጥ ወይም የሚዳክም ስሜት',
   'checkin.b3.symptomLegSwelling': 'በእግሮች/ጫማ ላይ እብጠት ወይም በፍጥነት ክብደት መጨመር',
+  // Cluster 7 (Manisha 5/11/26) — የጎንዮሽ ጉዳት የመግቢያ መለያዎች (አባሪ A)።
+  'checkin.b3.symptomFatigue': 'ባልተለመደ ሁኔታ መድከም ወይም ጉልበት ማጣት ስሜት',
+  'checkin.b3.symptomShortnessOfBreath': 'የትንፋሽ እጥረት ወይም ከተለመደው በላይ መተንፈስ መከበድ',
+  'checkin.b3.symptomDryCough': 'አዲስ ደረቅ፣ የሚኮረኩር ሳል',
   // Cluster 8 (Manisha 5/18/26, P0) — የአንጂኦኤዴማ የመተንፈሻ ድንገተኛ አደጋ።
   'checkin.b3.symptomFaceSwelling': 'የፊትዎ፣ የከንፈርዎ ወይም የምላስዎ እብጠት',
   'checkin.b3.symptomThroatTightness': 'ጉሮሮ ይጠብባል ወይም መዋጥ ይከብዳል',

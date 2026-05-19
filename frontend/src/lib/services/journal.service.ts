@@ -60,6 +60,10 @@ export interface JournalEntryPayload {
   syncope?: boolean
   palpitations?: boolean
   legSwelling?: boolean
+  // Cluster 7 (Manisha 5/11/26) — Appendix A side-effect inputs.
+  fatigue?: boolean
+  shortnessOfBreath?: boolean
+  dryCough?: boolean
   // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
   faceSwelling?: boolean
   throatTightness?: boolean

@@ -183,6 +183,10 @@ const de: Record<TranslationKey, string> = {
   'checkin.b3.symptomSyncope': 'Kürzlich Ohnmachtsanfall oder Beinahe-Ohnmacht',
   'checkin.b3.symptomPalpitations': 'Herz rast oder flattert',
   'checkin.b3.symptomLegSwelling': 'Schwellung in Beinen/Füßen oder schnelle Gewichtszunahme',
+  // Cluster 7 (Manisha 5/11/26) — Nebenwirkungs-Labels (Anhang A).
+  'checkin.b3.symptomFatigue': 'Ungewöhnliche Müdigkeit oder wenig Energie',
+  'checkin.b3.symptomShortnessOfBreath': 'Kurzatmigkeit oder schwereres Atmen als sonst',
+  'checkin.b3.symptomDryCough': 'Ein neuer trockener, kitzelnder Husten',
   // Cluster 8 (Manisha 5/18/26, P0) — Atemwegsnotfall (Angioödem).
   'checkin.b3.symptomFaceSwelling': 'Schwellung von Gesicht, Lippen oder Zunge',
   'checkin.b3.symptomThroatTightness': 'Engegefühl im Hals oder Schluckbeschwerden',

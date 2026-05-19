@@ -183,6 +183,10 @@ const es: Record<TranslationKey, string> = {
   'checkin.b3.symptomSyncope': 'Se desmayó o estuvo a punto de desmayarse recientemente',
   'checkin.b3.symptomPalpitations': 'Siente que el corazón se acelera o le palpita',
   'checkin.b3.symptomLegSwelling': 'Hinchazón en piernas o pies, o aumento rápido de peso',
+  // Cluster 7 (Manisha 5/11/26) — etiquetas de efectos secundarios (Apéndice A).
+  'checkin.b3.symptomFatigue': 'Sentirse inusualmente cansado o sin energía',
+  'checkin.b3.symptomShortnessOfBreath': 'Falta de aire o le cuesta respirar más de lo habitual',
+  'checkin.b3.symptomDryCough': 'Una tos nueva, seca y con cosquilleo',
   // Cluster 8 (Manisha 5/18/26, P0) — emergencia de vía aérea por angioedema.
   'checkin.b3.symptomFaceSwelling': 'Hinchazón de la cara, los labios o la lengua',
   'checkin.b3.symptomThroatTightness': 'La garganta se siente apretada o cuesta tragar',

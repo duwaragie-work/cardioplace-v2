@@ -128,6 +128,14 @@ interface FormData {
   syncope: boolean;
   palpitations: boolean;
   legSwelling: boolean;
+  // Cluster 7 (Manisha 5/11/26) — Appendix A side-effect inputs. Engine +
+  // DTO shipped in Cluster 7; the patient check-in surface was deferred
+  // (Lakshitha coordination) and is added here so β-blocker fatigue/SOB and
+  // ACE dry-cough rules are patient-reachable. (nsaidUse intentionally NOT a
+  // symptom button — it's a medication-use question for the intake form.)
+  fatigue: boolean;
+  shortnessOfBreath: boolean;
+  dryCough: boolean;
   // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
   faceSwelling: boolean;
   throatTightness: boolean;
@@ -191,6 +199,9 @@ function emptyForm(): FormData {
     syncope: false,
     palpitations: false,
     legSwelling: false,
+    fatigue: false,
+    shortnessOfBreath: false,
+    dryCough: false,
     faceSwelling: false,
     throatTightness: false,
     otherSymptomsText: '',
@@ -1054,6 +1065,11 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
     { key: 'syncope', icon: <Activity className="w-5 h-5" />, text: t('checkin.b3.symptomSyncope'), testId: 'check-in-symptom-SYNCOPE' },
     { key: 'palpitations', icon: <Heart className="w-5 h-5" />, text: t('checkin.b3.symptomPalpitations'), testId: 'check-in-symptom-PALPITATIONS' },
     { key: 'legSwelling', icon: <Droplets className="w-5 h-5" />, text: t('checkin.b3.symptomLegSwelling'), testId: 'check-in-symptom-LEG_SWELLING' },
+    // Cluster 7 (Manisha 5/11/26) — Appendix A side-effect inputs feeding
+    // β-blocker fatigue/SOB (HF + non-HF) and ACE dry-cough rules.
+    { key: 'fatigue', icon: <Bed className="w-5 h-5" />, text: t('checkin.b3.symptomFatigue'), testId: 'check-in-symptom-FATIGUE' },
+    { key: 'shortnessOfBreath', icon: <Wind className="w-5 h-5" />, text: t('checkin.b3.symptomShortnessOfBreath'), testId: 'check-in-symptom-SHORTNESS_OF_BREATH' },
+    { key: 'dryCough', icon: <Stethoscope className="w-5 h-5" />, text: t('checkin.b3.symptomDryCough'), testId: 'check-in-symptom-DRY_COUGH' },
     // Cluster 8 (Manisha 5/18/26, P0) — Button 12 + 13. ACE-angioedema
     // airway emergency. Either fires RULE_(ACE|GENERIC)_ANGIOEDEMA Tier 1
     // for ALL patients regardless of medication profile.
@@ -1671,6 +1687,10 @@ export default function CheckIn() {
         syncope: form.syncope,
         palpitations: form.palpitations,
         legSwelling: form.legSwelling,
+        // Cluster 7 — Appendix A side-effect flags.
+        fatigue: form.fatigue,
+        shortnessOfBreath: form.shortnessOfBreath,
+        dryCough: form.dryCough,
         // Cluster 8 — ACE-angioedema airway-emergency flags.
         faceSwelling: form.faceSwelling,
         throatTightness: form.throatTightness,

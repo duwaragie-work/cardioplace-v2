@@ -183,6 +183,10 @@ const fr: Record<TranslationKey, string> = {
   'checkin.b3.symptomSyncope': 'Évanouissement récent ou sensation de défaillance',
   'checkin.b3.symptomPalpitations': 'Cœur qui bat la chamade ou palpitations',
   'checkin.b3.symptomLegSwelling': 'Gonflement des jambes/pieds ou prise de poids rapide',
+  // Cluster 7 (Manisha 5/11/26) — libellés d'effets secondaires (Annexe A).
+  'checkin.b3.symptomFatigue': 'Fatigue inhabituelle ou manque d’énergie',
+  'checkin.b3.symptomShortnessOfBreath': 'Essoufflement ou respiration plus difficile que d’habitude',
+  'checkin.b3.symptomDryCough': 'Une nouvelle toux sèche et irritative',
   // Cluster 8 (Manisha 5/18/26, P0) — urgence des voies aériennes (angio-œdème).
   'checkin.b3.symptomFaceSwelling': 'Gonflement du visage, des lèvres ou de la langue',
   'checkin.b3.symptomThroatTightness': 'Gorge serrée ou difficulté à avaler',

@@ -178,6 +178,10 @@ const en = {
   'checkin.b3.symptomSyncope': 'Felt faint or passed out recently',
   'checkin.b3.symptomPalpitations': "Heart feels like it's racing or fluttering",
   'checkin.b3.symptomLegSwelling': 'Swelling in your legs or feet, or gained weight quickly',
+  // Cluster 7 (Manisha 5/11/26) — Appendix A side-effect check-in labels.
+  'checkin.b3.symptomFatigue': 'Feeling unusually tired or low on energy',
+  'checkin.b3.symptomShortnessOfBreath': 'Short of breath, or breathing is harder than usual',
+  'checkin.b3.symptomDryCough': 'A new dry, tickly cough',
   // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
   'checkin.b3.symptomFaceSwelling': 'Swelling of your face, lips, or tongue',
   'checkin.b3.symptomThroatTightness': 'Throat feels tight or hard to swallow',
