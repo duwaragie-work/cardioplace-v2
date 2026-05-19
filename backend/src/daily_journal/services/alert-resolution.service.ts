@@ -191,6 +191,7 @@ export class AlertResolutionService {
   private shouldNotifyPatient(tier: string | null): boolean {
     return (
       tier === 'TIER_1_CONTRAINDICATION' ||
+      tier === 'TIER_1_ANGIOEDEMA' ||
       tier === 'BP_LEVEL_2' ||
       tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
     )
@@ -200,6 +201,8 @@ export class AlertResolutionService {
     switch (tier) {
       case 'TIER_1_CONTRAINDICATION':
         return 'Medication alert reviewed'
+      case 'TIER_1_ANGIOEDEMA':
+        return 'Angioedema alert reviewed'
       case 'BP_LEVEL_2':
       case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
         return 'Blood pressure alert reviewed'
@@ -302,6 +305,9 @@ export class AlertResolutionService {
   ): 'TIER_1' | 'TIER_2' | 'BP_LEVEL_2' | null {
     switch (tier) {
       case 'TIER_1_CONTRAINDICATION':
+      // Cluster 8 — angioedema resolves via the Tier 1 action group
+      // (rationale-required, 15-field audit) like every Tier 1 alert.
+      case 'TIER_1_ANGIOEDEMA':
         return 'TIER_1'
       case 'TIER_2_DISCREPANCY':
         return 'TIER_2'
@@ -317,6 +323,8 @@ export class AlertResolutionService {
     switch (tier) {
       case 'TIER_1_CONTRAINDICATION':
         return 'Tier 1 — Contraindication'
+      case 'TIER_1_ANGIOEDEMA':
+        return 'Tier 1 — Angioedema (airway emergency)'
       case 'TIER_2_DISCREPANCY':
         return 'Tier 2 — Discrepancy'
       case 'BP_LEVEL_2':

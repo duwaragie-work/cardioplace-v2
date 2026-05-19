@@ -21,6 +21,7 @@ import {
   symptomOverrideGeneralRule,
   symptomOverridePregnancyRule,
 } from '../engine/symptom-override.js'
+import { angioedemaRule } from '../engine/angioedema.js'
 import { absoluteEmergencyRule } from '../engine/absolute-emergency.js'
 import {
   pregnancyL1HighRule,
@@ -113,6 +114,9 @@ import { loadAdherenceWindow } from '../engine/adherence-window.js'
  *   messages come from OutputGenerator (per-result, stateless).
  */
 type Axis =
+  // Cluster 8 — ACE-angioedema airway emergency. Highest priority: a
+  // potential airway obstruction outranks every BP/contraindication row.
+  | 'angioedema'
   | 'contraindication'
   | 'emergency'
   | 'bp-high'
@@ -134,6 +138,7 @@ type Axis =
   | 'info'
 
 const AXIS_PRIORITY: Axis[] = [
+  'angioedema',
   'emergency',
   'contraindication',
   'bp-high',
@@ -154,6 +159,9 @@ const AXIS_PRIORITY: Axis[] = [
 ]
 
 function axisFor(r: RuleResult): Axis {
+  // Cluster 8 — angioedema claims its own axis ahead of everything so the
+  // airway-emergency row coexists with (and outranks) any BP/HR row.
+  if (r.tier === 'TIER_1_ANGIOEDEMA') return 'angioedema'
   if (r.tier === 'TIER_1_CONTRAINDICATION') return 'contraindication'
   if (r.tier === 'BP_LEVEL_2' || r.tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'emergency'
   // HCM vasodilator is Tier 3, not a high/low axis claimant — let HCM_LOW
@@ -344,6 +352,10 @@ export class AlertEngineService {
     // also run for AFib patients with <3 readings, since contraindications
     // and symptom overrides aren't BP/HR-sample-size dependent.
     const preGateRules: RuleFunction[] = [
+      // Cluster 8 — angioedema runs FIRST. Airway emergency fires for ALL
+      // patients on a single reading (bypasses AFib ≥3 + Q2 single-reading
+      // gates) and claims the top-priority 'angioedema' axis.
+      angioedemaRule,
       pregnancyAceArbRule,
       ndhpHfrefRule,
       // symptomOverridePregnancyRule runs BEFORE symptomOverrideGeneralRule
@@ -806,6 +818,7 @@ export class AlertEngineService {
   private legacySeverityFor(result: RuleResult): 'LOW' | 'MEDIUM' | 'HIGH' {
     if (
       result.tier === 'TIER_1_CONTRAINDICATION' ||
+      result.tier === 'TIER_1_ANGIOEDEMA' ||
       result.tier === 'BP_LEVEL_2' ||
       result.tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
     ) {
@@ -832,6 +845,7 @@ export class AlertEngineService {
 function isNonDismissableTier(tier: RuleResult['tier']): boolean {
   return (
     tier === 'TIER_1_CONTRAINDICATION' ||
+    tier === 'TIER_1_ANGIOEDEMA' ||
     tier === 'BP_LEVEL_2' ||
     tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
   )
@@ -847,6 +861,8 @@ function patientNotificationTitle(tier: RuleResult['tier']): string {
     case 'BP_LEVEL_2':
     case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
       return 'Urgent Blood Pressure Alert'
+    case 'TIER_1_ANGIOEDEMA':
+      return 'Urgent — get medical help now'
     case 'TIER_1_CONTRAINDICATION':
       return 'Important medication alert'
     case 'TIER_2_DISCREPANCY':

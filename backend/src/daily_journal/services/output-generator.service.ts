@@ -106,6 +106,10 @@ export class OutputGeneratorService implements OnModuleInit {
       adherenceDaysWithMiss: result.metadata.adherenceDaysWithMiss,
       adherenceDaysWithMissOver7d: result.metadata.adherenceDaysWithMissOver7d,
       adherenceBetaBlockerCarveOut: result.metadata.adherenceBetaBlockerCarveOut,
+      // Cluster 8 — which angioedema symptom(s) fired. Lets the message
+      // builders lead with throat-tightness vs face-swelling wording.
+      angioedemaFace: result.metadata.angioedemaFace,
+      angioedemaThroat: result.metadata.angioedemaThroat,
       // Cluster 6 Q2 (Manisha 5/9/26) — true when alert fired on a single-
       // reading session finalized by the 5-min timeout. Drives the
       // "— confirm with next reading" physician-message annotation.

@@ -80,6 +80,14 @@ export const RULE_IDS = {
   NSAID_ANTIHTN_INTERACTION: 'RULE_NSAID_ANTIHTN_INTERACTION',
   ACE_COUGH: 'RULE_ACE_COUGH',
   HF_CAREGIVER_EDEMA: 'RULE_HF_CAREGIVER_EDEMA',
+
+  // Cluster 8 (Manisha 5/18/26, P0 pilot blocker) — ACE-angioedema airway
+  // emergency. Fires on faceSwelling || throatTightness for ALL patients.
+  // ACE_ANGIOEDEMA = ACE inhibitor OR ARB on med list (physician message
+  // branches ACE vs ARB); GENERIC_ANGIOEDEMA = neither / unverified list.
+  // Both tier TIER_1_ANGIOEDEMA, non-dismissable, compressed ladder.
+  ACE_ANGIOEDEMA: 'RULE_ACE_ANGIOEDEMA',
+  GENERIC_ANGIOEDEMA: 'RULE_GENERIC_ANGIOEDEMA',
 } as const
 
 export type RuleId = (typeof RULE_IDS)[keyof typeof RULE_IDS]
@@ -97,13 +105,20 @@ export type AlertTierValue =
   | 'BP_LEVEL_1_LOW'
   | 'BP_LEVEL_2'
   | 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
+  // Cluster 8 — angioedema. Tier-1 class (non-dismissable) but routed to a
+  // compressed escalation ladder instead of the standard Tier 1 ladder.
+  | 'TIER_1_ANGIOEDEMA'
 
 export type AlertModeValue = 'STANDARD' | 'PERSONALIZED'
 
-/** Tier 1 + BP Level 2 are non-dismissable per CLINICAL_SPEC V2-C + V2-D. */
+/** Tier 1 + BP Level 2 are non-dismissable per CLINICAL_SPEC V2-C + V2-D.
+ *  Cluster 8 — TIER_1_ANGIOEDEMA is a Tier-1 airway emergency, also
+ *  non-dismissable (resolution requires a documented rationale + the
+ *  15-field Joint Commission audit trail). */
 export function isNonDismissable(tier: AlertTierValue): boolean {
   return (
     tier === 'TIER_1_CONTRAINDICATION' ||
+    tier === 'TIER_1_ANGIOEDEMA' ||
     tier === 'BP_LEVEL_2' ||
     tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
   )
@@ -187,6 +202,11 @@ export const RULE_AXIS: Record<RuleId, RuleAxis> = {
   [RULE_IDS.TACHY_WITH_PALPITATIONS]: 'profile',
   [RULE_IDS.PALPITATIONS_GENERAL]: 'profile',
   [RULE_IDS.SYNCOPE_GENERAL]: 'profile',
+  // Cluster 8 — angioedema is symptom-driven; actualValue carries SBP for
+  // context only, not the trigger. 'profile' suppresses a misleading
+  // "TRIGGERING VALUE" axis label in the audit footer.
+  [RULE_IDS.ACE_ANGIOEDEMA]: 'profile',
+  [RULE_IDS.GENERIC_ANGIOEDEMA]: 'profile',
 }
 
 const AXIS_LABEL: Record<RuleAxis, string> = {

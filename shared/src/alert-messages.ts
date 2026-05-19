@@ -88,6 +88,12 @@ export interface AlertContext {
    *  (i.e. the patient didn't log a second reading to confirm). Drives a
    *  "— confirm with next reading" annotation on the physician message. */
   singleReadingSession?: boolean
+
+  /** Cluster 8 — which angioedema symptom(s) the patient reported. Drives
+   *  whether the message leads with face-swelling or throat-tightness
+   *  phrasing. Populated only for the angioedema rules. */
+  angioedemaFace?: boolean
+  angioedemaThroat?: boolean
 }
 
 export type MessageBuilder = (ctx: AlertContext) => string
@@ -652,6 +658,57 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     physicianMessage: (ctx) =>
       `Tier 3 — HF patient + new ankle edema, routed to caregiver for monitoring. Sibling row of HF_DECOMPENSATION (Tier 2 physician escalation).${physSuffix(ctx)}`,
   },
+
+  // ── Cluster 8 — ACE-angioedema (P0 pilot blocker, Manisha 5/18/26) ──────
+  // Patient + caregiver wording is the approved revised 1.7 / B1.6 verbatim.
+  // ACE_ANGIOEDEMA tells the patient to STOP the medicine (ACE/ARB is the
+  // likely cause); GENERIC_ANGIOEDEMA omits that line (cause unknown).
+  RULE_ACE_ANGIOEDEMA: {
+    patientMessage: (ctx) => `${angioedemaPatientLead(ctx)} Do not take any more of your blood pressure medicine until your doctor tells you it is safe.`,
+    caregiverMessage: (ctx) => {
+      const name = ctx.patientName?.trim() || 'The patient'
+      return `${name} reported swelling of their face, lips, or tongue. This can be a dangerous reaction to one of their blood pressure medicines. If they have trouble breathing or throat tightness, call 911 now. If not, take them to the nearest emergency room now. Do not let them take another dose of that medicine.`
+    },
+    physicianMessage: (ctx) => {
+      const drug = ctx.drugName ?? 'unknown'
+      const airway = ctx.angioedemaThroat
+        ? ' Throat tightness reported — potential airway compromise.'
+        : ''
+      if (ctx.drugClass === 'ARB') {
+        return `Tier 1 — RULE_ACE_ANGIOEDEMA: Patient on ${drug} (ARB) self-reported facial/lip/tongue swelling.${airway} ARB-associated angioedema is less common than ACE-inhibitor angioedema but uses the same emergency pathway. Discontinue ARB. Evaluate for alternative etiology.${physSuffix(ctx)}`
+      }
+      return `Tier 1 — RULE_ACE_ANGIOEDEMA: Patient on ${drug} (ACE_INHIBITOR) self-reported facial/lip/tongue swelling.${airway} ACE-inhibitor angioedema — airway obstruction risk ~10%. Standard antihistamines/corticosteroids/epinephrine are NOT reliably effective (bradykinin-mediated). Discontinue ACE inhibitor immediately. Do not rechallenge with any ACE inhibitor (class effect). Consider ARB with caution (cross-reactivity reported but uncommon).${physSuffix(ctx)}`
+    },
+  },
+
+  RULE_GENERIC_ANGIOEDEMA: {
+    // No "stop your medicine" line — cause may not be a medication (doc p.5).
+    patientMessage: (ctx) => angioedemaPatientLead(ctx),
+    caregiverMessage: (ctx) => {
+      const name = ctx.patientName?.trim() || 'The patient'
+      return `${name} reported swelling of their face, lips, or tongue. This can be dangerous and needs urgent medical attention. If they have trouble breathing or throat tightness, call 911 now. If not, take them to the nearest emergency room now.`
+    },
+    physicianMessage: (ctx) => {
+      const airway = ctx.angioedemaThroat
+        ? ' Throat tightness reported — potential airway compromise.'
+        : ''
+      return `Tier 1 — RULE_GENERIC_ANGIOEDEMA: Patient self-reported facial/lip/tongue swelling.${airway} No ACE inhibitor or ARB on verified med list. Differential: allergic angioedema, hereditary angioedema, idiopathic, or unverified ACE/ARB exposure. Standard anaphylaxis protocol appropriate if allergic etiology suspected.${physSuffix(ctx)}`
+    },
+  },
+}
+
+/**
+ * Cluster 8 — shared patient lead for both angioedema rules. Leads with the
+ * throat-tightness phrasing when that is the only symptom reported (doc p.6,
+ * throat tightness fires for ALL patients as an airway emergency); otherwise
+ * uses the approved revised-1.7 face/lip/tongue wording. Caller appends the
+ * "do not take your medicine" line for the ACE/ARB variant only.
+ */
+function angioedemaPatientLead(ctx: AlertContext): string {
+  if (ctx.angioedemaThroat && !ctx.angioedemaFace) {
+    return 'You reported that your throat feels tight or that it is hard to swallow. This can be a breathing emergency. Call 911 now.'
+  }
+  return 'You reported swelling of your face, lips, or tongue. This needs urgent medical attention. If you also have trouble breathing or feel tightness in your throat, call 911 now. If not, go to the nearest emergency room now.'
 }
 
 /**
