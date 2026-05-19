@@ -65,6 +65,7 @@ import {
 import {
   afibHrRule,
   bradyAbsoluteRule,
+  bradySurveillanceRuleWithWindow,
   bradySymptomaticRule,
   buildTachyRule,
   getHrContextAnnotation,
@@ -79,6 +80,7 @@ import {
 } from '../engine/loop-diuretic.js'
 import { medicationMissedRuleWithWindow } from '../engine/adherence.js'
 import { loadAdherenceWindow } from '../engine/adherence-window.js'
+import { loadBradyPatternWindow } from '../engine/hr-pattern-window.js'
 
 /**
  * Phase/5 AlertEngineService — the single owner of rule evaluation.
@@ -136,6 +138,8 @@ type Axis =
   | 'med-interaction'
   | 'med-cough'
   | 'hf-caregiver-edema'
+  // Cluster 8 Q1 — asymptomatic-bradycardia surveillance chart event.
+  | 'brady-surveillance'
   | 'info'
 
 const AXIS_PRIORITY: Axis[] = [
@@ -156,6 +160,7 @@ const AXIS_PRIORITY: Axis[] = [
   'med-interaction',
   'med-cough',
   'hf-caregiver-edema',
+  'brady-surveillance',
   'info',
 ]
 
@@ -179,6 +184,9 @@ function axisFor(r: RuleResult): Axis {
   ) {
     return 'hr'
   }
+  // Cluster 8 Q1 — surveillance on its own axis so the (Tier 3 / escalated
+  // Tier 2) chart event coexists with any BP/HR row on the same reading.
+  if (r.ruleId === 'RULE_BRADY_SURVEILLANCE') return 'brady-surveillance'
   // Cluster 6 — each new rule lives on its own axis so they coexist with
   // whatever BP/HR row also fires on the same reading.
   if (r.ruleId === 'RULE_HF_DECOMPENSATION') return 'hf-decomp'
@@ -314,6 +322,24 @@ export class AlertEngineService {
     const adherenceResult = medicationMissedRuleWithWindow(adherenceWindow)(session, ctx)
     if (adherenceResult) {
       await this.persistAlert(session, ctx, adherenceResult)
+    }
+
+    // Pass 3 — Cluster 8 Q1 asymptomatic-bradycardia surveillance.
+    // Independent pass (mirrors the adherence pattern): pre-computes the
+    // consecutive ≤45 bpm session run so the rule can escalate Tier 3 →
+    // Tier 2 on a sustained pattern. persistAlert dedups by
+    // (journalEntryId, ruleId) so this coexists with any Stage C row.
+    const bradyWindow = await loadBradyPatternWindow(
+      this.prisma,
+      session.userId,
+      session.measuredAt,
+      ctx.timezone ?? 'America/New_York',
+    )
+    const bradySurveillanceResult = bradySurveillanceRuleWithWindow(
+      bradyWindow.consecutiveSessionsLe45,
+    )(session, ctx)
+    if (bradySurveillanceResult) {
+      await this.persistAlert(session, ctx, bradySurveillanceResult)
     }
 
     // Bug #6/#7 fix: the silent auto-resolve sweep was removed. A clean

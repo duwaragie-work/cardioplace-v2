@@ -88,6 +88,12 @@ export const RULE_IDS = {
   // Both tier TIER_1_ANGIOEDEMA, non-dismissable, compressed ladder.
   ACE_ANGIOEDEMA: 'RULE_ACE_ANGIOEDEMA',
   GENERIC_ANGIOEDEMA: 'RULE_GENERIC_ANGIOEDEMA',
+
+  // Cluster 8 Q1 (Manisha 5/18/26) — asymptomatic bradycardia surveillance.
+  // HR 40–49, no brady symptoms, on a rate-control med or hasBradycardia.
+  // Tier 3 physician-only chart event; auto-escalates to Tier 2 when the
+  // mean HR has been ≤45 across 3+ consecutive sessions.
+  BRADY_SURVEILLANCE: 'RULE_BRADY_SURVEILLANCE',
 } as const
 
 export type RuleId = (typeof RULE_IDS)[keyof typeof RULE_IDS]
@@ -156,6 +162,7 @@ export const RULE_AXIS: Record<RuleId, RuleAxis> = {
   [RULE_IDS.BRADY_ABSOLUTE]: 'hr',
   [RULE_IDS.BRADY_HR_SYMPTOMATIC]: 'hr',
   [RULE_IDS.BRADY_HR_ASYMPTOMATIC]: 'hr',
+  [RULE_IDS.BRADY_SURVEILLANCE]: 'hr',
 
   // Diastolic-axis rule
   [RULE_IDS.CAD_DBP_CRITICAL]: 'diastolic',

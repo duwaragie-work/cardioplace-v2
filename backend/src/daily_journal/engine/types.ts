@@ -170,6 +170,10 @@ export interface RuleResultMetadata {
    *  and decide whether to include the "do not take your medicine" line. */
   angioedemaFace?: boolean
   angioedemaThroat?: boolean
+  /** Cluster 8 Q1 — count of consecutive ≤45 bpm sessions driving the
+   *  brady-surveillance Tier 3 → Tier 2 escalation. Rendered in the
+   *  physician message. */
+  bradySustainedSessions?: number
 }
 
 /**

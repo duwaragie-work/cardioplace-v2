@@ -94,6 +94,10 @@ export interface AlertContext {
    *  phrasing. Populated only for the angioedema rules. */
   angioedemaFace?: boolean
   angioedemaThroat?: boolean
+
+  /** Cluster 8 Q1 — consecutive ≤45 bpm sessions, rendered in the
+   *  brady-surveillance physician message. */
+  bradySustainedSessions?: number
 }
 
 export type MessageBuilder = (ctx: AlertContext) => string
@@ -697,6 +701,25 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
         ? ' Throat tightness reported — potential airway compromise.'
         : ''
       return `Tier 1 — RULE_GENERIC_ANGIOEDEMA: Patient self-reported facial/lip/tongue swelling.${airway} No ACE inhibitor or ARB on verified med list. Differential: allergic angioedema, hereditary angioedema, idiopathic, or unverified ACE/ARB exposure. Standard anaphylaxis protocol appropriate if allergic etiology suspected.${physSuffix(ctx)}`
+    },
+  },
+
+  // ── Cluster 8 Q1 — asymptomatic bradycardia surveillance ───────────────
+  // Physician-only: no patient/caregiver message (patient is asymptomatic —
+  // no reason to alarm them). Tier 3 = chart event + yellow dot, no push.
+  // The escalated (Tier 2) variant swaps in the sustained-pattern wording.
+  RULE_BRADY_SURVEILLANCE: {
+    patientMessage: () => '',
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) => {
+      const hr = ctx.pulse ?? '?'
+      const med = ctx.drugName ?? 'a rate-controlling medication'
+      const cls = ctx.drugClass ?? 'rate-control'
+      const sessions = ctx.bradySustainedSessions ?? 0
+      if (sessions >= 3) {
+        return `Tier 2 — Sustained asymptomatic bradycardia: mean resting HR ≤45 bpm on ${sessions} consecutive sessions (current ${hr} bpm). Patient is on ${med} (${cls}). ECG and medication-dose review recommended.${physSuffix(ctx)}`
+      }
+      return `Tier 3 — Surveillance: resting HR ${hr} bpm (asymptomatic). Patient is on ${med} (${cls}). Consider: is this the therapeutic target? Trend review recommended. If HR persists ≤45 on multiple sessions, consider ECG and medication-dose review.${physSuffix(ctx)}`
     },
   },
 }
