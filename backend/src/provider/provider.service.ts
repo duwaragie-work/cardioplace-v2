@@ -782,6 +782,11 @@ export class ProviderService {
               id: true,
               type: true,
               tier: true,
+              // Cluster 8.1 Gap 5 — ruleId lets the admin Readings tab flag a
+              // brady-surveillance reading distinctly (the doc's "reading
+              // flagged on the trend chart"; admin has no chart so it's a
+              // pill on the reading card).
+              ruleId: true,
               severity: true,
               magnitude: true,
               baselineValue: true,
@@ -866,6 +871,7 @@ export class ProviderService {
             id: a.id,
             type: a.type,
             tier: a.tier,
+            ruleId: a.ruleId,
             severity: a.severity,
             magnitude: a.magnitude != null ? Number(a.magnitude) : null,
             baselineValue: a.baselineValue ? Number(a.baselineValue) : null,

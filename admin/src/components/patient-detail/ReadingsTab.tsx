@@ -306,10 +306,29 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
             </span>
           )}
         </div>
-        {/* Linked alert tier badges */}
+        {/* Linked alert tier badges. Cluster 8.1 Gap 5 (Manisha 5/18/26):
+            a brady-surveillance deviation gets a distinct amber "Surveillance"
+            pill so the provider sees the flagged reading at a glance (the
+            doc's "reading flagged on the trend chart" — admin has no chart). */}
         {entry.deviations.length > 0 && (
           <div className="flex items-center gap-1.5 flex-wrap">
             {entry.deviations.map((d) => {
+              if (d.ruleId === 'RULE_BRADY_SURVEILLANCE') {
+                return (
+                  <span
+                    key={d.id}
+                    className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+                    style={{
+                      backgroundColor: 'var(--brand-warning-amber-light)',
+                      color: 'var(--brand-warning-amber-text)',
+                    }}
+                    title="Asymptomatic bradycardia surveillance — physician trend review"
+                  >
+                    <ShieldAlert className="w-3 h-3" />
+                    Surveillance
+                  </span>
+                );
+              }
               const chrome = tierChrome(tierBucket(d.tier));
               return (
                 <span

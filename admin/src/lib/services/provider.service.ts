@@ -116,6 +116,7 @@ export interface PatientJournalEntry {
     id: string
     type: string | null
     tier: string | null
+    ruleId: string | null
     severity: string | null
     status: string
     escalated: boolean

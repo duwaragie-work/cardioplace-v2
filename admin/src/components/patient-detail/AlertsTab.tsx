@@ -88,6 +88,11 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
   // CLINICAL_SPEC V2-C Layer 1 — it should NOT mix with safety-critical
   // alerts in the main queue. Surface it in the dedicated "Physician
   // notes" section below the main list instead.
+  // Cluster 8 Q1: RULE_BRADY_SURVEILLANCE is intentionally NON-medication-
+  // linked, so (unlike RULE_HCM_VASODILATOR / RULE_LOOP_DIURETIC_HYPOTENSION
+  // which MedicationsTab inlines via tier3DrugClassFor) it has no drug-class
+  // row to attach to — it correctly surfaces in this Physician-notes section
+  // + as a "Surveillance" pill on the triggering reading (Cluster 8.1 Gap 5).
   const tier3Alerts = useMemo(
     () => alerts.filter((a) => tierBucket(a.tier) === 'TIER_3'),
     [alerts],
