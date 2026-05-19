@@ -165,6 +165,18 @@ export class TestControlController {
     return { ok: true }
   }
 
+  // Cluster 8 — backdate User.enrolledAt for Q2 ramp + Q3 nudge personas.
+  @Post('user/backdate-enrolled-at')
+  @HttpCode(200)
+  async backdateEnrolledAt(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; deltaSeconds: number },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.backdateEnrolledAt(body.userId, body.deltaSeconds)
+    return { ok: true }
+  }
+
   @Post('journal/seed-at-time')
   @HttpCode(200)
   async seedReadingsAtTime(

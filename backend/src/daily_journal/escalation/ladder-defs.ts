@@ -19,6 +19,9 @@
 
 export type LadderStepId =
   | 'T0'
+  // Cluster 8 — angioedema compressed ladder rungs (see TIER_1_ANGIOEDEMA_LADDER).
+  | 'T15M'
+  | 'T1H'
   | 'T2H'
   | 'T4H'
   | 'T8H'

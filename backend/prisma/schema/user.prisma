@@ -11,6 +11,12 @@ model User {
   roles                   UserRole[]               @default([PATIENT])
   onboardingStatus        OnboardingStatus         @default(NOT_COMPLETED)
   enrollmentStatus        EnrollmentStatus         @default(NOT_ENROLLED)
+  // Cluster 8 (Manisha 5/18/26) — stamped when enrollmentStatus first flips
+  // to ENROLLED. Drives the CAD-threshold phased ramp (Q2: "newly enrolled"
+  // = enrolledAt ≥ rollout start) and the first-month adherence nudge (Q3:
+  // within 30 days of enrollment). Migration backfills = createdAt for
+  // already-ENROLLED users so existing patients aren't treated as brand new.
+  enrolledAt              DateTime?
   accountStatus           AccountStatus            @default(ACTIVE)
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt

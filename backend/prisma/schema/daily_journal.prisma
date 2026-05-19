@@ -49,6 +49,12 @@ model JournalEntry {
   dryCough          Boolean @default(false)
   nsaidUse          Boolean @default(false)
 
+  // Cluster 8 (Manisha 5/18/26, P0 pilot blocker) — ACE-angioedema airway
+  // emergency. Either symptom fires RULE_ACE_ANGIOEDEMA (ACE/ARB on med list)
+  // or RULE_GENERIC_ANGIOEDEMA, Tier 1, for ALL patients regardless of meds.
+  faceSwelling    Boolean @default(false)
+  throatTightness Boolean @default(false)
+
   // Cluster 6 Q2 (Manisha 5/9/26) — flag flipped by the 5-min finalize
   // endpoint after the patient's first reading times out without a second
   // reading arriving. Bypasses the non-emergency single-reading gate so the

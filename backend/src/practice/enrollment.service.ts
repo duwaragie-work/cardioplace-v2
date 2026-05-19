@@ -52,9 +52,15 @@ export class EnrollmentService {
       })
     }
 
+    // Cluster 8 — stamp enrolledAt on the first ENROLLED transition. The
+    // idempotent early-return above means this only runs on the real flip;
+    // drives the Q2 CAD-ramp "newly enrolled" check + Q3 first-month nudge.
     const updated = await this.prisma.user.update({
       where: { id: patientUserId },
-      data: { enrollmentStatus: EnrollmentStatus.ENROLLED },
+      data: {
+        enrollmentStatus: EnrollmentStatus.ENROLLED,
+        enrolledAt: new Date(),
+      },
       select: { id: true, enrollmentStatus: true },
     })
 

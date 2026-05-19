@@ -192,6 +192,21 @@ export class TestControlService {
     `
   }
 
+  /**
+   * Cluster 8 — backdate User.enrolledAt so the Q2 CAD-ramp + Q3 first-month
+   * adherence-nudge personas can simulate "enrolled N days ago" without
+   * waiting. Prisma's @updatedAt would clobber a plain update(); raw SQL
+   * keeps the value. Pass deltaSeconds to push enrolledAt into the past.
+   */
+  async backdateEnrolledAt(userId: string, deltaSeconds: number): Promise<void> {
+    const newEnrolledAt = new Date(Date.now() - deltaSeconds * 1000)
+    await this.prisma.$executeRaw`
+      UPDATE "User"
+      SET "enrolledAt" = ${newEnrolledAt}
+      WHERE id = ${userId}
+    `
+  }
+
   // ─── State reset ────────────────────────────────────────────────────────
   /**
    * Wipe journal/alert/escalation/notification rows for every *.cardioplace.test
@@ -275,9 +290,15 @@ export class TestControlService {
   }
 
   async setEnrollment(userId: string, status: 'NOT_ENROLLED' | 'ENROLLED'): Promise<void> {
+    // Cluster 8 — mirror production EnrollmentService: stamp enrolledAt on the
+    // ENROLLED flip, clear it on NOT_ENROLLED, so the Q2 CAD-ramp + Q3
+    // first-month-nudge personas have a real enrollment date to backdate.
     await this.prisma.user.update({
       where: { id: userId },
-      data: { enrollmentStatus: status },
+      data: {
+        enrollmentStatus: status,
+        enrolledAt: status === 'ENROLLED' ? new Date() : null,
+      },
     })
   }
 
