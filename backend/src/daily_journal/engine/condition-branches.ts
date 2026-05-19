@@ -19,10 +19,12 @@ const CAD_DEFAULT_UPPER = 160
 // Cluster 8 Q2 (Manisha 5/18/26) — Stage 2 HTN floor; the AHA/ACC alert
 // threshold for CAD patients without a provider-set custom sbpUpperTarget.
 const CAD_NEW_DEFAULT_UPPER = 140
-// Pilot launch — Q2 ramp anchor. A CAD patient whose enrolledAt is on/after
-// this counts as "newly enrolled" for Phase 1. Override with the
-// CAD_ROLLOUT_START env var (ISO date) once the real launch date is known.
-const CAD_ROLLOUT_START_DEFAULT = '2026-06-01T00:00:00Z'
+// Q2 ramp anchor — the sign-off date. A CAD patient whose enrolledAt is
+// on/after this counts as "newly enrolled" for Phase 1, so every patient
+// enrolled from the pilot onward gets the 140 default (the doc's intent:
+// "Phase 1 at pilot launch — all newly enrolled CAD patients"). Ops can
+// override with the CAD_ROLLOUT_START env var (ISO date).
+const CAD_ROLLOUT_START_DEFAULT = '2026-05-18T00:00:00Z'
 
 /**
  * Cluster 8 Q2 — phased ramp of the CAD default sbpUpperTarget 160 → 140.
