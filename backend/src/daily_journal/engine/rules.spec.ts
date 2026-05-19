@@ -167,6 +167,8 @@ function ctx(over: {
       over.pregnancyThresholdsActive ?? profile.isPregnant,
     triggerPregnancyContraindicationCheck:
       over.triggerPregnancyContraindicationCheck ?? profile.isPregnant,
+    enrolledAt: null,
+    practiceName: null,
     resolvedAt: FIXED_NOW,
   }
 }

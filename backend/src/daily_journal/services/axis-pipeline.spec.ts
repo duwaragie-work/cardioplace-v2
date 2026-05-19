@@ -136,6 +136,8 @@ function buildCtx(over: {
     personalizedEligible,
     pregnancyThresholdsActive: isPregnant,
     triggerPregnancyContraindicationCheck: isPregnant,
+    enrolledAt: null,
+    practiceName: null,
     resolvedAt: FIXED_NOW,
   }
 }

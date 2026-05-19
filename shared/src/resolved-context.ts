@@ -144,6 +144,17 @@ export interface ResolvedContext {
   /** ACE/ARB contraindication fires on unverified meds too. */
   triggerPregnancyContraindicationCheck: boolean
 
+  /** Cluster 8 (Manisha 5/18/26) — when the patient's enrollmentStatus
+   *  first flipped to ENROLLED. Drives the Q2 CAD-threshold phased ramp
+   *  ("newly enrolled" = enrolledAt ≥ rollout start) and the Q3 first-month
+   *  adherence nudge (within 30 days of enrollment). Null when never
+   *  enrolled (or for legacy rows the migration couldn't backfill). */
+  enrolledAt: Date | null
+  /** Cluster 8 — the patient's practice name (via PatientProviderAssignment).
+   *  Drives the Q2 CAD-ramp Phase 2 ("Cedar Hill first"). Null when the
+   *  patient has no assignment yet. */
+  practiceName: string | null
+
   /** Resolved at this instant (UTC). */
   resolvedAt: Date
 }

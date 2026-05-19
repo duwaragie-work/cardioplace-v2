@@ -78,6 +78,8 @@ function ctx(over: {
     personalizedEligible: over.threshold != null && readingCount >= 7,
     pregnancyThresholdsActive: over.profile?.isPregnant ?? false,
     triggerPregnancyContraindicationCheck: over.profile?.isPregnant ?? false,
+    enrolledAt: null,
+    practiceName: null,
     resolvedAt: NOW,
   }
 }

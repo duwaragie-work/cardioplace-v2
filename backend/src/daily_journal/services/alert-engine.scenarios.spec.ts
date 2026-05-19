@@ -142,6 +142,8 @@ function buildCtx(over: {
       over.pregnancyThresholdsActive ?? isPregnant,
     triggerPregnancyContraindicationCheck:
       over.triggerPregnancyContraindicationCheck ?? isPregnant,
+    enrolledAt: null,
+    practiceName: null,
     resolvedAt: FIXED_NOW,
   }
 }

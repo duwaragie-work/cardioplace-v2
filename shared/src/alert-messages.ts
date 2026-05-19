@@ -299,8 +299,12 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       `Your blood pressure reading is ${bp(ctx)}, which is higher than your goal. Please contact your care team today.${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
       `The patient's BP is elevated at ${bp(ctx)} (CAD).`,
+    // Cluster 8 Q2 (Manisha 5/18/26) — default alert threshold lowered to
+    // SBP ≥140 (Stage 2 HTN floor). Always surface the AHA/ACC 130/80
+    // treatment target + the DBP coronary-perfusion caution so the provider
+    // can customise the threshold per patient.
     physicianMessage: (ctx) =>
-      `BP Level 1 High — CAD SBP ≥ ${ctx.thresholdValue ?? 160}: ${bp(ctx)}.${physSuffix(ctx)}`,
+      `BP Level 1 High — CAD SBP ≥ ${ctx.thresholdValue ?? 140}: ${bp(ctx)} (session average). AHA/ACC treatment target 130/80. Consider medication adjustment. NOTE: monitor DBP — coronary perfusion (J-curve) risk if DBP < 70. Customise the alert threshold in patient settings.${physSuffix(ctx)}`,
   },
 
   // ── HCM ───────────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@
 // applies spec defaults. Source: CLINICAL_SPEC §4.2–§4.9.
 
 import { RULE_IDS, getPulsePressure } from '@cardioplace/shared'
+import type { ResolvedContext } from '@cardioplace/shared'
 import type { RuleFunction, RuleResult } from './types.js'
 
 const HFREF_DEFAULT_LOWER = 85
@@ -15,6 +16,53 @@ const DCM_DEFAULT_LOWER = 85
 const DCM_DEFAULT_UPPER = 160
 const CAD_DBP_CRITICAL = 70
 const CAD_DEFAULT_UPPER = 160
+// Cluster 8 Q2 (Manisha 5/18/26) — Stage 2 HTN floor; the AHA/ACC alert
+// threshold for CAD patients without a provider-set custom sbpUpperTarget.
+const CAD_NEW_DEFAULT_UPPER = 140
+// Pilot launch — Q2 ramp anchor. A CAD patient whose enrolledAt is on/after
+// this counts as "newly enrolled" for Phase 1. Override with the
+// CAD_ROLLOUT_START env var (ISO date) once the real launch date is known.
+const CAD_ROLLOUT_START_DEFAULT = '2026-06-01T00:00:00Z'
+
+/**
+ * Cluster 8 Q2 — phased ramp of the CAD default sbpUpperTarget 160 → 140.
+ * Ops advances `CAD_THRESHOLD_ROLLOUT_PHASE` (1|2|3, default 1); no calendar
+ * coupling beyond the configurable rollout-start anchor.
+ *
+ *   Phase 1 (pilot launch)  — 140 for newly enrolled CAD patients
+ *   Phase 2 (≈1wk post)     — + existing CAD patients at Cedar Hill
+ *   Phase 3 (≈2wk post)     — 140 for all CAD patients
+ *
+ * Provider-set custom thresholds always win — this only supplies the default.
+ */
+function cadRolloutPhase(): 1 | 2 | 3 {
+  const p = Number(process.env.CAD_THRESHOLD_ROLLOUT_PHASE)
+  return p === 3 ? 3 : p === 2 ? 2 : 1
+}
+
+function cadRolloutStart(): Date {
+  const raw = process.env.CAD_ROLLOUT_START
+  const d = raw ? new Date(raw) : new Date(CAD_ROLLOUT_START_DEFAULT)
+  return Number.isNaN(d.getTime()) ? new Date(CAD_ROLLOUT_START_DEFAULT) : d
+}
+
+export function cadDefaultUpper(ctx: ResolvedContext): number {
+  const phase = cadRolloutPhase()
+  if (phase >= 3) return CAD_NEW_DEFAULT_UPPER
+
+  const newlyEnrolled =
+    ctx.enrolledAt != null &&
+    ctx.enrolledAt.getTime() >= cadRolloutStart().getTime()
+  if (newlyEnrolled) return CAD_NEW_DEFAULT_UPPER
+
+  if (phase >= 2) {
+    const atCedarHill = (ctx.practiceName ?? '')
+      .toLowerCase()
+      .includes('cedar hill')
+    if (atCedarHill) return CAD_NEW_DEFAULT_UPPER
+  }
+  return CAD_DEFAULT_UPPER
+}
 
 // ─── HFrEF ──────────────────────────────────────────────────────────────────
 
@@ -80,7 +128,9 @@ export const cadDbpRule: RuleFunction = (session, ctx) => {
 export const cadHighRule: RuleFunction = (session, ctx) => {
   if (!ctx.profile.hasCAD) return null
   const { systolicBP: sbp } = session
-  const upper = ctx.threshold?.sbpUpperTarget ?? CAD_DEFAULT_UPPER
+  // Cluster 8 Q2 — provider custom threshold still wins; otherwise the
+  // phased-ramp default (140 once the ramp reaches this patient, else 160).
+  const upper = ctx.threshold?.sbpUpperTarget ?? cadDefaultUpper(ctx)
   if (sbp == null || sbp < upper) return null
   return highAlert(session, ctx, RULE_IDS.CAD_HIGH, 'CAD', upper)
 }

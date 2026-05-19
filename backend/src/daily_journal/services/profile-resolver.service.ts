@@ -38,7 +38,11 @@ export class ProfileResolverService {
       include: {
         patientProfile: true,
         patientThreshold: true,
-        providerAssignmentAsPatient: true,
+        // Cluster 8 — pull the practice name for the Q2 CAD-ramp Phase 2
+        // ("Cedar Hill first") gate.
+        providerAssignmentAsPatient: {
+          include: { practice: { select: { name: true } } },
+        },
         patientMedications: {
           where: { discontinuedAt: null },
         },
@@ -82,6 +86,10 @@ export class ProfileResolverService {
       personalizedEligible,
       pregnancyThresholdsActive,
       triggerPregnancyContraindicationCheck,
+      // Cluster 8 — Q2 CAD-ramp + Q3 first-month-nudge inputs.
+      enrolledAt: user.enrolledAt ?? null,
+      practiceName:
+        user.providerAssignmentAsPatient?.practice?.name ?? null,
       resolvedAt: now,
     }
   }

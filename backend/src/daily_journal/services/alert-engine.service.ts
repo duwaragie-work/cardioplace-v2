@@ -29,6 +29,7 @@ import {
 } from '../engine/pregnancy-thresholds.js'
 import {
   cadDbpRule,
+  cadDefaultUpper,
   cadHighRule,
   dcmRule,
   dhpCcbLegSwellingRule,
@@ -795,6 +796,54 @@ export class AlertEngineService {
       escalated: upserted.escalated,
       tier: result.tier,
       ruleId: result.ruleId,
+    })
+
+    // Cluster 8 Q2 — one-time provider notice when a CAD patient's effective
+    // threshold first changed 160→140. Fire-and-forget; never blocks the
+    // alert. Idempotent: only on the patient's FIRST RULE_CAD_HIGH alert.
+    void this.maybeNotifyCadThresholdRamp(session, ctx, result).catch((err) =>
+      this.logger.warn(
+        `CAD threshold-ramp notice failed for user ${session.userId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      ),
+    )
+  }
+
+  /**
+   * Cluster 8 Q2 — when the phased ramp first lowers a CAD patient's default
+   * sbpUpperTarget to 140 (no provider-set custom threshold) and that change
+   * produces the patient's first RULE_CAD_HIGH alert, send a one-time
+   * dashboard notice to the primary provider so they can customise the
+   * threshold. Idempotent via the "exactly one CAD_HIGH alert exists" guard.
+   */
+  private async maybeNotifyCadThresholdRamp(
+    session: SessionAverage,
+    ctx: ResolvedContext,
+    result: RuleResult,
+  ): Promise<void> {
+    if (result.ruleId !== 'RULE_CAD_HIGH') return
+    // Only when the NEW default produced this alert: no provider custom
+    // threshold AND the ramp resolved this patient to 140.
+    if (ctx.threshold?.sbpUpperTarget != null) return
+    if (cadDefaultUpper(ctx) !== 140) return
+    const providerId = ctx.assignment?.primaryProviderId
+    if (!providerId) return
+
+    const cadHighCount = await this.prisma.deviationAlert.count({
+      where: { userId: session.userId, ruleId: 'RULE_CAD_HIGH' },
+    })
+    // >1 means an earlier CAD_HIGH already fired — notice already sent.
+    if (cadHighCount !== 1) return
+
+    await this.prisma.notification.create({
+      data: {
+        userId: providerId,
+        channel: 'DASHBOARD',
+        title: 'CAD patient alert threshold updated',
+        body: 'CAD patient alert threshold updated from SBP ≥160 to SBP ≥140 per AHA/ACC guideline alignment (treatment target 130/80). Customise the threshold in patient settings.',
+        tips: [],
+      },
     })
   }
 
