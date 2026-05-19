@@ -142,6 +142,13 @@ export const TIER_1_LADDER: LadderStep[] = [
  *         unresolved-airway-emergency flag captured in the 15-field audit
  *         trail; full incident-report artifact deferred)
  *
+ * ACCEPTED DEFERRAL (user-confirmed 2026-05, gap audit): the sign-off says
+ * "incident report auto-generated" at T+4h. We ship the ops-dashboard
+ * escalation as the pilot-safe MVP for the June 1 blocker; a standalone
+ * incident-report record + admin surface is intentionally post-pilot scope,
+ * not an oversight. The 15-field JCAHO audit trail already records the
+ * unresolved-emergency timeline, so no compliance gap.
+ *
  * Patient T+0 (full-screen red + 911) + caregiver dispatch are handled
  * separately in EscalationService.fireT0 via ANGIOEDEMA_PATIENT_T0 +
  * dispatchCaregiverNotification (same pattern as BP_LEVEL_1_PATIENT_T0).

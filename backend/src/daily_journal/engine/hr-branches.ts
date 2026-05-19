@@ -216,6 +216,17 @@ export function bradySurveillanceRuleWithWindow(
 
     // Gate: only the at-risk population — diagnosed bradycardia OR on a
     // rate-controlling medication (MESA differential-mortality cohort).
+    //
+    // SIGNED-OFF INTERPRETATION (user-confirmed 2026-05, gap audit): the
+    // Q1 sign-off's literal WHEN clause is just HR 40–49 + no symptoms +
+    // session-averaged, with no medication gate. We deliberately keep this
+    // `hasBradycardia OR rate-control med` gate because (a) the doc's own
+    // physician-message template reads "Patient is on [medname]
+    // ([DRUGCLASS])" — meaningless without a med, (b) the entire MESA
+    // rationale is specific to patients on HR-modifying drugs, and (c) it
+    // matches the existing bradyAbsolute/bradySymptomatic gating, avoiding
+    // surveillance noise for healthy athletic bradycardia. Confirmed as the
+    // intended behavior, not an oversight.
     if (!ctx.profile.hasBradycardia && !onRateControlMed(ctx)) return null
 
     const sustained = consecutiveSessionsLe45 >= BRADY_SUSTAINED_SESSIONS
