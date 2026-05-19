@@ -29,6 +29,7 @@ import {
 } from '../engine/pregnancy-thresholds.js'
 import {
   cadDbpRule,
+  cadDbpHighRule,
   cadDefaultUpper,
   cadHighRule,
   dcmRule,
@@ -126,6 +127,9 @@ type Axis =
   | 'contraindication'
   | 'emergency'
   | 'bp-high'
+  // Cluster 8 Q2 — CAD DBP-high is its own axis so it co-fires with the
+  // SBP bp-high row (the "second independent alert trigger").
+  | 'dbp-high'
   | 'sbp-low'
   | 'dbp-low'
   | 'hr'
@@ -150,6 +154,7 @@ const AXIS_PRIORITY: Axis[] = [
   'emergency',
   'contraindication',
   'bp-high',
+  'dbp-high',
   'sbp-low',
   'dbp-low',
   'hr',
@@ -177,6 +182,9 @@ function axisFor(r: RuleResult): Axis {
   // still fire on sbp-low for the same patient (§4.6).
   if (r.ruleId === 'RULE_HCM_VASODILATOR') return 'info'
   if (r.ruleId === 'RULE_CAD_DBP_CRITICAL') return 'dbp-low'
+  // Cluster 8 Q2 — CAD DBP-high emits BP_LEVEL_1_HIGH but claims its own
+  // axis so it co-fires with the SBP cadHighRule 'bp-high' row.
+  if (r.ruleId === 'RULE_CAD_DBP_HIGH') return 'dbp-high'
   // HR rules emit BP_LEVEL_1_HIGH / LOW tiers but represent a different axis.
   if (
     r.ruleId === 'RULE_AFIB_HR_HIGH' ||
@@ -519,6 +527,8 @@ export class AlertEngineService {
       hfpefRule,
       cadDbpRule,
       cadHighRule,
+      // Cluster 8 Q2 — CAD DBP-high; own axis so it co-fires with cadHighRule.
+      cadDbpHighRule,
       hcmRule,
       // HCM vasodilator is split from hcmRule so it claims the info axis
       // independently — an HCM patient on a DHP-CCB with low SBP fires both

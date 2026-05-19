@@ -237,4 +237,37 @@ test.describe('Cluster 8 — angioedema + Q1/Q3 via API (Manisha 5/18)', () => {
       await tc.dispose()
     }
   })
+
+  test('Q2 — CAD 145/95 (in-ramp) fires BOTH RULE_CAD_HIGH and RULE_CAD_DBP_HIGH', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.paul.email)
+    await tc.resetUser(u.id)
+    await seedHistoryToClearPreDay3(tc, u.id)
+    // Fresh ENROLLED stamp → enrolledAt = now ≥ CAD rollout anchor → Phase 1
+    // "newly enrolled" → both the SBP≥140 default and the new DBP≥80 default
+    // apply (the doc's "second independent alert trigger").
+    await tc.setEnrollment(u.id, 'ENROLLED')
+    const api = await authedApi(API_BASE_URL, PATIENTS.paul.email)
+    try {
+      await postJournalEntry(api, {
+        measuredAt: new Date().toISOString(),
+        systolicBP: 145,
+        diastolicBP: 95,
+        pulse: 72,
+        position: 'SITTING',
+        sessionId: crypto.randomUUID(),
+      })
+      const alerts = await waitForAlerts(tc, u.id, (xs) =>
+        xs.some((a) => a.ruleId === 'RULE_CAD_DBP_HIGH'),
+      )
+      const ids = alerts.map((a) => a.ruleId)
+      expect(ids).toContain('RULE_CAD_HIGH')
+      expect(ids).toContain('RULE_CAD_DBP_HIGH')
+      const dbpRow = alerts.find((a) => a.ruleId === 'RULE_CAD_DBP_HIGH')
+      expect(dbpRow?.tier).toBe('BP_LEVEL_1_HIGH')
+    } finally {
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
 })

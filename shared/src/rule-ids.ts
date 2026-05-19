@@ -100,6 +100,11 @@ export const RULE_IDS = {
   // of enrollment after the first reported missed dose. The 2-of-3 default
   // window is unchanged — this is purely additive.
   FIRST_MONTH_ADHERENCE_NUDGE: 'RULE_FIRST_MONTH_ADHERENCE_NUDGE',
+
+  // Cluster 8 Q2 (Manisha 5/18/26 implementation block) — CAD DBP-high.
+  // Second independent BP-Level-1-High trigger at DBP ≥80 for CAD patients
+  // (no prior DBP-high rule existed); co-fires with RULE_CAD_HIGH.
+  CAD_DBP_HIGH: 'RULE_CAD_DBP_HIGH',
 } as const
 
 export type RuleId = (typeof RULE_IDS)[keyof typeof RULE_IDS]
@@ -172,6 +177,7 @@ export const RULE_AXIS: Record<RuleId, RuleAxis> = {
 
   // Diastolic-axis rule
   [RULE_IDS.CAD_DBP_CRITICAL]: 'diastolic',
+  [RULE_IDS.CAD_DBP_HIGH]: 'diastolic',
 
   // Systolic-axis BP rules (primary axis = systolic)
   [RULE_IDS.STANDARD_L1_HIGH]: 'systolic',

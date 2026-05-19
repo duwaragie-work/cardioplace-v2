@@ -310,6 +310,16 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     physicianMessage: (ctx) =>
       `BP Level 1 High — CAD SBP ≥ ${ctx.thresholdValue ?? 140}: ${bp(ctx)} (session average). AHA/ACC treatment target 130/80. Consider medication adjustment. NOTE: monitor DBP — coronary perfusion (J-curve) risk if DBP < 70. Customise the alert threshold in patient settings.${physSuffix(ctx)}`,
   },
+  // Cluster 8 Q2 (Manisha 5/18/26) — CAD DBP-high, the "second independent
+  // alert trigger" (145/95 fires this alongside RULE_CAD_HIGH).
+  RULE_CAD_DBP_HIGH: {
+    patientMessage: (ctx) =>
+      `Your blood pressure reading is ${bp(ctx)}, which is higher than your goal. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+    caregiverMessage: (ctx) =>
+      `The patient's lower BP number is elevated at ${bp(ctx)} (CAD).`,
+    physicianMessage: (ctx) =>
+      `BP Level 1 High — CAD DBP ≥ ${ctx.thresholdValue ?? 80}: ${bp(ctx)} (session average). AHA/ACC treatment target 130/80. Consider medication adjustment. NOTE: coronary perfusion (J-curve) risk if DBP < 70 — reassess antihypertensive class rather than over-titrating. Customise the alert threshold in patient settings.${physSuffix(ctx)}`,
+  },
 
   // ── HCM ───────────────────────────────────────────────────────────────
   // Cluster 7 A.5 (Manisha 5/11/26, Appendix B1.4): HCM patients are

@@ -19,6 +19,11 @@ const CAD_DEFAULT_UPPER = 160
 // Cluster 8 Q2 (Manisha 5/18/26) — Stage 2 HTN floor; the AHA/ACC alert
 // threshold for CAD patients without a provider-set custom sbpUpperTarget.
 const CAD_NEW_DEFAULT_UPPER = 140
+// Cluster 8 Q2 (Manisha 5/18/26 implementation block) — CAD DBP upper
+// default. The doc lists `dbpUpperTarget = 80`; previously the engine had
+// no CAD DBP-high rule at all (only the <70 J-curve low). Ramp-gated like
+// the SBP change so it doesn't surprise existing CAD patients.
+const CAD_DBP_HIGH_DEFAULT = 80
 // Q2 ramp anchor — the sign-off date. A CAD patient whose enrolledAt is
 // on/after this counts as "newly enrolled" for Phase 1, so every patient
 // enrolled from the pilot onward gets the 140 default (the doc's intent:
@@ -48,22 +53,31 @@ function cadRolloutStart(): Date {
   return Number.isNaN(d.getTime()) ? new Date(CAD_ROLLOUT_START_DEFAULT) : d
 }
 
-export function cadDefaultUpper(ctx: ResolvedContext): number {
+/**
+ * True when the Q2 ramp has reached this CAD patient (so the lowered
+ * SBP≥140 default AND the new DBP≥80 default apply). Shared by
+ * `cadDefaultUpper` (SBP) and `cadDbpHighRule` (DBP) so both ramp together.
+ */
+export function cadRampApplies(ctx: ResolvedContext): boolean {
   const phase = cadRolloutPhase()
-  if (phase >= 3) return CAD_NEW_DEFAULT_UPPER
+  if (phase >= 3) return true
 
   const newlyEnrolled =
     ctx.enrolledAt != null &&
     ctx.enrolledAt.getTime() >= cadRolloutStart().getTime()
-  if (newlyEnrolled) return CAD_NEW_DEFAULT_UPPER
+  if (newlyEnrolled) return true
 
   if (phase >= 2) {
     const atCedarHill = (ctx.practiceName ?? '')
       .toLowerCase()
       .includes('cedar hill')
-    if (atCedarHill) return CAD_NEW_DEFAULT_UPPER
+    if (atCedarHill) return true
   }
-  return CAD_DEFAULT_UPPER
+  return false
+}
+
+export function cadDefaultUpper(ctx: ResolvedContext): number {
+  return cadRampApplies(ctx) ? CAD_NEW_DEFAULT_UPPER : CAD_DEFAULT_UPPER
 }
 
 // ─── HFrEF ──────────────────────────────────────────────────────────────────
@@ -135,6 +149,34 @@ export const cadHighRule: RuleFunction = (session, ctx) => {
   const upper = ctx.threshold?.sbpUpperTarget ?? cadDefaultUpper(ctx)
   if (sbp == null || sbp < upper) return null
   return highAlert(session, ctx, RULE_IDS.CAD_HIGH, 'CAD', upper)
+}
+
+// Cluster 8 Q2 (Manisha 5/18/26) — CAD DBP-high. The sign-off's Q2
+// implementation block lists `dbpUpperTarget = 80` and the Post-Day3 note
+// calls DBP ≥80 a "second independent alert trigger" (145/95 fires BOTH the
+// SBP≥140 row AND this). Net-new alerting, so ramp-gated identically to the
+// SBP change; a provider-set custom dbpUpperTarget always wins. Own axis
+// (dbp-high) so it co-fires with cadHighRule's bp-high SBP row.
+export const cadDbpHighRule: RuleFunction = (session, ctx) => {
+  if (!ctx.profile.hasCAD) return null
+  const { systolicBP: sbp, diastolicBP: dbp } = session
+  if (dbp == null) return null
+  const custom = ctx.threshold?.dbpUpperTarget ?? null
+  const upper = custom ?? CAD_DBP_HIGH_DEFAULT
+  if (dbp < upper) return null
+  // Ramp gate only applies to the default; a provider custom threshold is
+  // an explicit clinical decision and fires regardless of ramp phase.
+  if (custom == null && !cadRampApplies(ctx)) return null
+  return {
+    ruleId: RULE_IDS.CAD_DBP_HIGH,
+    tier: 'BP_LEVEL_1_HIGH',
+    mode: ctx.personalizedEligible ? 'PERSONALIZED' : 'STANDARD',
+    pulsePressure: getPulsePressure(sbp, dbp),
+    suboptimalMeasurement: session.suboptimalMeasurement,
+    actualValue: dbp,
+    reason: `CAD DBP ≥${upper}: ${dbp}.`,
+    metadata: { conditionLabel: 'CAD', thresholdValue: upper },
+  }
 }
 
 // Phase/26 round-3 fix — bidirectional BP context annotation. When a CAD
