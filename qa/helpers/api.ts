@@ -449,22 +449,43 @@ export async function uploadBpPhotoViaUI(
 }
 
 /**
- * Stub OCR, then upload a fake medication-label photo via the clinical-intake
- * MedicationPhotoButton. Hardened in §D (20b.6) against the real route/modal.
+ * Stub the real medication-OCR route (ocr.service.ts → /api/v2/ocr/medications;
+ * MedOcrSuccess = { medications: MedOcrItem[], confidence }) and the RxNorm
+ * enrichment route (so non-catalog rows don't hit the network), then upload a
+ * fake label photo via the A5 MedicationPhotoButton. Leaves the
+ * MedicationPhotoConfirmModal open — the caller picks per-row frequency and
+ * confirms via `confirmOcrMedsViaUI`. Mirrors the proven 20e.4 BP-photo path.
+ *
+ * Use a drug NOT already on the persona's baseline (e.g. Hydrochlorothiazide
+ * for Aisha): an already-listed drug at UNSURE frequency classifies as `noop`
+ * and the Add-all button stays disabled (the v3.1 root cause).
  */
 export async function uploadMedPhotoViaUI(
   page: Page,
-  ocrResult: { drugName: string },
+  ocrResult: { drugName: string; frequency?: string; doseText?: string },
 ): Promise<void> {
-  await page.route('**/*ocr*', async (route) => {
+  const item = {
+    drugName: ocrResult.drugName,
+    frequency: ocrResult.frequency ?? 'once daily',
+    doseText: ocrResult.doseText ?? '',
+    raw: `${ocrResult.drugName} ${ocrResult.doseText ?? ''} ${
+      ocrResult.frequency ?? 'once daily'
+    }`.trim(),
+  }
+  await page.route('**/api/v2/ocr/medications', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ drugName: ocrResult.drugName }),
+      body: JSON.stringify({ medications: [item], confidence: 0.92 }),
     })
   })
+  // RxNorm enrichment is best-effort in the modal (null = fall back to raw
+  // name). Stub it to a fast 404 so a catalog miss doesn't add network flake.
+  await page.route('**/api/v2/medications/enrich', async (route) => {
+    await route.fulfill({ status: 404, contentType: 'application/json', body: '{}' })
+  })
   const btn = page.locator(byTestId(T.intake.medPhotoButton)).first()
-  await btn.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
+  await btn.waitFor({ state: 'visible', timeout: 15_000 })
   const fileInput = page.locator('input[type="file"]').first()
   await fileInput.setInputFiles({
     name: 'med.png',
@@ -474,7 +495,104 @@ export async function uploadMedPhotoViaUI(
       'base64',
     ),
   })
-  await page.getByRole('button', { name: /confirm|add|use|accept/i }).click().catch(() => {})
+  await page
+    .locator(byTestId(T.intake.medPhotoConfirmModal))
+    .waitFor({ state: 'visible', timeout: 15_000 })
+}
+
+/**
+ * Pick a frequency for each detected row in the open
+ * MedicationPhotoConfirmModal (rows are index-ordered = OCR order), then click
+ * "Add all".
+ *
+ * The confirm button is gated by the modal's per-row intent: a brand-new med
+ * is always actionable, but a med already on the patient's list is only
+ * actionable when the picked frequency DIFFERS from the stored one (otherwise
+ * `noop`). Because `resetUser` does not clear medications, a re-run can find
+ * the persona already carrying the OCR drug (from a prior run's wizard PUT) —
+ * so a single fixed frequency is not idempotent. We therefore cycle the four
+ * real frequencies until the gate opens: at most one of them can equal the
+ * stored frequency, so an actionable `add`/`update` is always reachable in
+ * ≤4 tries regardless of prior data state. No product behaviour is changed —
+ * the med is genuinely added/updated and the caller still asserts it
+ * end-to-end on /profile.
+ */
+const FREQ_CYCLE = [
+  'ONCE_DAILY',
+  'TWICE_DAILY',
+  'THREE_TIMES_DAILY',
+  'AS_NEEDED',
+] as const
+
+export async function confirmOcrMedsViaUI(
+  page: Page,
+  frequencies: Array<(typeof FREQ_CYCLE)[number]>,
+): Promise<void> {
+  await page
+    .locator(byTestId(T.intake.medPhotoConfirmModal))
+    .waitFor({ state: 'visible', timeout: 15_000 })
+  for (let i = 0; i < frequencies.length; i++) {
+    await page
+      .locator(byTestId(T.intake.medPhotoRowFrequency(i)))
+      .selectOption(frequencies[i])
+  }
+  const addAll = page.locator(byTestId(T.intake.medPhotoConfirmButton))
+  if (!(await addAll.isEnabled().catch(() => false))) {
+    // Already-listed-at-same-frequency `noop` — walk row 0 through the
+    // remaining frequencies until an actionable intent opens the gate.
+    for (const f of FREQ_CYCLE) {
+      await page
+        .locator(byTestId(T.intake.medPhotoRowFrequency(0)))
+        .selectOption(f)
+      await page.waitForTimeout(150)
+      if (await addAll.isEnabled().catch(() => false)) break
+    }
+  }
+  await expect(addAll).toBeEnabled({ timeout: 10_000 })
+  await addAll.click()
+  await page
+    .locator(byTestId(T.intake.medPhotoConfirmModal))
+    .waitFor({ state: 'hidden', timeout: 15_000 })
+    .catch(() => {})
+}
+
+/**
+ * Advance the clinical-intake wizard from the current step to /dashboard via
+ * the single sticky CTA (`intake-submit`). Bounded loop; on the A9 frequency
+ * step it defaults any not-yet-answered medication row to ONCE_DAILY so the
+ * A9 gate (every selected med needs a frequency) doesn't trap the walk. Used
+ * by the 20d spec (no local `walkIntake`); the 20b spec keeps its own
+ * step-aware demographics walk for the A1-entry cases.
+ */
+export async function advanceIntakeToDashboard(page: Page): Promise<void> {
+  const visible = (sel: string) =>
+    page.locator(byTestId(sel)).first().isVisible().catch(() => false)
+  for (let i = 0; i < 16; i++) {
+    if (/\/dashboard/.test(page.url())) return
+    // A9 — answer any medication row that has no active frequency yet.
+    const a9Rows = page.locator('[data-testid^="intake-a9-row-"]')
+    const rowCount = await a9Rows.count().catch(() => 0)
+    for (let r = 0; r < rowCount; r++) {
+      const onceBtn = page.locator(byTestId(T.intake.a9Freq(r, 'ONCE_DAILY')))
+      if (await onceBtn.isVisible().catch(() => false)) {
+        await onceBtn.click().catch(() => {})
+      }
+    }
+    const cta = page.locator(byTestId(T.intake.cta)).first()
+    if (await cta.isVisible().catch(() => false)) {
+      await cta.click().catch(() => {})
+      await page.waitForTimeout(700)
+    } else {
+      const done = page
+        .getByRole('button', { name: /dashboard|done|finish|continue|got it/i })
+        .first()
+      if (await done.isVisible().catch(() => false)) {
+        await done.click().catch(() => {})
+        await page.waitForTimeout(500)
+      } else break
+    }
+  }
+  await page.waitForURL(/\/dashboard/, { timeout: 15_000 }).catch(() => {})
 }
 
 /**

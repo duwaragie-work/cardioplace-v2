@@ -54,6 +54,28 @@ export const T = {
     medSaveBtn: 'intake-medication-save-button',
     medDeleteBtn: 'intake-medication-delete-button',
     medPhotoButton: 'intake-medication-photo-button',
+    // Phase 4b — MedicationPhotoConfirmModal. The "Add all" button is gated
+    // until each kept row resolves to a real write (a new med, or an
+    // already-listed med whose non-UNSURE frequency differs). Tests pick a
+    // per-row frequency via the native <select> before confirming.
+    medPhotoConfirmModal: 'medication-photo-confirm-modal',
+    medPhotoConfirmButton: 'medication-photo-confirm-button',
+    medPhotoRow: (i: number) => `medication-photo-row-${i}`,
+    medPhotoRowFrequency: (i: number) => `medication-photo-row-frequency-${i}`,
+    // Phase 4b — A9 per-medication frequency picker (index-keyed; each med
+    // is a row of 5 frequency buttons). The A9 gate blocks submit until
+    // every selected med has a frequency, so a freeform/OCR add that lands
+    // without one must be answered here before A10.
+    a9Row: (i: number) => `intake-a9-row-${i}`,
+    a9Freq: (
+      i: number,
+      freq:
+        | 'ONCE_DAILY'
+        | 'TWICE_DAILY'
+        | 'THREE_TIMES_DAILY'
+        | 'AS_NEEDED'
+        | 'UNSURE',
+    ) => `intake-a9-freq-${i}-${freq}`,
     // Phase 4 v3.1 — A8 medication-catalog category tiles (the OTHER tile
     // opens the free-text/photo sub-panel) + the A8 free-text input.
     catTile: (
