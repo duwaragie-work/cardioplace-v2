@@ -71,16 +71,17 @@ async function clickSymptomButtonViaUI(
   symptomKey: string,
 ): Promise<boolean> {
   await page.goto('/check-in')
-  // Next 16 hydration race: spec 05 documents that the wizard ships
-  // interactive DOM ahead of React onClick attachment. Wait for step 1 to
-  // mount before any click, then advance step-by-step with the same
-  // hydration wait pattern at each gate.
-  await page.locator(byTestId(T.checkin.step(1))).waitFor({ state: 'visible', timeout: 10_000 })
+  // Next 16 hydration race (per spec 05): the wizard ships interactive DOM
+  // ahead of React onClick attachment. Wait for the page to settle BEFORE
+  // any click, and again after every step transition. `networkidle`
+  // catches the React-Query hydration burst (profile + meds + readings).
+  await page.waitForLoadState('networkidle').catch(() => {})
+  await page.locator(byTestId(T.checkin.step(1))).waitFor({ state: 'visible', timeout: 15_000 })
 
   // Walk through B1 → B2 → WEIGHT → MEDICATION → B3 (StepKey order in
   // CheckIn.tsx:1461 STEP_FLOW). The helper terminates when the requested
   // symptom button on B3 is visible.
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 12; i++) {
     // Target reached? Done.
     if (
       await page
@@ -102,8 +103,8 @@ async function clickSymptomButtonViaUI(
       }
     }
     // MEDICATION — Aisha has Lisinopril seeded + optional setUserMedication
-    // add-on (which dedupes by drugName, so the count is stable). Click YES
-    // on every med row to satisfy MEDICATION step validation.
+    // add-on (which dedupes by drugName). Click YES on every med row to
+    // satisfy MEDICATION step validation.
     const medYes = page.locator(byTestId(T.checkin.medicationYes))
     if (await medYes.first().isVisible().catch(() => false)) {
       const count = await medYes.count()
@@ -111,16 +112,18 @@ async function clickSymptomButtonViaUI(
         await medYes.nth(j).click().catch(() => {})
       }
     }
-    // Advance — count() avoids the isVisible()-false-for-below-fold trap on
-    // the WEIGHT step (Next is at the bottom; viewport check fails). click()
-    // auto-scrolls + waits for hydration before sending the event.
+    // Advance — the WEIGHT step Next button can sit below the fold (out
+    // of viewport for short browser windows). scrollIntoViewIfNeeded() +
+    // networkidle wait + explicit click timeout collectively absorb the
+    // Next 16 hydration race + viewport-clip trap.
     const next = page.locator(byTestId(T.checkin.next))
     if ((await next.count()) > 0) {
-      await next.click({ timeout: 5_000 }).catch(() => {})
-      // Small settle so React state mutation lands before the next iteration
-      // queries the DOM. Without this the next iteration occasionally reads
-      // the pre-click DOM and double-clicks the same Next button.
-      await page.waitForTimeout(200)
+      await next.scrollIntoViewIfNeeded({ timeout: 5_000 }).catch(() => {})
+      await next.click({ timeout: 10_000 }).catch(() => {})
+      // Wait for the React-Query hydration on the new step before the next
+      // iteration reads the DOM.
+      await page.waitForLoadState('networkidle').catch(() => {})
+      await page.waitForTimeout(150)
     } else {
       break
     }
