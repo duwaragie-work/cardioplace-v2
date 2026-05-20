@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   Delete,
-  ForbiddenException,
   Get,
   NotFoundException,
   Param,
@@ -15,6 +14,7 @@ import {
 import type { Request } from 'express'
 import { UserRole } from '../generated/prisma/enums.js'
 import { Roles } from '../auth/decorators/roles.decorator.js'
+import { PatientAccessService } from '../common/patient-access.service.js'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js'
 import { RolesGuard } from '../auth/guards/roles.guard.js'
 import { PrismaService } from '../prisma/prisma.service.js'
@@ -40,6 +40,7 @@ export class ProviderController {
   constructor(
     private readonly providerService: ProviderService,
     private readonly prisma: PrismaService,
+    private readonly access: PatientAccessService,
   ) {}
 
   @Get('stats')
@@ -52,7 +53,6 @@ export class ProviderController {
     @Req() req: AuthedReq,
     @Query('riskTier') riskTier?: string,
     @Query('hasActiveAlerts') hasActiveAlerts?: string,
-    @Query('scope') scope?: string,
   ) {
     return this.providerService.getPatients({
       riskTier,
@@ -62,12 +62,10 @@ export class ProviderController {
           : hasActiveAlerts === 'false'
             ? false
             : undefined,
-      // PROVIDER-only scoping: pass scope=assigned to limit the result to
-      // patients whose primary or backup provider is the caller. Always
-      // applied for PROVIDER role even if the client doesn't request it,
-      // so a misconfigured frontend can't accidentally leak the full list.
-      scope: this.resolveScope(req, scope),
-      callerUserId: req.user.id,
+      // Pass through actor (id + roles). The scope filter is derived inside
+      // PatientAccessService — PROVIDER ⇒ panel, MED_DIR ⇒ practice,
+      // OPS/SUPER ⇒ unfiltered. A misconfigured frontend can't widen scope.
+      actor: { id: req.user.id, roles: req.user.roles },
     })
   }
 
@@ -122,7 +120,6 @@ export class ProviderController {
     @Req() req: AuthedReq,
     @Query('severity') severity?: string,
     @Query('escalated') escalated?: string,
-    @Query('scope') scope?: string,
   ) {
     return this.providerService.getAlerts({
       severity,
@@ -132,112 +129,28 @@ export class ProviderController {
           : escalated === 'false'
             ? false
             : undefined,
-      scope: this.resolveScope(req, scope),
-      callerUserId: req.user.id,
+      actor: { id: req.user.id, roles: req.user.roles },
     })
   }
 
   /**
-   * PROVIDER role is always force-scoped to their own assignments — the
-   * frontend can ask for `scope=assigned` explicitly, but even if it asks
-   * for `all` we override so a misconfigured caller can't leak data.
-   * Other admin roles can opt in to `assigned` if a future UI surfaces a
-   * "my patients" view, otherwise default `all`.
+   * Per-patient PHI read gate (Phase 1 Finding 1+2 — P0). Delegates to
+   * PatientAccessService so this controller picks up the same scope rules
+   * the patient-detail mutations use — including the May 2026 switch to
+   * MED_DIR scoping via the PracticeMedicalDirector join (a MD heads
+   * practices first-class, not derived from assignment.medicalDirectorId).
+   * The patient-views-self short-circuit stays here because PatientAccess-
+   * Service only handles admin-role callers.
    */
-  private resolveScope(req: AuthedReq, requested?: string): 'all' | 'assigned' {
-    const ADMIN_ROLES: UserRole[] = [
-      UserRole.SUPER_ADMIN,
-      UserRole.MEDICAL_DIRECTOR,
-      UserRole.HEALPLACE_OPS,
-    ]
-    const isProviderOnly =
-      req.user.roles.includes(UserRole.PROVIDER) &&
-      !req.user.roles.some((r) => ADMIN_ROLES.includes(r))
-    if (isProviderOnly) return 'assigned'
-    return requested === 'assigned' ? 'assigned' : 'all'
-  }
-
-  /**
-   * Authorization gate for per-patient PHI reads (Phase 1 Finding 1+2 — P0).
-   * resolveScope() only protects the list endpoints; the per-patient /
-   * per-alert endpoints took a raw id with NO assignment and NO practice
-   * scope, so any clinical-staff user could read any patient's audit PHI by
-   * id. This enforces, against the patient's care-team assignment(s):
-   *   • requester views their own record                          → allow
-   *   • SUPER_ADMIN / HEALPLACE_OPS (org-wide compliance access)   → allow
-   *   • PROVIDER — primary OR backup on any of the patient's
-   *     assignments                                                → allow
-   *   • MEDICAL_DIRECTOR — named MD on any of the patient's
-   *     assignments, OR MD for a practice the patient is in        → allow
-   *   • everyone else                                              → deny
-   *
-   * Iterates ALL of the patient's assignments. Today
-   * PatientProviderAssignment.userId is @unique (exactly one row), but
-   * multi-practice is a planned post-pilot phase — looping now avoids
-   * re-touching this security guard later.
-   */
-  private async canViewPatient(
-    user: { id: string; roles: UserRole[] },
-    patientUserId: string,
-  ): Promise<boolean> {
-    if (user.id === patientUserId) return true
-    if (
-      user.roles.includes(UserRole.SUPER_ADMIN) ||
-      user.roles.includes(UserRole.HEALPLACE_OPS)
-    ) {
-      return true
-    }
-
-    const assignments = await this.prisma.patientProviderAssignment.findMany({
-      where: { userId: patientUserId },
-      select: {
-        practiceId: true,
-        primaryProviderId: true,
-        backupProviderId: true,
-        medicalDirectorId: true,
-      },
-    })
-    if (assignments.length === 0) return false
-
-    if (
-      user.roles.includes(UserRole.PROVIDER) &&
-      assignments.some(
-        (a) =>
-          a.primaryProviderId === user.id || a.backupProviderId === user.id,
-      )
-    ) {
-      return true
-    }
-
-    if (user.roles.includes(UserRole.MEDICAL_DIRECTOR)) {
-      // Direct: MD named on one of the patient's own assignments.
-      if (assignments.some((a) => a.medicalDirectorId === user.id)) return true
-      // Practice-wide: this MD is medical director for ≥1 assignment in a
-      // practice the patient is also assigned to (the "same practice →
-      // allowed" rule; Practice has no MD FK so it's evidenced via
-      // assignments).
-      const practiceIds = Array.from(
-        new Set(assignments.map((a) => a.practiceId)),
-      )
-      const mdInPractice = await this.prisma.patientProviderAssignment.count({
-        where: {
-          medicalDirectorId: user.id,
-          practiceId: { in: practiceIds },
-        },
-      })
-      if (mdInPractice > 0) return true
-    }
-
-    return false
-  }
-
   private async assertCanViewPatient(
     req: AuthedReq,
     patientUserId: string,
   ): Promise<void> {
-    if (!(await this.canViewPatient(req.user, patientUserId))) {
-      throw new ForbiddenException('Not authorized to view this patient')
-    }
+    if (req.user.id === patientUserId) return
+    await this.access.assertCanAccessPatient(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+    )
   }
 
   @Get('alerts/:alertId/detail')

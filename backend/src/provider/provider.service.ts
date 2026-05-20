@@ -1,5 +1,9 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { getAgeGroup } from '@cardioplace/shared'
+import {
+  ActorUser,
+  PatientAccessService,
+} from '../common/patient-access.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { EmailService } from '../email/email.service.js'
 import { scheduleCallEmailHtml } from '../email/email-templates.js'
@@ -62,6 +66,7 @@ export class ProviderService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
+    private readonly access: PatientAccessService,
   ) {}
 
   // Age bucketing now delegated to shared/derivatives.ts::getAgeGroup (phase/4).
@@ -343,10 +348,10 @@ export class ProviderService {
   async getPatients(filters: {
     riskTier?: string
     hasActiveAlerts?: boolean
-    /** PROVIDER privacy scope. 'assigned' = only patients in caller's
-     *  primary or backup slot. 'all' = unrestricted (admin/MD/OPS view). */
-    scope?: 'all' | 'assigned'
-    callerUserId?: string
+    /** Caller — drives role-based data scoping via PatientAccessService.
+     *  PROVIDER → assigned panel. MED_DIR → patients in headed practices.
+     *  OPS / SUPER_ADMIN → unfiltered. May 2026 scope decision. */
+    actor: ActorUser
   }) {
     const where: Record<string, unknown> = {
       roles: { has: UserRole.PATIENT },
@@ -357,18 +362,11 @@ export class ProviderService {
         where.patientProfile = { is: profileWhere }
       }
     }
-    // PROVIDER scoping — only patients whose care-team assignment names this
-    // caller as primary OR backup provider. Medical-director-only role does
-    // NOT scope (they oversee everyone) — that's enforced in the controller.
-    if (filters.scope === 'assigned' && filters.callerUserId) {
-      where.providerAssignmentAsPatient = {
-        is: {
-          OR: [
-            { primaryProviderId: filters.callerUserId },
-            { backupProviderId: filters.callerUserId },
-          ],
-        },
-      }
+    // Role-scoped filter — see PatientAccessService.patientScopeFilter.
+    // Returns undefined for OPS/SUPER (no filter); a Prisma fragment otherwise.
+    const scope = await this.access.patientScopeFilter(filters.actor)
+    if (scope) {
+      Object.assign(where, scope)
     }
 
     const users = await this.prisma.user.findMany({
@@ -941,8 +939,8 @@ export class ProviderService {
   async getAlerts(filters: {
     severity?: string
     escalated?: boolean
-    scope?: 'all' | 'assigned'
-    callerUserId?: string
+    /** Caller — drives role-based data scoping. See getPatients. */
+    actor: ActorUser
   }) {
     const where: Record<string, unknown> = { status: 'OPEN' }
     if (filters.severity) {
@@ -951,21 +949,12 @@ export class ProviderService {
     if (filters.escalated != null) {
       where.escalated = filters.escalated
     }
-    // PROVIDER scoping — mirror getPatients. Only alerts for patients whose
-    // care-team assignment names the caller as primary OR backup.
-    if (filters.scope === 'assigned' && filters.callerUserId) {
-      where.user = {
-        is: {
-          providerAssignmentAsPatient: {
-            is: {
-              OR: [
-                { primaryProviderId: filters.callerUserId },
-                { backupProviderId: filters.callerUserId },
-              ],
-            },
-          },
-        },
-      }
+    // Role-scoped filter — same path as getPatients. patientScopeFilter
+    // returns a `providerAssignmentAsPatient` fragment; nest it under `user`
+    // because Alert.user is the patient User row.
+    const patientScope = await this.access.patientScopeFilter(filters.actor)
+    if (patientScope) {
+      where.user = { is: patientScope }
     }
 
     const alerts = await this.prisma.deviationAlert.findMany({
