@@ -98,7 +98,10 @@ async function assertAlertMessageMatches(
   textRegex: RegExp,
 ): Promise<void> {
   await page.goto(`/alerts/${alertId}`)
-  const msg = page.locator(byTestId(T.alertDetail.messagePatient))
+  // Post-FIX 1 (commit 388b816): angioedema routes to EmergencyAlertScreen.
+  // The body is the signed-off registry patientMessage rendered locale-aware
+  // via the alert.angioedema.* i18n key.
+  const msg = page.locator(byTestId(T.emergency.message))
   await expect(msg).toBeVisible({ timeout: 20_000 })
   await expect(msg).toContainText(textRegex)
 }

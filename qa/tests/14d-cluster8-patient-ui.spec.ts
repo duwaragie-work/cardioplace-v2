@@ -14,10 +14,10 @@ import { API_BASE_URL } from '../playwright.config.js'
  *
  * Complements Niva's API-level spec 20 + un-fixme'd 09. Drives REAL patient
  * UI surfaces: the 5 new symptom buttons (Cluster 8.1 faceSwelling /
- * throatTightness, Cluster 7 Appendix A fatigue / SOB / dryCough), the urgent
- * red angioedema treatment on /alerts/[id], the brady-surveillance "patient
- * sees nothing" negative test, and the first-month adherence nudge surfacing
- * in the patient notifications inbox.
+ * throatTightness, Cluster 7 Appendix A fatigue / SOB / dryCough), the
+ * angioedema full-screen EmergencyAlertScreen, the brady-surveillance
+ * "patient sees nothing" negative test, and the first-month adherence
+ * nudge surfacing in the patient notifications inbox.
  *
  * SUBMIT-PATH NOTE: tests use API submission for the trigger (the path is
  * already covered by Niva's spec 20 + my §C); §D's added value is verifying
@@ -25,16 +25,10 @@ import { API_BASE_URL } from '../playwright.config.js'
  * detail / notifications page render the expected text. Tests 5 + 6 are
  * pure-UI (no engine path).
  *
- * IMPLEMENTATION DISCOVERY (2026-05-20): Niva's "full-screen red routing"
- * for TIER_1_ANGIOEDEMA is wired via TierAlertView's variantFor red variant
- * on /alerts/[id], NOT via EmergencyAlertScreen (which still routes only
- * BP_LEVEL_2 / BP_LEVEL_2_SYMPTOM_OVERRIDE per /alerts/[id] page.tsx:305
- * `isEmergency`). Tests assert on alert-detail testids + the approved 911
- * wording. Separate gap-shaped finding flagged in §I: Dashboard.tsx
- * alertPriority + variantForTopAlert do not yet special-case
- * TIER_1_ANGIOEDEMA — not a blocker for §D (alert-detail is the canonical
- * surface) but the dashboard "top alert" card won't render with the urgent
- * red variant until that's wired.
+ * Angioedema routing — post-FIX 1 (commit 388b816): TIER_1_ANGIOEDEMA now
+ * routes to EmergencyAlertScreen (full-screen red with 911 button + signed-
+ * off registry body), matching Manisha's "full-screen red page + 911" spec.
+ * Tests assert against T.emergency.{screen,message,call911} accordingly.
  */
 
 async function seedHistoryToClearPreDay3(
@@ -161,7 +155,7 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
     'Write tests gated behind RUN_WRITE_TESTS=1 (mutates seed-patient state)',
   )
 
-  test('1. faceSwelling button receives click + Tier 1 red treatment renders on /alerts/[id] (ACE branch)', async ({ page }) => {
+  test('1. faceSwelling button receives click + EmergencyAlertScreen renders with 911 button (ACE branch)', async ({ page }) => {
     test.setTimeout(120_000)
     const { tc, userId } = await setupPatient(PATIENTS.aisha.email, async (tc, uid) => {
       await tc.setUserMedication(uid, {
@@ -178,8 +172,8 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
       expect(clicked, 'FACE_SWELLING button must be reachable in the check-in flow').toBe(true)
 
       // Drive the engine via API (proven path — spec 20). The §D assertion
-      // is "patient UI surfaces are exercised + the resulting alert detail
-      // renders the right treatment".
+      // is "patient UI surfaces are exercised + the resulting full-screen
+      // emergency renders with the signed-off body + 911 CTA".
       await postAngioedemaEntry(PATIENTS.aisha.email, { faceSwelling: true })
       const alerts = await waitForAlerts(tc, userId, (xs) =>
         xs.some((a) => a.ruleId === 'RULE_ACE_ANGIOEDEMA'),
@@ -188,8 +182,13 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
       expect(row.tier).toBe('TIER_1_ANGIOEDEMA')
 
       await page.goto(`/alerts/${row.id}`)
-      await expect(page.locator(byTestId(T.alertDetail.tierBadge))).toBeVisible()
-      const msg = page.locator(byTestId(T.alertDetail.messagePatient))
+      // Post-FIX 1 (commit 388b816): angioedema routes to
+      // EmergencyAlertScreen — full-screen red, 911 button, signed-off body.
+      await expect(page.locator(byTestId(T.emergency.screen))).toBeVisible({
+        timeout: 20_000,
+      })
+      await expect(page.locator(byTestId(T.emergency.call911))).toBeVisible()
+      const msg = page.locator(byTestId(T.emergency.message))
       await expect(msg).toBeVisible()
       await expect(msg).toContainText(/911|emergency room/i)
     } finally {
@@ -197,7 +196,7 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
     }
   })
 
-  test('2. throatTightness button + NO meds → Tier 1 STILL shows red treatment (universal airway)', async ({ page }) => {
+  test('2. throatTightness button + NO meds → EmergencyAlertScreen STILL shows (universal airway)', async ({ page }) => {
     test.setTimeout(120_000)
     const { tc, userId } = await setupPatient(PATIENTS.aisha.email, async () => {})
     try {
@@ -213,10 +212,13 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
       expect(row.tier).toBe('TIER_1_ANGIOEDEMA')
 
       await page.goto(`/alerts/${row.id}`)
-      // Critical: airway symptoms must surface a Tier 1 red alert even with
-      // no med history (allergic / idiopathic / hereditary etiologies).
-      await expect(page.locator(byTestId(T.alertDetail.tierBadge))).toBeVisible()
-      await expect(page.locator(byTestId(T.alertDetail.messagePatient))).toContainText(/911/)
+      // Critical: airway symptoms must surface the full-screen emergency
+      // even with no med history (allergic / idiopathic / hereditary).
+      await expect(page.locator(byTestId(T.emergency.screen))).toBeVisible({
+        timeout: 20_000,
+      })
+      await expect(page.locator(byTestId(T.emergency.call911))).toBeVisible()
+      await expect(page.locator(byTestId(T.emergency.message))).toContainText(/911/)
     } finally {
       await tc.dispose()
     }
@@ -248,7 +250,14 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
       expect(row.physicianMessage ?? '').toMatch(/\(ARB\)/)
 
       await page.goto(`/alerts/${row.id}`)
-      await expect(page.locator(byTestId(T.alertDetail.tierBadge))).toBeVisible()
+      // EmergencyAlertScreen renders (full-screen red) — title is neutral
+      // non-diagnostic, body comes from the signed-off ACE_ANGIOEDEMA
+      // registry message (ARB-variant physician text was verified above at
+      // the DB layer; patient UI doesn't show physician text per v2 split).
+      await expect(page.locator(byTestId(T.emergency.screen))).toBeVisible({
+        timeout: 20_000,
+      })
+      await expect(page.locator(byTestId(T.emergency.call911))).toBeVisible()
     } finally {
       await tc.dispose()
     }
@@ -272,8 +281,9 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
       )
       const row = alerts.find((a) => a.ruleId === 'RULE_ACE_ANGIOEDEMA')!
       await page.goto(`/alerts/${row.id}`)
-      const msg = page.locator(byTestId(T.alertDetail.messagePatient))
-      await expect(msg).toBeVisible()
+      // EmergencyAlertScreen body carries the signed-off ACE registry message.
+      const msg = page.locator(byTestId(T.emergency.message))
+      await expect(msg).toBeVisible({ timeout: 20_000 })
       // Approved verbatim ACE-branch wording.
       await expect(msg).toContainText(/do not take/i)
       await expect(msg).toContainText(/blood pressure medicine/i)
@@ -293,8 +303,8 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
       )
       const row = alerts.find((a) => a.ruleId === 'RULE_GENERIC_ANGIOEDEMA')!
       await page.goto(`/alerts/${row.id}`)
-      const msg = page.locator(byTestId(T.alertDetail.messagePatient))
-      await expect(msg).toBeVisible()
+      const msg = page.locator(byTestId(T.emergency.message))
+      await expect(msg).toBeVisible({ timeout: 20_000 })
       // Generic branch must NOT tell the patient to stop a medicine —
       // cause may be allergic / idiopathic / hereditary, not a drug.
       await expect(msg).not.toContainText(/do not take/i)
