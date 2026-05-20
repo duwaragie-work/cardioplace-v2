@@ -1867,4 +1867,185 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(result).toBeNull()
     expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
   })
+
+  // ========================================================================
+  // Cluster 8 Q1 (Manisha 5/18/26) — asymptomatic-brady surveillance
+  // ========================================================================
+  // MESA differential-mortality cohort: HR 40–49 with NO brady-relevant
+  // symptoms must not be silent for patients on rate-controlling meds (or
+  // hasBradycardia). Pass 3 fires AFTER the BP/HR pipeline:
+  //   • Tier 3 chart event (physician-only, empty patient/caregiver msg)
+  //     when the trailing consecutive ≤45 session run is < 3
+  //   • Tier 2 review when the run is ≥ 3 (escalation)
+  // Distinct from bradyAbsoluteRule (HR<40, Tier 1) and bradySymptomaticRule
+  // (HR 40–49 + symptom, Tier 2 via the BP/HR pipeline). 50–60 BB-therapeutic
+  // is unchanged (no alert).
+
+  function bradyHrEntry(measuredAt: Date, pulse: number) {
+    return { id: 'h-' + measuredAt.getTime(), measuredAt, pulse }
+  }
+
+  it('Scenario 82 (Cluster 8 B.2) — HR 45 asymptomatic on beta-blocker → RULE_BRADY_SURVEILLANCE Tier 3, empty patient/caregiver msg', async () => {
+    // loadAdherenceWindow (Pass 2) + loadBradyPatternWindow (Pass 3) BOTH
+    // call prisma.journalEntry.findMany. Default mock returns [] for both
+    // → consecutiveSessionsLe45 = 0 → Tier 3 (not escalated).
+    const { createArgs } = await run(
+      buildSession({ systolicBP: 122, diastolicBP: 76, pulse: 45 }),
+      buildCtx({
+        profile: { hasBradycardia: true, diagnosedHypertension: true },
+        contextMeds: [
+          buildMed({ drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER' }),
+        ],
+      }),
+    )
+
+    // Find the surveillance row — other passes may co-fire (HR-context
+    // annotations, missed-dose row from empty adherence) so don't index 0.
+    const calls = prisma.deviationAlert.create.mock.calls as Array<
+      [{ data: { ruleId: string; tier: string; patientMessage: string; caregiverMessage: string } }]
+    >
+    const surveillance = calls
+      .map((c) => c[0].data)
+      .find((d) => d.ruleId === 'RULE_BRADY_SURVEILLANCE')
+    expect(surveillance).toBeTruthy()
+    expect(surveillance?.tier).toBe('TIER_3_INFO')
+    // Per the registry: surveillance patient/caregiver messages are empty
+    // strings — physician-only chart event, no alarm to an asymptomatic
+    // patient.
+    expect(surveillance?.patientMessage).toBe('')
+    expect(surveillance?.caregiverMessage).toBe('')
+    expect(createArgs).toBeTruthy()
+  })
+
+  it('Scenario 83 (Cluster 8 B.2) — HR 45 + dizziness → SYMPTOMATIC (Tier 2), NOT surveillance', async () => {
+    await run(
+      buildSession({
+        systolicBP: 122,
+        diastolicBP: 76,
+        pulse: 45,
+        symptoms: { ...noSymptoms(), dizziness: true },
+      }),
+      buildCtx({
+        profile: { hasBradycardia: true },
+        contextMeds: [
+          buildMed({ drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER' }),
+        ],
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).toContain('RULE_BRADY_HR_SYMPTOMATIC')
+    expect(ruleIds).not.toContain('RULE_BRADY_SURVEILLANCE')
+  })
+
+  it('Scenario 84 (Cluster 8 B.2) — HR 45 asymptomatic + NOT on rate-control + no hasBradycardia → no alert', async () => {
+    // Gate: hasBradycardia OR rate-control med. With NEITHER, the rule is
+    // silent (avoids surveillance noise for healthy athletic bradycardia).
+    await run(
+      buildSession({ systolicBP: 122, diastolicBP: 76, pulse: 45 }),
+      buildCtx({
+        profile: { hasBradycardia: false },
+        contextMeds: [],
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_BRADY_SURVEILLANCE')
+    expect(ruleIds).not.toContain('RULE_BRADY_HR_SYMPTOMATIC')
+    expect(ruleIds).not.toContain('RULE_BRADY_HR_ASYMPTOMATIC')
+  })
+
+  it('Scenario 85 (Cluster 8 B.2) — HR 45 × 3 consecutive sessions → ESCALATE to TIER_2_DISCREPANCY (sustained)', async () => {
+    // Seed prisma.journalEntry.findMany with 3 prior days each at HR ≤45.
+    // The brady-pattern window buckets by calendar day → 3 distinct days
+    // → consecutiveSessionsLe45 = 3 → Tier 2 (sustained-pattern review).
+    //
+    // CRITICAL: there are THREE findMany call sites in evaluate():
+    //   Pass 1 → wasPriorReadingPulseElevated (Stage C)
+    //   Pass 2 → loadAdherenceWindow  (adherence)
+    //   Pass 3 → loadBradyPatternWindow (THIS)
+    // We use the default-mock-resolved-value pattern (mockResolvedValue,
+    // not mockResolvedValueOnce) so all three calls get the same payload
+    // — fine because the prior-elevated check + adherence both tolerate
+    // pulse-only / measuredAt-only rows.
+    const now = new Date('2026-04-22T10:00:00Z')
+    prisma.journalEntry.findMany.mockResolvedValue([
+      bradyHrEntry(new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000), 44),
+      bradyHrEntry(new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000), 45),
+      bradyHrEntry(new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000), 43),
+    ])
+
+    await run(
+      buildSession({ systolicBP: 122, diastolicBP: 76, pulse: 45 }),
+      buildCtx({
+        profile: { hasBradycardia: true, diagnosedHypertension: true },
+        contextMeds: [
+          buildMed({ drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER' }),
+        ],
+      }),
+    )
+
+    const surveillance = (
+      prisma.deviationAlert.create.mock.calls as Array<
+        [{ data: { ruleId: string; tier: string; physicianMessage: string } }]
+      >
+    )
+      .map((c) => c[0].data)
+      .find((d) => d.ruleId === 'RULE_BRADY_SURVEILLANCE')
+    expect(surveillance).toBeTruthy()
+    expect(surveillance?.tier).toBe('TIER_2_DISCREPANCY')
+    expect(surveillance?.physicianMessage).toMatch(
+      /Sustained asymptomatic bradycardia/i,
+    )
+    expect(surveillance?.physicianMessage).toMatch(/3 consecutive sessions/i)
+  })
+
+  it('Scenario 86 (Cluster 8 B.2) — HR 38 (below 40) → bradyAbsoluteRule Tier 1, NOT surveillance', async () => {
+    // The surveillance rule's [40, 50) band carves out HR<40 — that's
+    // owned by bradyAbsoluteRule (Tier 1). A regression would mean a HR
+    // 38 reading produces only a Tier 3 surveillance row, losing the
+    // Tier 1 absolute-emergency escalation.
+    await run(
+      buildSession({ systolicBP: 122, diastolicBP: 76, pulse: 38 }),
+      buildCtx({
+        profile: { hasBradycardia: true },
+        contextMeds: [
+          buildMed({ drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER' }),
+        ],
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).toContain('RULE_BRADY_ABSOLUTE')
+    expect(ruleIds).not.toContain('RULE_BRADY_SURVEILLANCE')
+  })
+
+  it('Scenario 87 (Cluster 8 B.2) — HR 55 on beta-blocker (BB therapeutic 50–60) → no brady alert', async () => {
+    // The MESA cohort still uses 50 as the suppression floor — HR 55 on a
+    // BB is the therapeutic target, not a surveillance signal. Guard
+    // against accidental band widening that would alarm-fatigue providers.
+    await run(
+      buildSession({ systolicBP: 122, diastolicBP: 76, pulse: 55 }),
+      buildCtx({
+        profile: { hasBradycardia: false },
+        contextMeds: [
+          buildMed({ drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER' }),
+        ],
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_BRADY_SURVEILLANCE')
+    expect(ruleIds).not.toContain('RULE_BRADY_HR_ASYMPTOMATIC')
+    expect(ruleIds).not.toContain('RULE_BRADY_HR_SYMPTOMATIC')
+    expect(ruleIds).not.toContain('RULE_BRADY_ABSOLUTE')
+  })
 })
