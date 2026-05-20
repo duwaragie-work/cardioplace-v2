@@ -6,6 +6,7 @@ import {
   findStep,
   TIER_1_LADDER,
   TIER_2_LADDER,
+  BP_LEVEL_1_LADDER,
   BP_LEVEL_2_LADDER,
   BP_LEVEL_2_SYMPTOM_OVERRIDE_LADDER,
   TIER_1_BACKUP_ON_T0,
@@ -47,12 +48,20 @@ describe('ladderForTier', () => {
     )
   })
 
-  it('BP_LEVEL_1_HIGH → null (not escalated)', () => {
-    expect(ladderForTier('BP_LEVEL_1_HIGH')).toBeNull()
+  it('BP_LEVEL_1_HIGH → BP Level 1 ladder (phase/23 — both HIGH and LOW share the ladder shape)', () => {
+    // Pre-phase/23 these returned null. Phase/23 shipped BP_LEVEL_1_LADDER
+    // (T0/T24H/T72H/T7D, yellow banner, queues for business hours); the
+    // registry-resolved patient/physician messages still disambiguate HIGH
+    // vs LOW wording.
+    const l = ladderForTier('BP_LEVEL_1_HIGH')
+    expect(l?.kind).toBe('BP_LEVEL_1')
+    expect(l?.steps).toBe(BP_LEVEL_1_LADDER)
   })
 
-  it('BP_LEVEL_1_LOW → null', () => {
-    expect(ladderForTier('BP_LEVEL_1_LOW')).toBeNull()
+  it('BP_LEVEL_1_LOW → same BP Level 1 ladder as HIGH (phase/23)', () => {
+    const l = ladderForTier('BP_LEVEL_1_LOW')
+    expect(l?.kind).toBe('BP_LEVEL_1')
+    expect(l?.steps).toBe(BP_LEVEL_1_LADDER)
   })
 
   it('TIER_3_INFO → null', () => {
