@@ -6,6 +6,9 @@ import {
   postJournalEntry,
   postSessionWithTwoReadings,
   waitForAlerts,
+  adminResolveAlert,
+  adminAuditAlert,
+  resolveAlertViaModal,
 } from '../helpers/api.js'
 import { byTestId, T } from '../helpers/selectors.js'
 import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
@@ -221,11 +224,15 @@ test.describe('Cluster 8 §D-ADMIN — angioedema 3-tier display + dashboard', (
       'RULE_ACE_ANGIOEDEMA',
     )
     try {
-      await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
+      // The dashboard queue is provider-scoped in the seed (every patient is
+      // assigned to primary-provider@cardioplace.test; Manisha is just
+      // PROVIDER+SUPER_ADMIN without explicit assignment). Spec 10 uses
+      // medicalDirector for the same reason — the MD role sees the whole
+      // practice's queue, so the seeded angioedema alert surfaces.
+      await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
       await page.goto(`${ADMIN_BASE_URL}/dashboard`)
-      // Switch to the TIER_1 filter — angioedema shares the TIER_1 ladder
-      // kind (per ladderForTier in §C.1), so the filter that surfaces
-      // contraindications also surfaces angioedema.
+      // Switch to the TIER_1 filter — post-FIX 5, angioedema buckets into
+      // TIER_1 (same chrome + filter group as contraindications).
       const tier1Filter = page.locator(byTestId(T.admin.dashboardTierFilter('TIER_1')))
       await expect(tier1Filter).toBeVisible({ timeout: 15_000 })
       await tier1Filter.click()
@@ -270,9 +277,16 @@ test.describe('Cluster 8 §D-ADMIN — compressed escalation ladder UI', () => {
 
       await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
       await openPatientDetailTab(page, patientName, 'Alerts')
+      // Spec 13 pattern — switch to 'All' status filter first so the seeded
+      // alert is reliably visible (default is OPEN; the seeded alert IS
+      // open, but 'All' is the most-robust filter for finding it). Then
+      // expand the card.
+      await page.getByRole('button', { name: 'All', exact: true }).first().click().catch(() => {})
       await page.getByRole('button', { name: 'Expand alert' }).first().click()
 
-      // Compressed-ladder rungs render with their ladder CODE.
+      // Post-FIX 6: angioedema renders via TIER_1_ANGIOEDEMA_LADDER —
+      // compressed rungs T+0 / T+15m / T+1h / T+4h, NOT the standard
+      // T+0 / T+4h / T+8h / T+24h / T+48h. Asserting all 4 compressed rungs.
       await expect(
         page.locator(byTestId(T.admin.escalationRung('T0'))),
       ).toBeVisible({ timeout: 15_000 })
@@ -282,6 +296,18 @@ test.describe('Cluster 8 §D-ADMIN — compressed escalation ladder UI', () => {
       await expect(
         page.locator(byTestId(T.admin.escalationRung('T1H'))),
       ).toBeVisible({ timeout: 15_000 })
+      await expect(
+        page.locator(byTestId(T.admin.escalationRung('T4H'))),
+      ).toBeVisible({ timeout: 15_000 })
+      // Cross-wiring guard at the UI: standard-ladder rungs MUST NOT render.
+      expect(
+        await page.locator(byTestId(T.admin.escalationRung('T8H'))).count(),
+        'compressed angioedema ladder must NOT render the standard T+8h rung',
+      ).toBe(0)
+      expect(
+        await page.locator(byTestId(T.admin.escalationRung('T24H'))).count(),
+        'compressed angioedema ladder must NOT render the standard T+24h rung',
+      ).toBe(0)
     } finally {
       await tc.dispose()
     }
@@ -341,57 +367,7 @@ test.describe('Cluster 8 §D-ADMIN — compressed escalation ladder UI', () => {
 test.describe('Cluster 8 §D-ADMIN — angioedema audit + resolution', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
-  test('18. Angioedema alert renders the 15-field JCAHO audit footer with angioedema-specific values', async ({ page }) => {
-    test.setTimeout(180_000)
-    const { tc, patientName } = await setupAndTriggerAlert(
-      PATIENTS.aisha.email,
-      async (tc, uid) => {
-        await tc.setUserMedication(uid, {
-          drugName: 'Lisinopril',
-          drugClass: 'ACE_INHIBITOR',
-          frequency: 'ONCE_DAILY',
-          verificationStatus: 'VERIFIED',
-        })
-      },
-      { faceSwelling: true },
-      'RULE_ACE_ANGIOEDEMA',
-    )
-    try {
-      await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
-      await openPatientDetailTab(page, patientName, 'Alerts')
-      await page.getByRole('button', { name: 'Expand alert' }).first().click()
-
-      // Subset of the 15 required JCAHO fields that an OPEN angioedema
-      // alert can populate without resolution (acknowledged/resolved/
-      // resolutionAction/resolutionRationale are empty until provider
-      // action — those are exercised in test 19's resolution flow).
-      const REQUIRED_OPEN_FIELDS = [
-        'alertId',
-        'tier',
-        'ruleId',
-        'severity',
-        'mode',
-        'status',
-        'created',
-        'reading',
-        'pulsePressure',
-        'escalationCount',
-      ]
-      for (const k of REQUIRED_OPEN_FIELDS) {
-        await expect(
-          page.locator(`[data-testid="audit-field-${k}"]`),
-          `15-field audit footer missing field: ${k}`,
-        ).toBeVisible({ timeout: 15_000 })
-      }
-      // Tier-specific value: TIER_1_ANGIOEDEMA in the tier row.
-      await expect(page.locator('[data-testid="audit-field-tier"]')).toContainText(/Angioedema|TIER_1/i)
-      await expect(page.locator('[data-testid="audit-field-ruleId"]')).toContainText('ACE_ANGIOEDEMA')
-    } finally {
-      await tc.dispose()
-    }
-  })
-
-  test('19. Tier 1 angioedema is non-dismissible — resolve requires rationale + writes audit row', async ({ page }) => {
+  test('18. RESOLVED angioedema alert renders the 15-field JCAHO audit footer with all resolution fields populated', async ({ page }) => {
     test.setTimeout(240_000)
     const { tc, patientName, alertId } = await setupAndTriggerAlert(
       PATIENTS.aisha.email,
@@ -407,32 +383,115 @@ test.describe('Cluster 8 §D-ADMIN — angioedema audit + resolution', () => {
       'RULE_ACE_ANGIOEDEMA',
     )
     try {
+      // API-resolve the alert FIRST (post-FIX 5, TIER_1_ANGIOEDEMA accepts
+      // the TIER_1 resolution catalog). The audit footer's
+      // resolutionAction / resolutionRationale / resolved / resolvedBy
+      // rows render after the alert is RESOLVED — testing on RESOLVED
+      // covers the full 15-field JCAHO surface in one shot.
+      const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+      try {
+        await adminResolveAlert(adminApi, alertId, {
+          resolutionAction: 'TIER1_FALSE_POSITIVE',
+          resolutionRationale: 'qa-test: angioedema audit-footer coverage (TIER_1 resolution catalog now wired for angioedema per FIX 5)',
+        })
+      } finally {
+        await adminApi.dispose()
+      }
+
       await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
       await openPatientDetailTab(page, patientName, 'Alerts')
-      // Open the resolve modal directly via the per-alert resolve button.
-      const resolveBtn = page.locator(byTestId(T.admin.alertResolveBtnFor(alertId)))
-      await expect(resolveBtn).toBeVisible({ timeout: 15_000 })
-      await resolveBtn.click()
+      // Spec 13 pattern: switch to 'All' status filter so the RESOLVED
+      // alert is visible (default is OPEN). Then expand the card.
+      await page.getByRole('button', { name: 'All', exact: true }).first().click().catch(() => {})
+      await page.getByRole('button', { name: 'Expand alert' }).first().click()
 
-      const rationale = page.locator(byTestId(T.admin.alertResolveRationale))
-      const confirm = page.locator(byTestId(T.admin.alertResolveBtn))
-      await expect(rationale).toBeVisible({ timeout: 15_000 })
-      await expect(confirm).toBeVisible()
-      // Confirm should be disabled until rationale + action are provided —
-      // the v2 modal flow gates confirm on resolutionAction being selected;
-      // the per-spec invariant tested here is "non-dismissable: not just
-      // a one-click resolve".
-      await expect(confirm).toBeDisabled()
-      // Provide rationale + click an action; confirm should enable.
-      await rationale.fill('qa-test: angioedema resolved post-treatment')
-      // Click the first available resolution-action button. Action keys
-      // differ by tier; the first visible action is sufficient.
-      const actions = page.locator('[data-testid^="admin-resolve-action-"]')
-      const actionCount = await actions.count()
-      if (actionCount > 0) {
-        await actions.first().click()
+      // 15 JCAHO fields populated on a RESOLVED alert. Open-only fields +
+      // resolution-fields = the full audit panel surface.
+      const REQUIRED_FIELDS = [
+        'alertId',
+        'tier',
+        'ruleId',
+        'severity',
+        'mode',
+        'status',
+        'created',
+        'reading',
+        'pulsePressure',
+        'escalationCount',
+        'resolved',
+        'resolvedBy',
+        'resolutionAction',
+      ]
+      for (const k of REQUIRED_FIELDS) {
+        await expect(
+          page.locator(`[data-testid="audit-field-${k}"]`),
+          `15-field audit footer missing field: ${k}`,
+        ).toBeVisible({ timeout: 15_000 })
       }
-      await expect(confirm).toBeEnabled()
+      // Resolution rationale renders as a free-form block (separate testid).
+      await expect(
+        page.locator('[data-testid="audit-field-resolutionRationale"]'),
+      ).toBeVisible({ timeout: 15_000 })
+      // Tier-specific values: TIER_1_ANGIOEDEMA in tier; ACE_ANGIOEDEMA in
+      // ruleId; resolved / resolvedBy populated.
+      await expect(page.locator('[data-testid="audit-field-tier"]')).toContainText(/Angioedema|TIER_1/i)
+      await expect(page.locator('[data-testid="audit-field-ruleId"]')).toContainText('ACE_ANGIOEDEMA')
+      await expect(page.locator('[data-testid="audit-field-resolvedBy"]')).not.toContainText('—')
+      await expect(page.locator('[data-testid="audit-field-resolutionAction"]')).toContainText(/TIER1_FALSE_POSITIVE/i)
+    } finally {
+      await tc.dispose()
+    }
+  })
+
+  test('19. Tier 1 angioedema non-dismissible resolution writes RESOLVED + audit row (post-FIX 5: TIER_1 resolution catalog wired)', async ({ page }) => {
+    test.setTimeout(240_000)
+    const { tc, userId, patientName, alertId } = await setupAndTriggerAlert(
+      PATIENTS.aisha.email,
+      async (tc, uid) => {
+        await tc.setUserMedication(uid, {
+          drugName: 'Lisinopril',
+          drugClass: 'ACE_INHIBITOR',
+          frequency: 'ONCE_DAILY',
+          verificationStatus: 'VERIFIED',
+        })
+      },
+      { faceSwelling: true },
+      'RULE_ACE_ANGIOEDEMA',
+    )
+    try {
+      await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
+      await openPatientDetailTab(page, patientName, 'Alerts')
+
+      // Use the canonical resolveAlertViaModal helper (spec 13 pattern):
+      // clicks the per-alert Resolve button → modal opens → picks a TIER_1
+      // action → fills rationale → confirms. Post-FIX 5 the Tier-1
+      // resolution catalog is wired for TIER_1_ANGIOEDEMA, so the modal's
+      // action list is populated; without FIX 5 the modal would have no
+      // selectable action.
+      await resolveAlertViaModal(page, alertId, {
+        resolutionAction: 'TIER1_FALSE_POSITIVE',
+        rationale: 'qa-test: angioedema non-dismissible resolution + audit row coverage',
+      })
+
+      // Backend invariant: alert is now RESOLVED with resolutionAction +
+      // resolvedBy populated. resolutionRationale lives on the audit
+      // endpoint (not the listAlerts shape), so we read the full audit
+      // record explicitly. This proves FIX 5's resolution catalog works
+      // end-to-end (modal → API → DB → audit row).
+      const after = await tc.listAlerts(userId)
+      const resolved = after.find((a) => a.id === alertId)
+      expect(resolved?.status, 'alert must be RESOLVED after modal flow').toBe('RESOLVED')
+      expect(resolved?.resolutionAction, 'resolutionAction round-trip').toBe('TIER1_FALSE_POSITIVE')
+      expect(resolved?.resolvedBy, 'resolvedBy populated (audit attribution)').toBeTruthy()
+      // Audit row carries the rationale we filled in the modal.
+      const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
+      try {
+        const audit = await adminAuditAlert(adminApi, alertId)
+        expect(audit.resolutionAction).toBe('TIER1_FALSE_POSITIVE')
+        expect(String(audit.resolutionRationale ?? '')).toMatch(/qa-test: angioedema/i)
+      } finally {
+        await adminApi.dispose()
+      }
     } finally {
       await tc.dispose()
     }
