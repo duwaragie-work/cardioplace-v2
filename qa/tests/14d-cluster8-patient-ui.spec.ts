@@ -202,12 +202,21 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
     }
   })
 
-  test('2. throatTightness button + NO meds → EmergencyAlertScreen STILL shows (universal airway)', async ({ page }) => {
+  test('2. throatTightness button + NO ACE/ARB → EmergencyAlertScreen STILL shows (universal airway)', async ({ page }) => {
     test.setTimeout(120_000)
     const { tc, userId } = await setupPatient(PATIENTS.aisha.email, async (tc, uid) => {
-      // Aisha ships with Lisinopril+Amlodipine; clear so the rule routes
-      // GENERIC (no ACE/ARB in roster).
+      // Clear seed Lisinopril (ACE), keep Aisha on Amlodipine (DHP_CCB —
+      // non-ACE/ARB). Rule routes GENERIC (no ACE/ARB in roster) AND the
+      // UI helper has a predictable MEDICATION step (would be skipped with
+      // 0 meds, but having one med makes navigation order independent of
+      // prior test cleanups).
       await tc.clearUserMedications(uid)
+      await tc.setUserMedication(uid, {
+        drugName: 'Amlodipine',
+        drugClass: 'DHP_CCB',
+        frequency: 'ONCE_DAILY',
+        verificationStatus: 'VERIFIED',
+      })
     })
     try {
       await signInPatient(page, PATIENTS.aisha.email)
@@ -309,8 +318,16 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
   test('4b. GENERIC branch (no ACE/ARB) patient message OMITS the "stop medicine" line', async ({ page }) => {
     test.setTimeout(120_000)
     const { tc, userId } = await setupPatient(PATIENTS.aisha.email, async (tc, uid) => {
-      // Clear seed Lisinopril so the rule routes GENERIC (no med in roster).
+      // Clear seed Lisinopril, keep Amlodipine (DHP_CCB, non-ACE/ARB) so
+      // the GENERIC branch fires AND the UI MEDICATION step has a row to
+      // click (decouples test from prior-test cleanup state).
       await tc.clearUserMedications(uid)
+      await tc.setUserMedication(uid, {
+        drugName: 'Amlodipine',
+        drugClass: 'DHP_CCB',
+        frequency: 'ONCE_DAILY',
+        verificationStatus: 'VERIFIED',
+      })
     })
     try {
       await signInPatient(page, PATIENTS.aisha.email)
@@ -333,7 +350,19 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
 
   test('5. Bespoke SVG icons render on both angioedema buttons (Cluster 8.1 Gap 6)', async ({ page }) => {
     test.setTimeout(60_000)
-    const { tc } = await setupPatient(PATIENTS.aisha.email, async () => {})
+    const { tc } = await setupPatient(PATIENTS.aisha.email, async (tc, uid) => {
+      // Ensure Aisha has a med so the MEDICATION step renders predictably
+      // (the previous test in serial order may have cleared her roster).
+      // Lisinopril dedupes with the seed; if a prior test cleared it, this
+      // restores. The angioedema engine path doesn't run in this test
+      // (UI-only assertion), so med class is irrelevant.
+      await tc.setUserMedication(uid, {
+        drugName: 'Lisinopril',
+        drugClass: 'ACE_INHIBITOR',
+        frequency: 'ONCE_DAILY',
+        verificationStatus: 'VERIFIED',
+      })
+    })
     try {
       await signInPatient(page, PATIENTS.aisha.email)
       // Walk to the B3 symptoms step using the same helper as the click tests.
@@ -355,7 +384,15 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
 
   test('6. "Anything else?" otherSymptoms textarea is present + functional after the 2 new buttons inserted', async ({ page }) => {
     test.setTimeout(60_000)
-    const { tc } = await setupPatient(PATIENTS.aisha.email, async () => {})
+    const { tc } = await setupPatient(PATIENTS.aisha.email, async (tc, uid) => {
+      // Same pattern as test 5 — predictable med state for the UI helper.
+      await tc.setUserMedication(uid, {
+        drugName: 'Lisinopril',
+        drugClass: 'ACE_INHIBITOR',
+        frequency: 'ONCE_DAILY',
+        verificationStatus: 'VERIFIED',
+      })
+    })
     try {
       await signInPatient(page, PATIENTS.aisha.email)
       // Reuse the symptom helper to walk through B1 → B2 → MEDICATION → B3

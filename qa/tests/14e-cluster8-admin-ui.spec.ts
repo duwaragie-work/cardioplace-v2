@@ -437,7 +437,12 @@ test.describe('Cluster 8 §D-ADMIN — angioedema audit + resolution', () => {
       await expect(page.locator('[data-testid="audit-field-tier"]')).toContainText(/Angioedema|TIER_1/i)
       await expect(page.locator('[data-testid="audit-field-ruleId"]')).toContainText('ACE_ANGIOEDEMA')
       await expect(page.locator('[data-testid="audit-field-resolvedBy"]')).not.toContainText('—')
-      await expect(page.locator('[data-testid="audit-field-resolutionAction"]')).toContainText(/TIER1_FALSE_POSITIVE/i)
+      // Audit field humanizes the enum (`TIER1_FALSE_POSITIVE` → "Tier1
+      // False Positive"). Accept either form so the assertion survives a
+      // pure presentation change.
+      await expect(page.locator('[data-testid="audit-field-resolutionAction"]')).toContainText(
+        /TIER1_FALSE_POSITIVE|Tier1\s*False\s*Positive/i,
+      )
     } finally {
       await tc.dispose()
     }

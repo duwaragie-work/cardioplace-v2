@@ -1365,27 +1365,100 @@ Amharic "የደም ግፊት", English "Do not take"). §D-PATIENT tests 1 + 4a
 confirm the ACE branch carries the "do not take medicine" line on the
 full-screen surface, and 4b confirms the GENERIC branch OMITS it.
 
-### Known remaining §D failures (UI-depth edge cases, not implementation gaps)
+### All-green push (2026-05-20, follow-up after FIX 5 / 5b / 6)
 
-- **§D-PATIENT 2, 5, 6, 7** — `clickSymptomButtonViaUI` helper races
-  hydration on the WEIGHT step in some test orderings (the Next button
-  is below the fold; `count() > 0` plus `click({ timeout })` mitigates
-  but doesn't fully eliminate). Engine + emergency-screen rendering is
-  verified by adjacent tests; the buttons themselves are tested for
-  presence + click by tests 1 + 3 + 4a (and pass).
-- **§D-ADMIN 15, 16, 18, 19** — admin AlertCard expand + audit-footer
-  rendering depends on a slightly different navigation ceremony from
-  the existing spec 13 (which clicks 'All' filter before 'Expand alert',
-  and tests its 15-field footer on a RESOLVED alert). My tests target
-  OPEN angioedema alerts; the audit footer + resolve button surface
-  on a different timing path. Engine behavior + the dashboard / queue /
-  3-tier-display / brady pill / CAD note / CAD_HIGH visibility are all
-  covered by the passing tests (13/14/17/20/21/22).
+The 8 §D failures the initial container sweep flagged turned out to be:
+- **4 helper-depth** (`clickSymptomButtonViaUI` MEDICATION step needed
+  predictable med state) → fixed by adding `setUserMedication` to each
+  test's prep so the helper never lands on the 0-meds shortcut path
+  + `scrollIntoViewIfNeeded` + `waitForLoadState('networkidle')` on
+  every step transition (Next 16 hydration race + below-fold viewport
+  clip absorbed).
+- **2 real product bugs in admin angioedema surfacing** (Category C —
+  see "FIX 5 / 5b / 6" below) → admin had **zero references to
+  `TIER_1_ANGIOEDEMA`**: `resolutionTierFor` fell through to null
+  (resolve button never rendered + no action catalog), `tierBucket`
+  fell through to `'OTHER'` (TIER_1 dashboard filter excluded
+  angioedema), `EscalationAuditTrail.ladderFor` returned `[]`
+  (no escalation timeline rendered).
+- **2 test-spec ceremony** (admin nav: `medicalDirector` role for the
+  provider-scoped dashboard, `'All'` status filter before `Expand`,
+  RESOLVED alert for the 15-field audit footer assertion, full
+  `resolveAlertViaModal` flow for the resolution test).
 
-These 8 failures do not reflect engine, message-registry, ladder-shape,
-or routing bugs — they are pure UI-test-helper depth issues. The §F
-gates (rule-coverage + message-snapshot + i18n-completeness) catch any
-regression in the underlying behavior the failing tests cover.
+### FIX 5 — admin angioedema bucketing + resolution catalog
+
+Commit `8d816ef` (user-listed 4 sites) + `ac42c95` (FIX 5b — 6
+additional pure-bucketing sites I surfaced + you authorized).
+
+| File | Function | Change |
+|---|---|---|
+| `admin/src/lib/services/provider.service.ts:395` | `resolutionTierFor` | `TIER_1_ANGIOEDEMA` → `'TIER_1'` group → admin can resolve angioedema with the existing TIER_1 catalog (TIER1_FALSE_POSITIVE, TIER1_MEDICATION_CORRECTED, etc.) |
+| `admin/src/components/AdminDashboard.tsx:124` | `readingOf` | `TIER_1_ANGIOEDEMA` → `'Medication'` reading category |
+| `admin/src/components/AdminDashboard.tsx:153` | `tierBucket` | `TIER_1_ANGIOEDEMA` → `'TIER_1'` filter bucket |
+| `admin/src/components/AlertCard.tsx:52` | `tierBucket` | `TIER_1_ANGIOEDEMA` → `'TIER_1'` chrome |
+| `admin/src/app/patients/page.tsx:294` (FIX 5b) | tier chrome | `TIER_1_ANGIOEDEMA` → red `"Tier 1"` chip on the patient list "Alerts" column |
+| `admin/src/app/patients/page.tsx:313` (FIX 5b) | `TIER_SEVERITY_ORDER` | `TIER_1_ANGIOEDEMA` inserted at Tier-1 severity position |
+| `admin/src/components/NotificationsScreen.tsx:59` (FIX 5b) | `tierBucket` | → `'TIER_1'` |
+| `admin/src/components/NotificationsScreen.tsx:89` (FIX 5b) | `readingOf` | → `'Medication'` |
+| `admin/src/components/patient-detail/AlertsTab.tsx:47` (FIX 5b) | `tierBucket` | → `'TIER_1'` |
+| `admin/src/components/patient-detail/ReadingsTab.tsx:80` (FIX 5b) | `tierBucket` | → `'TIER_1'` |
+
+**No new clinical wording invented** — every site reuses the
+existing TIER_1_CONTRAINDICATION group / chrome / catalog. Manisha:
+"angioedema non-dismissible, resolved like all Tier 1 alerts with
+15-field audit rationale." Bespoke airway visuals are a post-pilot
+follow-up.
+
+### FIX 6 — compressed angioedema ladder in admin
+
+Commit `3b56416`. `EscalationAuditTrail.tsx` had a hardcoded
+`TIER_1_LADDER` with the STANDARD shape (T0/T4H/T8H/T24H/T48H). Mapping
+`TIER_1_ANGIOEDEMA` to it would have rendered T+8h / T+24h / T+48h
+placeholder rungs that NEVER fire in the backend (the compressed ladder
+ends at T+4h). Added a new `TIER_1_ANGIOEDEMA_LADDER` constant matching
+the backend's `ladder-defs.ts:TIER_1_ANGIOEDEMA_LADDER` exactly
+(T+0/T+15m/T+1h/T+4h with the right recipient hints) + routed
+`TIER_1_ANGIOEDEMA` to it. Inline comment per directive: **"MUST mirror
+backend ladder-defs.ts TIER_1_ANGIOEDEMA_LADDER — post-pilot: hoist to
+`@cardioplace/shared`."**
+
+### Container sweep — FINAL all-green numbers
+
+```
+$ docker run pgvector/pgvector:pg16 + prisma migrate deploy + db seed
+$ node dist/main.js (prod mode, NOT nest --watch)
+$ RUN_WRITE_TESTS=1 RUN_E2E_TESTS=1 npm test -- tests/14d... tests/14e... tests/14f... tests/14c... --workers=1 --retries=1 --reporter=list
+
+  28 passed (6.6m)
+```
+
+| Suite | Final pass |
+|---|---|
+| §C runtime (compressed ladder) | 2 / 2 |
+| §D-PATIENT UI (13 tests) | 13 / 13 |
+| §D-ADMIN UI (10 tests) | 10 / 10 |
+| §E i18n render | 3 / 3 |
+| **QA runtime total** | **28 / 28** |
+
+| Suite | Pass | Snapshots |
+|---|---|---|
+| Backend `alert-engine.scenarios` | 95 / 95 | — |
+| Backend `ladder-defs` | 41 / 41 | — |
+| Backend `alert-messages.snapshot` | 109 / 109 | 306 / 306 |
+| Backend `i18n-completeness` | 9 / 9 | — |
+| Backend `rule-coverage` | 3 / 3 | — |
+| **Backend total** | **257 / 257** | **306 / 306** |
+
+`tsc --noEmit -p tsconfig.build.json` clean on backend.
+`tsc --noEmit` clean on `shared / qa / admin / frontend`.
+
+### Post-sweep state
+
+- Container torn down (`docker rm cardioplace-pgvector`).
+- `backend/.env DATABASE_URL` restored to the shared Prisma Cloud.
+- Branch `cluster8-test-coverage` pushed; PR-ready.
+- Paused before the combined merge to dev for your review.
 
 ### Push state
 
