@@ -3,6 +3,11 @@ import { byTestId, T } from '../helpers/selectors.js'
 import { PATIENTS } from '../helpers/accounts.js'
 import { signInPatient } from '../helpers/auth.js'
 import { newTestControl, type TestControl } from '../helpers/test-control.js'
+import {
+  uploadMedPhotoViaUI,
+  confirmOcrMedsViaUI,
+  advanceIntakeToDashboard,
+} from '../helpers/api.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
 /**
@@ -163,20 +168,37 @@ test.describe('Phase 4b — clinical intake wizard', () => {
     await tc.setProfileVerificationStatus(userId, 'VERIFIED')
   })
 
-  test('20b.4 — medication add via the intake "Other" free-text path', async () => {
-    test.skip(
-      true,
-      'Category A — testid infra DONE (v3.1: intake-cat-tile-OTHER + ' +
-        'intake-other-med-input + intake-medication-add-button all reachable ' +
-        'and the OTHER sub-panel opens). Remaining gap: a free-text OtherMed ' +
-        'added at A8 does not surface on /profile after the wizard PUT-replace ' +
-        '— the E3 ?step=A8 deep-link walk does not carry the A8-added ' +
-        'OTHER_UNVERIFIED row through A6/A9 into buildMedsPayload (needs the ' +
-        'A9 frequency step answered for the new row). Unblock: walkIntake must ' +
-        'set a frequency for newly-added OTHER rows on A9 before A10 submit. ' +
-        'Med add itself is proven API-side (spec 19) + via OtherMed modal ' +
-        '(20b.5 PASS). ~1 follow-up iteration.',
-    )
+  test('20b.4 — medication add via the intake "Other" free-text path', async ({
+    page,
+  }) => {
+    // A8 OTHER add → A9 frequency → A10 submit → /profile assertion runs
+    // past the 30s default; give it room.
+    test.setTimeout(60_000)
+    const userId = (await tc.findUser(PATIENTS.aisha.email)).id
+    await tc.resetUser(userId)
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/clinical-intake?step=A8')
+    await page.waitForLoadState('networkidle').catch(() => {})
+    // Open the OTHER sub-panel and add a freeform med not in Aisha's
+    // baseline (Lisinopril + Amlodipine). addOther() lands it as
+    // OTHER_UNVERIFIED with NO frequency — the A9 gate then blocks submit
+    // until a frequency is set, which advanceIntakeToDashboard answers.
+    await page.locator(byTestId(T.intake.catTile('OTHER'))).first().click()
+    const input = page.locator(byTestId(T.intake.otherMedInput)).first()
+    await input.waitFor({ state: 'visible', timeout: 10_000 })
+    await input.fill('Levothyroxine')
+    await page.locator(byTestId(T.intake.medAddBtn)).first().click()
+    // The freeform row surfaces in the OtherMedicationsList (in-session add,
+    // or hydrated from a prior run — either way it carries to submit).
+    await expect(
+      page.getByText(/Levothyroxine/i).first(),
+    ).toBeVisible({ timeout: 10_000 })
+    await advanceIntakeToDashboard(page)
+    await page.goto('/profile')
+    await expect(
+      page.getByText(/Levothyroxine/i).first(),
+    ).toBeVisible({ timeout: 12_000 })
+    await tc.resetUser(userId)
   })
 
   test('20b.5 — medication edit (dosage / frequency) via the OtherMed modal', async ({
@@ -215,20 +237,37 @@ test.describe('Phase 4b — clinical intake wizard', () => {
     await tc.resetUser(userId)
   })
 
-  test('20b.6 — medication photo OCR upload adds a med row', async () => {
-    test.skip(
-      true,
-      'Category A — OCR mechanics PROVEN: the §B.4/v3.1 testids work, the ' +
-        'route stub fires (ocrHit=true), and MedicationPhotoConfirmModal ' +
-        'opens with medication-photo-confirm-modal + -confirm-button present ' +
-        '(verified by direct probe). Remaining gap: the modal "Add all" ' +
-        'button stays disabled until each extracted row has a NON-UNSURE ' +
-        'frequency picked (rowIntent → noop when frequency===UNSURE; ' +
-        'normaliseFrequency("once daily") is not mapping to ONCE_DAILY). ' +
-        'Unblock: in the test, click a per-row frequency option in the modal ' +
-        'before medication-photo-confirm-button. The identical BP-photo OCR ' +
-        'path passes end-to-end in 20e.4. ~1 follow-up iteration.',
-    )
+  test('20b.6 — medication photo OCR upload adds a med row', async ({
+    page,
+  }) => {
+    // OCR upload + confirm modal + full A5→A11 wizard walk + /profile
+    // assertion runs past the 30s default; give it room.
+    test.setTimeout(60_000)
+    const userId = (await tc.findUser(PATIENTS.aisha.email)).id
+    await tc.resetUser(userId)
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/clinical-intake?step=A5')
+    await page.waitForLoadState('networkidle').catch(() => {})
+    // Hydrochlorothiazide is NOT in Aisha's baseline (Lisinopril +
+    // Amlodipine) → the OCR row classifies as a new `add`, not an
+    // already-listed `noop` that would keep "Add all" disabled.
+    await uploadMedPhotoViaUI(page, {
+      drugName: 'Hydrochlorothiazide',
+      frequency: 'once daily',
+      doseText: '25 mg',
+    })
+    // Picking a non-UNSURE per-row frequency is what flips the gated
+    // confirm button from disabled → enabled.
+    await confirmOcrMedsViaUI(page, ['ONCE_DAILY'])
+    // Walk the rest of the wizard (A8/A6/A9/A10) so the OCR-added row is
+    // carried through the medication PUT-replace on submit. A9-aware so a
+    // hydrated med without a frequency doesn't trap the walk.
+    await advanceIntakeToDashboard(page)
+    await page.goto('/profile')
+    await expect(
+      page.getByText(/Hydrochlorothiazide/i).first(),
+    ).toBeVisible({ timeout: 12_000 })
+    await tc.resetUser(userId)
   })
 
   test('20b.7 — submit returns to dashboard', async ({ page }) => {

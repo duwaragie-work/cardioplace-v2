@@ -847,9 +847,9 @@ pending Manisha threshold sign-off).
 | Spec | Result |
 |---|---|
 | 20a auth/onboarding | 5/5 PASS |
-| 20b clinical intake | 5 PASS (20b.1/.2/.3/.5/.7) · 20b.4/20b.6 Category-A |
+| 20b clinical intake | 7/7 PASS (20b.4/20b.6 closed in Phase 4b) |
 | 08 profile (20c) | 3/3 PASS |
-| 20d med CRUD + re-ask | 4 PASS (20d.1/.2/.5/.6) · 20d.3/20d.4 Category-A |
+| 20d med CRUD + re-ask | 6/6 PASS (20d.3/20d.4 closed in Phase 4b) |
 | 20e readings + OCR | 5/5 PASS (incl. 20e.4 BP-photo OCR end-to-end) |
 | 20f alert lifecycle | 4/4 PASS (20f.4 dropped — single-tier patient app) |
 | **20g alert engine** | **23/23 PASS (local pgvector)** |
@@ -860,38 +860,34 @@ pending Manisha threshold sign-off).
 | 16 a11y (20m) | 4/4 PASS |
 tsc clean ×4 (backend/frontend/admin/qa). jest test-control.seed 16/16.
 
-### 4 documented Category-A residuals (precise root cause — ZERO re-discovery cost)
-All testid infrastructure is DONE and committed (`intake-cat-tile-*`,
-`intake-other-med-input`, `intake-dob`, `intake-hf-type-*`,
-`medication-photo-confirm-modal/-button`). None are product gaps (verified):
+### 4 documented Category-A residuals — CLOSED in Phase 4b (2026-05-19)
+All 4 are now PASS (zero product changes — testid additions + test infra
+only). See the "Phase 4b close-out" section below for the as-built fixes.
+The original v3.1 root-cause notes are retained here for provenance:
 
-1. **20b.6 / 20d.4 — med-photo OCR.** OCR mechanics PROVEN: route stub fires
-   (`ocrHit=true`), `MedicationPhotoConfirmModal` opens with its testids
-   (direct probe confirmed). Blocker: the modal "Add all" button stays
-   disabled until each extracted row has a **non-UNSURE frequency** picked
-   (`rowIntent → 'noop'` when `frequency===UNSURE`; `normaliseFrequency(
-   "once daily")` is not mapping to `ONCE_DAILY`, and an already-in-list med
-   is also `noop`). **Unblock (~1 iteration):** in the test, click a per-row
-   frequency option in the modal, and stub a drug NOT in the persona's
-   baseline, before clicking `medication-photo-confirm-button`. The identical
-   BP-photo OCR path passes end-to-end in **20e.4 (PASS)**.
-2. **20b.4 — A8 free-text "Other" med add.** `intake-cat-tile-OTHER` opens
-   the sub-panel; `intake-other-med-input` + `intake-medication-add-button`
-   work. Blocker: a med added at A8 does not surface on `/profile` after the
-   wizard PUT-replace — the E3 `?step=A8` walk doesn't carry the new
-   OTHER_UNVERIFIED row through A6/A9 into `buildMedsPayload` (needs the A9
-   frequency answered for the new row). **Unblock (~1 iteration):**
-   `walkIntake` must set a frequency for newly-added OTHER rows on A9.
-3. **20d.3 — discontinue via A5 OtherMed list.** NOT a product gap:
-   `OtherMedicationsList` genuinely hard-deletes an existing med via
-   `intake-medication-delete-button` (confirmed in component source).
-   Blocker: a med attached via `tc.setUserMedication(OTHER_UNVERIFIED)` is
-   not hydrated into the A5 list on `?step=A5` deep-link (list renders
-   in-session adds; pre-existing OTHER_UNVERIFIED from `getMyMedications`
-   may not map into `selectedMedications` on hydrate). **Unblock (~1–2
-   iterations):** confirm the intake hydrate path includes OTHER_UNVERIFIED
-   rows, or add via the 20b.4 UI path then delete in-session. Discontinue is
-   covered API-side (spec 19) + admin med spec 11.
+1. **20b.6 / 20d.4 — med-photo OCR.** v3.1: "Add all" gated until a
+   non-UNSURE per-row frequency picked + an already-in-list med is `noop`.
+   **Closed:** added `data-testid` to the modal's row + native frequency
+   `<select>`; `confirmOcrMedsViaUI` picks a frequency and (for re-run
+   robustness, since `resetUser` doesn't clear meds) cycles frequencies
+   until the gate's `add`/`update` intent opens. Stub fixed to the real
+   `/api/v2/ocr/medications` shape (`{medications,confidence}`).
+2. **20b.4 — A8 free-text "Other" med add.** v3.1: A8-added OTHER row not
+   carried through the wizard PUT because the walk never answered A9
+   frequency. **Closed:** added `intake-a9-row-*` / `intake-a9-freq-*-*`
+   testids to A9; new `advanceIntakeToDashboard` helper answers A9 for
+   every row, so the OTHER_UNVERIFIED add persists through the PUT-replace.
+3. **20d.3 — discontinue via A5 OtherMed list.** v3.1 hypothesised the
+   seeded OTHER_UNVERIFIED med wasn't hydrated on `?step=A5`. **Reality:
+   hydration works on the deep-link** (same effect proven by 20b.5 on
+   `?step=A8`; getMyMedications → selectedMedications, filtered only by
+   `!discontinuedAt`). The actual blocker was test-data: the wizard
+   PUT-replace soft-closes removed rows (`discontinuedAt`) and
+   `setUserMedication`'s `(userId,drugName)` dedup can't revive a closed
+   row. **Closed:** seed a per-run unique freeform name → fresh
+   non-discontinued row every run; delete via `intake-medication-delete-
+   button`; assert gone from `/profile`. **No Category-C — not a product
+   bug.**
 
 ### Voice — 2 Category-C (accepted by Duwaragie)
 - **20i.5 / 20i.6** — voice transport is **socket.io** (`io('/voice')`,
@@ -924,10 +920,63 @@ All testid infrastructure is DONE and committed (`intake-cat-tile-*`,
 
 ### Net
 ~52 PASS · §F 23/23 engine on local pgvector · 4 Category-A documented
-(each ~1 follow-up iteration, precise root cause + unblock above) · 2 voice
-Category-C (accepted) · 20i.3 LLM-gated · 1 clinical fixme. Environment
-restored to shared DB; pgvector container removed; `.env.shared-backup`
-gitignored.
+(all CLOSED in Phase 4b — see below) · 2 voice Category-C (accepted) ·
+20i.3 LLM-gated · 1 clinical fixme. Environment restored to shared DB;
+pgvector container removed; `.env.shared-backup` gitignored.
+
+---
+
+## Phase 4b close-out — 4 medication CRUD residuals — 2026-05-19
+
+Closed the 4 documented Category-A residuals from Phase 4 v3.1. New small
+PR off `duwaragie-test-coverage` (post-#43-merge, branch reset to dev).
+**Zero product behaviour changes** — only `data-testid` additions (test
+infra) + qa helpers/specs.
+
+### 4/4 PASS (individually + together, `RUN_WRITE_TESTS=1 --workers=1`)
+| Test | Result | Fix |
+|---|---|---|
+| 20b.4 | PASS (~46s) | A8 OTHER freeform add → A9-aware walk carries it through the PUT |
+| 20b.6 | PASS (~39s) | OCR modal: pick per-row freq via testid'd `<select>`; freq-cycle for gate |
+| 20d.3 | PASS (~37s) | Per-run unique freeform name hydrates on `?step=A5`; trash → soft-close |
+| 20d.4 | PASS (~39s) | Same OCR path as 20b.6 (A5 MedicationPhotoButton) |
+
+Re-run idempotent (each verified twice; the OCR/discontinue tests are
+robust to the documented `resetUser`-doesn't-clear-meds self-pollution).
+
+### As-built
+- **Frontend (test infra only):** `data-testid` on
+  `MedicationPhotoConfirmModal` row + frequency `<select>`
+  (`medication-photo-row-{i}` / `-frequency-{i}`); `data-testid` on the A9
+  per-med frequency buttons (`intake-a9-row-{i}`,
+  `intake-a9-freq-{i}-{FREQ}`).
+- **qa registry:** `T.intake.medPhoto*`, `T.intake.a9Row/a9Freq`.
+- **qa helpers:** `uploadMedPhotoViaUI` rewritten to the real
+  `/api/v2/ocr/medications` `{medications,confidence}` shape (was a wrong
+  `{drugName}` stub); new `confirmOcrMedsViaUI` (freq pick + gate-aware
+  cycle) and `advanceIntakeToDashboard` (A9-aware wizard walk for the 20d
+  spec, which has no local `walkIntake`).
+- **Timeouts:** the 4 tests do OCR/seed + a full A5→A11 walk + `/profile`
+  assertion; `test.setTimeout(60_000)` (default 30s was too tight).
+
+### Notable reality delta vs the handoff
+- 20d.3 was NOT a hydration product gap. `?step=A5` deep-link hydrates
+  pre-seeded OTHER_UNVERIFIED meds correctly (same effect 20b.5 proves on
+  `?step=A8`). No linear-walk fallback needed; **no Category-C**. The real
+  blocker was test-data lifecycle: PUT-replace soft-closes
+  (`discontinuedAt`) and `setUserMedication` dedup can't revive a closed
+  row → solved with a per-run unique drug name.
+- OCR self-pollution: `resetUser` does not clear `PatientMedication`
+  rows, so a fixed OCR drug becomes "already in your list" on re-run.
+  `confirmOcrMedsViaUI` cycles the 4 real frequencies until the modal's
+  per-row intent (`add`/`update`) opens the gated confirm button — robust
+  on clean and polluted DBs without any product change.
+
+### Net
+4/4 PASS, zero skips except the `RUN_WRITE_TESTS` describe gates. Patient
+UI coverage ~95% → ~98%; the only remaining documented skip is the
+clinical fixme `RULE_BRADY_HR_ASYMPTOMATIC` (blocked on Manisha threshold
+sign-off — separate PR when ready).
 
 ---
 

@@ -1521,13 +1521,14 @@ function A9Frequency({ state, setState }: StepProps) {
               </div>
               <AudioButton text={t('intake.a9.medAudio').replace('{name}', m.drugName)} size="sm" />
             </div>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-4 gap-2" data-testid={`intake-a9-row-${i}`}>
               {options.map((o) => {
                 const active = m.frequency === o.value;
                 return (
                   <motion.button
                     key={o.value}
                     type="button"
+                    data-testid={`intake-a9-freq-${i}-${o.value}`}
                     onClick={() => setFreq(i, o.value)}
                     className="h-11 rounded-full text-[13px] font-bold border-2 transition"
                     style={{

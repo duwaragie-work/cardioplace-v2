@@ -3,7 +3,12 @@ import { signInPatient } from '../helpers/auth.js'
 import { byTestId, T } from '../helpers/selectors.js'
 import { PATIENTS } from '../helpers/accounts.js'
 import { newTestControl, type TestControl } from '../helpers/test-control.js'
-import { forceMonthlyMedReask } from '../helpers/api.js'
+import {
+  forceMonthlyMedReask,
+  uploadMedPhotoViaUI,
+  confirmOcrMedsViaUI,
+  advanceIntakeToDashboard,
+} from '../helpers/api.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
 /**
@@ -76,33 +81,75 @@ test.describe('Phase 4d — medication CRUD + monthly re-ask (20d)', () => {
     await tc.resetUser(userId)
   })
 
-  test('20d.3 — discontinue a medication via the intake OtherMed list', async () => {
-    test.skip(
-      true,
-      'Category A — NOT a product gap (OtherMedicationsList genuinely hard-' +
-        'deletes an existing med via intake-medication-delete-button, ' +
-        'confirmed in component source). Remaining gap: a med attached via ' +
-        'tc.setUserMedication(OTHER_UNVERIFIED) is NOT hydrated into the A5 ' +
-        'OtherMedicationsList on ?step=A5 deep-link entry (the list renders ' +
-        'in-session adds; pre-existing OTHER_UNVERIFIED rows from ' +
-        'getMyMedications may not map into selectedMedications on hydrate). ' +
-        'Unblock: confirm the intake hydrate path includes OTHER_UNVERIFIED ' +
-        'rows, or add the med via the 20b.4 UI add path then delete in the ' +
-        'same session. Discontinue is covered API-side (spec 19) + admin ' +
-        'med spec 11. ~1–2 follow-up iterations.',
-    )
+  test('20d.3 — discontinue a medication via the intake OtherMed list', async ({
+    page,
+  }) => {
+    // Seed → A5 hydrate → trash → A9/A10 submit → /profile assertion runs
+    // past the 30s default; give it room.
+    test.setTimeout(60_000)
+    const userId = (await tc.findUser(PATIENTS.aisha.email)).id
+    await tc.resetUser(userId)
+    // The wizard PUT-replace soft-closes removed meds (discontinuedAt), and
+    // setUserMedication's (userId, drugName) dedup can't revive a closed
+    // row — so a fixed name would only hydrate on the first ever run. A
+    // per-run unique freeform name guarantees a fresh non-discontinued row
+    // every time (the row is an OTHER_UNVERIFIED freeform; any string is a
+    // valid drugName).
+    const drugName = `QA-Discontinue-${Date.now()}`
+    await tc.setUserMedication(userId, {
+      drugName,
+      drugClass: 'OTHER_UNVERIFIED',
+      frequency: 'ONCE_DAILY',
+      verificationStatus: 'UNVERIFIED',
+    })
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/clinical-intake?step=A5')
+    await page.waitForLoadState('networkidle').catch(() => {})
+    // The seeded OTHER_UNVERIFIED med hydrates into the A5
+    // OtherMedicationsList (same hydration effect proven by 20b.5 on
+    // ?step=A8 — getMyMedications → selectedMedications, filtered only by
+    // !discontinuedAt; otherMeds = drugClass OTHER_UNVERIFIED).
+    await expect(
+      page.getByText(drugName).first(),
+    ).toBeVisible({ timeout: 15_000 })
+    // Hard-delete via the trash control on the OtherMed tile.
+    await page.locator(byTestId(T.intake.medDeleteBtn)).first().click()
+    await expect(page.getByText(drugName)).toHaveCount(0, { timeout: 8_000 })
+    // Walk to submit so the PUT-replace soft-closes the removed row.
+    await advanceIntakeToDashboard(page)
+    await page.goto('/profile')
+    await expect(page.getByText(drugName)).toHaveCount(0, {
+      timeout: 12_000,
+    })
+    await tc.resetUser(userId)
   })
 
-  test('20d.4 — medication photo OCR upload (A5 MedicationPhotoButton)', async () => {
-    test.skip(
-      true,
-      'Category A — identical to 20b.6 (OCR mechanics proven; modal opens; ' +
-        'confirm button gated until a non-UNSURE per-row frequency is picked ' +
-        '— normaliseFrequency("once daily")≠ONCE_DAILY). Unblock: click a ' +
-        'per-row frequency in medication-photo-confirm-modal before ' +
-        'medication-photo-confirm-button. Proven end-to-end by the identical ' +
-        'BP-photo path in 20e.4 (PASS). ~1 follow-up iteration.',
-    )
+  test('20d.4 — medication photo OCR upload (A5 MedicationPhotoButton)', async ({
+    page,
+  }) => {
+    // OCR upload + confirm modal + full A5→A11 wizard walk + /profile
+    // assertion runs past the 30s default; give it room.
+    test.setTimeout(60_000)
+    const userId = (await tc.findUser(PATIENTS.aisha.email)).id
+    await tc.resetUser(userId)
+    await signInPatient(page, PATIENTS.aisha.email)
+    await page.goto('/clinical-intake?step=A5')
+    await page.waitForLoadState('networkidle').catch(() => {})
+    // Hydrochlorothiazide is NOT in Aisha's baseline → the OCR row is a new
+    // `add`; picking a non-UNSURE frequency enables the gated "Add all".
+    await uploadMedPhotoViaUI(page, {
+      drugName: 'Hydrochlorothiazide',
+      frequency: 'once daily',
+      doseText: '25 mg',
+    })
+    await confirmOcrMedsViaUI(page, ['ONCE_DAILY'])
+    // Carry the OCR-added row through the wizard PUT-replace on submit.
+    await advanceIntakeToDashboard(page)
+    await page.goto('/profile')
+    await expect(
+      page.getByText(/Hydrochlorothiazide/i).first(),
+    ).toBeVisible({ timeout: 12_000 })
+    await tc.resetUser(userId)
   })
 
   /** Pre-seed a 31-day-stale re-ask timestamp keyed by the real userId so
