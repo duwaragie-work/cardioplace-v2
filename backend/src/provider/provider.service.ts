@@ -270,34 +270,45 @@ export class ProviderService {
 
   // ─── GET /provider/stats ──────────────────────────────────────────────────────
 
-  async getStats() {
+  async getStats(actor: ActorUser) {
     const now = new Date()
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+
+    // Role scoping mirrors getPatients / getAlerts. PROVIDER counts only
+    // their panel; MED_DIR counts only their practice's patients; OPS/SUPER
+    // count everyone. Same patientScopeFilter shape both for direct user
+    // queries (totalActivePatients) and for joined queries (alerts/journals
+    // need the filter under `user: { is: ... }`).
+    const patientScope = await this.access.patientScopeFilter(actor)
+    const userWhereScope = patientScope ?? {}
+    const joinedWhereScope = patientScope ? { user: { is: patientScope } } : {}
 
     const [totalActivePatients, monthlyInteractions, activeAlertsCount, readingsThisMonth, recentAlertPatients] =
       await Promise.all([
         // "Enrolled patients" = admin has passed the 4-piece clinical gate,
         // not just that the patient filled their identity onboarding form.
         this.prisma.user.count({
-          where: { enrollmentStatus: 'ENROLLED' },
+          where: { enrollmentStatus: 'ENROLLED', ...userWhereScope },
         }),
         this.prisma.journalEntry.count({
-          where: { createdAt: { gte: startOfMonth } },
+          where: { createdAt: { gte: startOfMonth }, ...joinedWhereScope },
         }),
         this.prisma.deviationAlert.count({
-          where: { status: 'OPEN' },
+          where: { status: 'OPEN', ...joinedWhereScope },
         }),
         this.prisma.journalEntry.count({
           where: {
             measuredAt: { gte: startOfMonth },
             systolicBP: { not: null },
+            ...joinedWhereScope,
           },
         }),
         this.prisma.deviationAlert.findMany({
           where: {
             status: 'OPEN',
             createdAt: { gte: twentyFourHoursAgo },
+            ...joinedWhereScope,
           },
           select: { userId: true },
           distinct: ['userId'],
@@ -308,6 +319,7 @@ export class ProviderService {
       where: {
         enrollmentStatus: 'ENROLLED',
         journalEntries: { some: {} },
+        ...userWhereScope,
       },
       include: {
         journalEntries: {

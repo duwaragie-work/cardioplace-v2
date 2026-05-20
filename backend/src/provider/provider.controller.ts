@@ -44,8 +44,11 @@ export class ProviderController {
   ) {}
 
   @Get('stats')
-  getStats() {
-    return this.providerService.getStats()
+  getStats(@Req() req: AuthedReq) {
+    return this.providerService.getStats({
+      id: req.user.id,
+      roles: req.user.roles,
+    })
   }
 
   @Get('patients')
