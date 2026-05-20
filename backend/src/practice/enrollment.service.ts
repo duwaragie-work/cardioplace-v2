@@ -5,6 +5,10 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common'
+import {
+  ActorUser,
+  PatientAccessService,
+} from '../common/patient-access.service.js'
 import { EnrollmentStatus } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
@@ -17,9 +21,14 @@ export class EnrollmentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly escalation: EscalationService,
+    private readonly access: PatientAccessService,
   ) {}
 
-  async completeEnrollment(adminId: string, patientUserId: string) {
+  async completeEnrollment(actor: ActorUser, patientUserId: string) {
+    // PROVIDER must be in panel; MED_DIR must head practice. Run before
+    // any DB writes so a denied caller can't accidentally trigger the
+    // enrollment audit row.
+    await this.access.assertCanAccessPatient(actor, patientUserId)
     const user = await this.prisma.user.findUnique({
       where: { id: patientUserId },
       select: { id: true, roles: true, enrollmentStatus: true },
@@ -89,7 +98,7 @@ export class EnrollmentService {
       data: {
         userId: updated.id,
         enrollmentStatus: updated.enrollmentStatus,
-        completedBy: adminId,
+        completedBy: actor.id,
         catchUpDispatched: catchUp.dispatched,
         catchUpSkipped: catchUp.skipped,
       },

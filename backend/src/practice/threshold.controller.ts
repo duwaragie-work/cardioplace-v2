@@ -15,7 +15,7 @@ import { UserRole } from '../generated/prisma/enums.js'
 import { UpsertThresholdDto } from './dto/upsert-threshold.dto.js'
 import { ThresholdService } from './threshold.service.js'
 
-type AuthedReq = Request & { user: { id: string } }
+type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
 
 // Thresholds are a clinical directive per CLINICAL_SPEC.
 //   • READ — open to all four admin roles (HEALPLACE_OPS sees the configured
@@ -43,7 +43,11 @@ export class ThresholdController {
     @Param('userId') patientUserId: string,
     @Body() dto: UpsertThresholdDto,
   ) {
-    return this.service.create(req.user.id, patientUserId, dto)
+    return this.service.create(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+      dto,
+    )
   }
 
   @Get()
@@ -58,6 +62,10 @@ export class ThresholdController {
     @Param('userId') patientUserId: string,
     @Body() dto: UpsertThresholdDto,
   ) {
-    return this.service.update(req.user.id, patientUserId, dto)
+    return this.service.update(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+      dto,
+    )
   }
 }

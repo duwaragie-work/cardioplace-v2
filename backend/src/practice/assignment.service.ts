@@ -4,6 +4,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
+import {
+  ActorUser,
+  PatientAccessService,
+} from '../common/patient-access.service.js'
 import { Prisma } from '../generated/prisma/client.js'
 import {
   VerifierRole,
@@ -28,13 +32,19 @@ const MEDICAL_DIRECTOR_ALLOWED = ['MEDICAL_DIRECTOR'] as const
 
 @Injectable()
 export class AssignmentService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly access: PatientAccessService,
+  ) {}
 
   async create(
-    adminId: string,
+    actor: ActorUser,
     patientUserId: string,
     dto: CreateAssignmentDto,
   ) {
+    // MED_DIR is gated to practices they head; OPS/SUPER unscoped. Runs
+    // before any DB writes so a denied caller can't see the audit row.
+    await this.access.assertCanModifyPracticeAssignment(actor, dto.practiceId)
     await this.assertPatientExists(patientUserId)
     await this.assertPracticeExists(dto.practiceId)
     await this.assertRoles(
@@ -67,7 +77,7 @@ export class AssignmentService {
       // state change and must leave an actor + before/after trail.
       await this.writeAssignmentAudit(
         patientUserId,
-        adminId,
+        actor.id,
         Prisma.JsonNull,
         this.assignmentSnapshot(assignment),
       )
@@ -134,7 +144,7 @@ export class AssignmentService {
   }
 
   async update(
-    adminId: string,
+    actor: ActorUser,
     patientUserId: string,
     dto: UpdateAssignmentDto,
   ) {
@@ -142,6 +152,13 @@ export class AssignmentService {
       where: { userId: patientUserId },
     })
     if (!existing) throw new NotFoundException('Assignment not found')
+
+    // MED_DIR scope: both the existing practice and (if changing) the new
+    // practice must be headed by them. Pre-check before any writes.
+    const practicesToCheck = dto.practiceId
+      ? [existing.practiceId, dto.practiceId]
+      : [existing.practiceId]
+    await this.access.assertCanModifyPracticeAssignment(actor, practicesToCheck)
 
     if (dto.practiceId) await this.assertPracticeExists(dto.practiceId)
     if (dto.primaryProviderId)
@@ -170,7 +187,7 @@ export class AssignmentService {
     // Finding 4 — JCAHO audit: capture prior care team → new care team.
     await this.writeAssignmentAudit(
       patientUserId,
-      adminId,
+      actor.id,
       this.assignmentSnapshot(existing),
       this.assignmentSnapshot(updated),
     )

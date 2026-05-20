@@ -48,8 +48,11 @@ export class AlertResolutionController {
   @HttpCode(HttpStatus.OK)
   @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.PROVIDER)
   acknowledge(@Req() req: Request, @Param('id') id: string) {
-    const { id: adminId } = req.user as { id: string }
-    return this.service.acknowledge(id, adminId)
+    const { id: actorId, roles } = req.user as {
+      id: string
+      roles: UserRole[]
+    }
+    return this.service.acknowledge(id, { id: actorId, roles })
   }
 
   @Post(':id/resolve')
@@ -60,8 +63,11 @@ export class AlertResolutionController {
     @Param('id') id: string,
     @Body() dto: ResolveAlertDto,
   ) {
-    const { id: adminId } = req.user as { id: string }
-    return this.service.resolve(id, adminId, dto)
+    const { id: actorId, roles } = req.user as {
+      id: string
+      roles: UserRole[]
+    }
+    return this.service.resolve(id, { id: actorId, roles }, dto)
   }
 
   @Get(':id/audit')

@@ -18,7 +18,7 @@ import {
 } from './dto/correct-profile.dto.js'
 import { VerifyMedicationDto } from './dto/verify-medication.dto.js'
 
-type AuthedReq = Request & { user: { id: string } }
+type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
 
 // Admin-scoped intake surface.
 //   • READ — open to all four admin roles. HEALPLACE_OPS needs to view
@@ -45,7 +45,11 @@ export class AdminIntakeController {
     @Param('id') patientUserId: string,
     @Body() dto: VerifyProfileDto,
   ) {
-    return this.intake.verifyProfile(req.user.id, patientUserId, dto)
+    return this.intake.verifyProfile(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+      dto,
+    )
   }
 
   @Post('users/:id/correct-profile')
@@ -56,7 +60,11 @@ export class AdminIntakeController {
     @Param('id') patientUserId: string,
     @Body() dto: CorrectProfileDto,
   ) {
-    return this.intake.correctProfile(req.user.id, patientUserId, dto)
+    return this.intake.correctProfile(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+      dto,
+    )
   }
 
   @Post('users/:id/reject-profile-field')
@@ -67,7 +75,11 @@ export class AdminIntakeController {
     @Param('id') patientUserId: string,
     @Body() dto: { field: string; rationale?: string },
   ) {
-    return this.intake.rejectProfileField(req.user.id, patientUserId, dto)
+    return this.intake.rejectProfileField(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+      dto,
+    )
   }
 
   @Post('medications/:id/verify')
@@ -78,7 +90,11 @@ export class AdminIntakeController {
     @Param('id') medicationId: string,
     @Body() dto: VerifyMedicationDto,
   ) {
-    return this.intake.verifyMedication(req.user.id, medicationId, dto)
+    return this.intake.verifyMedication(
+      { id: req.user.id, roles: req.user.roles },
+      medicationId,
+      dto,
+    )
   }
 
   @Get('users/:id/verification-logs')

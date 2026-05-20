@@ -12,7 +12,7 @@ import { Roles } from '../auth/decorators/roles.decorator.js'
 import { UserRole } from '../generated/prisma/enums.js'
 import { EnrollmentService } from './enrollment.service.js'
 
-type AuthedReq = Request & { user: { id: string } }
+type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
 
 // May 2026 access-scope decision (docs/ACCESS_SCOPE.md):
 //   • Complete-onboarding is a clinical readiness call. PROVIDER added so
@@ -28,7 +28,10 @@ export class EnrollmentController {
   @Post('complete-enrollment')
   @HttpCode(HttpStatus.OK)
   complete(@Req() req: AuthedReq, @Param('userId') patientUserId: string) {
-    return this.service.completeEnrollment(req.user.id, patientUserId)
+    return this.service.completeEnrollment(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+    )
   }
 
   @Get('enrollment-check')
