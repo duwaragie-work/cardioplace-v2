@@ -54,6 +54,7 @@ async function setupAndTriggerAlert(
   prep: (tc: TestControl, userId: string) => Promise<void>,
   trigger: { faceSwelling?: boolean; throatTightness?: boolean; pulse?: number; systolicBP?: number; diastolicBP?: number; medicationTaken?: boolean },
   expectedRuleId: string,
+  opts: { twoReadingSession?: boolean } = {},
 ): Promise<{ tc: TestControl; userId: string; patientName: string; alertId: string; alertTier: string }> {
   const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
   const u = await tc.findUser(patientEmail)
@@ -63,19 +64,34 @@ async function setupAndTriggerAlert(
 
   const api = await authedApi(API_BASE_URL, patientEmail)
   try {
-    // Two-reading session bypasses Cluster 6 Q2 single-reading gate. The
-    // angioedema rule fires off Stage A regardless of reading count, so the
-    // 2nd reading is harmless there; CAD_HIGH and other standard-pipeline
-    // rules NEED the 2nd reading to escape the gate.
-    await postSessionWithTwoReadings(api, {
-      systolicBP: trigger.systolicBP ?? 124,
-      diastolicBP: trigger.diastolicBP ?? 78,
-      pulse: trigger.pulse ?? 72,
-      position: 'SITTING',
-      faceSwelling: trigger.faceSwelling,
-      throatTightness: trigger.throatTightness,
-      medicationTaken: trigger.medicationTaken,
-    })
+    // Angioedema (Stage A pre-gate) + brady-surveillance (Pass 3) + first-
+    // month nudge (Pass 4) bypass the Cluster 6 Q2 single-reading gate, so
+    // a single reading produces exactly ONE alert (predictable for the
+    // admin-UI "first visible Expand" assertion). CAD_HIGH and other
+    // standard-pipeline rules opt-in to the 2-reading session.
+    if (opts.twoReadingSession) {
+      await postSessionWithTwoReadings(api, {
+        systolicBP: trigger.systolicBP ?? 124,
+        diastolicBP: trigger.diastolicBP ?? 78,
+        pulse: trigger.pulse ?? 72,
+        position: 'SITTING',
+        faceSwelling: trigger.faceSwelling,
+        throatTightness: trigger.throatTightness,
+        medicationTaken: trigger.medicationTaken,
+      })
+    } else {
+      await postJournalEntry(api, {
+        measuredAt: new Date().toISOString(),
+        systolicBP: trigger.systolicBP ?? 124,
+        diastolicBP: trigger.diastolicBP ?? 78,
+        pulse: trigger.pulse ?? 72,
+        position: 'SITTING',
+        faceSwelling: trigger.faceSwelling,
+        throatTightness: trigger.throatTightness,
+        medicationTaken: trigger.medicationTaken,
+        sessionId: crypto.randomUUID(),
+      })
+    }
   } finally {
     await api.dispose()
   }
@@ -280,6 +296,8 @@ test.describe('Cluster 8 §D-ADMIN — compressed escalation ladder UI', () => {
       async () => {},
       { systolicBP: 118, diastolicBP: 74, pulse: 68 },
       'RULE_NDHP_HFREF',
+      // NDHP_HFREF is a Stage A contraindication — bypasses the single-
+      // reading gate. Single-reading session for predictable expand target.
     )
     try {
       // Get the alert id by name lookup.
@@ -478,6 +496,9 @@ test.describe('Cluster 8 §D-ADMIN — brady-surveillance + CAD admin surfaces',
       },
       { systolicBP: 145, diastolicBP: 78, pulse: 72 },
       'RULE_CAD_HIGH',
+      // CAD_HIGH is in the standard pipeline — Cluster 6 Q2 single-reading
+      // gate suppresses it; opt-in to the 2-reading session.
+      { twoReadingSession: true },
     )
     try {
       await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
