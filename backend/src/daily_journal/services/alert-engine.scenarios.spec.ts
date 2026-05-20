@@ -558,7 +558,13 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // No-alert paths
   // ========================================================================
 
-  it('Scenario 16 — Controlled patient benign 124/78 → no alert + BP L1 scope resolve', async () => {
+  it('Scenario 16 — Controlled patient benign 124/78 → no alert, no auto-resolve', async () => {
+    // Bug #6/#7 fix (commit 37b7989) — the silent auto-resolve sweep on a
+    // clean reading was REMOVED for JCAHO audit-trail compliance: a clean
+    // reading must NEVER flip prior open alerts to RESOLVED with NULL
+    // resolutionAction / resolutionRationale / resolvedBy. Resolution now
+    // happens ONLY through the explicit /admin/alerts/:id/resolve API path
+    // (alert-resolution.service.ts), which writes the full 15-field audit.
     const { result, createArgs } = await run(
       buildSession({ systolicBP: 124, diastolicBP: 78, pulse: 70 }),
       buildCtx({
@@ -572,12 +578,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
 
     expect(result).toBeNull()
     expect(createArgs).toBeUndefined()
-    expect(prisma.deviationAlert.updateMany).toHaveBeenCalledTimes(1)
-    const updateManyCall = prisma.deviationAlert.updateMany.mock.calls[0][0]
-    expect(updateManyCall.where.tier).toEqual({
-      in: ['BP_LEVEL_1_HIGH', 'BP_LEVEL_1_LOW'],
-    })
-    expect(updateManyCall.data).toEqual({ status: 'RESOLVED' })
+    expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
   })
 
   it('Scenario 17 — AFib + 1 reading + pulse 118 → no alert (gate closed)', async () => {
@@ -1379,9 +1380,12 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
   })
 
-  it('Scenario 63 — medicationTaken=true + missedMedications=[] → no adherence alert (resolve-sweep only)', async () => {
-    // Happy path: patient took all meds, no BP rule fires either.
-    // Resolve-sweep runs and is scoped to BP L1 only (Bug 2 invariant).
+  it('Scenario 63 — medicationTaken=true + missedMedications=[] → no adherence alert, no auto-resolve', async () => {
+    // Bug #6/#7 fix (commit 37b7989) — happy path: patient took all meds,
+    // no BP rule fires either. The pre-bug-fix behavior silently swept
+    // open BP L1 alerts to RESOLVED on a clean reading; that sweep was
+    // removed for JCAHO audit-trail compliance. Resolution now requires
+    // the explicit /admin/alerts/:id/resolve path with full audit fields.
     const { result } = await run(
       buildSession({
         systolicBP: 124,
@@ -1394,11 +1398,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
 
     expect(result).toBeNull()
     expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
-    expect(prisma.deviationAlert.updateMany).toHaveBeenCalledTimes(1)
-    const updateManyCall = prisma.deviationAlert.updateMany.mock.calls[0][0]
-    expect(updateManyCall.where.tier).toEqual({
-      in: ['BP_LEVEL_1_HIGH', 'BP_LEVEL_1_LOW'],
-    })
+    expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
   })
 
   it('Scenario 59 — Brady + Beta-blocker + pulse 38 → RULE_BRADY_ABSOLUTE Tier 1 (Cluster 6 retier)', async () => {
