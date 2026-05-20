@@ -2,15 +2,19 @@
 
 // Admin-app-facing Terms of Service for the Cardioplace v2 pilot.
 //
-// Counsel-reviewed content (v2026-05-08), reflecting
-// Cardioplace_Admin_Terms_of_Service.docx. Do not edit wording without
+// Counsel-applied content (v2026-05-20). Previous counsel-reviewed
+// version was v2026-05-08; this revision adds: DC medical licensure
+// + annual training + BAA cross-reference (§1), HIPAA Minimum
+// Necessary standard (§3), 24-hour incident reporting timeframe
+// (§8), organizational offboarding responsibility (§9), Terms-
+// change notification process (§10). Do not edit wording without
 // legal/compliance sign-off.
 
 import LandingHeader from '@/components/LandingHeader';
 import LandingFooter from '@/components/LandingFooter';
 
 export default function TermsPage() {
-  const lastUpdated = 'May 8, 2026';
+  const lastUpdated = 'May 20, 2026';
 
   return (
     <div className="bg-white flex flex-col min-h-screen">
@@ -37,11 +41,25 @@ export default function TermsPage() {
             <section>
               <h2 className="font-semibold text-[#170c1d] text-xl mb-3">1. Eligibility</h2>
               <p className="mb-3">You may access the platform only if:</p>
-              <ul className="list-disc pl-6 space-y-1.5">
+              <ul className="list-disc pl-6 space-y-1.5 mb-3">
                 <li>You are authorized by a participating organization.</li>
-                <li>You hold any required licenses or credentials.</li>
-                <li>You have completed required HIPAA and privacy training.</li>
+                <li>
+                  You hold any required licenses or credentials. Clinical
+                  users practicing in the District of Columbia must hold an
+                  active license issued by the DC Department of Health Board
+                  of Medicine (or equivalent licensing body for your role).
+                </li>
+                <li>
+                  You have completed required HIPAA and privacy training.
+                  Training must be renewed annually.
+                </li>
               </ul>
+              <p>
+                Your organization&apos;s use of Cardioplace is governed by a
+                separate Business Associate Agreement (BAA) executed between
+                Healplace.com, Inc. and the organization. Nothing in these
+                Terms supersedes the BAA.
+              </p>
             </section>
 
             <section>
@@ -67,6 +85,12 @@ export default function TermsPage() {
                 You may use Cardioplace solely for authorized healthcare
                 operations, treatment, payment, and care coordination
                 purposes.
+              </p>
+              <p className="mb-3">
+                You must access only the minimum patient information
+                necessary to perform your authorized function, consistent
+                with the HIPAA Minimum Necessary standard (45 CFR
+                § 164.502(b)).
               </p>
               <p className="mb-3">You may not:</p>
               <ul className="list-disc pl-6 space-y-1.5">
@@ -141,22 +165,41 @@ export default function TermsPage() {
                 <li>Protect patient information.</li>
                 <li>Lock unattended devices.</li>
                 <li>Use organization-approved devices.</li>
-                <li>Report suspected incidents immediately.</li>
+                <li>
+                  Report suspected incidents immediately, and in any event
+                  no later than 24 hours after discovery.
+                </li>
               </ul>
             </section>
 
             <section>
               <h2 className="font-semibold text-[#170c1d] text-xl mb-3">9. Suspension and termination</h2>
               <p className="mb-3">Access may be suspended or terminated if:</p>
-              <ul className="list-disc pl-6 space-y-1.5">
+              <ul className="list-disc pl-6 space-y-1.5 mb-3">
                 <li>Organizational authorization ends.</li>
                 <li>Security or compliance concerns arise.</li>
                 <li>These Terms are violated.</li>
               </ul>
+              <p>
+                Upon termination of employment or removal of authorization,
+                the participating organization is responsible for promptly
+                disabling user access to Cardioplace.
+              </p>
             </section>
 
             <section>
-              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">10. Limitation of liability</h2>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">10. Changes to these Terms</h2>
+              <p>
+                We may update these Terms periodically. Material changes will
+                be communicated to participating organizations and, where
+                appropriate, individual users in advance of the effective
+                date. Continued use after the effective date constitutes
+                acceptance of the updated Terms.
+              </p>
+            </section>
+
+            <section>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">11. Limitation of liability</h2>
               <p>
                 To the maximum extent permitted by law, Healplace.com, Inc.
                 shall not be liable for indirect, incidental, or consequential
@@ -166,7 +209,7 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">11. Governing law</h2>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">12. Governing law</h2>
               <p>
                 These Terms are governed by the laws of the District of
                 Columbia.
@@ -174,7 +217,7 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">12. Contact</h2>
+              <h2 className="font-semibold text-[#170c1d] text-xl mb-3">13. Contact</h2>
               <p>
                 <a href="mailto:support@healplace.com" className="font-medium text-[#7B00E0] underline">
                   support@healplace.com
