@@ -30,6 +30,8 @@ import {
   getEnrollmentCheck,
   type EnrollmentGateReason,
 } from '@/lib/services/practice.service';
+import { useAuth } from '@/lib/auth-context';
+import { canCompleteEnrollment } from '@/lib/roleGates';
 
 interface Props {
   patientId: string;
@@ -51,12 +53,18 @@ export default function EnrollmentCard({
   onEnrolled,
   refreshTrigger = 0,
 }: Props) {
+  const { user } = useAuth();
   const [reasons, setReasons] = useState<EnrollmentGateReason[] | null>(null);
   const [checkLoading, setCheckLoading] = useState(false);
   const [enrolling, setEnrolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isEnrolled = enrollmentStatus === 'ENROLLED';
+  // May 2026 access-scope — complete-onboarding moved off HEALPLACE_OPS onto
+  // PROVIDER + MED_DIR + SUPER_ADMIN (clinical readiness call). Hide the
+  // entire card for roles outside that set. The shell already skips the
+  // card when patient is ENROLLED; this is an additional gate.
+  const canEnroll = canCompleteEnrollment(user);
 
   // Run the enrollment-check on mount + whenever the patient changes OR
   // the parent signals a prerequisite-affecting change via refreshTrigger.
@@ -90,6 +98,7 @@ export default function EnrollmentCard({
   // ENROLLED" guidance. The header pill still shows verified/unverified
   // status; an "Enrolled" pill on the header is a follow-up if needed.
   if (isEnrolled) return null;
+  if (!canEnroll) return null;
 
   const blocked = reasons != null && reasons.length > 0;
 

@@ -46,7 +46,7 @@ import {
   Info,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
-import { hasAdminRole, isProviderOnly } from '@/lib/roleGates';
+import { hasAdminRole } from '@/lib/roleGates';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getPatients, getPatientSummary } from '@/lib/services/provider.service';
 import {
@@ -835,17 +835,19 @@ export default function PatientsPage() {
   const [summary, setSummary] = useState<PatientSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
 
-  // Load patients. PROVIDER-only callers get the assigned-patients-only
-  // scope so the list never shows patients they don't treat. (Backend
-  // force-scopes too — this is for clarity / fewer wasted bytes.)
+  // Load patients. May 2026 access-scope: the backend now derives scope
+  // from the JWT roles (PROVIDER → panel, MED_DIR → practice via
+  // PracticeMedicalDirector, OPS/SUPER → all). The frontend no longer
+  // needs to pass `?scope=assigned` — left here only for backwards-compat
+  // with older backend builds.
   useEffect(() => {
     if (isLoading || !isAuthenticated) return;
     setLoading(true);
-    getPatients(isProviderOnly(user) ? { scope: 'assigned' } : undefined)
+    getPatients()
       .then((data) => setPatients(Array.isArray(data) ? data : []))
       .catch(() => setPatients([]))
       .finally(() => setLoading(false));
-  }, [isAuthenticated, isLoading, user]);
+  }, [isAuthenticated, isLoading]);
 
   // Load summary when patient selected
   useEffect(() => {
