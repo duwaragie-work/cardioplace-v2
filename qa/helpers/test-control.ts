@@ -155,6 +155,16 @@ export class TestControl {
   }
 
   /**
+   * Cluster 8 — backdate User.enrolledAt for Q2 CAD-ramp + Q3 first-month
+   * nudge personas. Lets tests simulate "enrolled N days ago" without
+   * waiting; prod-equivalent of EnrollmentService stamping enrolledAt at
+   * ENROLLED transition.
+   */
+  async backdateEnrolledAt(userId: string, deltaSeconds: number): Promise<void> {
+    await this.post('test-control/user/backdate-enrolled-at', { userId, deltaSeconds })
+  }
+
+  /**
    * Insert journal entries at exact timestamps. Bypasses the alert engine
    * (raw fixture insertion only) — use this for tests that need a specific
    * session window or reading count without triggering alerts mid-setup.
