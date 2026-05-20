@@ -133,16 +133,36 @@ export class PracticeService {
     })
     if (!practice) throw new NotFoundException('Practice not found')
 
-    const assignments = await this.prisma.patientProviderAssignment.findMany({
-      where: { practiceId: id },
-      select: {
-        primaryProviderId: true,
-        backupProviderId: true,
-        medicalDirectorId: true,
-      },
-    })
+    // Three sources of practice staff, unioned:
+    //   1. PatientProviderAssignment slots (primary/backup/MD) — historical
+    //      derivation that still works for existing data
+    //   2. PracticeProvider — explicit provider membership (May 2026 add)
+    //   3. PracticeMedicalDirector — explicit MD membership (May 2026 add)
+    // The explicit joins let a practice be staffed BEFORE the first patient
+    // assignment, which the care-team cascading dropdown depends on.
+    const [assignments, providerMembers, mdMembers] = await Promise.all([
+      this.prisma.patientProviderAssignment.findMany({
+        where: { practiceId: id },
+        select: {
+          primaryProviderId: true,
+          backupProviderId: true,
+          medicalDirectorId: true,
+        },
+      }),
+      this.prisma.practiceProvider.findMany({
+        where: { practiceId: id },
+        select: { userId: true },
+      }),
+      this.prisma.practiceMedicalDirector.findMany({
+        where: { practiceId: id },
+        select: { userId: true },
+      }),
+    ])
 
     // Track which slots each user has filled so the UI can show role badges.
+    // Users sourced only from the explicit joins (no current patient
+    // assignment) carry an empty slot set — they're staffed for the
+    // practice but not yet on anyone's care team.
     const slots = new Map<string, Set<'PRIMARY' | 'BACKUP' | 'MEDICAL_DIRECTOR'>>()
     const ensure = (uid: string) => {
       const s = slots.get(uid) ?? new Set()
@@ -154,6 +174,8 @@ export class PracticeService {
       ensure(a.backupProviderId).add('BACKUP')
       ensure(a.medicalDirectorId).add('MEDICAL_DIRECTOR')
     }
+    for (const m of providerMembers) ensure(m.userId)
+    for (const m of mdMembers) ensure(m.userId).add('MEDICAL_DIRECTOR')
 
     const ids = Array.from(slots.keys())
     if (ids.length === 0) {
@@ -258,5 +280,84 @@ export class PracticeService {
       select: { id: true },
     })
     if (!found) throw new ConflictException(`Practice ${id} does not exist`)
+  }
+
+  // ─── PracticeProvider / PracticeMedicalDirector explicit membership ──────
+  // Lets OPS / SUPER_ADMIN populate a practice with staff BEFORE the first
+  // patient assignment so the care-team cascading dropdown is populated on
+  // first use. Both joins are many-to-many — a user can belong to multiple
+  // practices. Idempotent: ON CONFLICT DO NOTHING via Prisma's @@unique.
+
+  async addProvider(practiceId: string, userId: string) {
+    await this.assertPracticeAndUser(practiceId, userId, 'PROVIDER')
+    try {
+      await this.prisma.practiceProvider.create({
+        data: { practiceId, userId },
+      })
+    } catch (err) {
+      // P2002 = already a member. Idempotent — silent success.
+      if (
+        err instanceof Error &&
+        (err as { code?: string }).code !== 'P2002'
+      ) {
+        throw err
+      }
+    }
+    return { statusCode: 200, message: 'Provider added to practice' }
+  }
+
+  async removeProvider(practiceId: string, userId: string) {
+    await this.prisma.practiceProvider.deleteMany({
+      where: { practiceId, userId },
+    })
+    return { statusCode: 200, message: 'Provider removed from practice' }
+  }
+
+  async addMedicalDirector(practiceId: string, userId: string) {
+    await this.assertPracticeAndUser(practiceId, userId, 'MEDICAL_DIRECTOR')
+    try {
+      await this.prisma.practiceMedicalDirector.create({
+        data: { practiceId, userId },
+      })
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        (err as { code?: string }).code !== 'P2002'
+      ) {
+        throw err
+      }
+    }
+    return { statusCode: 200, message: 'Medical director added to practice' }
+  }
+
+  async removeMedicalDirector(practiceId: string, userId: string) {
+    await this.prisma.practiceMedicalDirector.deleteMany({
+      where: { practiceId, userId },
+    })
+    return { statusCode: 200, message: 'Medical director removed from practice' }
+  }
+
+  private async assertPracticeAndUser(
+    practiceId: string,
+    userId: string,
+    requiredRole: 'PROVIDER' | 'MEDICAL_DIRECTOR',
+  ) {
+    const [practice, user] = await Promise.all([
+      this.prisma.practice.findUnique({
+        where: { id: practiceId },
+        select: { id: true },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, roles: true },
+      }),
+    ])
+    if (!practice) throw new NotFoundException('Practice not found')
+    if (!user) throw new NotFoundException(`User ${userId} not found`)
+    if (!user.roles.includes(requiredRole)) {
+      throw new BadRequestException(
+        `User ${userId} lacks required role ${requiredRole} (has: ${user.roles.join(', ')})`,
+      )
+    }
   }
 }

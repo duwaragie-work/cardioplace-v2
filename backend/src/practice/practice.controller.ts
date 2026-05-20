@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -69,5 +70,45 @@ export class PracticeController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.HEALPLACE_OPS)
   update(@Param('id') id: string, @Body() dto: UpdatePracticeDto) {
     return this.service.update(id, dto)
+  }
+
+  // ─── Explicit practice staff membership (May 2026) ───────────────────────
+  // OPS + SUPER_ADMIN only — practice staffing is an operational function.
+  // Adds/removes a user from PracticeProvider or PracticeMedicalDirector
+  // independent of any patient assignment, so OPS can bootstrap a practice
+  // before the first patient lands. See docs/ACCESS_SCOPE.md.
+
+  @Post(':id/providers/:userId')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.HEALPLACE_OPS)
+  addProvider(@Param('id') id: string, @Param('userId') userId: string) {
+    return this.service.addProvider(id, userId)
+  }
+
+  @Delete(':id/providers/:userId')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.HEALPLACE_OPS)
+  removeProvider(@Param('id') id: string, @Param('userId') userId: string) {
+    return this.service.removeProvider(id, userId)
+  }
+
+  @Post(':id/medical-directors/:userId')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.HEALPLACE_OPS)
+  addMedicalDirector(
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+  ) {
+    return this.service.addMedicalDirector(id, userId)
+  }
+
+  @Delete(':id/medical-directors/:userId')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.HEALPLACE_OPS)
+  removeMedicalDirector(
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+  ) {
+    return this.service.removeMedicalDirector(id, userId)
   }
 }
