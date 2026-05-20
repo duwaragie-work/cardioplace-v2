@@ -46,7 +46,7 @@ import {
   Info,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
-import { hasAdminRole } from '@/lib/roleGates';
+import { canCompleteEnrollment, canVerifyProfile, hasAdminRole } from '@/lib/roleGates';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getPatients, getPatientSummary } from '@/lib/services/provider.service';
 import {
@@ -444,11 +444,18 @@ function OnboardingCell({
   patient,
   completing,
   cachedReasons,
+  canAct,
   onComplete,
 }: {
   patient: Patient;
   completing: boolean;
   cachedReasons?: EnrollmentGateReason[];
+  /** Caller can run the enrollment endpoint. False for HEALPLACE_OPS (May
+   *  2026 access-scope decision — complete-onboarding is a clinical
+   *  readiness call moved off OPS). When false we render a status pill
+   *  instead of the actionable button so OPS sees the state without the
+   *  403 trap on click. */
+  canAct: boolean;
   onComplete: () => void | Promise<void>;
 }) {
   const [showTip, setShowTip] = useState(false);
@@ -461,6 +468,23 @@ function OnboardingCell({
       >
         <CheckCircle2 className="w-2.5 h-2.5" />
         Enrolled
+      </span>
+    );
+  }
+
+  // Read-only "Not enrolled" pill for callers without the clinical-readiness
+  // authority (HEALPLACE_OPS). Same shape as the Enrolled pill so OPS can
+  // still triage the patient list at a glance; the click affordance is
+  // simply absent.
+  if (!canAct) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full"
+        style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
+        title="Awaiting clinician enrollment"
+      >
+        <ShieldAlert className="w-2.5 h-2.5" />
+        Not enrolled
       </span>
     );
   }
@@ -1003,8 +1027,11 @@ export default function PatientsPage() {
               {/* Flow K1 — Awaiting verification quick-toggle chip.
                   Label collapses to "Unverified" on small screens to save
                   ~80px of horizontal space; the icon + count badge keep
-                  the affordance intact. */}
-              {(() => {
+                  the affordance intact.
+                  Hidden for HEALPLACE_OPS — May 2026 access-scope decision
+                  removed clinical-verification authority from OPS, so the
+                  filter has no actionable use for them. */}
+              {canVerifyProfile(user) && (() => {
                 const count = patients.filter((p) => p.profileVerificationStatus !== 'VERIFIED').length;
                 const active = awaitingVerificationOnly;
                 return (
@@ -1191,6 +1218,7 @@ export default function PatientsPage() {
                         patient={p}
                         completing={completingId === p.id}
                         cachedReasons={enrollmentReasons[p.id]}
+                        canAct={canCompleteEnrollment(user)}
                         onComplete={async () => {
                           setCompletingId(p.id);
                           try {
