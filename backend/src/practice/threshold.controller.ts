@@ -18,12 +18,12 @@ import { ThresholdService } from './threshold.service.js'
 type AuthedReq = Request & { user: { id: string } }
 
 // Thresholds are a clinical directive per CLINICAL_SPEC.
-//   • READ — open to all four admin roles (PROVIDER + HEALPLACE_OPS need
-//     to see the configured target on the patient detail screen, even
-//     though they can't change it).
-//   • WRITE — MEDICAL_DIRECTOR + SUPER_ADMIN only. PROVIDER/OPS cannot
-//     author thresholds; they'd be making a clinical decision they're
-//     not authorized for.
+//   • READ — open to all four admin roles (HEALPLACE_OPS sees the configured
+//     target read-only on the patient detail screen).
+//   • WRITE — SUPER_ADMIN, MEDICAL_DIRECTOR, PROVIDER (May 2026 scope
+//     decision — see docs/ACCESS_SCOPE.md). PROVIDER previously read-only;
+//     now writes on their assigned patients. HEALPLACE_OPS still excluded
+//     from writes (clinical decision they're not authorized for).
 // Method-level @Roles() overrides the controller-level decorator.
 @Controller('admin/patients/:userId/threshold')
 @Roles(
@@ -37,7 +37,7 @@ export class ThresholdController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.PROVIDER)
   create(
     @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,
@@ -52,7 +52,7 @@ export class ThresholdController {
   }
 
   @Patch()
-  @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.PROVIDER)
   update(
     @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,

@@ -14,8 +14,14 @@ import { EnrollmentService } from './enrollment.service.js'
 
 type AuthedReq = Request & { user: { id: string } }
 
+// May 2026 access-scope decision (docs/ACCESS_SCOPE.md):
+//   • Complete-onboarding is a clinical readiness call. PROVIDER added so
+//     they can enroll their own assigned patients; HEALPLACE_OPS removed
+//     (they handle practice ↔ patient assignment, not clinical readiness).
+//   • GET /enrollment-check stays open to the same role set so the admin UI
+//     can render the 4-piece checklist regardless of which role is viewing.
 @Controller('admin/patients/:userId')
-@Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.HEALPLACE_OPS)
+@Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.PROVIDER)
 export class EnrollmentController {
   constructor(private readonly service: EnrollmentService) {}
 

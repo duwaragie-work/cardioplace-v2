@@ -8,5 +8,6 @@ model Practice {
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
-  assignments PatientProviderAssignment[]
+  assignments       PatientProviderAssignment[]
+  medicalDirectors  PracticeMedicalDirector[]
 }
