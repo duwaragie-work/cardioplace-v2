@@ -7,12 +7,16 @@ import {
   Param,
   Patch,
   Post,
+  Req,
 } from '@nestjs/common'
+import type { Request } from 'express'
 import { Roles } from '../auth/decorators/roles.decorator.js'
 import { UserRole } from '../generated/prisma/enums.js'
 import { CreatePracticeDto } from './dto/create-practice.dto.js'
 import { UpdatePracticeDto } from './dto/update-practice.dto.js'
 import { PracticeService } from './practice.service.js'
+
+type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
 
 // Practices (May 2026 access-scope decision — see docs/ACCESS_SCOPE.md):
 //   • READ — open to all four admin roles. PROVIDER and MED_DIR still need
@@ -41,18 +45,24 @@ export class PracticeController {
   }
 
   @Get()
-  list() {
-    return this.service.list()
+  list(@Req() req: AuthedReq) {
+    return this.service.list({ id: req.user.id, roles: req.user.roles })
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id)
+  findOne(@Req() req: AuthedReq, @Param('id') id: string) {
+    return this.service.findOne(
+      { id: req.user.id, roles: req.user.roles },
+      id,
+    )
   }
 
   @Get(':id/staff')
-  listStaff(@Param('id') id: string) {
-    return this.service.listStaff(id)
+  listStaff(@Req() req: AuthedReq, @Param('id') id: string) {
+    return this.service.listStaff(
+      { id: req.user.id, roles: req.user.roles },
+      id,
+    )
   }
 
   @Patch(':id')

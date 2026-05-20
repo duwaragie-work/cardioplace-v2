@@ -41,11 +41,11 @@ describe('PatientAccessService', () => {
   beforeEach(async () => {
     prisma = {
       patientProviderAssignment: {
-        findUnique: jest.fn() as jest.Mock,
+        findUnique: jest.fn() as jest.Mock<any, any>,
       },
       practiceMedicalDirector: {
-        findUnique: jest.fn() as jest.Mock,
-        findMany: jest.fn() as jest.Mock,
+        findUnique: jest.fn() as jest.Mock<any, any>,
+        findMany: jest.fn() as jest.Mock<any, any>,
       },
     }
     const module: TestingModule = await Test.createTestingModule({

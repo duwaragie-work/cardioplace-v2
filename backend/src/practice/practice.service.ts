@@ -4,6 +4,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
+import {
+  ActorUser,
+  PatientAccessService,
+} from '../common/patient-access.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import type { CreatePracticeDto } from './dto/create-practice.dto.js'
 import type { UpdatePracticeDto } from './dto/update-practice.dto.js'
@@ -16,7 +20,10 @@ const DEFAULT_BUSINESS_HOURS = {
 
 @Injectable()
 export class PracticeService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly access: PatientAccessService,
+  ) {}
 
   async create(dto: CreatePracticeDto) {
     const start = dto.businessHoursStart ?? DEFAULT_BUSINESS_HOURS.start
@@ -42,8 +49,15 @@ export class PracticeService {
     }
   }
 
-  async list() {
+  async list(actor: ActorUser) {
+    // Role-scoped: PROVIDER + MED_DIR see only practices they're members
+    // of (via PracticeProvider / PracticeMedicalDirector joins). OPS/SUPER
+    // get undefined back = no filter. Empty array short-circuits to zero
+    // practices for a scoped role with no memberships yet.
+    const scopeIds = await this.access.practiceScopeIds(actor)
+    const where = scopeIds === undefined ? {} : { id: { in: scopeIds } }
     const practices = await this.prisma.practice.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
       include: { _count: { select: { assignments: true } } },
     })
@@ -70,7 +84,14 @@ export class PracticeService {
     }
   }
 
-  async findOne(id: string) {
+  async findOne(actor: ActorUser, id: string) {
+    // Scope enforcement: PROVIDER + MED_DIR can only view their own
+    // practices. Treat out-of-scope as 404 (not 403) so the caller can't
+    // probe practice-id existence by reading the error code.
+    const scopeIds = await this.access.practiceScopeIds(actor)
+    if (scopeIds !== undefined && !scopeIds.includes(id)) {
+      throw new NotFoundException('Practice not found')
+    }
     const practice = await this.prisma.practice.findUnique({
       where: { id },
       include: { _count: { select: { assignments: true } } },
@@ -99,7 +120,13 @@ export class PracticeService {
   // Deduplicated list of providers (any of primary / backup / medical-director
   // slots) referenced by any patient assignment at this practice. Powers the
   // J2 staff list and the J3 reassignment dropdowns.
-  async listStaff(id: string) {
+  async listStaff(actor: ActorUser, id: string) {
+    // Same scope rule as findOne — keep the staff list behind the same
+    // practice-visibility gate.
+    const scopeIds = await this.access.practiceScopeIds(actor)
+    if (scopeIds !== undefined && !scopeIds.includes(id)) {
+      throw new NotFoundException('Practice not found')
+    }
     const practice = await this.prisma.practice.findUnique({
       where: { id },
       select: { id: true },

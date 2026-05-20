@@ -168,4 +168,39 @@ export class PatientAccessService {
     })
     return rows.map((r) => r.practiceId)
   }
+
+  /**
+   * Practice IDs the actor can SEE in the /practices list. Mirrors the
+   * patient list scoping: OPS/SUPER see all (returns undefined =
+   * no filter), MED_DIR sees their PracticeMedicalDirector memberships,
+   * PROVIDER sees their PracticeProvider memberships.
+   *
+   * Returns undefined when no filter should apply, or an array of allowed
+   * practice IDs. An empty array means "no practices visible" — callers
+   * should pass that through to Prisma as `{ id: { in: [] } }` so the
+   * query returns zero rows rather than all rows.
+   */
+  async practiceScopeIds(actor: ActorUser): Promise<string[] | undefined> {
+    if (this.isUnscoped(actor)) return undefined
+
+    const ids = new Set<string>()
+
+    if (actor.roles.includes(UserRole.MEDICAL_DIRECTOR)) {
+      const md = await this.prisma.practiceMedicalDirector.findMany({
+        where: { userId: actor.id },
+        select: { practiceId: true },
+      })
+      for (const r of md) ids.add(r.practiceId)
+    }
+
+    if (actor.roles.includes(UserRole.PROVIDER)) {
+      const pp = await this.prisma.practiceProvider.findMany({
+        where: { userId: actor.id },
+        select: { practiceId: true },
+      })
+      for (const r of pp) ids.add(r.practiceId)
+    }
+
+    return Array.from(ids)
+  }
 }

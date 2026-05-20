@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common'
 import type { Request } from 'express'
 import { Roles } from '../auth/decorators/roles.decorator.js'
+import { PatientAccessService } from '../common/patient-access.service.js'
 import { UserRole } from '../generated/prisma/enums.js'
 import { EnrollmentService } from './enrollment.service.js'
 
@@ -23,7 +24,10 @@ type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
 @Controller('admin/patients/:userId')
 @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.PROVIDER)
 export class EnrollmentController {
-  constructor(private readonly service: EnrollmentService) {}
+  constructor(
+    private readonly service: EnrollmentService,
+    private readonly access: PatientAccessService,
+  ) {}
 
   @Post('complete-enrollment')
   @HttpCode(HttpStatus.OK)
@@ -35,7 +39,14 @@ export class EnrollmentController {
   }
 
   @Get('enrollment-check')
-  check(@Param('userId') patientUserId: string) {
+  async check(
+    @Req() req: AuthedReq,
+    @Param('userId') patientUserId: string,
+  ) {
+    await this.access.assertCanAccessPatient(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+    )
     return this.service.check(patientUserId)
   }
 }

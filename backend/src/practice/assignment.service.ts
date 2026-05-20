@@ -45,6 +45,14 @@ export class AssignmentService {
     // MED_DIR is gated to practices they head; OPS/SUPER unscoped. Runs
     // before any DB writes so a denied caller can't see the audit row.
     await this.access.assertCanModifyPracticeAssignment(actor, dto.practiceId)
+    // Same clinician in two slots is a coverage anti-pattern — primary +
+    // backup must be distinct so escalation has a real fallback. Caught
+    // here so a hand-crafted POST can't bypass the frontend dropdown.
+    if (dto.primaryProviderId === dto.backupProviderId) {
+      throw new BadRequestException(
+        'Primary and backup providers must be different',
+      )
+    }
     await this.assertPatientExists(patientUserId)
     await this.assertPracticeExists(dto.practiceId)
     await this.assertRoles(
@@ -159,6 +167,18 @@ export class AssignmentService {
       ? [existing.practiceId, dto.practiceId]
       : [existing.practiceId]
     await this.access.assertCanModifyPracticeAssignment(actor, practicesToCheck)
+
+    // Primary != backup after the patch is applied. Build the prospective
+    // state by overlaying dto on existing — a partial update that only sets
+    // primary still needs to be checked against the existing backup, and
+    // vice versa.
+    const nextPrimary = dto.primaryProviderId ?? existing.primaryProviderId
+    const nextBackup = dto.backupProviderId ?? existing.backupProviderId
+    if (nextPrimary === nextBackup) {
+      throw new BadRequestException(
+        'Primary and backup providers must be different',
+      )
+    }
 
     if (dto.practiceId) await this.assertPracticeExists(dto.practiceId)
     if (dto.primaryProviderId)

@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common'
 import type { Request } from 'express'
 import { Roles } from '../auth/decorators/roles.decorator.js'
+import { PatientAccessService } from '../common/patient-access.service.js'
 import { UserRole } from '../generated/prisma/enums.js'
 import { UpsertThresholdDto } from './dto/upsert-threshold.dto.js'
 import { ThresholdService } from './threshold.service.js'
@@ -33,7 +34,10 @@ type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
   UserRole.HEALPLACE_OPS,
 )
 export class ThresholdController {
-  constructor(private readonly service: ThresholdService) {}
+  constructor(
+    private readonly service: ThresholdService,
+    private readonly access: PatientAccessService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -51,7 +55,14 @@ export class ThresholdController {
   }
 
   @Get()
-  findOne(@Param('userId') patientUserId: string) {
+  async findOne(
+    @Req() req: AuthedReq,
+    @Param('userId') patientUserId: string,
+  ) {
+    await this.access.assertCanAccessPatient(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+    )
     return this.service.findByPatient(patientUserId)
   }
 

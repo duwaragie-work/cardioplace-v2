@@ -17,7 +17,6 @@ import {
   Building2,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
-import { canManagePractices } from '@/lib/roleGates';
 
 interface NavItem {
   href: string;
@@ -29,19 +28,14 @@ interface NavItem {
   show?: (roles: string[] | null | undefined) => boolean;
 }
 
+// /practices is visible to all four admin roles. PROVIDER + MED_DIR see
+// only their scoped practices (backend filter via PatientAccessService);
+// OPS + SUPER see all. CRUD buttons are hidden on the page itself for
+// non-OPS/SUPER. See docs/ACCESS_SCOPE.md (May 2026 — scope-not-hide).
 const PRIMARY_NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/patients', label: 'Patients', icon: Users, matchPrefix: true },
-  // Practice CRUD moved to OPS + SUPER_ADMIN only in May 2026 — MED_DIR and
-  // PROVIDER no longer see this nav item. Backend rejects with 403 if a
-  // hidden item is hit by a hand-crafted request. See docs/ACCESS_SCOPE.md.
-  {
-    href: '/practices',
-    label: 'Practices',
-    icon: Building2,
-    matchPrefix: true,
-    show: canManagePractices,
-  },
+  { href: '/practices', label: 'Practices', icon: Building2, matchPrefix: true },
 ];
 
 const SECONDARY_NAV: NavItem[] = [
