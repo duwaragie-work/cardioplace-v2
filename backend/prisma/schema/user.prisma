@@ -43,6 +43,7 @@ model User {
   providerAssignmentsAsBackup          PatientProviderAssignment[] @relation("BackupProvider")
   providerAssignmentsAsMedicalDirector PatientProviderAssignment[] @relation("MedicalDirector")
   practiceMedicalDirectorMemberships   PracticeMedicalDirector[]   @relation("PracticeMedicalDirectorMemberships")
+  practiceProviderMemberships          PracticeProvider[]          @relation("PracticeProviderMemberships")
   profileVerificationLogs              ProfileVerificationLog[]
 }
 

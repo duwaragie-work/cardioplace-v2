@@ -10,4 +10,5 @@ model Practice {
 
   assignments       PatientProviderAssignment[]
   medicalDirectors  PracticeMedicalDirector[]
+  providers         PracticeProvider[]
 }
