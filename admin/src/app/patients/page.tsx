@@ -292,6 +292,9 @@ function tierChrome(tier: string | null): {
     case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
       return { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)', label: 'BP L2', short: 'L2' };
     case 'TIER_1_CONTRAINDICATION':
+    // Cluster 8 — angioedema shares the Tier 1 chrome (red banner, "Tier 1"
+    // label) for MVP. Bespoke airway visuals are a post-pilot follow-up.
+    case 'TIER_1_ANGIOEDEMA':
       return { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)', label: 'Tier 1', short: 'T1' };
     case 'TIER_2_DISCREPANCY':
       return { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)', label: 'Tier 2', short: 'T2' };
@@ -311,6 +314,11 @@ const TIER_SEVERITY_ORDER = [
   'BP_LEVEL_2',
   'BP_LEVEL_2_SYMPTOM_OVERRIDE',
   'TIER_1_CONTRAINDICATION',
+  // Cluster 8 — angioedema sits at Tier-1 severity (airway emergency,
+  // "resolved like all Tier 1 alerts"). Placed immediately after
+  // TIER_1_CONTRAINDICATION so an angioedema-only patient sorts above
+  // a Tier-2 / BP-L1 patient in the list.
+  'TIER_1_ANGIOEDEMA',
   'TIER_2_DISCREPANCY',
   'BP_LEVEL_1_HIGH',
   'BP_LEVEL_1_LOW',
