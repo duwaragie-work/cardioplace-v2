@@ -165,6 +165,18 @@ export class TestControlController {
     return { ok: true }
   }
 
+  // Cluster 8 — backdate User.enrolledAt for Q2 ramp + Q3 nudge personas.
+  @Post('user/backdate-enrolled-at')
+  @HttpCode(200)
+  async backdateEnrolledAt(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; deltaSeconds: number },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.backdateEnrolledAt(body.userId, body.deltaSeconds)
+    return { ok: true }
+  }
+
   @Post('journal/seed-at-time')
   @HttpCode(200)
   async seedReadingsAtTime(
@@ -249,6 +261,19 @@ export class TestControlController {
   ) {
     this.assertAuthorized(secret)
     return this.svc.resetUser(body.userId)
+  }
+
+  // Cluster 8 §D — clear ALL of a user's PatientMedication rows so a test
+  // can set up an exact medication state without inheriting seed rows
+  // (Aisha ships with Lisinopril+Amlodipine; an ARB test needs neither).
+  @Post('reset/user-medications')
+  @HttpCode(200)
+  async clearUserMedications(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.clearUserMedications(body.userId)
   }
 
   @Post('user/set-enrollment')

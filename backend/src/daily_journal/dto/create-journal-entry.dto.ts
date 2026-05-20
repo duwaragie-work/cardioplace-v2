@@ -199,6 +199,11 @@ export class CreateJournalEntryDto {
   @IsOptional() @IsBoolean() dryCough?: boolean
   @IsOptional() @IsBoolean() nsaidUse?: boolean
 
+  // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
+  // Either flag fires the angioedema rule (Tier 1) for ALL patients.
+  @IsOptional() @IsBoolean() faceSwelling?: boolean
+  @IsOptional() @IsBoolean() throatTightness?: boolean
+
   // Patient's freeform "anything else" — sent as String[] so the schema
   // column can hold multiple notes if a future UI captures more than one.
   @IsOptional()

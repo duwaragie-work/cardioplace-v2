@@ -44,7 +44,10 @@ type StatusFilter = 'ALL' | 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
 
 function tierBucket(t: string | null): TierBucket {
   if (t === 'BP_LEVEL_2' || t === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'BP_L2';
-  if (t === 'TIER_1_CONTRAINDICATION') return 'TIER_1';
+  // Cluster 8 — angioedema buckets into TIER_1 so the patient-detail
+  // Alerts tab filter + chrome treats it identically to a Tier 1
+  // contraindication (Manisha "resolved like all Tier 1 alerts").
+  if (t === 'TIER_1_CONTRAINDICATION' || t === 'TIER_1_ANGIOEDEMA') return 'TIER_1';
   if (t === 'TIER_2_DISCREPANCY') return 'TIER_2';
   if (t === 'BP_LEVEL_1_HIGH' || t === 'BP_LEVEL_1_LOW') return 'BP_L1';
   if (t === 'TIER_3_INFO') return 'TIER_3';
@@ -88,6 +91,11 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
   // CLINICAL_SPEC V2-C Layer 1 — it should NOT mix with safety-critical
   // alerts in the main queue. Surface it in the dedicated "Physician
   // notes" section below the main list instead.
+  // Cluster 8 Q1: RULE_BRADY_SURVEILLANCE is intentionally NON-medication-
+  // linked, so (unlike RULE_HCM_VASODILATOR / RULE_LOOP_DIURETIC_HYPOTENSION
+  // which MedicationsTab inlines via tier3DrugClassFor) it has no drug-class
+  // row to attach to — it correctly surfaces in this Physician-notes section
+  // + as a "Surveillance" pill on the triggering reading (Cluster 8.1 Gap 5).
   const tier3Alerts = useMemo(
     () => alerts.filter((a) => tierBucket(a.tier) === 'TIER_3'),
     [alerts],

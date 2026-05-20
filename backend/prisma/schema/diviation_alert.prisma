@@ -63,6 +63,10 @@ enum AlertTier {
   BP_LEVEL_1_LOW
   BP_LEVEL_2
   BP_LEVEL_2_SYMPTOM_OVERRIDE
+  // Cluster 8 (Manisha 5/18/26) — ACE-angioedema. Tier-1 class
+  // (non-dismissable) but routed to its own compressed escalation ladder
+  // (T+0 → T+15m → T+1h → T+4h) instead of the standard Tier 1 ladder.
+  TIER_1_ANGIOEDEMA
 }
 
 enum AlertMode {

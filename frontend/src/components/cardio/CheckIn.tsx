@@ -128,6 +128,17 @@ interface FormData {
   syncope: boolean;
   palpitations: boolean;
   legSwelling: boolean;
+  // Cluster 7 (Manisha 5/11/26) — Appendix A side-effect inputs. Engine +
+  // DTO shipped in Cluster 7; the patient check-in surface was deferred
+  // (Lakshitha coordination) and is added here so β-blocker fatigue/SOB and
+  // ACE dry-cough rules are patient-reachable. (nsaidUse intentionally NOT a
+  // symptom button — it's a medication-use question for the intake form.)
+  fatigue: boolean;
+  shortnessOfBreath: boolean;
+  dryCough: boolean;
+  // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
+  faceSwelling: boolean;
+  throatTightness: boolean;
   otherSymptomsText: string;
 }
 
@@ -188,6 +199,11 @@ function emptyForm(): FormData {
     syncope: false,
     palpitations: false,
     legSwelling: false,
+    fatigue: false,
+    shortnessOfBreath: false,
+    dryCough: false,
+    faceSwelling: false,
+    throatTightness: false,
     otherSymptomsText: '',
   };
 }
@@ -978,6 +994,58 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
   );
 }
 
+// Cluster 8 Q2 (Manisha 5/18/26, P0) — bespoke angioedema symptom icons.
+// The sign-off specifies a "face silhouette with swelling indicators at
+// lips/cheeks" + a "neck/throat silhouette with constriction indicator";
+// no lucide glyph conveys either, so two small inline SVGs (currentColor,
+// stroke-based so they inherit the checklist-row color like lucide).
+function FaceSwellingIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* face outline */}
+      <path d="M12 3a7 7 0 0 1 7 7c0 4-2.5 7.5-7 11-4.5-3.5-7-7-7-11a7 7 0 0 1 7-7Z" />
+      {/* swollen cheeks */}
+      <path d="M6.5 11.5c1 1.4 1 2.6 0 4M17.5 11.5c-1 1.4-1 2.6 0 4" />
+      {/* swollen lips */}
+      <path d="M9.5 14.5c1.6 1.2 3.4 1.2 5 0" />
+      <circle cx="9.3" cy="9.5" r="0.6" fill="currentColor" stroke="none" />
+      <circle cx="14.7" cy="9.5" r="0.6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function ThroatTightnessIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* head + neck */}
+      <circle cx="12" cy="5.5" r="3" />
+      <path d="M9 9c0 2 0 3 0 4M15 9c0 2 0 3 0 4" />
+      {/* throat constriction (inward pinch) */}
+      <path d="M9 14.5c1.2-1.4 4.8-1.4 6 0" />
+      <path d="M9 18c1.2 1.4 4.8 1.4 6 0" />
+      <path d="M7.5 16.25h2M14.5 16.25h2" />
+    </svg>
+  );
+}
+
 interface SymptomsStepProps extends StepProps {
   isPregnant: boolean;
 }
@@ -997,6 +1065,16 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
     { key: 'syncope', icon: <Activity className="w-5 h-5" />, text: t('checkin.b3.symptomSyncope'), testId: 'check-in-symptom-SYNCOPE' },
     { key: 'palpitations', icon: <Heart className="w-5 h-5" />, text: t('checkin.b3.symptomPalpitations'), testId: 'check-in-symptom-PALPITATIONS' },
     { key: 'legSwelling', icon: <Droplets className="w-5 h-5" />, text: t('checkin.b3.symptomLegSwelling'), testId: 'check-in-symptom-LEG_SWELLING' },
+    // Cluster 7 (Manisha 5/11/26) — Appendix A side-effect inputs feeding
+    // β-blocker fatigue/SOB (HF + non-HF) and ACE dry-cough rules.
+    { key: 'fatigue', icon: <Bed className="w-5 h-5" />, text: t('checkin.b3.symptomFatigue'), testId: 'check-in-symptom-FATIGUE' },
+    { key: 'shortnessOfBreath', icon: <Wind className="w-5 h-5" />, text: t('checkin.b3.symptomShortnessOfBreath'), testId: 'check-in-symptom-SHORTNESS_OF_BREATH' },
+    { key: 'dryCough', icon: <Stethoscope className="w-5 h-5" />, text: t('checkin.b3.symptomDryCough'), testId: 'check-in-symptom-DRY_COUGH' },
+    // Cluster 8 (Manisha 5/18/26, P0) — Button 12 + 13. ACE-angioedema
+    // airway emergency. Either fires RULE_(ACE|GENERIC)_ANGIOEDEMA Tier 1
+    // for ALL patients regardless of medication profile.
+    { key: 'faceSwelling', icon: <FaceSwellingIcon className="w-5 h-5" />, text: t('checkin.b3.symptomFaceSwelling'), testId: 'check-in-symptom-FACE_SWELLING' },
+    { key: 'throatTightness', icon: <ThroatTightnessIcon className="w-5 h-5" />, text: t('checkin.b3.symptomThroatTightness'), testId: 'check-in-symptom-THROAT_TIGHTNESS' },
   ];
   const pregnancy: { key: keyof FormData; icon: React.ReactNode; text: string }[] = [
     { key: 'newOnsetHeadache', icon: <Brain className="w-5 h-5" />, text: t('checkin.b3.symptomNewHeadache') },
@@ -1083,6 +1161,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
         </div>
         <textarea
           id="checkin-other-symptoms"
+          data-testid="checkin-other-symptoms"
           rows={3}
           value={form.otherSymptomsText}
           onChange={(e) => setField('otherSymptomsText', e.target.value)}
@@ -1609,6 +1688,13 @@ export default function CheckIn() {
         syncope: form.syncope,
         palpitations: form.palpitations,
         legSwelling: form.legSwelling,
+        // Cluster 7 — Appendix A side-effect flags.
+        fatigue: form.fatigue,
+        shortnessOfBreath: form.shortnessOfBreath,
+        dryCough: form.dryCough,
+        // Cluster 8 — ACE-angioedema airway-emergency flags.
+        faceSwelling: form.faceSwelling,
+        throatTightness: form.throatTightness,
         otherSymptoms: form.otherSymptomsText.trim() ? [form.otherSymptomsText.trim()] : undefined,
       });
 

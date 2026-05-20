@@ -167,6 +167,102 @@ function onBetaBlocker(ctx: ResolvedContext): boolean {
   return ctx.contextMeds.some((m) => m.drugClass === 'BETA_BLOCKER')
 }
 
+// Cluster 8 Q1 — the MESA differential-mortality population: cardiac
+// patients on HR-modifying drugs. Beta-blockers + non-DHP CCBs (diltiazem/
+// verapamil) + antiarrhythmics (which include digoxin/amiodarone in this
+// catalog's grouping) are the rate-controlling classes whose asymptomatic
+// 40–49 bradycardia carries risk.
+function onRateControlMed(ctx: ResolvedContext): boolean {
+  return ctx.contextMeds.some(
+    (m) =>
+      m.drugClass === 'BETA_BLOCKER' ||
+      m.drugClass === 'NDHP_CCB' ||
+      m.drugClass === 'ANTIARRHYTHMIC',
+  )
+}
+
+// ─── Cluster 8 Q1 — asymptomatic bradycardia surveillance ───────────────────
+// Manisha 5/18/26: HR 40–49 with NO brady-relevant symptoms must NOT be
+// silent for cardiac patients on rate-controlling meds (MESA). Fire a Tier 3
+// surveillance chart event (physician-only, no patient/caregiver message, no
+// escalation ladder, no push). If the mean HR has been ≤45 across 3+
+// consecutive check-in sessions, auto-escalate to Tier 2 (physician review:
+// ECG + medication-dose review).
+//
+// Interaction with the existing brady split (May 10 sign-off):
+//   - HR < 40                  → bradyAbsoluteRule (Tier 1), unchanged
+//   - HR 40–49 + symptom       → bradySymptomaticRule (Tier 2), unchanged
+//   - HR 40–49 + NO symptom    → THIS rule (Tier 3, or Tier 2 if sustained)
+//   - HR 50–60 (BB therapeutic)→ no alert, unchanged
+const BRADY_SUSTAINED_SESSIONS = 3
+
+export function bradySurveillanceRuleWithWindow(
+  consecutiveSessionsLe45: number,
+): RuleFunction {
+  return (session, ctx) => {
+    const pulse = session.pulse
+    if (pulse == null) return null
+    // [40, 50): <40 is owned by bradyAbsoluteRule (Tier 1).
+    if (pulse < BRADY_ASYMPTOMATIC || pulse >= BRADY_SYMPTOMATIC) return null
+
+    const s = session.symptoms
+    const symptomatic =
+      s.dizziness ||
+      s.syncope ||
+      s.alteredMentalStatus ||
+      s.chestPainOrDyspnea
+    // Symptomatic 40–49 is bradySymptomaticRule's (Tier 2) territory.
+    if (symptomatic) return null
+
+    // Gate: only the at-risk population — diagnosed bradycardia OR on a
+    // rate-controlling medication (MESA differential-mortality cohort).
+    //
+    // SIGNED-OFF INTERPRETATION (user-confirmed 2026-05, gap audit): the
+    // Q1 sign-off's literal WHEN clause is just HR 40–49 + no symptoms +
+    // session-averaged, with no medication gate. We deliberately keep this
+    // `hasBradycardia OR rate-control med` gate because (a) the doc's own
+    // physician-message template reads "Patient is on [medname]
+    // ([DRUGCLASS])" — meaningless without a med, (b) the entire MESA
+    // rationale is specific to patients on HR-modifying drugs, and (c) it
+    // matches the existing bradyAbsolute/bradySymptomatic gating, avoiding
+    // surveillance noise for healthy athletic bradycardia. Confirmed as the
+    // intended behavior, not an oversight.
+    if (!ctx.profile.hasBradycardia && !onRateControlMed(ctx)) return null
+
+    const sustained = consecutiveSessionsLe45 >= BRADY_SUSTAINED_SESSIONS
+
+    return {
+      ruleId: RULE_IDS.BRADY_SURVEILLANCE,
+      tier: sustained ? 'TIER_2_DISCREPANCY' : 'TIER_3_INFO',
+      mode: 'STANDARD',
+      pulsePressure: getPulsePressure(session.systolicBP, session.diastolicBP),
+      suboptimalMeasurement: session.suboptimalMeasurement,
+      actualValue: pulse,
+      reason: sustained
+        ? `Sustained asymptomatic bradycardia HR ${pulse} ≤ 45 on ${consecutiveSessionsLe45} consecutive sessions.`
+        : `Asymptomatic bradycardia surveillance — resting HR ${pulse} (40–49 band).`,
+      metadata: {
+        conditionLabel: 'Asymptomatic bradycardia',
+        thresholdValue: BRADY_SYMPTOMATIC,
+        // Surfaced in the physician message ("Patient is on [med] ([class])").
+        drugName: ctx.contextMeds.find(
+          (m) =>
+            m.drugClass === 'BETA_BLOCKER' ||
+            m.drugClass === 'NDHP_CCB' ||
+            m.drugClass === 'ANTIARRHYTHMIC',
+        )?.drugName,
+        drugClass: ctx.contextMeds.find(
+          (m) =>
+            m.drugClass === 'BETA_BLOCKER' ||
+            m.drugClass === 'NDHP_CCB' ||
+            m.drugClass === 'ANTIARRHYTHMIC',
+        )?.drugClass,
+        bradySustainedSessions: consecutiveSessionsLe45,
+      },
+    }
+  }
+}
+
 // ─── HR context annotation ──────────────────────────────────────────────────
 // Phase/26 Reading 5b fix — surfaces an HR concern when a terminal-stage rule
 // (symptom override or absolute emergency) preempts Stage C and the HR rule

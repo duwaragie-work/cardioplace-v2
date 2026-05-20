@@ -36,6 +36,12 @@ type Expectation = {
   exclusive?: boolean
   // Optional: additional setup before submitting (e.g. multiple readings for AFib gate).
   preSubmit?: (api: Awaited<ReturnType<typeof authedApi>>, sessionId: string) => Promise<void>
+  // Cluster 6 Q2 (Manisha 5/9/26) — single-reading non-AFib non-preDay3
+  // sessions suppress standard-pipeline rules (HFrEF/CAD/HCM/standard L1).
+  // Opt-in flag to submit TWO readings under the same sessionId so the
+  // engine accepts it as confirmed. Default false preserves existing tests
+  // (most fire emergencies or run in preDay3Mode → gate already bypassed).
+  twoReadingSession?: boolean
   notes?: string
 }
 
@@ -61,7 +67,17 @@ async function submitAndAssert(e: Expectation): Promise<{
 
   const sessionId = randomUUID()
   if (e.preSubmit) await e.preSubmit(api, sessionId)
-  await postJournalEntry(api, { ...e.entry, sessionId })
+  if (e.twoReadingSession) {
+    // Two-reading session bypasses Cluster 6 Q2 single-reading gate. Both
+    // readings share the requested sessionId; second is offset 1 min later.
+    const secondMeasuredAt = new Date(
+      new Date(e.entry.measuredAt as string).getTime() + 60_000,
+    ).toISOString()
+    await postJournalEntry(api, { ...e.entry, sessionId })
+    await postJournalEntry(api, { ...e.entry, measuredAt: secondMeasuredAt, sessionId })
+  } else {
+    await postJournalEntry(api, { ...e.entry, sessionId })
+  }
 
   // Allow async event-driven engine ≤4s to land alerts.
   let alerts: Awaited<ReturnType<typeof tc.listAlerts>> = []
@@ -726,26 +742,32 @@ test.describe('Bucket B G3: Pre-Day-3 mode (educational suppression)', () => {
     expect(r.fired).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
   })
 
-  // Re-audited Cluster 7 (Niva, 2026-05-15): the underlying issue is
-  // STANDARD_L1_HIGH's threshold — the rule fires at SBP≥160 or DBP≥100
-  // (STANDARD_SEVERE_STAGE2_*), not at SBP≥140 or DBP≥90 as this test
-  // assumes. 145/95 sits in the (140,160)/(90,100) annotation band but
-  // doesn't trigger a row regardless of reading count. Same gap as Paul
-  // 145/92 above — needs Manisha sign-off on the Stage 1 threshold (140/90)
-  // before flipping. Leaving fixme until that decision lands.
-  test.fixme('Post Day-3 (≥7 readings), 145/95 → STANDARD_L1_HIGH fires normally', async () => {
+  // Resolved Cluster 8 Q2 (Manisha 5/18/26 ADDITIONAL NOTE): Post-Day3
+  // 145/95 is resolved by the CAD default-threshold change — "a CAD patient
+  // at 145/95 post-Day-3 now fires a Tier 2 alert because 145 ≥ 140". The
+  // original aisha/STANDARD_L1_HIGH framing was the pre-sign-off guess;
+  // the signed-off resolution is CAD-specific, so this uses Paul (CAD).
+  test('Post Day-3 (≥7 readings), CAD 145/95 → RULE_CAD_HIGH fires (Q2 default 140)', async () => {
     // submitAndAssert calls tc.resetUser FIRST, which wipes seeded readings.
-    // Seed in preSubmit so the 7 historical entries land between reset and
-    // the alert-triggering POST. preDay3Mode = readingCount < 7, so seven
-    // pre-existing readings + the new one = 8 in-window readings → false.
+    // Seed 7 historical entries + re-stamp ENROLLED in preSubmit so (a)
+    // preDay3Mode is false (≥7 readings) and (b) the CAD ramp resolves
+    // Paul's default sbpUpperTarget to 140 (Phase 1 newly-enrolled).
+    //
+    // twoReadingSession bypasses Cluster 6 Q2's single-reading gate.
+    // Clearing preDay3Mode (above) EXPOSES the gate — preDay3 was the
+    // safety net hiding it before the seed expanded; CAD_HIGH is a
+    // standard-pipeline rule and gets suppressed on a single-reading
+    // non-AFib non-preDay3 session.
     const r = await submitAndAssert({
-      label: 'post day-3 L1 fires',
-      patient: 'aisha',
+      label: 'post day-3 CAD L1 fires',
+      patient: 'paul',
       entry: { measuredAt: FUTURE(), systolicBP: 145, diastolicBP: 95, pulse: 78 },
-      expectRuleIds: ['RULE_STANDARD_L1_HIGH'],
+      expectRuleIds: ['RULE_CAD_HIGH'],
       expectTiers: ['BP_LEVEL_1_HIGH'],
+      twoReadingSession: true,
       preSubmit: async () => {
-        const u = await tc.findUser(PATIENTS.aisha.email)
+        const u = await tc.findUser(PATIENTS.paul.email)
+        await tc.setEnrollment(u.id, 'ENROLLED')
         const baseTime = Date.now() - 14 * 24 * 60 * 60 * 1000
         const seed = Array.from({ length: 7 }, (_, i) => ({
           measuredAt: new Date(baseTime + i * 24 * 60 * 60 * 1000).toISOString(),
@@ -756,7 +778,7 @@ test.describe('Bucket B G3: Pre-Day-3 mode (educational suppression)', () => {
         await tc.seedReadingsAtTime(u.id, seed)
       },
     })
-    expect(r.fired).toContain('RULE_STANDARD_L1_HIGH')
+    expect(r.fired).toContain('RULE_CAD_HIGH')
   })
 })
 
@@ -785,34 +807,25 @@ test.describe('Bucket B G4: Bradycardia × beta-blocker', () => {
     ).toEqual([])
   })
 
-  // Re-audited Cluster 7 (Niva, 2026-05-15):
-  // Post-Cluster-6 the engine split brady into:
-  //   - bradyAbsoluteRule: HR<40 → RULE_BRADY_ABSOLUTE (Tier 1)
-  //   - bradySymptomaticRule: HR [40,50) + symptom → RULE_BRADY_HR_SYMPTOMATIC
-  // There is intentionally NO asymptomatic rule for HR [40,50) — the BB
-  // therapeutic band sits in [50,60). HR 45 with no symptoms is silent by
-  // design, so this test cannot be un-fixme'd without a new clinical rule.
-  // Leaving fixme + assertion stands as the spec we'd target if Manisha
-  // signs off on an asymptomatic-brady rule in the 40-50 band.
-  test.fixme('Nora HR 45 → BRADY_HR_ASYMPTOMATIC fires (below suppression floor)', async () => {
-    // Below the BB suppression band, the bradycardia rule fires regardless
-    // of the patient's diagnosed-bradycardia status. The asymptomatic vs
-    // symptomatic split depends on the symptom flags on the entry — none
-    // are set here so we expect the asymptomatic variant.
+  // Resolved Cluster 8 Q1 (Manisha 5/18/26 sign-off): HR 40–49 with NO
+  // brady symptoms, on a rate-control med or hasBradycardia, fires
+  // RULE_BRADY_SURVEILLANCE (Tier 3 physician-only chart event). Nora is
+  // Bradycardia + Metoprolol so the gate passes; a single fresh reading at
+  // HR 45 → 1 consecutive ≤45 session (<3) → Tier 3 (not yet escalated).
+  test('Nora HR 45 → RULE_BRADY_SURVEILLANCE fires (Tier 3 surveillance)', async () => {
     const r = await submitAndAssert({
       label: 'nora 45',
       patient: 'nora',
       entry: { measuredAt: FUTURE(), systolicBP: 122, diastolicBP: 76, pulse: 45 },
-      expectRuleIds: ['RULE_BRADY_HR_ASYMPTOMATIC'],
-      expectTiers: ['BP_LEVEL_1_LOW'],
+      expectRuleIds: ['RULE_BRADY_SURVEILLANCE'],
+      expectTiers: ['TIER_3_INFO'],
     })
-    const bradyFired =
-      r.fired.includes('RULE_BRADY_HR_ASYMPTOMATIC') ||
-      r.fired.includes('RULE_BRADY_HR_SYMPTOMATIC')
     expect(
-      bradyFired,
-      `expected a brady rule to fire at HR 45; fired: [${r.fired.join(',')}]`,
+      r.fired.includes('RULE_BRADY_SURVEILLANCE'),
+      `expected RULE_BRADY_SURVEILLANCE at HR 45; fired: [${r.fired.join(',')}]`,
     ).toBeTruthy()
+    const surveillance = r.tiers[r.fired.indexOf('RULE_BRADY_SURVEILLANCE')]
+    expect(surveillance).toBe('TIER_3_INFO')
   })
 })
 
@@ -902,33 +915,28 @@ test.describe('Bucket B G5: HFpEF thresholds and personalized override', () => {
 test.describe('Bucket B G6: Per-condition × age 65+ edges', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
-  // Re-audited Cluster 7 (Niva, 2026-05-15): confirmed real engine gap.
-  //   - standardL1HighRule fires only at SBP≥160 / DBP≥100 (Severe Stage 2)
-  //   - cadHighRule defaults to SBP≥160 unless ctx.threshold.sbpUpperTarget
-  //     overrides; Paul has no threshold seeded, so it falls back to 160 too
-  //   - 145/92 is in the (140,160) annotation band per getCadHtnUncontrolled-
-  //     Annotation but no DeviationAlert row fires
-  // Manisha question (open): should CAD patients get a default sbpUpperTarget
-  // of 140 (per AHA Stage 1 + CLINICAL_SPEC §4.3 130/80 treatment target)?
-  // Until signed off, leave fixme — bumping the default could fire stage-1
-  // alerts for every CAD patient in the cohort without ramp coordination.
-  test.fixme('Paul (CAD, 65+) SBP 145 → STANDARD_L1_HIGH (or CAD_HIGH)', async () => {
-    // Paul has CAD + DOB 1957 (~69yo). At SBP 145 we expect a bp-high
-    // rule to fire — accept either standard or CAD-specific path since
-    // the threshold logic shifts by age but the axis claim is the same.
+  // Resolved Cluster 8 Q2 (Manisha 5/18/26 sign-off): CAD default
+  // sbpUpperTarget lowered 160→140 behind a phased ramp. Phase 1 = newly
+  // enrolled CAD patients. The preSubmit re-stamps Paul's enrolledAt (via
+  // setEnrollment → enrolledAt=now ≥ rollout anchor) so the ramp resolves
+  // his default to 140; SBP 145 ≥ 140 now fires RULE_CAD_HIGH.
+  test('Paul (CAD, 65+) SBP 145 → RULE_CAD_HIGH fires (Q2 default 140)', async () => {
     const r = await submitAndAssert({
       label: 'paul 145',
       patient: 'paul',
       entry: { measuredAt: FUTURE(), systolicBP: 145, diastolicBP: 92, pulse: 72 },
       expectRuleIds: ['RULE_CAD_HIGH'],
       expectTiers: ['BP_LEVEL_1_HIGH'],
+      preSubmit: async () => {
+        const u = await tc.findUser(PATIENTS.paul.email)
+        // Fresh ENROLLED stamp → enrolledAt = now ≥ CAD rollout anchor →
+        // Phase 1 "newly enrolled" → CAD default sbpUpperTarget = 140.
+        await tc.setEnrollment(u.id, 'ENROLLED')
+      },
     })
-    const highRule =
-      r.fired.includes('RULE_CAD_HIGH') ||
-      r.fired.includes('RULE_STANDARD_L1_HIGH')
     expect(
-      highRule,
-      `expected high rule at Paul 145; fired: [${r.fired.join(',')}]`,
+      r.fired.includes('RULE_CAD_HIGH'),
+      `expected RULE_CAD_HIGH at Paul 145 (Q2 default 140); fired: [${r.fired.join(',')}]`,
     ).toBeTruthy()
   })
 

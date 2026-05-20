@@ -40,6 +40,11 @@ model EscalationEvent {
 
 enum LadderStep {
   T0
+  // Cluster 8 (Manisha 5/18/26) — angioedema compressed ladder. Airway
+  // emergency escalates far faster than the standard Tier 1 ladder:
+  // T+15m backup, T+1h medical director + ops.
+  T15M
+  T1H
   T2H
   T4H
   T8H

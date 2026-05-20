@@ -155,6 +155,16 @@ export class TestControl {
   }
 
   /**
+   * Cluster 8 — backdate User.enrolledAt for Q2 CAD-ramp + Q3 first-month
+   * nudge personas. Lets tests simulate "enrolled N days ago" without
+   * waiting; prod-equivalent of EnrollmentService stamping enrolledAt at
+   * ENROLLED transition.
+   */
+  async backdateEnrolledAt(userId: string, deltaSeconds: number): Promise<void> {
+    await this.post('test-control/user/backdate-enrolled-at', { userId, deltaSeconds })
+  }
+
+  /**
    * Insert journal entries at exact timestamps. Bypasses the alert engine
    * (raw fixture insertion only) — use this for tests that need a specific
    * session window or reading count without triggering alerts mid-setup.
@@ -229,6 +239,16 @@ export class TestControl {
   /** Wipe journal/alert/escalation/notification rows for one user. */
   async resetUser(userId: string): Promise<{ rowsDeleted: number }> {
     return this.post('test-control/reset/user', { userId })
+  }
+
+  /**
+   * Cluster 8 §D — wipe ALL of a user's PatientMedication rows. Use before
+   * `setUserMedication` when the test needs an exact roster (e.g., ARB-only
+   * angioedema variant on Aisha, who ships with Lisinopril+Amlodipine —
+   * setUserMedication dedupes by drugName so ACE meds linger otherwise).
+   */
+  async clearUserMedications(userId: string): Promise<{ rowsDeleted: number }> {
+    return this.post('test-control/reset/user-medications', { userId })
   }
 
   /**

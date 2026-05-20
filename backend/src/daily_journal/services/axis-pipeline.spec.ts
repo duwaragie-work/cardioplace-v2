@@ -41,6 +41,8 @@ function noSymptoms(): SessionSymptoms {
     shortnessOfBreath: false,
     dryCough: false,
     nsaidUse: false,
+    faceSwelling: false,
+    throatTightness: false,
     otherSymptoms: [],
   }
 }
@@ -134,6 +136,8 @@ function buildCtx(over: {
     personalizedEligible,
     pregnancyThresholdsActive: isPregnant,
     triggerPregnancyContraindicationCheck: isPregnant,
+    enrolledAt: null,
+    practiceName: null,
     resolvedAt: FIXED_NOW,
   }
 }

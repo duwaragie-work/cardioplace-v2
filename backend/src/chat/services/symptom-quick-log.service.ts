@@ -22,7 +22,16 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
 
+// Every structured per-reading symptom boolean on JournalEntry that a
+// patient could report. Synced 2026-05 so chat/voice symptom-quick-log has
+// parity with the check-in checklist + the engine (was stale at the
+// original 9). Setting any of these creates a symptom-only entry; the alert
+// engine then evaluates whatever rule the flag feeds. Stage-A rules
+// (symptom overrides, angioedema) fire on a lone symptom-only entry;
+// Stage-C side-effect rules (β-blocker fatigue/SOB, ACE cough) still honor
+// their session-averaging / reading-count gates exactly as via check-in.
 export type StructuredSymptomKey =
+  // Original 9 — Level-2 symptom-override triggers.
   | 'severeHeadache'
   | 'visualChanges'
   | 'alteredMentalStatus'
@@ -32,6 +41,20 @@ export type StructuredSymptomKey =
   | 'newOnsetHeadache'
   | 'ruqPain'
   | 'edema'
+  // Cluster 6 (Manisha 5/10/26) — brady-symptomatic / HF-decomp / palpitations.
+  | 'dizziness'
+  | 'syncope'
+  | 'palpitations'
+  | 'legSwelling'
+  // Cluster 7 (Manisha 5/11/26) — Appendix A side-effects. nsaidUse stays
+  // loggable here too (it's a per-reading flag the engine reads).
+  | 'fatigue'
+  | 'shortnessOfBreath'
+  | 'dryCough'
+  | 'nsaidUse'
+  // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
+  | 'faceSwelling'
+  | 'throatTightness'
 
 export interface SymptomQuickLogInput {
   symptom: StructuredSymptomKey

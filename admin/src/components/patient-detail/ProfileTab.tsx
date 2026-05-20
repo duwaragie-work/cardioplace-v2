@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   Loader2,
   AlertTriangle,
+  Info,
 } from 'lucide-react';
 import {
   verifyPatientProfile,
@@ -413,6 +414,28 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
               {GROUP_LABEL[group]}
             </h3>
           </div>
+          {/* Cluster 8 Q2 (Manisha 5/18/26) — persistent CAD treatment-target
+              note. Shown for every CAD patient regardless of alert state so
+              the provider always sees the AHA/ACC target + the default alert
+              thresholds that now fire (SBP ≥140 via the Q2 ramp, DBP ≥80,
+              DBP <70 J-curve low). Per-patient overrides live in Thresholds. */}
+          {group === 'cardiac' && profile.hasCAD && (
+            <div
+              data-testid="admin-profile-cad-treatment-note"
+              className="mx-5 my-3 rounded-xl px-4 py-3 flex items-start gap-2.5"
+              style={{
+                backgroundColor: 'var(--brand-accent-teal-light)',
+                color: 'var(--brand-accent-teal)',
+              }}
+            >
+              <Info className="w-4 h-4 mt-0.5 shrink-0" />
+              <p className="text-[12px] leading-relaxed">
+                <span className="font-bold">CAD patient — AHA/ACC treatment target 130/80.</span>{' '}
+                Default alert thresholds: SBP ≥140 (Q2 ramp) / DBP ≥80 / DBP &lt;70 (J-curve low).
+                Customize per patient in Thresholds.
+              </p>
+            </div>
+          )}
           {/* Column headers */}
           <div className="hidden md:grid grid-cols-[180px_1fr_1fr] px-5 py-2.5" style={{ backgroundColor: 'var(--brand-background)' }}>
             <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>

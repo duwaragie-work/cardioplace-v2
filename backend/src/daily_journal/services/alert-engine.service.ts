@@ -21,6 +21,7 @@ import {
   symptomOverrideGeneralRule,
   symptomOverridePregnancyRule,
 } from '../engine/symptom-override.js'
+import { angioedemaRule } from '../engine/angioedema.js'
 import { absoluteEmergencyRule } from '../engine/absolute-emergency.js'
 import {
   pregnancyL1HighRule,
@@ -28,6 +29,8 @@ import {
 } from '../engine/pregnancy-thresholds.js'
 import {
   cadDbpRule,
+  cadDbpHighRule,
+  cadDefaultUpper,
   cadHighRule,
   dcmRule,
   dhpCcbLegSwellingRule,
@@ -63,6 +66,7 @@ import {
 import {
   afibHrRule,
   bradyAbsoluteRule,
+  bradySurveillanceRuleWithWindow,
   bradySymptomaticRule,
   buildTachyRule,
   getHrContextAnnotation,
@@ -75,8 +79,12 @@ import {
   getLoopDiureticAnnotation,
   loopDiureticHypotensionRule,
 } from '../engine/loop-diuretic.js'
-import { medicationMissedRuleWithWindow } from '../engine/adherence.js'
+import {
+  firstMonthAdherenceNudge,
+  medicationMissedRuleWithWindow,
+} from '../engine/adherence.js'
 import { loadAdherenceWindow } from '../engine/adherence-window.js'
+import { loadBradyPatternWindow } from '../engine/hr-pattern-window.js'
 
 /**
  * Phase/5 AlertEngineService — the single owner of rule evaluation.
@@ -113,9 +121,15 @@ import { loadAdherenceWindow } from '../engine/adherence-window.js'
  *   messages come from OutputGenerator (per-result, stateless).
  */
 type Axis =
+  // Cluster 8 — ACE-angioedema airway emergency. Highest priority: a
+  // potential airway obstruction outranks every BP/contraindication row.
+  | 'angioedema'
   | 'contraindication'
   | 'emergency'
   | 'bp-high'
+  // Cluster 8 Q2 — CAD DBP-high is its own axis so it co-fires with the
+  // SBP bp-high row (the "second independent alert trigger").
+  | 'dbp-high'
   | 'sbp-low'
   | 'dbp-low'
   | 'hr'
@@ -131,12 +145,16 @@ type Axis =
   | 'med-interaction'
   | 'med-cough'
   | 'hf-caregiver-edema'
+  // Cluster 8 Q1 — asymptomatic-bradycardia surveillance chart event.
+  | 'brady-surveillance'
   | 'info'
 
 const AXIS_PRIORITY: Axis[] = [
+  'angioedema',
   'emergency',
   'contraindication',
   'bp-high',
+  'dbp-high',
   'sbp-low',
   'dbp-low',
   'hr',
@@ -150,16 +168,23 @@ const AXIS_PRIORITY: Axis[] = [
   'med-interaction',
   'med-cough',
   'hf-caregiver-edema',
+  'brady-surveillance',
   'info',
 ]
 
 function axisFor(r: RuleResult): Axis {
+  // Cluster 8 — angioedema claims its own axis ahead of everything so the
+  // airway-emergency row coexists with (and outranks) any BP/HR row.
+  if (r.tier === 'TIER_1_ANGIOEDEMA') return 'angioedema'
   if (r.tier === 'TIER_1_CONTRAINDICATION') return 'contraindication'
   if (r.tier === 'BP_LEVEL_2' || r.tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'emergency'
   // HCM vasodilator is Tier 3, not a high/low axis claimant — let HCM_LOW
   // still fire on sbp-low for the same patient (§4.6).
   if (r.ruleId === 'RULE_HCM_VASODILATOR') return 'info'
   if (r.ruleId === 'RULE_CAD_DBP_CRITICAL') return 'dbp-low'
+  // Cluster 8 Q2 — CAD DBP-high emits BP_LEVEL_1_HIGH but claims its own
+  // axis so it co-fires with the SBP cadHighRule 'bp-high' row.
+  if (r.ruleId === 'RULE_CAD_DBP_HIGH') return 'dbp-high'
   // HR rules emit BP_LEVEL_1_HIGH / LOW tiers but represent a different axis.
   if (
     r.ruleId === 'RULE_AFIB_HR_HIGH' ||
@@ -170,6 +195,9 @@ function axisFor(r: RuleResult): Axis {
   ) {
     return 'hr'
   }
+  // Cluster 8 Q1 — surveillance on its own axis so the (Tier 3 / escalated
+  // Tier 2) chart event coexists with any BP/HR row on the same reading.
+  if (r.ruleId === 'RULE_BRADY_SURVEILLANCE') return 'brady-surveillance'
   // Cluster 6 — each new rule lives on its own axis so they coexist with
   // whatever BP/HR row also fires on the same reading.
   if (r.ruleId === 'RULE_HF_DECOMPENSATION') return 'hf-decomp'
@@ -307,6 +335,41 @@ export class AlertEngineService {
       await this.persistAlert(session, ctx, adherenceResult)
     }
 
+    // Pass 3 — Cluster 8 Q1 asymptomatic-bradycardia surveillance.
+    // Independent pass (mirrors the adherence pattern): pre-computes the
+    // consecutive ≤45 bpm session run so the rule can escalate Tier 3 →
+    // Tier 2 on a sustained pattern. persistAlert dedups by
+    // (journalEntryId, ruleId) so this coexists with any Stage C row.
+    const bradyWindow = await loadBradyPatternWindow(
+      this.prisma,
+      session.userId,
+      session.measuredAt,
+      ctx.timezone ?? 'America/New_York',
+    )
+    const bradySurveillanceResult = bradySurveillanceRuleWithWindow(
+      bradyWindow.consecutiveSessionsLe45,
+    )(session, ctx)
+    if (bradySurveillanceResult) {
+      await this.persistAlert(session, ctx, bradySurveillanceResult)
+    }
+
+    // Pass 4 — Cluster 8 Q3 first-month educational adherence nudge.
+    // One-time per patient ever: only fires when NO prior nudge alert
+    // exists for the user (mirrors the CAD-ramp one-time-notice guard).
+    // Reuses the adherence window — no extra query.
+    const nudgeResult = firstMonthAdherenceNudge(adherenceWindow)(session, ctx)
+    if (nudgeResult) {
+      const priorNudges = await this.prisma.deviationAlert.count({
+        where: {
+          userId: session.userId,
+          ruleId: 'RULE_FIRST_MONTH_ADHERENCE_NUDGE',
+        },
+      })
+      if (priorNudges === 0) {
+        await this.persistAlert(session, ctx, nudgeResult)
+      }
+    }
+
     // Bug #6/#7 fix: the silent auto-resolve sweep was removed. A clean
     // reading must NOT mutate prior open alerts — that flow flipped alerts
     // to RESOLVED with NULL resolutionAction / resolutionRationale /
@@ -344,6 +407,10 @@ export class AlertEngineService {
     // also run for AFib patients with <3 readings, since contraindications
     // and symptom overrides aren't BP/HR-sample-size dependent.
     const preGateRules: RuleFunction[] = [
+      // Cluster 8 — angioedema runs FIRST. Airway emergency fires for ALL
+      // patients on a single reading (bypasses AFib ≥3 + Q2 single-reading
+      // gates) and claims the top-priority 'angioedema' axis.
+      angioedemaRule,
       pregnancyAceArbRule,
       ndhpHfrefRule,
       // symptomOverridePregnancyRule runs BEFORE symptomOverrideGeneralRule
@@ -460,6 +527,8 @@ export class AlertEngineService {
       hfpefRule,
       cadDbpRule,
       cadHighRule,
+      // Cluster 8 Q2 — CAD DBP-high; own axis so it co-fires with cadHighRule.
+      cadDbpHighRule,
       hcmRule,
       // HCM vasodilator is split from hcmRule so it claims the info axis
       // independently — an HCM patient on a DHP-CCB with low SBP fires both
@@ -784,6 +853,54 @@ export class AlertEngineService {
       tier: result.tier,
       ruleId: result.ruleId,
     })
+
+    // Cluster 8 Q2 — one-time provider notice when a CAD patient's effective
+    // threshold first changed 160→140. Fire-and-forget; never blocks the
+    // alert. Idempotent: only on the patient's FIRST RULE_CAD_HIGH alert.
+    void this.maybeNotifyCadThresholdRamp(session, ctx, result).catch((err) =>
+      this.logger.warn(
+        `CAD threshold-ramp notice failed for user ${session.userId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      ),
+    )
+  }
+
+  /**
+   * Cluster 8 Q2 — when the phased ramp first lowers a CAD patient's default
+   * sbpUpperTarget to 140 (no provider-set custom threshold) and that change
+   * produces the patient's first RULE_CAD_HIGH alert, send a one-time
+   * dashboard notice to the primary provider so they can customise the
+   * threshold. Idempotent via the "exactly one CAD_HIGH alert exists" guard.
+   */
+  private async maybeNotifyCadThresholdRamp(
+    session: SessionAverage,
+    ctx: ResolvedContext,
+    result: RuleResult,
+  ): Promise<void> {
+    if (result.ruleId !== 'RULE_CAD_HIGH') return
+    // Only when the NEW default produced this alert: no provider custom
+    // threshold AND the ramp resolved this patient to 140.
+    if (ctx.threshold?.sbpUpperTarget != null) return
+    if (cadDefaultUpper(ctx) !== 140) return
+    const providerId = ctx.assignment?.primaryProviderId
+    if (!providerId) return
+
+    const cadHighCount = await this.prisma.deviationAlert.count({
+      where: { userId: session.userId, ruleId: 'RULE_CAD_HIGH' },
+    })
+    // >1 means an earlier CAD_HIGH already fired — notice already sent.
+    if (cadHighCount !== 1) return
+
+    await this.prisma.notification.create({
+      data: {
+        userId: providerId,
+        channel: 'DASHBOARD',
+        title: 'CAD patient alert threshold updated',
+        body: 'CAD patient alert threshold updated from SBP ≥160 to SBP ≥140 per AHA/ACC guideline alignment (treatment target 130/80). Customise the threshold in patient settings.',
+        tips: [],
+      },
+    })
   }
 
   private legacyTypeFor(result: RuleResult, session: SessionAverage): 'SYSTOLIC_BP' | 'DIASTOLIC_BP' | 'WEIGHT' | 'MEDICATION_ADHERENCE' {
@@ -806,6 +923,7 @@ export class AlertEngineService {
   private legacySeverityFor(result: RuleResult): 'LOW' | 'MEDIUM' | 'HIGH' {
     if (
       result.tier === 'TIER_1_CONTRAINDICATION' ||
+      result.tier === 'TIER_1_ANGIOEDEMA' ||
       result.tier === 'BP_LEVEL_2' ||
       result.tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
     ) {
@@ -832,6 +950,7 @@ export class AlertEngineService {
 function isNonDismissableTier(tier: RuleResult['tier']): boolean {
   return (
     tier === 'TIER_1_CONTRAINDICATION' ||
+    tier === 'TIER_1_ANGIOEDEMA' ||
     tier === 'BP_LEVEL_2' ||
     tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
   )
@@ -847,6 +966,8 @@ function patientNotificationTitle(tier: RuleResult['tier']): string {
     case 'BP_LEVEL_2':
     case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
       return 'Urgent Blood Pressure Alert'
+    case 'TIER_1_ANGIOEDEMA':
+      return 'Urgent — get medical help now'
     case 'TIER_1_CONTRAINDICATION':
       return 'Important medication alert'
     case 'TIER_2_DISCREPANCY':

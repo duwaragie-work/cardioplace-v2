@@ -23,6 +23,7 @@ import {
 } from './pregnancy-thresholds.js'
 import {
   cadDbpRule,
+  cadDbpHighRule,
   cadHighRule,
   dcmRule,
   hcmRule,
@@ -68,6 +69,8 @@ function noSymptoms(): SessionSymptoms {
     shortnessOfBreath: false,
     dryCough: false,
     nsaidUse: false,
+    faceSwelling: false,
+    throatTightness: false,
     otherSymptoms: [],
   }
 }
@@ -165,6 +168,8 @@ function ctx(over: {
       over.pregnancyThresholdsActive ?? profile.isPregnant,
     triggerPregnancyContraindicationCheck:
       over.triggerPregnancyContraindicationCheck ?? profile.isPregnant,
+    enrolledAt: null,
+    practiceName: null,
     resolvedAt: FIXED_NOW,
   }
 }
@@ -619,6 +624,77 @@ describe('cadHighRule (J — SBP-high axis)', () => {
     expect(
       cadHighRule(session({ systolicBP: 140, diastolicBP: 85 }), cadctx),
     ).toBeNull()
+  })
+})
+
+// Cluster 8 Q2 (Manisha 5/18/26) — CAD DBP-high "second independent trigger".
+describe('cadDbpHighRule (Cluster 8 Q2 — DBP-high axis)', () => {
+  const cadctx = ctx({ profile: { hasCAD: true } })
+
+  it('ramp inactive (enrolledAt null, phase 1) + no custom → does NOT fire at DBP 95', () => {
+    expect(
+      cadDbpHighRule(session({ systolicBP: 145, diastolicBP: 95 }), cadctx),
+    ).toBeNull()
+  })
+
+  it('phase 3 (ramp all CAD) → CAD 145/95 fires RULE_CAD_DBP_HIGH', () => {
+    const prev = process.env.CAD_THRESHOLD_ROLLOUT_PHASE
+    process.env.CAD_THRESHOLD_ROLLOUT_PHASE = '3'
+    try {
+      const r = cadDbpHighRule(session({ systolicBP: 145, diastolicBP: 95 }), cadctx)
+      expect(r?.tier).toBe('BP_LEVEL_1_HIGH')
+      expect(r?.ruleId).toBe('RULE_CAD_DBP_HIGH')
+      expect(r?.actualValue).toBe(95)
+    } finally {
+      if (prev === undefined) delete process.env.CAD_THRESHOLD_ROLLOUT_PHASE
+      else process.env.CAD_THRESHOLD_ROLLOUT_PHASE = prev
+    }
+  })
+
+  it('phase 3 + DBP=79 → no alert (boundary, default 80)', () => {
+    const prev = process.env.CAD_THRESHOLD_ROLLOUT_PHASE
+    process.env.CAD_THRESHOLD_ROLLOUT_PHASE = '3'
+    try {
+      expect(
+        cadDbpHighRule(session({ systolicBP: 145, diastolicBP: 79 }), cadctx),
+      ).toBeNull()
+    } finally {
+      if (prev === undefined) delete process.env.CAD_THRESHOLD_ROLLOUT_PHASE
+      else process.env.CAD_THRESHOLD_ROLLOUT_PHASE = prev
+    }
+  })
+
+  it('provider custom dbpUpperTarget fires regardless of ramp phase', () => {
+    const customCtx = ctx({
+      profile: { hasCAD: true },
+      threshold: {
+        sbpUpperTarget: null,
+        sbpLowerTarget: null,
+        dbpUpperTarget: 90,
+        dbpLowerTarget: null,
+        hrUpperTarget: null,
+        hrLowerTarget: null,
+        setByProviderId: 'prov-1',
+        setAt: FIXED_NOW,
+        notes: null,
+      },
+    })
+    const r = cadDbpHighRule(session({ systolicBP: 130, diastolicBP: 92 }), customCtx)
+    expect(r?.ruleId).toBe('RULE_CAD_DBP_HIGH')
+    expect(r?.metadata.thresholdValue).toBe(90)
+  })
+
+  it('non-CAD patient → never fires', () => {
+    const prev = process.env.CAD_THRESHOLD_ROLLOUT_PHASE
+    process.env.CAD_THRESHOLD_ROLLOUT_PHASE = '3'
+    try {
+      expect(
+        cadDbpHighRule(session({ systolicBP: 145, diastolicBP: 99 }), ctx()),
+      ).toBeNull()
+    } finally {
+      if (prev === undefined) delete process.env.CAD_THRESHOLD_ROLLOUT_PHASE
+      else process.env.CAD_THRESHOLD_ROLLOUT_PHASE = prev
+    }
   })
 })
 

@@ -110,6 +110,11 @@ export interface SessionSymptoms {
   shortnessOfBreath: boolean
   dryCough: boolean
   nsaidUse: boolean
+  /** Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
+   *  Either flag fires the angioedema rule (Tier 1) for ALL patients
+   *  regardless of medication profile. */
+  faceSwelling: boolean
+  throatTightness: boolean
   /** Freeform symptoms retained for context but not used in override logic. */
   otherSymptoms: string[]
 }
@@ -160,6 +165,15 @@ export interface RuleResultMetadata {
   adherenceDaysWithMissOver7d?: number
   /** Cluster 6 — true when the alert fired because of the beta-blocker carve-out. */
   adherenceBetaBlockerCarveOut?: boolean
+  /** Cluster 8 — which angioedema symptom(s) the patient reported. Lets the
+   *  message builders lead with throat-tightness phrasing vs face-swelling
+   *  and decide whether to include the "do not take your medicine" line. */
+  angioedemaFace?: boolean
+  angioedemaThroat?: boolean
+  /** Cluster 8 Q1 — count of consecutive ≤45 bpm sessions driving the
+   *  brady-surveillance Tier 3 → Tier 2 escalation. Rendered in the
+   *  physician message. */
+  bradySustainedSessions?: number
 }
 
 /**

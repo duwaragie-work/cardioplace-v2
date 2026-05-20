@@ -183,6 +183,20 @@ const fr: Record<TranslationKey, string> = {
   'checkin.b3.symptomSyncope': 'Évanouissement récent ou sensation de défaillance',
   'checkin.b3.symptomPalpitations': 'Cœur qui bat la chamade ou palpitations',
   'checkin.b3.symptomLegSwelling': 'Gonflement des jambes/pieds ou prise de poids rapide',
+  // Cluster 7 (Manisha 5/11/26) — libellés d'effets secondaires (Annexe A).
+  'checkin.b3.symptomFatigue': 'Fatigue inhabituelle ou manque d’énergie',
+  'checkin.b3.symptomShortnessOfBreath': 'Essoufflement ou respiration plus difficile que d’habitude',
+  'checkin.b3.symptomDryCough': 'Une nouvelle toux sèche et irritative',
+  // Cluster 8 (Manisha 5/18/26, P0) — urgence des voies aériennes (angio-œdème).
+  'checkin.b3.symptomFaceSwelling': 'Gonflement du visage, des lèvres ou de la langue',
+  'checkin.b3.symptomThroatTightness': 'Gorge serrée ou difficulté à avaler',
+  // Cluster 8 (Manisha 5/18/26, P0) — corps d'alerte angio-œdème.
+  'alert.angioedema.patientAce':
+    "Vous avez signalé un gonflement du visage, des lèvres ou de la langue, ou une sensation de gorge serrée. Cela nécessite des soins médicaux urgents. Si vous avez aussi du mal à respirer ou la gorge serrée, appelez le 911 maintenant. Sinon, allez aux urgences les plus proches maintenant. Ne prenez plus votre médicament pour la tension artérielle jusqu'à ce que votre médecin vous dise que c'est sans danger.",
+  'alert.angioedema.patientGeneric':
+    'Vous avez signalé un gonflement du visage, des lèvres ou de la langue, ou une sensation de gorge serrée. Cela nécessite des soins médicaux urgents. Si vous avez aussi du mal à respirer ou la gorge serrée, appelez le 911 maintenant. Sinon, allez aux urgences les plus proches maintenant.',
+  'alert.angioedema.caregiver':
+    "Il/elle a signalé un gonflement du visage, des lèvres ou de la langue. Cela peut être une réaction dangereuse à l'un de ses médicaments pour la tension. S'il/elle a du mal à respirer ou la gorge serrée, appelez le 911 maintenant. Sinon, emmenez-le/la aux urgences les plus proches maintenant. Ne le/la laissez pas prendre une autre dose de ce médicament.",
   'checkin.confirm.takeSecondReading': 'Prenez une seconde mesure dans environ 1 minute',
   'checkin.confirm.takeSecondReadingHint':
     "Une seule mesure peut être inexacte — une seconde aide votre équipe à voir l'ensemble. Nous attendrons quelques minutes.",

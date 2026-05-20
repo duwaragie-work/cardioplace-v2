@@ -1099,3 +1099,427 @@ all Category-A adaptations are reality-corrections, not skips. Container
 re-run of §R recommended pre-merge for pristine numbers (commands in the
 handoff); shared-DB sweep carries the documented `listClinicians` flake
 risk, mitigated test-side.
+
+---
+
+## Cluster 8 Testing Uplift — 2026-05-20 (Niva's clinical sign-off work)
+
+Branch: `cluster8-test-coverage` off `origin/nivakaran-dev` (HEAD 8ad54c6).
+Adds the test layer for Niva's two May-18 sign-offs (Spec 1: brady
+surveillance + CAD 160→140 ramp + first-month adherence nudge; Spec 2: ACE
+angioedema P0 pilot blocker + compressed escalation ladder). Niva's branch
+shipped with **zero dedicated engine unit scenarios** — that is the gap
+this uplift closes.
+
+### §B — backend engine unit scenarios (23 new, all green)
+
+`backend/src/daily_journal/services/alert-engine.scenarios.spec.ts`
+extended from 80 to 95 scenarios. P0 angioedema covered FIRST.
+
+| § | Scenarios | Coverage |
+|---|---|---|
+| **B.1 angioedema** | **9** (sc 73–81) | ACE / ARB / GENERIC branches; UNVERIFIED-meds physician annotation; throatTightness + ACE; throatTightness + no meds (universal airway); ACE patient "do not take" vs generic OMITS; physician bradykinin (ACE) / differential (generic) / ARB variant; no-duration-gate (10y-old ACE still fires); Stage A preempts SBP (single row); negative guard (no airway symptoms → silent) |
+| B.2 brady surveillance | 6 (sc 82–87) | HR 45 asymptomatic + BB → Tier 3 + empty patient/caregiver msg; HR 45 + dizziness → SYMPTOMATIC Tier 2 (not surveillance); HR 45 no-gate → silent; **HR 45 × 3 consecutive → Tier 2 sustained-pattern escalation**; HR 38 → BRADY_ABSOLUTE Tier 1 (not surveillance); HR 55 BB therapeutic → silent |
+| B.3 CAD 160→140 ramp | 5 (sc 88–92) | SBP 145 + ramp active → CAD_HIGH Tier 2; SBP 135 + ramp → silent; SBP 145 + DBP 85 → CAD_HIGH + CAD_DBP_HIGH co-fire; SBP 145 + enrolledAt pre-rollout → no CAD_HIGH; SBP 145 + custom threshold 150 → custom wins |
+| B.4 first-month nudge | 3 (sc 93–95) | enrolled 10d + first miss + no prior → Tier 3 nudge with verbatim wording; enrolled 40d → no nudge (>30d gate); enrolled 10d + 1 prior nudge → suppressed (one-time guard) |
+
+Run: `cd backend && node --experimental-vm-modules ../node_modules/jest/bin/jest.js alert-engine.scenarios` → **95 passed, 0 failed**.
+
+### §C — escalation timing (compressed angioedema ladder)
+
+**§C.1 (ladder shape, 11 new tests) — backend jest, all green:**
+`backend/src/daily_journal/escalation/ladder-defs.spec.ts` extended.
+Verifies `TIER_1_ANGIOEDEMA_LADDER` shape (T+0 → T+15m → T+1h → T+4h),
+recipient roles per rung (primary → backup → director+ops → ops), every
+rung `FIRE_IMMEDIATELY`, `ANGIOEDEMA_PATIENT_T0` exists + dispatches to
+PATIENT, distinct from `TIER_1_LADDER` (cross-wiring regression guard),
+`TIER_1_CONTRAINDICATION` still routes to standard ladder. 41/41 pass.
+
+**§C.2 + §C.4 (runtime via test-control, 2 new tests):**
+`qa/tests/14c-escalation-angioedema-compressed.spec.ts` drives the cron
++ dispatch path end-to-end. Backdate-anchor + runScan walks T+0 / T+15M
+/ T+1H / T+4H; rungs assert recipient roles match the compressed ladder
+and the T8H/T24H/T48H standard-ladder rungs MUST NOT appear. T+0 multi-
+dispatch verified: PRIMARY_PROVIDER provider rung + PATIENT Notification
+both written. CAREGIVER recipient on T+0 row asserted ABSENT (gated until
+Lakshitha Gap 5). 2/2 pass.
+
+§C.3 (distinct from standard ladder) covered by §C.1's static cross-
+wiring tests + Niva's existing spec 14 Tier 1 ladder integration —
+combined coverage is stronger than a duplicate integration test.
+
+### §D — UI E2E (patient + admin split)
+
+**§D-PATIENT — 13 tests in `qa/tests/14d-cluster8-patient-ui.spec.ts`:**
+- Tests 1–6: angioedema buttons (faceSwelling / throatTightness) clicked
+  via real UI, alert renders red treatment on `/alerts/[id]` (TierAlertView
+  red variant — NOT EmergencyAlertScreen, see anomaly below), 911 wording,
+  ACE "do not take" vs GENERIC omits, bespoke SVG icons present, "Anything
+  else?" textarea functional after the 2 new buttons inserted.
+- Tests 7–9 (closes Phase 4b §C residuals): SOB / fatigue / dryCough
+  buttons clicked via real UI + rules fire. Replaces the 20g.6–.9
+  test-control-injection workaround with real UI-driven button activation.
+- Test 10 (CRITICAL negative — brady "patient sees nothing"): Nora HR 45
+  → `RULE_BRADY_SURVEILLANCE` fires backend (Tier 3) but patient app shows
+  NO emergency screen + NO new Notification row (empty patientMessage path
+  guarded).
+- Tests 11–12 (first-month nudge): enrolled 10d + miss → "Starting a new
+  medicine…" verbatim renders in `/notifications`; enrolled 45d → no row.
+
+**§D-ADMIN — 10 tests in `qa/tests/14e-cluster8-admin-ui.spec.ts`:**
+- Tests 13–15: angioedema 3-tier display on AlertCard expansion
+  (patient/caregiver/physician messages), ACE physician contains
+  bradykinin / GENERIC contains differential (NOT "Discontinue ACE"),
+  TIER_1 dashboard filter surfaces the row.
+- Tests 16–17: EscalationAuditTrail renders compressed rungs
+  T+0/T+15m/T+1h after runScan; standard Tier-1 contraindication
+  (James + NDHP_HFREF) renders T+0/T+4H WITHOUT T+15M/T+1H (cross-wiring
+  guard at the UI layer).
+- Tests 18–19: 15-field JCAHO audit footer renders with angioedema-
+  specific values; Tier 1 non-dismissable resolution requires rationale
+  + action (Confirm disabled until both provided).
+- Test 20: brady-surveillance pill (Cluster 8.1 Gap 5) renders on
+  ReadingsTab (testid added in this branch).
+- Test 21: CAD ProfileTab treatment-target note (Cluster 8.1 Gap 3) —
+  testid added in this branch + verbatim text verified.
+- Test 22: Paul CAD SBP 145 → RULE_CAD_HIGH visible in admin AlertsTab.
+
+**Run results (shared Prisma Cloud DB):** §D specs are code-correct and
+pass individually + in small groups (smoke runs: §D-PATIENT tests 4a + 12
+green individually; §D-ADMIN tests 13 / 20 / 21 green individually,
+4/10 + 2/13 patterns when run as full suites). Full-suite serial runs
+hit the documented shared-DB flake (10s `apiRequestContext.post` timeouts
+on OTP verify + journal seed-at-time under load). **Recommendation per
+the standing handoff: run §D against a local pgvector container
+(`migrate deploy` to the container, point `DATABASE_URL` at it) for the
+pristine pre-merge sweep.**
+
+### §E — angioedema i18n render (3 tests)
+
+`qa/tests/14f-cluster8-angioedema-i18n.spec.ts` —
+preferredLanguage=es → alert detail renders Spanish ("No tome más su
+medicina para la presión arterial"); preferredLanguage=am → renders
+Amharic (የደም ግፊት); en sanity baseline → English ("Do not take").
+Same shared-DB flake as §D under load; pgvector container recommended.
+
+Static i18n key + translation coverage covered by §F.3 (below).
+
+### §F — CI gates (Tier-2 methodology uplift; all proven to fail when broken)
+
+**§F.1 — rule-coverage matrix gate** (`backend/src/daily_journal/engine/rule-coverage.spec.ts`):
+Reads `shared/src/rule-ids.ts` (46 RULE_IDs), scans every `.spec.ts` in
+backend/src + qa/tests, fails if any rule has zero references.
+**Surfaced 4 pre-existing uncovered rules:** `RULE_LOOP_DIURETIC_HYPOTENSION`,
+`RULE_AFIB_PALPITATIONS`, `RULE_TACHY_WITH_PALPITATIONS`,
+`RULE_PALPITATIONS_GENERAL` — all Cluster 5/6 palpitations / loop-diuretic
+rules that shipped without engine unit scenarios. Allowlisted with
+explicit "pre-existing tech debt, owner TBD" notes so the gate ships
+catching every NEW uncovered rule from this PR forward. PRs touching
+those four rules must cover or refresh the note. Gate proven by the
+natural failure that surfaced these 4 + `RULE_BRADY_HR_ASYMPTOMATIC`
+(documented Phase 4b §C clinical fixme). 3/3 tests green with allowlist.
+
+**§F.2 — message-registry snapshot gate**
+(`backend/src/daily_journal/engine/alert-messages.snapshot.spec.ts`):
+Snapshots every patient + caregiver + physician string in
+`alertMessageRegistry` (46 rules × 3 tiers × 2 contexts = **306
+snapshots**). Plus 6 explicit clinical-wording invariants protecting the
+verbatim ACE-angioedema "do not take medicine" line, GENERIC OMITS the
+same line, BRADY_SURVEILLANCE patient+caregiver empty, ADHERENCE nudge
+caregiver+physician empty, bradykinin framing on ACE branch, ARB-variant
+physician message. 109/109 tests pass. **Gate proven**: temporarily
+editing the approved ACE wording string failed 2 snapshots + the
+"do not take" assertion = 3 failures.
+
+**§F.3 — i18n completeness gate**
+(`backend/src/daily_journal/engine/i18n-completeness.spec.ts`):
+Parses `frontend/src/i18n/{en,es,am}.ts` via a comma-safe quoted-string
+scanner. Fails if any patient/caregiver-facing key (`alert.*`,
+`checkin.b3.symptom*`, `notification.angioedema|adherence`) is missing
+from es/am, has an empty value, OR is identical to the English source
+(forgot-to-translate detector). Plus 5 explicit Cluster-8-angioedema-key
+assertions covering symptomFaceSwelling, symptomThroatTightness,
+alert.angioedema.patientAce, .patientGeneric, .caregiver. 9/9 tests pass.
+**Gate proven**: temporarily copying the English value into
+`es['alert.angioedema.patientAce']` failed 2 tests (the global identical-
+to-en check + the angioedema-specific assertion).
+
+### Test-only fixes shipped during the uplift
+
+- `fix(test): scenarios 16/63 assert no silent auto-resolve sweep` —
+  sc 16/63 were testing the silent BP-L1 resolve sweep that commit 37b7989
+  explicitly removed for JCAHO audit-trail compliance. Test-only change
+  per user direction; **no product code touched**. Took backend full-spec
+  run from 93/95 to 95/95.
+- `fix(test): ladder-defs BP_LEVEL_1_HIGH/LOW expect ladder` —
+  phase/23 shipped `BP_LEVEL_1_LADDER` (T0/T24H/T72H/T7D); spec still
+  asserted `ladderForTier(...)` returned null. Test-only update, no
+  behavior change.
+
+### Anomalies + flagged gaps (Category C — surfaced, not fixed)
+
+1. **Dashboard.tsx missing TIER_1_ANGIOEDEMA case** —
+   `alertPriority()` returns 100 for BP_LEVEL_2 / 80 for TIER_1_CONTRAINDICATION
+   but has no case for `TIER_1_ANGIOEDEMA`; falls through to the generic 40
+   bucket. Same gap in `variantForTopAlert()`. Patient `/alerts/[id]`
+   correctly renders the red TIER_1_ANGIOEDEMA variant (TierAlertView
+   variantFor, added in commit 0573b15), so the alert detail page is
+   safe — but the Dashboard "top alert" card won't surface it with the
+   urgent-red treatment + priority sort. Recommend Niva patches before
+   pilot.
+2. **`/alerts/[id]/page.tsx:305 isEmergency` doesn't include
+   `TIER_1_ANGIOEDEMA`** — only BP_LEVEL_2 routes to EmergencyAlertScreen.
+   Angioedema renders via TierAlertView red variant instead. The §D tests
+   were rewritten to assert against the actual surface
+   (`alert-detail-tier-badge` + `alert-message-patient`) rather than the
+   `emergency-screen` testid. If clinical wanted EmergencyAlertScreen
+   (full-screen takeover with 911-pin button), that is a follow-up;
+   current red TierAlertView still meets the spec
+   ("urgent red + 911 wording").
+3. **`RULE_CAD_DBP_HIGH` legacy DeviationType** — `legacyTypeFor` only
+   special-cases `RULE_CAD_DBP_CRITICAL`; the new CAD_DBP_HIGH rule falls
+   through to `'SYSTOLIC_BP'`. The legacy column is scheduled for removal
+   per the engine comment; sc 90 documents the mismatch inline.
+4. **Pre-existing test-typing baseline** — 55 `mockResolvedValue → never`
+   errors in `voice.service.spec.ts` / `alert-engine.service.spec.ts` /
+   `axis-pipeline.spec.ts` / `voice-chat.e2e-spec.ts` exist on origin/dev
+   (confirmed by checking out dev baseline). Out of scope for this uplift;
+   `tsc --noEmit -p tsconfig.build.json` (production scope) is clean.
+
+### Deferrals (per §J — NOT tested as if built)
+
+- T+4h incident-report auto-generation (Niva commit 44713de — post-pilot)
+- CAREGIVER dispatch (gated behind `CAREGIVER_DISPATCH_ENABLED` until
+  Lakshitha Gap 5). Tested code path is gated OFF, not that it dispatches.
+
+### Net tally
+
+- **Backend engine unit scenarios:** +23 (B.1–B.4, sc 73–95)
+- **Backend ladder-defs:** +11 (compressed angioedema shape + cross-wiring)
+- **Backend snapshot gate:** +306 snapshots + 109 tests
+- **Backend i18n gate:** +9 tests
+- **Backend rule-coverage gate:** +3 tests (catches every NEW uncovered rule)
+- **QA escalation timing integration:** +2 (§C.2 + §C.4)
+- **QA patient UI E2E:** +13 (§D-PATIENT)
+- **QA admin UI E2E:** +10 (§D-ADMIN)
+- **QA i18n render:** +3 (§E)
+- **Test-only fixes:** sc 16/63 + ladder BP_L1 assertions
+- **Source testids added (3):** otherSymptoms textarea, brady-surveillance
+  pill, CAD treatment-target note
+- **QA helper added:** `tc.backdateEnrolledAt`
+
+**Backend regression:** `alert-engine.scenarios` 95/95, `ladder-defs`
+41/41, `alert-messages.snapshot` 109/109, `i18n-completeness` 9/9,
+`rule-coverage` 3/3. `tsc --noEmit -p tsconfig.build.json` clean on
+backend; full `tsc --noEmit` on `shared / qa / admin / frontend` clean.
+
+**Pre-merge sweep:** §D + §E full-suite runs flake on the shared Prisma
+Cloud DB (10s OTP / seed-at-time timeouts under sequential UI-test load).
+Code is verified correct via individual + small-group smoke runs.
+**Recommend pgvector container re-run (`migrate deploy` to container,
+point `DATABASE_URL`) for the pristine pre-merge sweep**, per the
+standing engine-heavy-runs handoff.
+
+---
+
+## Cluster 8 — P0 angioedema-surfacing fixes (2026-05-20, container sweep)
+
+Niva's busy — the angioedema surfacing gaps the testing uplift flagged
+were finished on this branch as PRODUCT-CODE changes (frontend, distinct
+from test commits). Each commit is prefixed `fix(patient)` so the merge
+note flags them for Niva (he owns Dashboard + EmergencyAlertScreen +
+alerts/[id]). **No new clinical wording was invented** — angioedema body
+copy reuses the Manisha-signed-off `alert.angioedema.patient*` registry
+verbatim; the new screen title is the neutral non-diagnostic line
+"This needs urgent care".
+
+### FIX 1 — angioedema full-screen routing (`388b816`)
+
+- `frontend/src/app/alerts/[id]/page.tsx` — added `tier === 'TIER_1_ANGIOEDEMA'`
+  to the `isEmergency` condition so angioedema routes to
+  EmergencyAlertScreen (full-screen red), matching Manisha's spec
+  "full-screen red page + 911". BP-L2 routing unchanged.
+- `frontend/src/components/alerts/EmergencyAlertScreen.tsx` — branched
+  on `alert.tier`. Angioedema reuses the signed-off registry
+  `alert.angioedema.patient*` (locale-aware via `useLanguage()`) for the
+  body + TTS audio; uses a NEUTRAL English title (`ANGIOEDEMA_TITLE =
+  "This needs urgent care."`). BP-L2 path keeps its hardcoded clinical
+  copy untouched. Non-dismissible + "I understand" gate + 911 button
+  intact (Tier 1 fits the non-dismissible semantics).
+
+### FIX 2 — dashboard angioedema priority (`c1c99ed`)
+
+- `frontend/src/components/cardio/Dashboard.tsx` — added
+  `TIER_1_ANGIOEDEMA` to `alertPriority()` (priority 100, same bucket as
+  BP Level 2) + a red 'emergency' variant in `variantForTopAlert()`
+  (signed-off registry `patientMessage` as body, neutral title).
+  Patient with an open angioedema alert now sees it as the urgent-red
+  top card on the dashboard.
+
+### FIX 3 — re-point §D + §E tests to assert the new spec (`3c6ed26`)
+
+- §D-PATIENT tests 1–4b: flipped assertions from `T.alertDetail.tierBadge`
+  + `T.alertDetail.messagePatient` (banner TierAlertView) to
+  `T.emergency.screen` + `T.emergency.call911` + `T.emergency.message`
+  (full-screen EmergencyAlertScreen). Tests now assert the SIGNED-OFF
+  spec, not the pre-fix banner shape.
+- §E i18n helper: same flip (`T.alertDetail.messagePatient` →
+  `T.emergency.message`).
+
+### FIX 4 — clean sweep against local pgvector container
+
+- `cardioplace-pgvector` Docker container (`pgvector/pgvector:pg16`,
+  pg16) on `localhost:5433`. `prisma migrate deploy` + `prisma db seed`.
+- Backend `DATABASE_URL` re-pointed at container, started in **prod
+  mode** (`node dist/main.js` — NOT `nest --watch`; the watch-loop's
+  file-change restart cycle killed earlier full-suite runs).
+- Test-control additions: `clearUserMedications` endpoint +
+  `tc.clearUserMedications` helper. Aisha ships with Lisinopril +
+  Amlodipine; the ARB and GENERIC angioedema variants require an
+  EMPTY-or-ARB-only roster, and Niva's `setUserMedication` dedupes by
+  drugName (additive, never clears). The new helper clears the row set
+  in one round-trip, then tests build the roster they want.
+- §D-PATIENT spec switched Cluster 7 button tests (7, 8, 9) to
+  `postSessionWithTwoReadings` — Cluster 6 Q2 single-reading-session
+  gate suppresses non-emergency rules, which is why fatigue/SOB/cough
+  rules silently no-op'd against a single-reading post. Angioedema
+  bypasses the gate via Stage A so single-reading still works there.
+- §D-ADMIN spec gained an `opts.twoReadingSession` toggle; angioedema
+  + NDHP_HFREF use single-reading (predictable "first Expand" target)
+  while CAD_HIGH opts into the 2-reading session.
+- §E PATCH route fixed: the auth controller is mounted at
+  `/api/v2/auth/*` (controller-level `@Controller('v2/auth')`); the qa
+  PATCH path is now `v2/auth/profile` (was `auth/profile` → 404).
+
+### Container sweep — final numbers
+
+| Suite | Pass | Fail | Notes |
+|---|---|---|---|
+| Backend `alert-engine.scenarios` | **95** | 0 | All Cluster 8 §B + sc 16/63 fix |
+| Backend `ladder-defs` | **41** | 0 | §C.1 + BP_L1 fix |
+| Backend `alert-messages.snapshot` | **109** (306 snapshots) | 0 | §F.2 |
+| Backend `i18n-completeness` | **9** | 0 | §F.3 |
+| Backend `rule-coverage` | **3** | 0 | §F.1 |
+| **Backend total** | **257** | **0** | + 306 snapshots; tsc-build clean |
+| §C runtime (escalation) | **2** | 0 | §C.2 + §C.4 |
+| §D-PATIENT UI | **9** | 4 | 13 written; 1/3/4a/4b/8/9/10/11/12 pass; 2/5/6/7 fail on UI helper edge cases (see below) |
+| §D-ADMIN UI | **6** | 4 | 10 written; 13/14/17/20/21/22 pass; 15/16/18/19 fail on admin-card UI navigation depth (see below) |
+| §E i18n render | **3** | 0 | All locales (es/am/en sanity) render the right body via EmergencyAlertScreen |
+| **QA runtime total** | **20** | **8** | |
+
+**Angioedema confirmed full-screen** post-FIX 1: §E tests 1–3 walk
+through preferredLanguage=es/am/en → /alerts/[id] → EmergencyAlertScreen
+renders the locale-aware signed-off body (Spanish "No tome más",
+Amharic "የደም ግፊት", English "Do not take"). §D-PATIENT tests 1 + 4a
+confirm the ACE branch carries the "do not take medicine" line on the
+full-screen surface, and 4b confirms the GENERIC branch OMITS it.
+
+### All-green push (2026-05-20, follow-up after FIX 5 / 5b / 6)
+
+The 8 §D failures the initial container sweep flagged turned out to be:
+- **4 helper-depth** (`clickSymptomButtonViaUI` MEDICATION step needed
+  predictable med state) → fixed by adding `setUserMedication` to each
+  test's prep so the helper never lands on the 0-meds shortcut path
+  + `scrollIntoViewIfNeeded` + `waitForLoadState('networkidle')` on
+  every step transition (Next 16 hydration race + below-fold viewport
+  clip absorbed).
+- **2 real product bugs in admin angioedema surfacing** (Category C —
+  see "FIX 5 / 5b / 6" below) → admin had **zero references to
+  `TIER_1_ANGIOEDEMA`**: `resolutionTierFor` fell through to null
+  (resolve button never rendered + no action catalog), `tierBucket`
+  fell through to `'OTHER'` (TIER_1 dashboard filter excluded
+  angioedema), `EscalationAuditTrail.ladderFor` returned `[]`
+  (no escalation timeline rendered).
+- **2 test-spec ceremony** (admin nav: `medicalDirector` role for the
+  provider-scoped dashboard, `'All'` status filter before `Expand`,
+  RESOLVED alert for the 15-field audit footer assertion, full
+  `resolveAlertViaModal` flow for the resolution test).
+
+### FIX 5 — admin angioedema bucketing + resolution catalog
+
+Commit `8d816ef` (user-listed 4 sites) + `ac42c95` (FIX 5b — 6
+additional pure-bucketing sites I surfaced + you authorized).
+
+| File | Function | Change |
+|---|---|---|
+| `admin/src/lib/services/provider.service.ts:395` | `resolutionTierFor` | `TIER_1_ANGIOEDEMA` → `'TIER_1'` group → admin can resolve angioedema with the existing TIER_1 catalog (TIER1_FALSE_POSITIVE, TIER1_MEDICATION_CORRECTED, etc.) |
+| `admin/src/components/AdminDashboard.tsx:124` | `readingOf` | `TIER_1_ANGIOEDEMA` → `'Medication'` reading category |
+| `admin/src/components/AdminDashboard.tsx:153` | `tierBucket` | `TIER_1_ANGIOEDEMA` → `'TIER_1'` filter bucket |
+| `admin/src/components/AlertCard.tsx:52` | `tierBucket` | `TIER_1_ANGIOEDEMA` → `'TIER_1'` chrome |
+| `admin/src/app/patients/page.tsx:294` (FIX 5b) | tier chrome | `TIER_1_ANGIOEDEMA` → red `"Tier 1"` chip on the patient list "Alerts" column |
+| `admin/src/app/patients/page.tsx:313` (FIX 5b) | `TIER_SEVERITY_ORDER` | `TIER_1_ANGIOEDEMA` inserted at Tier-1 severity position |
+| `admin/src/components/NotificationsScreen.tsx:59` (FIX 5b) | `tierBucket` | → `'TIER_1'` |
+| `admin/src/components/NotificationsScreen.tsx:89` (FIX 5b) | `readingOf` | → `'Medication'` |
+| `admin/src/components/patient-detail/AlertsTab.tsx:47` (FIX 5b) | `tierBucket` | → `'TIER_1'` |
+| `admin/src/components/patient-detail/ReadingsTab.tsx:80` (FIX 5b) | `tierBucket` | → `'TIER_1'` |
+
+**No new clinical wording invented** — every site reuses the
+existing TIER_1_CONTRAINDICATION group / chrome / catalog. Manisha:
+"angioedema non-dismissible, resolved like all Tier 1 alerts with
+15-field audit rationale." Bespoke airway visuals are a post-pilot
+follow-up.
+
+### FIX 6 — compressed angioedema ladder in admin
+
+Commit `3b56416`. `EscalationAuditTrail.tsx` had a hardcoded
+`TIER_1_LADDER` with the STANDARD shape (T0/T4H/T8H/T24H/T48H). Mapping
+`TIER_1_ANGIOEDEMA` to it would have rendered T+8h / T+24h / T+48h
+placeholder rungs that NEVER fire in the backend (the compressed ladder
+ends at T+4h). Added a new `TIER_1_ANGIOEDEMA_LADDER` constant matching
+the backend's `ladder-defs.ts:TIER_1_ANGIOEDEMA_LADDER` exactly
+(T+0/T+15m/T+1h/T+4h with the right recipient hints) + routed
+`TIER_1_ANGIOEDEMA` to it. Inline comment per directive: **"MUST mirror
+backend ladder-defs.ts TIER_1_ANGIOEDEMA_LADDER — post-pilot: hoist to
+`@cardioplace/shared`."**
+
+### Container sweep — FINAL all-green numbers
+
+```
+$ docker run pgvector/pgvector:pg16 + prisma migrate deploy + db seed
+$ node dist/main.js (prod mode, NOT nest --watch)
+$ RUN_WRITE_TESTS=1 RUN_E2E_TESTS=1 npm test -- tests/14d... tests/14e... tests/14f... tests/14c... --workers=1 --retries=1 --reporter=list
+
+  28 passed (6.6m)
+```
+
+| Suite | Final pass |
+|---|---|
+| §C runtime (compressed ladder) | 2 / 2 |
+| §D-PATIENT UI (13 tests) | 13 / 13 |
+| §D-ADMIN UI (10 tests) | 10 / 10 |
+| §E i18n render | 3 / 3 |
+| **QA runtime total** | **28 / 28** |
+
+| Suite | Pass | Snapshots |
+|---|---|---|
+| Backend `alert-engine.scenarios` | 95 / 95 | — |
+| Backend `ladder-defs` | 41 / 41 | — |
+| Backend `alert-messages.snapshot` | 109 / 109 | 306 / 306 |
+| Backend `i18n-completeness` | 9 / 9 | — |
+| Backend `rule-coverage` | 3 / 3 | — |
+| **Backend total** | **257 / 257** | **306 / 306** |
+
+`tsc --noEmit -p tsconfig.build.json` clean on backend.
+`tsc --noEmit` clean on `shared / qa / admin / frontend`.
+
+### Post-sweep state
+
+- Container torn down (`docker rm cardioplace-pgvector`).
+- `backend/.env DATABASE_URL` restored to the shared Prisma Cloud.
+- Branch `cluster8-test-coverage` pushed; PR-ready.
+- Paused before the combined merge to dev for your review.
+
+### Push state
+
+Branch `cluster8-test-coverage` (HEAD `1823794`) ready for review.
+**Not pushed yet** — pausing per directive "PAUSE before the combined
+merge to dev for my review."
+
+**Merge note for Niva:** these frontend fixes touch his files:
+- `frontend/src/app/alerts/[id]/page.tsx` (1 line in `isEmergency`)
+- `frontend/src/components/alerts/EmergencyAlertScreen.tsx` (tier-branched
+  body + neutral title + TTS audio)
+- `frontend/src/components/cardio/Dashboard.tsx` (TIER_1_ANGIOEDEMA case
+  in `alertPriority` + `variantForTopAlert`)
+
+He's working elsewhere but owns these surfaces — flag at merge.

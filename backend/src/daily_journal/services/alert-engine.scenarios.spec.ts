@@ -39,6 +39,8 @@ function noSymptoms(): SessionSymptoms {
     shortnessOfBreath: false,
     dryCough: false,
     nsaidUse: false,
+    faceSwelling: false,
+    throatTightness: false,
     otherSymptoms: [],
   }
 }
@@ -93,6 +95,12 @@ function buildCtx(over: {
   preDay3Mode?: boolean
   ageGroup?: ResolvedContext['ageGroup']
   dateOfBirth?: Date | null
+  // Cluster 8 Q2 / Q3 — drive the CAD ramp + first-month nudge gates.
+  // enrolledAt is compared against CAD_ROLLOUT_START (default
+  // 2026-05-18T00:00:00Z) for the CAD ramp; the nudge requires
+  // ctx.resolvedAt - ctx.enrolledAt ≤ 30 days.
+  enrolledAt?: Date | null
+  practiceName?: string | null
 } = {}): ResolvedContext {
   const isPregnant = over.isPregnant ?? over.profile?.isPregnant ?? false
   const profile: ResolvedContext['profile'] = {
@@ -140,6 +148,8 @@ function buildCtx(over: {
       over.pregnancyThresholdsActive ?? isPregnant,
     triggerPregnancyContraindicationCheck:
       over.triggerPregnancyContraindicationCheck ?? isPregnant,
+    enrolledAt: over.enrolledAt ?? null,
+    practiceName: over.practiceName ?? null,
     resolvedAt: FIXED_NOW,
   }
 }
@@ -173,6 +183,11 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
           }),
         ),
         updateMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 0 }),
+        // Cluster 8 Q3 — engine's one-time-per-patient guard for the
+        // first-month nudge calls deviationAlert.count. Default 0 (no
+        // prior nudges) so the guard passes; scenarios that test
+        // suppression override per-test via mockResolvedValueOnce.
+        count: (jest.fn() as jest.Mock<any>).mockResolvedValue(0),
       },
       journalEntry: {
         findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
@@ -543,7 +558,13 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   // No-alert paths
   // ========================================================================
 
-  it('Scenario 16 — Controlled patient benign 124/78 → no alert + BP L1 scope resolve', async () => {
+  it('Scenario 16 — Controlled patient benign 124/78 → no alert, no auto-resolve', async () => {
+    // Bug #6/#7 fix (commit 37b7989) — the silent auto-resolve sweep on a
+    // clean reading was REMOVED for JCAHO audit-trail compliance: a clean
+    // reading must NEVER flip prior open alerts to RESOLVED with NULL
+    // resolutionAction / resolutionRationale / resolvedBy. Resolution now
+    // happens ONLY through the explicit /admin/alerts/:id/resolve API path
+    // (alert-resolution.service.ts), which writes the full 15-field audit.
     const { result, createArgs } = await run(
       buildSession({ systolicBP: 124, diastolicBP: 78, pulse: 70 }),
       buildCtx({
@@ -557,12 +578,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
 
     expect(result).toBeNull()
     expect(createArgs).toBeUndefined()
-    expect(prisma.deviationAlert.updateMany).toHaveBeenCalledTimes(1)
-    const updateManyCall = prisma.deviationAlert.updateMany.mock.calls[0][0]
-    expect(updateManyCall.where.tier).toEqual({
-      in: ['BP_LEVEL_1_HIGH', 'BP_LEVEL_1_LOW'],
-    })
-    expect(updateManyCall.data).toEqual({ status: 'RESOLVED' })
+    expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
   })
 
   it('Scenario 17 — AFib + 1 reading + pulse 118 → no alert (gate closed)', async () => {
@@ -1364,9 +1380,12 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
   })
 
-  it('Scenario 63 — medicationTaken=true + missedMedications=[] → no adherence alert (resolve-sweep only)', async () => {
-    // Happy path: patient took all meds, no BP rule fires either.
-    // Resolve-sweep runs and is scoped to BP L1 only (Bug 2 invariant).
+  it('Scenario 63 — medicationTaken=true + missedMedications=[] → no adherence alert, no auto-resolve', async () => {
+    // Bug #6/#7 fix (commit 37b7989) — happy path: patient took all meds,
+    // no BP rule fires either. The pre-bug-fix behavior silently swept
+    // open BP L1 alerts to RESOLVED on a clean reading; that sweep was
+    // removed for JCAHO audit-trail compliance. Resolution now requires
+    // the explicit /admin/alerts/:id/resolve path with full audit fields.
     const { result } = await run(
       buildSession({
         systolicBP: 124,
@@ -1379,11 +1398,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
 
     expect(result).toBeNull()
     expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
-    expect(prisma.deviationAlert.updateMany).toHaveBeenCalledTimes(1)
-    const updateManyCall = prisma.deviationAlert.updateMany.mock.calls[0][0]
-    expect(updateManyCall.where.tier).toEqual({
-      in: ['BP_LEVEL_1_HIGH', 'BP_LEVEL_1_LOW'],
-    })
+    expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
   })
 
   it('Scenario 59 — Brady + Beta-blocker + pulse 38 → RULE_BRADY_ABSOLUTE Tier 1 (Cluster 6 retier)', async () => {
@@ -1618,5 +1633,684 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       ]),
     )
     expect(persistedRuleIds).not.toContain('RULE_PREGNANCY_L2')
+  })
+
+  // ========================================================================
+  // Cluster 8 (Manisha 5/18/26) — angioedema (P0 pilot blocker)
+  // ========================================================================
+  // Source: cardioplace-ace-angioedema-rule-signoff. Stage A pre-gate rule.
+  // Fires for ALL patients on a SINGLE reading regardless of med profile
+  // (bypasses Cluster 6 Q2 ≥2-reading gate). TIER_1_ANGIOEDEMA, non-dismiss-
+  // able, compressed escalation ladder. Three branches by med list:
+  //   ACE_ANGIOEDEMA      — ACE inhibitor present (ACE physician variant)
+  //   ACE_ANGIOEDEMA      — ARB present, no ACE  (ARB physician variant)
+  //   GENERIC_ANGIOEDEMA  — neither (NO "stop your medicine" patient line)
+  // Edge: GENERIC_ANGIOEDEMA + "list unverified" annotation when contextMeds
+  // has any non-VERIFIED entry but no matched ACE/ARB.
+
+  it('Scenario 73 (Cluster 8 B.1) — faceSwelling + VERIFIED ACE inhibitor → RULE_ACE_ANGIOEDEMA TIER_1_ANGIOEDEMA', async () => {
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1, // bypasses Cluster 6 Q2 single-reading gate
+        symptoms: { ...noSymptoms(), faceSwelling: true },
+      }),
+      buildCtx({ contextMeds: [buildMed()] }),
+    )
+
+    expect(createArgs.data.ruleId).toBe('RULE_ACE_ANGIOEDEMA')
+    expect(createArgs.data.tier).toBe('TIER_1_ANGIOEDEMA')
+    expect(createArgs.data.dismissible).toBe(false)
+    expect(createArgs.data.patientMessage).toMatch(
+      /do not take any more of your blood pressure medicine/i,
+    )
+    expect(createArgs.data.physicianMessage).toContain('Lisinopril')
+    expect(createArgs.data.physicianMessage).toContain('ACE_INHIBITOR')
+    expect(createArgs.data.physicianMessage).toMatch(/bradykinin-mediated/i)
+  })
+
+  it('Scenario 74 (Cluster 8 B.1) — faceSwelling + VERIFIED ARB (no ACE) → RULE_ACE_ANGIOEDEMA ARB variant', async () => {
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: { ...noSymptoms(), faceSwelling: true },
+      }),
+      buildCtx({
+        contextMeds: [
+          buildMed({ drugName: 'Losartan', drugClass: 'ARB' }),
+        ],
+      }),
+    )
+
+    expect(createArgs.data.ruleId).toBe('RULE_ACE_ANGIOEDEMA')
+    expect(createArgs.data.tier).toBe('TIER_1_ANGIOEDEMA')
+    // ARB physician variant: different wording, no bradykinin paragraph.
+    expect(createArgs.data.physicianMessage).toContain('Losartan')
+    expect(createArgs.data.physicianMessage).toContain('(ARB)')
+    expect(createArgs.data.physicianMessage).toMatch(
+      /ARB-associated angioedema is less common/i,
+    )
+    expect(createArgs.data.physicianMessage).not.toMatch(/bradykinin-mediated/i)
+  })
+
+  it('Scenario 75 (Cluster 8 B.1) — faceSwelling + NO ACE/ARB → RULE_GENERIC_ANGIOEDEMA, no "stop medicine" line', async () => {
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: { ...noSymptoms(), faceSwelling: true },
+      }),
+      // Empty contextMeds is the cleanest "neither ACE nor ARB" condition.
+      buildCtx({ contextMeds: [] }),
+    )
+
+    expect(createArgs.data.ruleId).toBe('RULE_GENERIC_ANGIOEDEMA')
+    expect(createArgs.data.tier).toBe('TIER_1_ANGIOEDEMA')
+    // Generic branch must NOT tell the patient to stop their medicine —
+    // cause may not be a medication.
+    expect(createArgs.data.patientMessage).not.toMatch(
+      /do not take any more of your blood pressure medicine/i,
+    )
+    // Patient still gets the airway/911 lead.
+    expect(createArgs.data.patientMessage).toMatch(/swelling of your face/i)
+    expect(createArgs.data.physicianMessage).toContain('Differential')
+    expect(createArgs.data.physicianMessage).not.toMatch(/bradykinin-mediated/i)
+  })
+
+  it('Scenario 76 (Cluster 8 B.1) — faceSwelling + UNVERIFIED non-ACE med → GENERIC + physician "unverified" annotation', async () => {
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: { ...noSymptoms(), faceSwelling: true },
+      }),
+      buildCtx({
+        contextMeds: [
+          // Non-ACE/ARB drug class so the rule doesn't match ACE/ARB, but
+          // it IS on the list and IS unverified — the safety-net branch.
+          buildMed({
+            drugName: 'Amlodipine',
+            drugClass: 'DHP_CCB',
+            verificationStatus: 'UNVERIFIED',
+          }),
+        ],
+      }),
+    )
+
+    expect(createArgs.data.ruleId).toBe('RULE_GENERIC_ANGIOEDEMA')
+    expect(createArgs.data.tier).toBe('TIER_1_ANGIOEDEMA')
+    // Provider annotation surfaced via physSuffix — flags that ACE/ARB
+    // exposure cannot be ruled out from an unverified list.
+    expect(createArgs.data.physicianMessage).toMatch(
+      /Medication list unverified — cannot rule out ACE inhibitor or ARB exposure/i,
+    )
+  })
+
+  it('Scenario 77 (Cluster 8 B.1) — throatTightness + ACE inhibitor → RULE_ACE_ANGIOEDEMA TIER_1_ANGIOEDEMA', async () => {
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: { ...noSymptoms(), throatTightness: true },
+      }),
+      buildCtx({ contextMeds: [buildMed()] }),
+    )
+
+    expect(createArgs.data.ruleId).toBe('RULE_ACE_ANGIOEDEMA')
+    expect(createArgs.data.tier).toBe('TIER_1_ANGIOEDEMA')
+    // Throat-tightness-only lead leads with the airway phrasing.
+    expect(createArgs.data.patientMessage).toMatch(/your throat feels tight/i)
+    expect(createArgs.data.patientMessage).toMatch(/911/)
+    expect(createArgs.data.physicianMessage).toMatch(
+      /Throat tightness reported — potential airway compromise/i,
+    )
+  })
+
+  it('Scenario 78 (Cluster 8 B.1) — throatTightness + NO meds at all → RULE_GENERIC_ANGIOEDEMA Tier 1 (universal airway)', async () => {
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: { ...noSymptoms(), throatTightness: true },
+      }),
+      buildCtx({ contextMeds: [] }),
+    )
+
+    // Critical: airway symptoms must fire Tier 1 EVEN with no med history —
+    // angioedema can be allergic, hereditary, idiopathic. The rule must not
+    // gate on med presence.
+    expect(createArgs.data.ruleId).toBe('RULE_GENERIC_ANGIOEDEMA')
+    expect(createArgs.data.tier).toBe('TIER_1_ANGIOEDEMA')
+    expect(createArgs.data.dismissible).toBe(false)
+    // No "stop medicine" line — no medicine to stop.
+    expect(createArgs.data.patientMessage).not.toMatch(
+      /do not take any more of your blood pressure medicine/i,
+    )
+  })
+
+  it('Scenario 79 (Cluster 8 B.1) — angioedema preempts SBP — Stage A fires alone on a 145 reading + faceSwelling + ACE', async () => {
+    // Wiring spec: ACE_ANGIOEDEMA claims the top-priority 'angioedema' axis
+    // ahead of every BP axis, and the Stage A pre-gate is terminal for that
+    // axis. With diagnosedHypertension + SBP 145 in standard mode, no L1
+    // SBP rule fires here either (STANDARD_L1_HIGH threshold is 160). We
+    // explicitly assert only ONE row is persisted, the angioedema row.
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 145,
+        diastolicBP: 85,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: { ...noSymptoms(), faceSwelling: true },
+      }),
+      buildCtx({
+        profile: { diagnosedHypertension: true },
+        contextMeds: [buildMed()],
+      }),
+    )
+
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(1)
+    expect(createArgs.data.ruleId).toBe('RULE_ACE_ANGIOEDEMA')
+  })
+
+  it('Scenario 80 (Cluster 8 B.1) — ACE inhibitor reported 10 years ago (no duration gate) → still fires Tier 1', async () => {
+    // OCTAVE / doc Q4 — ACE-induced angioedema can occur after years of
+    // therapy. Explicit guard: an ACE on the list for a decade must fire
+    // identically to a fresh prescription. We backdate verifiedAt + the
+    // med's reportedAt to TEN_YEARS_AGO to exercise the "no time filter".
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: { ...noSymptoms(), faceSwelling: true },
+      }),
+      buildCtx({
+        contextMeds: [
+          buildMed({
+            // Same default ACE drug + class; explicit 10y-old reportedAt
+            // documents the test's intent. The rule never inspects this
+            // field — that IS the assertion.
+            reportedAt: TEN_YEARS_AGO,
+            verificationStatus: 'VERIFIED',
+          }),
+        ],
+      }),
+    )
+
+    expect(createArgs.data.ruleId).toBe('RULE_ACE_ANGIOEDEMA')
+    expect(createArgs.data.tier).toBe('TIER_1_ANGIOEDEMA')
+  })
+
+  it('Scenario 81 (Cluster 8 B.1) — no airway symptoms → angioedema rule is silent (negative guard)', async () => {
+    // Belt-and-suspenders: the rule must NOT fire on an ordinary clean
+    // reading. A regression here would mean an ACE inhibitor on the list +
+    // any reading is producing spurious Tier 1 emergency alerts.
+    const { result } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: noSymptoms(),
+      }),
+      buildCtx({ contextMeds: [buildMed()] }),
+    )
+
+    expect(result).toBeNull()
+    expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
+  })
+
+  // ========================================================================
+  // Cluster 8 Q1 (Manisha 5/18/26) — asymptomatic-brady surveillance
+  // ========================================================================
+  // MESA differential-mortality cohort: HR 40–49 with NO brady-relevant
+  // symptoms must not be silent for patients on rate-controlling meds (or
+  // hasBradycardia). Pass 3 fires AFTER the BP/HR pipeline:
+  //   • Tier 3 chart event (physician-only, empty patient/caregiver msg)
+  //     when the trailing consecutive ≤45 session run is < 3
+  //   • Tier 2 review when the run is ≥ 3 (escalation)
+  // Distinct from bradyAbsoluteRule (HR<40, Tier 1) and bradySymptomaticRule
+  // (HR 40–49 + symptom, Tier 2 via the BP/HR pipeline). 50–60 BB-therapeutic
+  // is unchanged (no alert).
+
+  function bradyHrEntry(measuredAt: Date, pulse: number) {
+    return { id: 'h-' + measuredAt.getTime(), measuredAt, pulse }
+  }
+
+  it('Scenario 82 (Cluster 8 B.2) — HR 45 asymptomatic on beta-blocker → RULE_BRADY_SURVEILLANCE Tier 3, empty patient/caregiver msg', async () => {
+    // loadAdherenceWindow (Pass 2) + loadBradyPatternWindow (Pass 3) BOTH
+    // call prisma.journalEntry.findMany. Default mock returns [] for both
+    // → consecutiveSessionsLe45 = 0 → Tier 3 (not escalated).
+    const { createArgs } = await run(
+      buildSession({ systolicBP: 122, diastolicBP: 76, pulse: 45 }),
+      buildCtx({
+        profile: { hasBradycardia: true, diagnosedHypertension: true },
+        contextMeds: [
+          buildMed({ drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER' }),
+        ],
+      }),
+    )
+
+    // Find the surveillance row — other passes may co-fire (HR-context
+    // annotations, missed-dose row from empty adherence) so don't index 0.
+    const calls = prisma.deviationAlert.create.mock.calls as Array<
+      [{ data: { ruleId: string; tier: string; patientMessage: string; caregiverMessage: string } }]
+    >
+    const surveillance = calls
+      .map((c) => c[0].data)
+      .find((d) => d.ruleId === 'RULE_BRADY_SURVEILLANCE')
+    expect(surveillance).toBeTruthy()
+    expect(surveillance?.tier).toBe('TIER_3_INFO')
+    // Per the registry: surveillance patient/caregiver messages are empty
+    // strings — physician-only chart event, no alarm to an asymptomatic
+    // patient.
+    expect(surveillance?.patientMessage).toBe('')
+    expect(surveillance?.caregiverMessage).toBe('')
+    expect(createArgs).toBeTruthy()
+  })
+
+  it('Scenario 83 (Cluster 8 B.2) — HR 45 + dizziness → SYMPTOMATIC (Tier 2), NOT surveillance', async () => {
+    await run(
+      buildSession({
+        systolicBP: 122,
+        diastolicBP: 76,
+        pulse: 45,
+        symptoms: { ...noSymptoms(), dizziness: true },
+      }),
+      buildCtx({
+        profile: { hasBradycardia: true },
+        contextMeds: [
+          buildMed({ drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER' }),
+        ],
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).toContain('RULE_BRADY_HR_SYMPTOMATIC')
+    expect(ruleIds).not.toContain('RULE_BRADY_SURVEILLANCE')
+  })
+
+  it('Scenario 84 (Cluster 8 B.2) — HR 45 asymptomatic + NOT on rate-control + no hasBradycardia → no alert', async () => {
+    // Gate: hasBradycardia OR rate-control med. With NEITHER, the rule is
+    // silent (avoids surveillance noise for healthy athletic bradycardia).
+    await run(
+      buildSession({ systolicBP: 122, diastolicBP: 76, pulse: 45 }),
+      buildCtx({
+        profile: { hasBradycardia: false },
+        contextMeds: [],
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_BRADY_SURVEILLANCE')
+    expect(ruleIds).not.toContain('RULE_BRADY_HR_SYMPTOMATIC')
+    expect(ruleIds).not.toContain('RULE_BRADY_HR_ASYMPTOMATIC')
+  })
+
+  it('Scenario 85 (Cluster 8 B.2) — HR 45 × 3 consecutive sessions → ESCALATE to TIER_2_DISCREPANCY (sustained)', async () => {
+    // Seed prisma.journalEntry.findMany with 3 prior days each at HR ≤45.
+    // The brady-pattern window buckets by calendar day → 3 distinct days
+    // → consecutiveSessionsLe45 = 3 → Tier 2 (sustained-pattern review).
+    //
+    // CRITICAL: there are THREE findMany call sites in evaluate():
+    //   Pass 1 → wasPriorReadingPulseElevated (Stage C)
+    //   Pass 2 → loadAdherenceWindow  (adherence)
+    //   Pass 3 → loadBradyPatternWindow (THIS)
+    // We use the default-mock-resolved-value pattern (mockResolvedValue,
+    // not mockResolvedValueOnce) so all three calls get the same payload
+    // — fine because the prior-elevated check + adherence both tolerate
+    // pulse-only / measuredAt-only rows.
+    const now = new Date('2026-04-22T10:00:00Z')
+    prisma.journalEntry.findMany.mockResolvedValue([
+      bradyHrEntry(new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000), 44),
+      bradyHrEntry(new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000), 45),
+      bradyHrEntry(new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000), 43),
+    ])
+
+    await run(
+      buildSession({ systolicBP: 122, diastolicBP: 76, pulse: 45 }),
+      buildCtx({
+        profile: { hasBradycardia: true, diagnosedHypertension: true },
+        contextMeds: [
+          buildMed({ drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER' }),
+        ],
+      }),
+    )
+
+    const surveillance = (
+      prisma.deviationAlert.create.mock.calls as Array<
+        [{ data: { ruleId: string; tier: string; physicianMessage: string } }]
+      >
+    )
+      .map((c) => c[0].data)
+      .find((d) => d.ruleId === 'RULE_BRADY_SURVEILLANCE')
+    expect(surveillance).toBeTruthy()
+    expect(surveillance?.tier).toBe('TIER_2_DISCREPANCY')
+    expect(surveillance?.physicianMessage).toMatch(
+      /Sustained asymptomatic bradycardia/i,
+    )
+    expect(surveillance?.physicianMessage).toMatch(/3 consecutive sessions/i)
+  })
+
+  it('Scenario 86 (Cluster 8 B.2) — HR 38 (below 40) → bradyAbsoluteRule Tier 1, NOT surveillance', async () => {
+    // The surveillance rule's [40, 50) band carves out HR<40 — that's
+    // owned by bradyAbsoluteRule (Tier 1). A regression would mean a HR
+    // 38 reading produces only a Tier 3 surveillance row, losing the
+    // Tier 1 absolute-emergency escalation.
+    await run(
+      buildSession({ systolicBP: 122, diastolicBP: 76, pulse: 38 }),
+      buildCtx({
+        profile: { hasBradycardia: true },
+        contextMeds: [
+          buildMed({ drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER' }),
+        ],
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).toContain('RULE_BRADY_ABSOLUTE')
+    expect(ruleIds).not.toContain('RULE_BRADY_SURVEILLANCE')
+  })
+
+  it('Scenario 87 (Cluster 8 B.2) — HR 55 on beta-blocker (BB therapeutic 50–60) → no brady alert', async () => {
+    // The MESA cohort still uses 50 as the suppression floor — HR 55 on a
+    // BB is the therapeutic target, not a surveillance signal. Guard
+    // against accidental band widening that would alarm-fatigue providers.
+    await run(
+      buildSession({ systolicBP: 122, diastolicBP: 76, pulse: 55 }),
+      buildCtx({
+        profile: { hasBradycardia: false },
+        contextMeds: [
+          buildMed({ drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER' }),
+        ],
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_BRADY_SURVEILLANCE')
+    expect(ruleIds).not.toContain('RULE_BRADY_HR_ASYMPTOMATIC')
+    expect(ruleIds).not.toContain('RULE_BRADY_HR_SYMPTOMATIC')
+    expect(ruleIds).not.toContain('RULE_BRADY_ABSOLUTE')
+  })
+
+  // ========================================================================
+  // Cluster 8 Q2 (Manisha 5/18/26) — CAD default sbpUpperTarget 160 → 140
+  // ========================================================================
+  // Phased ramp anchored at 2026-05-18 (env-overridable). Phase 1 (default)
+  // = newly enrolled CAD patients only. Phase 2 = + Cedar Hill. Phase 3 =
+  // all. Provider-set PatientThreshold.sbpUpperTarget always wins. The DBP-
+  // high companion (≥80) shares the same ramp gate.
+  //
+  // FIXED_NOW = 2026-04-22 sits BEFORE the rollout, so "ramp-active"
+  // scenarios use enrolledAt ≥ 2026-05-18 explicitly. cadRampApplies is a
+  // pure date comparison — it doesn't enforce enrolledAt ≤ resolvedAt
+  // ordering, so this exercises the gate without env mutation.
+
+  const CAD_RAMP_ENROLLED_AT = new Date('2026-05-18T12:00:00Z')
+  const CAD_PRE_ROLLOUT_ENROLLED_AT = new Date('2026-04-01T00:00:00Z')
+
+  it('Scenario 88 (Cluster 8 B.3) — CAD + SBP 145 + enrolledAt ≥ rollout → RULE_CAD_HIGH fires (Q2 default 140)', async () => {
+    const { createArgs } = await run(
+      buildSession({ systolicBP: 145, diastolicBP: 78, pulse: 72 }),
+      buildCtx({
+        profile: { hasCAD: true, diagnosedHypertension: true },
+        enrolledAt: CAD_RAMP_ENROLLED_AT,
+      }),
+    )
+
+    expect(createArgs.data.ruleId).toBe('RULE_CAD_HIGH')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
+    // Physician message surfaces the new 140 threshold + AHA/ACC treatment
+    // target — verifies the message-registry is reading the ramp default.
+    expect(createArgs.data.physicianMessage).toContain('140')
+    expect(createArgs.data.physicianMessage).toMatch(/AHA\/ACC treatment target 130\/80/i)
+  })
+
+  it('Scenario 89 (Cluster 8 B.3) — CAD + SBP 135 + ramp active → NO CAD_HIGH (below 140)', async () => {
+    const { result } = await run(
+      buildSession({ systolicBP: 135, diastolicBP: 78, pulse: 72 }),
+      buildCtx({
+        profile: { hasCAD: true, diagnosedHypertension: true },
+        enrolledAt: CAD_RAMP_ENROLLED_AT,
+      }),
+    )
+
+    // Below the new 140 default — no bp-high row should fire. Guards against
+    // a regression that drops the floor below 140.
+    expect(result).toBeNull()
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_CAD_HIGH')
+  })
+
+  it('Scenario 90 (Cluster 8 B.3) — CAD + 145/85 + ramp active → CAD_HIGH + CAD_DBP_HIGH co-fire', async () => {
+    await run(
+      buildSession({ systolicBP: 145, diastolicBP: 85, pulse: 72 }),
+      buildCtx({
+        profile: { hasCAD: true, diagnosedHypertension: true },
+        enrolledAt: CAD_RAMP_ENROLLED_AT,
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    // Distinct axes (bp-high SBP vs dbp-high DBP) so both must fire.
+    expect(ruleIds).toContain('RULE_CAD_HIGH')
+    expect(ruleIds).toContain('RULE_CAD_DBP_HIGH')
+    const dbpRow = (
+      prisma.deviationAlert.create.mock.calls as Array<
+        [{ data: { ruleId: string; tier: string; actualValue: unknown; physicianMessage: string } }]
+      >
+    )
+      .map((c) => c[0].data)
+      .find((d) => d.ruleId === 'RULE_CAD_DBP_HIGH')
+    expect(dbpRow?.tier).toBe('BP_LEVEL_1_HIGH')
+    // actualValue is wrapped in Prisma.Decimal at persist time — compare
+    // by stringified form so the assertion works regardless of whether
+    // the driver returns a number, BigInt, or Decimal instance.
+    expect(String(dbpRow?.actualValue)).toBe('85')
+    // Sanity: the new DBP-high companion's physician message references the
+    // 80 default + AHA/ACC 130/80 target.
+    expect(dbpRow?.physicianMessage).toContain('80')
+    expect(dbpRow?.physicianMessage).toMatch(/AHA\/ACC treatment target 130\/80/i)
+    // NOTE: legacy DeviationType for RULE_CAD_DBP_HIGH currently falls
+    // through to 'SYSTOLIC_BP' (only RULE_CAD_DBP_CRITICAL is special-cased
+    // in legacyTypeFor). Not asserting type here — the legacy column is
+    // slated for removal per the engine comment, and the source-of-truth
+    // for axis routing is the new `axisFor` helper, not the legacy enum.
+  })
+
+  it('Scenario 91 (Cluster 8 B.3) — CAD + SBP 145 + enrolledAt BEFORE rollout → old 160 threshold (no CAD_HIGH)', async () => {
+    // Ramp gating: a CAD patient enrolled before the rollout anchor stays on
+    // the 160 default unless ops advances the rollout phase. SBP 145 < 160
+    // → no CAD bp-high row. Without this guard, the 140 default would apply
+    // to every legacy CAD patient on the same day, surprising the cohort.
+    //
+    // NOTE: 145/78 produces PP=67 which fires the Tier 3 RULE_PULSE_PRESSURE
+    // _WIDE chart event. That's an independent axis (info), unrelated to the
+    // CAD ramp under test — we assert specifically on the CAD rules, not on
+    // total row count.
+    await run(
+      buildSession({ systolicBP: 145, diastolicBP: 78, pulse: 72 }),
+      buildCtx({
+        profile: { hasCAD: true, diagnosedHypertension: true },
+        enrolledAt: CAD_PRE_ROLLOUT_ENROLLED_AT,
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_CAD_HIGH')
+    expect(ruleIds).not.toContain('RULE_CAD_DBP_HIGH')
+  })
+
+  it('Scenario 92 (Cluster 8 B.3) — CAD + custom PatientThreshold.sbpUpperTarget=150 → custom wins over the new 140', async () => {
+    // Provider-set custom thresholds bypass the ramp entirely. SBP 145 with
+    // custom=150 → no CAD_HIGH row. If the ramp default 140 ever leaked
+    // through, SBP 145 would fire — that's the regression this catches.
+    //
+    // (Same PP=67 noise as Scenario 91 — assert on the CAD rule, not on
+    // overall result/row count.)
+    await run(
+      buildSession({ systolicBP: 145, diastolicBP: 78, pulse: 72 }),
+      buildCtx({
+        profile: { hasCAD: true, diagnosedHypertension: true },
+        // Ramp-active enrolledAt — ensures the custom threshold's win is
+        // tested against the default 140 path (not the 160 path).
+        enrolledAt: CAD_RAMP_ENROLLED_AT,
+        threshold: {
+          sbpUpperTarget: 150,
+          sbpLowerTarget: null,
+          dbpUpperTarget: null,
+          dbpLowerTarget: null,
+          hrUpperTarget: null,
+          hrLowerTarget: null,
+          setByProviderId: 'prov-1',
+          setAt: TEN_YEARS_AGO,
+          notes: null,
+        },
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_CAD_HIGH')
+  })
+
+  // ========================================================================
+  // Cluster 8 Q3 (Manisha 5/18/26) — first-month educational adherence nudge
+  // ========================================================================
+  // Patient-only Tier 3 educational message. One-time per patient ever —
+  // engine guards on prisma.deviationAlert.count for prior nudge rows. Only
+  // within the first 30 days of enrollment. 2-of-3 default adherence window
+  // is UNCHANGED — a single miss must NOT fire RULE_MEDICATION_MISSED, only
+  // this nudge.
+
+  const NUDGE_RECENT_ENROLLED_AT = new Date('2026-04-12T10:00:00Z') // 10d before FIXED_NOW
+
+  it('Scenario 93 (Cluster 8 B.4) — enrolled 10d ago + first missed dose (no prior nudge) → RULE_FIRST_MONTH_ADHERENCE_NUDGE Tier 3', async () => {
+    // Seed one prior journal entry with medicationTaken=false to give the
+    // adherence window 1 day with miss → nudge gate passes. The current
+    // session is a clean BP reading (no co-fires) so the nudge is the only
+    // expected row.
+    const now = FIXED_NOW
+    prisma.journalEntry.findMany.mockResolvedValue([
+      {
+        id: 'prev-1',
+        measuredAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        medicationTaken: false,
+        missedMedications: null,
+      },
+    ])
+
+    await run(
+      buildSession({ systolicBP: 124, diastolicBP: 78, pulse: 72 }),
+      buildCtx({
+        profile: { diagnosedHypertension: true },
+        enrolledAt: NUDGE_RECENT_ENROLLED_AT,
+      }),
+    )
+
+    const calls = prisma.deviationAlert.create.mock.calls as Array<
+      [{ data: { ruleId: string; tier: string; patientMessage: string } }]
+    >
+    const nudge = calls
+      .map((c) => c[0].data)
+      .find((d) => d.ruleId === 'RULE_FIRST_MONTH_ADHERENCE_NUDGE')
+    expect(nudge).toBeTruthy()
+    expect(nudge?.tier).toBe('TIER_3_INFO')
+    // Approved verbatim wording — protect against silent edits.
+    expect(nudge?.patientMessage).toMatch(/starting a new medicine/i)
+    // 2-of-3 default window unchanged: a single miss must NOT fire the
+    // Tier 2 RULE_MEDICATION_MISSED row.
+    const ruleIds = calls.map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_MEDICATION_MISSED')
+  })
+
+  it('Scenario 94 (Cluster 8 B.4) — enrolled 40d ago + missed dose → no nudge (>30d window)', async () => {
+    // First-month window: enrolledAt 40 days before FIXED_NOW puts the
+    // patient OUT of the 30-day educational window. Even with a fresh miss
+    // signal, the nudge must stay silent — single miss also doesn't trip
+    // the 2-of-3 default, so we expect NO adherence row at all.
+    const now = FIXED_NOW
+    prisma.journalEntry.findMany.mockResolvedValue([
+      {
+        id: 'prev-1',
+        measuredAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        medicationTaken: false,
+        missedMedications: null,
+      },
+    ])
+
+    await run(
+      buildSession({ systolicBP: 124, diastolicBP: 78, pulse: 72 }),
+      buildCtx({
+        profile: { diagnosedHypertension: true },
+        enrolledAt: new Date(now.getTime() - 40 * 24 * 60 * 60 * 1000),
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_FIRST_MONTH_ADHERENCE_NUDGE')
+    // 2-of-3 default unchanged — single miss is below threshold.
+    expect(ruleIds).not.toContain('RULE_MEDICATION_MISSED')
+  })
+
+  it('Scenario 95 (Cluster 8 B.4) — enrolled 10d ago + nudge already fired once → does NOT fire again (one-time guard)', async () => {
+    // Override the prior-nudge count from 0 → 1: the engine's
+    // deviationAlert.count guard suppresses the second nudge. This is the
+    // one-time-per-patient-ever invariant — without it, a patient who
+    // misses doses across the first month would be nagged every time.
+    prisma.deviationAlert.count.mockResolvedValueOnce(1)
+    const now = FIXED_NOW
+    prisma.journalEntry.findMany.mockResolvedValue([
+      {
+        id: 'prev-1',
+        measuredAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        medicationTaken: false,
+        missedMedications: null,
+      },
+    ])
+
+    await run(
+      buildSession({ systolicBP: 124, diastolicBP: 78, pulse: 72 }),
+      buildCtx({
+        profile: { diagnosedHypertension: true },
+        enrolledAt: NUDGE_RECENT_ENROLLED_AT,
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_FIRST_MONTH_ADHERENCE_NUDGE')
   })
 })

@@ -88,6 +88,16 @@ export interface AlertContext {
    *  (i.e. the patient didn't log a second reading to confirm). Drives a
    *  "— confirm with next reading" annotation on the physician message. */
   singleReadingSession?: boolean
+
+  /** Cluster 8 — which angioedema symptom(s) the patient reported. Drives
+   *  whether the message leads with face-swelling or throat-tightness
+   *  phrasing. Populated only for the angioedema rules. */
+  angioedemaFace?: boolean
+  angioedemaThroat?: boolean
+
+  /** Cluster 8 Q1 — consecutive ≤45 bpm sessions, rendered in the
+   *  brady-surveillance physician message. */
+  bradySustainedSessions?: number
 }
 
 export type MessageBuilder = (ctx: AlertContext) => string
@@ -293,8 +303,22 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       `Your blood pressure reading is ${bp(ctx)}, which is higher than your goal. Please contact your care team today.${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
       `The patient's BP is elevated at ${bp(ctx)} (CAD).`,
+    // Cluster 8 Q2 (Manisha 5/18/26) — default alert threshold lowered to
+    // SBP ≥140 (Stage 2 HTN floor). Always surface the AHA/ACC 130/80
+    // treatment target + the DBP coronary-perfusion caution so the provider
+    // can customise the threshold per patient.
     physicianMessage: (ctx) =>
-      `BP Level 1 High — CAD SBP ≥ ${ctx.thresholdValue ?? 160}: ${bp(ctx)}.${physSuffix(ctx)}`,
+      `BP Level 1 High — CAD SBP ≥ ${ctx.thresholdValue ?? 140}: ${bp(ctx)} (session average). AHA/ACC treatment target 130/80. Consider medication adjustment. NOTE: monitor DBP — coronary perfusion (J-curve) risk if DBP < 70. Customise the alert threshold in patient settings.${physSuffix(ctx)}`,
+  },
+  // Cluster 8 Q2 (Manisha 5/18/26) — CAD DBP-high, the "second independent
+  // alert trigger" (145/95 fires this alongside RULE_CAD_HIGH).
+  RULE_CAD_DBP_HIGH: {
+    patientMessage: (ctx) =>
+      `Your blood pressure reading is ${bp(ctx)}, which is higher than your goal. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+    caregiverMessage: (ctx) =>
+      `The patient's lower BP number is elevated at ${bp(ctx)} (CAD).`,
+    physicianMessage: (ctx) =>
+      `BP Level 1 High — CAD DBP ≥ ${ctx.thresholdValue ?? 80}: ${bp(ctx)} (session average). AHA/ACC treatment target 130/80. Consider medication adjustment. NOTE: coronary perfusion (J-curve) risk if DBP < 70 — reassess antihypertensive class rather than over-titrating. Customise the alert threshold in patient settings.${physSuffix(ctx)}`,
   },
 
   // ── HCM ───────────────────────────────────────────────────────────────
@@ -652,6 +676,86 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     physicianMessage: (ctx) =>
       `Tier 3 — HF patient + new ankle edema, routed to caregiver for monitoring. Sibling row of HF_DECOMPENSATION (Tier 2 physician escalation).${physSuffix(ctx)}`,
   },
+
+  // ── Cluster 8 — ACE-angioedema (P0 pilot blocker, Manisha 5/18/26) ──────
+  // Patient + caregiver wording is the approved revised 1.7 / B1.6 verbatim.
+  // ACE_ANGIOEDEMA tells the patient to STOP the medicine (ACE/ARB is the
+  // likely cause); GENERIC_ANGIOEDEMA omits that line (cause unknown).
+  RULE_ACE_ANGIOEDEMA: {
+    patientMessage: (ctx) => `${angioedemaPatientLead(ctx)} Do not take any more of your blood pressure medicine until your doctor tells you it is safe.`,
+    caregiverMessage: (ctx) => {
+      const name = ctx.patientName?.trim() || 'The patient'
+      return `${name} reported swelling of their face, lips, or tongue. This can be a dangerous reaction to one of their blood pressure medicines. If they have trouble breathing or throat tightness, call 911 now. If not, take them to the nearest emergency room now. Do not let them take another dose of that medicine.`
+    },
+    physicianMessage: (ctx) => {
+      const drug = ctx.drugName ?? 'unknown'
+      const airway = ctx.angioedemaThroat
+        ? ' Throat tightness reported — potential airway compromise.'
+        : ''
+      if (ctx.drugClass === 'ARB') {
+        return `Tier 1 — RULE_ACE_ANGIOEDEMA: Patient on ${drug} (ARB) self-reported facial/lip/tongue swelling.${airway} ARB-associated angioedema is less common than ACE-inhibitor angioedema but uses the same emergency pathway. Discontinue ARB. Evaluate for alternative etiology.${physSuffix(ctx)}`
+      }
+      return `Tier 1 — RULE_ACE_ANGIOEDEMA: Patient on ${drug} (ACE_INHIBITOR) self-reported facial/lip/tongue swelling.${airway} ACE-inhibitor angioedema — airway obstruction risk ~10%. Standard antihistamines/corticosteroids/epinephrine are NOT reliably effective (bradykinin-mediated). Discontinue ACE inhibitor immediately. Do not rechallenge with any ACE inhibitor (class effect). Consider ARB with caution (cross-reactivity reported but uncommon).${physSuffix(ctx)}`
+    },
+  },
+
+  RULE_GENERIC_ANGIOEDEMA: {
+    // No "stop your medicine" line — cause may not be a medication (doc p.5).
+    patientMessage: (ctx) => angioedemaPatientLead(ctx),
+    caregiverMessage: (ctx) => {
+      const name = ctx.patientName?.trim() || 'The patient'
+      return `${name} reported swelling of their face, lips, or tongue. This can be dangerous and needs urgent medical attention. If they have trouble breathing or throat tightness, call 911 now. If not, take them to the nearest emergency room now.`
+    },
+    physicianMessage: (ctx) => {
+      const airway = ctx.angioedemaThroat
+        ? ' Throat tightness reported — potential airway compromise.'
+        : ''
+      return `Tier 1 — RULE_GENERIC_ANGIOEDEMA: Patient self-reported facial/lip/tongue swelling.${airway} No ACE inhibitor or ARB on verified med list. Differential: allergic angioedema, hereditary angioedema, idiopathic, or unverified ACE/ARB exposure. Standard anaphylaxis protocol appropriate if allergic etiology suspected.${physSuffix(ctx)}`
+    },
+  },
+
+  // ── Cluster 8 Q1 — asymptomatic bradycardia surveillance ───────────────
+  // Physician-only: no patient/caregiver message (patient is asymptomatic —
+  // no reason to alarm them). Tier 3 = chart event + yellow dot, no push.
+  // The escalated (Tier 2) variant swaps in the sustained-pattern wording.
+  RULE_BRADY_SURVEILLANCE: {
+    patientMessage: () => '',
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) => {
+      const hr = ctx.pulse ?? '?'
+      const med = ctx.drugName ?? 'a rate-controlling medication'
+      const cls = ctx.drugClass ?? 'rate-control'
+      const sessions = ctx.bradySustainedSessions ?? 0
+      if (sessions >= 3) {
+        return `Tier 2 — Sustained asymptomatic bradycardia: mean resting HR ≤45 bpm on ${sessions} consecutive sessions (current ${hr} bpm). Patient is on ${med} (${cls}). ECG and medication-dose review recommended.${physSuffix(ctx)}`
+      }
+      return `Tier 3 — Surveillance: resting HR ${hr} bpm (asymptomatic). Patient is on ${med} (${cls}). Consider: is this the therapeutic target? Trend review recommended. If HR persists ≤45 on multiple sessions, consider ECG and medication-dose review.${physSuffix(ctx)}`
+    },
+  },
+
+  // ── Cluster 8 Q3 — first-month educational adherence nudge ─────────────
+  // Patient-only, Tier 3, one-time. Verbatim from the sign-off (doc p.7).
+  // No provider/caregiver message — educational, not clinical.
+  RULE_FIRST_MONTH_ADHERENCE_NUDGE: {
+    patientMessage: () =>
+      'Starting a new medicine can take some getting used to. If you missed a dose, try to take your next one on time. Taking your medicine every day helps keep your blood pressure steady. Your care team is here to help if anything makes it hard to stay on schedule.',
+    caregiverMessage: () => '',
+    physicianMessage: () => '',
+  },
+}
+
+/**
+ * Cluster 8 — shared patient lead for both angioedema rules. Leads with the
+ * throat-tightness phrasing when that is the only symptom reported (doc p.6,
+ * throat tightness fires for ALL patients as an airway emergency); otherwise
+ * uses the approved revised-1.7 face/lip/tongue wording. Caller appends the
+ * "do not take your medicine" line for the ACE/ARB variant only.
+ */
+function angioedemaPatientLead(ctx: AlertContext): string {
+  if (ctx.angioedemaThroat && !ctx.angioedemaFace) {
+    return 'You reported that your throat feels tight or that it is hard to swallow. This can be a breathing emergency. Call 911 now.'
+  }
+  return 'You reported swelling of your face, lips, or tongue. This needs urgent medical attention. If you also have trouble breathing or feel tightness in your throat, call 911 now. If not, go to the nearest emergency room now.'
 }
 
 /**

@@ -80,6 +80,31 @@ export const RULE_IDS = {
   NSAID_ANTIHTN_INTERACTION: 'RULE_NSAID_ANTIHTN_INTERACTION',
   ACE_COUGH: 'RULE_ACE_COUGH',
   HF_CAREGIVER_EDEMA: 'RULE_HF_CAREGIVER_EDEMA',
+
+  // Cluster 8 (Manisha 5/18/26, P0 pilot blocker) — ACE-angioedema airway
+  // emergency. Fires on faceSwelling || throatTightness for ALL patients.
+  // ACE_ANGIOEDEMA = ACE inhibitor OR ARB on med list (physician message
+  // branches ACE vs ARB); GENERIC_ANGIOEDEMA = neither / unverified list.
+  // Both tier TIER_1_ANGIOEDEMA, non-dismissable, compressed ladder.
+  ACE_ANGIOEDEMA: 'RULE_ACE_ANGIOEDEMA',
+  GENERIC_ANGIOEDEMA: 'RULE_GENERIC_ANGIOEDEMA',
+
+  // Cluster 8 Q1 (Manisha 5/18/26) — asymptomatic bradycardia surveillance.
+  // HR 40–49, no brady symptoms, on a rate-control med or hasBradycardia.
+  // Tier 3 physician-only chart event; auto-escalates to Tier 2 when the
+  // mean HR has been ≤45 across 3+ consecutive sessions.
+  BRADY_SURVEILLANCE: 'RULE_BRADY_SURVEILLANCE',
+
+  // Cluster 8 Q3 (Manisha 5/18/26) — one-time first-month educational
+  // adherence nudge. Tier 3, patient-only, fires once ever within 30 days
+  // of enrollment after the first reported missed dose. The 2-of-3 default
+  // window is unchanged — this is purely additive.
+  FIRST_MONTH_ADHERENCE_NUDGE: 'RULE_FIRST_MONTH_ADHERENCE_NUDGE',
+
+  // Cluster 8 Q2 (Manisha 5/18/26 implementation block) — CAD DBP-high.
+  // Second independent BP-Level-1-High trigger at DBP ≥80 for CAD patients
+  // (no prior DBP-high rule existed); co-fires with RULE_CAD_HIGH.
+  CAD_DBP_HIGH: 'RULE_CAD_DBP_HIGH',
 } as const
 
 export type RuleId = (typeof RULE_IDS)[keyof typeof RULE_IDS]
@@ -97,13 +122,20 @@ export type AlertTierValue =
   | 'BP_LEVEL_1_LOW'
   | 'BP_LEVEL_2'
   | 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
+  // Cluster 8 — angioedema. Tier-1 class (non-dismissable) but routed to a
+  // compressed escalation ladder instead of the standard Tier 1 ladder.
+  | 'TIER_1_ANGIOEDEMA'
 
 export type AlertModeValue = 'STANDARD' | 'PERSONALIZED'
 
-/** Tier 1 + BP Level 2 are non-dismissable per CLINICAL_SPEC V2-C + V2-D. */
+/** Tier 1 + BP Level 2 are non-dismissable per CLINICAL_SPEC V2-C + V2-D.
+ *  Cluster 8 — TIER_1_ANGIOEDEMA is a Tier-1 airway emergency, also
+ *  non-dismissable (resolution requires a documented rationale + the
+ *  15-field Joint Commission audit trail). */
 export function isNonDismissable(tier: AlertTierValue): boolean {
   return (
     tier === 'TIER_1_CONTRAINDICATION' ||
+    tier === 'TIER_1_ANGIOEDEMA' ||
     tier === 'BP_LEVEL_2' ||
     tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
   )
@@ -141,9 +173,11 @@ export const RULE_AXIS: Record<RuleId, RuleAxis> = {
   [RULE_IDS.BRADY_ABSOLUTE]: 'hr',
   [RULE_IDS.BRADY_HR_SYMPTOMATIC]: 'hr',
   [RULE_IDS.BRADY_HR_ASYMPTOMATIC]: 'hr',
+  [RULE_IDS.BRADY_SURVEILLANCE]: 'hr',
 
   // Diastolic-axis rule
   [RULE_IDS.CAD_DBP_CRITICAL]: 'diastolic',
+  [RULE_IDS.CAD_DBP_HIGH]: 'diastolic',
 
   // Systolic-axis BP rules (primary axis = systolic)
   [RULE_IDS.STANDARD_L1_HIGH]: 'systolic',
@@ -187,6 +221,12 @@ export const RULE_AXIS: Record<RuleId, RuleAxis> = {
   [RULE_IDS.TACHY_WITH_PALPITATIONS]: 'profile',
   [RULE_IDS.PALPITATIONS_GENERAL]: 'profile',
   [RULE_IDS.SYNCOPE_GENERAL]: 'profile',
+  // Cluster 8 — angioedema is symptom-driven; actualValue carries SBP for
+  // context only, not the trigger. 'profile' suppresses a misleading
+  // "TRIGGERING VALUE" axis label in the audit footer.
+  [RULE_IDS.ACE_ANGIOEDEMA]: 'profile',
+  [RULE_IDS.GENERIC_ANGIOEDEMA]: 'profile',
+  [RULE_IDS.FIRST_MONTH_ADHERENCE_NUDGE]: 'profile',
 }
 
 const AXIS_LABEL: Record<RuleAxis, string> = {

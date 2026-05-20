@@ -42,8 +42,12 @@ export type CreateJournalEntry = {
   shortnessOfBreath?: boolean
   dryCough?: boolean
   nsaidUse?: boolean
+  // Cluster 8 symptom flags (Manisha 5/18/26 — ACE-angioedema, P0)
+  faceSwelling?: boolean
+  throatTightness?: boolean
   otherSymptoms?: string[]
   measurementConditions?: Record<string, boolean>
+  medicationTaken?: boolean
 }
 
 export async function postJournalEntry(

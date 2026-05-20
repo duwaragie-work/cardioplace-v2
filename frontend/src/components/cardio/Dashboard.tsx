@@ -295,6 +295,10 @@ export default function Dashboard() {
     const sbp = a.journalEntry?.systolicBP ?? 0;
     const dbp = a.journalEntry?.diastolicBP ?? 0;
     const tier = (a as { tier?: AlertTier | null }).tier;
+    // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema is an airway
+    // emergency; same urgency bucket as BP Level 2 so the dashboard top-
+    // card surfaces it ahead of every other open alert.
+    if (tier === 'TIER_1_ANGIOEDEMA') return 100;
     if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 100;
     if (sbp >= 180 || dbp >= 120) return 100; // tier-null but clinically critical
     if (tier === 'TIER_1_CONTRAINDICATION') return 80;
@@ -341,6 +345,24 @@ export default function Dashboard() {
         accentLight: 'var(--brand-alert-red-light)',
         icon: <AlertTriangle className="w-5 h-5" />,
         title: 'Critical blood pressure reading',
+        body: patientMessage || 'Tap to see what to do next.',
+      };
+    }
+    // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema gets the same red
+    // 'emergency' treatment as BP Level 2 so the dashboard top-card surfaces
+    // it with urgent visual priority. Body comes from the signed-off
+    // patientMessage (RULE_ACE_ANGIOEDEMA / RULE_GENERIC_ANGIOEDEMA); title
+    // stays neutral non-diagnostic — the clinical content is in the body.
+    // Tapping the card routes to /alerts/[id] → EmergencyAlertScreen (the
+    // signed-off full-screen surface).
+    if (tier === 'TIER_1_ANGIOEDEMA') {
+      return {
+        key: 'emergency',
+        accent: 'var(--brand-alert-red)',
+        accentText: 'var(--brand-alert-red-text)',
+        accentLight: 'var(--brand-alert-red-light)',
+        icon: <AlertTriangle className="w-5 h-5" />,
+        title: 'This needs urgent care',
         body: patientMessage || 'Tap to see what to do next.',
       };
     }
