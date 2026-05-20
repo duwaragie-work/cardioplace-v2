@@ -2203,4 +2203,114 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(ruleIds).not.toContain('RULE_CAD_HIGH')
   })
 
+  // ========================================================================
+  // Cluster 8 Q3 (Manisha 5/18/26) — first-month educational adherence nudge
+  // ========================================================================
+  // Patient-only Tier 3 educational message. One-time per patient ever —
+  // engine guards on prisma.deviationAlert.count for prior nudge rows. Only
+  // within the first 30 days of enrollment. 2-of-3 default adherence window
+  // is UNCHANGED — a single miss must NOT fire RULE_MEDICATION_MISSED, only
+  // this nudge.
+
+  const NUDGE_RECENT_ENROLLED_AT = new Date('2026-04-12T10:00:00Z') // 10d before FIXED_NOW
+
+  it('Scenario 93 (Cluster 8 B.4) — enrolled 10d ago + first missed dose (no prior nudge) → RULE_FIRST_MONTH_ADHERENCE_NUDGE Tier 3', async () => {
+    // Seed one prior journal entry with medicationTaken=false to give the
+    // adherence window 1 day with miss → nudge gate passes. The current
+    // session is a clean BP reading (no co-fires) so the nudge is the only
+    // expected row.
+    const now = FIXED_NOW
+    prisma.journalEntry.findMany.mockResolvedValue([
+      {
+        id: 'prev-1',
+        measuredAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        medicationTaken: false,
+        missedMedications: null,
+      },
+    ])
+
+    await run(
+      buildSession({ systolicBP: 124, diastolicBP: 78, pulse: 72 }),
+      buildCtx({
+        profile: { diagnosedHypertension: true },
+        enrolledAt: NUDGE_RECENT_ENROLLED_AT,
+      }),
+    )
+
+    const calls = prisma.deviationAlert.create.mock.calls as Array<
+      [{ data: { ruleId: string; tier: string; patientMessage: string } }]
+    >
+    const nudge = calls
+      .map((c) => c[0].data)
+      .find((d) => d.ruleId === 'RULE_FIRST_MONTH_ADHERENCE_NUDGE')
+    expect(nudge).toBeTruthy()
+    expect(nudge?.tier).toBe('TIER_3_INFO')
+    // Approved verbatim wording — protect against silent edits.
+    expect(nudge?.patientMessage).toMatch(/starting a new medicine/i)
+    // 2-of-3 default window unchanged: a single miss must NOT fire the
+    // Tier 2 RULE_MEDICATION_MISSED row.
+    const ruleIds = calls.map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_MEDICATION_MISSED')
+  })
+
+  it('Scenario 94 (Cluster 8 B.4) — enrolled 40d ago + missed dose → no nudge (>30d window)', async () => {
+    // First-month window: enrolledAt 40 days before FIXED_NOW puts the
+    // patient OUT of the 30-day educational window. Even with a fresh miss
+    // signal, the nudge must stay silent — single miss also doesn't trip
+    // the 2-of-3 default, so we expect NO adherence row at all.
+    const now = FIXED_NOW
+    prisma.journalEntry.findMany.mockResolvedValue([
+      {
+        id: 'prev-1',
+        measuredAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        medicationTaken: false,
+        missedMedications: null,
+      },
+    ])
+
+    await run(
+      buildSession({ systolicBP: 124, diastolicBP: 78, pulse: 72 }),
+      buildCtx({
+        profile: { diagnosedHypertension: true },
+        enrolledAt: new Date(now.getTime() - 40 * 24 * 60 * 60 * 1000),
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_FIRST_MONTH_ADHERENCE_NUDGE')
+    // 2-of-3 default unchanged — single miss is below threshold.
+    expect(ruleIds).not.toContain('RULE_MEDICATION_MISSED')
+  })
+
+  it('Scenario 95 (Cluster 8 B.4) — enrolled 10d ago + nudge already fired once → does NOT fire again (one-time guard)', async () => {
+    // Override the prior-nudge count from 0 → 1: the engine's
+    // deviationAlert.count guard suppresses the second nudge. This is the
+    // one-time-per-patient-ever invariant — without it, a patient who
+    // misses doses across the first month would be nagged every time.
+    prisma.deviationAlert.count.mockResolvedValueOnce(1)
+    const now = FIXED_NOW
+    prisma.journalEntry.findMany.mockResolvedValue([
+      {
+        id: 'prev-1',
+        measuredAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        medicationTaken: false,
+        missedMedications: null,
+      },
+    ])
+
+    await run(
+      buildSession({ systolicBP: 124, diastolicBP: 78, pulse: 72 }),
+      buildCtx({
+        profile: { diagnosedHypertension: true },
+        enrolledAt: NUDGE_RECENT_ENROLLED_AT,
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_FIRST_MONTH_ADHERENCE_NUDGE')
+  })
 })
