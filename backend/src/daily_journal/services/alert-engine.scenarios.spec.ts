@@ -177,6 +177,11 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
           }),
         ),
         updateMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 0 }),
+        // Cluster 8 Q3 — engine's one-time-per-patient guard for the
+        // first-month nudge calls deviationAlert.count. Default 0 (no
+        // prior nudges) so the guard passes; scenarios that test
+        // suppression override per-test via mockResolvedValueOnce.
+        count: (jest.fn() as jest.Mock<any>).mockResolvedValue(0),
       },
       journalEntry: {
         findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
@@ -1622,5 +1627,244 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       ]),
     )
     expect(persistedRuleIds).not.toContain('RULE_PREGNANCY_L2')
+  })
+
+  // ========================================================================
+  // Cluster 8 (Manisha 5/18/26) — angioedema (P0 pilot blocker)
+  // ========================================================================
+  // Source: cardioplace-ace-angioedema-rule-signoff. Stage A pre-gate rule.
+  // Fires for ALL patients on a SINGLE reading regardless of med profile
+  // (bypasses Cluster 6 Q2 ≥2-reading gate). TIER_1_ANGIOEDEMA, non-dismiss-
+  // able, compressed escalation ladder. Three branches by med list:
+  //   ACE_ANGIOEDEMA      — ACE inhibitor present (ACE physician variant)
+  //   ACE_ANGIOEDEMA      — ARB present, no ACE  (ARB physician variant)
+  //   GENERIC_ANGIOEDEMA  — neither (NO "stop your medicine" patient line)
+  // Edge: GENERIC_ANGIOEDEMA + "list unverified" annotation when contextMeds
+  // has any non-VERIFIED entry but no matched ACE/ARB.
+
+  it('Scenario 73 (Cluster 8 B.1) — faceSwelling + VERIFIED ACE inhibitor → RULE_ACE_ANGIOEDEMA TIER_1_ANGIOEDEMA', async () => {
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1, // bypasses Cluster 6 Q2 single-reading gate
+        symptoms: { ...noSymptoms(), faceSwelling: true },
+      }),
+      buildCtx({ contextMeds: [buildMed()] }),
+    )
+
+    expect(createArgs.data.ruleId).toBe('RULE_ACE_ANGIOEDEMA')
+    expect(createArgs.data.tier).toBe('TIER_1_ANGIOEDEMA')
+    expect(createArgs.data.dismissible).toBe(false)
+    expect(createArgs.data.patientMessage).toMatch(
+      /do not take any more of your blood pressure medicine/i,
+    )
+    expect(createArgs.data.physicianMessage).toContain('Lisinopril')
+    expect(createArgs.data.physicianMessage).toContain('ACE_INHIBITOR')
+    expect(createArgs.data.physicianMessage).toMatch(/bradykinin-mediated/i)
+  })
+
+  it('Scenario 74 (Cluster 8 B.1) — faceSwelling + VERIFIED ARB (no ACE) → RULE_ACE_ANGIOEDEMA ARB variant', async () => {
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: { ...noSymptoms(), faceSwelling: true },
+      }),
+      buildCtx({
+        contextMeds: [
+          buildMed({ drugName: 'Losartan', drugClass: 'ARB' }),
+        ],
+      }),
+    )
+
+    expect(createArgs.data.ruleId).toBe('RULE_ACE_ANGIOEDEMA')
+    expect(createArgs.data.tier).toBe('TIER_1_ANGIOEDEMA')
+    // ARB physician variant: different wording, no bradykinin paragraph.
+    expect(createArgs.data.physicianMessage).toContain('Losartan')
+    expect(createArgs.data.physicianMessage).toContain('(ARB)')
+    expect(createArgs.data.physicianMessage).toMatch(
+      /ARB-associated angioedema is less common/i,
+    )
+    expect(createArgs.data.physicianMessage).not.toMatch(/bradykinin-mediated/i)
+  })
+
+  it('Scenario 75 (Cluster 8 B.1) — faceSwelling + NO ACE/ARB → RULE_GENERIC_ANGIOEDEMA, no "stop medicine" line', async () => {
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: { ...noSymptoms(), faceSwelling: true },
+      }),
+      // Empty contextMeds is the cleanest "neither ACE nor ARB" condition.
+      buildCtx({ contextMeds: [] }),
+    )
+
+    expect(createArgs.data.ruleId).toBe('RULE_GENERIC_ANGIOEDEMA')
+    expect(createArgs.data.tier).toBe('TIER_1_ANGIOEDEMA')
+    // Generic branch must NOT tell the patient to stop their medicine —
+    // cause may not be a medication.
+    expect(createArgs.data.patientMessage).not.toMatch(
+      /do not take any more of your blood pressure medicine/i,
+    )
+    // Patient still gets the airway/911 lead.
+    expect(createArgs.data.patientMessage).toMatch(/swelling of your face/i)
+    expect(createArgs.data.physicianMessage).toContain('Differential')
+    expect(createArgs.data.physicianMessage).not.toMatch(/bradykinin-mediated/i)
+  })
+
+  it('Scenario 76 (Cluster 8 B.1) — faceSwelling + UNVERIFIED non-ACE med → GENERIC + physician "unverified" annotation', async () => {
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: { ...noSymptoms(), faceSwelling: true },
+      }),
+      buildCtx({
+        contextMeds: [
+          // Non-ACE/ARB drug class so the rule doesn't match ACE/ARB, but
+          // it IS on the list and IS unverified — the safety-net branch.
+          buildMed({
+            drugName: 'Amlodipine',
+            drugClass: 'DHP_CCB',
+            verificationStatus: 'UNVERIFIED',
+          }),
+        ],
+      }),
+    )
+
+    expect(createArgs.data.ruleId).toBe('RULE_GENERIC_ANGIOEDEMA')
+    expect(createArgs.data.tier).toBe('TIER_1_ANGIOEDEMA')
+    // Provider annotation surfaced via physSuffix — flags that ACE/ARB
+    // exposure cannot be ruled out from an unverified list.
+    expect(createArgs.data.physicianMessage).toMatch(
+      /Medication list unverified — cannot rule out ACE inhibitor or ARB exposure/i,
+    )
+  })
+
+  it('Scenario 77 (Cluster 8 B.1) — throatTightness + ACE inhibitor → RULE_ACE_ANGIOEDEMA TIER_1_ANGIOEDEMA', async () => {
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: { ...noSymptoms(), throatTightness: true },
+      }),
+      buildCtx({ contextMeds: [buildMed()] }),
+    )
+
+    expect(createArgs.data.ruleId).toBe('RULE_ACE_ANGIOEDEMA')
+    expect(createArgs.data.tier).toBe('TIER_1_ANGIOEDEMA')
+    // Throat-tightness-only lead leads with the airway phrasing.
+    expect(createArgs.data.patientMessage).toMatch(/your throat feels tight/i)
+    expect(createArgs.data.patientMessage).toMatch(/911/)
+    expect(createArgs.data.physicianMessage).toMatch(
+      /Throat tightness reported — potential airway compromise/i,
+    )
+  })
+
+  it('Scenario 78 (Cluster 8 B.1) — throatTightness + NO meds at all → RULE_GENERIC_ANGIOEDEMA Tier 1 (universal airway)', async () => {
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: { ...noSymptoms(), throatTightness: true },
+      }),
+      buildCtx({ contextMeds: [] }),
+    )
+
+    // Critical: airway symptoms must fire Tier 1 EVEN with no med history —
+    // angioedema can be allergic, hereditary, idiopathic. The rule must not
+    // gate on med presence.
+    expect(createArgs.data.ruleId).toBe('RULE_GENERIC_ANGIOEDEMA')
+    expect(createArgs.data.tier).toBe('TIER_1_ANGIOEDEMA')
+    expect(createArgs.data.dismissible).toBe(false)
+    // No "stop medicine" line — no medicine to stop.
+    expect(createArgs.data.patientMessage).not.toMatch(
+      /do not take any more of your blood pressure medicine/i,
+    )
+  })
+
+  it('Scenario 79 (Cluster 8 B.1) — angioedema preempts SBP — Stage A fires alone on a 145 reading + faceSwelling + ACE', async () => {
+    // Wiring spec: ACE_ANGIOEDEMA claims the top-priority 'angioedema' axis
+    // ahead of every BP axis, and the Stage A pre-gate is terminal for that
+    // axis. With diagnosedHypertension + SBP 145 in standard mode, no L1
+    // SBP rule fires here either (STANDARD_L1_HIGH threshold is 160). We
+    // explicitly assert only ONE row is persisted, the angioedema row.
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 145,
+        diastolicBP: 85,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: { ...noSymptoms(), faceSwelling: true },
+      }),
+      buildCtx({
+        profile: { diagnosedHypertension: true },
+        contextMeds: [buildMed()],
+      }),
+    )
+
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(1)
+    expect(createArgs.data.ruleId).toBe('RULE_ACE_ANGIOEDEMA')
+  })
+
+  it('Scenario 80 (Cluster 8 B.1) — ACE inhibitor reported 10 years ago (no duration gate) → still fires Tier 1', async () => {
+    // OCTAVE / doc Q4 — ACE-induced angioedema can occur after years of
+    // therapy. Explicit guard: an ACE on the list for a decade must fire
+    // identically to a fresh prescription. We backdate verifiedAt + the
+    // med's reportedAt to TEN_YEARS_AGO to exercise the "no time filter".
+    const { createArgs } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: { ...noSymptoms(), faceSwelling: true },
+      }),
+      buildCtx({
+        contextMeds: [
+          buildMed({
+            // Same default ACE drug + class; explicit 10y-old reportedAt
+            // documents the test's intent. The rule never inspects this
+            // field — that IS the assertion.
+            reportedAt: TEN_YEARS_AGO,
+            verificationStatus: 'VERIFIED',
+          }),
+        ],
+      }),
+    )
+
+    expect(createArgs.data.ruleId).toBe('RULE_ACE_ANGIOEDEMA')
+    expect(createArgs.data.tier).toBe('TIER_1_ANGIOEDEMA')
+  })
+
+  it('Scenario 81 (Cluster 8 B.1) — no airway symptoms → angioedema rule is silent (negative guard)', async () => {
+    // Belt-and-suspenders: the rule must NOT fire on an ordinary clean
+    // reading. A regression here would mean an ACE inhibitor on the list +
+    // any reading is producing spurious Tier 1 emergency alerts.
+    const { result } = await run(
+      buildSession({
+        systolicBP: 124,
+        diastolicBP: 78,
+        pulse: 72,
+        readingCount: 1,
+        symptoms: noSymptoms(),
+      }),
+      buildCtx({ contextMeds: [buildMed()] }),
+    )
+
+    expect(result).toBeNull()
+    expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
   })
 })
