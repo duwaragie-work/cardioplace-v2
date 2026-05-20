@@ -2,7 +2,11 @@ import { expect, test } from '@playwright/test'
 import { authedApi } from '../helpers/auth.js'
 import { PATIENTS } from '../helpers/accounts.js'
 import { newTestControl, type TestControl } from '../helpers/test-control.js'
-import { postJournalEntry, waitForAlerts } from '../helpers/api.js'
+import {
+  postJournalEntry,
+  postSessionWithTwoReadings,
+  waitForAlerts,
+} from '../helpers/api.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
 /**
@@ -79,6 +83,10 @@ test.describe('Cluster 8 — angioedema + Q1/Q3 via API (Manisha 5/18)', () => {
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
     await seedHistoryToClearPreDay3(tc, u.id)
+    // Clear Aisha's seed Lisinopril+Amlodipine — otherwise the engine sees
+    // the ACE inhibitor in the roster and routes the ACE branch instead of
+    // ARB. (resetUser doesn't touch PatientMedication rows.)
+    await tc.clearUserMedications(u.id)
     await tc.setUserMedication(u.id, {
       drugName: 'Losartan',
       drugClass: 'ARB',
@@ -113,6 +121,9 @@ test.describe('Cluster 8 — angioedema + Q1/Q3 via API (Manisha 5/18)', () => {
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
     await seedHistoryToClearPreDay3(tc, u.id)
+    // Clear seed Lisinopril+Amlodipine so the engine routes GENERIC (no
+    // ACE/ARB in roster). resetUser doesn't touch PatientMedication.
+    await tc.clearUserMedications(u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
       await postJournalEntry(api, {
@@ -144,6 +155,9 @@ test.describe('Cluster 8 — angioedema + Q1/Q3 via API (Manisha 5/18)', () => {
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
     await seedHistoryToClearPreDay3(tc, u.id)
+    // Clear seed meds — engine must see an empty roster to route GENERIC
+    // (universal-airway rule fires for ALL patients regardless of meds).
+    await tc.clearUserMedications(u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
       await postJournalEntry(api, {
@@ -249,13 +263,16 @@ test.describe('Cluster 8 — angioedema + Q1/Q3 via API (Manisha 5/18)', () => {
     await tc.setEnrollment(u.id, 'ENROLLED')
     const api = await authedApi(API_BASE_URL, PATIENTS.paul.email)
     try {
-      await postJournalEntry(api, {
-        measuredAt: new Date().toISOString(),
+      // CAD_HIGH and CAD_DBP_HIGH are standard-pipeline rules — Cluster 6 Q2
+      // single-reading-session gate suppresses them on a 1-reading post.
+      // The seedHistoryToClearPreDay3 above clears preDay3Mode, but the
+      // single-reading gate is independent. Submit BOTH readings in one
+      // session so the engine accepts the session as confirmed.
+      await postSessionWithTwoReadings(api, {
         systolicBP: 145,
         diastolicBP: 95,
         pulse: 72,
         position: 'SITTING',
-        sessionId: crypto.randomUUID(),
       })
       const alerts = await waitForAlerts(tc, u.id, (xs) =>
         xs.some((a) => a.ruleId === 'RULE_CAD_DBP_HIGH'),

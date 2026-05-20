@@ -36,6 +36,12 @@ type Expectation = {
   exclusive?: boolean
   // Optional: additional setup before submitting (e.g. multiple readings for AFib gate).
   preSubmit?: (api: Awaited<ReturnType<typeof authedApi>>, sessionId: string) => Promise<void>
+  // Cluster 6 Q2 (Manisha 5/9/26) — single-reading non-AFib non-preDay3
+  // sessions suppress standard-pipeline rules (HFrEF/CAD/HCM/standard L1).
+  // Opt-in flag to submit TWO readings under the same sessionId so the
+  // engine accepts it as confirmed. Default false preserves existing tests
+  // (most fire emergencies or run in preDay3Mode → gate already bypassed).
+  twoReadingSession?: boolean
   notes?: string
 }
 
@@ -61,7 +67,17 @@ async function submitAndAssert(e: Expectation): Promise<{
 
   const sessionId = randomUUID()
   if (e.preSubmit) await e.preSubmit(api, sessionId)
-  await postJournalEntry(api, { ...e.entry, sessionId })
+  if (e.twoReadingSession) {
+    // Two-reading session bypasses Cluster 6 Q2 single-reading gate. Both
+    // readings share the requested sessionId; second is offset 1 min later.
+    const secondMeasuredAt = new Date(
+      new Date(e.entry.measuredAt as string).getTime() + 60_000,
+    ).toISOString()
+    await postJournalEntry(api, { ...e.entry, sessionId })
+    await postJournalEntry(api, { ...e.entry, measuredAt: secondMeasuredAt, sessionId })
+  } else {
+    await postJournalEntry(api, { ...e.entry, sessionId })
+  }
 
   // Allow async event-driven engine ≤4s to land alerts.
   let alerts: Awaited<ReturnType<typeof tc.listAlerts>> = []
@@ -736,12 +752,19 @@ test.describe('Bucket B G3: Pre-Day-3 mode (educational suppression)', () => {
     // Seed 7 historical entries + re-stamp ENROLLED in preSubmit so (a)
     // preDay3Mode is false (≥7 readings) and (b) the CAD ramp resolves
     // Paul's default sbpUpperTarget to 140 (Phase 1 newly-enrolled).
+    //
+    // twoReadingSession bypasses Cluster 6 Q2's single-reading gate.
+    // Clearing preDay3Mode (above) EXPOSES the gate — preDay3 was the
+    // safety net hiding it before the seed expanded; CAD_HIGH is a
+    // standard-pipeline rule and gets suppressed on a single-reading
+    // non-AFib non-preDay3 session.
     const r = await submitAndAssert({
       label: 'post day-3 CAD L1 fires',
       patient: 'paul',
       entry: { measuredAt: FUTURE(), systolicBP: 145, diastolicBP: 95, pulse: 78 },
       expectRuleIds: ['RULE_CAD_HIGH'],
       expectTiers: ['BP_LEVEL_1_HIGH'],
+      twoReadingSession: true,
       preSubmit: async () => {
         const u = await tc.findUser(PATIENTS.paul.email)
         await tc.setEnrollment(u.id, 'ENROLLED')
