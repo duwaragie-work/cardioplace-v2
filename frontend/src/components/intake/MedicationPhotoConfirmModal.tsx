@@ -180,6 +180,7 @@ export default function MedicationPhotoConfirmModal({
         onClick={onCancel}
       />
       <motion.div
+        data-testid="medication-photo-confirm-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="med-confirm-title"
@@ -250,6 +251,7 @@ export default function MedicationPhotoConfirmModal({
               {rows.map((row, i) => (
                 <RowCard
                   key={i}
+                  index={i}
                   row={row}
                   findExisting={findExisting}
                   onChange={(patch) => updateRow(i, patch)}
@@ -281,6 +283,7 @@ export default function MedicationPhotoConfirmModal({
         >
           <button
             type="button"
+            data-testid="medication-photo-confirm-button"
             onClick={handleConfirm}
             disabled={actionableCount === 0}
             className="flex-1 h-11 rounded-xl font-bold text-white cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--brand-primary-purple)] disabled:opacity-50 disabled:cursor-not-allowed"
@@ -323,10 +326,12 @@ export default function MedicationPhotoConfirmModal({
 // ─── Row card ────────────────────────────────────────────────────────────────
 
 function RowCard({
+  index,
   row,
   findExisting,
   onChange,
 }: {
+  index: number;
   row: RowState;
   findExisting?: (drugName: string) => ExistingMedicationMatch | null;
   onChange: (patch: Partial<RowState>) => void;
@@ -389,6 +394,7 @@ function RowCard({
 
   return (
     <div
+      data-testid={`medication-photo-row-${index}`}
       className="rounded-xl p-3 flex flex-col gap-2 transition-opacity"
       style={{
         border: '1px solid var(--brand-border)',
@@ -474,6 +480,7 @@ function RowCard({
       {/* Frequency + skip toggle */}
       <div className="flex items-center justify-between gap-2">
         <select
+          data-testid={`medication-photo-row-frequency-${index}`}
           value={row.frequency}
           onChange={(e) =>
             onChange({ frequency: e.target.value as RowState['frequency'] })

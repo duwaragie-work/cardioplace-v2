@@ -300,6 +300,7 @@ function AlertCard({
   return (
     <motion.div
       layout
+      data-testid={`notification-row-${alert.id}`}
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.97 }}
@@ -448,6 +449,7 @@ function AlertCard({
         <div className="mt-3 flex items-center gap-2">
           {canAck && (
             <motion.button
+              data-testid={`notification-dismiss-button-${alert.id}`}
               onClick={() => onAcknowledge(alert.id)}
               disabled={isAcking}
               className="flex-1 h-10 rounded-xl text-[13px] font-bold flex items-center justify-center gap-2 text-white transition disabled:opacity-60 cursor-pointer"
@@ -474,6 +476,7 @@ function AlertCard({
           )}
           <Link
             href={`/alerts/${alert.id}`}
+            data-testid={`notification-link-${alert.id}`}
             className={
               (canAck ? 'h-10 px-4' : 'flex-1 h-10') +
               ' rounded-xl text-[13px] font-bold flex items-center justify-center gap-1 transition cursor-pointer'
@@ -510,6 +513,7 @@ function NotifCard({
   return (
     <motion.div
       layout
+      data-testid={`notification-row-${notif.id}`}
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
@@ -599,6 +603,7 @@ function NotifCard({
             {notif.alertId ? (
               <div className="mt-1.5 flex items-center justify-between gap-3">
                 <span
+                  data-testid={`notification-link-${notif.id}`}
                   className="inline-flex items-center gap-1 text-[11px] font-semibold"
                   style={{ color: 'var(--brand-primary-purple)' }}
                 >
@@ -608,6 +613,7 @@ function NotifCard({
                 {!notif.watched && (
                   <button
                     type="button"
+                    data-testid={`notification-mark-read-button-${notif.id}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       onRead(notif.id);

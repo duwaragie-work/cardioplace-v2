@@ -64,6 +64,22 @@ function deriveTier(alert: DeviationAlertDto): AlertTier {
 
 function variantFor(tier: AlertTier | null | undefined): Variant {
   switch (tier) {
+    // Cluster 8 — ACE-angioedema airway emergency. Most urgent red treatment;
+    // the registry patientMessage (passed as the alert body) carries the
+    // exact approved 911 wording — these are the fallback strings.
+    case 'TIER_1_ANGIOEDEMA':
+      return {
+        accent: 'var(--brand-alert-red)',
+        accentLight: 'var(--brand-alert-red-light)',
+        icon: <AlertTriangle className="w-7 h-7" strokeWidth={2.4} />,
+        title: 'Urgent — get medical help now.',
+        defaultBody:
+          'You reported swelling of your face, lips, or tongue, or throat tightness. If you have trouble breathing or your throat feels tight, call 911 now. Otherwise go to the nearest emergency room now.',
+        footer:
+          'This can be a dangerous reaction. Your care team has been notified. Do not take any more of your blood pressure medicine until your doctor tells you it is safe.',
+        followUp:
+          'Do not wait. Call 911 or go to the emergency room now if you have any trouble breathing or throat tightness.',
+      };
     case 'BP_LEVEL_2':
     case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
       return {
@@ -164,12 +180,24 @@ function formatTime(iso: string): string {
 
 export default function TierAlertView({ alert, acknowledging, onAcknowledge }: Props) {
   const router = useRouter();
-  const { t } = useLanguage();
+  const { t, locale } = useLanguage();
   // Use the rule engine's tier when present; otherwise derive one from the
   // legacy fields so v1 alerts still render meaningfully.
   const effectiveTier = alert.tier ?? deriveTier(alert);
   const v = variantFor(effectiveTier);
-  const body = (alert.patientMessage?.trim() || v.defaultBody);
+  // Cluster 8 Gap 1 (Manisha 5/18/26, P0) — the angioedema emergency text is
+  // a Priority-1 translation. The backend persists the English string (kept
+  // as the fallback + the JCAHO audit record); the patient app renders it
+  // locale-aware by ruleId so es/am pilot patients see their language.
+  const angioedemaKey =
+    alert.ruleId === 'RULE_ACE_ANGIOEDEMA'
+      ? 'alert.angioedema.patientAce'
+      : alert.ruleId === 'RULE_GENERIC_ANGIOEDEMA'
+        ? 'alert.angioedema.patientGeneric'
+        : null;
+  const body = angioedemaKey
+    ? (t(angioedemaKey) || alert.patientMessage?.trim() || v.defaultBody)
+    : (alert.patientMessage?.trim() || v.defaultBody);
   const bp = formatBp(alert);
   const measuredAtLabel = alert.journalEntry?.measuredAt
     ? formatTime(alert.journalEntry.measuredAt)
@@ -230,6 +258,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
                       Until Dr. Singal signs off per-locale, they stay English so screen
                       readers and TTS don't try to pronounce English as the page locale. */}
                   <h1
+                    data-testid="alert-detail-tier-badge"
                     lang="en"
                     className="text-[20px] sm:text-[22px] font-bold leading-tight"
                     style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
@@ -252,7 +281,8 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
                 )}
 
                 <p
-                  lang="en"
+                  data-testid="alert-message-patient"
+                  lang={angioedemaKey ? locale : 'en'}
                   className="text-[14.5px] sm:text-[15px] mt-3 leading-relaxed"
                   style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
                 >
@@ -325,6 +355,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
           if (hasResolution) {
             statusPanel = (
               <div
+                data-testid="alert-resolved-by"
                 className="rounded-xl px-4 py-3 flex items-start gap-3"
                 style={{ backgroundColor: 'var(--brand-success-green-light)' }}
               >
@@ -392,6 +423,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
           } else if (isPatientAcked) {
             statusPanel = (
               <div
+                data-testid="alert-status-badge"
                 className="rounded-xl px-4 py-3 flex items-center gap-3"
                 style={{ backgroundColor: 'var(--brand-success-green-light)' }}
               >
@@ -412,6 +444,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
               {canAck && (
                 <motion.button
                   type="button"
+                  data-testid="alert-acknowledge-button"
                   onClick={onAcknowledge}
                   disabled={acknowledging}
                   className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer transition"

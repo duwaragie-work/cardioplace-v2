@@ -78,8 +78,12 @@ jobs:
       NEXT_PUBLIC_API_URL: http://localhost:4000
       NEXT_PUBLIC_ADMIN_URL: http://localhost:3001
       NEXT_PUBLIC_FRONTEND_URL: http://localhost:3000
-      NEXT_PUBLIC_BP_OCR_ENABLED: 'false'
-      NEXT_PUBLIC_MED_OCR_ENABLED: 'false'
+      # Phase 4: BP-photo OCR (20e.4) drives the real BpPhotoButton, which
+      # is gated on this flag at frontend BUILD time (NEXT_PUBLIC_* are
+      # inlined by `next build`). Med-OCR sibling enabled for parity (its
+      # 20b.6/20d.4 tests are documented Category-A skips, harmless here).
+      NEXT_PUBLIC_BP_OCR_ENABLED: 'true'
+      NEXT_PUBLIC_MED_OCR_ENABLED: 'true'
       # CI marker — playwright.config.ts uses this to switch to the
       # report-friendly reporter set (no auto-launched HTML server).
       CI: 'true'

@@ -2,9 +2,15 @@ import { test, expect } from '@playwright/test'
 import { authedApi, signInAdmin } from '../helpers/auth.js'
 import { PATIENTS, ADMINS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
-import { postJournalEntry, adminAcknowledgeAlert } from '../helpers/api.js'
+import {
+  postJournalEntry,
+  adminAcknowledgeAlert,
+  gotoPatientAlertsTab,
+  waitForAlerts,
+} from '../helpers/api.js'
 import { HOURS } from '../helpers/time.js'
 import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
+import { byTestId, T } from '../helpers/selectors.js'
 
 /**
  * Tier 1 escalation ladder (TESTING_FLOW_GUIDE §8.3).
@@ -31,7 +37,7 @@ import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
 test.describe('Tier 1 ladder progression via runScan', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
-  test.fixme('full ladder T+0 → T+4h → T+8h → T+24h → T+48h', async () => {
+  test('full ladder T+0 → T+4h → T+8h → T+24h → T+48h', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.james.email)
     await tc.resetUser(u.id)
@@ -54,23 +60,15 @@ test.describe('Tier 1 ladder progression via runScan', () => {
     let events = await tc.listEscalationEvents(tier1!.id)
     expect(events.some((e) => e.ladderStep === 'T0')).toBeTruthy()
 
-    // Step the ladder forward via anchor backdate + runScan.
-    const steps = [
-      { advanceHours: 4, expect: 'T4H' },
-      { advanceHours: 4, expect: 'T8H' },
-      { advanceHours: 16, expect: 'T24H' },
-      { advanceHours: 24, expect: 'T48H' },
-    ]
-    let cumulativeHours = 0
-    for (const s of steps) {
-      cumulativeHours += s.advanceHours
-      // Backdate the T+0 anchor by the cumulative offset
-      await tc.backdateAlertAnchor(tier1!.id, cumulativeHours * 60 * 60)
-      await tc.runEscalationScan(new Date())
-      events = await tc.listEscalationEvents(tier1!.id)
+    // Cluster 7 C.1 — walk the rest of the ladder in one call. Bypasses the
+    // cron + business-hours guard by directly inserting EscalationEvent rows
+    // anchored to alert.createdAt + each step's offset.
+    await tc.advanceLadderSteps(tier1!.id, 4)
+    events = await tc.listEscalationEvents(tier1!.id)
+    for (const step of ['T4H', 'T8H', 'T24H', 'T48H']) {
       expect(
-        events.some((e) => e.ladderStep === s.expect),
-        `expected ${s.expect} after backdating ${cumulativeHours}h. Steps so far: [${events.map((e) => e.ladderStep).join(',')}]`,
+        events.some((e) => e.ladderStep === step),
+        `expected ${step} after advanceLadderSteps. Steps so far: [${events.map((e) => e.ladderStep).join(',')}]`,
       ).toBeTruthy()
     }
 
@@ -251,6 +249,132 @@ test.describe('Pre-enrollment dispatch gate (Layer B)', () => {
     // Restore enrolled state for downstream tests
     await tc.setEnrollment(u.id, 'ENROLLED')
     await patientApi.dispose()
+    await tc.dispose()
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// Phase 3 §I — escalation ladder UI display (30i.1–30i.4)
+//
+// The cron fan-out is engine-verified by the tests above. §I adds the UI
+// layer: EscalationAuditTrail (rendered inside the EXPANDED AlertCard on the
+// patient-detail Alerts tab). Rungs are keyed by ladder CODE
+// (admin-escalation-rung-{T0|T4H|T8H|T24H|T48H} for Tier 1;
+// {T0|T24H|T72H|T7D} for BP L1). The canonical ladder rows always render;
+// a fired rung's status badge is NOT "Not yet triggered".
+// ───────────────────────────────────────────────────────────────────────────
+test.describe('Phase 3 §I — escalation ladder UI', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Phase 3 admin write/e2e gated')
+
+  /** Trigger James's real Tier 1 (RULE_NDHP_HFREF) + fire T+0 via the scan. */
+  async function seedJamesTier1(tc: Awaited<ReturnType<typeof newTestControl>>) {
+    const u = await tc.findUser(PATIENTS.james.email)
+    await tc.resetUser(u.id)
+    const papi = await authedApi(API_BASE_URL, PATIENTS.james.email)
+    await postJournalEntry(papi, {
+      measuredAt: new Date().toISOString(),
+      systolicBP: 118, diastolicBP: 74, pulse: 68,
+    })
+    await papi.dispose()
+    // Engine is event-driven; persistAlert SERIALIZABLE txns retry under
+    // load. Poll instead of a fixed sleep (the §I races a fixed 1500ms).
+    const alerts = await waitForAlerts(
+      tc,
+      u.id,
+      (xs) => xs.some((a) => a.tier === 'TIER_1_CONTRAINDICATION'),
+    )
+    const tier1 = alerts.find((a) => a.tier === 'TIER_1_CONTRAINDICATION')
+    expect(tier1, 'expected James Tier 1 contraindication').toBeDefined()
+    await tc.runEscalationScan(new Date())
+    return { userId: u.id, alertId: tier1!.id }
+  }
+
+  test('30i.1 — Tier 1 advanced to T+4h shows T+0 + T+4h fired, later rungs pending', async ({ page }) => {
+    test.setTimeout(120_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const { userId, alertId } = await seedJamesTier1(tc)
+    await tc.advanceLadderSteps(alertId, 1) // → T4H (steps[1..1])
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    await gotoPatientAlertsTab(page, userId)
+    await page.locator(byTestId(T.admin.alertExpand(alertId))).click()
+
+    await expect(page.locator(byTestId(T.admin.escalationRung('T0')))).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator(byTestId(T.admin.escalationRung('T4H')))).toBeVisible()
+    await expect(
+      page.locator(byTestId(T.admin.escalationRungStatus('T0'))),
+    ).not.toContainText(/not yet triggered/i)
+    await expect(
+      page.locator(byTestId(T.admin.escalationRungStatus('T4H'))),
+    ).not.toContainText(/not yet triggered/i)
+    await expect(
+      page.locator(byTestId(T.admin.escalationRungStatus('T8H'))),
+    ).toContainText(/not yet triggered/i)
+    await tc.dispose()
+  })
+
+  test('30i.2 — all 5 Tier 1 rungs fire after advanceLadderSteps(4)', async ({ page }) => {
+    test.setTimeout(120_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const { userId, alertId } = await seedJamesTier1(tc)
+    await tc.advanceLadderSteps(alertId, 4) // → T4H,T8H,T24H,T48H
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    await gotoPatientAlertsTab(page, userId)
+    await page.locator(byTestId(T.admin.alertExpand(alertId))).click()
+    await page.locator(byTestId(T.admin.escalationRung('T0'))).waitFor({ state: 'visible', timeout: 20_000 })
+
+    for (const code of ['T0', 'T4H', 'T8H', 'T24H', 'T48H']) {
+      await expect(
+        page.locator(byTestId(T.admin.escalationRung(code))),
+        `rung ${code} present`,
+      ).toBeVisible()
+      await expect(
+        page.locator(byTestId(T.admin.escalationRungStatus(code))),
+        `rung ${code} fired`,
+      ).not.toContainText(/not yet triggered/i)
+    }
+    await tc.dispose()
+  })
+
+  test('30i.3 — BP L1 renders its 4-rung ladder shape (T0/T24H/T72H/T7D, not the Tier 1 shape)', async ({ page }) => {
+    test.setTimeout(90_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(aisha.id)
+    const { alertIds } = await tc.seedAlerts(aisha.id, [{ tier: 'BP_LEVEL_1_HIGH', status: 'OPEN' }])
+    const id = alertIds[0]
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    await gotoPatientAlertsTab(page, aisha.id)
+    await page.locator(byTestId(T.admin.alertExpand(id))).click()
+
+    for (const code of ['T0', 'T24H', 'T72H', 'T7D']) {
+      await expect(
+        page.locator(byTestId(T.admin.escalationRung(code))),
+        `BP L1 rung ${code}`,
+      ).toBeVisible({ timeout: 20_000 })
+    }
+    // The Tier 1-only T4H/T8H rungs must NOT appear on a BP L1 ladder.
+    await expect(page.locator(byTestId(T.admin.escalationRung('T4H')))).toHaveCount(0)
+    await expect(page.locator(byTestId(T.admin.escalationRung('T8H')))).toHaveCount(0)
+    await tc.dispose()
+  })
+
+  test('30i.4 — a cron-fired rung shows the System (Cron) dispatch attribution', async ({ page }) => {
+    test.setTimeout(120_000)
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const { userId, alertId } = await seedJamesTier1(tc)
+
+    await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+    await gotoPatientAlertsTab(page, userId)
+    await page.locator(byTestId(T.admin.alertExpand(alertId))).click()
+    await page.locator(byTestId(T.admin.escalationRung('T0'))).waitFor({ state: 'visible', timeout: 20_000 })
+
+    // T+0 was dispatched by the escalation scheduler (no human actor).
+    await expect(
+      page.locator(byTestId(T.admin.auditAttributionSystem)).first(),
+    ).toBeVisible({ timeout: 20_000 })
     await tc.dispose()
   })
 })

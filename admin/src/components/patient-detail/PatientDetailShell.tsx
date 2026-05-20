@@ -385,7 +385,7 @@ export default function PatientDetailShell({ patientId }: Props) {
         </button>
 
         {/* ── Header card ───────────────────────────────────────────────── */}
-        <div className="bg-white rounded-2xl p-5 md:p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+        <div className="bg-white rounded-2xl p-5 md:p-6" style={{ boxShadow: 'var(--brand-shadow-card)' }} data-testid="admin-patient-detail-header">
           {headerLoading ? (
             <div className="flex items-center gap-4 animate-pulse">
               <div className="w-14 h-14 rounded-full" style={{ backgroundColor: '#EDE9F6' }} />
@@ -424,12 +424,14 @@ export default function PatientDetailShell({ patientId }: Props) {
                     <h1
                       className="text-lg sm:text-xl font-bold leading-tight truncate"
                       style={{ color: 'var(--brand-text-primary)' }}
+                      data-testid="admin-patient-name"
                     >
                       {header.name ?? 'Unknown patient'}
                     </h1>
                     <span
                       className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider whitespace-nowrap"
                       style={{ backgroundColor: verificationBadge.bg, color: verificationBadge.fg }}
+                      data-testid="admin-patient-verification-badge"
                     >
                       {verificationBadge.icon}
                       {verificationBadge.label}
@@ -603,6 +605,7 @@ export default function PatientDetailShell({ patientId }: Props) {
                 key={key}
                 type="button"
                 role="tab"
+                data-testid={`admin-tab-${key}`}
                 aria-selected={active}
                 onClick={() => setTab(key)}
                 className="inline-flex items-center gap-1.5 px-3 md:px-4 h-9 rounded-xl text-[12.5px] font-semibold transition-all cursor-pointer"
@@ -670,6 +673,7 @@ export default function PatientDetailShell({ patientId }: Props) {
                   loading={alertsLoading}
                   onResolved={onAlertsResolved}
                   heightCm={profile?.heightCm ?? null}
+                  patientName={header?.name ?? null}
                 />
               </>
             )}

@@ -22,12 +22,26 @@ import {
   TIER_1_BACKUP_ON_T0,
   TIER_1_LADDER,
   BP_LEVEL_1_PATIENT_T0,
+  ANGIOEDEMA_PATIENT_T0,
 } from '../escalation/ladder-defs.js'
 import {
   isWithinBusinessHours,
   nextBusinessHoursStart,
   type BusinessHoursConfig,
 } from '../utils/business-hours.js'
+
+/**
+ * Cluster 7 A.6 — rules whose primary delivery channel is the caregiver
+ * dashboard rather than the standard provider escalation ladder. Each ruleId
+ * here is Tier 3 (no ladder) and the alert's caregiverMessage is the payload.
+ */
+const CAREGIVER_ROUTED_RULES: ReadonlySet<string> = new Set<string>([
+  'RULE_HF_CAREGIVER_EDEMA',
+  // Cluster 8 — angioedema dispatches the approved caregiver message at T+0
+  // (idle until CAREGIVER_DISPATCH_ENABLED + Lakshitha's Gap-5 UI lands).
+  'RULE_ACE_ANGIOEDEMA',
+  'RULE_GENERIC_ANGIOEDEMA',
+])
 
 /**
  * Phase/7 EscalationService — the single owner of the ladder state machine.
@@ -80,6 +94,17 @@ export class EscalationService {
     } catch (err) {
       this.logger.error(
         `T+0 dispatch failed for alert ${payload.alertId}`,
+        err instanceof Error ? err.stack : err,
+      )
+    }
+    // Cluster 7 A.6 — caregiver dispatch runs alongside the standard ladder.
+    // Tier 3 caregiver-routed rules (e.g. RULE_HF_CAREGIVER_EDEMA) have no
+    // ladder, so fireT0() exits early; this path is their only delivery.
+    try {
+      await this.dispatchCaregiverNotification(payload)
+    } catch (err) {
+      this.logger.error(
+        `Caregiver dispatch failed for alert ${payload.alertId}`,
         err instanceof Error ? err.stack : err,
       )
     }
@@ -153,6 +178,9 @@ export class EscalationService {
         recipientRoles: args.recipientRoles,
         scheduledFor,
         triggeredByResolution: true,
+        // Finding 5 — scheduled by an admin's BP_L2_UNABLE_TO_REACH_RETRY
+        // resolution action, not the cron scheduler. Human-attributed.
+        dispatchedBySystem: false,
         afterHours: false,
       },
     })
@@ -297,7 +325,16 @@ export class EscalationService {
     // CLINICAL_SPEC §V2-D After-Hours handling: "Tier 1: Queue for first
     // business day. Immediate push to backup. Escalation clock starts next
     // business day." The "immediate push to backup" scopes to after-hours.
-    if (ladder.kind === 'TIER_1' && practice != null) {
+    //
+    // Cluster 8 — angioedema is excluded: its ladder is FIRE_IMMEDIATELY
+    // (primary always pages at T+0 regardless of hours) and it has an
+    // explicit T+15m backup step, so the after-hours courtesy backup would
+    // double-page. The "primary is queued" rationale doesn't apply.
+    if (
+      ladder.kind === 'TIER_1' &&
+      alert.tier !== 'TIER_1_ANGIOEDEMA' &&
+      practice != null
+    ) {
       const afterHours = !isWithinBusinessHours(now, practice)
       if (afterHours) {
         await this.dispatchStep({
@@ -323,6 +360,22 @@ export class EscalationService {
         step: BP_LEVEL_1_PATIENT_T0,
         ladderKind: ladder.kind,
         recipientRoles: BP_LEVEL_1_PATIENT_T0.recipientRoles,
+        practice,
+        assignment,
+        now,
+      })
+    }
+
+    // Cluster 8 — angioedema patient T+0. Out-of-app push + in-app card so
+    // the patient sees the full-screen red + 911 CTA without opening the app
+    // first. Fires immediately regardless of business hours (airway
+    // emergency). Same separate-dispatch pattern as BP_LEVEL_1_PATIENT_T0.
+    if (alert.tier === 'TIER_1_ANGIOEDEMA') {
+      await this.dispatchStep({
+        alert,
+        step: ANGIOEDEMA_PATIENT_T0,
+        ladderKind: ladder.kind,
+        recipientRoles: ANGIOEDEMA_PATIENT_T0.recipientRoles,
         practice,
         assignment,
         now,
@@ -426,6 +479,9 @@ export class EscalationService {
         tier: {
           in: [
             'TIER_1_CONTRAINDICATION',
+            // Cluster 8 — without this the compressed angioedema ladder
+            // never advances past T+0 (T+15m/T+1h/T+4h never fire).
+            'TIER_1_ANGIOEDEMA',
             'TIER_2_DISCREPANCY',
             'BP_LEVEL_2',
             'BP_LEVEL_2_SYMPTOM_OVERRIDE',
@@ -590,6 +646,9 @@ export class EscalationService {
               notificationChannel: step.channels[0] ?? 'PUSH',
               afterHours: true,
               scheduledFor,
+              // Finding 5 — queued by the escalation scheduler (cron); no
+              // human actor.
+              dispatchedBySystem: true,
             },
           }),
         this.logger,
@@ -621,6 +680,9 @@ export class EscalationService {
             notificationChannel: step.channels[0] ?? 'PUSH',
             afterHours,
             notificationSentAt: now,
+            // Finding 5 — fired by the escalation scheduler (cron); no
+            // human actor.
+            dispatchedBySystem: true,
           },
         })
 
@@ -904,6 +966,44 @@ export class EscalationService {
     return users.map((u) => u.id)
   }
 
+  /**
+   * Cluster 7 A.6 — idle caregiver dispatch path. Writes a DASHBOARD
+   * Notification carrying the alert's caregiverMessage to every caregiver
+   * linked to the patient. Lakshitha's Gap 5 will populate the patient ↔
+   * caregiver relationship; until then `findCaregiverUserIds` returns [] and
+   * this method is a no-op. Gated behind CAREGIVER_DISPATCH_ENABLED=true so
+   * production stays silent until the UI ships.
+   */
+  private async dispatchCaregiverNotification(
+    payload: AlertCreatedEvent,
+  ): Promise<void> {
+    if (!CAREGIVER_ROUTED_RULES.has(payload.ruleId ?? '')) return
+    if (process.env.CAREGIVER_DISPATCH_ENABLED !== 'true') return
+
+    const caregiverUserIds = await this.findCaregiverUserIds(payload.userId)
+    if (caregiverUserIds.length === 0) return
+
+    const alert = await this.loadAlert(payload.alertId)
+    if (!alert?.caregiverMessage) return
+
+    for (const caregiverUserId of caregiverUserIds) {
+      await this.prisma.notification.create({
+        data: {
+          userId: caregiverUserId,
+          alertId: alert.id,
+          channel: 'DASHBOARD',
+          title: 'Caregiver update',
+          body: alert.caregiverMessage,
+        },
+      })
+    }
+  }
+
+  private async findCaregiverUserIds(_patientUserId: string): Promise<string[]> {
+    // Placeholder — PatientCaregiver model ships with Lakshitha's Gap 5.
+    return []
+  }
+
   private pickMessageForRole(alert: AlertRow, role: RecipientRole): string | null {
     if (role === 'PATIENT') return alert.patientMessage ?? null
     // All provider + ops roles use the clinical-shorthand physicianMessage.
@@ -916,10 +1016,18 @@ export class EscalationService {
     tier: string | null,
   ): string {
     if (role === 'PATIENT') {
+      if (tier === 'TIER_1_ANGIOEDEMA') {
+        return 'Urgent — get medical help now'
+      }
       if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') {
         return 'Urgent Blood Pressure Alert'
       }
       return 'Cardioplace Alert'
+    }
+    // Cluster 8 — angioedema is an airway emergency; surface it ahead of
+    // BP emergencies in the provider email subject.
+    if (tier === 'TIER_1_ANGIOEDEMA') {
+      return `[${step}] AIRWAY EMERGENCY (ANGIOEDEMA) — Patient needs review`
     }
     const isEmergency =
       tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
@@ -1253,6 +1361,7 @@ function tierLabelFor(tier: string | null): string {
   if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') {
     return 'BP EMERGENCY'
   }
+  if (tier === 'TIER_1_ANGIOEDEMA') return 'AIRWAY EMERGENCY (ANGIOEDEMA)'
   if (tier === 'TIER_1_CONTRAINDICATION') return 'TIER 1 CONTRAINDICATION'
   if (tier === 'BP_LEVEL_1_HIGH') return 'BP LEVEL 1 HIGH'
   if (tier === 'BP_LEVEL_1_LOW') return 'BP LEVEL 1 LOW'
@@ -1264,7 +1373,8 @@ function tierColorFor(tier: string | null): string {
   if (
     tier === 'BP_LEVEL_2' ||
     tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE' ||
-    tier === 'TIER_1_CONTRAINDICATION'
+    tier === 'TIER_1_CONTRAINDICATION' ||
+    tier === 'TIER_1_ANGIOEDEMA'
   ) {
     return '#b91c1c' // red-700
   }
@@ -1283,6 +1393,9 @@ function tierColorFor(tier: string | null): string {
 function ackFooterFor(tier: string | null): string {
   if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') {
     return 'If you do not acknowledge within 2 hours, the medical director will be paged. Healplace ops will phone the practice within 4 hours.'
+  }
+  if (tier === 'TIER_1_ANGIOEDEMA') {
+    return 'AIRWAY EMERGENCY. If you do not acknowledge within 15 minutes, your backup provider is paged. If unresolved within 1 hour, the medical director and Healplace ops are notified.'
   }
   if (tier === 'TIER_1_CONTRAINDICATION') {
     return 'If you do not acknowledge within 4 hours, your backup provider will be paged. If unresolved within 8 hours, the medical director will be notified.'
@@ -1306,6 +1419,9 @@ function humanStep(step: LadderStepId): string {
 }
 
 function patientSubject(tier: string | null): string {
+  if (tier === 'TIER_1_ANGIOEDEMA') {
+    return 'Urgent — get medical help now — Cardioplace'
+  }
   if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') {
     return 'Urgent Blood Pressure Alert — Cardioplace'
   }

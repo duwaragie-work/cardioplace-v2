@@ -241,6 +241,7 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
                 color: 'var(--brand-text-muted)',
               }}
               title="Read-only — only a Medical Director can change BP / HR thresholds."
+              data-testid="admin-threshold-readonly"
             >
               Read-only
             </span>
@@ -309,6 +310,8 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
             onUpper={(v) => set('sbpUpperTarget', v)}
             onLower={(v) => set('sbpLowerTarget', v)}
             color="var(--brand-alert-red)"
+            upperTestId="admin-threshold-sbp-upper"
+            lowerTestId="admin-threshold-sbp-lower"
           />
           <PairRow
             title="Diastolic BP (DBP)"
@@ -320,6 +323,8 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
             onUpper={(v) => set('dbpUpperTarget', v)}
             onLower={(v) => set('dbpLowerTarget', v)}
             color="var(--brand-primary-purple)"
+            upperTestId="admin-threshold-dbp-upper"
+            lowerTestId="admin-threshold-dbp-lower"
           />
           <PairRow
             title="Heart rate (optional)"
@@ -331,6 +336,8 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
             onUpper={(v) => set('hrUpperTarget', v)}
             onLower={(v) => set('hrLowerTarget', v)}
             color="var(--brand-accent-teal)"
+            upperTestId="admin-threshold-hr-upper"
+            lowerTestId="admin-threshold-hr-lower"
           />
         </div>
 
@@ -342,6 +349,7 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
           <textarea
             value={form.notes}
             onChange={(e) => set('notes', e.target.value)}
+            data-testid="admin-threshold-notes"
             placeholder="Why these targets? e.g. HFrEF + recent fall — using lower SBP floor of 95 instead of 85."
             rows={3}
             className="w-full px-3 py-2 rounded-lg text-[13px] outline-none resize-y leading-relaxed"
@@ -377,6 +385,7 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
             type="button"
             onClick={save}
             disabled={saving || !dirty}
+            data-testid="admin-threshold-save"
             className="btn-admin-primary shrink-0"
           >
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
@@ -431,6 +440,8 @@ interface PairRowProps {
   onUpper: (v: string) => void;
   onLower: (v: string) => void;
   color: string;
+  upperTestId?: string;
+  lowerTestId?: string;
 }
 
 function PairRow({
@@ -443,6 +454,8 @@ function PairRow({
   onUpper,
   onLower,
   color,
+  upperTestId,
+  lowerTestId,
 }: PairRowProps) {
   return (
     <div>
@@ -450,8 +463,8 @@ function PairRow({
         {title}
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <NumberInput label={upperLabel} unit={unit} value={upperValue} onChange={onUpper} />
-        <NumberInput label={lowerLabel} unit={unit} value={lowerValue} onChange={onLower} />
+        <NumberInput label={upperLabel} unit={unit} value={upperValue} onChange={onUpper} testId={upperTestId} />
+        <NumberInput label={lowerLabel} unit={unit} value={lowerValue} onChange={onLower} testId={lowerTestId} />
       </div>
     </div>
   );
@@ -502,7 +515,7 @@ function ReadonlyPair({
   );
 }
 
-function NumberInput({ label, unit, value, onChange }: { label: string; unit: string; value: string; onChange: (v: string) => void }) {
+function NumberInput({ label, unit, value, onChange, testId }: { label: string; unit: string; value: string; onChange: (v: string) => void; testId?: string }) {
   return (
     <label className="block">
       <span className="block text-[10.5px] font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--brand-text-muted)' }}>
@@ -517,6 +530,7 @@ function NumberInput({ label, unit, value, onChange }: { label: string; unit: st
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder="—"
+          data-testid={testId}
           className="flex-1 px-3 h-9 text-[13px] outline-none bg-transparent"
           style={{ color: 'var(--brand-text-primary)' }}
         />

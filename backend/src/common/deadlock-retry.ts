@@ -31,13 +31,19 @@ export async function withDeadlockRetry<T>(
     } catch (err: unknown) {
       const e = err as {
         code?: string
+        message?: string
         meta?: { code?: string }
         cause?: { code?: string }
       }
       const isDeadlock =
         e?.code === 'P2034' ||
         e?.meta?.code === '40P01' ||
-        e?.cause?.code === '40P01'
+        e?.cause?.code === '40P01' ||
+        // @prisma/adapter-pg wraps deadlocks as DriverAdapterError with the
+        // 'TransactionWriteConflict' string in the message. Observed against
+        // Prisma Cloud dev DB during Cluster 7 verification; the underlying
+        // 40P01 doesn't surface to the typed code field through the adapter.
+        (typeof e?.message === 'string' && e.message.includes('TransactionWriteConflict'))
       if (!isDeadlock || attempt === maxAttempts) throw err
       logger?.warn(
         `${label} deadlock (attempt ${attempt}/${maxAttempts}) — retrying in ${BACKOFF_MS}ms`,

@@ -292,6 +292,9 @@ function tierChrome(tier: string | null): {
     case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
       return { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)', label: 'BP L2', short: 'L2' };
     case 'TIER_1_CONTRAINDICATION':
+    // Cluster 8 — angioedema shares the Tier 1 chrome (red banner, "Tier 1"
+    // label) for MVP. Bespoke airway visuals are a post-pilot follow-up.
+    case 'TIER_1_ANGIOEDEMA':
       return { bg: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)', label: 'Tier 1', short: 'T1' };
     case 'TIER_2_DISCREPANCY':
       return { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)', label: 'Tier 2', short: 'T2' };
@@ -311,6 +314,11 @@ const TIER_SEVERITY_ORDER = [
   'BP_LEVEL_2',
   'BP_LEVEL_2_SYMPTOM_OVERRIDE',
   'TIER_1_CONTRAINDICATION',
+  // Cluster 8 — angioedema sits at Tier-1 severity (airway emergency,
+  // "resolved like all Tier 1 alerts"). Placed immediately after
+  // TIER_1_CONTRAINDICATION so an angioedema-only patient sorts above
+  // a Tier-2 / BP-L1 patient in the list.
+  'TIER_1_ANGIOEDEMA',
   'TIER_2_DISCREPANCY',
   'BP_LEVEL_1_HIGH',
   'BP_LEVEL_1_LOW',
@@ -880,7 +888,7 @@ export default function PatientsPage() {
   if (!hasAdminRole(user)) {
     return (
       <div className="h-full flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
-        <div className="text-center p-8 rounded-2xl bg-white" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+        <div className="text-center p-8 rounded-2xl bg-white" style={{ boxShadow: 'var(--brand-shadow-card)' }} data-testid="admin-access-denied">
           <div
             className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
             style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
@@ -947,6 +955,7 @@ export default function PatientsPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={t('provider.searchPatients')}
+                data-testid="admin-patient-search-input"
                 className="flex-1 text-[12px] outline-none bg-transparent min-w-0"
                 style={{ color: 'var(--brand-text-primary)' }}
               />
@@ -970,6 +979,7 @@ export default function PatientsPage() {
                 <select
                   value={riskFilter}
                   onChange={(e) => setRiskFilter(e.target.value)}
+                  data-testid="admin-patient-risk-filter"
                   className="appearance-none h-9 pl-3 pr-7 rounded-full text-[12px] font-semibold outline-none cursor-pointer"
                   style={{
                     backgroundColor: 'white',
@@ -999,6 +1009,7 @@ export default function PatientsPage() {
                   <button
                     type="button"
                     onClick={() => setAwaitingVerificationOnly((v) => !v)}
+                    data-testid="admin-patient-awaiting-filter"
                     aria-pressed={active}
                     aria-label={active ? 'Showing only unverified patients' : 'Filter to unverified patients'}
                     className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap"
@@ -1067,7 +1078,7 @@ export default function PatientsPage() {
               <TableSkeleton />
             </div>
           ) : filtered.length === 0 ? (
-            <div className="py-16 text-center">
+            <div className="py-16 text-center" data-testid="admin-patient-list-empty">
               <Users className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--brand-border)' }} />
               <p className="text-sm font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('provider.noPatients')}
@@ -1084,6 +1095,7 @@ export default function PatientsPage() {
                   // biome-ignore lint/a11y/useSemanticElements: row contains block-level children (grid columns), which would be invalid inside a <button>. Keyboard support handled below.
                   <div
                     key={p.id}
+                    data-testid={`admin-patient-list-row-${p.id}`}
                     onClick={() => router.push(`/patients/${p.id}`)}
                     role="button"
                     tabIndex={0}

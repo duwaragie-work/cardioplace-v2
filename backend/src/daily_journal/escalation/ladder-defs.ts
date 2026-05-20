@@ -19,6 +19,9 @@
 
 export type LadderStepId =
   | 'T0'
+  // Cluster 8 — angioedema compressed ladder rungs (see TIER_1_ANGIOEDEMA_LADDER).
+  | 'T15M'
+  | 'T1H'
   | 'T2H'
   | 'T4H'
   | 'T8H'
@@ -37,6 +40,11 @@ export type RecipientRole =
   | 'BACKUP_PROVIDER'
   | 'MEDICAL_DIRECTOR'
   | 'HEALPLACE_OPS'
+  // Cluster 7 A.6 — dispatch path stays gated behind
+  // CAREGIVER_DISPATCH_ENABLED until Lakshitha Gap 5 ships the
+  // PatientCaregiver relation + admin UI. Adding the type now so the
+  // engine + Notification rows can carry it idempotently.
+  | 'CAREGIVER'
 
 export type NotificationChannel = 'PUSH' | 'EMAIL' | 'DASHBOARD' | 'PHONE'
 
@@ -66,6 +74,7 @@ export interface LadderStep {
 
 export type LadderKind = 'TIER_1' | 'TIER_2' | 'BP_LEVEL_1' | 'BP_LEVEL_2'
 
+const MINUTE = 60 * 1000
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
 
@@ -115,6 +124,66 @@ export const TIER_1_LADDER: LadderStep[] = [
     recipientRoles: ['HEALPLACE_OPS'],
     channels: ['DASHBOARD'],
     afterHoursBehavior: 'QUEUE_UNTIL_BUSINESS_HOURS',
+    displayHint: 'RED_BANNER_ANIMATED',
+  },
+]
+
+/**
+ * Cluster 8 (Manisha 5/18/26) — ACE-angioedema compressed escalation ladder.
+ * Airway obstruction can progress within hours, so this escalates far faster
+ * than the standard Tier 1 ladder and NEVER queues for business hours
+ * (every step FIRE_IMMEDIATELY):
+ *
+ *   T+0   primary provider — push + email + dashboard
+ *   T+15m backup provider (only if primary hasn't acknowledged — the cron's
+ *         advanceOverdueLadders already excludes acknowledged alerts)
+ *   T+1h  medical director + Healplace ops — push + dashboard
+ *   T+4h  Healplace ops — dashboard (MVP "auto incident report": the
+ *         unresolved-airway-emergency flag captured in the 15-field audit
+ *         trail; full incident-report artifact deferred)
+ *
+ * ACCEPTED DEFERRAL (user-confirmed 2026-05, gap audit): the sign-off says
+ * "incident report auto-generated" at T+4h. We ship the ops-dashboard
+ * escalation as the pilot-safe MVP for the June 1 blocker; a standalone
+ * incident-report record + admin surface is intentionally post-pilot scope,
+ * not an oversight. The 15-field JCAHO audit trail already records the
+ * unresolved-emergency timeline, so no compliance gap.
+ *
+ * Patient T+0 (full-screen red + 911) + caregiver dispatch are handled
+ * separately in EscalationService.fireT0 via ANGIOEDEMA_PATIENT_T0 +
+ * dispatchCaregiverNotification (same pattern as BP_LEVEL_1_PATIENT_T0).
+ */
+export const TIER_1_ANGIOEDEMA_LADDER: LadderStep[] = [
+  {
+    step: 'T0',
+    offsetMs: 0,
+    recipientRoles: ['PRIMARY_PROVIDER'],
+    channels: ['PUSH', 'EMAIL', 'DASHBOARD'],
+    afterHoursBehavior: 'FIRE_IMMEDIATELY',
+    displayHint: 'RED_BANNER_ANIMATED',
+  },
+  {
+    step: 'T15M',
+    offsetMs: 15 * MINUTE,
+    recipientRoles: ['BACKUP_PROVIDER'],
+    channels: ['PUSH', 'EMAIL'],
+    afterHoursBehavior: 'FIRE_IMMEDIATELY',
+    displayHint: 'RED_BANNER_ANIMATED',
+  },
+  {
+    step: 'T1H',
+    offsetMs: HOUR,
+    recipientRoles: ['MEDICAL_DIRECTOR', 'HEALPLACE_OPS'],
+    channels: ['PUSH', 'DASHBOARD'],
+    afterHoursBehavior: 'FIRE_IMMEDIATELY',
+    displayHint: 'RED_BANNER_ANIMATED',
+  },
+  {
+    step: 'T4H',
+    offsetMs: 4 * HOUR,
+    recipientRoles: ['HEALPLACE_OPS'],
+    channels: ['DASHBOARD'],
+    afterHoursBehavior: 'FIRE_IMMEDIATELY',
     displayHint: 'RED_BANNER_ANIMATED',
   },
 ]
@@ -308,6 +377,22 @@ export const BP_LEVEL_1_PATIENT_T0: LadderStep = {
   afterHoursBehavior: 'FIRE_IMMEDIATELY',
 }
 
+/**
+ * Cluster 8 — angioedema patient T+0. Fires immediately regardless of hours
+ * (airway emergency). The patient app routes TIER_1_ANGIOEDEMA to the
+ * full-screen red + 911 treatment; this row writes the PUSH + DASHBOARD
+ * Notification carrying the registry patientMessage. Wired as a separate
+ * dispatch in EscalationService.fireT0 so it doesn't pollute the provider
+ * ladder's recipientRoles[0].
+ */
+export const ANGIOEDEMA_PATIENT_T0: LadderStep = {
+  step: 'T0',
+  offsetMs: 0,
+  recipientRoles: ['PATIENT'],
+  channels: ['PUSH', 'DASHBOARD'],
+  afterHoursBehavior: 'FIRE_IMMEDIATELY',
+}
+
 // ─── Tier router ──────────────────────────────────────────────────────────
 
 /**
@@ -323,6 +408,11 @@ export function ladderForTier(tier: string | null): {
   switch (tier) {
     case 'TIER_1_CONTRAINDICATION':
       return { kind: 'TIER_1', steps: TIER_1_LADDER }
+    case 'TIER_1_ANGIOEDEMA':
+      // Tier-1 kind (inherits non-dismissable + the 15-field audit trail),
+      // but the compressed steps + FIRE_IMMEDIATELY behavior come from the
+      // angioedema ladder, not the standard one.
+      return { kind: 'TIER_1', steps: TIER_1_ANGIOEDEMA_LADDER }
     case 'TIER_2_DISCREPANCY':
       return { kind: 'TIER_2', steps: TIER_2_LADDER }
     case 'BP_LEVEL_1_HIGH':

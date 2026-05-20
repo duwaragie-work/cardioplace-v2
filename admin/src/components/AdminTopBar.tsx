@@ -50,12 +50,16 @@ export default function AdminTopBar({ onOpenMobileNav }: Props) {
           >
             <Menu className="w-4 h-4" style={{ color: 'var(--brand-text-secondary)' }} />
           </button>
-          <h1
+          {/* a11y: the persistent top-bar title is NOT the page's semantic
+              heading — each routed page renders its own content <h1>. Keeping
+              this as an <h1> put two <h1>s on every admin page. Demoted to a
+              styled <div> (same classes → zero visual change). */}
+          <div
             className="text-[15px] font-bold truncate"
             style={{ color: 'var(--brand-text-primary)' }}
           >
             {title}
-          </h1>
+          </div>
         </div>
 
         <div className="flex items-center gap-1.5">

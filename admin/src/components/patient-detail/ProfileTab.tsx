@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   Loader2,
   AlertTriangle,
+  Info,
 } from 'lucide-react';
 import {
   verifyPatientProfile,
@@ -247,6 +248,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
           <div className="flex gap-1.5">
             <button
               type="button"
+              data-testid={`admin-profile-edit-save-${field.key}`}
               onClick={() => saveCorrection(field)}
               disabled={saving}
               className="h-7 px-2.5 rounded-lg text-[11px] font-semibold text-white transition-all hover:brightness-95 cursor-pointer inline-flex items-center gap-1 disabled:opacity-60"
@@ -280,6 +282,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
       <div className="flex items-center justify-between gap-2">
         <span
           className="text-[12.5px] truncate"
+          data-testid={`admin-profile-field-${field.key}`}
           style={{
             color:
               isFullyVerified
@@ -315,6 +318,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
               <button
                 type="button"
                 title="Confirm"
+                data-testid={`admin-profile-confirm-${field.key}`}
                 onClick={() => setStatus(field.key, 'confirmed')}
                 className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-green-50 cursor-pointer"
                 style={{
@@ -329,6 +333,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
             <button
               type="button"
               title={isFullyVerified ? 'Edit (re-opens verification)' : 'Correct'}
+              data-testid={`admin-profile-correct-${field.key}`}
               onClick={() => setStatus(field.key, 'editing')}
               disabled={saving}
               className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-purple-50 cursor-pointer disabled:opacity-60"
@@ -343,6 +348,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
             <button
               type="button"
               title={isFullyVerified ? 'Reject (returns profile to unverified)' : 'Reject'}
+              data-testid={`admin-profile-reject-${field.key}`}
               onClick={() => rejectField(field)}
               disabled={saving}
               className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-[var(--brand-alert-red-light)] cursor-pointer disabled:opacity-60"
@@ -365,6 +371,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
       {/* Status banner */}
       <div
         className="rounded-2xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
+        data-testid="admin-profile-status-banner"
         style={{
           backgroundColor: isFullyVerified ? 'var(--brand-success-green-light)' : 'var(--brand-warning-amber-light)',
           borderLeft: `4px solid ${isFullyVerified ? 'var(--brand-success-green)' : 'var(--brand-warning-amber)'}`,
@@ -407,6 +414,28 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
               {GROUP_LABEL[group]}
             </h3>
           </div>
+          {/* Cluster 8 Q2 (Manisha 5/18/26) — persistent CAD treatment-target
+              note. Shown for every CAD patient regardless of alert state so
+              the provider always sees the AHA/ACC target + the default alert
+              thresholds that now fire (SBP ≥140 via the Q2 ramp, DBP ≥80,
+              DBP <70 J-curve low). Per-patient overrides live in Thresholds. */}
+          {group === 'cardiac' && profile.hasCAD && (
+            <div
+              data-testid="admin-profile-cad-treatment-note"
+              className="mx-5 my-3 rounded-xl px-4 py-3 flex items-start gap-2.5"
+              style={{
+                backgroundColor: 'var(--brand-accent-teal-light)',
+                color: 'var(--brand-accent-teal)',
+              }}
+            >
+              <Info className="w-4 h-4 mt-0.5 shrink-0" />
+              <p className="text-[12px] leading-relaxed">
+                <span className="font-bold">CAD patient — AHA/ACC treatment target 130/80.</span>{' '}
+                Default alert thresholds: SBP ≥140 (Q2 ramp) / DBP ≥80 / DBP &lt;70 (J-curve low).
+                Customize per patient in Thresholds.
+              </p>
+            </div>
+          )}
           {/* Column headers */}
           <div className="hidden md:grid grid-cols-[180px_1fr_1fr] px-5 py-2.5" style={{ backgroundColor: 'var(--brand-background)' }}>
             <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
@@ -488,6 +517,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
                 type="text"
                 value={completeRationale}
                 onChange={(e) => setCompleteRationale(e.target.value)}
+                data-testid="admin-profile-verify-rationale"
                 placeholder="Optional rationale for the audit log"
                 className="px-3 h-9 rounded-lg text-[12.5px] outline-none"
                 style={{ border: '1px solid var(--brand-border)', minWidth: 240 }}
@@ -504,6 +534,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
                   type="button"
                   onClick={completeVerification}
                   disabled={completing}
+                  data-testid="admin-profile-verify-confirm"
                   className="btn-admin-primary"
                 >
                   {completing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
@@ -515,6 +546,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
             <button
               type="button"
               onClick={() => setShowCompleteRationale(true)}
+              data-testid="admin-profile-verify-complete"
               className="btn-admin-primary"
             >
               <ShieldCheck className="w-3.5 h-3.5" />
@@ -553,6 +585,7 @@ function renderEditor(field: FieldDef, value: unknown, onChange: (v: unknown) =>
       <select
         value={value ? 'true' : 'false'}
         onChange={(e) => onChange(e.target.value === 'true')}
+        data-testid={`admin-profile-edit-input-${field.key}`}
         className="px-2.5 h-8 rounded-lg text-[12px] outline-none w-full"
         style={{ border: '1px solid var(--brand-border)' }}
       >
@@ -566,6 +599,7 @@ function renderEditor(field: FieldDef, value: unknown, onChange: (v: unknown) =>
       <select
         value={(value as string) ?? ''}
         onChange={(e) => onChange(e.target.value)}
+        data-testid={`admin-profile-edit-input-${field.key}`}
         className="px-2.5 h-8 rounded-lg text-[12px] outline-none w-full"
         style={{ border: '1px solid var(--brand-border)' }}
       >
@@ -583,6 +617,7 @@ function renderEditor(field: FieldDef, value: unknown, onChange: (v: unknown) =>
         type="date"
         value={value ? String(value).slice(0, 10) : ''}
         onChange={(e) => onChange(e.target.value || null)}
+        data-testid={`admin-profile-edit-input-${field.key}`}
         className="px-2.5 h-8 rounded-lg text-[12px] outline-none w-full"
         style={{ border: '1px solid var(--brand-border)' }}
       />
@@ -594,6 +629,7 @@ function renderEditor(field: FieldDef, value: unknown, onChange: (v: unknown) =>
       type="number"
       value={(value as number | null) ?? ''}
       onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+      data-testid={`admin-profile-edit-input-${field.key}`}
       className="px-2.5 h-8 rounded-lg text-[12px] outline-none w-full"
       style={{ border: '1px solid var(--brand-border)' }}
     />

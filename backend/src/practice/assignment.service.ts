@@ -5,9 +5,21 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { Prisma } from '../generated/prisma/client.js'
+import {
+  VerifierRole,
+  VerificationChangeType,
+} from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import type { CreateAssignmentDto } from './dto/create-assignment.dto.js'
 import type { UpdateAssignmentDto } from './dto/update-assignment.dto.js'
+
+// JCAHO audit snapshot — the four care-team slots only.
+interface AssignmentSnapshot {
+  practiceId: string | null
+  primaryProviderId: string | null
+  backupProviderId: string | null
+  medicalDirectorId: string | null
+}
 
 // Which user roles qualify for each assignment slot.
 const PRIMARY_ALLOWED = ['PROVIDER', 'MEDICAL_DIRECTOR'] as const
@@ -18,7 +30,11 @@ const MEDICAL_DIRECTOR_ALLOWED = ['MEDICAL_DIRECTOR'] as const
 export class AssignmentService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(patientUserId: string, dto: CreateAssignmentDto) {
+  async create(
+    adminId: string,
+    patientUserId: string,
+    dto: CreateAssignmentDto,
+  ) {
     await this.assertPatientExists(patientUserId)
     await this.assertPracticeExists(dto.practiceId)
     await this.assertRoles(
@@ -47,6 +63,14 @@ export class AssignmentService {
           medicalDirectorId: dto.medicalDirectorId,
         },
       })
+      // Finding 4 — JCAHO audit: care-team assignment is a clinical-staff
+      // state change and must leave an actor + before/after trail.
+      await this.writeAssignmentAudit(
+        patientUserId,
+        adminId,
+        Prisma.JsonNull,
+        this.assignmentSnapshot(assignment),
+      )
       return {
         statusCode: 201,
         message: 'Assignment created',
@@ -109,7 +133,11 @@ export class AssignmentService {
     }
   }
 
-  async update(patientUserId: string, dto: UpdateAssignmentDto) {
+  async update(
+    adminId: string,
+    patientUserId: string,
+    dto: UpdateAssignmentDto,
+  ) {
     const existing = await this.prisma.patientProviderAssignment.findUnique({
       where: { userId: patientUserId },
     })
@@ -139,11 +167,53 @@ export class AssignmentService {
       where: { userId: patientUserId },
       data: dto,
     })
+    // Finding 4 — JCAHO audit: capture prior care team → new care team.
+    await this.writeAssignmentAudit(
+      patientUserId,
+      adminId,
+      this.assignmentSnapshot(existing),
+      this.assignmentSnapshot(updated),
+    )
     return {
       statusCode: 200,
       message: 'Assignment updated',
       data: updated,
     }
+  }
+
+  private assignmentSnapshot(a: {
+    practiceId: string | null
+    primaryProviderId: string | null
+    backupProviderId: string | null
+    medicalDirectorId: string | null
+  }): AssignmentSnapshot {
+    return {
+      practiceId: a.practiceId ?? null,
+      primaryProviderId: a.primaryProviderId ?? null,
+      backupProviderId: a.backupProviderId ?? null,
+      medicalDirectorId: a.medicalDirectorId ?? null,
+    }
+  }
+
+  private async writeAssignmentAudit(
+    patientUserId: string,
+    adminId: string,
+    previousValue: AssignmentSnapshot | typeof Prisma.JsonNull,
+    newValue: AssignmentSnapshot,
+  ): Promise<void> {
+    await this.prisma.profileVerificationLog.create({
+      data: {
+        userId: patientUserId,
+        fieldPath: 'assignment',
+        previousValue:
+          previousValue as unknown as Prisma.InputJsonValue,
+        newValue: newValue as unknown as Prisma.InputJsonValue,
+        changedBy: adminId,
+        changedByRole: VerifierRole.ADMIN,
+        changeType: VerificationChangeType.ADMIN_ASSIGNMENT_CHANGE,
+        rationale: null,
+      },
+    })
   }
 
   private async assertPatientExists(userId: string) {

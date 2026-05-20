@@ -71,6 +71,40 @@ export const RULE_IDS = {
   TACHY_WITH_PALPITATIONS: 'RULE_TACHY_WITH_PALPITATIONS',
   PALPITATIONS_GENERAL: 'RULE_PALPITATIONS_GENERAL',
   SYNCOPE_GENERAL: 'RULE_SYNCOPE_GENERAL',
+
+  // Cluster 7 (Manisha 5/11/26) — Appendix A side-effect + interaction rules.
+  // All Tier 3 (informational, patient-facing) unless noted.
+  BETA_BLOCKER_FATIGUE: 'RULE_BETA_BLOCKER_FATIGUE',
+  BETA_BLOCKER_SOB_HF: 'RULE_BETA_BLOCKER_SOB_HF',         // Tier 2 — escalates
+  BETA_BLOCKER_SOB_NON_HF: 'RULE_BETA_BLOCKER_SOB_NON_HF',
+  NSAID_ANTIHTN_INTERACTION: 'RULE_NSAID_ANTIHTN_INTERACTION',
+  ACE_COUGH: 'RULE_ACE_COUGH',
+  HF_CAREGIVER_EDEMA: 'RULE_HF_CAREGIVER_EDEMA',
+
+  // Cluster 8 (Manisha 5/18/26, P0 pilot blocker) — ACE-angioedema airway
+  // emergency. Fires on faceSwelling || throatTightness for ALL patients.
+  // ACE_ANGIOEDEMA = ACE inhibitor OR ARB on med list (physician message
+  // branches ACE vs ARB); GENERIC_ANGIOEDEMA = neither / unverified list.
+  // Both tier TIER_1_ANGIOEDEMA, non-dismissable, compressed ladder.
+  ACE_ANGIOEDEMA: 'RULE_ACE_ANGIOEDEMA',
+  GENERIC_ANGIOEDEMA: 'RULE_GENERIC_ANGIOEDEMA',
+
+  // Cluster 8 Q1 (Manisha 5/18/26) — asymptomatic bradycardia surveillance.
+  // HR 40–49, no brady symptoms, on a rate-control med or hasBradycardia.
+  // Tier 3 physician-only chart event; auto-escalates to Tier 2 when the
+  // mean HR has been ≤45 across 3+ consecutive sessions.
+  BRADY_SURVEILLANCE: 'RULE_BRADY_SURVEILLANCE',
+
+  // Cluster 8 Q3 (Manisha 5/18/26) — one-time first-month educational
+  // adherence nudge. Tier 3, patient-only, fires once ever within 30 days
+  // of enrollment after the first reported missed dose. The 2-of-3 default
+  // window is unchanged — this is purely additive.
+  FIRST_MONTH_ADHERENCE_NUDGE: 'RULE_FIRST_MONTH_ADHERENCE_NUDGE',
+
+  // Cluster 8 Q2 (Manisha 5/18/26 implementation block) — CAD DBP-high.
+  // Second independent BP-Level-1-High trigger at DBP ≥80 for CAD patients
+  // (no prior DBP-high rule existed); co-fires with RULE_CAD_HIGH.
+  CAD_DBP_HIGH: 'RULE_CAD_DBP_HIGH',
 } as const
 
 export type RuleId = (typeof RULE_IDS)[keyof typeof RULE_IDS]
@@ -88,14 +122,143 @@ export type AlertTierValue =
   | 'BP_LEVEL_1_LOW'
   | 'BP_LEVEL_2'
   | 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
+  // Cluster 8 — angioedema. Tier-1 class (non-dismissable) but routed to a
+  // compressed escalation ladder instead of the standard Tier 1 ladder.
+  | 'TIER_1_ANGIOEDEMA'
 
 export type AlertModeValue = 'STANDARD' | 'PERSONALIZED'
 
-/** Tier 1 + BP Level 2 are non-dismissable per CLINICAL_SPEC V2-C + V2-D. */
+/** Tier 1 + BP Level 2 are non-dismissable per CLINICAL_SPEC V2-C + V2-D.
+ *  Cluster 8 — TIER_1_ANGIOEDEMA is a Tier-1 airway emergency, also
+ *  non-dismissable (resolution requires a documented rationale + the
+ *  15-field Joint Commission audit trail). */
 export function isNonDismissable(tier: AlertTierValue): boolean {
   return (
     tier === 'TIER_1_CONTRAINDICATION' ||
+    tier === 'TIER_1_ANGIOEDEMA' ||
     tier === 'BP_LEVEL_2' ||
     tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
   )
+}
+
+// ─── Triggering-value axis (Phase 1 polish — Finding 10) ─────────────────────
+//
+// The audit footer's "TRIGGERING VALUE" (formerly the ambiguous "ACTUAL
+// VALUE 165") needs an axis + unit so a reviewer knows whether 165 is
+// systolic, diastolic, or heart rate without cross-referencing the rule ID.
+//
+// Every value in RULE_IDS is mapped. Classification:
+//   • 'hr'        — heart-rate threshold rules (bpm)
+//   • 'diastolic' — rules that compare against the diastolic target (mmHg)
+//   • 'systolic'  — BP rules; systolic is the primary axis even when the
+//                   rule can also fire on diastolic (single-axis is fine for
+//                   pilot — dual-axis is future-spec per the plan §H note)
+//   • 'profile'   — contraindication / medication / symptom-driven rules
+//                   whose actualValue is null (no measured trigger value)
+//
+// ⚠ Clinical-review flags (best-effort, pilot-safe defaults):
+//   - RULE_PULSE_PRESSURE_WIDE: labelled systolic-derived (PP = SBP−DBP);
+//     a dedicated "pulse pressure" axis could be added if Dr. Singal wants.
+//   - RULE_ORTHOSTATIC_HYPOTENSION: classed 'profile' (postural/symptom-
+//     driven) though it involves a positional BP delta.
+//   - RULE_SYMPTOM_OVERRIDE_*: value-derived but symptom-triggered; kept
+//     'systolic' per the plan's mapping.
+export type RuleAxis = 'systolic' | 'diastolic' | 'hr' | 'profile'
+
+export const RULE_AXIS: Record<RuleId, RuleAxis> = {
+  // Heart-rate rules
+  [RULE_IDS.AFIB_HR_HIGH]: 'hr',
+  [RULE_IDS.AFIB_HR_LOW]: 'hr',
+  [RULE_IDS.TACHY_HR]: 'hr',
+  [RULE_IDS.BRADY_ABSOLUTE]: 'hr',
+  [RULE_IDS.BRADY_HR_SYMPTOMATIC]: 'hr',
+  [RULE_IDS.BRADY_HR_ASYMPTOMATIC]: 'hr',
+  [RULE_IDS.BRADY_SURVEILLANCE]: 'hr',
+
+  // Diastolic-axis rule
+  [RULE_IDS.CAD_DBP_CRITICAL]: 'diastolic',
+  [RULE_IDS.CAD_DBP_HIGH]: 'diastolic',
+
+  // Systolic-axis BP rules (primary axis = systolic)
+  [RULE_IDS.STANDARD_L1_HIGH]: 'systolic',
+  [RULE_IDS.STANDARD_L1_LOW]: 'systolic',
+  [RULE_IDS.ABSOLUTE_EMERGENCY]: 'systolic',
+  [RULE_IDS.PERSONALIZED_HIGH]: 'systolic',
+  [RULE_IDS.PERSONALIZED_LOW]: 'systolic',
+  [RULE_IDS.HFREF_LOW]: 'systolic',
+  [RULE_IDS.HFREF_HIGH]: 'systolic',
+  [RULE_IDS.HFPEF_LOW]: 'systolic',
+  [RULE_IDS.HFPEF_HIGH]: 'systolic',
+  [RULE_IDS.CAD_HIGH]: 'systolic',
+  [RULE_IDS.HCM_LOW]: 'systolic',
+  [RULE_IDS.HCM_HIGH]: 'systolic',
+  [RULE_IDS.DCM_LOW]: 'systolic',
+  [RULE_IDS.DCM_HIGH]: 'systolic',
+  [RULE_IDS.AGE_65_LOW]: 'systolic',
+  [RULE_IDS.PREGNANCY_L1_HIGH]: 'systolic',
+  [RULE_IDS.PREGNANCY_L2]: 'systolic',
+  [RULE_IDS.SYMPTOM_OVERRIDE_GENERAL]: 'systolic',
+  [RULE_IDS.SYMPTOM_OVERRIDE_PREGNANCY]: 'systolic',
+  [RULE_IDS.LOOP_DIURETIC_HYPOTENSION]: 'systolic',
+  [RULE_IDS.PULSE_PRESSURE_WIDE]: 'systolic',
+
+  // Profile / medication / symptom-driven rules (actualValue is null)
+  [RULE_IDS.NDHP_HFREF]: 'profile',
+  [RULE_IDS.PREGNANCY_ACE_ARB]: 'profile',
+  [RULE_IDS.HCM_VASODILATOR]: 'profile',
+  [RULE_IDS.ACE_COUGH]: 'profile',
+  [RULE_IDS.BETA_BLOCKER_FATIGUE]: 'profile',
+  [RULE_IDS.BETA_BLOCKER_SOB_HF]: 'profile',
+  [RULE_IDS.BETA_BLOCKER_SOB_NON_HF]: 'profile',
+  [RULE_IDS.BETA_BLOCKER_DIZZINESS]: 'profile',
+  [RULE_IDS.NSAID_ANTIHTN_INTERACTION]: 'profile',
+  [RULE_IDS.HF_CAREGIVER_EDEMA]: 'profile',
+  [RULE_IDS.HF_DECOMPENSATION]: 'profile',
+  [RULE_IDS.MEDICATION_MISSED]: 'profile',
+  [RULE_IDS.DHP_CCB_LEG_SWELLING]: 'profile',
+  [RULE_IDS.ORTHOSTATIC_HYPOTENSION]: 'profile',
+  [RULE_IDS.AFIB_PALPITATIONS]: 'profile',
+  [RULE_IDS.TACHY_WITH_PALPITATIONS]: 'profile',
+  [RULE_IDS.PALPITATIONS_GENERAL]: 'profile',
+  [RULE_IDS.SYNCOPE_GENERAL]: 'profile',
+  // Cluster 8 — angioedema is symptom-driven; actualValue carries SBP for
+  // context only, not the trigger. 'profile' suppresses a misleading
+  // "TRIGGERING VALUE" axis label in the audit footer.
+  [RULE_IDS.ACE_ANGIOEDEMA]: 'profile',
+  [RULE_IDS.GENERIC_ANGIOEDEMA]: 'profile',
+  [RULE_IDS.FIRST_MONTH_ADHERENCE_NUDGE]: 'profile',
+}
+
+const AXIS_LABEL: Record<RuleAxis, string> = {
+  systolic: 'systolic',
+  diastolic: 'diastolic',
+  hr: 'heart rate',
+  profile: '',
+}
+
+const AXIS_UNIT: Record<RuleAxis, string> = {
+  systolic: 'mmHg',
+  diastolic: 'mmHg',
+  hr: 'bpm',
+  profile: '',
+}
+
+/**
+ * Format the audit footer's TRIGGERING VALUE with axis + unit context:
+ *   "165 mmHg (systolic)" · "45 bpm (heart rate)" ·
+ *   "Not applicable — profile-based rule" (profile rules / null) ·
+ *   "—" (value-based rule with a genuinely missing value)
+ * Unmapped rule ids fall back to 'systolic' (safe for any future BP rule
+ * before its RULE_AXIS entry lands). Display-only — does not touch the
+ * `actualValue` data model.
+ */
+export function formatTriggeringValue(
+  ruleId: string | null | undefined,
+  actualValue: number | null | undefined,
+): string {
+  const axis: RuleAxis =
+    (ruleId ? RULE_AXIS[ruleId as RuleId] : undefined) ?? 'systolic'
+  if (axis === 'profile') return 'Not applicable — profile-based rule'
+  if (actualValue === null || actualValue === undefined) return '—'
+  return `${actualValue} ${AXIS_UNIT[axis]} (${AXIS_LABEL[axis]})`
 }

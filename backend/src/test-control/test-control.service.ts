@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service.js'
 import { GapAlertService } from '../crons/gap-alert.service.js'
 import { MonthlyReaskService } from '../crons/monthly-reask.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
+import { ladderForTier } from '../daily_journal/escalation/ladder-defs.js'
+import type { LadderStep as LadderStepEnum } from '../generated/prisma/client.js'
 
 /**
  * Helpers backing the /test-control HTTP endpoints. Pure delegation —
@@ -190,6 +192,21 @@ export class TestControlService {
     `
   }
 
+  /**
+   * Cluster 8 — backdate User.enrolledAt so the Q2 CAD-ramp + Q3 first-month
+   * adherence-nudge personas can simulate "enrolled N days ago" without
+   * waiting. Prisma's @updatedAt would clobber a plain update(); raw SQL
+   * keeps the value. Pass deltaSeconds to push enrolledAt into the past.
+   */
+  async backdateEnrolledAt(userId: string, deltaSeconds: number): Promise<void> {
+    const newEnrolledAt = new Date(Date.now() - deltaSeconds * 1000)
+    await this.prisma.$executeRaw`
+      UPDATE "User"
+      SET "enrolledAt" = ${newEnrolledAt}
+      WHERE id = ${userId}
+    `
+  }
+
   // ─── State reset ────────────────────────────────────────────────────────
   /**
    * Wipe journal/alert/escalation/notification rows for every *.cardioplace.test
@@ -210,6 +227,17 @@ export class TestControlService {
       rowsDeleted += r.rowsDeleted
     }
     return { usersTouched: users.length, rowsDeleted }
+  }
+
+  /**
+   * Cluster 8 §D — wipe ALL PatientMedication rows for a user. Niva's
+   * setUserMedication dedupes by drugName, so swapping a test's med roster
+   * (e.g., ACE → ARB-only for the angioedema ARB-variant test) requires
+   * clearing first. Test-control only; no production caller.
+   */
+  async clearUserMedications(userId: string): Promise<{ rowsDeleted: number }> {
+    const result = await this.prisma.patientMedication.deleteMany({ where: { userId } })
+    return { rowsDeleted: result.count }
   }
 
   async resetUser(userId: string): Promise<{ rowsDeleted: number }> {
@@ -246,9 +274,21 @@ export class TestControlService {
             notifications.count + escalations.count + alerts.count + entries.count,
         }
       } catch (err: unknown) {
-        const e = err as { code?: string; meta?: { code?: string }; cause?: { code?: string } }
+        const e = err as {
+          code?: string
+          message?: string
+          meta?: { code?: string }
+          cause?: { code?: string }
+        }
         const isDeadlock =
-          e?.code === 'P2034' || e?.meta?.code === '40P01' || e?.cause?.code === '40P01'
+          e?.code === 'P2034' ||
+          e?.meta?.code === '40P01' ||
+          e?.cause?.code === '40P01' ||
+          // @prisma/adapter-pg wraps deadlocks as DriverAdapterError with the
+          // 'TransactionWriteConflict' string in the message. Observed against
+          // Prisma Cloud dev DB during Cluster 7 verification; the underlying
+          // 40P01 doesn't surface to the typed code field through the adapter.
+          (typeof e?.message === 'string' && e.message.includes('TransactionWriteConflict'))
         if (!isDeadlock || attempt === MAX_ATTEMPTS) throw err
         this.logger.warn(
           `resetUser deadlock (attempt ${attempt}/${MAX_ATTEMPTS}) for ${userId} — retrying in 100ms`,
@@ -261,9 +301,31 @@ export class TestControlService {
   }
 
   async setEnrollment(userId: string, status: 'NOT_ENROLLED' | 'ENROLLED'): Promise<void> {
+    // Cluster 8 — mirror production EnrollmentService: stamp enrolledAt on the
+    // ENROLLED flip, clear it on NOT_ENROLLED, so the Q2 CAD-ramp + Q3
+    // first-month-nudge personas have a real enrollment date to backdate.
     await this.prisma.user.update({
       where: { id: userId },
-      data: { enrollmentStatus: status },
+      data: {
+        enrollmentStatus: status,
+        enrolledAt: status === 'ENROLLED' ? new Date() : null,
+      },
+    })
+  }
+
+  /**
+   * Phase 4 §C — flip a user's onboardingStatus. Seed personas are all
+   * COMPLETED; the auth-onboarding spec (20a) needs to roll one back to
+   * NOT_COMPLETED to exercise the new-user → /onboarding redirect and the
+   * returning-user skip. Mirrors setEnrollment (test-infra only).
+   */
+  async setOnboardingStatus(
+    userId: string,
+    status: 'NOT_COMPLETED' | 'COMPLETED',
+  ): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { onboardingStatus: status },
     })
   }
 
@@ -369,6 +431,34 @@ export class TestControlService {
     },
   ): Promise<{ id: string }> {
     const status = med.verificationStatus ?? 'VERIFIED'
+
+    // Dedup on (userId, drugName): if a row already exists with the same
+    // name for this user, update it in place rather than inserting another
+    // duplicate. Prevents test-control from accumulating multiple "active"
+    // copies of the same medication across repeated calls (bug #19, observed
+    // 2026-05-15 — spec 19's sequential tests piled up Metoprolol/Lisinopril
+    // rows on Aisha). PatientMedication's only unique constraint is on `id`,
+    // so this is a findFirst → update|create rather than a native upsert;
+    // a composite unique index would need a migration and isn't worth it for
+    // a test-control-only path.
+    const existing = await this.prisma.patientMedication.findFirst({
+      where: { userId, drugName: med.drugName },
+      select: { id: true },
+    })
+
+    if (existing) {
+      await this.prisma.patientMedication.update({
+        where: { id: existing.id },
+        data: {
+          drugClass: med.drugClass as never,
+          frequency: med.frequency,
+          verificationStatus: status,
+          verifiedAt: status === 'VERIFIED' ? new Date() : null,
+        },
+      })
+      return { id: existing.id }
+    }
+
     const created = await this.prisma.patientMedication.create({
       data: {
         userId,
@@ -392,6 +482,215 @@ export class TestControlService {
       where: { userId },
       data: { profileVerificationStatus: status },
     })
+  }
+
+  /**
+   * Phase 4 §B.2 — set a User.dateOfBirth. Backs the age-bucket boundary
+   * tests (spec 20g.1): AGE_65_LOW must fire the day a patient turns 65 and
+   * NOT the day before, proving the cutoff is enforced at reading-evaluation
+   * time rather than at user-creation time.
+   */
+  async setUserDateOfBirth(userId: string, dob: Date): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { dateOfBirth: dob },
+    })
+  }
+
+  /**
+   * Phase 4 §B.2 — upsert a PatientThreshold for personalized-mode tests
+   * (spec 20g.21–22). `PatientThreshold.setByProviderId` is a required
+   * column, so resolve it server-side: prefer the patient's assigned
+   * medical director, then primary / backup provider, then any
+   * MEDICAL_DIRECTOR / SUPER_ADMIN user. Tests assert only on the threshold
+   * targets, never on attribution — but the column must be populated for the
+   * create path to succeed.
+   */
+  async setPatientThreshold(
+    userId: string,
+    override: {
+      sbpUpperTarget?: number
+      sbpLowerTarget?: number
+      dbpUpperTarget?: number
+      dbpLowerTarget?: number
+    },
+  ): Promise<{ userId: string }> {
+    const assignment = await this.prisma.patientProviderAssignment.findUnique({
+      where: { userId },
+      select: {
+        medicalDirectorId: true,
+        primaryProviderId: true,
+        backupProviderId: true,
+      },
+    })
+    let setByProviderId: string | null =
+      assignment?.medicalDirectorId ??
+      assignment?.primaryProviderId ??
+      assignment?.backupProviderId ??
+      null
+    if (!setByProviderId) {
+      const admin = await this.prisma.user.findFirst({
+        where: {
+          OR: [
+            { roles: { has: 'MEDICAL_DIRECTOR' } },
+            { roles: { has: 'SUPER_ADMIN' } },
+          ],
+        },
+        select: { id: true },
+      })
+      setByProviderId = admin?.id ?? null
+    }
+    if (!setByProviderId) {
+      throw new Error(
+        `setPatientThreshold: no provider available to attribute threshold for user ${userId}`,
+      )
+    }
+    await this.prisma.patientThreshold.upsert({
+      where: { userId },
+      update: { ...override },
+      create: { userId, setByProviderId, ...override },
+    })
+    return { userId }
+  }
+
+  // ─── Seed fixtures (Phase 0 §H) ─────────────────────────────────────────
+  // Imperative test-only seeders (like seedReadingsAtTime). Not idempotent
+  // by design — tests call them to compose a scenario then reset between
+  // runs. The 4 endpoints the pre-Phase-0 controller was missing.
+
+  /**
+   * Force a User.accountStatus. AccountStatus has NO `INACTIVE` member —
+   * valid values are ACTIVE | BLOCKED | SUSPENDED (schema-verified).
+   */
+  async setAccountStatus(
+    email: string,
+    status: 'ACTIVE' | 'BLOCKED' | 'SUSPENDED',
+  ): Promise<{ id: string; email: string; accountStatus: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    })
+    if (!user) throw new Error(`User not found: ${email}`)
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { accountStatus: status },
+    })
+    return { id: user.id, email, accountStatus: status }
+  }
+
+  /**
+   * Seed N alerts in specific states. DeviationAlert.journalEntryId is
+   * required, so each alert auto-creates its own backing JournalEntry.
+   */
+  async seedAlerts(
+    userId: string,
+    alerts: Array<{
+      tier: string
+      status?: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
+      ruleId?: string
+      createdAtIso?: string
+      acknowledgedByUserId?: string
+      resolvedBy?: string
+      resolutionAction?: string
+      resolutionRationale?: string
+    }>,
+  ): Promise<{ created: number; alertIds: string[] }> {
+    const alertIds: string[] = []
+    for (const a of alerts) {
+      const je = await this.prisma.journalEntry.create({
+        data: {
+          userId,
+          measuredAt: new Date(),
+          systolicBP: 150,
+          diastolicBP: 95,
+          pulse: 80,
+          position: 'SITTING',
+          source: 'MANUAL',
+        },
+        select: { id: true },
+      })
+      const status = a.status ?? 'OPEN'
+      const created = await this.prisma.deviationAlert.create({
+        data: {
+          userId,
+          journalEntryId: je.id,
+          tier: a.tier as never,
+          mode: 'STANDARD',
+          ruleId: a.ruleId ?? 'TEST_SEED',
+          status,
+          dismissible: true,
+          createdAt: a.createdAtIso ? new Date(a.createdAtIso) : new Date(),
+          acknowledgedAt: status === 'ACKNOWLEDGED' ? new Date() : null,
+          acknowledgedByUserId: a.acknowledgedByUserId ?? null,
+          resolvedAt: status === 'RESOLVED' ? new Date() : null,
+          resolvedBy: a.resolvedBy ?? null,
+          resolutionAction: a.resolutionAction ?? null,
+          resolutionRationale: a.resolutionRationale ?? null,
+        },
+        select: { id: true },
+      })
+      alertIds.push(created.id)
+    }
+    return { created: alertIds.length, alertIds }
+  }
+
+  /** Seed N notifications for a user (badge / list fixtures). */
+  async seedNotifications(
+    userId: string,
+    count: number,
+    channel: 'PUSH' | 'EMAIL' | 'PHONE' | 'DASHBOARD' = 'DASHBOARD',
+  ): Promise<{ created: number }> {
+    for (let i = 1; i <= count; i++) {
+      await this.prisma.notification.create({
+        data: {
+          userId,
+          channel,
+          title: `Test notification ${i}`,
+          body: `Seeded test notification ${i}.`,
+          tips: [],
+        },
+      })
+    }
+    return { created: count }
+  }
+
+  /**
+   * Seed audit events. changeType must be a VerificationChangeType member
+   * (PATIENT_REPORT | ADMIN_VERIFY | ADMIN_CORRECT | ADMIN_REJECT |
+   * ADMIN_THRESHOLD_UPDATE | ADMIN_ASSIGNMENT_CHANGE) — there are NO
+   * ALERT_* members; alert lifecycle audit lives on DeviationAlert.
+   */
+  async seedAuditTrail(
+    userId: string,
+    events: Array<{
+      changeType: string
+      fieldPath: string
+      changedBy: string
+      changedByRole?: 'PATIENT' | 'ADMIN' | 'PROVIDER'
+      previousValue?: unknown
+      newValue?: unknown
+      rationale?: string
+      discrepancyFlag?: boolean
+      createdAtIso?: string
+    }>,
+  ): Promise<{ created: number }> {
+    for (const e of events) {
+      await this.prisma.profileVerificationLog.create({
+        data: {
+          userId,
+          fieldPath: e.fieldPath,
+          changedBy: e.changedBy,
+          changedByRole: (e.changedByRole ?? 'ADMIN') as never,
+          changeType: e.changeType as never,
+          previousValue: (e.previousValue ?? undefined) as never,
+          newValue: (e.newValue ?? undefined) as never,
+          discrepancyFlag: e.discrepancyFlag ?? false,
+          rationale: e.rationale ?? null,
+          ...(e.createdAtIso ? { createdAt: new Date(e.createdAtIso) } : {}),
+        },
+      })
+    }
+    return { created: events.length }
   }
 
   // ─── Inspection ─────────────────────────────────────────────────────────
@@ -435,9 +734,81 @@ export class TestControlService {
         resolvedAt: true,
         resolvedBy: true,
         triggeredByResolution: true,
+        dispatchedBySystem: true,
         reason: true,
       },
     })
+  }
+
+  /**
+   * Cluster 7 C.1 — walk N ladder rungs without sleeping. Writes
+   * `EscalationEvent` rows directly with `notificationSentAt = anchor + offset`
+   * and `afterHours = false` so the events look "already dispatched". Tests
+   * use this to drive the Tier 1 T+0 → T+4h → T+8h → T+24h → T+48h progression
+   * in a single tick without waiting for the cron + business-hours guard.
+   *
+   * Skips T+0 because it's written when the alert is created. Walks
+   * `steps[1..1+n]` in order. Idempotent: re-running with the same `n` is a
+   * no-op if those steps already exist (unique on alertId+ladderStep elsewhere
+   * is not enforced, so this helper checks before inserting).
+   */
+  async advanceLadderSteps(
+    alertId: string,
+    n: number,
+  ): Promise<{ advanced: number; steps: string[] }> {
+    if (n <= 0) return { advanced: 0, steps: [] }
+
+    const alert = await this.prisma.deviationAlert.findUnique({
+      where: { id: alertId },
+    })
+    if (!alert) {
+      throw new Error(`Alert ${alertId} not found`)
+    }
+    const ladder = ladderForTier(alert.tier)
+    if (!ladder) {
+      throw new Error(`Alert ${alertId} tier=${alert.tier} has no ladder`)
+    }
+
+    const existing = await this.prisma.escalationEvent.findMany({
+      where: { alertId },
+      select: { ladderStep: true },
+    })
+    const existingSteps = new Set(
+      existing.map((e) => e.ladderStep).filter((s): s is LadderStepEnum => s != null),
+    )
+
+    const anchor = alert.createdAt
+    const advanced: string[] = []
+
+    for (let i = 1; i <= n && i < ladder.steps.length; i++) {
+      const step = ladder.steps[i]
+      if (!step) continue
+      if (existingSteps.has(step.step as LadderStepEnum)) continue
+
+      const firedAt = new Date(anchor.getTime() + step.offsetMs)
+      await this.prisma.escalationEvent.create({
+        data: {
+          alertId,
+          userId: alert.userId,
+          escalationLevel: ladder.kind === 'TIER_2' || ladder.kind === 'BP_LEVEL_1'
+            ? 'LEVEL_1'
+            : 'LEVEL_2',
+          ladderStep: step.step as LadderStepEnum,
+          recipientIds: [],
+          recipientRoles: step.recipientRoles,
+          notificationChannel: step.channels[0] ?? null,
+          triggeredAt: firedAt,
+          notificationSentAt: firedAt,
+          scheduledFor: firedAt,
+          afterHours: false,
+          triggeredByResolution: false,
+          reason: 'test-control.advanceLadderSteps',
+        },
+      })
+      advanced.push(step.step)
+    }
+
+    return { advanced: advanced.length, steps: advanced }
   }
 
   async listNotifications(userId: string) {
@@ -478,5 +849,64 @@ export class TestControlService {
       onboardingStatus: user.onboardingStatus,
       profileVerificationStatus: user.patientProfile?.profileVerificationStatus ?? null,
     }
+  }
+
+  // Spec 12 — clear the three businessHours fields on the practice attached
+  // to this user via PatientProviderAssignment. Practice columns are
+  // non-nullable strings, so we set to empty strings — the enrollment-gate
+  // truthiness check (`!p.businessHoursStart || …`) treats empty as missing.
+  // Returns the prior values so the test can restore them in a finally block.
+  async clearPracticeBusinessHours(userId: string): Promise<{
+    practiceId: string
+    prior: {
+      businessHoursStart: string
+      businessHoursEnd: string
+      businessHoursTimezone: string
+    }
+  }> {
+    const assignment = await this.prisma.patientProviderAssignment.findUnique({
+      where: { userId },
+      include: { practice: true },
+    })
+    if (!assignment?.practice) {
+      throw new Error(`No practice assignment found for user ${userId}`)
+    }
+    const prior = {
+      businessHoursStart: assignment.practice.businessHoursStart,
+      businessHoursEnd: assignment.practice.businessHoursEnd,
+      businessHoursTimezone: assignment.practice.businessHoursTimezone,
+    }
+    await this.prisma.practice.update({
+      where: { id: assignment.practice.id },
+      data: {
+        businessHoursStart: '',
+        businessHoursEnd: '',
+        businessHoursTimezone: '',
+      },
+    })
+    return { practiceId: assignment.practice.id, prior }
+  }
+
+  async restorePracticeBusinessHours(args: {
+    userId: string
+    businessHoursStart: string
+    businessHoursEnd: string
+    businessHoursTimezone: string
+  }): Promise<{ ok: true }> {
+    const assignment = await this.prisma.patientProviderAssignment.findUnique({
+      where: { userId: args.userId },
+    })
+    if (!assignment) {
+      throw new Error(`No practice assignment found for user ${args.userId}`)
+    }
+    await this.prisma.practice.update({
+      where: { id: assignment.practiceId },
+      data: {
+        businessHoursStart: args.businessHoursStart,
+        businessHoursEnd: args.businessHoursEnd,
+        businessHoursTimezone: args.businessHoursTimezone,
+      },
+    })
+    return { ok: true }
   }
 }

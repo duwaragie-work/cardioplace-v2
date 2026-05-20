@@ -38,6 +38,10 @@ enum DrugClass {
   ANTIARRHYTHMIC
   VASODILATOR_NITRATE
   ARNI
+  // Cluster 7 — NSAIDs (ibuprofen, naproxen, celecoxib) blunt antihypertensive
+  // efficacy + raise BP. A.3 rule warns the patient when they report NSAID use
+  // while on any antihypertensive.
+  NSAID
   OTHER_UNVERIFIED
 }
 
@@ -61,4 +65,8 @@ enum MedicationVerificationStatus {
   VERIFIED
   REJECTED
   AWAITING_PROVIDER
+  // Cluster 7 A.7 — provider has placed the medication on hold pending review.
+  // Triggers SYSTEM_MSG_MEDICATION_HOLD to the patient's inbox + suppresses
+  // adherence rule fires for this med until status returns to VERIFIED.
+  HOLD
 }

@@ -109,6 +109,19 @@ export class TestControlController {
     return { ok: true }
   }
 
+  // Cluster 7 C.1 — drive the ladder forward without waiting for the cron or
+  // the business-hours guard. Inserts already-dispatched EscalationEvent rows
+  // for steps[1..n] using the alert's createdAt anchor.
+  @Post('escalation/advance-ladder-steps')
+  @HttpCode(200)
+  async advanceLadderSteps(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { alertId: string; n: number },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.advanceLadderSteps(body.alertId, body.n)
+  }
+
   @Post('journal/backdate-latest')
   @HttpCode(200)
   async backdateLastJournalEntry(
@@ -149,6 +162,18 @@ export class TestControlController {
   ) {
     this.assertAuthorized(secret)
     await this.svc.backdateUserUpdatedAt(body.userId, body.deltaSeconds)
+    return { ok: true }
+  }
+
+  // Cluster 8 — backdate User.enrolledAt for Q2 ramp + Q3 nudge personas.
+  @Post('user/backdate-enrolled-at')
+  @HttpCode(200)
+  async backdateEnrolledAt(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; deltaSeconds: number },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.backdateEnrolledAt(body.userId, body.deltaSeconds)
     return { ok: true }
   }
 
@@ -238,6 +263,19 @@ export class TestControlController {
     return this.svc.resetUser(body.userId)
   }
 
+  // Cluster 8 §D — clear ALL of a user's PatientMedication rows so a test
+  // can set up an exact medication state without inheriting seed rows
+  // (Aisha ships with Lisinopril+Amlodipine; an ARB test needs neither).
+  @Post('reset/user-medications')
+  @HttpCode(200)
+  async clearUserMedications(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.clearUserMedications(body.userId)
+  }
+
   @Post('user/set-enrollment')
   @HttpCode(200)
   async setEnrollment(
@@ -246,6 +284,18 @@ export class TestControlController {
   ) {
     this.assertAuthorized(secret)
     await this.svc.setEnrollment(body.userId, body.status)
+    return { ok: true }
+  }
+
+  // Phase 4 §C — auth-onboarding spec (20a) onboarding-state control.
+  @Post('user/set-onboarding-status')
+  @HttpCode(200)
+  async setOnboardingStatus(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; status: 'NOT_COMPLETED' | 'COMPLETED' },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.setOnboardingStatus(body.userId, body.status)
     return { ok: true }
   }
 
@@ -258,6 +308,112 @@ export class TestControlController {
     this.assertAuthorized(secret)
     await this.svc.setProfileVerificationStatus(body.userId, body.status)
     return { ok: true }
+  }
+
+  // Phase 4 §B.2 — age-bucket boundary tests (spec 20g.1).
+  @Post('user/set-date-of-birth')
+  @HttpCode(200)
+  async setUserDateOfBirth(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; dob: string },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.setUserDateOfBirth(body.userId, new Date(body.dob))
+    return { ok: true }
+  }
+
+  // Phase 4 §B.2 — personalized-mode threshold tests (spec 20g.21–22).
+  @Post('user/set-threshold')
+  @HttpCode(200)
+  async setPatientThreshold(
+    @Headers('x-test-control-secret') secret: string,
+    @Body()
+    body: {
+      userId: string
+      override: {
+        sbpUpperTarget?: number
+        sbpLowerTarget?: number
+        dbpUpperTarget?: number
+        dbpLowerTarget?: number
+      }
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.setPatientThreshold(body.userId, body.override ?? {})
+  }
+
+
+  // ─── Seed fixtures (Phase 0 §H) ─────────────────────────────────────────
+  @Post('user/set-account-status')
+  @HttpCode(200)
+  async setAccountStatus(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { email: string; status: 'ACTIVE' | 'BLOCKED' | 'SUSPENDED' },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.setAccountStatus(body.email, body.status)
+  }
+
+  @Post('seed/alerts')
+  @HttpCode(200)
+  async seedAlerts(
+    @Headers('x-test-control-secret') secret: string,
+    @Body()
+    body: {
+      userId: string
+      alerts: Array<{
+        tier: string
+        status?: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
+        ruleId?: string
+        createdAtIso?: string
+        acknowledgedByUserId?: string
+        resolvedBy?: string
+        resolutionAction?: string
+        resolutionRationale?: string
+      }>
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.seedAlerts(body.userId, body.alerts ?? [])
+  }
+
+  @Post('seed/notifications')
+  @HttpCode(200)
+  async seedNotifications(
+    @Headers('x-test-control-secret') secret: string,
+    @Body()
+    body: {
+      userId: string
+      count: number
+      channel?: 'PUSH' | 'EMAIL' | 'PHONE' | 'DASHBOARD'
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.seedNotifications(body.userId, body.count, body.channel)
+  }
+
+  @Post('seed/audit-trail')
+  @HttpCode(200)
+  async seedAuditTrail(
+    @Headers('x-test-control-secret') secret: string,
+    @Body()
+    body: {
+      userId: string
+      events: Array<{
+        changeType: string
+        fieldPath: string
+        changedBy: string
+        changedByRole?: 'PATIENT' | 'ADMIN' | 'PROVIDER'
+        previousValue?: unknown
+        newValue?: unknown
+        rationale?: string
+        discrepancyFlag?: boolean
+        createdAtIso?: string
+      }>
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.seedAuditTrail(body.userId, body.events ?? [])
   }
 
   // ─── Inspection ─────────────────────────────────────────────────────────
@@ -295,5 +451,35 @@ export class TestControlController {
   ) {
     this.assertAuthorized(secret)
     return this.svc.findUser(email)
+  }
+
+  // Spec 12 — drive the enrollment-gate "practice-missing-business-hours"
+  // failure path. Clears the three businessHours fields on the practice
+  // linked to `userId` via PatientProviderAssignment; returns the prior
+  // values so tests can restore them via /practice/restore-business-hours.
+  @Post('practice/clear-business-hours')
+  @HttpCode(200)
+  async clearPracticeBusinessHours(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.clearPracticeBusinessHours(body.userId)
+  }
+
+  @Post('practice/restore-business-hours')
+  @HttpCode(200)
+  async restorePracticeBusinessHours(
+    @Headers('x-test-control-secret') secret: string,
+    @Body()
+    body: {
+      userId: string
+      businessHoursStart: string
+      businessHoursEnd: string
+      businessHoursTimezone: string
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.restorePracticeBusinessHours(body)
   }
 }

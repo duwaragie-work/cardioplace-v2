@@ -56,7 +56,9 @@ type NotifFilter = 'all' | 'unread' | 'read';
 
 function tierBucket(t: string | null | undefined): TierFilter {
   if (t === 'BP_LEVEL_2' || t === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'BP_L2';
-  if (t === 'TIER_1_CONTRAINDICATION') return 'TIER_1';
+  // Cluster 8 — angioedema buckets into TIER_1 (same chrome + filter group
+  // as contraindications) per Manisha "resolved like all Tier 1 alerts".
+  if (t === 'TIER_1_CONTRAINDICATION' || t === 'TIER_1_ANGIOEDEMA') return 'TIER_1';
   if (t === 'TIER_2_DISCREPANCY') return 'TIER_2';
   if (t === 'BP_LEVEL_1_HIGH' || t === 'BP_LEVEL_1_LOW') return 'BP_L1';
   return 'OTHER';
@@ -86,7 +88,13 @@ function readingOf(a: ProviderAlert): string {
   if (a.journalEntry?.systolicBP != null && a.journalEntry?.diastolicBP != null) {
     return `${a.journalEntry.systolicBP}/${a.journalEntry.diastolicBP} mmHg`;
   }
-  if (a.tier === 'TIER_1_CONTRAINDICATION' || a.tier === 'TIER_2_DISCREPANCY') return 'Medication';
+  // Cluster 8 — angioedema is medication-linked (ACE/ARB branches) → same
+  // "Medication" reading category as Tier 1 contraindication / Tier 2.
+  if (
+    a.tier === 'TIER_1_CONTRAINDICATION' ||
+    a.tier === 'TIER_1_ANGIOEDEMA' ||
+    a.tier === 'TIER_2_DISCREPANCY'
+  ) return 'Medication';
   return '—';
 }
 
@@ -498,12 +506,14 @@ export default function NotificationsScreen() {
               <EmptyNotifCard filter={notifFilter} hasNotifs={notifs.length > 0} />
             ) : (
               <div
+                data-testid="admin-notifications-list"
                 className="bg-white rounded-2xl overflow-hidden"
                 style={{ boxShadow: 'var(--brand-shadow-card)' }}
               >
                 {filteredNotifs.map((n, idx) => (
                   <div
                     key={n.id}
+                    data-testid={`admin-notification-row-${n.id}`}
                     style={{ borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none' }}
                   >
                     <NotifCard

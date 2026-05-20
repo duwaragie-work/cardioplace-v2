@@ -349,6 +349,7 @@ function EntryCard({
 
   return (
     <motion.div
+      data-testid={`readings-row-${entry.id}`}
       className="bg-white rounded-2xl p-5"
       style={{ boxShadow: '0 1px 12px rgba(123,0,224,0.06)' }}
       initial={{ opacity: 0, y: 8 }}
@@ -524,6 +525,7 @@ function EntryCard({
             <Pencil className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
           </button>
           <button
+            data-testid={`readings-delete-button-${entry.id}`}
             onClick={onDelete}
             className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
             style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
@@ -1258,6 +1260,7 @@ function DeleteConfirm({
     >
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onCancel} />
       <motion.div
+        data-testid="readings-delete-confirm-modal"
         className="relative w-full max-w-sm bg-white rounded-2xl p-6 text-center"
         style={{ boxShadow: '0 8px 48px rgba(0,0,0,0.18)' }}
         initial={{ scale: 0.92, opacity: 0 }}
@@ -1294,6 +1297,7 @@ function DeleteConfirm({
             {t('common.cancel')}
           </button>
           <button
+            data-testid="readings-delete-confirm-button"
             onClick={onConfirm}
             disabled={deleting}
             className="flex-1 h-11 rounded-full text-white text-sm font-bold disabled:opacity-60"
@@ -1575,7 +1579,7 @@ export default function ReadingsPage() {
         </div>
 
         {/* List — grouped by date */}
-        <div className="space-y-3">
+        <div data-testid="readings-table" className="space-y-3">
         {loading ? (
           Array.from({ length: 5 }).map((_, i) => <EntrySkeleton key={i} />)
         ) : entries.length === 0 ? (

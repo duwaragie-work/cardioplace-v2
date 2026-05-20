@@ -302,9 +302,15 @@ export default function AlertDetailPage({ params }: PageProps) {
   const tier = alert.tier;
   const sbp = alert.journalEntry?.systolicBP ?? 0;
   const dbp = alert.journalEntry?.diastolicBP ?? 0;
+  // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema is also a full-screen
+  // emergency: airway-obstruction risk + 911 routing per the signed-off
+  // spec. EmergencyAlertScreen branches on tier internally so the body +
+  // TTS reuse the signed-off RULE_ACE_ANGIOEDEMA / RULE_GENERIC_ANGIOEDEMA
+  // patient message instead of the BP-L2 copy.
   const isEmergency =
     tier === 'BP_LEVEL_2' ||
     tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE' ||
+    tier === 'TIER_1_ANGIOEDEMA' ||
     (tier == null && (sbp >= 180 || dbp >= 120));
 
   if (tier === 'TIER_2_DISCREPANCY') {

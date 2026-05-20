@@ -206,6 +206,7 @@ function MessageBubble({ msg }: { msg: Message }) {
   if (msg.type === 'patient') {
     return (
       <motion.div
+        data-testid="chat-message-patient"
         className="flex justify-end"
         initial={{ opacity: 0, y: 8, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -232,6 +233,7 @@ function MessageBubble({ msg }: { msg: Message }) {
   if (msg.type === 'teachback') {
     return (
       <motion.div
+        data-testid="chat-message-ai"
         className="flex items-end gap-2.5"
         initial={{ opacity: 0, y: 8, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -269,6 +271,7 @@ function MessageBubble({ msg }: { msg: Message }) {
         <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
       </div>
       <div
+        data-testid="chat-message-ai"
         className="max-w-[80%] sm:max-w-[70%] px-4 py-3.5"
         style={{ backgroundColor: 'white', borderRadius: '4px 18px 18px 18px', boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }}
       >
@@ -498,6 +501,8 @@ function VoiceCallBar({
 
   return (
     <motion.div
+      data-testid="voice-active-bar"
+      data-voice-state={state}
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
@@ -516,7 +521,11 @@ function VoiceCallBar({
         <span className="text-[12px] font-semibold" style={{ color: 'var(--brand-primary-purple)' }}>
           {t('chat.voiceMode')}
         </span>
-        <span className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
+        <span
+          data-testid="voice-state-label"
+          className="text-[12px]"
+          style={{ color: 'var(--brand-text-muted)' }}
+        >
           · {stateLabel[state] ?? state}
         </span>
       </div>
@@ -526,6 +535,7 @@ function VoiceCallBar({
           <span>{t('chat.emergencyCall')}</span>
         </div>
         <button
+          data-testid="voice-end-button"
           onClick={onStop}
           className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-semibold transition hover:opacity-80"
           style={{ backgroundColor: '#ef4444', color: 'white' }}
@@ -1811,7 +1821,7 @@ export default function AIChatInterface() {
 
               <AnimatePresence>
                 {pendingSymptom && (
-                  <motion.div key="symptom" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                  <motion.div data-testid="symptom-quick-log-card" key="symptom" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                     <SymptomLogCard
                       summary={pendingSymptom}
                       onDismiss={() => setPendingSymptom(null)}
@@ -1849,6 +1859,7 @@ export default function AIChatInterface() {
         {/* Input bar */}
         <div className="shrink-0 bg-white px-4 lg:px-6 pt-3 pb-4" style={{ borderTop: '1px solid var(--brand-border)' }}>
           <div
+            data-testid="chat-message-input"
             className="flex items-end gap-2 px-4 py-1.5 transition-all"
             style={{
               border: isVoiceActive ? '1.5px solid var(--brand-primary-purple)' : '1.5px solid var(--brand-border)',
@@ -1925,6 +1936,7 @@ export default function AIChatInterface() {
                 - amber-outline + warning title: prewarm failed, click to retry
                 - purple: idle / ready */}
             <motion.button
+              data-testid="voice-mic-button"
               onClick={() => void handleMicClick()}
               disabled={!token || isSending}
               className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition disabled:opacity-40"

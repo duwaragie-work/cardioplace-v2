@@ -89,6 +89,14 @@ export const PATIENTS = {
     archetype: '65+ control — no comorbidities, age threshold edges',
     expectedRuleId: null,
   },
+
+  // ─── Phase 4 §B.1 — young-adult persona (18–29 bucket) ───────────────────
+  taylor: {
+    email: process.env.PATIENT_TAYLOR_EMAIL ?? 'taylor.brown@cardioplace.test',
+    name: 'Taylor Brown',
+    archetype: 'Young adult (18–29 bucket) — general adult HTN',
+    expectedRuleId: null,
+  },
 } as const
 
 export type SeedPatientKey = keyof typeof PATIENTS

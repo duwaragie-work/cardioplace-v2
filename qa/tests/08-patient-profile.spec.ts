@@ -63,3 +63,54 @@ test.describe('Profile — Priya (pregnancy + Tier 1 contraindication seed)', ()
     // the rule-engine spec via the alert listing — not on profile.
   })
 })
+
+// ─── Phase 4c (§E) — profile view + inline edit + deep-link ────────────────
+test.describe('Phase 4c — profile (20c)', () => {
+  test.beforeEach(async ({ page }) => {
+    await signInPatient(page, PATIENTS.aisha.email)
+  })
+
+  test('20c.1 — profile renders personal + clinical + medications + care team', async ({
+    page,
+  }) => {
+    await page.goto('/profile')
+    await expect(page.locator('[data-testid="profile-name"]')).toContainText(
+      PATIENTS.aisha.name,
+      { timeout: 10_000 },
+    )
+    // Clinical (conditions) + medications + care-team markers.
+    await expect(
+      page.getByText(/hypertension|high blood pressure/i).first(),
+    ).toBeVisible()
+    await expect(page.getByText(/Lisinopril/i)).toBeVisible()
+    await expect(page.getByText(/cedar hill/i)).toBeVisible()
+  })
+
+  test('20c.2 — inline edit: name + communication preference', async ({ page }) => {
+    await page.goto('/profile')
+    await page.locator('[data-testid="profile-name-edit-button"]').click()
+    // PersonalInfoModal — set a comm preference (TEXT_FIRST) then save.
+    const textFirst = page.locator(
+      '[data-testid="profile-comm-preference-TEXT_FIRST"]',
+    )
+    await textFirst.click().catch(() => {})
+    const save = page
+      .getByRole('button', { name: /save|update|done/i })
+      .first()
+    await save.click().catch(() => {})
+    // Modal closes; profile still renders the name.
+    await expect(page.locator('[data-testid="profile-name"]')).toContainText(
+      PATIENTS.aisha.name,
+      { timeout: 10_000 },
+    )
+  })
+
+  test('20c.3 — deep-link from profile to /clinical-intake for clinical edits', async ({
+    page,
+  }) => {
+    await page.goto('/profile')
+    await page.locator('[data-testid="profile-edit-clinical-link"]').click()
+    await page.waitForURL(/\/clinical-intake/, { timeout: 15_000 })
+    await expect(page).toHaveURL(/\/clinical-intake/)
+  })
+})

@@ -23,6 +23,7 @@ export default function LanguageSelector() {
   return (
     <div className="relative" ref={ref}>
       <button
+        data-testid="language-selector-button"
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1 sm:gap-1.5 h-8 sm:h-9 px-2 sm:px-3 rounded-full text-[12px] sm:text-[13px] font-semibold transition hover:opacity-80"
         style={{
@@ -46,6 +47,7 @@ export default function LanguageSelector() {
             return (
               <button
                 key={l.code}
+                data-testid={`language-selector-option-${l.code}`}
                 onClick={() => { setLocale(l.code); setOpen(false); }}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-[13px] transition hover:bg-gray-50"
                 style={{

@@ -26,6 +26,9 @@ export type DrugClassInput =
   | 'ANTIARRHYTHMIC'
   | 'VASODILATOR_NITRATE'
   | 'ARNI'
+  // Cluster 7 A.3 — NSAID + antihypertensive interaction warning. Mirrors
+  // the Prisma DrugClass enum bump.
+  | 'NSAID'
   | 'OTHER_UNVERIFIED'
 
 export type MedicationFrequencyInput =
@@ -46,6 +49,7 @@ export type MedicationVerificationStatusInput =
   | 'VERIFIED'
   | 'REJECTED'
   | 'AWAITING_PROVIDER'
+  | 'HOLD'
 
 export type ProfileVerificationStatusInput =
   | 'UNVERIFIED'
@@ -135,7 +139,7 @@ export interface CorrectProfilePayload {
 export interface VerifyMedicationPayload {
   status: Extract<
     MedicationVerificationStatusInput,
-    'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER'
+    'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER' | 'HOLD'
   >
   rationale?: string
 }

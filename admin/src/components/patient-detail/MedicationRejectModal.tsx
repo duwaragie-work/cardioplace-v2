@@ -109,6 +109,7 @@ export default function MedicationRejectModal({ med, open, onClose, onConfirmed 
             style={{ maxHeight: '92dvh', boxShadow: '0 8px 48px rgba(0,0,0,0.18)' }}
             role="dialog"
             aria-label="Reject medication"
+            data-testid="admin-med-reject-modal"
           >
             <div
               className="shrink-0 flex items-start justify-between gap-3 px-5 pt-4 pb-3"
@@ -164,6 +165,7 @@ export default function MedicationRejectModal({ med, open, onClose, onConfirmed 
                         key={q.key}
                         type="button"
                         onClick={() => handlePick(q.key, q.rationale)}
+                        data-testid={`admin-med-reject-pick-${q.key}`}
                         className="w-full text-left rounded-lg p-3 transition-colors cursor-pointer"
                         style={{
                           backgroundColor: selected ? 'var(--brand-alert-red-light)' : 'white',
@@ -207,6 +209,7 @@ export default function MedicationRejectModal({ med, open, onClose, onConfirmed 
                   <textarea
                     value={rationale}
                     onChange={(e) => setRationale(e.target.value)}
+                    data-testid="admin-med-reject-rationale"
                     placeholder="Brief clinical note for the audit trail."
                     rows={3}
                     className="w-full px-3 py-2 rounded-lg text-[13px] outline-none resize-y leading-relaxed"
@@ -247,6 +250,7 @@ export default function MedicationRejectModal({ med, open, onClose, onConfirmed 
                   type="button"
                   onClick={handleSubmit}
                   disabled={!canSubmit}
+                  data-testid="admin-med-reject-confirm"
                   className="btn-admin-primary flex-1"
                 >
                   {submitting ? (

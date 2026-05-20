@@ -98,6 +98,7 @@ export default function MonthlyMedReask({ userId, hasMedications, intakeComplete
           aria-label={t('intake.reask.ariaLabel')}
         >
           <motion.div
+            data-testid="dashboard-monthly-med-reask"
             initial={{ scale: 0.92, y: 16 }}
             animate={{ scale: 1, y: 0 }}
             exit={{ scale: 0.92, y: 16 }}

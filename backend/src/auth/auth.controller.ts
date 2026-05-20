@@ -15,6 +15,14 @@ import { ConfigService } from '@nestjs/config'
 import type { Request, Response } from 'express'
 import { UserRole } from '../generated/prisma/enums.js'
 import { AuthService } from './auth.service.js'
+import {
+  type CookieScope,
+  LEGACY_ACCESS_COOKIE,
+  LEGACY_REFRESH_COOKIE,
+  cookieName,
+  deriveCookieScope,
+  scopeForRoles,
+} from './cookie-scope.js'
 import { Public } from './decorators/public.decorator.js'
 import { ProfileDto } from './dto/profile.dto.js'
 import { RefreshDto } from './dto/refresh.dto.js'
@@ -95,8 +103,12 @@ export class AuthController {
       dto.otp,
       context,
     )
-    this.setAccessCookie(res, result.accessToken)
-    this.setRefreshCookie(res, result.refreshToken)
+    // Scope cookies to the destination app (admin-role users land on the
+    // admin app — including via the patient→admin sign-in bridge, where
+    // this POST's Origin is the patient origin but the session is admin's).
+    const scope = scopeForRoles(result.roles)
+    this.setAccessCookie(res, result.accessToken, scope)
+    this.setRefreshCookie(res, result.refreshToken, scope)
     if (context.deviceId) {
       await this.authService.upsertOrTrackDevice({
         deviceId: context.deviceId,
@@ -134,8 +146,12 @@ export class AuthController {
     try {
       const context = this.buildAuthContext(req)
       const result = await this.authService.verifyMagicLink(token, context)
-      this.setAccessCookie(res, result.accessToken)
-      this.setRefreshCookie(res, result.refreshToken)
+      // Magic-link verify is a top-level GET (clicked from an email) so the
+      // browser sends no Origin — derive scope from the verified roles, the
+      // same signal that picks targetUrl below.
+      const scope = scopeForRoles(result.roles)
+      this.setAccessCookie(res, result.accessToken, scope)
+      this.setRefreshCookie(res, result.refreshToken, scope)
 
       const targetUrl = result.roles.includes(UserRole.SUPER_ADMIN)
         ? (adminAppUrl ?? patientAppUrl)
@@ -166,15 +182,22 @@ export class AuthController {
     @Body() dto: RefreshDto,
     @Res({ passthrough: true }) res: Response,
   ) {
+    // Each app refreshes from its own origin, so Origin reliably identifies
+    // the scope here. Read the scoped cookie first, then the pre-fix
+    // unscoped name (so sessions created before this change keep working),
+    // then the body (legacy non-browser clients).
+    const scope = deriveCookieScope(req)
+    const cookies = (req.cookies as Record<string, string>) ?? {}
     const rawToken =
-      (req.cookies as Record<string, string>)?.['refresh_token'] ??
+      cookies[cookieName(scope, 'refresh')] ??
+      cookies[LEGACY_REFRESH_COOKIE] ??
       dto.refreshToken
     if (!rawToken) throw new UnauthorizedException('No refresh token provided')
 
     const context = this.buildAuthContext(req)
     const result = await this.authService.rotateRefreshToken(rawToken, context)
-    this.setAccessCookie(res, result.accessToken)
-    this.setRefreshCookie(res, result.refreshToken)
+    this.setAccessCookie(res, result.accessToken, scope)
+    this.setRefreshCookie(res, result.refreshToken, scope)
     return {
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
@@ -190,8 +213,11 @@ export class AuthController {
     @Body() dto: RefreshDto,
     @Res({ passthrough: true }) res: Response,
   ) {
+    const scope = deriveCookieScope(req)
+    const cookies = (req.cookies as Record<string, string>) ?? {}
     const rawToken =
-      (req.cookies as Record<string, string>)?.['refresh_token'] ??
+      cookies[cookieName(scope, 'refresh')] ??
+      cookies[LEGACY_REFRESH_COOKIE] ??
       dto.refreshToken
     if (rawToken) {
       const context = this.buildAuthContext(req)
@@ -201,9 +227,16 @@ export class AuthController {
     // a clearCookie whose `secure`, `sameSite`, `path`, or `domain` doesn't
     // match the original Set-Cookie — the cookie silently survives. Reuse
     // `cookieDefaults()` so setter + clearer share one source of truth.
+    //
+    // Clear ONLY this app's scoped cookies (+ the pre-fix unscoped names so
+    // legacy local sessions wipe). Deliberately do NOT touch the other
+    // scope: signing out of the patient app must leave a concurrent admin
+    // session intact, and vice versa — that's the whole point of scoping.
     const clearOpts = { ...this.cookieDefaults(), path: '/' }
-    res.clearCookie('access_token', clearOpts)
-    res.clearCookie('refresh_token', clearOpts)
+    res.clearCookie(cookieName(scope, 'access'), clearOpts)
+    res.clearCookie(cookieName(scope, 'refresh'), clearOpts)
+    res.clearCookie(LEGACY_ACCESS_COOKIE, clearOpts)
+    res.clearCookie(LEGACY_REFRESH_COOKIE, clearOpts)
     return { message: 'Logged out successfully' }
   }
 
@@ -256,18 +289,18 @@ export class AuthController {
     } as const
   }
 
-  private setAccessCookie(res: Response, token: string) {
+  private setAccessCookie(res: Response, token: string, scope: CookieScope) {
     // 7 day max-age — shorter than refresh but long enough to survive idle
     // tabs without the Bearer-fallback re-prompting; the backend's actual
     // JWT expiry (JWT_ACCESS_EXPIRES_IN, default 15m) is the real lifetime.
-    res.cookie('access_token', token, {
+    res.cookie(cookieName(scope, 'access'), token, {
       ...this.cookieDefaults(),
       maxAge: 7 * 24 * 60 * 60 * 1000,
     })
   }
 
-  private setRefreshCookie(res: Response, token: string) {
-    res.cookie('refresh_token', token, {
+  private setRefreshCookie(res: Response, token: string, scope: CookieScope) {
+    res.cookie(cookieName(scope, 'refresh'), token, {
       ...this.cookieDefaults(),
       maxAge: 30 * 24 * 60 * 60 * 1000,
     })

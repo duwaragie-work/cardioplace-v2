@@ -77,7 +77,9 @@ const CONDITION_LABELS: Record<string, string> = {
 
 function tierBucket(t: string | null): TierFilter | 'OTHER' {
   if (t === 'BP_LEVEL_2' || t === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'BP_L2';
-  if (t === 'TIER_1_CONTRAINDICATION') return 'TIER_1';
+  // Cluster 8 — angioedema buckets into TIER_1 (same red chrome on the
+  // readings card) per Manisha "resolved like all Tier 1 alerts".
+  if (t === 'TIER_1_CONTRAINDICATION' || t === 'TIER_1_ANGIOEDEMA') return 'TIER_1';
   if (t === 'TIER_2_DISCREPANCY') return 'TIER_2';
   if (t === 'BP_LEVEL_1_HIGH' || t === 'BP_LEVEL_1_LOW') return 'BP_L1';
   if (t === 'TIER_3_INFO') return 'TIER_3';
@@ -180,6 +182,7 @@ export default function ReadingsTab({ patientId }: Props) {
                     key={key}
                     type="button"
                     onClick={() => setDateFilter(key)}
+                    data-testid={`admin-readings-date-filter-${key}`}
                     className="px-2.5 h-7 rounded-full text-[11px] font-semibold transition-all cursor-pointer"
                     style={{
                       backgroundColor: active ? 'var(--brand-primary-purple)' : 'var(--brand-primary-purple-light)',
@@ -216,6 +219,7 @@ export default function ReadingsTab({ patientId }: Props) {
                     key={key}
                     type="button"
                     onClick={() => setTierFilter(key)}
+                    data-testid={`admin-readings-tier-filter-${key}`}
                     className="px-2.5 h-7 rounded-full text-[11px] font-semibold transition-all cursor-pointer"
                     style={{
                       backgroundColor: active ? chrome.color : chrome.bg,
@@ -247,7 +251,7 @@ export default function ReadingsTab({ patientId }: Props) {
       ) : filtered.length === 0 ? (
         <EmptyCard hasReadings={entries.length > 0} />
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2" data-testid="admin-readings-list">
           {filtered.map((entry) => (
             <ReadingCard key={entry.id} entry={entry} />
           ))}
@@ -275,6 +279,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
   return (
     <div
       className="bg-white rounded-2xl p-4 md:p-5"
+      data-testid={`admin-readings-card-${entry.id}`}
       style={{ boxShadow: 'var(--brand-shadow-card)' }}
     >
       {/* Header — date + time + source + suboptimal flag */}
@@ -303,10 +308,30 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
             </span>
           )}
         </div>
-        {/* Linked alert tier badges */}
+        {/* Linked alert tier badges. Cluster 8.1 Gap 5 (Manisha 5/18/26):
+            a brady-surveillance deviation gets a distinct amber "Surveillance"
+            pill so the provider sees the flagged reading at a glance (the
+            doc's "reading flagged on the trend chart" — admin has no chart). */}
         {entry.deviations.length > 0 && (
           <div className="flex items-center gap-1.5 flex-wrap">
             {entry.deviations.map((d) => {
+              if (d.ruleId === 'RULE_BRADY_SURVEILLANCE') {
+                return (
+                  <span
+                    key={d.id}
+                    data-testid="admin-readings-brady-surveillance-pill"
+                    className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+                    style={{
+                      backgroundColor: 'var(--brand-warning-amber-light)',
+                      color: 'var(--brand-warning-amber-text)',
+                    }}
+                    title="Asymptomatic bradycardia surveillance — physician trend review"
+                  >
+                    <ShieldAlert className="w-3 h-3" />
+                    Surveillance
+                  </span>
+                );
+              }
               const chrome = tierChrome(tierBucket(d.tier));
               return (
                 <span
@@ -609,6 +634,7 @@ function EmptyCard({ hasReadings }: { hasReadings: boolean }) {
   return (
     <div
       className="bg-white rounded-2xl p-8 text-center"
+      data-testid="admin-readings-empty"
       style={{ boxShadow: 'var(--brand-shadow-card)' }}
     >
       <div

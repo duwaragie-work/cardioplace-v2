@@ -183,6 +183,20 @@ const es: Record<TranslationKey, string> = {
   'checkin.b3.symptomSyncope': 'Se desmayó o estuvo a punto de desmayarse recientemente',
   'checkin.b3.symptomPalpitations': 'Siente que el corazón se acelera o le palpita',
   'checkin.b3.symptomLegSwelling': 'Hinchazón en piernas o pies, o aumento rápido de peso',
+  // Cluster 7 (Manisha 5/11/26) — etiquetas de efectos secundarios (Apéndice A).
+  'checkin.b3.symptomFatigue': 'Sentirse inusualmente cansado o sin energía',
+  'checkin.b3.symptomShortnessOfBreath': 'Falta de aire o le cuesta respirar más de lo habitual',
+  'checkin.b3.symptomDryCough': 'Una tos nueva, seca y con cosquilleo',
+  // Cluster 8 (Manisha 5/18/26, P0) — emergencia de vía aérea por angioedema.
+  'checkin.b3.symptomFaceSwelling': 'Hinchazón de la cara, los labios o la lengua',
+  'checkin.b3.symptomThroatTightness': 'La garganta se siente apretada o cuesta tragar',
+  // Cluster 8 (Manisha 5/18/26, P0) — cuerpos de alerta de angioedema (Prioridad 1).
+  'alert.angioedema.patientAce':
+    'Informó hinchazón de la cara, los labios o la lengua, o que siente la garganta apretada. Esto requiere atención médica urgente. Si además tiene dificultad para respirar o siente la garganta cerrada, llame al 911 ahora. Si no, vaya a la sala de emergencias más cercana ahora. No tome más su medicina para la presión arterial hasta que su médico le diga que es seguro.',
+  'alert.angioedema.patientGeneric':
+    'Informó hinchazón de la cara, los labios o la lengua, o que siente la garganta apretada. Esto requiere atención médica urgente. Si además tiene dificultad para respirar o siente la garganta cerrada, llame al 911 ahora. Si no, vaya a la sala de emergencias más cercana ahora.',
+  'alert.angioedema.caregiver':
+    'Informó hinchazón de su cara, labios o lengua. Esto puede ser una reacción peligrosa a uno de sus medicamentos para la presión arterial. Si tiene dificultad para respirar o la garganta apretada, llame al 911 ahora. Si no, llévelo a la sala de emergencias más cercana ahora. No deje que tome otra dosis de ese medicamento.',
   'checkin.confirm.takeSecondReading': 'Tome una segunda medición en aproximadamente 1 minuto',
   'checkin.confirm.takeSecondReadingHint':
     'Una sola medición puede ser inexacta — una segunda ayuda a su equipo de atención a ver el panorama completo. Esperaremos unos minutos.',

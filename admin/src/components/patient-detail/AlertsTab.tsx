@@ -3,7 +3,7 @@
 // Flow H3 — per-patient alerts tab.
 //
 // • Tier filter chips (All / BP L2 / Tier 1 / Tier 2 / BP L1 / Tier 3)
-// • Status filter (All / Open / Resolved)
+// • Status filter (Open / Acknowledged / Resolved / All)
 // • Each row uses the shared AlertCard (extracted Nov 2026 so the same
 //   inline expand + three-tier + Resolve / Acknowledge surface is reused
 //   on /admin/notifications per CLINICAL_SPEC V2-C Layer 1).
@@ -32,14 +32,22 @@ interface Props {
   /** PatientProfile.heightCm — passed through to EscalationAuditTrail
    *  so the resolution audit footer can compute BMI alongside PP. */
   heightCm?: number | null;
+  /** Patient display name — the per-patient alerts endpoint omits the
+   *  nested patient object (you're already in the patient's page), so the
+   *  resolve modal showed "Unknown patient". Thread it from the shell.
+   *  (Phase 1 polish Finding 8.) */
+  patientName?: string | null;
 }
 
 type TierBucket = 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'TIER_3' | 'OTHER';
-type StatusFilter = 'ALL' | 'OPEN' | 'RESOLVED';
+type StatusFilter = 'ALL' | 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
 
 function tierBucket(t: string | null): TierBucket {
   if (t === 'BP_LEVEL_2' || t === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'BP_L2';
-  if (t === 'TIER_1_CONTRAINDICATION') return 'TIER_1';
+  // Cluster 8 — angioedema buckets into TIER_1 so the patient-detail
+  // Alerts tab filter + chrome treats it identically to a Tier 1
+  // contraindication (Manisha "resolved like all Tier 1 alerts").
+  if (t === 'TIER_1_CONTRAINDICATION' || t === 'TIER_1_ANGIOEDEMA') return 'TIER_1';
   if (t === 'TIER_2_DISCREPANCY') return 'TIER_2';
   if (t === 'BP_LEVEL_1_HIGH' || t === 'BP_LEVEL_1_LOW') return 'BP_L1';
   if (t === 'TIER_3_INFO') return 'TIER_3';
@@ -69,7 +77,7 @@ function timeAgo(iso: string): string {
   return `${d}d ago`;
 }
 
-export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Props) {
+export default function AlertsTab({ alerts, loading, onResolved, heightCm, patientName }: Props) {
   const [tierFilter, setTierFilter] = useState<TierBucket>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('OPEN');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -83,6 +91,11 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
   // CLINICAL_SPEC V2-C Layer 1 — it should NOT mix with safety-critical
   // alerts in the main queue. Surface it in the dedicated "Physician
   // notes" section below the main list instead.
+  // Cluster 8 Q1: RULE_BRADY_SURVEILLANCE is intentionally NON-medication-
+  // linked, so (unlike RULE_HCM_VASODILATOR / RULE_LOOP_DIURETIC_HYPOTENSION
+  // which MedicationsTab inlines via tier3DrugClassFor) it has no drug-class
+  // row to attach to — it correctly surfaces in this Physician-notes section
+  // + as a "Surveillance" pill on the triggering reading (Cluster 8.1 Gap 5).
   const tier3Alerts = useMemo(
     () => alerts.filter((a) => tierBucket(a.tier) === 'TIER_3'),
     [alerts],
@@ -130,7 +143,10 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
     return {
       id: resolving.id,
       tier: resolving.tier as AlertTier | null,
-      patient: { name: null },
+      // Finding 8 — the per-patient alerts feed omits the nested patient
+      // object; thread the name from the shell so the modal header reads
+      // "James Okafor · 118/74" not "Unknown patient · 118/74".
+      patient: { name: patientName ?? null },
       patientMessage: resolving.patientMessage,
       journalEntry: resolving.journalEntry
         ? {
@@ -141,7 +157,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
         : null,
       createdAt: resolving.createdAt,
     };
-  }, [resolving]);
+  }, [resolving, patientName]);
 
   const handleAcknowledge = useCallback(
     async (alertId: string) => {
@@ -193,11 +209,12 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
             className="inline-flex p-1 rounded-full"
             style={{ backgroundColor: 'var(--brand-background)', border: '1px solid var(--brand-border)' }}
           >
-            {(['OPEN', 'RESOLVED', 'ALL'] as StatusFilter[]).map((s) => {
+            {(['OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'ALL'] as StatusFilter[]).map((s) => {
               const active = statusFilter === s;
               return (
                 <button
                   key={s}
+                  data-testid={`admin-alerts-status-filter-${s}`}
                   type="button"
                   onClick={() => setStatusFilter(s)}
                   className="px-2.5 h-6 rounded-full text-[10.5px] font-semibold transition-all cursor-pointer"
@@ -207,7 +224,13 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
                     boxShadow: active ? 'var(--brand-shadow-card)' : 'none',
                   }}
                 >
-                  {s === 'OPEN' ? 'Open' : s === 'RESOLVED' ? 'Resolved' : 'All'}
+                  {s === 'OPEN'
+                    ? 'Open'
+                    : s === 'ACKNOWLEDGED'
+                      ? 'Acknowledged'
+                      : s === 'RESOLVED'
+                        ? 'Resolved'
+                        : 'All'}
                 </button>
               );
             })}
@@ -232,6 +255,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
             return (
               <button
                 key={key}
+                data-testid={`admin-alerts-tier-filter-${key}`}
                 type="button"
                 onClick={() => setTierFilter(key)}
                 className="px-2.5 h-7 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 cursor-pointer"
@@ -261,7 +285,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm }: Pro
 
       {/* Empty state */}
       {filtered.length === 0 ? (
-        <div className="bg-white rounded-2xl p-8 text-center" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+        <div data-testid="admin-alerts-empty" className="bg-white rounded-2xl p-8 text-center" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
           <CheckCircle2 className="w-7 h-7 mx-auto mb-2" style={{ color: 'var(--brand-success-green)' }} />
           <p className="text-[14px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
             No alerts match your filter

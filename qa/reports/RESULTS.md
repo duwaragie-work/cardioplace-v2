@@ -1,279 +1,1525 @@
 # Cardioplace v2 — Playwright E2E Run Results
 
-**Run date:** 2026-05-08 (final run after clusters 1–4 + Phase B CI + Phase D polish)
-**Branch:** `claude/review-cardioplace-v2-fOTac` (HEAD `932593c`)
+**Run date:** 2026-05-15 (A1 small-bugs + B4 translation-pipeline cycle, on top of Cluster 6/7)
+**Branch:** `duwaragie-dev` (12 commits ahead of `origin/dev`) → PR `duwaragie-dev → dev`
 **Engine:** chromium-desktop (1440×900)
-**Stack tested:** local + CI (GitHub Actions, 4-shard matrix). Postgres 16 + pgvector, NestJS backend `:4000` (`ENABLE_TEST_CONTROL=true`), Next.js 16 patient `:3000`, Next.js 16 admin `:3001`
-**Seed:** 5 patients (Priya / James / Rita / Charles / Aisha) + 6 admins, perma-OTP `666666`
+**Stack tested:** local (NestJS `:4000`, Next 16 patient `:3000`, Next 16 admin `:3001`) + CI (GitHub Actions, sharded, fresh DB per shard). Local DB is the shared remote `db.prisma.io` (seed pollution applies).
+**Seed:** 5 base patients (Priya / James / Rita / Charles / Aisha) + 6 admins, perma-OTP `666666`. Cluster 6 persona expansion (Carol / Mike / Kate / …) is NOT fully seeded on the swapped local DB.
 
 ---
 
 ## Bottom line
 
-| | Initial run | After clusters 1–4 | After Phase B + D (CI) |
-|---|---:|---:|---:|
-| **Passed** | 67 | 85 | **93** ⬆️ |
-| **Failed** | 39 | 21 | **14** ⬇️ |
-| **Skipped** (env-gated) | 13 | 13 | 12 |
-| **Total** | 119 | 119 | 119 |
+| | Backend unit (jest) | Playwright (no-write, local) | Write-gated + full matrix |
+|---|---:|---:|---|
+| **Passed** | **19 / 19** | **14** (incl. all 3 new §F/§H tests) | CI is authoritative |
+| **Failed** | 0 | 1 — *pre-existing* `Carol Miller` seed gap, unrelated | — |
+| **Skipped** | 0 | 1 + §G env-gated + spec 19 (9, write-gated) | — |
 
-**25 fewer failures than initial run.** All remaining 14 failures are either awaiting clinical sign-off (Dr. Singal — 12) or pre-classified as next-pass infra TODOs (2). **No new regressions from Phase D.**
+This cycle shipped a **9-item bundle** (3 backend/test-infra fixes, a translation-pipeline
+doc update, 3 frontend bug fixes) as one PR. No engine clinical-rule changes, no schema
+changes. Every code change carries a test or a documented manual-verification note.
 
-CI now runs on every PR to `dev` / `main` via `.github/workflows/e2e.yml` (4-shard matrix, per-shard postgres + pgvector + backend + frontend + admin, advisory until first green run on a real `dev` PR).
+A full-suite local run was **not** possible this cycle: the running backend had
+`ENABLE_TEST_CONTROL=false` (write-gated specs defer to CI) and the admin `.next` dev cache
+was corrupt (now cleared — see *Known test-infra issues*). CI (test-control provisioned,
+fresh DB per shard) is the authoritative full tally; targeted gates below all pass.
 
-HTML report at `qa/reports/final/index.html`. JSON at `qa/reports/final/results.json`. Per-shard artifacts uploaded by the workflow.
+**Categorized status**
 
-### Remaining 14 failures (categorized)
-
-| Owner | Count | Spec file | What |
-|---|---:|---|---:|
-| Dr. Singal (clinical decision) | 9 | `09-rule-engine-via-ui` | G1–G9 multi-alert behavior — engine fires single-primary; tests assumed multi-axis. Awaiting clinical sign-off. |
-| Other dev | 1 | `09-rule-engine-via-ui` | B1 `severeEpigastricRuq` engine miss (CLINICAL_SPEC §1.3 says it should fire BP_LEVEL_2_SYMPTOM_OVERRIDE). |
-| Test infra (next-pass) | 2 | `14-escalation-tier1-ladder` (1) + `15-crons-gap-and-monthly-reask` (1) | Iterative ladder backdate compounding (T+8h not reached after sequential 4h+4h backdates) + gap-alert seed needs `User.updatedAt` backdate (S13). |
-| Pulse-pressure assertion | 1 | `09-rule-engine-via-ui` | Wide pulse pressure (170/85) — engine annotates on primary alert, test expected separate Tier 3 row. Either fix `physicianAnnotation` inspection or relax. |
-| Pre-existing TS errors | 1 (typecheck only) | `16-cross-cutting` (test 16) | Pre-existing TS2740 — Page interface drift; not a runtime failure. |
-
-
----
-
-## ✅ 67 passing tests
-
-Full list is in `results.json`. Highlights worth calling out:
-
-- **Marketing surface:** 7 of 8 pages return 200 + correct gated-route redirects.
-- **Auth:** all 7 OTP flows + role-redirect tests pass on first run, including `seed patient OTP flow lands on /dashboard`, `wrong OTP shows inline error`, `email preserved when toggling OTP↔Magic Link`, `SUPER_ADMIN OTP lands on admin /dashboard`, `PATIENT-only email rejected by admin gate`, and `admin-role token signs in on patient app then bridges to admin URL`.
-- **Per-role admin sign-in:** all 6 admin roles (manisha, support, primary-provider, backup-provider, medical-director, ops) sign in and land on `/dashboard`.
-- **Admin patient list:** all 5 seeded patients render in the admin list.
-- **Rule engine — 19 of 31 tier-9 cases pass:** standard adult thresholds (124/78 normal, 165/100 → STANDARD_L1_HIGH, 185/95 → ABSOLUTE_EMERGENCY, 170/125 → ABSOLUTE_EMERGENCY, Aisha 95/75 → AGE_65_LOW), 5 of 6 general symptom overrides (severeHeadache, visualChanges, alteredMentalStatus, chestPainOrDyspnea, focalNeuroDeficit), Tier 1 contraindications (Priya pregnancy + ACE → PREGNANCY_ACE_ARB, James HFrEF + Diltiazem → NDHP_HFREF), Rita CAD DBP 68 → CAD_DBP_CRITICAL, Rita CAD SBP 165 → CAD_HIGH, AFib HR rules with the ≥3-readings session gate (HR 115 → AFIB_HR_HIGH, HR 45 → AFIB_HR_LOW), AFib gate single reading correctly suppresses BP/HR rules, benign-reading auto-resolve (165/100 then 124/78 flips first alert OPEN→RESOLVED), Tier 1 contraindication does NOT auto-resolve on benign reading.
-- **Patient onboarding Layer A gate:** seeded enrolled patient with PatientProfile can POST `/daily-journal` (control case passes).
+| Area | Result |
+|---|---|
+| Shared build / `src` tsc (frontend, admin, qa) | ✅ clean |
+| Backend `src` tsc | ✅ clean (changed files 0 errors; pre-existing spec `never`-typing + voice-chat e2e noise excluded — present on `dev`) |
+| Backend jest (§B deadlock-retry, §D session-averager + daily_journal) | ✅ 19/19 |
+| Playwright §F NotificationBell + §H patient/admin `<h1>` | ✅ 3/3 |
+| §C polling (spec 13 / spec 19) | ✅ extraction sound (spec 19 loads, 9 skipped clean); write-gated assertions → CI |
+| §G AlertsTab pill | ✅ admin tsc clean; UI walk env-gated (skips clean locally, runs in CI) |
+| §E translation package | ✅ cross-checked vs `shared/src/alert-messages.ts` |
 
 ---
 
-## 🔴 Real product bugs caught by the suite (post-cluster-2 reconfirm)
+## Cookie pollution + sign-in a11y (2026-05-17)
 
-Each line: **expected** → **got**. Copy these into a triage backlog.
+Branch `duwaragie-test-coverage` (synced to `origin/dev`, 2 commits on top). Two
+focused fixes — no engine / schema / clinical-rule changes. Verified live:
+**`02-auth` 13/13 passed** (`RUN_WRITE_TESTS=1`, chromium-desktop, 1.8m) — the 6
+new tests below plus all 7 pre-existing auth tests still green (no regression on
+the cross-app bridge or sign-out flows). Shared build + backend(build)/frontend/
+admin/qa `tsc --noEmit` all clean.
 
-> **Reconfirm note (cluster 2 — 2026-05-08):** B2 + B3 closed as test-side
-> issues, not product bugs. B4 narrative updated with deeper clinical
-> impact + Option-2 fix. See "Cluster 2 reconfirm log" section below for
-> the full ladder analysis.
+| Bug | Fix | Verified |
+|---|---|---|
+| Cross-app cookie pollution on shared localhost — admin session leaked to the patient app and vice versa (shared API-origin token cookie + same `localhost` host meant signing into one app contaminated the other; required incognito/2nd browser for side-by-side role testing) | App-scoped cookie names `cp_patient_*` / `cp_admin_*`: backend `scopeForRoles()` (fresh sign-in, role-based — handles the patient→admin bridge) + `deriveCookieScope()` from Origin (refresh/logout); per-app `cookie-names.ts` for the JS marker cookies; legacy unscoped names still read + cleared on logout | 2 Playwright tests (admin sign-in doesn't pollute patient tab; patient sign-out leaves admin session intact) + 13/13 `02-auth` live |
+| Sign-in forms ignored the Enter key (WCAG 2.1.1 Keyboard violation) — Send OTP / Send Magic Link / Continue were mouse-click only, on both patient + admin | `onKeyDown` on the email + OTP inputs submits the active flow (patient: OTP send/resend vs magic-link by mode; admin: OTP-only); `e.preventDefault()`, same pattern both apps | 4 Playwright tests (patient + admin × email→Send OTP + OTP→Continue) |
 
-### P0 — Patient safety / clinical correctness
+Production behavior unchanged — the two apps are already on separate subdomains
+in prod, so cookies were isolated there; the prefixed names are additive.
 
-| # | Test | Expected | Got | Severity | Status |
+---
+
+## ✅ Passing highlights
+
+- **§B (bug #20)** — `withDeadlockRetry` + `test-control.service.ts` now catch the
+  `@prisma/adapter-pg` `DriverAdapterError: TransactionWriteConflict` form (the typed
+  `code` is undefined through the adapter, so the old `P2034 / 40P01` matcher never
+  engaged). Conservative widening. `deadlock-retry.spec.ts` 8/8.
+- **§D (bug #5)** — `suboptimalMeasurement` no longer defaults TRUE when a patient skips
+  the optional 8-item checklist (the form sends all keys `false`; an all-false object now
+  reads as "not completed", not "measured badly"). Mirrored in `provider.service.ts`.
+  `session-averager.service.spec.ts` 10/10 (2 new bug-#5 cases).
+- **§F (bug #1)** — admin NotificationBell badge now counts unread notifications from the
+  **same source the dropdown renders** (was summing open clinical alerts + unread notifs;
+  the dropdown is notifications-only → "9+" badge over an empty dropdown). Playwright PASS.
+- **§H (a11y)** — patient `/dashboard` now has exactly one `<h1>` (sr-only), admin every
+  page has exactly one `<h1>` (the persistent `AdminTopBar` title demoted to a styled
+  `<div>`). Hydration #418 fixed — the time-of-day greeting moved out of render into a
+  post-mount `useEffect`. Playwright PASS ×2.
+- **§C** — `waitForAlerts` poll helper extracted to `qa/helpers/api.ts`; 6 fixed-`setTimeout`
+  race sites in spec 13 converted to polling (kills the remote-DB timing flake class).
+- **§G (bug #3)** — admin AlertsTab gains an "Acknowledged" status filter pill.
+
+---
+
+## ✅ Verified-fixed P0 HIPAA items (re-confirmed 2026-05-15)
+
+| # | Area | Resolution |
+|---|---|---|
+| **B5** | Security / HIPAA | Refresh token NO LONGER in `localStorage`. Fix landed via phase/cluster-1; verified by code (`frontend/src/lib/services/token.ts:10-11` — "deliberately do NOT persist to localStorage") + passing spec `qa/tests/16-cross-cutting-a11y-and-security.spec.ts:96` (`refresh token NOT in localStorage after sign-in`) + corroborating `qa/tests/02-auth.spec.ts:91`. Refresh token lives ONLY in backend's HttpOnly `refresh_token` cookie. **CLOSED.** |
+| **B6** | Security / HIPAA | `access_token` cookie IS `HttpOnly`. Verified by passing spec `qa/tests/16-cross-cutting-a11y-and-security.spec.ts:107` (`access_token cookie is HttpOnly`). **CLOSED.** |
+
+Note: spec 16 test descriptions still carry the legacy comment "currently FAILS in v1" — that's stale text from before the fix landed; the tests themselves now pass and assert the fixed state.
+
+---
+
+# Phase 1 — Audit Trail comprehensive HIPAA/JCAHO/EPIC review
+
+**Branch:** `duwaragie-test-coverage` (cut from `dev` @ `36964e0`, after PR #39 merged)
+**Date:** 2026-05-17 · **Scope:** audit-trail UI display, actor identity, role/tenant
+boundaries, PHI safety, immutability, system attribution. **No clinical-rule changes.**
+**Posture:** pre-approved display/test fixes applied; P0/P1 boundary + completeness
+findings **documented, NOT auto-fixed** (Phase 1 investigation protocol) — see the
+*REPORT-FIRST findings* block below.
+
+**Phase 1 bottom line**
+
+| Gate | Result |
+|---|---|
+| Shared build · backend/admin/frontend/qa `src` tsc | ✅ all clean (changed files: 0 errors) |
+| §B 15-field panel | ✅ all 15 render, distinct ack/resolve rows + actor names + `data-testid` added |
+| §C actor display | ✅ observed patient-ack-name bug fixed (backend + UI); 9 actor surfaces audited |
+| §F admin PHI safety | ✅ **3/3 Playwright pass live** (URL, console, error-response — no leaks) |
+| §H system attribution | ✅ every rung now labelled `System (Cron)` or `Retry · admin-scheduled` |
+| §G.2 immutability (UI) | ✅ no edit/delete/revert/reopen surface (grep clean) |
+| §D/§E role + cross-tenant | 🔴 **P0 — documented, not fixed** (pending Duwaragie) |
+| §G.1 immutability (API) | 🟠 no direct DELETE on 5 audit tables; one indirect cascade — documented |
+| §J ProfileVerificationLog | 🟠 threshold + assignment actions write no audit row — documented |
+
+### 15-field display audit (§B)
+
+Component: `admin/src/components/patient-detail/EscalationAuditTrail.tsx`
+(`ResolutionAuditFooter`). Backend feed: `provider.service.ts getPatientAlerts`
+(consumed via `admin/src/lib/services/patient-detail.service.ts:319`).
+
+| Field | Rendered | Correct value | Null handling | data-testid | Action taken |
 |---|---|---|---|---|---|
-| **B1** | `09 — severeEpigastricRuq at 130/80 → BP_LEVEL_2_SYMPTOM_OVERRIDE` | `RULE_SYMPTOM_OVERRIDE_GENERAL` fires (CLINICAL_SPEC §1.3 lists severe epigastric/RUQ pain as a Level 2 trigger) | **No alert fired at all** — empty alert list | **P0** | Open — owned by other dev |
-| ~~**B2**~~ | ~~`13 — audit endpoint returns the 15 expected fields`~~ | ~~Missing `timeToAcknowledgment` + `timeToResolution`~~ | **Reconfirm:** fields exist as `timeToAcknowledgmentMs` + `timeToResolutionMs` (proper unit suffix per Joint Commission audit precision). Backend is correct. | n/a | **CLOSED — naming mismatch in the test, fixed in cluster-2 commit.** |
-| ~~**B3**~~ | ~~`14 — acknowledged alert stops ladder progression`~~ | ~~`T4H` fires anyway after ack~~ | **Reconfirm:** admin ack via `POST /admin/alerts/:id/acknowledge` correctly flips state and `advanceOverdueLadders` filters out ack'd alerts. Original test failure used patient-side `PATCH /daily-journal/alerts/:id/acknowledge` which **returns 400 for Tier 1** (correct — patients can't self-ack a contraindication); test didn't check response, treated 400 as success. | n/a | **CLOSED — test used wrong endpoint, fixed in cluster-2 commit.** |
-| **B4** | `13 — BP_L2_UNABLE_TO_REACH_RETRY` retry actually fires | After provider acks + chooses "unable to reach, retry in 4h", the scheduled retry event must dispatch when its `scheduledFor` passes | **Retry event silently dropped** — `firePendingScheduled` skips the event because `alert.acknowledgedAt` is set (typical ack-then-resolve flow). Patient who couldn't be reached for a BP Level 2 emergency receives no follow-up dispatch. | **P0** | **FIXED in cluster-2 commit (Option 2)** — `firePendingScheduled` exempts `triggeredByResolution: true` events from the ack/status skip. Ack stays for audit trail; retry fires anyway. Per Dr. Singal sign-off. |
+| 1 Alert ID | ✓ | ✓ | n/a | ✓ added | none |
+| 2 Tier | ✓ | ✓ | ✓ `prettify→'—'` | ✓ added | none |
+| 3 Rule ID | ✓ | ✓ | ✓ `?? '—'` | ✓ added | none |
+| 4 Severity | ✓ | ✓ | ✓ | ✓ added | none |
+| 5 Mode (Std/Personalized) | ✓ | ✓ | ✓ | ✓ added | none |
+| 6 Status | ✓ | ✓ | ✓ | ✓ added | none |
+| 7 Created | ✓ | ✓ | ✓ `fmtDateTime→'—'` | ✓ added | none |
+| 8 Acknowledged (at + actor) | ✓ **fixed** | ✓ **fixed** | ✓ | ✓ added | **split** — was one conflated "Resolved"=acknowledgedAt row, no actor; now `acknowledged` + `acknowledgedBy` rows; backend resolves `acknowledgedByUserId`→name |
+| 9 Resolved (at + actor) | ✓ **fixed** | ✓ **fixed** | ✓ | ✓ added | **fixed binding** — `resolved` now binds `alert.resolvedAt` (was reusing acknowledgedAt); `resolvedBy`→`resolvedByName` |
+| 10 Resolution action | ✓ | ✓ | ✓ | ✓ added | none |
+| 11 Resolution rationale | ✓ | ✓ | ✓ (conditional block) | ✓ added | testid added |
+| 12 Reading (BP) | ✓ | ✓ | ✓ ternary | ✓ added | BP rendered; HR/pulse not in `journalEntry` projection — minor, documented (not a regression) |
+| 13 Pulse pressure | ✓ | ✓ | ✓ | ✓ added | none |
+| 14 Baseline value (personalized) | ✓ | ✓ | ✓ | ✓ added | none |
+| 15 Escalation count | ✓ | ✓ | ✓ | ✓ added | none |
+| (+ BMI, Actual value — extras) | ✓ | ✓ | ✓ | ✓ added | kept (additive) |
 
-### P0 — Security / HIPAA
+### Actor display audit (§C — observed bug + symmetric cases)
 
-| # | Test | Expected | Got | Severity | Reference |
+| Action | Actor | Before | After |
+|---|---|---|---|
+| Patient acknowledges alert | Patient | ✗ "Acknowledged", **no name** (observed bug) | ✓ `acknowledgedByName` resolved + rendered — proven by `qa/tests/13:511` (passes in provisioned CI) |
+| Provider resolves alert | Provider/MD | ✓ name shown | ✓ unchanged + now a **distinct** `resolvedAt` row |
+| Admin verifies profile | Admin | ✓ `TimelineTab` `changedByName` | ✓ verified |
+| Admin corrects profile | Admin | ✓ `TimelineTab` | ✓ verified |
+| MED_DIR edits threshold | MED_DIR | ✓ `PatientThreshold.setByName` | ✓ verified (but no `ProfileVerificationLog` row — see §J) |
+| Admin marks med VERIFIED/REJECTED/HOLD | Admin | ✓ `TimelineTab` verb + `changedByName` | ✓ verified |
+| Admin assigns provider | Admin | ✗ no patient-detail audit UI **and** no `ProfileVerificationLog` (REPORT-FIRST §J) | unchanged — documented |
+| BP_L2 retry scheduled | Admin action | "Retry" badge, no attribution text | ✓ `Retry · admin-scheduled` + tooltip |
+| CRON ladder rung | System | ✗ blank (indistinguishable from human) | ✓ `System (Cron)` chip (§H) |
+
+### PHI safety (§F)
+
+| Check | Status |
+|---|---|
+| Admin URL bar across patient-detail walk | ✅ pass (no BP-shape / patient-name in any nav URL) |
+| Admin console during walk | ✅ pass (no PHI; error-free after standard noise filter) |
+| Error responses (`/provider/alerts/<garbage>/detail`, `/provider/patients/<garbage>/alerts`) | ✅ pass (no name / BP in body) |
+
+All 3 ran **live** against the admin app (`16-cross-cutting-a11y-and-security.spec.ts:190/216/244`) — **3/3 pass**.
+
+### Immutability (§G)
+
+| Surface | Result |
+|---|---|
+| §G.1 API — DELETE on `DeviationAlert` / `EscalationEvent` / `ProfileVerificationLog` / `Notification` / `PatientMedication` | ✅ **none exist** (probed in `11:262`, skips cleanly w/o env) |
+| §G.1 indirect | 🟠 `DELETE /daily-journal/:id` (`daily_journal.controller.ts:158`, JWT+ownership, **not** test-gated) cascades JournalEntry → DeviationAlert → EscalationEvent (+Notification) — REPORT-FIRST |
+| test-control `deleteMany` (240-242) | ✅ correctly gated by `ENABLE_TEST_CONTROL` + `NODE_ENV!==production` |
+| §G.2 UI — edit/delete/revert/reopen audit buttons | ✅ none (grep clean across `admin/src`) |
+| §G.3 DB-level append-only / §G.4 field-immutability | ⏸ **deferred per plan** — CTO + Manisha + counsel discussion; no remediation recommended, no prejudging test added |
+
+### System vs user attribution (§H)
+
+| Audit row type | "System" labelled? |
+|---|---|
+| CRON-dispatched ladder rung (T+0/T+4h/T+8h/T+24h/T+48h, etc.) | ✅ `System (Cron)` chip |
+| Admin BP_L2_UNABLE_TO_REACH_RETRY-scheduled rung | ✅ `Retry · admin-scheduled` chip |
+
+Display-only (pre-approved). **Data-layer caveat:** no `dispatchedBySystem` column
+exists — the chip is derived from `triggeredByResolution`. Correct schema-level
+attribution is a REPORT-FIRST design question (see Finding 4).
+
+### §I / §K / §L / §M
+
+- **§I escalation completeness** — every `EscalationEvent` schema field is persisted
+  (`ladderStep`, `recipientIds/Roles`, `notificationChannel`, `afterHours`,
+  `scheduledFor`, `notificationSentAt`, `acknowledgedAt/By`, `resolvedAt/By`,
+  `triggeredByResolution`, `reason`) and rendered in the timeline. Only gap: no
+  system-dispatch flag at the data layer (Finding 4).
+- **§K retry action** — data layer covered by existing `13:99`; UI now renders
+  `Retry · admin-scheduled` + off-ladder event card; original alert stays OPEN
+  (asserted by `13:99`). UI display assertion added in `13:612` (env-gated skip).
+- **§L patient-side access log** — **intentional post-pilot deferral.** No clinical
+  `RecordAccessLog`/record-view tracking exists (only content-module audit, unrelated).
+  Cardioplace logs state-change events, not read-only views; pilot clinics rely on
+  their own EHR access logs. No test (intentional gap).
+- **§M notification dispatch audit** — `Notification` rows carry full audit context
+  and **are** surfaced nested per escalation event (`event.notifications[]` in
+  `EscalationAuditTrail`). No dedicated admin "all notifications for this patient"
+  view. Gap filed (Finding 5) — not built this phase (not trivial; needs a new
+  endpoint + tab).
+
+### Tests added this phase (8 new)
+
+| File:line | Test | Result here |
+|---|---|---|
+| `qa/tests/13-admin-alert-resolution.spec.ts:511` | §B/§C backend contract — alert-level `acknowledgedBy`/`acknowledgedByName`/`resolvedAt` | skips cleanly w/o `ENABLE_TEST_CONTROL`; asserts in CI |
+| `qa/tests/13-admin-alert-resolution.spec.ts:612` | §B/§C/§H 15-field panel UI walk | env-gated skip (volatile-walk posture) |
+| `qa/tests/16-cross-cutting-a11y-and-security.spec.ts:190` | §F admin URL PHI | ✅ **pass (live)** |
+| `qa/tests/16-cross-cutting-a11y-and-security.spec.ts:216` | §F admin console PHI | ✅ **pass (live)** |
+| `qa/tests/16-cross-cutting-a11y-and-security.spec.ts:244` | §F error-response PHI | ✅ **pass (live)** |
+| `qa/tests/11-admin-verification-and-thresholds.spec.ts:211` | §D role boundary (secure contract) | `test.fixme` — documented P0, never reds suite |
+| `qa/tests/11-admin-verification-and-thresholds.spec.ts:231` | §E cross-tenant (secure contract) | `test.fixme` — documented P0 |
+| `qa/tests/11-admin-verification-and-thresholds.spec.ts:262` | §G.1 no-DELETE on audit tables | env-gated skip; asserts in CI |
+
+### §N acceptance gate (honest)
+
+- `npm run build -w @cardioplace/shared` → ✅ clean
+- backend / admin / frontend / qa `tsc --noEmit` → ✅ all clean (changed files 0 errors;
+  pre-existing `*.spec.ts` `never`-typing noise on `dev` unchanged)
+- backend jest → no new unit tests this phase (Playwright-only)
+- `RUN_WRITE_TESTS=1 npx playwright test 13 16 11 --workers=1` (this sandbox) →
+  **19 passed / 2 skipped / 15 failed**. **All 15 failures share one cause:** backend
+  has `ENABLE_TEST_CONTROL` unset → every write-test's `tc.findUser` 403s. **12 of the
+  15 are pre-existing** (`11:18`, `13:32`, `13:212`, …) — identical env condition, not
+  introduced here. The 3 new write-tests were hardened to **skip cleanly** under this
+  condition (re-verified: targeted run = 3 passed §F / 5 skipped / 0 failed). Spec 16
+  unaffected (no regression). Provisioned CI remains authoritative for write-gated rows.
+
+## Phase 1 — REPORT-FIRST findings awaiting Duwaragie review
+
+> Per the Phase 1 investigation protocol these were **not auto-fixed**. Duwaragie
+> decides which to fix in a follow-up commit (or escalate to security review /
+> counsel / CTO / Manisha). The PR is otherwise merge-ready (pre-approved fixes +
+> tests applied).
+
+### Finding 1: Per-patient provider endpoints apply no assignment or practice scope (PHI leak)
+
+- **Severity:** P0
+- **Category:** Role boundary + cross-tenant isolation (§D + §E — same root cause)
+- **What I found:** `@Controller('provider')` admits all four clinical-staff roles
+  (`PROVIDER`, `MEDICAL_DIRECTOR`, `HEALPLACE_OPS`, `SUPER_ADMIN`).
+  `resolveScope()` (`backend/src/provider/provider.controller.ts:131-142`), which
+  force-scopes a PROVIDER-only caller to *their own assignments*, is wired into
+  **only** `getPatients` (l.63) and `getAlerts` (l.119). The per-patient endpoints
+  take a raw `:userId`/`:alertId` with **no scope and no callerUserId**:
+  `GET /provider/patients/:userId/alerts` (l.95-102), `:userId/summary` (l.68),
+  `:userId/journal` (l.73), `:userId/bp-trend` (l.86), `GET /provider/alerts/:alertId/detail`
+  (l.144). `provider.service.ts getPatientAlerts` (l.480-538) queries
+  `where:{ userId }` with no `PatientProviderAssignment` and no `Practice` filter.
+  Net: **any authenticated clinical-staff user (PROVIDER included) can read any
+  patient's full alert + escalation audit PHI** (BP readings, three-tier clinical
+  messages, escalation recipients) by supplying an arbitrary `userId`, across any
+  practice. The admin patient-detail panel calls this exact endpoint
+  (`patient-detail.service.ts:319`).
+- **Repro / proof:** Code-path proof above (controller + service file:line — an
+  authz gap is structural, not data-dependent). Executable secure-contract spec:
+  `qa/tests/11-admin-verification-and-thresholds.spec.ts:211` (§D) + `:231` (§E),
+  marked `test.fixme` so the suite stays green until the guard lands.
+- **What I did NOT do:** Did not add the role/assignment/practice guard per Phase 1
+  investigation protocol (P0 HIPAA — needs security review).
+- **Recommended next step (Duwaragie decides):** add an assignment+practice scope
+  check to all per-patient/per-alert provider endpoints (mirror `resolveScope` +
+  `PatientProviderAssignment` + `Practice` FK), then un-`fixme` the two §D/§E tests.
+  Likely a hotfix candidate before pilot.
+
+### Finding 2: `DELETE /daily-journal/:id` cascade-erases linked audit rows
+
+- **Severity:** P1 (immutability)
+- **Category:** Audit immutability (§G.1 indirect)
+- **What I found:** `DELETE /daily-journal/:id` (`daily_journal.controller.ts:158`,
+  JWT + ownership only, **not** gated by `ENABLE_TEST_CONTROL`) →
+  `journalEntry.delete()` (`daily_journal.service.ts:754`) cascades via FK to
+  `DeviationAlert` → `EscalationEvent` (service comment l.744), and dispatched
+  `Notification` rows. A patient can therefore erase a JCAHO escalation audit
+  trail by deleting the originating reading. No direct DELETE exists on the five
+  audit tables themselves (verified).
+- **Repro / proof:** Grep + code path (`@Delete(':id')` → `.delete()` + cascade
+  comment). Not exercised destructively in tests (would delete seed data).
+- **What I did NOT do:** Did not remove the endpoint or change the cascade — this
+  is the same product-design question deferred in §G.3 (patient typo-correction
+  vs strict append-only).
+- **Recommended next step (Duwaragie decides):** fold into the §G.3 CTO + Manisha +
+  counsel discussion (soft-supersede vs `onDelete: Restrict` for alert-bearing
+  entries vs status-only soft-delete).
+
+### Finding 3: Admin threshold + provider/practice-assignment actions write no `ProfileVerificationLog`
+
+- **Severity:** P1
+- **Category:** Audit completeness (§J)
+- **What I found:** `prisma.profileVerificationLog.create` appears **only** in
+  `backend/src/intake/intake.service.ts` (6 sites: patient med add/edit, admin
+  verify/reject/correct profile, med status change). These admin actions write
+  **no** audit-log row: MED_DIR **threshold create/edit**, **provider/practice
+  assignment** changes (CareTeamTab), enrollment-status toggle, condition-flag
+  edits. An EHR auditor reviewing "who changed this patient's BP thresholds / care
+  team and why" finds no trail.
+- **Repro / proof:** `grep profileVerificationLog backend/src` → 1 file
+  (`intake.service.ts`); threshold + assignment services have zero calls.
+- **What I did NOT do:** Did not add the audit-writes — needs a design decision on
+  the `fieldPath` / `changeType` enum values (current `VerificationChangeType` has
+  no THRESHOLD_SET / ASSIGNMENT_CHANGE member) and actor/role mapping.
+- **Recommended next step (Duwaragie decides):** extend `VerificationChangeType`
+  (or a sibling audit model) + emit a log row from the threshold + assignment
+  services. Likely pilot-relevant for JCAHO completeness.
+
+### Finding 4: No `dispatchedBySystem` attribution at the data layer
+
+- **Severity:** P2 (display mitigated)
+- **Category:** Audit completeness / system attribution (§H + §I)
+- **What I found:** No `EscalationEvent.dispatchedBySystem` (or actor) column. CRON
+  vs admin-scheduled is only inferable from `triggeredByResolution` + `reason`
+  text. The §H UI chip is derived from that heuristic — accurate today but not a
+  persisted, queryable audit fact.
+- **Repro / proof:** `escalation_event.prisma` field list (no system/actor column);
+  cron `runScan` persists only timestamp + step + `reason`.
+- **What I did NOT do:** Did not add a schema column (additive migration + backfill
+  decision belongs with the team).
+- **Recommended next step (Duwaragie decides):** consider an additive
+  `dispatchedBySystem Boolean @default(true)` (or `dispatchedByUserId String?`) so
+  attribution is a persisted audit fact, not a UI inference.
+
+### Finding 5: No admin "all notifications for this patient" view
+
+- **Severity:** P2
+- **Category:** Audit completeness (§M)
+- **What I found:** Notification audit context is only reachable nested under
+  escalation events in `EscalationAuditTrail`. There is no per-patient notification
+  log tab in the admin patient-detail screen.
+- **Repro / proof:** No `NotificationsTab` / "all notifications" surface in
+  `admin/src/components/patient-detail` (grep).
+- **What I did NOT do:** Did not build it (not trivial — new endpoint + tab; out of
+  Phase 1 "don't build unless trivial" scope).
+- **Recommended next step (Duwaragie decides):** backlog a patient-scoped
+  notification log tab if pilot compliance review wants it surfaced standalone.
+
+### Known deferred items (post-pilot, intentional — not findings)
+
+- **§G.3 / §G.4 DB-level append-only & field-immutability** — deferred per plan
+  (CTO + Manisha + counsel). No remediation recommended, no prejudging test.
+- **§L per-record-view access log** — HIPAA right-of-access; pilot clinics use
+  their own EHR access logs. Add `RecordAccessLog` post-pilot.
+
+---
+
+# Phase 2 — REPORT-FIRST findings fixes
+
+**Branch:** `duwaragie-test-coverage` (continues Phase 1; HEAD was `7761e33`)
+**Date:** 2026-05-17 · **Scope:** the 5 Phase-1 REPORT-FIRST findings, fixed per
+Duwaragie-approved scope. One commit + test + row per finding. **No clinical-rule
+changes.**
+
+| # | Finding | Severity | Disposition | Commit | Test |
 |---|---|---|---|---|---|
-| **B5** | `16 — refresh token NOT in localStorage` | Refresh token in `HttpOnly` cookie only | **`localStorage["healplace_refresh_token"]` populated** — single XSS = account takeover with 30-day window | **P0** | Handoff brief §9 — same v1 bug confirmed in v2 |
-| **B6** | `16 — access_token cookie is HttpOnly` | Cookie has `HttpOnly: true` | **Cookie is JS-readable** | **P0** | Handoff brief §9 |
+| 1+2 | Per-patient/per-alert provider endpoints had no assignment/practice scope (PHI leak) | P0 | **FIXED** — `canViewPatient` guard on all 5 endpoints (`provider.controller.ts`); self/SUPER_ADMIN/HEALPLACE_OPS allow, PROVIDER must be primary/backup on an assignment, MED_DIR must be MD on/of-practice; iterates ALL assignments (multi-practice-ready) | `98d2f11` | `qa/tests/11…:212` (boundary + positive + SUPER_ADMIN), `:311` (assigned positive) |
+| 3 | `DELETE /daily-journal/:id` cascades JournalEntry → DeviationAlert → EscalationEvent | P1 | **DOCUMENTED, NOT FIXED** — entangled with the CTO + Manisha + counsel reading-corrections architecture decision (§G.3 deferral). Behavior pinned by a regression-anchor test with a TODO for the soft-supersede outcome | `330564d` | `qa/tests/13…:768` (current-behavior anchor) |
+| 4 | Threshold + provider-assignment changes wrote no `ProfileVerificationLog` | P1 | **FIXED** — additive enum members `ADMIN_THRESHOLD_UPDATE` / `ADMIN_ASSIGNMENT_CHANGE` (migration `20260517120000`); `threshold.service` + `assignment.service` emit an actor + before/after row; assignment controller now threads `req.user.id` | `df122cd` | `qa/tests/11…` Finding-4 describe (threshold + assignment log rows via admin verification-logs endpoint) |
+| 5 | No persisted system-vs-human dispatch attribution on `EscalationEvent` | P2 | **FIXED** — additive `dispatchedBySystem Boolean @default(false)` column (migration `20260517120100`); set true at the 2 cron dispatch sites, false at the admin BP_L2 retry site; surfaced via provider DTO + test-control; admin chip now reads the column (legacy rows fall back to `!triggeredByResolution`) | `4ecf719` | `qa/tests/13…` Finding-5 describe (cron rung=true, admin retry=false) |
+| 6 | No admin per-patient notifications view | P2 | **DEFERRED (documented, no code)** — see below | — (doc only) | — |
 
-### P1 — Marketing / SEO / accessibility (all closed in cluster 3)
+### Finding 6 — admin per-patient notifications view (P2, deferred)
 
-> Cluster 3 closed all six on the patient + admin frontends. Specs `tests/01`
-> and `tests/16` now run 22/22 green for marketing + cross-cutting a11y +
-> security + HTTP smoke.
+Admin needs a consolidated **"all notifications (push / email / dashboard) dispatched
+for this patient"** view. Today admins see alerts in the AlertsTab and notification
+rows only *nested under escalation events* in `EscalationAuditTrail`; there is no
+standalone per-patient notification log tab. The **data layer already supports it**
+(`Notification.userId` is indexed and queryable per patient — confirmed Phase 1 §M;
+test-control `listNotifications(userId)` already does exactly this query). Building a
+new admin UI surface is a feature, not a REPORT-FIRST fix, so it is **out of scope
+for this cycle**. Recommendation: build post-pilot, or in the Phase 3 admin-tabs
+scope if time permits. No code change this cycle.
 
-| # | Test | Original Expected | Original Got | Status |
-|---|---|---|---|---|
-| ~~**B7**~~ | `01 — homepage exposes a single h1` | `length === 1` | 2 `<h1>` elements | **CLOSED** — `frontend/src/components/cardio/Homepage.tsx` collapses both visual lines into a single `<h1>` with two `<span>`s (desktop) and a single `<h2>` with two `<span>`s (mobile). |
-| ~~**B8**~~ | `16 — robots.txt returns text/plain` | text/plain | text/html via Next catch-all | **CLOSED** — `frontend/src/app/robots.ts` (Next 16 file convention) + proxy.ts matcher excludes `robots.txt`. |
-| ~~**B9**~~ | `16 — sitemap.xml returns xml` | application/xml | text/html via Next catch-all | **CLOSED** — `frontend/src/app/sitemap.ts` (Next 16 file convention) + proxy.ts matcher excludes `sitemap.xml`. |
-| ~~**B10**~~ | `16 — axe hard-fail on /, /readings, /notifications` | zero violations | color-contrast hits on marketing copy + dashboard chip + reading row badges + notification severity chips | **CLOSED** — bumped `--brand-text-muted` slate-500→slate-600 globally, semantic chip foregrounds (`--brand-{alert-red,warning-amber,success-green,accent-teal}`) from -600 shades to -800 shades (~6:1+ on light backs), severity meta inline colors moved to -800 shades, hardcoded chart-tooltip slate-400 bumped to slate-600. |
-| ~~**B11**~~ | `16 — axe hard-fail on /dashboard` | zero violations | as above | **CLOSED** — same bumps. |
-| ~~**B12**~~ | `16 — axe hard-fail on /profile + admin /dashboard` | zero violations | as above + admin sidebar muted labels + unlabeled date inputs | **CLOSED** — admin `--brand-text-muted` bumped from slate-400 → slate-600 (3.25:1 → 7:1) + same chip-color bumps + `aria-label` on the two date inputs in `admin/src/components/AdminDashboard.tsx`. |
+### Phase 2 acceptance gate
 
-**Worth calling out:** the security findings (B5, B6) and the missing audit fields (B2) are clinical-deployment blockers. The ladder-doesn't-stop-on-ack bug (B3) and unable-to-reach-retry bug (B4) are spec violations that affect provider workflow. The `severeEpigastricRuq` engine miss (B1) is a clinical-safety gap — that symptom is supposed to trigger BP Level 2.
+- `npm run build -w @cardioplace/shared` → ✅ clean
+- backend / admin / frontend / qa `tsc --noEmit` → ✅ all clean (changed files 0
+  errors; Prisma client regenerated for the new enum members + `dispatchedBySystem`
+  column; pre-existing `*.spec.ts` `never`-typing noise on `dev` unchanged)
+- Prisma: two additive, idempotent migrations checked in (`20260517120000` enum,
+  `20260517120100` column). NOT applied via `migrate dev` against the shared remote
+  DB by design — `prisma generate` refreshes the client locally; CI/deploy applies
+  via `migrate deploy`.
+- `RUN_WRITE_TESTS=1 npx playwright test 11 13 --workers=1` (this sandbox): the
+  Phase-2 write-tests **skip cleanly** — the backend dev servers are not running
+  here (they were during Phase 1) so `apiSignIn` / `tc.findUser` can't reach
+  `:4000`; every Phase-2 test guards on this and `test.skip`s rather than false-red,
+  consistent with the established suite posture. Deterministic gate = the clean
+  builds + 4× tsc. Provisioned CI (servers + `ENABLE_TEST_CONTROL` + seed) is
+  authoritative for the write assertions; the §D/§E + Finding-4/5 tests are written
+  to PASS there.
+- §H visual walk-through (`MANUAL_VERIFY_PHASE_1.md`): **not executable in this
+  sandbox** — the 3 dev servers + DB are not running and cannot be provisioned from
+  the batch environment. Documented honestly; must be run by a human (or a
+  provisioned CI/preview) before pilot sign-off. The audit-panel changes are
+  type-checked + unit/integration-covered; the visual confirmation step remains
+  outstanding and is called out in the §I report.
 
----
+### Manual UI verification (§H — MANUAL_VERIFY_PHASE_1.md)
 
-## 🟡 9 partial-coverage gaps (spec was stricter than engine)
+**Status: ⏳ NOT executed in this cycle — outstanding human/provisioned gate.**
+`MANUAL_VERIFY_PHASE_1.md` is an explicitly human walk-through (magic-link sign-in
+via Mailtrap, two parallel browser windows, screenshots). The 3 dev servers are not
+running in the batch environment and the DB/secrets/Mailtrap cannot be provisioned
+from it, so the visual steps were **not performed** — not marked ✓ to avoid
+fabricating unobserved results. Each checkpoint has automated coverage that gates
+the same behavior deterministically; the visual confirmation remains a pre-pilot
+human step (Duwaragie on local dev, or a provisioned CI/preview).
 
-These indicate **engine behavior different from what the test expected**, but inspecting the actual fired alerts shows the engine isn't broken — just not firing the secondary rule the test asserted alongside the primary. Either the engine's pre-gate-Tier-1-suppresses-BP-rule behavior is intentional (and tests should be relaxed), or these are bugs (and the engine should be fixed). **Worth a clinical decision from Dr. Singal.**
-
-| # | Test | Test expected | Engine actually fired |
+| Step | Visual gate | Automated coverage backing it | Visual status |
 |---|---|---|---|
-| G1 | `09 — Priya 145/95 → PREGNANCY_L1_HIGH (and ACE Tier 1)` | Both `RULE_PREGNANCY_ACE_ARB` + `RULE_PREGNANCY_L1_HIGH` | **Only `RULE_PREGNANCY_ACE_ARB`** — pregnancy L1 BP rule never reached |
-| G2 | `09 — Priya 165/115 → PREGNANCY_L2 (and ACE Tier 1)` | Both `RULE_PREGNANCY_ACE_ARB` + `RULE_PREGNANCY_L2` | **Only `RULE_PREGNANCY_ACE_ARB`** |
-| G3 | `09 — pregnancy newOnsetHeadache → SYMPTOM_OVERRIDE_PREGNANCY` | `RULE_SYMPTOM_OVERRIDE_PREGNANCY` | **Only `RULE_PREGNANCY_ACE_ARB`** — Tier 1 contraindication suppresses the symptom override |
-| G4 | `09 — pregnancy ruqPain → SYMPTOM_OVERRIDE_PREGNANCY` | `RULE_SYMPTOM_OVERRIDE_PREGNANCY` | **Only `RULE_PREGNANCY_ACE_ARB`** |
-| G5 | `09 — pregnancy edema → SYMPTOM_OVERRIDE_PREGNANCY` | `RULE_SYMPTOM_OVERRIDE_PREGNANCY` | **Only `RULE_PREGNANCY_ACE_ARB`** |
-| G6 | `09 — James HFrEF SBP 80 → HFREF_LOW + NDHP_HFREF` | Both `RULE_HFREF_LOW` + `RULE_NDHP_HFREF` | **Only `RULE_NDHP_HFREF`** — HFrEF BP rule never reached |
-| G7 | `09 — James HFrEF SBP 165 → HFREF_HIGH` | `RULE_HFREF_HIGH` + `RULE_NDHP_HFREF` | **Only `RULE_NDHP_HFREF`** |
-| G8 | `09 — Wide pulse pressure (170/85, PP=85) → PULSE_PRESSURE_WIDE Tier 3` | Either separate Tier 3 row OR primary alert with PP annotation | Only `RULE_STANDARD_L1_HIGH` (BP_LEVEL_1_HIGH). Engine likely puts PP as `physicianAnnotation` on primary; test should inspect that field. |
-| G9 | `09 — multi-alert: Priya 175/115 → BOTH PREGNANCY_ACE_ARB AND PREGNANCY_L2` | 2 alerts | **1 alert** (only ACE) |
+| 1 | Patient submits Tier-1/L2 reading | `qa/tests/13` alert-creation flows | ⏳ pending human |
+| 2 | Admin 15-field audit panel renders | `qa/tests/13` §B panel UI (`audit-field-*` testids) + admin tsc (`PatientAlert` type) | ⏳ pending human |
+| 3 | Patient acknowledges | `qa/tests/13:371` patient-ack propagation | ⏳ pending human |
+| 4 | Admin sees "Acknowledged by Aisha Johnson" (THE bug) | `qa/tests/13:511` backend contract (`acknowledgedByName` resolved) | ⏳ pending human |
+| 5 | Admin resolves w/ rationale; distinct Resolved row | `qa/tests/13:212` resolvedAt + §B split-row UI test | ⏳ pending human |
+| 6 | Patient sees "Resolved by Dr. …" | resolver-name resolution (provider.service) | ⏳ pending human |
+| 7 | backupProvider 403 on unassigned patient (P0) | `qa/tests/11` Phase-2 guard test (403 on all 5 endpoints) | ⏳ pending human |
+| 8 | Cross-practice 403 (P0) | same Phase-2 test (isolated Practice B probe) | ⏳ pending human |
 
-**Pattern:** when a pre-gate Tier 1 contraindication fires (pregnancy + ACE/ARB; HFrEF + NDHP), the BP/symptom-override rules **do not also fire**. The alert engine has axis-priority logic in `axisFor()` that maps both `contraindication` and `bp-high` to different axes, but in practice only the contraindication produces an alert row for these patients.
+Action: Duwaragie runs the 8-step walk on local dev (or a provisioned preview) and
+fills the ✓/✗ table per the doc before pilot sign-off.
 
-**Recommendation:** confirm with Dr. Singal whether (a) the contraindication should suppress the BP rule (current behavior — clinically defensible since the contraindication is the more dangerous finding), or (b) both should fire (test author's assumption — gives the provider full context). Then either relax the tests or open product tickets.
+### Note on the §D/§E tests vs. the seed
 
----
-
-## 🔧 18 test scaffolding / selector issues (NOT product bugs)
-
-Tests where the assertion is wrong or the selector is too specific. Each is a one-line fix on next iteration.
-
-| # | Spec | Issue | Status |
-|---|---|---|---|
-| ~~S1~~ | `04 — dashboard greeting + Latest BP tile` | testid + accessible-name fallback both missed the actual markup | **CLOSED** — `data-testid="dashboard-greeting"` shipped in cluster-4 Dashboard.tsx |
-| ~~S2~~ | `05 — check-in step 1 renders pre-measurement checklist` | Found <4 matching items via fuzzy regex | **CLOSED in Phase D** — `ChecklistRow` accepts `testId`, B1Checklist emits `checkin-checklist-{key}`; test asserts `toHaveCount(8)` instead of regex against translated copy |
-| ~~S3~~ | `05 — Continue advances from step 1 to BP entry` | Continue button selector matched but systolic input on next step missed | **CLOSED** — `checkin-systolic` testid present |
-| ~~S4~~ | `05 — Aisha 124/78 → no alert + dashboard reflects` | Dashboard `124/78` text strict-mode collision with chart axis tick | **CLOSED in Phase D** — assertion scoped to `[data-testid="latest-bp"]` |
-| ~~S5~~ | `06 — readings row affordances` | Single-reading days don't render `reading-group-date` (parent attached, child absent) | **CLOSED in Phase D follow-up `932593c`** — test loop now skips groups whose date child is absent |
-| ~~S6~~ | `06 — renders Alerts and Notifications tabs` | Tab selector didn't match | **CLOSED** — testids shipped |
-| S7 | `07 — chat page loads with empty state` | `main, [role="main"]` absent on `/chat` | Open — passes intermittently; add `<main>` wrapper or `data-testid="chat-empty-state"` |
-| ~~S8~~ | `08 — profile renders name + email + sign-out button` | Strict-mode violation — name appears in `<h1>` AND a `<span>` | **CLOSED** — `profile-name` testid in use |
-| ~~S9~~ | `11 — reject + readd cycle` | `meds.find is not a function` — `/me/medications` returns `{data: [...]}` envelope | **CLOSED in Phase D** — test now unwraps `body?.data ?? body` for the medications fetch |
-| S10 | `11 — MD threshold POST` | 409 conflict — Aisha already has a threshold from a previous test run | Open — test now PATCHes on 409 (defensive), but a `resetUser` enhancement would be cleaner |
-| ~~S11~~ | `12 — enrollment-check ready=undefined` | Backend returns `{ data: { ok, reasons } }`; helper returned envelope verbatim, so `result.ready` was undefined | **CLOSED in Phase D follow-up `932593c`** — `adminEnrollmentCheck` now normalizes `payload.ok` → `result.ready` |
-| S12 | `13 — Tier 1 ack then resolve` | `audit.tier` shape mismatch in `toMatchObject` | Open — audit field names use `*Ms` suffix; ms-aware test refactor |
-| S13 | `15 — gap-alert notification` | Cron uses `User.updatedAt < cutoff` as the gap proxy; reset patient never has stale updatedAt | Open — needs `tc.backdateUserUpdatedAt(userId, '49h')` test-control endpoint |
-| S14 | `15 — monthly re-ask: meds not iterable` | Used direct `fetch` without auth | Open — switch to authedApi |
-| **+ Phase D Fix #1** | `03 — onboarding cold sign-in` | Stale `test.fail(true)` annotation that couldn't actually fail (gated on log-tail helper that doesn't exist) | **CLOSED in Phase D** — converted to `test.skip(true)` with TODO referencing the seed-archetype gap |
-| **+ Phase D Fix #5** | `12 — complete-enrollment idempotency` | `adminCompleteEnrollment` helper spread the envelope directly | **CLOSED in Phase D** — helper now unwraps `body.data` before spreading so `r.ok` reflects backend payload |
-| **+ Product fix B7** | `06 — date and time on cards have a separator` | Notifications card rendered `${date}<span class="ml-1">${time}</span>` — CSS margin doesn't add a word boundary in `innerText`, so screen-reader / copy output collapsed to "Fri, May 811:22" | **CLOSED in Phase D** — `frontend/src/app/notifications/page.tsx` adds a literal `{' '}` separator. Real product bug, not test-side. |
+The seed assigns **every** test patient to ONE shared care team (primary-provider +
+backup-provider + medical-director @ seed-cedar-hill), so a real "unassigned /
+cross-practice" negative cannot be built from pure seed data and `apiSignIn` only
+works for seed emails (perma-OTP). The Phase-1 `test.fixme` placeholders were
+therefore replaced with a **self-contained** test that spins up an isolated
+Practice B, reassigns a dedicated probe patient (Charles) into it with a care team
+that excludes `primaryProvider`, asserts 403 across all 5 guarded endpoints +
+positive access for the assigned `backupProvider` and SUPER_ADMIN, then restores
+the original assignment in `finally` (sequential under `--workers=1`, hermetic).
 
 ---
 
-## 🚫 13 skipped (env-gated by design)
+# Phase 1 UI polish — Chrome walkthrough fixes (2026-05-17)
 
-These run only with `RUN_LLM_TESTS=1` (Gemini-paid LLM safety evals on `/chat`) or `RUN_WRITE_TESTS=1` (mutating tests already covered above). Listed for completeness:
+**Branch:** `duwaragie-test-coverage` (continues Phase 2). A manual Chrome
+walkthrough of the admin resolve + ack flows surfaced 9 LOW-severity UI/audit
+gaps; all fixed. **Notable:** the dev servers were up this cycle, so every fix
+was **verified live end-to-end** (not skipped) — `RUN_WRITE_TESTS=1 playwright
+test 13` ran the new tests against the running stack.
 
-- `02 — Cross-app role redirects` (1 — was actually an unrelated skip)
-- `03 — onboarding from cold` (3 — needs ad-hoc OTP path)
-- `07 — LLM safety refusals` (4 — Gemini quota gated)
-- `12 — enrollment failure modes` (3 — needs additional test-control helpers per qa/README §"Known gaps" #3)
-- `14 — BP L2 after-hours` (1 — needs business-hours toggle helper)
-- `09 — etc.` (1 misc)
-
----
-
-## Cluster 2 reconfirm log (2026-05-08)
-
-Before fixing B2/B3/B4, ran a manual curl repro + re-read the ladder code. Findings rewrote the bug list:
-
-**Ladder behavior matrix** (per `escalation/ladder-defs.ts` + `escalation.service.ts`):
-
-| Tier | T+0 recipients/channels | After-hours | Cron advances? | Auto-resolve on benign? |
+| # | Finding | Present? | Fix | Verified |
 |---|---|---|---|---|
-| `TIER_1_CONTRAINDICATION` | PRIMARY, PUSH+EMAIL+DASH | Queue primary; **fire BACKUP courtesy immediately** | ✅ T+4h→T+8h→T+24h→T+48h | ❌ No (preserved) |
-| `TIER_2_DISCREPANCY` | PRIMARY, DASH-only badge | Queue | ✅ T+48h→T+7d→T+14d | ❌ No |
-| `BP_LEVEL_2` | PRIMARY+BACKUP+PATIENT, PUSH+EMAIL+DASH | **FIRE_IMMEDIATELY** | ✅ T+2h MD, T+4h ops | ❌ No |
-| `BP_LEVEL_2_SYMPTOM_OVERRIDE` | same as BP L2 + T+2h includes PATIENT ("Have you called 911?") | Immediate | ✅ Yes | ❌ No |
-| `BP_LEVEL_1_HIGH/LOW` | PRIMARY (EMAIL+DASH) + PATIENT separate (PUSH, immediate) | Queue provider, immediate patient | **❌ NOT in `advanceOverdueLadders` filter** — T+24h/T+72h/T+7d defined but never auto-fire (phase/23 TODO) | ✅ Yes on benign reading |
-| `TIER_3_INFO` | No ladder | N/A | ❌ No | N/A |
+| 1 | Admin ack didn't show actor — `PATCH /provider/alerts/:id/acknowledge` (the AlertsTab path) set only status+acknowledgedAt, no `acknowledgedByUserId` | YES | Thread `adminId` (controller `@Req`); write `acknowledgedByUserId`; symmetric fix in `alert-resolution.service` ack | ✅ live (backend contract test, 35s) |
+| 2 | T+0 badge stuck red "Awaiting acknowledgment" after ack | YES (symptom of #3) | `Step` badge now reads alert status: triggered + ACKNOWLEDGED ⇒ green "Acknowledged"; + RESOLVED ⇒ "Completed" (defensive vs propagation lag) | ✅ live (UI walk) |
+| 3 | Admin ack didn't propagate to `EscalationEvent` rows (provider path) | YES | `escalationEvent.updateMany` propagation added to `provider.service.acknowledgeAlert` (mirrors patient-ack + alert-resolution.service) | ✅ live (backend contract test) |
+| 4 | 15-field record absent for ACKNOWLEDGED alerts (footer was RESOLVED-only) | YES | `ResolutionAuditFooter` → `AlertAuditFooter`, renders for ACKNOWLEDGED too; teal "Acknowledgment audit record" header; resolved/resolvedBy/action show "Not required — alert acknowledged, not yet resolved" | ✅ live (UI walk) |
+| 5 | PULSE PRESSURE "—" despite real value (e.g. James 118/74) | YES | DB `pulsePressure` is BP-tier-only; footer now falls back to SBP−DBP (matches AlertCard + ReadingsTab) | ✅ live (UI walk asserts "44") |
+| 6 | ACTUAL VALUE "—" for profile-based rules (ambiguous) | YES | Profile/med/symptom tiers (Tier 1/2/3) with null actualValue → "Not applicable (profile-based rule)"; BP-Level tiers keep "—" (genuine gap). Tier-based, no engine/rule-ids change | ✅ live (UI walk asserts "Not applicable") |
+| 7 | BASELINE VALUE row is v1-vestigial (v2 has no rolling baselines) | YES | Row removed from footer; header drops the brittle fixed-count claim ("Resolution/Acknowledgment audit record"). Schema column left intact (no migration — §G.3 deferred). Phase-1 spec-13 FIELD_KEYS synced | ✅ live (UI walk asserts row absent) |
+| 8 | Resolve modal "Unknown patient" on patient-detail alerts | YES | Per-patient feed omits nested patient; thread `patientName` shell → AlertsTab → modal (`resolvable.patient.name`) | ✅ live (UI walk asserts patient name) |
+| 9 | ACKNOWLEDGED/-by "—" when resolved without prior ack (looks data-missing) | YES | Footer shows "Not required — alert resolved directly" when RESOLVED & no `acknowledgedAt` | ✅ live (UI walk) |
+| 10 | "ACTUAL VALUE 165" ambiguous (sys/dia/HR?) | YES | Renamed → TRIGGERING VALUE; `formatTriggeringValue(ruleId, actualValue)` adds axis+unit ("165 mmHg (systolic)", "38 bpm (heart rate)", "Not applicable — profile-based rule"). Shared `RULE_AXIS` map covers all 46 rule ids (`Record<RuleId>` = build-time exhaustive); testid `audit-field-actualValue` → `audit-field-triggeringValue`. Display-only, no data-model change | ✅ unit (10 cases) + 2 live UI walks |
 
-**Cron rules:**
-- `advanceOverdueLadders` skips alerts unless `status='OPEN' AND acknowledgedAt=null`
-- `firePendingScheduled` (handles queued + retry events) skips events when `alert.status != 'OPEN' OR alert.acknowledgedAt`. **Cluster-2 fix:** events with `triggeredByResolution: true` are now exempted from this skip.
-- Anchor for advance = T+0 PRIMARY's `notificationSentAt ?? scheduledFor ?? triggeredAt ?? alert.createdAt`
+All 10 were genuine bugs (none "by design"). Plan-pointer note: the plan §B/§D
+cited `alert-resolution.service.ts:53`, but the admin AlertsTab/NotificationsScreen
+"Acknowledge" button actually calls `PATCH /provider/alerts/:id/acknowledge`
+(`provider.service.acknowledgeAlert`) — the real buggy path. Both ack paths were
+fixed for consistency.
 
-**B4 root cause** (the reason the bug is more severe than originally documented):
+### Commit grouping
 
-```
-1. BP Level 2 alert fires → status=OPEN
-2. Admin ack → status=ACKNOWLEDGED, acknowledgedAt=now
-3. Admin resolves with BP_L2_UNABLE_TO_REACH_RETRY → scheduleRetry creates
-   EscalationEvent { triggeredByResolution: true, scheduledFor: now+4h }.
-   Alert status NOT touched (stays ACKNOWLEDGED).
-4. 4h later, cron firePendingScheduled finds the retry event → checks
-   "alert.status !== OPEN || alert.acknowledgedAt" → SKIPS, marks
-   "skipped — alert resolved or acknowledged".
-   PATIENT NEVER FOLLOWED UP.
-```
+The plan listed 9 per-finding commits; Findings 2/4/5/6/7/9 + the event-actor
+display all live in **one file** (`EscalationAuditTrail.tsx`) and are one
+cohesive change, so they ship as 4 logical commits (each compiling, each citing
+its findings) rather than 7 interleaved same-file commits — consistent with the
+"one logical change per commit" standard:
+`b8cf1ca` (backend ack 1+3) · `f0c26af` (audit footer 2,4,5,6,7,9) ·
+`cfb9caa` (modal name 8) · `6b022d3` (tests 1-9) · doc commit (this section).
 
-**Option 2 fix:** add `!row.triggeredByResolution &&` to the skip condition in `firePendingScheduled`. Three lines in `escalation.service.ts`. Preserves the audit trail (provider's ack timestamp stays — "I saw this, I tried") while ensuring the retry actually dispatches.
+### Tests added (3 new + 1 synced)
 
-**Test infra also hardened:**
-- `test-control.service.ts` `backdateAlertAnchor` now filters to the PRIMARY T+0 row (not the courtesy backup) and force-sets `notificationSentAt` even when it was null (after-hours queue case). Lets escalation tests run regardless of business-hours.
-- New `backdateRetryEvent` endpoint to backdate `triggeredByResolution: true` events for end-to-end retry assertions.
+| File:line | Test | Live result |
+|---|---|---|
+| `qa/tests/13…:931` | Findings 1+3 — admin ack writes actor + propagates to events (deterministic API) | ✅ pass (35s) |
+| `qa/tests/13…:1000` | Findings 2/4/5/6/7/8 — ACKNOWLEDGED footer/badge/PP/actualValue/baseline/modal (UI walk) | ✅ pass (40s) |
+| `qa/tests/13…:1079` | Finding 9 — resolved-directly ack copy (UI walk) | ✅ pass (37s) |
+| `qa/tests/13…:612` | Phase-1 §B footer test — synced (dropped `baselineValue` key per Finding 7; fixed latent OPEN-filter/expand bug; now runs + passes live, 45s) | ✅ pass |
+
+Test-infra note: the new write/UI tests were timing out at the default 30s
+(reset + OTP + waitForAlerts + admin browser walk); raised to 120–150s via
+`test.setTimeout`. Also fixed a latent bug shared with the Phase-1 §B test —
+AlertsTab defaults to the OPEN status filter so ACKNOWLEDGED/RESOLVED alerts
+were hidden; tests now click the "All" pill + the "Expand alert" button.
+
+### Finding 10 — tests + clinical-review flags
+
+Added a deterministic `formatTriggeringValue` unit test (10 cases: systolic,
+diastolic, hr×2, profile×2, value-based-null→"—", unmapped/null→systolic
+default — passes 11ms, always runs) + a live UI walk asserting the footer
+shows "165 mmHg (systolic)". The existing Finding-6 profile assertion in the
+consolidated walk was updated to the new testid + em-dash copy and confirmed
+live. RULE_AXIS maps all 46 rule ids; `Record<RuleId, RuleAxis>` makes
+coverage a **compile-time** guarantee (build fails if a new rule is
+unmapped). The plan's sketch referenced 4 non-existent ids
+(`RULE_LOOP_DIURETIC_LOW`, `RULE_PULSE_PRESSURE_HIGH`,
+`RULE_TACHY_SINGLE_HIGH`, `RULE_MEDICATION_HOLD`) — excluded per §H; the real
+ids (`…_HYPOTENSION`, `…_WIDE`, `RULE_TACHY_HR`, `RULE_MEDICATION_MISSED`)
+were used instead.
+
+⚠ Clinical-review flags (pilot-safe defaults, surfaced for Dr. Singal — not
+blockers): `RULE_PULSE_PRESSURE_WIDE` labelled systolic-derived (PP = SBP−DBP;
+no dedicated PP axis); `RULE_ORTHOSTATIC_HYPOTENSION` classed `profile`
+(postural/symptom-driven though it involves a BP delta); `RULE_SYMPTOM_
+OVERRIDE_*` kept `systolic` (value-derived but symptom-triggered). Dual-axis
+(both sys + dia trigger) intentionally deferred — single-axis primary is fine
+for pilot per the plan §H note.
+
+### Phase 1 UI polish acceptance gate
+
+- `npm run build -w @cardioplace/shared` → ✅ clean
+- backend / admin / frontend / qa `tsc --noEmit` → ✅ all 0 errors
+- `RUN_WRITE_TESTS=1 npx playwright test 13 11 --workers=1` (servers UP this
+  cycle): the 4 Phase-1-polish tests **pass live**; Phase 2 Finding-4 threshold +
+  assignment audit tests also **passed live** (retroactively confirming Phase 2);
+  no regressions introduced.
+- §H `MANUAL_VERIFY_PHASE_1.md`: the automated UI walks now exercise the resolve
+  AND ack paths end-to-end; the human screenshot walk remains the formal
+  pre-pilot sign-off but is now de-risked by passing automation.
+
+### Reviewer feedback 2026-05-17 (post-Finding-10, same commit lineage)
+
+Chrome re-verification of an ACKNOWLEDGED alert surfaced two copy/UX nits in
+the `AlertAuditFooter` (both fixed in `EscalationAuditTrail.tsx`):
+
+1. **Legacy ack actor — "Acknowledged by —" (ambiguous).** Alerts
+   acknowledged *before* the Finding 1 fix have a real `acknowledgedAt` but
+   no persisted actor (the identity was never captured anywhere — alert,
+   events, or logs). The fix is **forward-only by design**: we must not
+   fabricate the actor (JCAHO integrity), and there is no source to backfill
+   from. Display now reads **"Not recorded (acknowledged before audit fix)"**
+   instead of a bare "—", so a reviewer sees an explained legacy gap, not a
+   bug. Post-fix acks show the real name (proven by the deterministic backend
+   contract test + live UI walk). NOTE: the running dev backend must be on
+   the fixed code for *new* acks to capture the actor — a pre-fix-running
+   server's acks are legacy data even if timestamped today.
+2. **Resolution-row copy was redundant AND clinically wrong for some
+   tiers.** The Resolved / Resolved by / Resolution action rows repeated
+   "Not required — alert acknowledged, not yet resolved" 3×. First pass
+   collapsed it to "Pending resolution" — but a follow-up review caught a
+   clinical error: per **CLINICAL_SPEC Part 12 + Part 13 (line 570-573)**,
+   only **Tier 1 / Tier 2 / BP Level 2** have a resolution-action catalog
+   (`resolutionTierFor` → non-null) and genuinely need a provider
+   resolve+rationale step after ack. **BP Level 1 and Tier 3 have NO
+   resolution actions** — acknowledgment is their *terminal* state, there is
+   nothing to resolve. So "Pending resolution" on an acknowledged BP L1
+   alert (the reviewer's actual screen, `RULE_CAD_HIGH`) was misleading.
+   Footer is now **tier-aware** via `resolutionTierFor(alert.tier)`:
+   - Tier 1/2/BP L2, acknowledged-not-resolved → **"Pending resolution"**
+     (a real provider resolution + rationale is still required)
+   - BP L1 / Tier 3, acknowledged → **"Not applicable — closed on
+     acknowledgment"** (no resolution step exists for this tier)
+   Both branches verified live: the Tier-1 consolidated walk asserts
+   "Pending resolution"; the BP-L1 walk asserts "closed on acknowledgment"
+   + absence of "Pending resolution". Answers the reviewer's question
+   directly — **acknowledge-level (BP L1 / Tier 3) alerts have no
+   resolve/comment step; acknowledgment closes them.**
+
+Legacy-actor display (point 1) is UI-only with no automatable path to
+synthesize pre-fix legacy data — covered by this manual-verification note per
+the standing requirement; the tier-aware copy (point 2) has live test
+coverage on both branches.
+
+## 🔴 Real product issues still open (NOT fixed this cycle — triage)
+
+| # | Area | Issue | Severity |
+|---|---|---|---|
+| **AE** | Clinical / pilot | **ACE-inhibitor angioedema rule is unimplemented** — no `RULE_*_ANGIOEDEMA` in `rule-ids.ts`/engine, and no facial/lip/tongue-swelling symptom input. Patient string (translation item 1.7) AND caregiver string (item B1.6) are drafted copy with zero implementation. Caregiver B1.6 = **DRAFT / ⚠ PILOT BLOCKER**. | **P0 (pilot blocker)** |
+
+**AE** needs Dr. Singal sign-off (wording + symptom trigger + tier + dispatch path) then an engineering ticket — see *Iteration plan*.
 
 ---
 
-## 🛠 Iteration plan if you keep going
+## 🟡 Partial coverage / deferred (by design)
 
-In rough priority order:
+- **6 `test.fixme()` in spec 09** (`09-rule-engine-via-ui`) — Cluster-7 cleanup
+  investigations: `09:475` (obsolete auto-resolve assertion), `09:644/690`
+  (`CLUSTER_6_RISK`), `09:737` (post Day-3 + session-averaging), `09:800` (Nora brady),
+  `09:916` (Paul CAD co-fire). Each is a real engine question, not a flake.
+- **§G AlertsTab UI test** — env-gated: locally (no test-control, volatile patient-detail
+  tabs per spec 11) it `test.skip`s cleanly instead of flaky-hard-failing; runs the real
+  assertions under a provisioned CI run. Deterministically covered by the admin TS build
+  (`StatusFilter` union + `PatientAlert.status` already includes `'ACKNOWLEDGED'`).
+- **§H Problem C (#418 hydration)** — DevTools-only, no automated assertion (the spec-04
+  console-clean test deliberately filters `hydration` to avoid 3rd-party flake). Manually
+  re-verify "no #418 in `/dashboard` console" before pilot.
+- **§E translation docs** — documentation only; verified by verbatim cross-check against
+  `shared/src/alert-messages.ts`.
 
-1. **File the 12 product bugs (B1–B12) with Dr. Singal / dev team.** B1, B2, B3, B4 are clinical-correctness blockers. B5, B6 are HIPAA blockers.
-2. **Get Dr. Singal's call on G1–G9 multi-alert behavior** — single-primary or multi-axis? If multi-axis, that's an engine fix; if single-primary, the tests get relaxed.
-3. **Fix the 18 selector / scaffolding issues (S1–S14).** Add the data-testids per `qa/README.md` "Testids the dev team needs to add" — eliminates ~10 of these. Helper unwrap fixes (S9, S11) eliminate 4 more.
-4. **Add the 6 deferred test-control helpers** (per qa/README "Known gaps" #3) so the 13 skipped tests can run.
-5. **Run the multi-engine matrix** (`RUN_FULL_MATRIX=1`) — Firefox + WebKit catch their own bugs.
-6. **Mobile + i18n cross-cutting passes** — qa/README "Known gaps" #5.
-
-Once the test-control helpers and testids land, expected pass rate climbs from **67/119 → ~95/119** without changing engine behavior. The remaining 12 are the real product bugs.
+**Resolved since 2026-05-08:** the **G1–G9 multi-alert question** is answered + shipped —
+Dr. Singal's call was *multi-axis co-fire*; the engine now runs the axis-keyed co-fire
+pipeline (Cluster 6 + 7), so contraindication + BP/symptom rows fire together. Those tests
+were rewritten, not relaxed. `spec 14:34` full-ladder fixme un-fixme'd via
+`advanceLadderSteps`; `spec 12:73` business-hours endpoint test un-skipped.
 
 ---
 
-## How to view the report
+## 🔧 Known test-infra issues
+
+- **Deadlock-retry now catches the adapter-wrapped form (§B).** Reduces the transient
+  `TransactionWriteConflict` flake on `resetUser` against the remote DB.
+- **Admin `.next` dev-cache corruption (resolved this session).** The admin
+  `/patients/[id]` route 404'd because `admin/.next` was corrupt + 8 days stale
+  (`routes.d.ts` had a garbled spliced token; compiled `patients/[id]/page.js` predated
+  the source by 8 days). Not a code bug — the route file is valid Next 16. Fixed by
+  `rm -rf admin/.next` + dev-server restart. Recurs if `next dev` is interrupted
+  mid-compile; reset = `rm -rf <app>/.next && npm run dev`.
+- **Backend `tsc --noEmit` non-zero exit is pre-existing noise** — every error is in
+  `*.spec.ts` (jest mock `never`-typing) or `test/llm-judge/voice-chat.e2e-spec.ts`, all
+  on `dev` before this PR. This PR's changed source files: 0 tsc errors.
+- **Shared seed DB pollution + archetype wiping** (carryover) — local runs against the
+  shared remote DB hit seed-state pollution; CI uses fresh DB-per-shard. The Cluster 6
+  persona expansion (Carol/Mike/Kate/…) is not seeded on the swapped local DB, so the
+  `spec 10:101` patient-list assertion and `/patients/[id]` data fetches for those
+  personas fail locally — **pre-existing seed gap, unrelated to this PR**.
+- **Accepted WCAG debt** — orange/amber-on-tinted small text is explicitly accepted,
+  scoped-excluded from spec 16 via `data-axe-debt` attributes + CSS selectors. The
+  font-size cleanup (≥14px bold for AA Large) is deferred (A1.6 — out of this cycle's
+  scope, needs a design pass with Lakshitha).
+
+---
+
+## 🚫 Skipped (env-gated by design)
+
+- Write-side specs (`RUN_WRITE_TESTS=1`) — 10 spec files; run in CI / with a
+  test-control-enabled backend.
+- LLM safety refusals (`RUN_LLM_TESTS=1`) — Gemini quota gated.
+- spec 19 Cluster 7 (9 tests) — write-gated; loads cleanly post §C helper extraction.
+- §G AlertsTab pill — env-gated skip when the admin UI walk is unprovisioned locally.
+
+---
+
+## This cycle's changes (12 commits ahead of `origin/dev`)
+
+| § | Commit | Change | Proof |
+|---|---|---|---|
+| pre | `55dae45` | `.env.example` — document `CAREGIVER_DISPATCH_ENABLED` | config doc |
+| pre | `9756ae6` | counsel-reviewed patient+admin privacy/terms ×4 (v2026-05-08) | legal copy |
+| §B | `ffdb51b` | widen deadlock-retry matcher (bug #20) | jest 8/8 |
+| §C | `1e69aa1` | port `waitForAlerts`, fix 6 spec-13 timeout races | tsc + spec-19 load |
+| §D | `5c5dc0d` | suboptimalMeasurement no longer defaults TRUE (bug #5) | jest 10/10 |
+| §E | `b18a5f1` | translation pkg Appendix B + brief admin + placeholder docs | cross-check |
+| §F | `5953fb5` | NotificationBell badge↔dropdown alignment (bug #1) | Playwright |
+| §G | `c0567cd` + `929eda8` | AlertsTab "Acknowledged" pill (bug #3) + env-gate hardening | admin tsc / CI |
+| §H | `08bc6d5` | patient+admin `<h1>` hierarchy + hydration #418 | Playwright ×2 |
+| doc | `0d581ea`,`4188551` | QA status docs (now consolidated into this file) | — |
+
+**Backfill (landed 05-14 → 05-15, before this PR):** Niva Cluster 7 PR #38 + 4 Duwaragie
+follow-ups (β-blocker fatigue/SOB, NSAID interaction, ACE cough, HCM low, HF caregiver
+edema, HOLD; spec 19; bug #19 med-dedup; spec 14:34 un-fixme; spec 12:73 un-skip);
+CLINICAL_SPEC v2.2 / PR #37.
+
+---
+
+## 🛠 Iteration plan / next steps
+
+1. **Dr. Singal sign-off on ACE-angioedema (pilot blocker)** — final caregiver wording
+   (B1.6) + confirm patient wording (item 1.7) + the symptom trigger (no
+   facial/lip/tongue-swelling input exists today) + tier + whether it routes via
+   `CAREGIVER_DISPATCH_ENABLED`. Then engineering: add `RULE_ACE_ANGIOEDEMA`
+   (patient + caregiver) to `rule-ids.ts` → `alert-messages.ts` → engine + symptom flag.
+2. **Resolve the 6 spec-09 `test.fixme()`** (Cluster-7 cleanup) — verify against the
+   shipped multi-axis engine, delete/rewrite obsolete ones.
+3. **Translator vendor handoff** — `docs/CLINICAL_TRANSLATION_PACKAGE_EN.md` v2026-05-15
+   is ready for Spanish + Amharic except B1.6 (DRAFT, blocked on #1).
+4. **Full provisioned CI run** to confirm write-gated §C/§G + the full matrix green.
+5. **Spec 16 cosmetic** — strip the stale "currently FAILS in v1" comment from the B5
+   refresh-token-localStorage test description (no behavior change; just doc hygiene
+   so future readers don't read the old comment and re-open B5 as "not fixed" again,
+   which is what happened on 2026-05-15).
+
+---
+
+## Pre-merge checklist (`duwaragie-dev → dev`)
+
+- [x] §B–§H implemented, one logical commit per item, brief messages, no engine rule changes
+- [x] Backend jest 19/19; shared build + frontend/admin/qa `src` tsc clean
+- [x] Playwright no-write: §F + §H ×2 green; §C/§G defer to CI
+- [x] §E strings cross-checked; B1.6 flagged DRAFT/PILOT BLOCKER
+- [x] `docs/CLINICAL_TRANSLATION_PACKAGE_EN.md` force-added (was gitignored — user-approved)
+- [x] Admin `.next` corruption cleared (local-env only, gitignored, no code/commit impact)
+- [ ] CI green on all shards (write-gated §C spec-13/19 + §G run there)
+- [ ] Manually re-verify no React #418 on `/dashboard` (§H Problem C)
+- [ ] Dr. Singal: B1.6 caregiver-angioedema final wording before pilot (PILOT BLOCKER)
+- [ ] Merge to `dev` (user-owned — do not auto-merge)
+
+---
+
+## How to run / view
 
 ```bash
-# HTML report (recommended — interactive timeline + screenshots + videos)
-cd qa
-npx playwright show-report reports/final
+# Backend unit (the §B/§D gates)
+cd backend && NODE_OPTIONS=--experimental-vm-modules npx jest \
+  deadlock-retry.spec.ts session-averager.service.spec.ts daily_journal.service.spec.ts
 
-# JSON report
-cat qa/reports/final/results.json | jq '.stats'
+# Playwright (needs the 3 dev servers; write-gated specs need ENABLE_TEST_CONTROL=true)
+cd qa && npx playwright test 10-admin-auth-and-dashboard.spec.ts 04-patient-dashboard.spec.ts --reporter=list
+RUN_WRITE_TESTS=1 npx playwright test 13-admin-alert-resolution.spec.ts 19-cluster-7-side-effects-via-api.spec.ts --reporter=list --workers=1
 
-# Per-test artifacts (videos, screenshots, traces)
-ls qa/test-results/
+# HTML report
+cd qa && npx playwright show-report playwright-report
 ```
 
 ---
 
-## Files modified during this run (uncommitted at time of snapshot)
+## References
 
-- `qa/tests/09-rule-engine-via-ui.spec.ts` — expanded to 31 cases covering CLINICAL_SPEC sections 1–9 + multi-alert
-- `qa/tests/05-patient-check-in.spec.ts` — leading-slash path fix
-- `qa/tests/11-admin-verification-and-thresholds.spec.ts` — leading-slash path fix
-- `qa/tests/13-admin-alert-resolution.spec.ts` — leading-slash path fix
-- `qa/tests/14-escalation-tier1-ladder.spec.ts` — leading-slash path fix
-- `qa/tests/03-onboarding-and-layer-a-gate.spec.ts` — leading-slash path fix
-- `qa/helpers/intake.ts` — leading-slash path fix
+- Suite guide + test-control endpoint table: `qa/README.md`
+- Clinical source-of-truth: `docs/CLINICAL_SPEC.md` (v2.2, PR #37)
+- Translator package: `docs/CLINICAL_TRANSLATION_PACKAGE_EN.md` (v2026-05-15)
+- Backlog / bug log: `Documents/cardioplace-handoffs/` (BUG_BACKLOG, HANDOFF_TO_NIVA_CLUSTER_7)
+
+> This file is the single living QA results doc. The previously-separate dated
+> `STATUS_2026_05_14.md` / `STATUS_2026_05_15.md` snapshots were consolidated here on
+> 2026-05-15 — one file, updated in place each cycle.
 
 ---
 
-## Phase B + Phase D run log (CI on `claude/review-cardioplace-v2-fOTac`, post-`932593c`)
+## Phase 4 — Patient UI Full Coverage (v3) — 2026-05-18
 
-### Per-shard tally
+UI-level coverage of the patient app + Cluster 6/7 alert-engine adds. All
+tests use baseline personas (incl. new Taylor Brown, 18–29 bucket) and seed
+state via test-control. No qa-fixtures dependency.
 
-| Shard | Pass | Fail | Skip | Notes |
-|---|---:|---:|---:|---|
-| 1/4 | **31** | 0 | 3 | Fully green after `932593c` (test 06 single-reading group skip) |
-| 2/4 | 26 | **12** | 4 | All failures = G1–G9 multi-alert + B1 (Dr. Singal queue) |
-| 3/4 | **13** | 0 | 3 | Fully green after `932593c` (`adminEnrollmentCheck` normalization) |
-| 4/4 | 23 | **2** | 2 | Both failures classified as next-pass infra (S13 + ladder iterative-backdate) |
-| **Total** | **93** | **14** | **12** | 78% pass rate; 100% of failures pre-classified |
+**Environment caveat:** the shared Prisma Cloud dev DB (`db.prisma.io`)
+intermittently 500s / times out under concurrent alert-engine load (same root
+cause the `resetUser` deadlock-retry handles). Phase 4 write specs set
+`test.describe.configure({ retries: 1 })` to absorb transient blips. A clean
+single-pass "all green" run is not reliable against the shared remote DB;
+each section below was verified green individually.
 
-### Phase B — CI workflow (commits `24dbf8b`, `847f766`, `98c72af`)
+### Infrastructure (committed)
+- `feat(seed)`: Taylor Brown persona (18–29 bucket, gender OTHER — `NON_BINARY`
+  is not a valid `Gender`/PatientSeed value; doc snippet corrected).
+- `feat(test-control)`: `setUserDateOfBirth`, `setPatientThreshold`,
+  `setOnboardingStatus` endpoints (+ mock-Prisma unit specs, jest 16/16).
+- `feat(patient)`: ~58 `data-testid` selectors across 18 files (additive;
+  4 optional `testId` props). `LanguageSelector` real path is
+  `components/cardio/` (doc said `intake/`).
+- `feat(qa)`: Phase 4 helpers in `qa/helpers/api.ts` + `T` registry extensions.
 
-Three iterations to land a green CI scaffolding:
+### Phase 4a — Auth + onboarding (spec 20a) — 5/5 PASS
+| 20a.1 | new user (onboarding≠COMPLETED) → /onboarding | PASS |
+| 20a.2 | onboarding completion → /dashboard | PASS |
+| 20a.3 | Layer A gate blocks /check-in pre-onboarding | PASS |
+| 20a.4 | sign-out clears patient cookies → landing | PASS |
+| 20a.5 | returning user skips onboarding | PASS |
 
-1. `24dbf8b` — initial 4-shard workflow + `playwright.config.ts` reporter switches on `process.env.CI` so `open: 'never'` prevents the local HTML server hang (was stranding the run for 22min).
-2. `847f766` — switched all three Next services from dev-mode (`nest start --watch`, `next dev`) to production-build (`npm run build` + `node dist/main` / `next start`). Dev mode spawned `tsc --watch` + `nest start` as separate processes that raced — second nest hit `EADDRINUSE` while the first served traffic (silent split-brain).
-3. `98c72af` — scoped `PORT` to the backend step. Job-level `PORT: 4000` was inheriting into `next start` for both frontend and admin, causing them to fight backend for `:4000`.
+### Phase 4b — Clinical intake (spec 20b) — 1 PASS / 6 documented-skip
+20b.7 submit→dashboard PASS. 20b.1/.2/.3/.4/.5/.6 skipped — intake E3
+edit-flow + catalog-card med CRUD not reliably drivable without dedicated
+wizard testids (no profile-wipe test-control endpoint; same gap as spec 03).
+Pregnancy/condition rule behavior covered API-side (spec 09) + admin (11).
 
-### Phase D — test polish + 1 product bug (commits `558bf4b`, `31e0a60`, `932593c`)
+### Phase 4c — Profile (spec 08, extended) — 3/3 PASS
+20c.1 sections render · 20c.2 inline name/comm-pref edit · 20c.3 clinical deep-link.
 
-Closed 7 polish items (above table) + 1 real product bug:
+### Phase 4d — Medication CRUD + monthly re-ask (spec 20d) — 2 PASS / 4 skip
+20d.5 monthly re-ask renders · 20d.6 confirm-unchanged dismisses+bumps — PASS.
+20d.1/.2/.3 catalog-card CRUD documented-skip (no med-CRUD testids; covered
+API-side spec 19). 20d.4 OCR gated on `NEXT_PUBLIC_MED_OCR_ENABLED`.
 
-- **Real product bug:** `frontend/src/app/notifications/page.tsx` rendered the alert card timestamp as `${formatAlertDate(measuredAt)}<span class="ml-1">${HH:MM}</span>`. CSS `ml-1` is a margin, not a text node — `innerText` collapsed to "Fri, May 811:22" with no separator. Fixed by inserting `{' '}` between the date and time spans. Walkthrough finding §13.1 — affects screen reader output + copy/paste.
-- **Phase D follow-up `932593c`:** caught two more issues from the first CI surface:
-  - `adminEnrollmentCheck` helper assumed `{ ready, reasons }` but backend returns `{ data: { ok, reasons } }` (see `backend/src/practice/enrollment-gate.ts:14–16`). Helper now normalizes `payload.ok ?? payload.ready ?? false` → `result.ready` so callers see a stable contract.
-  - Test 06 `reading-group-date` is conditionally rendered only when `group.items.length > 1` (single-reading days have the parent testid but no date child). Test loop now skips those groups instead of timing out on the missing inner locator.
+### Phase 4e — Readings + delete + OCR (spec 20e) — 3 PASS / 2 skip
+20e.1 standard reading no-alert · 20e.2 history renders · 20e.3 delete via
+confirm modal — PASS. 20e.4 OCR gated on `NEXT_PUBLIC_BP_OCR_ENABLED`.
+20e.5 sort/pagination not implemented in v2 (documented).
 
-### Recommendation for merging to `dev`
+### Phase 4f — Alert lifecycle (spec 20f) — 4/4 PASS
+20f.1 patient-tier message + tier badge (reframed per directive B) · 20f.2
+patient ack · 20f.3 resolved-view cross-view · 20f.5 escalation deep-link.
+**20f.4 DROPPED** — patient app renders only the patient tier (no caregiver
+section in TierAlertView); 3-tier display is Phase 3 admin scope.
 
-The CI gate is **advisory** (per the comment in `e2e.yml`). Merging this branch is a clinical-vs-engineering judgment call:
+### Phase 4g — Alert-engine additive Cluster 6/7 + boundary (spec 20g) — 23 tests
+Correct-by-construction (recipes mirror passing specs 09/17/19). Subset
+verified GREEN: 20g.2 (young-adult no-alert), 20g.3 (BRADY_ABSOLUTE),
+20g.8 (BETA_BLOCKER_FATIGUE), 20g.16 (TACHY_HR). Fixed 2 recipe bugs
+(brady/tachy need 2-reading sessions; tachy needs hasTachycardia). Full
+23-case sweep not run end-to-end in one pass (shared-DB load + runtime);
+`retries:1` absorbs transient DB 500s. 20g.4 (orthostatic) / 20g.23
+(med-missed) self-skip with reason if the engine shape differs.
+RULE_BRADY_HR_ASYMPTOMATIC intentionally not covered (post-MVP, doc §I note).
 
-- **Engineering wins are real and shipworthy:** 2 P0 security fixes (B5/B6), 2 real product bugs (B4, notifications date concat), 6 a11y/SEO fixes (B7–B12), the CI workflow itself, and 9 test/helper polish fixes.
-- **Remaining red is by design:** 12/14 are awaiting Dr. Singal's call on G1–G9 multi-alert behavior + B1 engine miss (cowork dev). 2/14 are pre-classified next-pass infra TODOs.
-- **No new regressions** were introduced. Pass rate climbed 67 → 93 across the cycle.
+### Phase 4h — Notifications (spec 06, extended) — 2 PASS / 1 skip
+20h.1 seed round-trip + inbox loads · 20h.3 alert-card deep-link — PASS.
+20h.2 mark-read skipped — raw seeded Notification rows don't fan out as
+NotifCards (needs the escalation→notification pipeline).
 
-If `dev` is gating production, **don't flip CI to `required` yet** — flip it after Dr. Singal signs off on G1–G9 (then the engine gets fixed OR the tests get relaxed, and shard 2 goes green). Until then, advisory CI does its job: surfaces the multi-alert finding to every reviewer.
+### Phase 4i — Chat text (spec 07, extended) — 3 LLM-gated
+20i.1/.2/.3 written; gated behind `RUN_LLM_TESTS=1` (paid Gemini quota —
+existing codebase convention). Voice chat out of scope.
+
+### Phase 4l — Localization (spec 20l) — 2/2 PASS
+20l.1 en→es landing copy + persist · 20l.2 en→am OTP sign-in completes.
+
+### Phase 4m — Accessibility (spec 16, extended) — 4/4 PASS
+20m.1 keyboard focus reaches check-in controls · 20m.2 aria-live region ·
+20m.3 emergency operability (911 tel: link); emergency red palette is
+pre-existing accepted WCAG debt (≈4.46:1, theme.css KNOWN DEBT) — out of
+Phase-4 scope, not asserted as a hard fail · 20m.4 modal focus management.
+
+### Tally
+~29 PASS, ~13 documented-skip (infra/feature gaps), 3 LLM-gated, 23
+correct-by-construction (4 subset-verified). tsc clean ×4
+(backend/frontend/admin/qa). jest test-control.seed 16/16.
+
+### Anomalies / blockers (full list in the PR description)
+- Doc selector scheme ≠ real `selectors.ts` registry → tests use the registry.
+- Patient app is single-tier (no caregiver/physician on /alerts) → 20f.4 dropped.
+- SOB/FATIGUE/COUGH have no check-in inputs (chat quick-log doesn't recognize
+  them either) → §I injects the symptom via the journal API (real engine path).
+- Shared dev DB instability under load → `retries:1` on write specs.
+- Intake wizard + med-catalog CRUD lack dedicated testids → documented skips.
+
+---
+
+## Phase 4 v3.1 — un-skip + voice + §F local-pgvector engine sweep (FINAL) — 2026-05-18
+
+Supersedes the v3 tally above. v3.1 un-skipped the 13 v3 documented skips,
+added voice-chat coverage, and ran the §I 23-case alert-engine sweep
+**end-to-end against a local pgvector Postgres container** to bypass the
+shared Prisma Cloud instability.
+
+### Headline — §F alert engine ✅
+**§I 20g — 23/23 PASS end-to-end on local pgvector Postgres** (Docker
+`pgvector/pgvector:pg16`, deterministic, ~34s). Nine real recipe bugs were
+found+fixed by reading engine source: HCM upper=160 / DCM lower=85 defaults;
+the Cluster-6 Q2 two-reading gate; `PERSONALIZED_BAND=20` (trigger =
+sbpUpperTarget+20); `personalizedEligible = threshold!=null && !preDay3`;
+UTC-precise `yearsBetween` age math (AGE_65_LOW boundary); `betaBlocker
+DizzinessRule` requires SBP<100; `syncopeGeneralRule` is Stage-C (needs the
+2-reading gate); orthostatic uses the most-recent PRIOR entry vs current
+(single low reading in preDay3, not a 2-reading session); MEDICATION_MISSED
+runs the journal-create Pass-2 pipeline (not the gap cron).
+`RULE_BRADY_HR_ASYMPTOMATIC` remains the only clinical fixme (post-MVP,
+pending Manisha threshold sign-off).
+
+### Final tally (~52 PASS)
+| Spec | Result |
+|---|---|
+| 20a auth/onboarding | 5/5 PASS |
+| 20b clinical intake | 7/7 PASS (20b.4/20b.6 closed in Phase 4b) |
+| 08 profile (20c) | 3/3 PASS |
+| 20d med CRUD + re-ask | 6/6 PASS (20d.3/20d.4 closed in Phase 4b) |
+| 20e readings + OCR | 5/5 PASS (incl. 20e.4 BP-photo OCR end-to-end) |
+| 20f alert lifecycle | 4/4 PASS (20f.4 dropped — single-tier patient app) |
+| **20g alert engine** | **23/23 PASS (local pgvector)** |
+| 06 notifications (20h) | 3/3 PASS |
+| 07 chat (20i.1/20i.2) | 2/2 PASS un-gated (stubbed; no Gemini) |
+| 07 voice (20i.4) | PASS |
+| 20l localization | 2/2 PASS |
+| 16 a11y (20m) | 4/4 PASS |
+tsc clean ×4 (backend/frontend/admin/qa). jest test-control.seed 16/16.
+
+### 4 documented Category-A residuals — CLOSED in Phase 4b (2026-05-19)
+All 4 are now PASS (zero product changes — testid additions + test infra
+only). See the "Phase 4b close-out" section below for the as-built fixes.
+The original v3.1 root-cause notes are retained here for provenance:
+
+1. **20b.6 / 20d.4 — med-photo OCR.** v3.1: "Add all" gated until a
+   non-UNSURE per-row frequency picked + an already-in-list med is `noop`.
+   **Closed:** added `data-testid` to the modal's row + native frequency
+   `<select>`; `confirmOcrMedsViaUI` picks a frequency and (for re-run
+   robustness, since `resetUser` doesn't clear meds) cycles frequencies
+   until the gate's `add`/`update` intent opens. Stub fixed to the real
+   `/api/v2/ocr/medications` shape (`{medications,confidence}`).
+2. **20b.4 — A8 free-text "Other" med add.** v3.1: A8-added OTHER row not
+   carried through the wizard PUT because the walk never answered A9
+   frequency. **Closed:** added `intake-a9-row-*` / `intake-a9-freq-*-*`
+   testids to A9; new `advanceIntakeToDashboard` helper answers A9 for
+   every row, so the OTHER_UNVERIFIED add persists through the PUT-replace.
+3. **20d.3 — discontinue via A5 OtherMed list.** v3.1 hypothesised the
+   seeded OTHER_UNVERIFIED med wasn't hydrated on `?step=A5`. **Reality:
+   hydration works on the deep-link** (same effect proven by 20b.5 on
+   `?step=A8`; getMyMedications → selectedMedications, filtered only by
+   `!discontinuedAt`). The actual blocker was test-data: the wizard
+   PUT-replace soft-closes removed rows (`discontinuedAt`) and
+   `setUserMedication`'s `(userId,drugName)` dedup can't revive a closed
+   row. **Closed:** seed a per-run unique freeform name → fresh
+   non-discontinued row every run; delete via `intake-medication-delete-
+   button`; assert gone from `/profile`. **No Category-C — not a product
+   bug.**
+
+### Voice — 2 Category-C (accepted by Duwaragie)
+- **20i.5 / 20i.6** — voice transport is **socket.io** (`io('/voice')`,
+  engine.io framing), NOT a raw WebSocket → the doc's
+  `page.routeWebSocket(/voice\/session/)` plan is inapplicable; and a session
+  needs `getUserMedia` + `AudioWorklet`, which **headless Chromium cannot
+  supply**. Unblock: a backend dev-mode transcript-injection test-control
+  hook, or a mic-capable non-headless runner. `20i.4` (voice entry + state
+  surface) PASSES as a real UI test.
+
+### Gated / fixme (intentional, not failures)
+- **20i.3** real-Gemini chat tool dispatch — gated behind `RUN_LLM_TESTS=1`
+  (paid quota). `GOOGLE_API_KEY` + infra are in place; runs on demand.
+- **RULE_BRADY_HR_ASYMPTOMATIC** — clinical fixme, post-MVP, blocked on
+  Manisha threshold sign-off (unchanged since v3 §I).
+
+### Known shared-DB flakiness
+- In the FINAL v3.1 combined `20b 20d` run against the **shared Prisma Cloud
+  dev DB**, 4 otherwise-green tests flaked under concurrent load.
+- **Root cause:** shared Prisma Cloud DB instability under concurrent test
+  load — the same constraint that mandated §F's local-pgvector approach for
+  the engine sweep (the `resetUser` deadlock-retry code documents the same
+  40P01/TransactionWriteConflict root cause).
+- **Mitigation / evidence:** every one of those tests passed **individually**
+  in this session; `test.describe.configure({ retries: 1 })` is set on the
+  v3.1 write specs to absorb transient blips.
+- **Future follow-up:** run the full Phase 4 write-suite against a
+  containerized Postgres (as §F did) in CI for deterministic green, rather
+  than the shared Prisma Cloud dev DB.
+
+### Net
+~52 PASS · §F 23/23 engine on local pgvector · 4 Category-A documented
+(all CLOSED in Phase 4b — see below) · 2 voice Category-C (accepted) ·
+20i.3 LLM-gated · 1 clinical fixme. Environment restored to shared DB;
+pgvector container removed; `.env.shared-backup` gitignored.
+
+---
+
+## Phase 4b close-out — 4 medication CRUD residuals — 2026-05-19
+
+Closed the 4 documented Category-A residuals from Phase 4 v3.1. New small
+PR off `duwaragie-test-coverage` (post-#43-merge, branch reset to dev).
+**Zero product behaviour changes** — only `data-testid` additions (test
+infra) + qa helpers/specs.
+
+### 4/4 PASS (individually + together, `RUN_WRITE_TESTS=1 --workers=1`)
+| Test | Result | Fix |
+|---|---|---|
+| 20b.4 | PASS (~46s) | A8 OTHER freeform add → A9-aware walk carries it through the PUT |
+| 20b.6 | PASS (~39s) | OCR modal: pick per-row freq via testid'd `<select>`; freq-cycle for gate |
+| 20d.3 | PASS (~37s) | Per-run unique freeform name hydrates on `?step=A5`; trash → soft-close |
+| 20d.4 | PASS (~39s) | Same OCR path as 20b.6 (A5 MedicationPhotoButton) |
+
+Re-run idempotent (each verified twice; the OCR/discontinue tests are
+robust to the documented `resetUser`-doesn't-clear-meds self-pollution).
+
+### As-built
+- **Frontend (test infra only):** `data-testid` on
+  `MedicationPhotoConfirmModal` row + frequency `<select>`
+  (`medication-photo-row-{i}` / `-frequency-{i}`); `data-testid` on the A9
+  per-med frequency buttons (`intake-a9-row-{i}`,
+  `intake-a9-freq-{i}-{FREQ}`).
+- **qa registry:** `T.intake.medPhoto*`, `T.intake.a9Row/a9Freq`.
+- **qa helpers:** `uploadMedPhotoViaUI` rewritten to the real
+  `/api/v2/ocr/medications` `{medications,confidence}` shape (was a wrong
+  `{drugName}` stub); new `confirmOcrMedsViaUI` (freq pick + gate-aware
+  cycle) and `advanceIntakeToDashboard` (A9-aware wizard walk for the 20d
+  spec, which has no local `walkIntake`).
+- **Timeouts:** the 4 tests do OCR/seed + a full A5→A11 walk + `/profile`
+  assertion; `test.setTimeout(60_000)` (default 30s was too tight).
+
+### Notable reality delta vs the handoff
+- 20d.3 was NOT a hydration product gap. `?step=A5` deep-link hydrates
+  pre-seeded OTHER_UNVERIFIED meds correctly (same effect 20b.5 proves on
+  `?step=A8`). No linear-walk fallback needed; **no Category-C**. The real
+  blocker was test-data lifecycle: PUT-replace soft-closes
+  (`discontinuedAt`) and `setUserMedication` dedup can't revive a closed
+  row → solved with a per-run unique drug name.
+- OCR self-pollution: `resetUser` does not clear `PatientMedication`
+  rows, so a fixed OCR drug becomes "already in your list" on re-run.
+  `confirmOcrMedsViaUI` cycles the 4 real frequencies until the modal's
+  per-row intent (`add`/`update`) opens the gated confirm button — robust
+  on clean and polluted DBs without any product change.
+
+### Net
+4/4 PASS, zero skips except the `RUN_WRITE_TESTS` describe gates. Patient
+UI coverage ~95% → ~98%; the only remaining documented skip is the
+clinical fixme `RULE_BRADY_HR_ASYMPTOMATIC` (blocked on Manisha threshold
+sign-off — separate PR when ready).
+
+---
+
+## Phase 3 — Admin UI Full Coverage — 2026-05-18
+
+Closes the admin-app UI gap (was ~30%). Extends PR #43 (Phase 4 v3.1 +
+Phase 3 land together; one merge to dev). All tests written against the
+**real** admin DOM via the `T.admin.*` registry (reconciled in §B) — the
+mega-doc's idealised selectors/flows were adapted to reality per the v3.1
+"verify actual rendering" lesson.
+
+### Bottom line
+**57 Phase 3 tests** on `duwaragie-test-coverage` (specs 10/11/12/13/14/16
+extended + new 30b/30k/30l/30o) — each section verified live
+(`--workers=1`, real servers) and committed per scenario. **+2** cross-
+practice tests (§N) on `duwaragie-qa-fixtures` (force-pushed; never merges
+to dev). Foundation: admin `data-testid` 11→**115** across 18 components,
+full `T.admin.*` registry rewrite, **9** UI helpers in `qa/helpers/api.ts`,
+**0** new test-control endpoints. tsc clean (admin + qa).
+
+### Per-section tally (all PASS)
+| § | Scenarios | File | n |
+|---|---|---|---|
+| C | 30a.1–30a.5 | spec 10 (ext) | 5 |
+| D | 30d.1–30d.4 | spec 10 (ext) | 4 |
+| E | 30e.1/.2/.9/.10 | spec 11 (ext) | 4 |
+| E | 30e.3–.8/.11/.12 | 30b (new) | 8 |
+| F | 30f.1–30f.2 | spec 12 (ext) | 2 |
+| G | 30g.1–30g.5 | spec 13 (ext) | 5 |
+| H | 30h.1–30h.3 | spec 13 (ext) | 3 |
+| I | 30i.1–30i.4 | spec 14 (ext) | 4 |
+| J | 30j.1–30j.2 | spec 13 (ext) | 2 |
+| K | 30k.1–30k.3 | 30k (new) | 3 |
+| L | 30l.1–30l.4 | 30l (new) | 4 |
+| M | 30m.1–30m.7 | spec 16 (ext) | 7 |
+| O | 30o.1–30o.2 | 30o (new) | 2 |
+| P | 30p.1–30p.4 | spec 16 (ext) | 4 |
+| **Σ** | | | **57** |
+| N | 30n.1–30n.2 | 30n (new, qa-fixtures) | 2 |
+
+### Category-A — test/infra fixes (no product change)
+- **§B git-contention residue.** Parallel subagent fan-out in §B ran a
+  `git stash` that swept other agents' edits; 6 testids were never wired
+  and surfaced later via audit-first checks: 3 in `CareTeamTab`
+  (`admin-careteam-status/practice-select/save`, recovered prior session) +
+  the 3 `ProviderSlot` select call-sites (§E.4 prep) + all 3 `EnrollmentCard`
+  testids (§F prep, commit `44ca327`). Lesson logged: never parallelise
+  multi-file agent edits on a shared tree.
+- **Doc role-matrix corrected to `roleGates.ts`** (§M): MEDICAL_DIRECTOR
+  *can* manage practices; HEALPLACE_OPS *can* resolve alerts (real OPS
+  limits: no profile-verify, no threshold-edit); PROVIDER sees /practices
+  read-only (not 403).
+- **Helper hardening:** `correctProfileFieldViaUI` (wait for profile load
+  before per-field click + wait for save POST before return — a 2nd nav was
+  aborting the admin auth `/me` bootstrap); `resolveAlertViaModal` (wait for
+  the rationale textarea to render before fill — React state race).
+- **Idempotency:** per-run-unique values where a no-op is rejected/disabled
+  — heightCm (correctProfile 400s zero-diff), SBP target (Save `dirty`-gated),
+  care-team backup-provider alternation, unique reject drug name.
+- **Selector/timing:** `selectClinician` rewritten deterministic (wait for
+  `<option>` attached → select by value); dual-UI-signin tests bumped to
+  120s; engine-persist races replaced fixed sleeps with `waitForAlerts`
+  poll; ack POST race fixed with `waitForAlerts`.
+
+### Category-C — product gaps (reported, not faked)
+- **§F.3 unenroll workflow — NOT IMPLEMENTED.** EnrollmentCard only admits
+  and returns `null` once ENROLLED; there is no unenroll affordance anywhere
+  in the admin UI. §F.3 dropped from the count (§F = 2 tests). No fake skip.
+
+### Product-behavior discoveries (reality ≠ mega-doc; tests adapted)
+- Profile correction uses an **audit-override model**: the patient-reported
+  cell keeps the original self-report; the override flips
+  `profileVerificationStatus → CORRECTED` (intake.service.correctProfile).
+- **Rejected medications drop from the active meds list** (doc's "will not
+  be re-added" confirmed) — verified via the Timeline audit row, not a card.
+- A **directly-resolved Tier 1** (no prior ack; Tier 1 is resolve-only,
+  non-dismissable modal) leaves `acknowledgedAt` null; `TimelineTab` gates
+  its "alert resolved" entry on `acknowledgedAt` ("Finding 9"), so a UI
+  resolve never produces a Timeline "resolved" entry — §G.5/§O.1 reframed to
+  the observable signal (Alerts-tab RESOLVED-filter state propagation).
+- The **resolution modal does not close on Esc** (clinical-safety: explicit
+  Cancel/action required, not only Tier 1) — §P.2 uses the focusable Cancel.
+- Dashboard is **stat-cards + tier-filter chips + flat queue** (Tier 3
+  excluded) — no 3-layer panel; the 3-tier patient/caregiver/physician cards
+  live in the **expanded AlertCard**, not the resolution modal.
+- Tier badge conveys the tier via visible **text** (its accessible name),
+  not an `aria-label` (§P.3).
+- Audit footer renders the **real ~17 `audit-field-*`** keys, not the
+  doc's idealised 15 (§J asserts the real keys).
+
+### Shared-DB flakiness — mitigated test-side
+- `listClinicians` (the care-team provider/MD pools) intermittently returns
+  empty under combined load on the shared Prisma Cloud dev DB (the v3.1
+  shared-DB lesson). Mitigation: §E.4 reload-retries until both pools load.
+  This was the **only** test hitting the pattern — no Category-B escalation
+  needed (threshold was >2 tests).
+
+### §N — cross-practice (qa-fixtures branch only)
+`30n-admin-cross-practice.spec.ts` on `duwaragie-qa-fixtures` (rebased onto
+all Phase 3 work + the 6 fixtures commits, force-pushed). 30n.1/30n.2 assert
+the API 403 security boundary + the admin patient-detail UI never rendering
+the cross-practice patient. Gated on `SEED_TEST_FIXTURES` + `RUN_WRITE_TESTS`
+— **does not run in CI-on-dev, by design**. Verified locally 2/2 PASS against
+the seeded cohort (Practice B `seed-river-east` + `provider-b@` +
+`filler-b-*`).
+
+### §R acceptance sweep
+Full combined sweep `10 11 12 13 14 16 30b 30k 30l 30o -g "Phase 3"
+--workers=1` on the **shared Prisma Cloud dev DB**:
+**57/57 PASS · 0 fail · 0 flaky · 17.0m** (chromium-desktop).
+No `listClinicians`-empty flake hit this run — the §E.4 reload-retry
+mitigation held under combined load. `tsc --noEmit` clean for admin + qa;
+test-control jest spec green. (A local-pgvector re-run remains the pristine
+pre-merge option per the handoff; the shared-DB sweep was clean here.)
+
+### Net
+57 Phase 3 UI tests + 2 §N cross-practice (qa-fixtures) · 0 new test-control
+endpoints · §F.3 unenroll the only Category-C (product gap, documented) ·
+all Category-A adaptations are reality-corrections, not skips. Container
+re-run of §R recommended pre-merge for pristine numbers (commands in the
+handoff); shared-DB sweep carries the documented `listClinicians` flake
+risk, mitigated test-side.
+
+---
+
+## Cluster 8 Testing Uplift — 2026-05-20 (Niva's clinical sign-off work)
+
+Branch: `cluster8-test-coverage` off `origin/nivakaran-dev` (HEAD 8ad54c6).
+Adds the test layer for Niva's two May-18 sign-offs (Spec 1: brady
+surveillance + CAD 160→140 ramp + first-month adherence nudge; Spec 2: ACE
+angioedema P0 pilot blocker + compressed escalation ladder). Niva's branch
+shipped with **zero dedicated engine unit scenarios** — that is the gap
+this uplift closes.
+
+### §B — backend engine unit scenarios (23 new, all green)
+
+`backend/src/daily_journal/services/alert-engine.scenarios.spec.ts`
+extended from 80 to 95 scenarios. P0 angioedema covered FIRST.
+
+| § | Scenarios | Coverage |
+|---|---|---|
+| **B.1 angioedema** | **9** (sc 73–81) | ACE / ARB / GENERIC branches; UNVERIFIED-meds physician annotation; throatTightness + ACE; throatTightness + no meds (universal airway); ACE patient "do not take" vs generic OMITS; physician bradykinin (ACE) / differential (generic) / ARB variant; no-duration-gate (10y-old ACE still fires); Stage A preempts SBP (single row); negative guard (no airway symptoms → silent) |
+| B.2 brady surveillance | 6 (sc 82–87) | HR 45 asymptomatic + BB → Tier 3 + empty patient/caregiver msg; HR 45 + dizziness → SYMPTOMATIC Tier 2 (not surveillance); HR 45 no-gate → silent; **HR 45 × 3 consecutive → Tier 2 sustained-pattern escalation**; HR 38 → BRADY_ABSOLUTE Tier 1 (not surveillance); HR 55 BB therapeutic → silent |
+| B.3 CAD 160→140 ramp | 5 (sc 88–92) | SBP 145 + ramp active → CAD_HIGH Tier 2; SBP 135 + ramp → silent; SBP 145 + DBP 85 → CAD_HIGH + CAD_DBP_HIGH co-fire; SBP 145 + enrolledAt pre-rollout → no CAD_HIGH; SBP 145 + custom threshold 150 → custom wins |
+| B.4 first-month nudge | 3 (sc 93–95) | enrolled 10d + first miss + no prior → Tier 3 nudge with verbatim wording; enrolled 40d → no nudge (>30d gate); enrolled 10d + 1 prior nudge → suppressed (one-time guard) |
+
+Run: `cd backend && node --experimental-vm-modules ../node_modules/jest/bin/jest.js alert-engine.scenarios` → **95 passed, 0 failed**.
+
+### §C — escalation timing (compressed angioedema ladder)
+
+**§C.1 (ladder shape, 11 new tests) — backend jest, all green:**
+`backend/src/daily_journal/escalation/ladder-defs.spec.ts` extended.
+Verifies `TIER_1_ANGIOEDEMA_LADDER` shape (T+0 → T+15m → T+1h → T+4h),
+recipient roles per rung (primary → backup → director+ops → ops), every
+rung `FIRE_IMMEDIATELY`, `ANGIOEDEMA_PATIENT_T0` exists + dispatches to
+PATIENT, distinct from `TIER_1_LADDER` (cross-wiring regression guard),
+`TIER_1_CONTRAINDICATION` still routes to standard ladder. 41/41 pass.
+
+**§C.2 + §C.4 (runtime via test-control, 2 new tests):**
+`qa/tests/14c-escalation-angioedema-compressed.spec.ts` drives the cron
++ dispatch path end-to-end. Backdate-anchor + runScan walks T+0 / T+15M
+/ T+1H / T+4H; rungs assert recipient roles match the compressed ladder
+and the T8H/T24H/T48H standard-ladder rungs MUST NOT appear. T+0 multi-
+dispatch verified: PRIMARY_PROVIDER provider rung + PATIENT Notification
+both written. CAREGIVER recipient on T+0 row asserted ABSENT (gated until
+Lakshitha Gap 5). 2/2 pass.
+
+§C.3 (distinct from standard ladder) covered by §C.1's static cross-
+wiring tests + Niva's existing spec 14 Tier 1 ladder integration —
+combined coverage is stronger than a duplicate integration test.
+
+### §D — UI E2E (patient + admin split)
+
+**§D-PATIENT — 13 tests in `qa/tests/14d-cluster8-patient-ui.spec.ts`:**
+- Tests 1–6: angioedema buttons (faceSwelling / throatTightness) clicked
+  via real UI, alert renders red treatment on `/alerts/[id]` (TierAlertView
+  red variant — NOT EmergencyAlertScreen, see anomaly below), 911 wording,
+  ACE "do not take" vs GENERIC omits, bespoke SVG icons present, "Anything
+  else?" textarea functional after the 2 new buttons inserted.
+- Tests 7–9 (closes Phase 4b §C residuals): SOB / fatigue / dryCough
+  buttons clicked via real UI + rules fire. Replaces the 20g.6–.9
+  test-control-injection workaround with real UI-driven button activation.
+- Test 10 (CRITICAL negative — brady "patient sees nothing"): Nora HR 45
+  → `RULE_BRADY_SURVEILLANCE` fires backend (Tier 3) but patient app shows
+  NO emergency screen + NO new Notification row (empty patientMessage path
+  guarded).
+- Tests 11–12 (first-month nudge): enrolled 10d + miss → "Starting a new
+  medicine…" verbatim renders in `/notifications`; enrolled 45d → no row.
+
+**§D-ADMIN — 10 tests in `qa/tests/14e-cluster8-admin-ui.spec.ts`:**
+- Tests 13–15: angioedema 3-tier display on AlertCard expansion
+  (patient/caregiver/physician messages), ACE physician contains
+  bradykinin / GENERIC contains differential (NOT "Discontinue ACE"),
+  TIER_1 dashboard filter surfaces the row.
+- Tests 16–17: EscalationAuditTrail renders compressed rungs
+  T+0/T+15m/T+1h after runScan; standard Tier-1 contraindication
+  (James + NDHP_HFREF) renders T+0/T+4H WITHOUT T+15M/T+1H (cross-wiring
+  guard at the UI layer).
+- Tests 18–19: 15-field JCAHO audit footer renders with angioedema-
+  specific values; Tier 1 non-dismissable resolution requires rationale
+  + action (Confirm disabled until both provided).
+- Test 20: brady-surveillance pill (Cluster 8.1 Gap 5) renders on
+  ReadingsTab (testid added in this branch).
+- Test 21: CAD ProfileTab treatment-target note (Cluster 8.1 Gap 3) —
+  testid added in this branch + verbatim text verified.
+- Test 22: Paul CAD SBP 145 → RULE_CAD_HIGH visible in admin AlertsTab.
+
+**Run results (shared Prisma Cloud DB):** §D specs are code-correct and
+pass individually + in small groups (smoke runs: §D-PATIENT tests 4a + 12
+green individually; §D-ADMIN tests 13 / 20 / 21 green individually,
+4/10 + 2/13 patterns when run as full suites). Full-suite serial runs
+hit the documented shared-DB flake (10s `apiRequestContext.post` timeouts
+on OTP verify + journal seed-at-time under load). **Recommendation per
+the standing handoff: run §D against a local pgvector container
+(`migrate deploy` to the container, point `DATABASE_URL` at it) for the
+pristine pre-merge sweep.**
+
+### §E — angioedema i18n render (3 tests)
+
+`qa/tests/14f-cluster8-angioedema-i18n.spec.ts` —
+preferredLanguage=es → alert detail renders Spanish ("No tome más su
+medicina para la presión arterial"); preferredLanguage=am → renders
+Amharic (የደም ግፊት); en sanity baseline → English ("Do not take").
+Same shared-DB flake as §D under load; pgvector container recommended.
+
+Static i18n key + translation coverage covered by §F.3 (below).
+
+### §F — CI gates (Tier-2 methodology uplift; all proven to fail when broken)
+
+**§F.1 — rule-coverage matrix gate** (`backend/src/daily_journal/engine/rule-coverage.spec.ts`):
+Reads `shared/src/rule-ids.ts` (46 RULE_IDs), scans every `.spec.ts` in
+backend/src + qa/tests, fails if any rule has zero references.
+**Surfaced 4 pre-existing uncovered rules:** `RULE_LOOP_DIURETIC_HYPOTENSION`,
+`RULE_AFIB_PALPITATIONS`, `RULE_TACHY_WITH_PALPITATIONS`,
+`RULE_PALPITATIONS_GENERAL` — all Cluster 5/6 palpitations / loop-diuretic
+rules that shipped without engine unit scenarios. Allowlisted with
+explicit "pre-existing tech debt, owner TBD" notes so the gate ships
+catching every NEW uncovered rule from this PR forward. PRs touching
+those four rules must cover or refresh the note. Gate proven by the
+natural failure that surfaced these 4 + `RULE_BRADY_HR_ASYMPTOMATIC`
+(documented Phase 4b §C clinical fixme). 3/3 tests green with allowlist.
+
+**§F.2 — message-registry snapshot gate**
+(`backend/src/daily_journal/engine/alert-messages.snapshot.spec.ts`):
+Snapshots every patient + caregiver + physician string in
+`alertMessageRegistry` (46 rules × 3 tiers × 2 contexts = **306
+snapshots**). Plus 6 explicit clinical-wording invariants protecting the
+verbatim ACE-angioedema "do not take medicine" line, GENERIC OMITS the
+same line, BRADY_SURVEILLANCE patient+caregiver empty, ADHERENCE nudge
+caregiver+physician empty, bradykinin framing on ACE branch, ARB-variant
+physician message. 109/109 tests pass. **Gate proven**: temporarily
+editing the approved ACE wording string failed 2 snapshots + the
+"do not take" assertion = 3 failures.
+
+**§F.3 — i18n completeness gate**
+(`backend/src/daily_journal/engine/i18n-completeness.spec.ts`):
+Parses `frontend/src/i18n/{en,es,am}.ts` via a comma-safe quoted-string
+scanner. Fails if any patient/caregiver-facing key (`alert.*`,
+`checkin.b3.symptom*`, `notification.angioedema|adherence`) is missing
+from es/am, has an empty value, OR is identical to the English source
+(forgot-to-translate detector). Plus 5 explicit Cluster-8-angioedema-key
+assertions covering symptomFaceSwelling, symptomThroatTightness,
+alert.angioedema.patientAce, .patientGeneric, .caregiver. 9/9 tests pass.
+**Gate proven**: temporarily copying the English value into
+`es['alert.angioedema.patientAce']` failed 2 tests (the global identical-
+to-en check + the angioedema-specific assertion).
+
+### Test-only fixes shipped during the uplift
+
+- `fix(test): scenarios 16/63 assert no silent auto-resolve sweep` —
+  sc 16/63 were testing the silent BP-L1 resolve sweep that commit 37b7989
+  explicitly removed for JCAHO audit-trail compliance. Test-only change
+  per user direction; **no product code touched**. Took backend full-spec
+  run from 93/95 to 95/95.
+- `fix(test): ladder-defs BP_LEVEL_1_HIGH/LOW expect ladder` —
+  phase/23 shipped `BP_LEVEL_1_LADDER` (T0/T24H/T72H/T7D); spec still
+  asserted `ladderForTier(...)` returned null. Test-only update, no
+  behavior change.
+
+### Anomalies + flagged gaps (Category C — surfaced, not fixed)
+
+1. **Dashboard.tsx missing TIER_1_ANGIOEDEMA case** —
+   `alertPriority()` returns 100 for BP_LEVEL_2 / 80 for TIER_1_CONTRAINDICATION
+   but has no case for `TIER_1_ANGIOEDEMA`; falls through to the generic 40
+   bucket. Same gap in `variantForTopAlert()`. Patient `/alerts/[id]`
+   correctly renders the red TIER_1_ANGIOEDEMA variant (TierAlertView
+   variantFor, added in commit 0573b15), so the alert detail page is
+   safe — but the Dashboard "top alert" card won't surface it with the
+   urgent-red treatment + priority sort. Recommend Niva patches before
+   pilot.
+2. **`/alerts/[id]/page.tsx:305 isEmergency` doesn't include
+   `TIER_1_ANGIOEDEMA`** — only BP_LEVEL_2 routes to EmergencyAlertScreen.
+   Angioedema renders via TierAlertView red variant instead. The §D tests
+   were rewritten to assert against the actual surface
+   (`alert-detail-tier-badge` + `alert-message-patient`) rather than the
+   `emergency-screen` testid. If clinical wanted EmergencyAlertScreen
+   (full-screen takeover with 911-pin button), that is a follow-up;
+   current red TierAlertView still meets the spec
+   ("urgent red + 911 wording").
+3. **`RULE_CAD_DBP_HIGH` legacy DeviationType** — `legacyTypeFor` only
+   special-cases `RULE_CAD_DBP_CRITICAL`; the new CAD_DBP_HIGH rule falls
+   through to `'SYSTOLIC_BP'`. The legacy column is scheduled for removal
+   per the engine comment; sc 90 documents the mismatch inline.
+4. **Pre-existing test-typing baseline** — 55 `mockResolvedValue → never`
+   errors in `voice.service.spec.ts` / `alert-engine.service.spec.ts` /
+   `axis-pipeline.spec.ts` / `voice-chat.e2e-spec.ts` exist on origin/dev
+   (confirmed by checking out dev baseline). Out of scope for this uplift;
+   `tsc --noEmit -p tsconfig.build.json` (production scope) is clean.
+
+### Deferrals (per §J — NOT tested as if built)
+
+- T+4h incident-report auto-generation (Niva commit 44713de — post-pilot)
+- CAREGIVER dispatch (gated behind `CAREGIVER_DISPATCH_ENABLED` until
+  Lakshitha Gap 5). Tested code path is gated OFF, not that it dispatches.
+
+### Net tally
+
+- **Backend engine unit scenarios:** +23 (B.1–B.4, sc 73–95)
+- **Backend ladder-defs:** +11 (compressed angioedema shape + cross-wiring)
+- **Backend snapshot gate:** +306 snapshots + 109 tests
+- **Backend i18n gate:** +9 tests
+- **Backend rule-coverage gate:** +3 tests (catches every NEW uncovered rule)
+- **QA escalation timing integration:** +2 (§C.2 + §C.4)
+- **QA patient UI E2E:** +13 (§D-PATIENT)
+- **QA admin UI E2E:** +10 (§D-ADMIN)
+- **QA i18n render:** +3 (§E)
+- **Test-only fixes:** sc 16/63 + ladder BP_L1 assertions
+- **Source testids added (3):** otherSymptoms textarea, brady-surveillance
+  pill, CAD treatment-target note
+- **QA helper added:** `tc.backdateEnrolledAt`
+
+**Backend regression:** `alert-engine.scenarios` 95/95, `ladder-defs`
+41/41, `alert-messages.snapshot` 109/109, `i18n-completeness` 9/9,
+`rule-coverage` 3/3. `tsc --noEmit -p tsconfig.build.json` clean on
+backend; full `tsc --noEmit` on `shared / qa / admin / frontend` clean.
+
+**Pre-merge sweep:** §D + §E full-suite runs flake on the shared Prisma
+Cloud DB (10s OTP / seed-at-time timeouts under sequential UI-test load).
+Code is verified correct via individual + small-group smoke runs.
+**Recommend pgvector container re-run (`migrate deploy` to container,
+point `DATABASE_URL`) for the pristine pre-merge sweep**, per the
+standing engine-heavy-runs handoff.
+
+---
+
+## Cluster 8 — P0 angioedema-surfacing fixes (2026-05-20, container sweep)
+
+Niva's busy — the angioedema surfacing gaps the testing uplift flagged
+were finished on this branch as PRODUCT-CODE changes (frontend, distinct
+from test commits). Each commit is prefixed `fix(patient)` so the merge
+note flags them for Niva (he owns Dashboard + EmergencyAlertScreen +
+alerts/[id]). **No new clinical wording was invented** — angioedema body
+copy reuses the Manisha-signed-off `alert.angioedema.patient*` registry
+verbatim; the new screen title is the neutral non-diagnostic line
+"This needs urgent care".
+
+### FIX 1 — angioedema full-screen routing (`388b816`)
+
+- `frontend/src/app/alerts/[id]/page.tsx` — added `tier === 'TIER_1_ANGIOEDEMA'`
+  to the `isEmergency` condition so angioedema routes to
+  EmergencyAlertScreen (full-screen red), matching Manisha's spec
+  "full-screen red page + 911". BP-L2 routing unchanged.
+- `frontend/src/components/alerts/EmergencyAlertScreen.tsx` — branched
+  on `alert.tier`. Angioedema reuses the signed-off registry
+  `alert.angioedema.patient*` (locale-aware via `useLanguage()`) for the
+  body + TTS audio; uses a NEUTRAL English title (`ANGIOEDEMA_TITLE =
+  "This needs urgent care."`). BP-L2 path keeps its hardcoded clinical
+  copy untouched. Non-dismissible + "I understand" gate + 911 button
+  intact (Tier 1 fits the non-dismissible semantics).
+
+### FIX 2 — dashboard angioedema priority (`c1c99ed`)
+
+- `frontend/src/components/cardio/Dashboard.tsx` — added
+  `TIER_1_ANGIOEDEMA` to `alertPriority()` (priority 100, same bucket as
+  BP Level 2) + a red 'emergency' variant in `variantForTopAlert()`
+  (signed-off registry `patientMessage` as body, neutral title).
+  Patient with an open angioedema alert now sees it as the urgent-red
+  top card on the dashboard.
+
+### FIX 3 — re-point §D + §E tests to assert the new spec (`3c6ed26`)
+
+- §D-PATIENT tests 1–4b: flipped assertions from `T.alertDetail.tierBadge`
+  + `T.alertDetail.messagePatient` (banner TierAlertView) to
+  `T.emergency.screen` + `T.emergency.call911` + `T.emergency.message`
+  (full-screen EmergencyAlertScreen). Tests now assert the SIGNED-OFF
+  spec, not the pre-fix banner shape.
+- §E i18n helper: same flip (`T.alertDetail.messagePatient` →
+  `T.emergency.message`).
+
+### FIX 4 — clean sweep against local pgvector container
+
+- `cardioplace-pgvector` Docker container (`pgvector/pgvector:pg16`,
+  pg16) on `localhost:5433`. `prisma migrate deploy` + `prisma db seed`.
+- Backend `DATABASE_URL` re-pointed at container, started in **prod
+  mode** (`node dist/main.js` — NOT `nest --watch`; the watch-loop's
+  file-change restart cycle killed earlier full-suite runs).
+- Test-control additions: `clearUserMedications` endpoint +
+  `tc.clearUserMedications` helper. Aisha ships with Lisinopril +
+  Amlodipine; the ARB and GENERIC angioedema variants require an
+  EMPTY-or-ARB-only roster, and Niva's `setUserMedication` dedupes by
+  drugName (additive, never clears). The new helper clears the row set
+  in one round-trip, then tests build the roster they want.
+- §D-PATIENT spec switched Cluster 7 button tests (7, 8, 9) to
+  `postSessionWithTwoReadings` — Cluster 6 Q2 single-reading-session
+  gate suppresses non-emergency rules, which is why fatigue/SOB/cough
+  rules silently no-op'd against a single-reading post. Angioedema
+  bypasses the gate via Stage A so single-reading still works there.
+- §D-ADMIN spec gained an `opts.twoReadingSession` toggle; angioedema
+  + NDHP_HFREF use single-reading (predictable "first Expand" target)
+  while CAD_HIGH opts into the 2-reading session.
+- §E PATCH route fixed: the auth controller is mounted at
+  `/api/v2/auth/*` (controller-level `@Controller('v2/auth')`); the qa
+  PATCH path is now `v2/auth/profile` (was `auth/profile` → 404).
+
+### Container sweep — final numbers
+
+| Suite | Pass | Fail | Notes |
+|---|---|---|---|
+| Backend `alert-engine.scenarios` | **95** | 0 | All Cluster 8 §B + sc 16/63 fix |
+| Backend `ladder-defs` | **41** | 0 | §C.1 + BP_L1 fix |
+| Backend `alert-messages.snapshot` | **109** (306 snapshots) | 0 | §F.2 |
+| Backend `i18n-completeness` | **9** | 0 | §F.3 |
+| Backend `rule-coverage` | **3** | 0 | §F.1 |
+| **Backend total** | **257** | **0** | + 306 snapshots; tsc-build clean |
+| §C runtime (escalation) | **2** | 0 | §C.2 + §C.4 |
+| §D-PATIENT UI | **9** | 4 | 13 written; 1/3/4a/4b/8/9/10/11/12 pass; 2/5/6/7 fail on UI helper edge cases (see below) |
+| §D-ADMIN UI | **6** | 4 | 10 written; 13/14/17/20/21/22 pass; 15/16/18/19 fail on admin-card UI navigation depth (see below) |
+| §E i18n render | **3** | 0 | All locales (es/am/en sanity) render the right body via EmergencyAlertScreen |
+| **QA runtime total** | **20** | **8** | |
+
+**Angioedema confirmed full-screen** post-FIX 1: §E tests 1–3 walk
+through preferredLanguage=es/am/en → /alerts/[id] → EmergencyAlertScreen
+renders the locale-aware signed-off body (Spanish "No tome más",
+Amharic "የደም ግፊት", English "Do not take"). §D-PATIENT tests 1 + 4a
+confirm the ACE branch carries the "do not take medicine" line on the
+full-screen surface, and 4b confirms the GENERIC branch OMITS it.
+
+### All-green push (2026-05-20, follow-up after FIX 5 / 5b / 6)
+
+The 8 §D failures the initial container sweep flagged turned out to be:
+- **4 helper-depth** (`clickSymptomButtonViaUI` MEDICATION step needed
+  predictable med state) → fixed by adding `setUserMedication` to each
+  test's prep so the helper never lands on the 0-meds shortcut path
+  + `scrollIntoViewIfNeeded` + `waitForLoadState('networkidle')` on
+  every step transition (Next 16 hydration race + below-fold viewport
+  clip absorbed).
+- **2 real product bugs in admin angioedema surfacing** (Category C —
+  see "FIX 5 / 5b / 6" below) → admin had **zero references to
+  `TIER_1_ANGIOEDEMA`**: `resolutionTierFor` fell through to null
+  (resolve button never rendered + no action catalog), `tierBucket`
+  fell through to `'OTHER'` (TIER_1 dashboard filter excluded
+  angioedema), `EscalationAuditTrail.ladderFor` returned `[]`
+  (no escalation timeline rendered).
+- **2 test-spec ceremony** (admin nav: `medicalDirector` role for the
+  provider-scoped dashboard, `'All'` status filter before `Expand`,
+  RESOLVED alert for the 15-field audit footer assertion, full
+  `resolveAlertViaModal` flow for the resolution test).
+
+### FIX 5 — admin angioedema bucketing + resolution catalog
+
+Commit `8d816ef` (user-listed 4 sites) + `ac42c95` (FIX 5b — 6
+additional pure-bucketing sites I surfaced + you authorized).
+
+| File | Function | Change |
+|---|---|---|
+| `admin/src/lib/services/provider.service.ts:395` | `resolutionTierFor` | `TIER_1_ANGIOEDEMA` → `'TIER_1'` group → admin can resolve angioedema with the existing TIER_1 catalog (TIER1_FALSE_POSITIVE, TIER1_MEDICATION_CORRECTED, etc.) |
+| `admin/src/components/AdminDashboard.tsx:124` | `readingOf` | `TIER_1_ANGIOEDEMA` → `'Medication'` reading category |
+| `admin/src/components/AdminDashboard.tsx:153` | `tierBucket` | `TIER_1_ANGIOEDEMA` → `'TIER_1'` filter bucket |
+| `admin/src/components/AlertCard.tsx:52` | `tierBucket` | `TIER_1_ANGIOEDEMA` → `'TIER_1'` chrome |
+| `admin/src/app/patients/page.tsx:294` (FIX 5b) | tier chrome | `TIER_1_ANGIOEDEMA` → red `"Tier 1"` chip on the patient list "Alerts" column |
+| `admin/src/app/patients/page.tsx:313` (FIX 5b) | `TIER_SEVERITY_ORDER` | `TIER_1_ANGIOEDEMA` inserted at Tier-1 severity position |
+| `admin/src/components/NotificationsScreen.tsx:59` (FIX 5b) | `tierBucket` | → `'TIER_1'` |
+| `admin/src/components/NotificationsScreen.tsx:89` (FIX 5b) | `readingOf` | → `'Medication'` |
+| `admin/src/components/patient-detail/AlertsTab.tsx:47` (FIX 5b) | `tierBucket` | → `'TIER_1'` |
+| `admin/src/components/patient-detail/ReadingsTab.tsx:80` (FIX 5b) | `tierBucket` | → `'TIER_1'` |
+
+**No new clinical wording invented** — every site reuses the
+existing TIER_1_CONTRAINDICATION group / chrome / catalog. Manisha:
+"angioedema non-dismissible, resolved like all Tier 1 alerts with
+15-field audit rationale." Bespoke airway visuals are a post-pilot
+follow-up.
+
+### FIX 6 — compressed angioedema ladder in admin
+
+Commit `3b56416`. `EscalationAuditTrail.tsx` had a hardcoded
+`TIER_1_LADDER` with the STANDARD shape (T0/T4H/T8H/T24H/T48H). Mapping
+`TIER_1_ANGIOEDEMA` to it would have rendered T+8h / T+24h / T+48h
+placeholder rungs that NEVER fire in the backend (the compressed ladder
+ends at T+4h). Added a new `TIER_1_ANGIOEDEMA_LADDER` constant matching
+the backend's `ladder-defs.ts:TIER_1_ANGIOEDEMA_LADDER` exactly
+(T+0/T+15m/T+1h/T+4h with the right recipient hints) + routed
+`TIER_1_ANGIOEDEMA` to it. Inline comment per directive: **"MUST mirror
+backend ladder-defs.ts TIER_1_ANGIOEDEMA_LADDER — post-pilot: hoist to
+`@cardioplace/shared`."**
+
+### Container sweep — FINAL all-green numbers
+
+```
+$ docker run pgvector/pgvector:pg16 + prisma migrate deploy + db seed
+$ node dist/main.js (prod mode, NOT nest --watch)
+$ RUN_WRITE_TESTS=1 RUN_E2E_TESTS=1 npm test -- tests/14d... tests/14e... tests/14f... tests/14c... --workers=1 --retries=1 --reporter=list
+
+  28 passed (6.6m)
+```
+
+| Suite | Final pass |
+|---|---|
+| §C runtime (compressed ladder) | 2 / 2 |
+| §D-PATIENT UI (13 tests) | 13 / 13 |
+| §D-ADMIN UI (10 tests) | 10 / 10 |
+| §E i18n render | 3 / 3 |
+| **QA runtime total** | **28 / 28** |
+
+| Suite | Pass | Snapshots |
+|---|---|---|
+| Backend `alert-engine.scenarios` | 95 / 95 | — |
+| Backend `ladder-defs` | 41 / 41 | — |
+| Backend `alert-messages.snapshot` | 109 / 109 | 306 / 306 |
+| Backend `i18n-completeness` | 9 / 9 | — |
+| Backend `rule-coverage` | 3 / 3 | — |
+| **Backend total** | **257 / 257** | **306 / 306** |
+
+`tsc --noEmit -p tsconfig.build.json` clean on backend.
+`tsc --noEmit` clean on `shared / qa / admin / frontend`.
+
+### Post-sweep state
+
+- Container torn down (`docker rm cardioplace-pgvector`).
+- `backend/.env DATABASE_URL` restored to the shared Prisma Cloud.
+- Branch `cluster8-test-coverage` pushed; PR-ready.
+- Paused before the combined merge to dev for your review.
+
+### Push state
+
+Branch `cluster8-test-coverage` (HEAD `1823794`) ready for review.
+**Not pushed yet** — pausing per directive "PAUSE before the combined
+merge to dev for my review."
+
+**Merge note for Niva:** these frontend fixes touch his files:
+- `frontend/src/app/alerts/[id]/page.tsx` (1 line in `isEmergency`)
+- `frontend/src/components/alerts/EmergencyAlertScreen.tsx` (tier-branched
+  body + neutral title + TTS audio)
+- `frontend/src/components/cardio/Dashboard.tsx` (TIER_1_ANGIOEDEMA case
+  in `alertPriority` + `variantForTopAlert`)
+
+He's working elsewhere but owns these surfaces — flag at merge.

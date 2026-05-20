@@ -56,6 +56,8 @@ function buildResolvedContext(
     personalizedEligible: false,
     pregnancyThresholdsActive: false,
     triggerPregnancyContraindicationCheck: false,
+    enrolledAt: null,
+    practiceName: null,
     resolvedAt: NOW,
     ...over,
   }

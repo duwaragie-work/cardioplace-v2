@@ -5,10 +5,13 @@ import {
   nextStep,
   findStep,
   TIER_1_LADDER,
+  TIER_1_ANGIOEDEMA_LADDER,
   TIER_2_LADDER,
+  BP_LEVEL_1_LADDER,
   BP_LEVEL_2_LADDER,
   BP_LEVEL_2_SYMPTOM_OVERRIDE_LADDER,
   TIER_1_BACKUP_ON_T0,
+  ANGIOEDEMA_PATIENT_T0,
 } from './ladder-defs.js'
 
 describe('ladderForTier', () => {
@@ -47,12 +50,20 @@ describe('ladderForTier', () => {
     )
   })
 
-  it('BP_LEVEL_1_HIGH → null (not escalated)', () => {
-    expect(ladderForTier('BP_LEVEL_1_HIGH')).toBeNull()
+  it('BP_LEVEL_1_HIGH → BP Level 1 ladder (phase/23 — both HIGH and LOW share the ladder shape)', () => {
+    // Pre-phase/23 these returned null. Phase/23 shipped BP_LEVEL_1_LADDER
+    // (T0/T24H/T72H/T7D, yellow banner, queues for business hours); the
+    // registry-resolved patient/physician messages still disambiguate HIGH
+    // vs LOW wording.
+    const l = ladderForTier('BP_LEVEL_1_HIGH')
+    expect(l?.kind).toBe('BP_LEVEL_1')
+    expect(l?.steps).toBe(BP_LEVEL_1_LADDER)
   })
 
-  it('BP_LEVEL_1_LOW → null', () => {
-    expect(ladderForTier('BP_LEVEL_1_LOW')).toBeNull()
+  it('BP_LEVEL_1_LOW → same BP Level 1 ladder as HIGH (phase/23)', () => {
+    const l = ladderForTier('BP_LEVEL_1_LOW')
+    expect(l?.kind).toBe('BP_LEVEL_1')
+    expect(l?.steps).toBe(BP_LEVEL_1_LADDER)
   })
 
   it('TIER_3_INFO → null', () => {
@@ -196,5 +207,119 @@ describe('findStep', () => {
 
   it('not found → null', () => {
     expect(findStep(TIER_1_LADDER, 'T2H')).toBeNull()
+  })
+})
+
+// ─── Cluster 8 §C.1 — angioedema compressed-ladder shape ──────────────────
+// Source: Manisha 5/18/26 ACE-angioedema sign-off + ladder-defs comment.
+// The angioedema ladder must be DISTINCT from the standard Tier 1 ladder:
+//   T+0  primary
+//   T+15m backup
+//   T+1h  medical director + ops
+//   T+4h  ops
+// Every step fires IMMEDIATELY (no after-hours queue — airway emergency).
+// Patient + caregiver dispatch are wired separately via ANGIOEDEMA_PATIENT_T0
+// + EscalationService.fireT0; not part of the provider ladder steps.
+
+describe('Cluster 8 — TIER_1_ANGIOEDEMA_LADDER (compressed)', () => {
+  it('routes TIER_1_ANGIOEDEMA → angioedema ladder, kind TIER_1', () => {
+    const l = ladderForTier('TIER_1_ANGIOEDEMA')
+    expect(l).not.toBeNull()
+    // Tier-1 KIND (inherits non-dismissable + 15-field audit) but
+    // STEPS are the compressed list.
+    expect(l?.kind).toBe('TIER_1')
+    expect(l?.steps).toBe(TIER_1_ANGIOEDEMA_LADDER)
+  })
+
+  it('ladder shape: T0 → T15M → T1H → T4H (compressed vs standard T0/T4H/T8H/T24H/T48H)', () => {
+    expect(TIER_1_ANGIOEDEMA_LADDER.map((s) => s.step)).toEqual([
+      'T0',
+      'T15M',
+      'T1H',
+      'T4H',
+    ])
+  })
+
+  it('offsets are exactly 0 / 15m / 1h / 4h (regression guard for the compressed clock)', () => {
+    const MIN = 60 * 1000
+    const HR = 60 * MIN
+    const ms = TIER_1_ANGIOEDEMA_LADDER.map((s) => s.offsetMs)
+    expect(ms).toEqual([0, 15 * MIN, HR, 4 * HR])
+  })
+
+  it('recipients per rung match the sign-off (primary → backup → director+ops → ops)', () => {
+    const byStep = Object.fromEntries(
+      TIER_1_ANGIOEDEMA_LADDER.map((s) => [s.step, s.recipientRoles]),
+    )
+    expect(byStep.T0).toEqual(['PRIMARY_PROVIDER'])
+    expect(byStep.T15M).toEqual(['BACKUP_PROVIDER'])
+    // T+1h is the medical director + ops co-fire (doc: "1h med director").
+    expect(new Set(byStep.T1H)).toEqual(
+      new Set(['MEDICAL_DIRECTOR', 'HEALPLACE_OPS']),
+    )
+    expect(byStep.T4H).toEqual(['HEALPLACE_OPS'])
+  })
+
+  it('every step fires IMMEDIATELY (FIRE_IMMEDIATELY) — airway never queues for business hours', () => {
+    for (const step of TIER_1_ANGIOEDEMA_LADDER) {
+      expect(step.afterHoursBehavior).toBe('FIRE_IMMEDIATELY')
+    }
+  })
+
+  it('every step shows the animated red banner (top-priority surface on admin dashboard)', () => {
+    for (const step of TIER_1_ANGIOEDEMA_LADDER) {
+      expect(step.displayHint).toBe('RED_BANNER_ANIMATED')
+    }
+  })
+
+  it('offsets are monotonically non-decreasing', () => {
+    for (let i = 1; i < TIER_1_ANGIOEDEMA_LADDER.length; i++) {
+      expect(TIER_1_ANGIOEDEMA_LADDER[i].offsetMs).toBeGreaterThanOrEqual(
+        TIER_1_ANGIOEDEMA_LADDER[i - 1].offsetMs,
+      )
+    }
+  })
+
+  it('distinct from the standard Tier 1 ladder — no cross-wiring (regression guard)', () => {
+    // Same `kind` ('TIER_1') but the steps array must be a different
+    // object — a regression that wired TIER_1_ANGIOEDEMA back to
+    // TIER_1_LADDER would silently slow the airway escalation from
+    // minutes/hours back to the 4h / 8h / 24h cadence.
+    expect(TIER_1_ANGIOEDEMA_LADDER).not.toBe(TIER_1_LADDER)
+    // And the rung set differs: standard has T8H/T24H/T48H; compressed
+    // has T15M/T1H.
+    const stdSteps = new Set(TIER_1_LADDER.map((s) => s.step))
+    const aeSteps = new Set(TIER_1_ANGIOEDEMA_LADDER.map((s) => s.step))
+    expect(aeSteps.has('T15M')).toBe(true)
+    expect(aeSteps.has('T1H')).toBe(true)
+    expect(stdSteps.has('T15M')).toBe(false)
+    expect(stdSteps.has('T1H')).toBe(false)
+  })
+
+  it('TIER_1_CONTRAINDICATION still routes to the STANDARD ladder (no cross-wiring)', () => {
+    // Spec 1 contraindications (NDHP_HFREF, PREGNANCY_ACE_ARB, etc) MUST
+    // keep their T+0/T+4h/T+8h/T+24h/T+48h cadence. A regression that
+    // dropped contraindications onto the compressed ladder would page
+    // every responder within an hour for non-airway issues.
+    const l = ladderForTier('TIER_1_CONTRAINDICATION')
+    expect(l?.steps).toBe(TIER_1_LADDER)
+    expect(l?.steps).not.toBe(TIER_1_ANGIOEDEMA_LADDER)
+  })
+
+  it('ANGIOEDEMA_PATIENT_T0 row exists and fires immediately to PATIENT at T+0', () => {
+    // Separate from the provider ladder so the recipientRoles[0] of the
+    // provider rung stays clean (admin display + dispatch routing).
+    expect(ANGIOEDEMA_PATIENT_T0.step).toBe('T0')
+    expect(ANGIOEDEMA_PATIENT_T0.offsetMs).toBe(0)
+    expect(ANGIOEDEMA_PATIENT_T0.recipientRoles).toEqual(['PATIENT'])
+    expect(ANGIOEDEMA_PATIENT_T0.afterHoursBehavior).toBe('FIRE_IMMEDIATELY')
+  })
+
+  it('nextStep walks the compressed ladder end-to-end', () => {
+    expect(nextStep(TIER_1_ANGIOEDEMA_LADDER, null)?.step).toBe('T0')
+    expect(nextStep(TIER_1_ANGIOEDEMA_LADDER, 'T0')?.step).toBe('T15M')
+    expect(nextStep(TIER_1_ANGIOEDEMA_LADDER, 'T15M')?.step).toBe('T1H')
+    expect(nextStep(TIER_1_ANGIOEDEMA_LADDER, 'T1H')?.step).toBe('T4H')
+    expect(nextStep(TIER_1_ANGIOEDEMA_LADDER, 'T4H')).toBeNull()
   })
 })

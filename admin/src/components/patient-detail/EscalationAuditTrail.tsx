@@ -23,13 +23,15 @@ import {
   CheckCircle2,
   Users,
   Repeat,
+  Cpu,
 } from 'lucide-react';
 import type {
   PatientAlert,
   PatientAlertEscalationEvent,
   NotificationChannel,
 } from '@/lib/services/patient-detail.service';
-import { getBMI } from '@cardioplace/shared';
+import { resolutionTierFor } from '@/lib/services/provider.service';
+import { getBMI, formatTriggeringValue } from '@cardioplace/shared';
 
 // ─── Canonical ladder ────────────────────────────────────────────────────────
 // Mirrors the LadderStep enum from
@@ -58,6 +60,18 @@ const TIER_1_LADDER: LadderStep[] = [
   { code: 'T8H', label: 'T+8h', hint: 'Medical director paged' },
   { code: 'T24H', label: 'T+24h', hint: 'Healplace ops escalation' },
   { code: 'T48H', label: 'T+48h', hint: 'Final compliance review' },
+];
+
+// Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema compressed escalation.
+// Airway-obstruction risk progresses within hours, so this ladder NEVER
+// queues for business hours and walks far faster than the standard Tier 1.
+// MUST mirror backend ladder-defs.ts TIER_1_ANGIOEDEMA_LADDER — post-pilot:
+// hoist to @cardioplace/shared so admin + backend share the canonical shape.
+const TIER_1_ANGIOEDEMA_LADDER: LadderStep[] = [
+  { code: 'T0',   label: 'T+0',   hint: 'Primary provider notified' },
+  { code: 'T15M', label: 'T+15m', hint: 'Backup provider paged' },
+  { code: 'T1H',  label: 'T+1h',  hint: 'Medical director + Healplace ops' },
+  { code: 'T4H',  label: 'T+4h',  hint: 'Healplace ops final' },
 ];
 
 // Tier 2 — medication discrepancies. Slow ladder, weeks not hours.
@@ -94,6 +108,11 @@ function ladderFor(tier: string | null): LadderStep[] {
   switch (tier) {
     case 'TIER_1_CONTRAINDICATION':
       return TIER_1_LADDER;
+    // Cluster 8 — angioedema uses a DISTINCT compressed ladder (NOT
+    // TIER_1_LADDER). Mapping it to TIER_1_LADDER would render T+8h /
+    // T+24h / T+48h placeholder rungs that never fire in the backend.
+    case 'TIER_1_ANGIOEDEMA':
+      return TIER_1_ANGIOEDEMA_LADDER;
     case 'TIER_2_DISCREPANCY':
       return TIER_2_LADDER;
     case 'BP_LEVEL_1_HIGH':
@@ -249,7 +268,9 @@ export default function EscalationAuditTrail({ alert, heightCm }: Props) {
       )}
 
       {/* Resolution + 15-field audit footer */}
-      {alert.status === 'RESOLVED' && <ResolutionAuditFooter alert={alert} heightCm={heightCm} />}
+      {(alert.status === 'RESOLVED' || alert.status === 'ACKNOWLEDGED') && (
+        <AlertAuditFooter alert={alert} heightCm={heightCm} />
+      )}
     </div>
   );
 }
@@ -282,12 +303,17 @@ function Step({
   // saying "Not yet triggered" once the alert is closed.
   let untriggeredHint: string | null = null;
 
-  if (allResolved) {
+  // Phase 1 polish Finding 2 — a triggered step's badge must reflect the
+  // ALERT's status, not only this event row's own acknowledgedAt. Otherwise
+  // a T+0 rung stays red "Awaiting acknowledgment" after the admin acks
+  // (the event-level propagation can lag / be filtered). Defensive: alert
+  // ACKNOWLEDGED/RESOLVED ⇒ green, even if this row's timestamp is absent.
+  if (allResolved || (triggered && alertStatus === 'RESOLVED')) {
     nodeColor = 'var(--brand-success-green)';
     nodeBg = 'var(--brand-success-green-light)';
     nodeIcon = <CheckCircle2 className="w-3 h-3" />;
     nodeLabel = 'Completed';
-  } else if (acked) {
+  } else if (triggered && (acked || alertStatus === 'ACKNOWLEDGED')) {
     nodeColor = 'var(--brand-accent-teal)';
     nodeBg = 'var(--brand-accent-teal-light)';
     nodeIcon = <Check className="w-3 h-3" />;
@@ -317,7 +343,7 @@ function Step({
   }
 
   return (
-    <li className="relative pl-9 pb-4">
+    <li data-testid={`admin-escalation-rung-${step.code}`} className="relative pl-9 pb-4">
       {/* Vertical connector line */}
       {!isLast && (
         <span
@@ -350,6 +376,7 @@ function Step({
           </p>
         </div>
         <span
+          data-testid={`admin-escalation-rung-status-${step.code}`}
           className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
           style={{ backgroundColor: nodeBg, color: nodeColor }}
         >
@@ -401,13 +428,21 @@ function EventDetail({ event }: { event: PatientAlertEscalationEvent }) {
         )}
         <KV
           label="Acknowledged"
-          value={fmtDateTime(event.acknowledgedAt)}
+          value={
+            event.acknowledgedAt
+              ? `${fmtDateTime(event.acknowledgedAt)}${event.acknowledgedByName ? ` · ${event.acknowledgedByName}` : ''}`
+              : '—'
+          }
           valueColor={
             event.acknowledgedAt ? 'var(--brand-success-green)' : 'var(--brand-alert-red)'
           }
         />
         {event.resolvedAt && (
-          <KV label="Resolved" value={fmtDateTime(event.resolvedAt)} valueColor="var(--brand-success-green)" />
+          <KV
+            label="Resolved"
+            value={`${fmtDateTime(event.resolvedAt)}${event.resolvedByName ? ` · ${event.resolvedByName}` : ''}`}
+            valueColor="var(--brand-success-green)"
+          />
         )}
       </div>
 
@@ -474,15 +509,32 @@ function EventDetail({ event }: { event: PatientAlertEscalationEvent }) {
           </span>
         )}
 
-        {/* BP_L2 retry marker */}
-        {event.triggeredByResolution && (
+        {/* Dispatch attribution (JCAHO system-vs-human requirement).
+            Finding 5 — now backed by the persisted EscalationEvent
+            .dispatchedBySystem column (source of truth) instead of the
+            old triggeredByResolution heuristic. Legacy rows predating the
+            column default false, so fall back to "not a retry ⇒ system"
+            (the only non-system creation path is the admin BP_L2 retry,
+            which always sets triggeredByResolution=true). */}
+        {event.dispatchedBySystem || !event.triggeredByResolution ? (
           <span
+            data-testid="audit-attribution-system"
+            className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+            style={{ backgroundColor: 'var(--brand-background)', color: 'var(--brand-text-secondary)' }}
+            title="Dispatched automatically by the escalation scheduler (cron) — no human actor"
+          >
+            <Cpu className="w-2.5 h-2.5" />
+            System (Cron)
+          </span>
+        ) : (
+          <span
+            data-testid="audit-attribution-retry"
             className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded"
             style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
             title="Scheduled by an admin's BP_L2_UNABLE_TO_REACH_RETRY action"
           >
             <Repeat className="w-2.5 h-2.5" />
-            Retry
+            Retry · admin-scheduled
           </span>
         )}
       </div>
@@ -499,59 +551,142 @@ function EventDetail({ event }: { event: PatientAlertEscalationEvent }) {
 
 // ─── 15-field audit footer ──────────────────────────────────────────────────
 
-function ResolutionAuditFooter({
+function AlertAuditFooter({
   alert,
   heightCm,
 }: {
   alert: PatientAlert;
   heightCm?: number | null;
 }) {
+  // Phase 1 polish — this footer now renders for ACKNOWLEDGED alerts too
+  // (Finding 4), not only RESOLVED. Acknowledgement is a real JCAHO
+  // state-change and deserves an audit record.
+  const isResolved = alert.status === 'RESOLVED';
+  const accent = isResolved
+    ? { line: 'var(--brand-success-green)', tint: 'var(--brand-success-green-light)' }
+    : { line: 'var(--brand-accent-teal)', tint: 'var(--brand-accent-teal-light)' };
+
   // BMI is computed from this alert's reading weight + the patient's
-  // intake-time height. Clinically valuable alongside pulse pressure for
-  // the resolving clinician.
+  // intake-time height. Clinically valuable alongside pulse pressure.
   const bmi = getBMI(heightCm ?? null, alert.journalEntry?.weight ?? null);
 
-  // The 15 Joint-Commission audit fields (per CLAUDE.md). We surface every
-  // field we currently have available; missing fields render as "—" so the
-  // structure stays predictable.
-  const fields: { label: string; value: string }[] = [
-    { label: 'Alert ID', value: alert.id },
-    { label: 'Tier', value: prettify(alert.tier) },
-    { label: 'Rule ID', value: alert.ruleId ?? '—' },
-    { label: 'Severity', value: prettify(alert.severity) },
-    { label: 'Mode', value: prettify(alert.mode) },
-    { label: 'Status', value: prettify(alert.status) },
-    { label: 'Created', value: fmtDateTime(alert.createdAt) },
-    { label: 'Resolved', value: fmtDateTime(alert.acknowledgedAt) },
-    { label: 'Resolved by', value: alert.resolvedByName ?? alert.resolvedBy ?? '—' },
-    { label: 'Resolution action', value: prettify(alert.resolutionAction) },
-    { label: 'Reading', value: alert.journalEntry?.systolicBP != null ? `${alert.journalEntry.systolicBP}/${alert.journalEntry.diastolicBP} mmHg` : '—' },
-    { label: 'Pulse pressure', value: alert.pulsePressure != null ? `${alert.pulsePressure} mmHg` : '—' },
-    { label: 'BMI', value: bmi != null ? bmi.toFixed(1) : '—' },
-    { label: 'Baseline value', value: alert.baselineValue != null ? String(alert.baselineValue) : '—' },
-    { label: 'Actual value', value: alert.actualValue != null ? String(alert.actualValue) : '—' },
-    { label: 'Escalation count', value: String(alert.escalationEvents.length) },
+  // Finding 5 — pulse pressure: the alert summary card + readings tab derive
+  // PP as SBP−DBP. The DB `pulsePressure` column is only populated for
+  // BP-tier rules, so profile-based alerts (e.g. RULE_NDHP_HFREF) showed
+  // "—" here despite the card showing "PP 44". Fall back to the same
+  // derivation so both surfaces agree.
+  const sbp = alert.journalEntry?.systolicBP ?? null;
+  const dbp = alert.journalEntry?.diastolicBP ?? null;
+  const pp =
+    alert.pulsePressure ?? (sbp != null && dbp != null ? sbp - dbp : null);
+
+  // Clinical lifecycle (CLINICAL_SPEC Part 12 + Part 13, line 570-573):
+  // ONLY Tier 1 / Tier 2 / BP Level 2 have a resolution-action catalog —
+  // those alerts need a provider resolution (action + rationale) AFTER ack,
+  // so an ACKNOWLEDGED one is genuinely "Pending resolution".
+  // BP Level 1 and Tier 3 have NO resolution actions (`resolutionTierFor`
+  // → null); acknowledgment is their TERMINAL state — there is nothing to
+  // resolve. Showing "Pending resolution" for those is clinically wrong
+  // (reviewer feedback 2026-05-17), so they read "closed on acknowledgment".
+  const hasResolutionWorkflow = resolutionTierFor(alert.tier) !== null;
+  const PENDING_RESOLUTION = 'Pending resolution';
+  const CLOSED_ON_ACK = 'Not applicable — closed on acknowledgment';
+  // Placeholder for the three resolution rows when the alert is not (yet)
+  // resolved: a real pending step for Tier 1/2/BP L2, or "n/a — this tier
+  // closes on ack" for BP L1 / Tier 3.
+  const resolutionPlaceholder = hasResolutionWorkflow
+    ? PENDING_RESOLUTION
+    : CLOSED_ON_ACK;
+  const RESOLVED_DIRECTLY = 'Not required — alert resolved directly';
+  // Legacy acks (acknowledged before the Finding 1 audit fix) have a real
+  // acknowledgedAt but no persisted actor — the identity was never captured
+  // anywhere. Show that explicitly rather than a bare "—" (which reads as a
+  // bug). We do NOT fabricate an actor — JCAHO integrity.
+  const ACTOR_NOT_RECORDED = 'Not recorded (acknowledged before audit fix)';
+
+  // Finding 9 — when an alert is resolved directly (no prior ack), the
+  // Acknowledged rows are intentionally empty, not data-missing.
+  const ackValue = alert.acknowledgedAt
+    ? fmtDateTime(alert.acknowledgedAt)
+    : isResolved
+      ? RESOLVED_DIRECTLY
+      : '—';
+  const ackByValue = alert.acknowledgedAt
+    ? (alert.acknowledgedByName ?? alert.acknowledgedBy ?? ACTOR_NOT_RECORDED)
+    : isResolved
+      ? RESOLVED_DIRECTLY
+      : '—';
+
+  // Joint-Commission audit fields (per CLAUDE.md / CLINICAL_SPEC Part 13).
+  // Finding 7 — the v1 "Baseline value" row was removed (v2 has no rolling
+  // baselines; the field was always "—"). Header no longer claims a fixed
+  // count to avoid drift. `key` drives `data-testid="audit-field-<key>"`.
+  const fields: { key: string; label: string; value: string }[] = [
+    { key: 'alertId', label: 'Alert ID', value: alert.id },
+    { key: 'tier', label: 'Tier', value: prettify(alert.tier) },
+    { key: 'ruleId', label: 'Rule ID', value: alert.ruleId ?? '—' },
+    { key: 'severity', label: 'Severity', value: prettify(alert.severity) },
+    { key: 'mode', label: 'Mode', value: prettify(alert.mode) },
+    { key: 'status', label: 'Status', value: prettify(alert.status) },
+    { key: 'created', label: 'Created', value: fmtDateTime(alert.createdAt) },
+    { key: 'acknowledged', label: 'Acknowledged', value: ackValue },
+    { key: 'acknowledgedBy', label: 'Acknowledged by', value: ackByValue },
+    {
+      key: 'resolved',
+      label: 'Resolved',
+      value: isResolved ? fmtDateTime(alert.resolvedAt) : resolutionPlaceholder,
+    },
+    {
+      key: 'resolvedBy',
+      label: 'Resolved by',
+      value: isResolved
+        ? (alert.resolvedByName ?? alert.resolvedBy ?? '—')
+        : resolutionPlaceholder,
+    },
+    {
+      key: 'resolutionAction',
+      label: 'Resolution action',
+      value: isResolved ? prettify(alert.resolutionAction) : resolutionPlaceholder,
+    },
+    { key: 'reading', label: 'Reading', value: sbp != null ? `${sbp}/${dbp} mmHg` : '—' },
+    { key: 'pulsePressure', label: 'Pulse pressure', value: pp != null ? `${pp} mmHg` : '—' },
+    { key: 'bmi', label: 'BMI', value: bmi != null ? bmi.toFixed(1) : '—' },
+    {
+      // Finding 10 — was the ambiguous "ACTUAL VALUE 165". Now axis +
+      // unit-labelled via the shared RULE_AXIS map so a reviewer reads
+      // "165 mmHg (systolic)" / "45 bpm (heart rate)" / the profile copy.
+      key: 'triggeringValue',
+      label: 'Triggering value',
+      value: formatTriggeringValue(alert.ruleId, alert.actualValue),
+    },
+    { key: 'escalationCount', label: 'Escalation count', value: String(alert.escalationEvents.length) },
   ];
 
   return (
     <div
+      data-testid="alert-audit-footer"
       className="mt-4 rounded-lg p-3.5"
-      style={{
-        backgroundColor: 'var(--brand-success-green-light)',
-        border: '1px solid var(--brand-success-green)',
-      }}
+      style={{ backgroundColor: accent.tint, border: `1px solid ${accent.line}` }}
     >
       <div className="flex items-center gap-1.5 mb-2">
-        <CheckCircle2 className="w-3.5 h-3.5" style={{ color: 'var(--brand-success-green)' }} />
-        <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-success-green)' }}>
-          Resolution audit · 15-field record
+        <CheckCircle2 className="w-3.5 h-3.5" style={{ color: accent.line }} />
+        <p
+          data-testid="alert-audit-header"
+          className="text-[11px] font-bold uppercase tracking-wider"
+          style={{ color: accent.line }}
+        >
+          {isResolved ? 'Resolution audit record' : 'Acknowledgment audit record'}
         </p>
       </div>
 
       {/* Fixed two-column key/value grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-1.5 mb-3">
         {fields.map((f) => (
-          <div key={f.label} className="flex items-baseline gap-2 min-w-0">
+          <div
+            key={f.key}
+            data-testid={`audit-field-${f.key}`}
+            className="flex items-baseline gap-2 min-w-0"
+          >
             <span className="text-[10px] font-bold uppercase tracking-wider shrink-0" style={{ color: 'var(--brand-text-muted)' }}>
               {f.label}
             </span>
@@ -562,9 +697,14 @@ function ResolutionAuditFooter({
         ))}
       </div>
 
-      {/* Free-form rationale */}
-      {alert.resolutionRationale && (
-        <div className="rounded-md bg-white p-2.5" style={{ border: '1px solid var(--brand-border)' }}>
+      {/* Free-form rationale — only for RESOLVED alerts (an ack-only alert
+          has no resolution rationale yet). */}
+      {isResolved && alert.resolutionRationale && (
+        <div
+          data-testid="audit-field-resolutionRationale"
+          className="rounded-md bg-white p-2.5"
+          style={{ border: '1px solid var(--brand-border)' }}
+        >
           <p className="text-[10px] font-bold uppercase tracking-wider mb-0.5" style={{ color: 'var(--brand-success-green)' }}>
             Clinical rationale
           </p>

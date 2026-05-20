@@ -1,7 +1,7 @@
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator'
 import type { VerifyMedicationPayload } from '@cardioplace/shared'
 
-const STATUSES = ['VERIFIED', 'REJECTED', 'AWAITING_PROVIDER'] as const
+const STATUSES = ['VERIFIED', 'REJECTED', 'AWAITING_PROVIDER', 'HOLD'] as const
 
 export class VerifyMedicationDto implements VerifyMedicationPayload {
   @IsIn(STATUSES)

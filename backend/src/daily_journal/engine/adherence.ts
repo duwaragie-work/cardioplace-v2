@@ -69,6 +69,44 @@ export function medicationMissedRuleWithWindow(
   }
 }
 
+// Cluster 8 Q3 (Manisha 5/18/26) — first-month educational nudge. The
+// 2-of-3 default window (above) is UNCHANGED. This is a purely additive,
+// one-time, Tier 3 patient-only educational message: a single gentle nudge
+// after the patient's first reported missed dose, but only within the first
+// 30 days of enrollment (the AHA highest-risk non-adherence window). The
+// "fires once per patient ever" guarantee is enforced by the engine via a
+// prior-alert existence check (mirrors the CAD-ramp one-time notice).
+const FIRST_MONTH_DAYS = 30
+
+export function firstMonthAdherenceNudge(
+  window: AdherenceWindow,
+): RuleFunction {
+  return (session, ctx) => {
+    if (ctx.enrolledAt == null) return null
+    const ageMs = ctx.resolvedAt.getTime() - ctx.enrolledAt.getTime()
+    if (ageMs < 0 || ageMs > FIRST_MONTH_DAYS * 24 * 60 * 60 * 1000) return null
+
+    // Any miss reported in the rolling window (3- or 7-day) counts as the
+    // patient's "first missed dose" — the engine's one-time guard ensures
+    // this only ever fires once, so a broad miss signal is correct here.
+    const anyMiss =
+      window.daysWithMissOver7d >= 1 || window.missedMedications.length >= 1
+    if (!anyMiss) return null
+
+    return {
+      ruleId: RULE_IDS.FIRST_MONTH_ADHERENCE_NUDGE,
+      tier: 'TIER_3_INFO',
+      mode: 'STANDARD',
+      pulsePressure: null,
+      suboptimalMeasurement: session.suboptimalMeasurement,
+      actualValue: null,
+      reason:
+        'First missed dose within the first 30 days of enrollment — one-time educational nudge.',
+      metadata: { conditionLabel: 'Medication adherence' },
+    }
+  }
+}
+
 /**
  * Backwards-compat single-session rule. Used only by older tests that
  * exercise the rule in isolation without a window. Returns null unless the

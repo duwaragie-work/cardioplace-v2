@@ -41,6 +41,9 @@ const MISSED_MED_REASONS = new Set([
   'OTHER',
 ] as const)
 
+// Synced 2026-05 to the full StructuredSymptomKey union (was stale at the
+// original 9) so chat/voice quick-log can report every symptom the check-in
+// checklist + engine support (Cluster 6/7/8).
 const STRUCTURED_SYMPTOM_KEYS: ReadonlySet<StructuredSymptomKey> = new Set([
   'severeHeadache',
   'visualChanges',
@@ -51,6 +54,16 @@ const STRUCTURED_SYMPTOM_KEYS: ReadonlySet<StructuredSymptomKey> = new Set([
   'newOnsetHeadache',
   'ruqPain',
   'edema',
+  'dizziness',
+  'syncope',
+  'palpitations',
+  'legSwelling',
+  'fatigue',
+  'shortnessOfBreath',
+  'dryCough',
+  'nsaidUse',
+  'faceSwelling',
+  'throatTightness',
 ])
 
 const ADHERENCE_STATUSES: ReadonlySet<AdherenceStatus> = new Set([
@@ -433,7 +446,7 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
       parameters: {
         type: Type.OBJECT,
         properties: {
-          symptom: { type: Type.STRING, description: 'One of the 9 structured symptom keys: severeHeadache, visualChanges, alteredMentalStatus, chestPainOrDyspnea, focalNeuroDeficit, severeEpigastricPain, newOnsetHeadache, ruqPain, edema. The pregnancy-specific ones (newOnsetHeadache, ruqPain, edema) only fire alerts when the patient is pregnant.' },
+          symptom: { type: Type.STRING, description: 'One structured symptom key. Emergency / Level-2: severeHeadache, visualChanges, alteredMentalStatus, chestPainOrDyspnea, focalNeuroDeficit, severeEpigastricPain. Pregnancy-only (fire only if patient is pregnant): newOnsetHeadache, ruqPain, edema. Cardiac signals: dizziness, syncope, palpitations, legSwelling. Medication side-effects: fatigue, shortnessOfBreath, dryCough, nsaidUse. Airway emergency (Tier 1, any patient): faceSwelling, throatTightness.' },
           notes: { type: Type.STRING, description: 'Optional patient phrasing of the symptom (e.g. "throbbing pain behind my eyes for an hour"). Stored as otherSymptoms[0].' },
         },
         required: ['symptom'],
@@ -782,7 +795,7 @@ export async function executeJournalTool(
       if (!STRUCTURED_SYMPTOM_KEYS.has(symptom as StructuredSymptomKey)) {
         return JSON.stringify({
           logged: false,
-          message: `Unknown symptom key "${args.symptom}". Use one of severeHeadache, visualChanges, alteredMentalStatus, chestPainOrDyspnea, focalNeuroDeficit, severeEpigastricPain, newOnsetHeadache, ruqPain, edema.`,
+          message: `Unknown symptom key "${args.symptom}". Use one of: severeHeadache, visualChanges, alteredMentalStatus, chestPainOrDyspnea, focalNeuroDeficit, severeEpigastricPain, newOnsetHeadache, ruqPain, edema, dizziness, syncope, palpitations, legSwelling, fatigue, shortnessOfBreath, dryCough, nsaidUse, faceSwelling, throatTightness.`,
         })
       }
       try {

@@ -101,6 +101,22 @@ export class TestControl {
     await this.post('test-control/retry-event/backdate', { alertId, deltaSeconds })
   }
 
+  /**
+   * Cluster 7 C.1 — drive `n` ladder rungs forward without sleeping. Inserts
+   * already-dispatched EscalationEvent rows for steps[1..n] anchored to the
+   * alert's createdAt. Returns the step IDs that were inserted (idempotent —
+   * pre-existing steps are skipped).
+   */
+  async advanceLadderSteps(
+    alertId: string,
+    n: number,
+  ): Promise<{ advanced: number; steps: string[] }> {
+    return this.post('test-control/escalation/advance-ladder-steps', {
+      alertId,
+      n,
+    })
+  }
+
   /** Backdate the latest JournalEntry for a user (for gap-alert + monthly-reask). */
   async backdateLastJournalEntry(userId: string, deltaSeconds: number): Promise<void> {
     await this.post('test-control/journal/backdate-latest', { userId, deltaSeconds })
@@ -136,6 +152,16 @@ export class TestControl {
    */
   async backdateUserUpdatedAt(userId: string, deltaSeconds: number): Promise<void> {
     await this.post('test-control/user/backdate-updated-at', { userId, deltaSeconds })
+  }
+
+  /**
+   * Cluster 8 — backdate User.enrolledAt for Q2 CAD-ramp + Q3 first-month
+   * nudge personas. Lets tests simulate "enrolled N days ago" without
+   * waiting; prod-equivalent of EnrollmentService stamping enrolledAt at
+   * ENROLLED transition.
+   */
+  async backdateEnrolledAt(userId: string, deltaSeconds: number): Promise<void> {
+    await this.post('test-control/user/backdate-enrolled-at', { userId, deltaSeconds })
   }
 
   /**
@@ -216,6 +242,16 @@ export class TestControl {
   }
 
   /**
+   * Cluster 8 §D — wipe ALL of a user's PatientMedication rows. Use before
+   * `setUserMedication` when the test needs an exact roster (e.g., ARB-only
+   * angioedema variant on Aisha, who ships with Lisinopril+Amlodipine —
+   * setUserMedication dedupes by drugName so ACE meds linger otherwise).
+   */
+  async clearUserMedications(userId: string): Promise<{ rowsDeleted: number }> {
+    return this.post('test-control/reset/user-medications', { userId })
+  }
+
+  /**
    * Replace this user's `enrollmentStatus`. Used by tests that need a
    * deterministic state without driving the full 4-piece enrollment gate.
    */
@@ -226,12 +262,136 @@ export class TestControl {
     await this.post('test-control/user/set-enrollment', { userId, status })
   }
 
+  /**
+   * Phase 4 §C — flip a user's onboardingStatus. Seed personas are all
+   * COMPLETED; spec 20a rolls one back to NOT_COMPLETED to exercise the
+   * new-user → /onboarding redirect.
+   */
+  async setOnboardingStatus(
+    userId: string,
+    status: 'NOT_COMPLETED' | 'COMPLETED',
+  ): Promise<void> {
+    await this.post('test-control/user/set-onboarding-status', { userId, status })
+  }
+
   /** Force a user's `profileVerificationStatus` (UNVERIFIED/VERIFIED/CORRECTED). */
   async setProfileVerificationStatus(
     userId: string,
     status: 'UNVERIFIED' | 'VERIFIED' | 'CORRECTED',
   ): Promise<void> {
     await this.post('test-control/user/set-profile-verification', { userId, status })
+  }
+
+  /**
+   * Phase 4 §B.2 — set a user's dateOfBirth. Used by the age-bucket boundary
+   * test (spec 20g.1): AGE_65_LOW must fire the day the patient turns 65 and
+   * NOT one day earlier, proving the cutoff is evaluated at reading time.
+   */
+  async setUserDateOfBirth(userId: string, dob: Date): Promise<void> {
+    await this.post('test-control/user/set-date-of-birth', {
+      userId,
+      dob: dob.toISOString(),
+    })
+  }
+
+  /**
+   * Phase 4 §B.2 — upsert a PatientThreshold for personalized-mode tests
+   * (spec 20g.21–22). `setByProviderId` is resolved server-side from the
+   * patient's assignment, so callers only pass the target overrides.
+   */
+  async setPatientThreshold(
+    userId: string,
+    override: {
+      sbpUpperTarget?: number
+      sbpLowerTarget?: number
+      dbpUpperTarget?: number
+      dbpLowerTarget?: number
+    },
+  ): Promise<{ userId: string }> {
+    return this.post('test-control/user/set-threshold', { userId, override })
+  }
+
+  /**
+   * Spec 12 — clear businessHours on the practice attached to this user.
+   * Returns the prior values; pair with `restorePracticeBusinessHours` in a
+   * `finally` block so the seed state stays intact for other tests.
+   */
+  async clearPracticeBusinessHours(userId: string): Promise<{
+    practiceId: string
+    prior: {
+      businessHoursStart: string
+      businessHoursEnd: string
+      businessHoursTimezone: string
+    }
+  }> {
+    return this.post('test-control/practice/clear-business-hours', { userId })
+  }
+
+  async restorePracticeBusinessHours(
+    userId: string,
+    prior: {
+      businessHoursStart: string
+      businessHoursEnd: string
+      businessHoursTimezone: string
+    },
+  ): Promise<void> {
+    await this.post('test-control/practice/restore-business-hours', {
+      userId,
+      ...prior,
+    })
+  }
+
+  // ─── Seed fixtures (Phase 0 §H) ─────────────────────────────────────────
+  /** Force a user's accountStatus (ACTIVE | BLOCKED | SUSPENDED). */
+  async setAccountStatus(
+    email: string,
+    status: 'ACTIVE' | 'BLOCKED' | 'SUSPENDED',
+  ): Promise<{ id: string; email: string; accountStatus: string }> {
+    return this.post('test-control/user/set-account-status', { email, status })
+  }
+
+  /** Seed N alerts in specific states (each auto-creates its JournalEntry). */
+  async seedAlerts(
+    userId: string,
+    alerts: Array<{
+      tier: string
+      status?: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
+      ruleId?: string
+      createdAtIso?: string
+      acknowledgedByUserId?: string
+      resolvedBy?: string
+      resolutionAction?: string
+      resolutionRationale?: string
+    }>,
+  ): Promise<{ created: number; alertIds: string[] }> {
+    return this.post('test-control/seed/alerts', { userId, alerts })
+  }
+
+  /** Seed N notifications for a user. */
+  async seedNotifications(
+    userId: string,
+    count: number,
+    channel?: 'PUSH' | 'EMAIL' | 'PHONE' | 'DASHBOARD',
+  ): Promise<{ created: number }> {
+    return this.post('test-control/seed/notifications', { userId, count, channel })
+  }
+
+  /** Seed audit events (ProfileVerificationLog rows). */
+  async seedAuditTrail(
+    userId: string,
+    events: Array<{
+      changeType: string
+      fieldPath: string
+      changedBy: string
+      changedByRole?: 'PATIENT' | 'ADMIN' | 'PROVIDER'
+      previousValue?: unknown
+      newValue?: unknown
+      rationale?: string
+      discrepancyFlag?: boolean
+      createdAtIso?: string
+    }>,
+  ): Promise<{ created: number }> {
+    return this.post('test-control/seed/audit-trail', { userId, events })
   }
 
   // ─── Inspection ─────────────────────────────────────────────────────────

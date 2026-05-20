@@ -22,7 +22,7 @@ export interface MedCatalogEntry {
   /** UI screen this card lives on. */
   screen: 'CORE' | 'CATEGORY' | 'COMBO'
   /** Category tab for Screen 2. Undefined for CORE / COMBO. */
-  category?: 'WATER_PILL' | 'BLOOD_THINNER' | 'CHOLESTEROL' | 'HEART_RHYTHM' | 'SGLT2'
+  category?: 'WATER_PILL' | 'BLOOD_THINNER' | 'CHOLESTEROL' | 'HEART_RHYTHM' | 'SGLT2' | 'PAIN_RELIEVER'
 }
 
 export interface MedComboEntry {
@@ -87,6 +87,14 @@ export const CATEGORY_MEDS: MedCatalogEntry[] = [
   // SGLT2
   { id: 'empagliflozin', brandName: 'Jardiance', genericName: 'Empagliflozin', drugClass: 'SGLT2', purpose: 'Diabetes medicine that also helps the heart.', screen: 'CATEGORY', category: 'SGLT2' },
   { id: 'dapagliflozin', brandName: 'Farxiga', genericName: 'Dapagliflozin', drugClass: 'SGLT2', purpose: 'Diabetes medicine that also helps the heart.', screen: 'CATEGORY', category: 'SGLT2' },
+
+  // Cluster 7 — NSAIDs. Listed so the engine can read NSAID context if a
+  // patient adds one to their med list, but the primary detection surface
+  // for A.3 (NSAID + antihypertensive warning) is the per-reading
+  // `nsaidUse` symptom flag — most patients take these PRN, not chronically.
+  { id: 'ibuprofen', brandName: 'Advil', genericName: 'Ibuprofen', drugClass: 'NSAID', purpose: 'Pain reliever (OTC). Can raise blood pressure with regular use.', screen: 'CATEGORY', category: 'PAIN_RELIEVER' },
+  { id: 'naproxen', brandName: 'Aleve', genericName: 'Naproxen', drugClass: 'NSAID', purpose: 'Pain reliever (OTC). Can raise blood pressure with regular use.', screen: 'CATEGORY', category: 'PAIN_RELIEVER' },
+  { id: 'celecoxib', brandName: 'Celebrex', genericName: 'Celecoxib', drugClass: 'NSAID', purpose: 'Prescription pain reliever. Can raise blood pressure with regular use.', screen: 'CATEGORY', category: 'PAIN_RELIEVER' },
 ]
 
 // ─── Screen 3 — 5 combo cards ─────────────────────────────────────────────────

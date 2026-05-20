@@ -239,12 +239,23 @@ export default function Dashboard() {
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayHasEntry = latestEntry?.measuredAt?.slice(0, 10) === todayStr;
 
-  const greeting = (() => {
+  // React #418 fix: the time-of-day greeting is derived from
+  // `new Date().getHours()`, which is LOCAL time — the server's timezone
+  // and the browser's can differ, so computing it during render makes the
+  // SSR markup and the first client render disagree and trips a hydration
+  // error on /dashboard. Compute it in an effect instead (after mount);
+  // the small subtitle line starts blank and fills in on the client.
+  const [greeting, setGreeting] = useState('');
+  useEffect(() => {
     const h = new Date().getHours();
-    if (h < 12) return t('dashboard.goodMorning');
-    if (h < 17) return t('dashboard.goodAfternoon');
-    return t('dashboard.goodEvening');
-  })();
+    setGreeting(
+      h < 12
+        ? t('dashboard.goodMorning')
+        : h < 17
+          ? t('dashboard.goodAfternoon')
+          : t('dashboard.goodEvening'),
+    );
+  }, [t]);
 
   const latestBP = latestEntry?.systolicBP && latestEntry?.diastolicBP
     ? `${latestEntry.systolicBP}/${latestEntry.diastolicBP}` : '--/--';
@@ -284,6 +295,10 @@ export default function Dashboard() {
     const sbp = a.journalEntry?.systolicBP ?? 0;
     const dbp = a.journalEntry?.diastolicBP ?? 0;
     const tier = (a as { tier?: AlertTier | null }).tier;
+    // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema is an airway
+    // emergency; same urgency bucket as BP Level 2 so the dashboard top-
+    // card surfaces it ahead of every other open alert.
+    if (tier === 'TIER_1_ANGIOEDEMA') return 100;
     if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 100;
     if (sbp >= 180 || dbp >= 120) return 100; // tier-null but clinically critical
     if (tier === 'TIER_1_CONTRAINDICATION') return 80;
@@ -330,6 +345,24 @@ export default function Dashboard() {
         accentLight: 'var(--brand-alert-red-light)',
         icon: <AlertTriangle className="w-5 h-5" />,
         title: 'Critical blood pressure reading',
+        body: patientMessage || 'Tap to see what to do next.',
+      };
+    }
+    // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema gets the same red
+    // 'emergency' treatment as BP Level 2 so the dashboard top-card surfaces
+    // it with urgent visual priority. Body comes from the signed-off
+    // patientMessage (RULE_ACE_ANGIOEDEMA / RULE_GENERIC_ANGIOEDEMA); title
+    // stays neutral non-diagnostic — the clinical content is in the body.
+    // Tapping the card routes to /alerts/[id] → EmergencyAlertScreen (the
+    // signed-off full-screen surface).
+    if (tier === 'TIER_1_ANGIOEDEMA') {
+      return {
+        key: 'emergency',
+        accent: 'var(--brand-alert-red)',
+        accentText: 'var(--brand-alert-red-text)',
+        accentLight: 'var(--brand-alert-red-light)',
+        icon: <AlertTriangle className="w-5 h-5" />,
+        title: 'This needs urgent care',
         body: patientMessage || 'Tap to see what to do next.',
       };
     }
@@ -544,6 +577,7 @@ export default function Dashboard() {
           <div data-testid="active-alert-banner" className="relative mb-3 md:mb-4">
           <button
             type="button"
+            data-testid="dashboard-alert-banner"
             onClick={() => router.push(`/alerts/${topAlert.id}`)}
             className="w-full text-left rounded-2xl p-4 cursor-pointer transition-all flex items-center gap-3 active:scale-[0.99]"
             style={{
@@ -631,6 +665,10 @@ export default function Dashboard() {
             <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 bg-white" />
             <div className="absolute -bottom-8 -right-4 w-20 h-20 rounded-full opacity-10 bg-white" />
 
+            {/* a11y: every page needs exactly one <h1>. The visible heading
+                is the userName <h2> below (intentional visual hierarchy), so
+                the page-level <h1> is screen-reader-only. */}
+            <h1 className="sr-only">Dashboard</h1>
             <p data-testid="dashboard-greeting" className="text-white/70 text-xs font-medium mb-1">{greeting}</p>
             {loading ? (
               <Bone w={160} h={26} color="rgba(255,255,255,0.3)" />
@@ -919,7 +957,7 @@ export default function Dashboard() {
                 <p className="text-[11px] mb-3 text-white">{t('dashboard.takesAbout')}</p>
               </div>
 
-              <div>
+              <div data-testid="dashboard-cta-checkin">
                 {/* Check-in is gated on intake being fully complete —
                     routes to /clinical-intake instead so the patient
                     finishes onboarding before logging readings the rule

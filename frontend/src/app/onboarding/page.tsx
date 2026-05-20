@@ -238,6 +238,7 @@ export default function OnboardingPage() {
               <div className="pt-4 w-full max-w-105 space-y-2">
                 <button
                   type="button"
+                  data-testid="onboarding-submit-btn"
                   onClick={handleContinue}
                   disabled={!isFormPartiallyFilled || isSubmitting}
                   className="w-full h-12 lg:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm lg:text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
@@ -246,6 +247,7 @@ export default function OnboardingPage() {
                 </button>
                 <button
                   type="button"
+                  data-testid="onboarding-skip-btn"
                   onClick={handleSkip}
                   className="w-full text-sm text-[#737373] mt-4 cursor-pointer"
                 >

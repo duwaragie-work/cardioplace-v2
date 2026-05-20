@@ -183,6 +183,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
               <Field label="Practice name" required>
                 <input
                   type="text"
+                  data-testid="admin-practice-name-input"
                   value={form.name}
                   onChange={(e) => set('name', e.target.value)}
                   className="w-full px-3 h-9 rounded-lg text-[13px] outline-none"
@@ -194,6 +195,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
                 <Field label="Hours start">
                   <input
                     type="time"
+                    data-testid="admin-practice-hours-start"
                     value={form.businessHoursStart}
                     onChange={(e) => set('businessHoursStart', e.target.value)}
                     className="w-full px-3 h-9 rounded-lg text-[13px] outline-none"
@@ -203,6 +205,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
                 <Field label="Hours end">
                   <input
                     type="time"
+                    data-testid="admin-practice-hours-end"
                     value={form.businessHoursEnd}
                     onChange={(e) => set('businessHoursEnd', e.target.value)}
                     className="w-full px-3 h-9 rounded-lg text-[13px] outline-none"
@@ -222,6 +225,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
                   <input
                     type="text"
                     list="iana-tz-list"
+                    data-testid="admin-practice-tz-input"
                     value={form.businessHoursTimezone}
                     onChange={(e) => set('businessHoursTimezone', e.target.value)}
                     className="w-full px-3 h-9 rounded-lg text-[13px] outline-none"
@@ -237,6 +241,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
 
               <Field label="After-hours protocol">
                 <textarea
+                  data-testid="admin-practice-protocol-input"
                   value={form.afterHoursProtocol}
                   onChange={(e) => set('afterHoursProtocol', e.target.value)}
                   rows={4}
@@ -264,7 +269,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
               )}
 
               <div className="flex justify-end">
-                <button type="button" onClick={save} disabled={!dirty || saving} className="btn-admin-primary">
+                <button type="button" data-testid="admin-practice-save" onClick={save} disabled={!dirty || saving} className="btn-admin-primary">
                   {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                   Save changes
                 </button>
@@ -277,6 +282,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
                     Practice configuration
                   </h2>
                   <span
+                    data-testid="admin-practice-readonly"
                     className="ml-auto text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
                     style={{ backgroundColor: 'var(--brand-background)', color: 'var(--brand-text-muted)' }}
                     title="Read-only — only an administrator can change practice settings."
@@ -307,7 +313,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
             )}
 
             {/* Staff list */}
-            <div className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+            <div data-testid="admin-practice-staff-list" className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
               <div className="px-5 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--brand-border)' }}>
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4" style={{ color: 'var(--brand-primary-purple)' }} />

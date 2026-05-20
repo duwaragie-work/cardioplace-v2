@@ -116,6 +116,7 @@ export interface PatientJournalEntry {
     id: string
     type: string | null
     tier: string | null
+    ruleId: string | null
     severity: string | null
     status: string
     escalated: boolean
@@ -393,6 +394,11 @@ export const RESOLUTION_CATALOG: Record<ResolutionAction, ResolutionActionDef> =
 export function resolutionTierFor(tier: AlertTier | string | null): ResolutionTier | null {
   switch (tier) {
     case 'TIER_1_CONTRAINDICATION':
+    // Cluster 8 (Manisha 5/18/26, P0) — angioedema is non-dismissible and
+    // "resolved like all Tier 1 alerts" with 15-field audit rationale.
+    // Same resolution catalog (TIER1_FALSE_POSITIVE,
+    // TIER1_MEDICATION_CORRECTED, etc.) as the Tier 1 contraindication.
+    case 'TIER_1_ANGIOEDEMA':
       return 'TIER_1'
     case 'TIER_2_DISCREPANCY':
       return 'TIER_2'

@@ -190,6 +190,7 @@ function OtherMedTile({
         </button>
         <button
           type="button"
+          data-testid="intake-medication-delete-button"
           onClick={(e) => {
             e.stopPropagation();
             onDelete();

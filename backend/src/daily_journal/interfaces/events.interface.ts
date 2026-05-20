@@ -58,6 +58,9 @@ export interface EscalationDispatchedEvent {
   ruleId: string | null
   ladderStep:
     | 'T0'
+    // Cluster 8 — angioedema compressed ladder rungs.
+    | 'T15M'
+    | 'T1H'
     | 'T2H'
     | 'T4H'
     | 'T8H'
