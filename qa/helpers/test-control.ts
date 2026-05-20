@@ -242,6 +242,16 @@ export class TestControl {
   }
 
   /**
+   * Cluster 8 §D — wipe ALL of a user's PatientMedication rows. Use before
+   * `setUserMedication` when the test needs an exact roster (e.g., ARB-only
+   * angioedema variant on Aisha, who ships with Lisinopril+Amlodipine —
+   * setUserMedication dedupes by drugName so ACE meds linger otherwise).
+   */
+  async clearUserMedications(userId: string): Promise<{ rowsDeleted: number }> {
+    return this.post('test-control/reset/user-medications', { userId })
+  }
+
+  /**
    * Replace this user's `enrollmentStatus`. Used by tests that need a
    * deterministic state without driving the full 4-piece enrollment gate.
    */

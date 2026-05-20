@@ -46,10 +46,12 @@ async function setPreferredLanguage(
 ): Promise<void> {
   const api = await authedApi(API_BASE_URL, patientEmail)
   try {
-    const res = await api.patch('auth/profile', {
+    // Auth controller is mounted at /api/v2/auth/* (the v2 prefix); the
+    // authedApi baseURL already includes /api/, so the path is v2/auth/profile.
+    const res = await api.patch('v2/auth/profile', {
       data: { preferredLanguage: locale },
     })
-    expect(res.ok(), `PATCH /auth/profile failed: ${await res.text()}`).toBeTruthy()
+    expect(res.ok(), `PATCH /v2/auth/profile failed: ${await res.text()}`).toBeTruthy()
   } finally {
     await api.dispose()
   }

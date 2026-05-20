@@ -4,6 +4,7 @@ import { PATIENTS } from '../helpers/accounts.js'
 import { newTestControl, type TestControl } from '../helpers/test-control.js'
 import {
   postJournalEntry,
+  postSessionWithTwoReadings,
   waitForAlerts,
 } from '../helpers/api.js'
 import { byTestId, T } from '../helpers/selectors.js'
@@ -110,14 +111,16 @@ async function clickSymptomButtonViaUI(
         await medYes.nth(j).click().catch(() => {})
       }
     }
-    // Advance — wait for the next button to hydrate before clicking.
+    // Advance — count() avoids the isVisible()-false-for-below-fold trap on
+    // the WEIGHT step (Next is at the bottom; viewport check fails). click()
+    // auto-scrolls + waits for hydration before sending the event.
     const next = page.locator(byTestId(T.checkin.next))
-    if (await next.isVisible().catch(() => false)) {
-      await next.click()
+    if ((await next.count()) > 0) {
+      await next.click({ timeout: 5_000 }).catch(() => {})
       // Small settle so React state mutation lands before the next iteration
-      // queries visibility. Without this the next iteration occasionally
-      // reads the pre-click DOM and double-clicks the same Next button.
-      await page.waitForTimeout(150)
+      // queries the DOM. Without this the next iteration occasionally reads
+      // the pre-click DOM and double-clicks the same Next button.
+      await page.waitForTimeout(200)
     } else {
       break
     }
@@ -198,7 +201,11 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
 
   test('2. throatTightness button + NO meds → EmergencyAlertScreen STILL shows (universal airway)', async ({ page }) => {
     test.setTimeout(120_000)
-    const { tc, userId } = await setupPatient(PATIENTS.aisha.email, async () => {})
+    const { tc, userId } = await setupPatient(PATIENTS.aisha.email, async (tc, uid) => {
+      // Aisha ships with Lisinopril+Amlodipine; clear so the rule routes
+      // GENERIC (no ACE/ARB in roster).
+      await tc.clearUserMedications(uid)
+    })
     try {
       await signInPatient(page, PATIENTS.aisha.email)
       const clicked = await clickSymptomButtonViaUI(page, 'THROAT_TIGHTNESS')
@@ -227,6 +234,10 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
   test('3. faceSwelling + ARB → Tier 1 red alert + ARB-variant physician text', async ({ page }) => {
     test.setTimeout(120_000)
     const { tc, userId } = await setupPatient(PATIENTS.aisha.email, async (tc, uid) => {
+      // Clear Aisha's seed Lisinopril (ACE) so the rule routes to the ARB
+      // branch — without this, the ACE inhibitor still matches and the
+      // physician message uses the ACE variant.
+      await tc.clearUserMedications(uid)
       await tc.setUserMedication(uid, {
         drugName: 'Losartan',
         drugClass: 'ARB',
@@ -294,7 +305,10 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
 
   test('4b. GENERIC branch (no ACE/ARB) patient message OMITS the "stop medicine" line', async ({ page }) => {
     test.setTimeout(120_000)
-    const { tc, userId } = await setupPatient(PATIENTS.aisha.email, async () => {})
+    const { tc, userId } = await setupPatient(PATIENTS.aisha.email, async (tc, uid) => {
+      // Clear seed Lisinopril so the rule routes GENERIC (no med in roster).
+      await tc.clearUserMedications(uid)
+    })
     try {
       await signInPatient(page, PATIENTS.aisha.email)
       await postAngioedemaEntry(PATIENTS.aisha.email, { faceSwelling: true })
@@ -341,28 +355,11 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
     const { tc } = await setupPatient(PATIENTS.aisha.email, async () => {})
     try {
       await signInPatient(page, PATIENTS.aisha.email)
-      await page.goto('/check-in')
-      for (let i = 0; i < 6; i++) {
-        if (
-          await page
-            .locator(byTestId(T.checkin.otherSymptoms))
-            .first()
-            .isVisible()
-            .catch(() => false)
-        ) {
-          break
-        }
-        if (await page.locator(byTestId(T.checkin.systolic)).isVisible().catch(() => false)) {
-          await page.locator(byTestId(T.checkin.systolic)).fill('120')
-          await page.locator(byTestId(T.checkin.diastolic)).fill('78')
-          await page.locator(byTestId(T.checkin.pulse)).fill('72')
-        }
-        if (await page.locator(byTestId(T.checkin.next)).isVisible().catch(() => false)) {
-          await page.locator(byTestId(T.checkin.next)).click()
-        } else {
-          break
-        }
-      }
+      // Reuse the symptom helper to walk through B1 → B2 → MEDICATION → B3
+      // (it handles position click + medication yes-clicks + Next-button
+      // hydration). Lands on B3 where the otherSymptoms textarea also lives.
+      const reached = await clickSymptomButtonViaUI(page, 'FACE_SWELLING')
+      expect(reached, 'must reach B3 symptoms step (where otherSymptoms textarea lives)').toBe(true)
       const other = page.locator(byTestId(T.checkin.otherSymptoms))
       await expect(other).toBeVisible()
       // Accepts input — guards against a regression that disables / strips
@@ -398,19 +395,19 @@ test.describe('Cluster 8 §D-PATIENT — Cluster 7 symptom buttons (closes Phase
       const clicked = await clickSymptomButtonViaUI(page, 'SHORTNESS_OF_BREATH')
       expect(clicked, 'SHORTNESS_OF_BREATH button must be reachable').toBe(true)
 
-      // Trigger via API to deterministically fire the rule. The §D assertion
-      // for Cluster 7 buttons is "UI surface exists + receives input" — the
-      // engine path is owned by spec 09's un-fixme'd cases.
+      // Trigger via API. NB: Cluster 6 Q2 single-reading-session gate
+      // suppresses non-emergency rules — post TWO readings with the same
+      // sessionId so the engine accepts the session as confirmed and fires
+      // the Cluster 7 symptom rule. Angioedema bypasses this gate via Stage A;
+      // Cluster 7 + most BP rules need the two-reading session.
       const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
       try {
-        await postJournalEntry(api, {
-          measuredAt: new Date().toISOString(),
+        await postSessionWithTwoReadings(api, {
           systolicBP: 124,
           diastolicBP: 78,
           pulse: 72,
           position: 'SITTING',
           shortnessOfBreath: true,
-          sessionId: crypto.randomUUID(),
         })
       } finally {
         await api.dispose()
@@ -441,14 +438,13 @@ test.describe('Cluster 8 §D-PATIENT — Cluster 7 symptom buttons (closes Phase
 
       const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
       try {
-        await postJournalEntry(api, {
-          measuredAt: new Date().toISOString(),
+        // Two-reading session — bypass Cluster 6 Q2 single-reading gate.
+        await postSessionWithTwoReadings(api, {
           systolicBP: 124,
           diastolicBP: 78,
           pulse: 72,
           position: 'SITTING',
           fatigue: true,
-          sessionId: crypto.randomUUID(),
         })
       } finally {
         await api.dispose()
@@ -479,14 +475,13 @@ test.describe('Cluster 8 §D-PATIENT — Cluster 7 symptom buttons (closes Phase
 
       const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
       try {
-        await postJournalEntry(api, {
-          measuredAt: new Date().toISOString(),
+        // Two-reading session — bypass Cluster 6 Q2 single-reading gate.
+        await postSessionWithTwoReadings(api, {
           systolicBP: 124,
           diastolicBP: 78,
           pulse: 72,
           position: 'SITTING',
           dryCough: true,
-          sessionId: crypto.randomUUID(),
         })
       } finally {
         await api.dispose()

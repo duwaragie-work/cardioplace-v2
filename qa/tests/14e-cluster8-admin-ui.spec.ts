@@ -2,7 +2,11 @@ import { test, expect, type Page } from '@playwright/test'
 import { authedApi, signInAdmin } from '../helpers/auth.js'
 import { PATIENTS, ADMINS } from '../helpers/accounts.js'
 import { newTestControl, type TestControl } from '../helpers/test-control.js'
-import { postJournalEntry, waitForAlerts } from '../helpers/api.js'
+import {
+  postJournalEntry,
+  postSessionWithTwoReadings,
+  waitForAlerts,
+} from '../helpers/api.js'
 import { byTestId, T } from '../helpers/selectors.js'
 import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
 
@@ -59,8 +63,11 @@ async function setupAndTriggerAlert(
 
   const api = await authedApi(API_BASE_URL, patientEmail)
   try {
-    await postJournalEntry(api, {
-      measuredAt: new Date().toISOString(),
+    // Two-reading session bypasses Cluster 6 Q2 single-reading gate. The
+    // angioedema rule fires off Stage A regardless of reading count, so the
+    // 2nd reading is harmless there; CAD_HIGH and other standard-pipeline
+    // rules NEED the 2nd reading to escape the gate.
+    await postSessionWithTwoReadings(api, {
       systolicBP: trigger.systolicBP ?? 124,
       diastolicBP: trigger.diastolicBP ?? 78,
       pulse: trigger.pulse ?? 72,
@@ -68,7 +75,6 @@ async function setupAndTriggerAlert(
       faceSwelling: trigger.faceSwelling,
       throatTightness: trigger.throatTightness,
       medicationTaken: trigger.medicationTaken,
-      sessionId: crypto.randomUUID(),
     })
   } finally {
     await api.dispose()
@@ -156,7 +162,11 @@ test.describe('Cluster 8 §D-ADMIN — angioedema 3-tier display + dashboard', (
     test.setTimeout(180_000)
     const { tc, patientName, alertId } = await setupAndTriggerAlert(
       PATIENTS.aisha.email,
-      async () => {},
+      async (tc, uid) => {
+        // Clear Aisha's seed Lisinopril+Amlodipine so the angioedema rule
+        // routes GENERIC (no ACE/ARB anywhere in the verified roster).
+        await tc.clearUserMedications(uid)
+      },
       { faceSwelling: true },
       'RULE_GENERIC_ANGIOEDEMA',
     )
