@@ -317,6 +317,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
                 return (
                   <span
                     key={d.id}
+                    data-testid="admin-readings-brady-surveillance-pill"
                     className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
                     style={{
                       backgroundColor: 'var(--brand-warning-amber-light)',

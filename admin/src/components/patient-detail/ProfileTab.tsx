@@ -421,6 +421,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
               DBP <70 J-curve low). Per-patient overrides live in Thresholds. */}
           {group === 'cardiac' && profile.hasCAD && (
             <div
+              data-testid="admin-profile-cad-treatment-note"
               className="mx-5 my-3 rounded-xl px-4 py-3 flex items-start gap-2.5"
               style={{
                 backgroundColor: 'var(--brand-accent-teal-light)',

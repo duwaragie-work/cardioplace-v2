@@ -161,7 +161,12 @@ export const T = {
     pulse: 'checkin-pulse',
     positionSelect: 'checkin-position',
     sessionId: 'checkin-session-id',
-    symptom: (key: string) => `checkin-symptom-${key}`,
+    // CheckIn.tsx renders the actual data-testid as `check-in-symptom-${KEY}`
+    // (hyphenated, KEY is the SCREAMING_SNAKE form). qa/helpers/api.ts:300
+    // already references it that way. Keep the helper aligned with reality —
+    // pass the SCREAMING_SNAKE key (FACE_SWELLING, THROAT_TIGHTNESS, FATIGUE,
+    // SHORTNESS_OF_BREATH, DRY_COUGH, etc.).
+    symptom: (key: string) => `check-in-symptom-${key}`,
     otherSymptoms: 'checkin-other-symptoms',
     measurementCondition: (key: string) => `checkin-measurement-${key}`,
     next: 'checkin-next-btn',
@@ -334,6 +339,11 @@ export const T = {
     profileVerifyComplete: 'admin-profile-verify-complete',
     profileVerifyRationale: 'admin-profile-verify-rationale',
     profileVerifyConfirm: 'admin-profile-verify-confirm',
+    // Cluster 8.1 Gap 3 — persistent CAD treatment-target note rendered on
+    // the cardiac section of ProfileTab whenever profile.hasCAD. Documents
+    // the AHA/ACC 130/80 target + the Q2-ramp default thresholds the
+    // engine alerts on.
+    profileCadTreatmentNote: 'admin-profile-cad-treatment-note',
 
     // MedicationsTab (cards keyed by med.id; tests filter by visible drugName)
     medGroup: (drugClass: string) => `admin-med-group-${drugClass}`,
@@ -385,6 +395,10 @@ export const T = {
       key: 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'TIER_3',
     ) => `admin-readings-tier-filter-${key}`,
     readingsEmpty: 'admin-readings-empty',
+    // Cluster 8.1 Gap 5 — yellow-dot surveillance pill rendered on a reading
+    // whose deviation is RULE_BRADY_SURVEILLANCE (physician-only chart event,
+    // no patient-facing alarm). Surfaced on ReadingsTab.tsx.
+    readingsBradySurveillancePill: 'admin-readings-brady-surveillance-pill',
 
     // TimelineTab
     timelineList: 'admin-timeline-list',
