@@ -28,24 +28,23 @@ const OPS_ID = 'ops-1'
 
 describe('PatientAccessService', () => {
   let service: PatientAccessService
-  let prisma: {
-    patientProviderAssignment: {
-      findUnique: jest.Mock
-    }
-    practiceMedicalDirector: {
-      findUnique: jest.Mock
-      findMany: jest.Mock
-    }
-  }
+  // Loose prisma typing so mockResolvedValue accepts any payload — matches
+  // the alert-resolution.service.spec.ts pattern. Strict typing made TS
+  // infer `never` for the mock parameter type (jest types in this project
+  // only accept one generic arg).
+  let prisma: Record<string, any>
 
   beforeEach(async () => {
     prisma = {
       patientProviderAssignment: {
-        findUnique: jest.fn() as jest.Mock<any, any>,
+        findUnique: jest.fn() as jest.Mock<any>,
       },
       practiceMedicalDirector: {
-        findUnique: jest.fn() as jest.Mock<any, any>,
-        findMany: jest.fn() as jest.Mock<any, any>,
+        findUnique: jest.fn() as jest.Mock<any>,
+        findMany: jest.fn() as jest.Mock<any>,
+      },
+      practiceProvider: {
+        findMany: jest.fn() as jest.Mock<any>,
       },
     }
     const module: TestingModule = await Test.createTestingModule({
@@ -301,6 +300,83 @@ describe('PatientAccessService', () => {
       expect(filter).toEqual({
         providerAssignmentAsPatient: { is: { id: '__never__' } },
       })
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // practiceScopeIds — drives /practices list filter for May 2026 scope.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('practiceScopeIds', () => {
+    it('SUPER_ADMIN returns undefined (no filter)', async () => {
+      const ids = await service.practiceScopeIds({
+        id: SUPER_ID,
+        roles: [UserRole.SUPER_ADMIN],
+      })
+      expect(ids).toBeUndefined()
+      expect(prisma.practiceMedicalDirector.findMany).not.toHaveBeenCalled()
+      expect(prisma.practiceProvider.findMany).not.toHaveBeenCalled()
+    })
+
+    it('HEALPLACE_OPS returns undefined (no filter)', async () => {
+      const ids = await service.practiceScopeIds({
+        id: OPS_ID,
+        roles: [UserRole.HEALPLACE_OPS],
+      })
+      expect(ids).toBeUndefined()
+    })
+
+    it('MED_DIR returns their PracticeMedicalDirector memberships', async () => {
+      prisma.practiceMedicalDirector.findMany.mockResolvedValue([
+        { practiceId: PRACTICE_A },
+        { practiceId: PRACTICE_B },
+      ])
+      prisma.practiceProvider.findMany.mockResolvedValue([])
+      const ids = await service.practiceScopeIds({
+        id: MED_ID,
+        roles: [UserRole.MEDICAL_DIRECTOR],
+      })
+      expect(ids).toEqual(expect.arrayContaining([PRACTICE_A, PRACTICE_B]))
+      expect(ids).toHaveLength(2)
+    })
+
+    it('PROVIDER returns their PracticeProvider memberships', async () => {
+      prisma.practiceProvider.findMany.mockResolvedValue([
+        { practiceId: PRACTICE_A },
+      ])
+      const ids = await service.practiceScopeIds({
+        id: PROV_ID,
+        roles: [UserRole.PROVIDER],
+      })
+      expect(ids).toEqual([PRACTICE_A])
+    })
+
+    it('multi-role MED_DIR + PROVIDER unions both join tables (dedup)', async () => {
+      prisma.practiceMedicalDirector.findMany.mockResolvedValue([
+        { practiceId: PRACTICE_A },
+        { practiceId: PRACTICE_B },
+      ])
+      prisma.practiceProvider.findMany.mockResolvedValue([
+        { practiceId: PRACTICE_A }, // overlap with MED_DIR membership
+        { practiceId: 'practice-C' },
+      ])
+      const ids = await service.practiceScopeIds({
+        id: 'multi-1',
+        roles: [UserRole.MEDICAL_DIRECTOR, UserRole.PROVIDER],
+      })
+      expect(ids).toEqual(
+        expect.arrayContaining([PRACTICE_A, PRACTICE_B, 'practice-C']),
+      )
+      expect(ids).toHaveLength(3)
+    })
+
+    it('MED_DIR with zero memberships returns empty array (sees no practices)', async () => {
+      prisma.practiceMedicalDirector.findMany.mockResolvedValue([])
+      prisma.practiceProvider.findMany.mockResolvedValue([])
+      const ids = await service.practiceScopeIds({
+        id: 'md-newbie',
+        roles: [UserRole.MEDICAL_DIRECTOR],
+      })
+      expect(ids).toEqual([])
     })
   })
 })
