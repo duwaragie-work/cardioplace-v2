@@ -119,7 +119,14 @@ function readingOf(a: RawAlert): string {
   if (a.journalEntry?.systolicBP != null && a.journalEntry?.diastolicBP != null) {
     return `${a.journalEntry.systolicBP}/${a.journalEntry.diastolicBP} mmHg`;
   }
-  if ((a.type ?? '').toUpperCase().includes('MEDICATION') || a.tier === 'TIER_1_CONTRAINDICATION' || a.tier === 'TIER_2_DISCREPANCY') {
+  if (
+    (a.type ?? '').toUpperCase().includes('MEDICATION') ||
+    a.tier === 'TIER_1_CONTRAINDICATION' ||
+    // Cluster 8 — angioedema is a medication-linked safety alert (ACE/ARB
+    // branches) routed identically to Tier 1 contraindications.
+    a.tier === 'TIER_1_ANGIOEDEMA' ||
+    a.tier === 'TIER_2_DISCREPANCY'
+  ) {
     return 'Medication';
   }
   return '—';
@@ -140,7 +147,10 @@ function timeAgo(iso: string): string {
 /** Bucket an alert into one of the 7 tier filter groups. */
 function tierBucket(a: RawAlert): TierFilter {
   if (a.tier === 'BP_LEVEL_2' || a.tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'BP_L2';
-  if (a.tier === 'TIER_1_CONTRAINDICATION') return 'TIER_1';
+  // Cluster 8 — angioedema buckets into TIER_1 so the dashboard TIER_1
+  // filter surfaces it alongside contraindications (Manisha "resolved
+  // like all Tier 1 alerts").
+  if (a.tier === 'TIER_1_CONTRAINDICATION' || a.tier === 'TIER_1_ANGIOEDEMA') return 'TIER_1';
   if (a.tier === 'TIER_2_DISCREPANCY') return 'TIER_2';
   if (a.tier === 'BP_LEVEL_1_HIGH' || a.tier === 'BP_LEVEL_1_LOW') return 'BP_L1';
   if (a.tier === 'TIER_3_INFO') return 'TIER_3';

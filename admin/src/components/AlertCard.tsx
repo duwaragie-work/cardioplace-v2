@@ -46,7 +46,10 @@ type TierBucket = 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'TIER_3' | 'OTHER';
 
 function tierBucket(t: string | null): TierBucket {
   if (t === 'BP_LEVEL_2' || t === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'BP_L2';
-  if (t === 'TIER_1_CONTRAINDICATION') return 'TIER_1';
+  // Cluster 8 — angioedema shares the Tier 1 chrome (red banner, audit
+  // footer, resolution catalog) per Manisha "resolved like all Tier 1
+  // alerts". Bespoke airway visuals are a post-pilot follow-up.
+  if (t === 'TIER_1_CONTRAINDICATION' || t === 'TIER_1_ANGIOEDEMA') return 'TIER_1';
   if (t === 'TIER_2_DISCREPANCY') return 'TIER_2';
   if (t === 'BP_LEVEL_1_HIGH' || t === 'BP_LEVEL_1_LOW') return 'BP_L1';
   if (t === 'TIER_3_INFO') return 'TIER_3';
