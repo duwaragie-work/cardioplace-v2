@@ -8,7 +8,8 @@
 //   inline expand + three-tier + Resolve / Acknowledge surface is reused
 //   on /admin/notifications per CLINICAL_SPEC V2-C Layer 1).
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Bell,
   CheckCircle2,
@@ -82,6 +83,32 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('OPEN');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [resolving, setResolving] = useState<PatientAlert | null>(null);
+
+  // Deep-link consumer — escalation notifications navigate to
+  // /patients/{userId}?alert={alertId}; when the alert arrives in the
+  // list we auto-expand + scroll to it so the user lands on the row
+  // that triggered the bell click. Falls through silently if the id
+  // doesn't match (alert already resolved + filtered out, etc.).
+  const searchParams = useSearchParams();
+  const targetAlertId = searchParams?.get('alert') ?? null;
+  useEffect(() => {
+    if (!targetAlertId) return;
+    if (loading) return;
+    const exists = alerts.some((a) => a.id === targetAlertId);
+    if (!exists) return;
+    setExpandedId(targetAlertId);
+    // Defer one tick so the row is in the DOM before we scroll.
+    const tick = window.setTimeout(() => {
+      const el = document.querySelector(
+        `[data-testid="admin-alert-row-${targetAlertId}"]`,
+      );
+      if (el && 'scrollIntoView' in el) {
+        (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 50);
+    return () => window.clearTimeout(tick);
+  }, [targetAlertId, alerts, loading]);
+
   // Per-alert ack-in-flight set so the button disables while the request
   // is pending. A Set rather than a boolean so two simultaneous BP L1 acks
   // don't collide visually.

@@ -470,13 +470,18 @@ export default function NotificationsScreen() {
                       <AlertCard
                         alert={a}
                         expanded={expanded}
-                        // Row click navigates — replaces the v1 "Review" button.
+                        // Row click navigates to the patient + deep-links the
+                        // specific alert via ?alert= so the patient-detail
+                        // AlertsTab auto-expands + scrolls to this row.
                         // Falls back to expand-toggle if patient.id is missing
                         // (rare — orphaned alert) so the card still does
                         // something.
                         onRowClick={() => {
-                          if (a.patient?.id) router.push(`/patients/${a.patient.id}`);
-                          else setExpandedId(expanded ? null : a.id);
+                          if (a.patient?.id) {
+                            router.push(`/patients/${a.patient.id}?alert=${a.id}`);
+                          } else {
+                            setExpandedId(expanded ? null : a.id);
+                          }
                         }}
                         onToggleExpand={() => setExpandedId(expanded ? null : a.id)}
                         onResolve={() => setResolving(a)}
@@ -521,10 +526,17 @@ export default function NotificationsScreen() {
                       onRead={() => void handleMarkRead(n)}
                       onOpen={() => {
                         if (!n.watched) void handleMarkRead(n);
-                        // Alert-linked notification → switch to Alerts tab so
-                        // the user can act on it; bare notifications just
-                        // mark-read on tap.
-                        if (n.alertId) setTopTab('alerts');
+                        // Alert-linked notification → deep-link to the
+                        // patient detail Alerts tab with ?alert= so the
+                        // target alert auto-expands. Falls back to the
+                        // local Alerts tab when patientUserId is missing.
+                        if (n.alertId && n.patientUserId) {
+                          router.push(
+                            `/patients/${n.patientUserId}?alert=${n.alertId}`,
+                          );
+                        } else if (n.alertId) {
+                          setTopTab('alerts');
+                        }
                       }}
                     />
                   </div>
