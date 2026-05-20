@@ -52,8 +52,12 @@ export function deriveCookieScope(req: Request): CookieScope {
     (req.headers.origin as string | undefined) ||
     (req.headers.referer as string | undefined) ||
     ''
-  if (origin.includes(':3001') || origin.includes('://admin.')) return 'admin'
-  if (origin.includes(':3000') || origin.includes('://app.')) return 'patient'
+  // Tolerate an optional `www.` prefix — DNS/CDN may serve the app under
+  // the www. host (e.g. https://www.admin.dev.cardioplace.ai), and a plain
+  // `://admin.` substring check would miss it and fall through to patient,
+  // causing refresh/logout to look up the wrong scoped cookie.
+  if (origin.includes(':3001') || /:\/\/(www\.)?admin\./.test(origin)) return 'admin'
+  if (origin.includes(':3000') || /:\/\/(www\.)?app\./.test(origin)) return 'patient'
   return 'patient'
 }
 
