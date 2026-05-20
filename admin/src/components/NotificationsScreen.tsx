@@ -64,6 +64,26 @@ function tierBucket(t: string | null | undefined): TierFilter {
   return 'OTHER';
 }
 
+/**
+ * Notification rows don't carry an explicit tier field — derive it from
+ * the title/body text. Mirrors the escalation builder's title format:
+ *   [T+0] TIER 1 CONTRAINDICATION — Patient needs review
+ *   [T0] AIRWAY EMERGENCY (ANGIOEDEMA) — Patient needs review
+ *   [T+4h] BP EMERGENCY — Patient needs review
+ * Keyword match is intentionally permissive so future tier-label tweaks
+ * still bucket correctly. Falls back to 'OTHER' for non-alert
+ * notifications (gap alerts, system messages, etc.).
+ */
+function tierBucketFromText(title: string, body: string): TierFilter {
+  const text = `${title} ${body}`.toUpperCase();
+  if (/ANGIOEDEMA|AIRWAY EMERGENCY/.test(text)) return 'TIER_1';
+  if (/TIER\s*1|CONTRAINDICATION/.test(text)) return 'TIER_1';
+  if (/BP\s*L2|BP\s*LEVEL\s*2|BP\s*EMERGENCY/.test(text)) return 'BP_L2';
+  if (/TIER\s*2|DISCREPANCY/.test(text)) return 'TIER_2';
+  if (/BP\s*L1|BP\s*LEVEL\s*1/.test(text)) return 'BP_L1';
+  return 'OTHER';
+}
+
 function bucketChrome(b: TierFilter): {
   label: string;
   accent: string;
@@ -159,6 +179,10 @@ export default function NotificationsScreen() {
   const [acking, setAcking] = useState<Set<string>>(new Set());
   const [topTab, setTopTab] = useState<TopTab>(initialTab);
   const [notifFilter, setNotifFilter] = useState<NotifFilter>('all');
+  // Tier filter for the Notifications tab — mirrors the Alerts tab pills
+  // but derives the tier from notification title/body since the
+  // Notification row doesn't carry an explicit tier field.
+  const [notifTierFilter, setNotifTierFilter] = useState<TierFilter>('ALL');
   const [markingAll, setMarkingAll] = useState(false);
 
   // First mount sets `loading` so the skeleton shows; subsequent
@@ -232,10 +256,33 @@ export default function NotificationsScreen() {
   const unreadCount = useMemo(() => notifs.filter((n) => !n.watched).length, [notifs]);
 
   const filteredNotifs = useMemo(() => {
-    if (notifFilter === 'unread') return notifs.filter((n) => !n.watched);
-    if (notifFilter === 'read') return notifs.filter((n) => n.watched);
-    return notifs;
-  }, [notifs, notifFilter]);
+    let base = notifs;
+    if (notifFilter === 'unread') base = base.filter((n) => !n.watched);
+    if (notifFilter === 'read') base = base.filter((n) => n.watched);
+    if (notifTierFilter !== 'ALL') {
+      base = base.filter(
+        (n) => tierBucketFromText(n.title, n.body) === notifTierFilter,
+      );
+    }
+    return base;
+  }, [notifs, notifFilter, notifTierFilter]);
+
+  // Per-tier counts for the pill row — show all-time counts (not just
+  // post-filter) so the user can see what's hidden by the active tier.
+  const notifTierCounts = useMemo(() => {
+    const c: Record<TierFilter, number> = {
+      ALL: notifs.length,
+      BP_L2: 0,
+      TIER_1: 0,
+      TIER_2: 0,
+      BP_L1: 0,
+      OTHER: 0,
+    };
+    for (const n of notifs) {
+      c[tierBucketFromText(n.title, n.body)]++;
+    }
+    return c;
+  }, [notifs]);
 
   const resolvable: ResolvableAlert | null = useMemo(() => {
     if (!resolving) return null;
@@ -504,6 +551,53 @@ export default function NotificationsScreen() {
               onChange={setNotifFilter}
               unreadCount={unreadCount}
             />
+
+            {/* Tier filter chips — same chrome as the Alerts tab so the
+                row reads as "filter the inbox by tier". Notifications
+                don't carry an explicit tier field so we derive from the
+                title/body text via tierBucketFromText. */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {([
+                ['ALL', 'All'],
+                ['BP_L2', 'BP L2'],
+                ['TIER_1', 'Tier 1'],
+                ['TIER_2', 'Tier 2'],
+                ['BP_L1', 'BP L1'],
+              ] as [TierFilter, string][]).map(([key, label]) => {
+                const active = notifTierFilter === key;
+                const chrome = key === 'ALL'
+                  ? { accent: 'var(--brand-primary-purple)', light: 'var(--brand-primary-purple-light)' }
+                  : bucketChrome(key);
+                const count = notifTierCounts[key];
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    data-testid={`admin-notif-tier-pill-${key}`}
+                    onClick={() => setNotifTierFilter(key)}
+                    className="px-2.5 h-7 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                    style={{
+                      backgroundColor: active ? chrome.accent : chrome.light,
+                      color: active ? 'white' : chrome.accent,
+                      border: `1.5px solid ${active ? chrome.accent : 'transparent'}`,
+                    }}
+                  >
+                    {label}
+                    <span
+                      className="text-[10px] font-bold px-1.5 rounded-full"
+                      style={{
+                        backgroundColor: active ? 'rgba(255,255,255,0.25)' : 'white',
+                        color: active ? 'white' : chrome.accent,
+                        minWidth: 18,
+                        textAlign: 'center',
+                      }}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
 
             {loading && notifs.length === 0 ? (
               <NotifListSkeleton />
