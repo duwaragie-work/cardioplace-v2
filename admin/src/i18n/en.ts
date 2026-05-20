@@ -306,7 +306,7 @@ const en = {
 
   // ─── Provider ──────────────────────────────────────────────────────────────
   'provider.dashboard': 'Provider Dashboard',
-  'provider.totalPatients': 'Total Patients',
+  'provider.totalPatients': 'Active Patients',
   'provider.readingsThisMonth': 'Readings This Month',
   'provider.bpReadingsSubmitted': 'BP readings submitted',
   'provider.activeAlerts': 'Active Alerts',

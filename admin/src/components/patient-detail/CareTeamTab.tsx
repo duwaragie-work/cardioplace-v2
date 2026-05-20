@@ -198,6 +198,15 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
     form.backupProviderId.length > 0 &&
     form.primaryProviderId === form.backupProviderId;
 
+  // Soft warning when MED_DIR is also primary or backup. Doesn't block save
+  // (small practices may legitimately have one clinician with both roles),
+  // just flags the escalation-coverage implication — every escalation rung
+  // routes to the same inbox.
+  const mdProviderCollision =
+    form.medicalDirectorId.length > 0 &&
+    (form.medicalDirectorId === form.primaryProviderId ||
+      form.medicalDirectorId === form.backupProviderId);
+
   const isComplete =
     form.practiceId.length > 0 &&
     form.primaryProviderId.length > 0 &&
@@ -396,6 +405,29 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
           >
             Primary and backup providers must be different — pick a different
             backup so escalation has a real fallback.
+          </div>
+        )}
+
+        {/* MED_DIR == primary/backup soft warning. Allowed (multi-role
+            clinicians exist; small practices often have one person
+            covering both roles) — flagged so the user understands the
+            escalation-coverage implication: every escalation rung routes
+            to the same inbox. Save stays enabled. */}
+        {mdProviderCollision && !primaryBackupCollision && (
+          <div
+            data-testid="admin-careteam-md-provider-collision"
+            className="rounded-lg px-3 py-2 text-[12px] font-semibold"
+            style={{
+              backgroundColor: 'var(--brand-warning-amber-light)',
+              color: 'var(--brand-warning-amber-text)',
+            }}
+          >
+            Medical director is the same clinician as the
+            {form.medicalDirectorId === form.primaryProviderId
+              ? ' primary'
+              : ' backup'}
+            {' '}provider — escalation will route to one inbox at every
+            rung. Save anyway if that matches your practice's coverage.
           </div>
         )}
 

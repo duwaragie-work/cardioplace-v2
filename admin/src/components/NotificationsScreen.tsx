@@ -50,7 +50,7 @@ type ProviderAlert = PatientAlert & {
   followUpScheduledAt: string | null;
 };
 
-type TierFilter = 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'OTHER';
+type TierFilter = 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'TIER_3' | 'OTHER';
 type TopTab = 'alerts' | 'notifications';
 type NotifFilter = 'all' | 'unread' | 'read';
 
@@ -61,6 +61,7 @@ function tierBucket(t: string | null | undefined): TierFilter {
   if (t === 'TIER_1_CONTRAINDICATION' || t === 'TIER_1_ANGIOEDEMA') return 'TIER_1';
   if (t === 'TIER_2_DISCREPANCY') return 'TIER_2';
   if (t === 'BP_LEVEL_1_HIGH' || t === 'BP_LEVEL_1_LOW') return 'BP_L1';
+  if (t === 'TIER_3_INFO') return 'TIER_3';
   return 'OTHER';
 }
 
@@ -81,6 +82,7 @@ function tierBucketFromText(title: string, body: string): TierFilter {
   if (/BP\s*L2|BP\s*LEVEL\s*2|BP\s*EMERGENCY/.test(text)) return 'BP_L2';
   if (/TIER\s*2|DISCREPANCY/.test(text)) return 'TIER_2';
   if (/BP\s*L1|BP\s*LEVEL\s*1/.test(text)) return 'BP_L1';
+  if (/TIER\s*3|SURVEILLANCE|INFORMATIONAL/.test(text)) return 'TIER_3';
   return 'OTHER';
 }
 
@@ -99,6 +101,8 @@ function bucketChrome(b: TierFilter): {
       return { label: 'Tier 2', accent: 'var(--brand-warning-amber)', light: 'var(--brand-warning-amber-light)', icon: <ArrowUp className="w-3 h-3" /> };
     case 'BP_L1':
       return { label: 'BP L1', accent: 'var(--brand-warning-amber)', light: 'var(--brand-warning-amber-light)', icon: <Activity className="w-3 h-3" /> };
+    case 'TIER_3':
+      return { label: 'Tier 3', accent: 'var(--brand-accent-teal)', light: 'var(--brand-accent-teal-light)', icon: <Activity className="w-3 h-3" /> };
     default:
       return { label: 'Other', accent: 'var(--brand-text-muted)', light: 'var(--brand-background)', icon: <Bell className="w-3 h-3" /> };
   }
@@ -230,7 +234,7 @@ export default function NotificationsScreen() {
   // Per-tier counts drive the filter chips (always show even tier-empty
   // chips so the filter row doesn't reflow as alerts come and go).
   const counts = useMemo(() => {
-    const acc: Record<TierFilter, number> = { ALL: 0, BP_L2: 0, TIER_1: 0, TIER_2: 0, BP_L1: 0, OTHER: 0 };
+    const acc: Record<TierFilter, number> = { ALL: 0, BP_L2: 0, TIER_1: 0, TIER_2: 0, BP_L1: 0, TIER_3: 0, OTHER: 0 };
     for (const a of alerts) {
       acc.ALL++;
       acc[tierBucket(a.tier)]++;
@@ -276,6 +280,7 @@ export default function NotificationsScreen() {
       TIER_1: 0,
       TIER_2: 0,
       BP_L1: 0,
+      TIER_3: 0,
       OTHER: 0,
     };
     for (const n of notifs) {
@@ -459,6 +464,7 @@ export default function NotificationsScreen() {
                   ['TIER_1', 'Tier 1'],
                   ['TIER_2', 'Tier 2'],
                   ['BP_L1', 'BP L1'],
+                  ['TIER_3', 'Tier 3'],
                 ] as [TierFilter, string][]).map(([key, label]) => {
                   const active = tierFilter === key;
                   const chrome = key === 'ALL'
@@ -563,6 +569,7 @@ export default function NotificationsScreen() {
                 ['TIER_1', 'Tier 1'],
                 ['TIER_2', 'Tier 2'],
                 ['BP_L1', 'BP L1'],
+                ['TIER_3', 'Tier 3'],
               ] as [TierFilter, string][]).map(([key, label]) => {
                 const active = notifTierFilter === key;
                 const chrome = key === 'ALL'
