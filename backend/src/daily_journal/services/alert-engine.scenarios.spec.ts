@@ -95,6 +95,12 @@ function buildCtx(over: {
   preDay3Mode?: boolean
   ageGroup?: ResolvedContext['ageGroup']
   dateOfBirth?: Date | null
+  // Cluster 8 Q2 / Q3 — drive the CAD ramp + first-month nudge gates.
+  // enrolledAt is compared against CAD_ROLLOUT_START (default
+  // 2026-05-18T00:00:00Z) for the CAD ramp; the nudge requires
+  // ctx.resolvedAt - ctx.enrolledAt ≤ 30 days.
+  enrolledAt?: Date | null
+  practiceName?: string | null
 } = {}): ResolvedContext {
   const isPregnant = over.isPregnant ?? over.profile?.isPregnant ?? false
   const profile: ResolvedContext['profile'] = {
@@ -142,8 +148,8 @@ function buildCtx(over: {
       over.pregnancyThresholdsActive ?? isPregnant,
     triggerPregnancyContraindicationCheck:
       over.triggerPregnancyContraindicationCheck ?? isPregnant,
-    enrolledAt: null,
-    practiceName: null,
+    enrolledAt: over.enrolledAt ?? null,
+    practiceName: over.practiceName ?? null,
     resolvedAt: FIXED_NOW,
   }
 }
@@ -2048,4 +2054,153 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(ruleIds).not.toContain('RULE_BRADY_HR_SYMPTOMATIC')
     expect(ruleIds).not.toContain('RULE_BRADY_ABSOLUTE')
   })
+
+  // ========================================================================
+  // Cluster 8 Q2 (Manisha 5/18/26) — CAD default sbpUpperTarget 160 → 140
+  // ========================================================================
+  // Phased ramp anchored at 2026-05-18 (env-overridable). Phase 1 (default)
+  // = newly enrolled CAD patients only. Phase 2 = + Cedar Hill. Phase 3 =
+  // all. Provider-set PatientThreshold.sbpUpperTarget always wins. The DBP-
+  // high companion (≥80) shares the same ramp gate.
+  //
+  // FIXED_NOW = 2026-04-22 sits BEFORE the rollout, so "ramp-active"
+  // scenarios use enrolledAt ≥ 2026-05-18 explicitly. cadRampApplies is a
+  // pure date comparison — it doesn't enforce enrolledAt ≤ resolvedAt
+  // ordering, so this exercises the gate without env mutation.
+
+  const CAD_RAMP_ENROLLED_AT = new Date('2026-05-18T12:00:00Z')
+  const CAD_PRE_ROLLOUT_ENROLLED_AT = new Date('2026-04-01T00:00:00Z')
+
+  it('Scenario 88 (Cluster 8 B.3) — CAD + SBP 145 + enrolledAt ≥ rollout → RULE_CAD_HIGH fires (Q2 default 140)', async () => {
+    const { createArgs } = await run(
+      buildSession({ systolicBP: 145, diastolicBP: 78, pulse: 72 }),
+      buildCtx({
+        profile: { hasCAD: true, diagnosedHypertension: true },
+        enrolledAt: CAD_RAMP_ENROLLED_AT,
+      }),
+    )
+
+    expect(createArgs.data.ruleId).toBe('RULE_CAD_HIGH')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
+    // Physician message surfaces the new 140 threshold + AHA/ACC treatment
+    // target — verifies the message-registry is reading the ramp default.
+    expect(createArgs.data.physicianMessage).toContain('140')
+    expect(createArgs.data.physicianMessage).toMatch(/AHA\/ACC treatment target 130\/80/i)
+  })
+
+  it('Scenario 89 (Cluster 8 B.3) — CAD + SBP 135 + ramp active → NO CAD_HIGH (below 140)', async () => {
+    const { result } = await run(
+      buildSession({ systolicBP: 135, diastolicBP: 78, pulse: 72 }),
+      buildCtx({
+        profile: { hasCAD: true, diagnosedHypertension: true },
+        enrolledAt: CAD_RAMP_ENROLLED_AT,
+      }),
+    )
+
+    // Below the new 140 default — no bp-high row should fire. Guards against
+    // a regression that drops the floor below 140.
+    expect(result).toBeNull()
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_CAD_HIGH')
+  })
+
+  it('Scenario 90 (Cluster 8 B.3) — CAD + 145/85 + ramp active → CAD_HIGH + CAD_DBP_HIGH co-fire', async () => {
+    await run(
+      buildSession({ systolicBP: 145, diastolicBP: 85, pulse: 72 }),
+      buildCtx({
+        profile: { hasCAD: true, diagnosedHypertension: true },
+        enrolledAt: CAD_RAMP_ENROLLED_AT,
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    // Distinct axes (bp-high SBP vs dbp-high DBP) so both must fire.
+    expect(ruleIds).toContain('RULE_CAD_HIGH')
+    expect(ruleIds).toContain('RULE_CAD_DBP_HIGH')
+    const dbpRow = (
+      prisma.deviationAlert.create.mock.calls as Array<
+        [{ data: { ruleId: string; tier: string; actualValue: unknown; physicianMessage: string } }]
+      >
+    )
+      .map((c) => c[0].data)
+      .find((d) => d.ruleId === 'RULE_CAD_DBP_HIGH')
+    expect(dbpRow?.tier).toBe('BP_LEVEL_1_HIGH')
+    // actualValue is wrapped in Prisma.Decimal at persist time — compare
+    // by stringified form so the assertion works regardless of whether
+    // the driver returns a number, BigInt, or Decimal instance.
+    expect(String(dbpRow?.actualValue)).toBe('85')
+    // Sanity: the new DBP-high companion's physician message references the
+    // 80 default + AHA/ACC 130/80 target.
+    expect(dbpRow?.physicianMessage).toContain('80')
+    expect(dbpRow?.physicianMessage).toMatch(/AHA\/ACC treatment target 130\/80/i)
+    // NOTE: legacy DeviationType for RULE_CAD_DBP_HIGH currently falls
+    // through to 'SYSTOLIC_BP' (only RULE_CAD_DBP_CRITICAL is special-cased
+    // in legacyTypeFor). Not asserting type here — the legacy column is
+    // slated for removal per the engine comment, and the source-of-truth
+    // for axis routing is the new `axisFor` helper, not the legacy enum.
+  })
+
+  it('Scenario 91 (Cluster 8 B.3) — CAD + SBP 145 + enrolledAt BEFORE rollout → old 160 threshold (no CAD_HIGH)', async () => {
+    // Ramp gating: a CAD patient enrolled before the rollout anchor stays on
+    // the 160 default unless ops advances the rollout phase. SBP 145 < 160
+    // → no CAD bp-high row. Without this guard, the 140 default would apply
+    // to every legacy CAD patient on the same day, surprising the cohort.
+    //
+    // NOTE: 145/78 produces PP=67 which fires the Tier 3 RULE_PULSE_PRESSURE
+    // _WIDE chart event. That's an independent axis (info), unrelated to the
+    // CAD ramp under test — we assert specifically on the CAD rules, not on
+    // total row count.
+    await run(
+      buildSession({ systolicBP: 145, diastolicBP: 78, pulse: 72 }),
+      buildCtx({
+        profile: { hasCAD: true, diagnosedHypertension: true },
+        enrolledAt: CAD_PRE_ROLLOUT_ENROLLED_AT,
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_CAD_HIGH')
+    expect(ruleIds).not.toContain('RULE_CAD_DBP_HIGH')
+  })
+
+  it('Scenario 92 (Cluster 8 B.3) — CAD + custom PatientThreshold.sbpUpperTarget=150 → custom wins over the new 140', async () => {
+    // Provider-set custom thresholds bypass the ramp entirely. SBP 145 with
+    // custom=150 → no CAD_HIGH row. If the ramp default 140 ever leaked
+    // through, SBP 145 would fire — that's the regression this catches.
+    //
+    // (Same PP=67 noise as Scenario 91 — assert on the CAD rule, not on
+    // overall result/row count.)
+    await run(
+      buildSession({ systolicBP: 145, diastolicBP: 78, pulse: 72 }),
+      buildCtx({
+        profile: { hasCAD: true, diagnosedHypertension: true },
+        // Ramp-active enrolledAt — ensures the custom threshold's win is
+        // tested against the default 140 path (not the 160 path).
+        enrolledAt: CAD_RAMP_ENROLLED_AT,
+        threshold: {
+          sbpUpperTarget: 150,
+          sbpLowerTarget: null,
+          dbpUpperTarget: null,
+          dbpLowerTarget: null,
+          hrUpperTarget: null,
+          hrLowerTarget: null,
+          setByProviderId: 'prov-1',
+          setAt: TEN_YEARS_AGO,
+          notes: null,
+        },
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).not.toContain('RULE_CAD_HIGH')
+  })
+
 })
