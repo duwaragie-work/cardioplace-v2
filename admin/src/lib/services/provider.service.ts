@@ -398,6 +398,11 @@ export function resolutionTierFor(tier: AlertTier | string | null): ResolutionTi
     // "resolved like all Tier 1 alerts" with 15-field audit rationale.
     // Same resolution catalog (TIER1_FALSE_POSITIVE,
     // TIER1_MEDICATION_CORRECTED, etc.) as the Tier 1 contraindication.
+    // B.5 GATE (Manisha sign-off pending): an angioedema-specific catalog
+    // (e.g. "ACE discontinued in ED", "patient admitted", "evaluated — not
+    // angioedema") plugs in HERE — split TIER_1_ANGIOEDEMA into its own
+    // ResolutionTier + RESOLUTION_CATALOG entries once Dr. Singal signs off
+    // the action wording. Until then the Tier-1 catalog is the approved set.
     case 'TIER_1_ANGIOEDEMA':
       return 'TIER_1'
     case 'TIER_2_DISCREPANCY':

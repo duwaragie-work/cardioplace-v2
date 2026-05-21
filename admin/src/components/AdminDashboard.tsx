@@ -150,6 +150,10 @@ function tierBucket(a: RawAlert): TierFilter {
   // Cluster 8 — angioedema buckets into TIER_1 so the dashboard TIER_1
   // filter surfaces it alongside contraindications (Manisha "resolved
   // like all Tier 1 alerts").
+  // B.5 GATE (Manisha sign-off pending): a bespoke "Airway emergency" bucket
+  // + distinctive chrome (vs the generic Tier-1 red Pill) plugs in HERE and
+  // in bucketChrome() once Dr. Singal approves the label/colour. Until then
+  // angioedema is correctly visible + resolvable as Tier 1 (no functional gap).
   if (a.tier === 'TIER_1_CONTRAINDICATION' || a.tier === 'TIER_1_ANGIOEDEMA') return 'TIER_1';
   if (a.tier === 'TIER_2_DISCREPANCY') return 'TIER_2';
   if (a.tier === 'BP_LEVEL_1_HIGH' || a.tier === 'BP_LEVEL_1_LOW') return 'BP_L1';
