@@ -402,6 +402,11 @@ export const T = {
     careTeamReadonly: 'admin-careteam-readonly',
     careTeamCurrent: (role: 'primary' | 'backup' | 'md' | 'practice') =>
       `admin-careteam-current-${role}`,
+    // May 2026 role-scope refactor — inline validation banners.
+    // Red: hard collision (backend rejects, Save disabled).
+    // Amber: soft warning (Save still enabled — small-practice realism).
+    careTeamPrimaryBackupCollision: 'admin-careteam-primary-backup-collision',
+    careTeamMdCollision: 'admin-careteam-md-provider-collision',
 
     // EnrollmentCard (no unenroll affordance — Category C, see report)
     enrollmentCard: 'admin-enrollment-card',
