@@ -106,6 +106,14 @@ const en = {
 
   // ─── Check-In v2 (Flow B) ──────────────────────────────────────────────────
   // B1 — pre-measurement checklist
+  'checkin.resume.title': 'Resume your check-in?',
+  'checkin.resume.body': "You started a check-in but didn't finish it. Pick up where you left off, or start a new one.",
+  'checkin.resume.resume': 'Resume check-in',
+  'checkin.resume.startNew': 'Start a new check-in',
+  'checkin.saveExit.title': 'Save and finish later?',
+  'checkin.saveExit.body': "Your check-in is saved on this device. You can pick up right where you left off next time.",
+  'checkin.saveExit.confirm': 'Save and exit',
+  'checkin.saveExit.keepGoing': 'Keep going',
   'checkin.b1.title': 'Before you measure',
   'checkin.b1.subtitle': 'A quick checklist for an accurate reading.',
   'checkin.b1.audio': 'Before you measure. A quick checklist for an accurate reading. Tap each item that is true for you right now.',
@@ -119,6 +127,8 @@ const en = {
   'checkin.b1.itemCuff': 'Cuff is on bare upper arm (not over clothing)',
   'checkin.b1.allSet': 'All set — your reading will be the most accurate.',
   'checkin.b1.progress': '{n} of 8 confirmed.',
+  'checkin.b1.selectAll': 'Select all',
+  'checkin.b1.unselectAll': 'Unselect all',
   'checkin.b1.footer': "These help your care team trust the reading. You can skip items that don't apply.",
 
   // B2 — reading (date/time + position + BP + pulse)
@@ -240,6 +250,8 @@ const en = {
 
   // Wizard chrome + session banner
   'checkin.nav.back': 'Back',
+  'checkin.nav.save': 'Save',
+  'checkin.nav.saveAria': 'Save and go to dashboard',
   'checkin.nav.stepOf': 'Step {current} of {total}',
   'checkin.nav.sessionBanner': 'Reading {n} in this session',
   'checkin.nav.sessionBannerAfib': 'Reading {n} in this session · AFib needs 3 in a row',
@@ -251,12 +263,14 @@ const en = {
   'checkin.err.dateTime': 'Please pick the date and time.',
   'checkin.err.dateInvalid': "That date doesn't look right.",
   'checkin.err.timeFuture': 'The time is in the future.',
+  'checkin.err.dateFuture': 'The date is in the future.',
   'checkin.err.timeOld': "That's more than 30 days ago.",
   'checkin.err.position': 'Pick a position.',
   'checkin.err.bpMissing': 'Enter both blood pressure numbers.',
   'checkin.err.systolic': 'Top number should be between 60 and 250.',
   'checkin.err.diastolic': 'Bottom number should be between 40 and 150.',
   'checkin.err.pulse': 'Pulse should be between 30 and 220.',
+  'checkin.err.weight': 'Weight should be between {min} and {max} {unit}.',
   'checkin.err.submit': 'Could not send reading. Try again.',
 
 
@@ -533,6 +547,7 @@ const en = {
   // variant and weightRange are edit-only and stay here.
   'readings.validate.bpBoth': 'Enter both blood pressure numbers (or clear both).',
   'readings.validate.weightRange': 'Weight should be between 20 and 600.',
+  'readings.validate.missedReason': 'Please pick a reason for each medication you missed.',
   'readings.sameMinute': 'same minute',
   'readings.sessionReadings': 'Session · {count} readings',
   'readings.readingsCount': '{count} readings',
@@ -954,6 +969,9 @@ const en = {
   'intake.a0b.begin': 'Begin',
   'intake.a0b.saveForLater': 'Save for later',
 
+  // Shared placeholder shown inside empty date fields (DateField.tsx)
+  'intake.datePlaceholder': 'MM / DD / YYYY',
+
   // A1 — demographics
   'intake.a1.title': 'A bit about you',
   'intake.a1.subtitle': 'Helps us personalise your safety thresholds.',
@@ -1107,9 +1125,9 @@ const en = {
   'intake.a9.title': 'How often each day?',
   'intake.a9.subtitle': 'Just the count — your care team will fill in the dose.',
   'intake.a9.audio': 'How often do you take each one each day? Just the count — your care team will fill in the dose.',
-  'intake.a9.freqOnce': 'One time',
-  'intake.a9.freqTwice': 'Two times',
-  'intake.a9.freqThree': 'Three times',
+  'intake.a9.freqOnce': '1 Time',
+  'intake.a9.freqTwice': '2 Times',
+  'intake.a9.freqThree': '3 Times',
   'intake.a9.freqAsNeeded': 'As needed',
   'intake.a9.freqUnsure': 'Not sure',
   'intake.a9.medAudio': 'How many times a day do you take {name}?',

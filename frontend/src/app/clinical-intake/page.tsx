@@ -83,6 +83,7 @@ import OtherMedicationsList from '@/components/intake/OtherMedicationsList';
 import OtherMedEditModal from '@/components/intake/OtherMedEditModal';
 import { cmToFtIn, ftInToCm } from '@/lib/units';
 import StepDots from '@/components/intake/StepDots';
+import DateField from '@/components/intake/DateField';
 import ChoiceCard from '@/components/intake/ChoiceCard';
 import MedicationCard from '@/components/intake/MedicationCard';
 import SpinnerIndicator from '@/components/ui/SpinnerIndicator';
@@ -259,7 +260,7 @@ interface StepProps {
 function A0bIntro({ onBegin, onSaveLater }: { onBegin: () => void; onSaveLater: () => void }) {
   const { t } = useLanguage();
   return (
-    <div className="flex flex-col items-center text-center px-6 py-10">
+    <div className="flex flex-col items-center text-center px-6 py-6 sm:py-10">
       <motion.div
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -355,22 +356,13 @@ function A1Demographics({ state, setState }: StepProps) {
 
       <div>
         <SectionLabel text={t('intake.a1.dobQuestion')} audio={t('intake.a1.dobQuestion')} />
-        <input
+        <DateField
           id="intake-a1-dob"
-          data-testid="intake-dob"
-          type="date"
+          testId="intake-dob"
           value={state.dateOfBirth ?? ''}
           max={maxDobIso()}
-          onChange={(e) => setState((p) => ({ ...p, dateOfBirth: e.target.value || undefined }))}
-          className="w-full h-14 px-4 rounded-xl text-[18px] outline-none transition box-border"
-          style={{
-            border: '2px solid var(--brand-border)',
-            color: 'var(--brand-text-primary)',
-            backgroundColor: 'white',
-            colorScheme: 'light',
-          }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+          placeholder={t('intake.datePlaceholder')}
+          onChange={(v) => setState((p) => ({ ...p, dateOfBirth: v || undefined }))}
         />
         <p className="text-[12px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
           {t('intake.a1.dobHint')}
@@ -430,7 +422,10 @@ function A1Demographics({ state, setState }: StepProps) {
                         value={storedFeet || ''}
                         onChange={(e) => {
                           const v = parseInt(e.target.value, 10);
-                          updateHeightFromFtIn(Number.isFinite(v) ? v : 0, storedInches);
+                          // Clamp to a realistic range so a stray digit can't
+                          // produce an out-of-bounds height.
+                          const feet = Number.isFinite(v) ? Math.min(8, Math.max(0, v)) : 0;
+                          updateHeightFromFtIn(feet, storedInches);
                         }}
                         placeholder="5"
                         className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
@@ -447,7 +442,7 @@ function A1Demographics({ state, setState }: StepProps) {
                         numeric
                         onTranscript={(text) => {
                           const n = parseInt(text, 10);
-                          if (Number.isFinite(n)) updateHeightFromFtIn(n, storedInches);
+                          if (Number.isFinite(n)) updateHeightFromFtIn(Math.min(8, Math.max(0, n)), storedInches);
                         }}
                       />
                     </div>
@@ -463,10 +458,15 @@ function A1Demographics({ state, setState }: StepProps) {
                         inputMode="numeric"
                         min={0}
                         max={11}
-                        value={storedInches || (storedFeet ? '0' : '')}
+                        value={storedInches || ''}
                         onChange={(e) => {
                           const v = parseInt(e.target.value, 10);
-                          updateHeightFromFtIn(storedFeet, Number.isFinite(v) ? v : 0);
+                          // Clamp to 0–11. Without this, an inches value > 11
+                          // rolls over into feet through the cm round-trip
+                          // (e.g. 4 ft + 50 in = 98 in = 8 ft 2 in), which is
+                          // what made the feet field jump while typing inches.
+                          const inches = Number.isFinite(v) ? Math.min(11, Math.max(0, v)) : 0;
+                          updateHeightFromFtIn(storedFeet, inches);
                         }}
                         placeholder="9"
                         className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
@@ -483,7 +483,7 @@ function A1Demographics({ state, setState }: StepProps) {
                         numeric
                         onTranscript={(text) => {
                           const n = parseInt(text, 10);
-                          if (Number.isFinite(n)) updateHeightFromFtIn(storedFeet, n);
+                          if (Number.isFinite(n)) updateHeightFromFtIn(storedFeet, Math.min(11, Math.max(0, n)));
                         }}
                       />
                     </div>
@@ -612,18 +612,12 @@ function A2Pregnancy({ state, setState }: StepProps) {
             exit={{ opacity: 0, y: -8 }}
           >
             <SectionLabel text={t('intake.a2.dueDateLabel')} audio={t('intake.a2.dueDateAudio')} />
-            <input
-              type="date"
-              aria-label={t('intake.a2.dueDateLabel')}
+            <DateField
+              ariaLabel={t('intake.a2.dueDateLabel')}
               value={state.pregnancyDueDate ?? ''}
-              onChange={(e) => setState((p) => ({ ...p, pregnancyDueDate: e.target.value || undefined }))}
-              className="w-full h-14 px-5 rounded-xl text-[15px] outline-none transition box-border"
-              style={{
-                border: '2px solid var(--brand-border)',
-                color: 'var(--brand-text-primary)',
-                backgroundColor: 'white',
-                colorScheme: 'light',
-              }}
+              placeholder={t('intake.datePlaceholder')}
+              textSizeClass="text-[15px]"
+              onChange={(v) => setState((p) => ({ ...p, pregnancyDueDate: v || undefined }))}
             />
           </motion.div>
         )}
@@ -1521,7 +1515,7 @@ function A9Frequency({ state, setState }: StepProps) {
               </div>
               <AudioButton text={t('intake.a9.medAudio').replace('{name}', m.drugName)} size="sm" />
             </div>
-            <div className="grid grid-cols-4 gap-2" data-testid={`intake-a9-row-${i}`}>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" data-testid={`intake-a9-row-${i}`}>
               {options.map((o) => {
                 const active = m.frequency === o.value;
                 return (
@@ -2408,7 +2402,25 @@ function ClinicalIntakeWizard() {
   const stepProps: StepProps = { state, setState, goTo };
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: 'var(--brand-background)' }}>
+    <div
+      className={
+        'flex flex-col ' +
+        // Intro (A0b) + complete (A11) are single-screen panels: pin them to
+        // the viewport so they never grow past the screen or introduce a page
+        // scroll. Other steps keep min-h-screen and scroll.
+        (isIntro || isComplete ? '' : 'min-h-screen')
+      }
+      style={{
+        backgroundColor: 'var(--brand-background)',
+        // The global navbar is fixed (h-16) and NavbarWrapper reserves space
+        // for it with pt-16, so this route already sits 4rem below the top.
+        // Cap the single-screen panels at viewport MINUS that 4rem, otherwise
+        // 4rem (navbar) + 100dvh (page) overflows and shows a browser scroll.
+        // Inline style, not a Tailwind calc class — arbitrary calc() values
+        // get stripped on some builds (see the main padding note below).
+        ...(isIntro || isComplete ? { height: 'calc(100dvh - 4rem)' } : null),
+      }}
+    >
       {/* Top bar — visible when not on intro/complete */}
       {showNav && (
         <header
@@ -2478,7 +2490,10 @@ function ClinicalIntakeWizard() {
         className={
           'flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 ' +
           (isIntro || isComplete
-            ? 'flex items-center justify-center py-8'
+            // min-h-0 lets the flex child shrink so overflow-y-auto can take
+            // over; items-center-safe centers when it fits and falls back to
+            // top-aligned + scroll when content is taller than the screen.
+            ? 'flex items-center-safe justify-center overflow-y-auto min-h-0 py-6'
             : 'py-5 sm:py-8')
         }
         style={

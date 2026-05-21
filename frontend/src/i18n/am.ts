@@ -113,6 +113,14 @@ const am: Record<TranslationKey, string> = {
 
   // ─── Check-In v2 (Flow B) ──────────────────────────────────────────────────
   // B1 — pre-measurement checklist
+  'checkin.resume.title': 'ምልከታዎን ይቀጥሉ?',
+  'checkin.resume.body': 'ምልከታ ጀምረዋል ግን አልጨረሱትም። ካቆሙበት ይቀጥሉ ወይም አዲስ ይጀምሩ።',
+  'checkin.resume.resume': 'ምልከታ ቀጥል',
+  'checkin.resume.startNew': 'አዲስ ምልከታ ጀምር',
+  'checkin.saveExit.title': 'አስቀምጠው በኋላ ይጨርሱ?',
+  'checkin.saveExit.body': 'ምልከታዎ በዚህ መሣሪያ ላይ ተቀምጧል። በሚቀጥለው ጊዜ ካቆሙበት መቀጠል ይችላሉ።',
+  'checkin.saveExit.confirm': 'አስቀምጠህ ውጣ',
+  'checkin.saveExit.keepGoing': 'ቀጥል',
   'checkin.b1.title': 'ከመለካትዎ በፊት',
   'checkin.b1.subtitle': 'ትክክለኛ ንባብ ለማግኘት ፈጣን ዝርዝር።',
   'checkin.b1.audio': 'ከመለካትዎ በፊት። ትክክለኛ ንባብ ለማግኘት ፈጣን ዝርዝር። አሁን ለእርስዎ እውነት የሆነውን እያንዳንዱን ነገር ይንኩ።',
@@ -126,6 +134,8 @@ const am: Record<TranslationKey, string> = {
   'checkin.b1.itemCuff': 'ካፍ በባዶ የላይ ክንድ ላይ (በልብስ ላይ አይደለም)',
   'checkin.b1.allSet': 'ሁሉም ዝግጁ — ንባብዎ በጣም ትክክል ይሆናል።',
   'checkin.b1.progress': '{n} ከ8 ተረጋግጧል።',
+  'checkin.b1.selectAll': 'ሁሉንም ይምረጡ',
+  'checkin.b1.unselectAll': 'ሁሉንም አይምረጡ',
   'checkin.b1.footer': 'ይህ የተንከባካቢ ቡድንዎ በንባቡ እንዲተማመን ይረዳል። የማይመለከቱ ነገሮችን መዝለል ይችላሉ።',
 
   // B2 — reading
@@ -242,6 +252,8 @@ const am: Record<TranslationKey, string> = {
 
   // Wizard chrome + session banner
   'checkin.nav.back': 'ተመለስ',
+  'checkin.nav.save': 'አስቀምጥ',
+  'checkin.nav.saveAria': 'አስቀምጠው ወደ ዳሽቦርድ ይሂዱ',
   'checkin.nav.stepOf': 'ደረጃ {current} ከ {total}',
   'checkin.nav.sessionBanner': 'ንባብ {n} በዚህ ክፍለ ጊዜ',
   'checkin.nav.sessionBannerAfib': 'ንባብ {n} በዚህ ክፍለ ጊዜ · አትሪያል ፊብሪሌሽን 3 በተከታታይ ይፈልጋል',
@@ -253,12 +265,14 @@ const am: Record<TranslationKey, string> = {
   'checkin.err.dateTime': 'እባክዎ ቀን እና ሰዓት ይምረጡ።',
   'checkin.err.dateInvalid': 'ያ ቀን ትክክል አይመስልም።',
   'checkin.err.timeFuture': 'ሰዓቱ በወደፊት ነው።',
+  'checkin.err.dateFuture': 'ቀኑ በወደፊት ነው።',
   'checkin.err.timeOld': 'ያ ከ30 ቀናት በፊት ነው።',
   'checkin.err.position': 'አንድ አቀማመጥ ይምረጡ።',
   'checkin.err.bpMissing': 'ሁለቱንም የደም ግፊት ቁጥሮች ያስገቡ።',
   'checkin.err.systolic': 'ከፍተኛው ቁጥር በ60 እና 250 መካከል መሆን አለበት።',
   'checkin.err.diastolic': 'ዝቅተኛው ቁጥር በ40 እና 150 መካከል መሆን አለበት።',
   'checkin.err.pulse': 'የልብ ምት በ30 እና 220 መካከል መሆን አለበት።',
+  'checkin.err.weight': 'ክብደት በ{min} እና {max} {unit} መካከል መሆን አለበት።',
   'checkin.err.submit': 'ንባብ መላክ አልተቻለም። እንደገና ይሞክሩ።',
 
 
@@ -532,6 +546,7 @@ const am: Record<TranslationKey, string> = {
   // ─── Readings (audit sweep additions) ──────────────────────────────────────
   'readings.validate.bpBoth': 'የደም ግፊት ሁለቱንም ቁጥር ያስገቡ (ወይም ሁለቱንም ያጥፉ)።',
   'readings.validate.weightRange': 'ክብደቱ ከ20 እስከ 600 መሆን አለበት።',
+  'readings.validate.missedReason': 'ላመለጡት እያንዳንዱ መድኃኒት ምክንያት ይምረጡ።',
   'readings.sameMinute': 'ተመሳሳይ ደቂቃ',
   'readings.sessionReadings': 'ክፍለ-ጊዜ · {count} ንባቦች',
   'readings.readingsCount': '{count} ንባቦች',
@@ -953,6 +968,9 @@ const am: Record<TranslationKey, string> = {
   'intake.a0b.begin': 'ጀምር',
   'intake.a0b.saveForLater': 'ለኋላ አስቀምጥ',
 
+  // Shared placeholder shown inside empty date fields (DateField.tsx)
+  'intake.datePlaceholder': 'ቀን / ወር / ዓመት',
+
   // A1 — demographics
   'intake.a1.title': 'ስለ እርስዎ ትንሽ',
   'intake.a1.subtitle': 'የደህንነት ገደቦችዎን ለማስተካከል ይረዳናል።',
@@ -1099,9 +1117,9 @@ const am: Record<TranslationKey, string> = {
   'intake.a9.title': 'በቀን ስንት ጊዜ?',
   'intake.a9.subtitle': 'ቁጥሩ ብቻ — የተንከባካቢ ቡድንዎ መጠኑን ይሞላል።',
   'intake.a9.audio': 'እያንዳንዱን በቀን ስንት ጊዜ ይወስዳሉ? ቁጥሩ ብቻ — የተንከባካቢ ቡድንዎ መጠኑን ይሞላል።',
-  'intake.a9.freqOnce': 'አንዴ',
-  'intake.a9.freqTwice': 'ሁለቴ',
-  'intake.a9.freqThree': 'ሶስቴ',
+  'intake.a9.freqOnce': '1 ጊዜ',
+  'intake.a9.freqTwice': '2 ጊዜ',
+  'intake.a9.freqThree': '3 ጊዜ',
   'intake.a9.freqAsNeeded': 'እንደ አስፈላጊነቱ',
   'intake.a9.freqUnsure': 'እርግጠኛ አይደለሁም',
   'intake.a9.medAudio': '{name} በቀን ስንት ጊዜ ይወስዳሉ?',
