@@ -38,6 +38,7 @@ import {
 } from '@/lib/services/practice.service';
 import { useAuth } from '@/lib/auth-context';
 import { canAssignCareTeam } from '@/lib/roleGates';
+import CaregiversPanel from './CaregiversPanel';
 
 interface Props {
   patientId: string;
@@ -381,6 +382,9 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
           </div>
         </div>
       )}
+
+      {/* Gap 5 — caregiver contacts + consent live alongside the care team. */}
+      <CaregiversPanel patientId={patientId} />
     </div>
   );
 }
