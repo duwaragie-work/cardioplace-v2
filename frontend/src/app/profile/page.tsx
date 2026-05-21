@@ -51,6 +51,7 @@ import {
   type PatientMedicationDto,
   type CareTeamDto,
 } from '@/lib/services/intake.service';
+import CaregiversCard from '@/components/cardio/CaregiversCard';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -1112,6 +1113,9 @@ export default function ProfilePage() {
           </div>
         </div>
         {/* /grid */}
+
+        {/* Gap 5 — caregiver contacts + consent (full width below the grid) */}
+        <CaregiversCard />
 
         {/* Re-verification reminder — visible whenever the profile is unverified */}
         {profile && verificationStatus === 'UNVERIFIED' && (
