@@ -117,8 +117,13 @@ describe('OutputGeneratorService', () => {
         metadata: { drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR', conditionLabel: 'Pregnancy' },
       })
       const out = service.generate(r, baseSession, false)
+      // Reconciled 2026-05-20 (B.2): the registry copy now names the specific
+      // drug + a clear next action ("call your provider today before your next
+      // dose") instead of the generic "blood pressure medicine" phrase. Intent
+      // is unchanged — warm, plain language, no clinical jargon.
       expect(out.patientMessage.toLowerCase()).not.toContain('teratogenic')
-      expect(out.patientMessage).toMatch(/blood pressure medicine/i)
+      expect(out.patientMessage).toMatch(/call your provider/i)
+      expect(out.patientMessage).toContain('Lisinopril')
     })
 
     it('pregnancy+ACE physician message uses clinical terms', () => {

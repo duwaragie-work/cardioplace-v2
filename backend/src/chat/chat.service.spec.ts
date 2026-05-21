@@ -15,6 +15,9 @@ import { PrismaService } from '../prisma/prisma.service.js'
 import { DailyJournalService } from '../daily_journal/daily_journal.service.js'
 import { ProfileResolverService } from '../daily_journal/services/profile-resolver.service.js'
 import { GeminiService } from '../gemini/gemini.service.js'
+import { OcrService } from '../ocr/ocr.service.js'
+import { MedicationAdherenceService } from './services/medication-adherence.service.js'
+import { SymptomQuickLogService } from './services/symptom-quick-log.service.js'
 
 const NOW = new Date('2026-04-22T10:00:00Z')
 const DOB = new Date('1980-06-15T00:00:00Z')
@@ -103,6 +106,9 @@ describe('ChatService.buildPatientSystemPrompt() — phase/16', () => {
         { provide: ConfigService, useValue: { get: jest.fn() } },
         { provide: DailyJournalService, useValue: {} },
         { provide: GeminiService, useValue: {} },
+        { provide: OcrService, useValue: {} },
+        { provide: MedicationAdherenceService, useValue: {} },
+        { provide: SymptomQuickLogService, useValue: {} },
       ],
     }).compile()
     service = module.get(ChatService)

@@ -413,17 +413,17 @@ describe('AlertEngineService (orchestrator)', () => {
       expect(call.data.dismissible).toBe(true)
     })
 
-    it('no rule fires → resolves existing open alerts', async () => {
+    it('no rule fires → no new alert AND no silent auto-resolve (JCAHO)', async () => {
+      // Reconciled 2026-05-20 (B.2): the silent auto-resolve sweep on a clean
+      // reading was removed in 37b7989 — it broke the JCAHO audit trail (a
+      // provider, not the system, must resolve an alert with a rationale).
+      // A benign reading now creates nothing and resolves nothing.
       sessionAverager.averageForEntry.mockResolvedValue(
         baseSession({ systolicBP: 125, diastolicBP: 78 }),
       )
       await service.evaluate('entry-1')
       expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
-      expect(prisma.deviationAlert.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: { status: 'RESOLVED' },
-        }),
-      )
+      expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
     })
 
     it('no PatientProfile → skip silently', async () => {
@@ -495,19 +495,16 @@ describe('AlertEngineService (orchestrator)', () => {
     })
   })
 
-  // Bug 2 — resolveOpenAlerts must only clear BP Level 1 rows, not Tier 1 / L2.
-  describe('Bug 2 — resolveOpenAlerts scope', () => {
-    it('benign reading only resolves BP_LEVEL_1_* tiers', async () => {
+  // Bug 2 (superseded) — the auto-resolve sweep was removed entirely in
+  // 37b7989 for JCAHO compliance (only a provider resolves an alert, with a
+  // rationale). The scope concern is moot: a benign reading resolves nothing.
+  describe('Bug 2 (superseded) — no auto-resolve sweep', () => {
+    it('benign reading does not auto-resolve any tier', async () => {
       sessionAverager.averageForEntry.mockResolvedValue(
         baseSession({ systolicBP: 125, diastolicBP: 78 }),
       )
       await service.evaluate('entry-1')
-      expect(prisma.deviationAlert.updateMany).toHaveBeenCalledTimes(1)
-      const call = prisma.deviationAlert.updateMany.mock.calls[0][0]
-      expect(call.where.tier).toEqual({
-        in: ['BP_LEVEL_1_HIGH', 'BP_LEVEL_1_LOW'],
-      })
-      expect(call.data).toEqual({ status: 'RESOLVED' })
+      expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
     })
   })
 
