@@ -20,14 +20,23 @@ const LANGUAGE_RULE =
 /**
  * Build the unified voice system instruction.
  *
- * Phase/27 parity — gated on CHAT_V2_PROMPT_ENABLED env (must be 'true' to
- * flip). Defaults to v1 so prod keeps Manisha-signed-off behaviour until she
- * explicitly approves v2. Same env var as the chat system prompt; flipping
- * one without the other means voice and text drift.
+ * Phase/27 parity — gated on CHAT_V2_PROMPT_ENABLED. B.4: the caller
+ * (VoiceService) resolves the flag via ConfigService and passes `v2` so
+ * voice + text read the flag through the SAME source with the SAME
+ * normalization (exact `=== 'true'`). The env fallback is kept only for
+ * callers/tests that don't thread the resolved value. Defaults to v1 so prod
+ * keeps Manisha-signed-off behaviour until she explicitly approves v2.
  */
-export function buildVoiceSystemInstruction(patientContext: string): string {
-  const v2 = process.env.CHAT_V2_PROMPT_ENABLED?.toLowerCase() === 'true'
-  return v2 ? promptV2(patientContext) : promptV1(patientContext)
+export function buildVoiceSystemInstruction(
+  patientContext: string,
+  v2?: boolean,
+): string {
+  // Match the chat check exactly (system-prompt.service.ts isV2Enabled):
+  // strict `=== 'true'`, no case-folding, so a value like "TRUE" can't
+  // enable one surface but not the other.
+  const enabled =
+    v2 ?? process.env.CHAT_V2_PROMPT_ENABLED === 'true'
+  return enabled ? promptV2(patientContext) : promptV1(patientContext)
 }
 
 function promptV1(patientContext: string): string {

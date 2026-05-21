@@ -208,7 +208,14 @@ export class VoiceService implements OnModuleDestroy {
     // Use the dedicated v1alpha client (see constructor). The shared
     // `GeminiService.clientInstance` is on v1beta for text/OCR/embeddings.
     const client = this.liveClient
-    const systemInstruction = buildVoiceSystemInstruction(patientContext)
+    // B.4 — resolve the v2 flag via ConfigService (same source + exact
+    // `=== 'true'` check as the text chat) so voice and text never drift.
+    const v2Enabled =
+      this.config.get<string>('CHAT_V2_PROMPT_ENABLED') === 'true'
+    const systemInstruction = buildVoiceSystemInstruction(
+      patientContext,
+      v2Enabled,
+    )
 
     // Span covers just the connect handshake. The session itself is long-
     // lived; per-tool spans are recorded inside handleLiveEvent.
