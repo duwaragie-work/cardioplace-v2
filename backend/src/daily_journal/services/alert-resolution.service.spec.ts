@@ -1,6 +1,8 @@
 import { jest } from '@jest/globals'
 import { BadRequestException, NotFoundException } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
+import { PatientAccessService } from '../../common/patient-access.service.js'
+import { UserRole } from '../../generated/prisma/enums.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { AlertResolutionService } from './alert-resolution.service.js'
 import { EscalationService } from './escalation.service.js'
@@ -15,6 +17,10 @@ describe('AlertResolutionService', () => {
   let escalation: { scheduleRetry: jest.Mock }
 
   const adminId = 'admin-1'
+  // Actor wraps adminId + roles to match the May 2026 role-scope service
+  // signature. SUPER_ADMIN short-circuits the access check so tests don't
+  // need to set up assignment / practice membership mocks.
+  const actor = { id: adminId, roles: [UserRole.SUPER_ADMIN] as UserRole[] }
   const alertId = 'alert-1'
   const baseAlert = {
     id: alertId,
@@ -51,11 +57,19 @@ describe('AlertResolutionService', () => {
       scheduleRetry: (jest.fn() as jest.Mock<any>).mockResolvedValue(undefined),
     }
 
+    // PatientAccessService is no-op mocked: SUPER_ADMIN actor bypasses the
+    // real implementation's scope lookup anyway, but a stub keeps the unit
+    // tests isolated from PrismaService internals.
+    const access = {
+      assertCanAccessPatient: (jest.fn() as jest.Mock<any>).mockResolvedValue(undefined),
+    }
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AlertResolutionService,
         { provide: PrismaService, useValue: prisma },
         { provide: EscalationService, useValue: escalation },
+        { provide: PatientAccessService, useValue: access },
       ],
     }).compile()
 
@@ -67,7 +81,7 @@ describe('AlertResolutionService', () => {
   // ────────────────────────────────────────────────────────────────────────
   describe('acknowledge', () => {
     it('marks alert ACKNOWLEDGED + closes open escalation events', async () => {
-      const r = await service.acknowledge(alertId, adminId)
+      const r = await service.acknowledge(alertId, actor)
       expect(r.acknowledgedAt).toBeInstanceOf(Date)
       expect(prisma.deviationAlert.update).toHaveBeenCalledWith({
         where: { id: alertId },
@@ -85,7 +99,7 @@ describe('AlertResolutionService', () => {
         ...baseAlert,
         acknowledgedAt: prevAck,
       })
-      const r = await service.acknowledge(alertId, adminId)
+      const r = await service.acknowledge(alertId, actor)
       expect(r.acknowledgedAt).toBe(prevAck)
       expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
     })
@@ -95,14 +109,14 @@ describe('AlertResolutionService', () => {
         ...baseAlert,
         status: 'RESOLVED',
       })
-      await expect(service.acknowledge(alertId, adminId)).rejects.toThrow(
+      await expect(service.acknowledge(alertId, actor)).rejects.toThrow(
         BadRequestException,
       )
     })
 
     it('404 on missing alert', async () => {
       prisma.deviationAlert.findUnique.mockResolvedValue(null)
-      await expect(service.acknowledge(alertId, adminId)).rejects.toThrow(
+      await expect(service.acknowledge(alertId, actor)).rejects.toThrow(
         NotFoundException,
       )
     })
@@ -118,7 +132,7 @@ describe('AlertResolutionService', () => {
         tier: 'TIER_1_CONTRAINDICATION',
       })
       await expect(
-        service.resolve(alertId, adminId, {
+        service.resolve(alertId, actor, {
           resolutionAction: 'TIER1_DISCONTINUED',
         }),
       ).rejects.toThrow(BadRequestException)
@@ -129,7 +143,7 @@ describe('AlertResolutionService', () => {
         ...baseAlert,
         tier: 'TIER_1_CONTRAINDICATION',
       })
-      const r = await service.resolve(alertId, adminId, {
+      const r = await service.resolve(alertId, actor, {
         resolutionAction: 'TIER1_DISCONTINUED',
         resolutionRationale: 'Patient switched to labetalol',
       })
@@ -145,7 +159,7 @@ describe('AlertResolutionService', () => {
         ...baseAlert,
         tier: 'TIER_1_CONTRAINDICATION',
       })
-      await service.resolve(alertId, adminId, {
+      await service.resolve(alertId, actor, {
         resolutionAction: 'TIER1_DISCONTINUED',
         resolutionRationale: 'Patient switched to labetalol',
       })
@@ -167,7 +181,7 @@ describe('AlertResolutionService', () => {
         tier: 'TIER_2_DISCREPANCY',
       })
       await expect(
-        service.resolve(alertId, adminId, {
+        service.resolve(alertId, actor, {
           resolutionAction: 'TIER2_REVIEWED_NO_ACTION',
         }),
       ).rejects.toThrow(BadRequestException)
@@ -178,7 +192,7 @@ describe('AlertResolutionService', () => {
         ...baseAlert,
         tier: 'TIER_2_DISCREPANCY',
       })
-      const r = await service.resolve(alertId, adminId, {
+      const r = await service.resolve(alertId, actor, {
         resolutionAction: 'TIER2_WILL_CONTACT',
       })
       expect(r.status).toBe('RESOLVED')
@@ -189,7 +203,7 @@ describe('AlertResolutionService', () => {
         ...baseAlert,
         tier: 'TIER_2_DISCREPANCY',
       })
-      const r = await service.resolve(alertId, adminId, {
+      const r = await service.resolve(alertId, actor, {
         resolutionAction: 'TIER2_CHANGE_ORDERED',
       })
       expect(r.status).toBe('RESOLVED')
@@ -201,7 +215,7 @@ describe('AlertResolutionService', () => {
         tier: 'BP_LEVEL_2',
       })
       await expect(
-        service.resolve(alertId, adminId, {
+        service.resolve(alertId, actor, {
           resolutionAction: 'BP_L2_CONTACTED_MED_ADJUSTED',
         }),
       ).rejects.toThrow(BadRequestException)
@@ -213,7 +227,7 @@ describe('AlertResolutionService', () => {
         tier: 'BP_LEVEL_2',
       })
       await expect(
-        service.resolve(alertId, adminId, {
+        service.resolve(alertId, actor, {
           resolutionAction: 'TIER1_DISCONTINUED',
           resolutionRationale: 'explanation here',
         }),
@@ -233,7 +247,7 @@ describe('AlertResolutionService', () => {
     })
 
     it('leaves alert OPEN + calls EscalationService.scheduleRetry', async () => {
-      const r = await service.resolve(alertId, adminId, {
+      const r = await service.resolve(alertId, actor, {
         resolutionAction: 'BP_L2_UNABLE_TO_REACH_RETRY',
         resolutionRationale: 'Phone unanswered, left voicemail',
       })
@@ -259,7 +273,7 @@ describe('AlertResolutionService', () => {
 
     it('still requires rationale', async () => {
       await expect(
-        service.resolve(alertId, adminId, {
+        service.resolve(alertId, actor, {
           resolutionAction: 'BP_L2_UNABLE_TO_REACH_RETRY',
         }),
       ).rejects.toThrow(BadRequestException)

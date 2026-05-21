@@ -8,7 +8,8 @@
 //   inline expand + three-tier + Resolve / Acknowledge surface is reused
 //   on /admin/notifications per CLINICAL_SPEC V2-C Layer 1).
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Bell,
   CheckCircle2,
@@ -82,6 +83,32 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('OPEN');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [resolving, setResolving] = useState<PatientAlert | null>(null);
+
+  // Deep-link consumer — escalation notifications navigate to
+  // /patients/{userId}?alert={alertId}; when the alert arrives in the
+  // list we auto-expand + scroll to it so the user lands on the row
+  // that triggered the bell click. Falls through silently if the id
+  // doesn't match (alert already resolved + filtered out, etc.).
+  const searchParams = useSearchParams();
+  const targetAlertId = searchParams?.get('alert') ?? null;
+  useEffect(() => {
+    if (!targetAlertId) return;
+    if (loading) return;
+    const exists = alerts.some((a) => a.id === targetAlertId);
+    if (!exists) return;
+    setExpandedId(targetAlertId);
+    // Defer one tick so the row is in the DOM before we scroll.
+    const tick = window.setTimeout(() => {
+      const el = document.querySelector(
+        `[data-testid="admin-alert-row-${targetAlertId}"]`,
+      );
+      if (el && 'scrollIntoView' in el) {
+        (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 50);
+    return () => window.clearTimeout(tick);
+  }, [targetAlertId, alerts, loading]);
+
   // Per-alert ack-in-flight set so the button disables while the request
   // is pending. A Set rather than a boolean so two simultaneous BP L1 acks
   // don't collide visually.
@@ -105,6 +132,10 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
     [alerts],
   );
 
+  // Counts feed the pill badges. ALL excludes Tier 3 (matches main-list
+  // default: Tier 3 lives in Physician notes when filter is ALL). The
+  // Tier 3 bucket is counted from the full alerts array so its pill
+  // accurately reflects how many will appear when the user selects it.
   const counts = useMemo(() => {
     const acc: Record<TierBucket, number> = { ALL: 0, BP_L2: 0, TIER_1: 0, TIER_2: 0, BP_L1: 0, TIER_3: 0, OTHER: 0 };
     for (const a of nonTier3Alerts) {
@@ -112,16 +143,32 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
       acc.ALL++;
       acc[tierBucket(a.tier)]++;
     }
+    for (const a of tier3Alerts) {
+      if (statusFilter !== 'ALL' && a.status !== statusFilter) continue;
+      acc.TIER_3++;
+    }
     return acc;
-  }, [nonTier3Alerts, statusFilter]);
+  }, [nonTier3Alerts, tier3Alerts, statusFilter]);
 
+  // Filtered list rules:
+  //   • TIER_3 selected → show only Tier 3 alerts in the main list.
+  //     The Physician-notes section is suppressed (rows would otherwise
+  //     duplicate).
+  //   • ALL → show non-Tier-3 alerts only (Physician notes section
+  //     handles Tier 3 below the main list).
+  //   • Any other tier → show only that tier's non-Tier-3 alerts.
   const filtered = useMemo(() => {
+    if (tierFilter === 'TIER_3') {
+      return tier3Alerts.filter(
+        (a) => statusFilter === 'ALL' || a.status === statusFilter,
+      );
+    }
     return nonTier3Alerts.filter((a) => {
       if (statusFilter !== 'ALL' && a.status !== statusFilter) return false;
       if (tierFilter !== 'ALL' && tierBucket(a.tier) !== tierFilter) return false;
       return true;
     });
-  }, [nonTier3Alerts, tierFilter, statusFilter]);
+  }, [nonTier3Alerts, tier3Alerts, tierFilter, statusFilter]);
 
   // Cluster 6 Q4 (Manisha 5/9/26) — group alerts that came off the same
   // reading (matched on JournalEntry.measuredAt — proxy for journalEntryId
@@ -237,8 +284,9 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
           </div>
         </div>
 
-        {/* Tier filter chips — Tier 3 omitted; rendered separately in the
-            "Physician notes" section below since it's informational. */}
+        {/* Tier filter chips — six pills including Tier 3. When Tier 3 is
+            selected the main list shows only Tier 3 alerts and the
+            Physician notes section below is suppressed (would duplicate). */}
         <div className="flex flex-wrap items-center gap-1.5">
           {([
             ['ALL', 'All'],
@@ -246,6 +294,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
             ['TIER_1', 'Tier 1'],
             ['TIER_2', 'Tier 2'],
             ['BP_L1', 'BP L1'],
+            ['TIER_3', 'Tier 3'],
           ] as [TierBucket, string][]).map(([key, label]) => {
             const active = tierFilter === key;
             const chrome = key === 'ALL'
@@ -350,8 +399,10 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
           tiers for attention. Quiet teal palette + Stethoscope icon signals
           "context for the clinician" rather than "action required". Per
           CLINICAL_SPEC V2-C Layer 1 these are physician-only and have no
-          patientMessage / caregiverMessage. */}
-      {tier3Alerts.length > 0 && (
+          patientMessage / caregiverMessage.
+          Suppressed when the Tier 3 pill is active because the same rows
+          render in the main list above (filter target). */}
+      {tier3Alerts.length > 0 && tierFilter !== 'TIER_3' && (
         <div
           className="bg-white rounded-2xl overflow-hidden"
           style={{ boxShadow: 'var(--brand-shadow-card)' }}

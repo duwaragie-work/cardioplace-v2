@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -14,6 +15,12 @@ export default function Homepage() {
   const { t } = useLanguage();
   const { isAuthenticated } = useAuth();
   const router = useRouter();
+  // Gate auth-dependent CTA rendering behind mount so the server-rendered
+  // (logged-out) markup matches the first client paint — no hydration flash.
+  const [mounted, setMounted] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setMounted(true); }, []);
+  const loggedIn = mounted && isAuthenticated;
 
   const handleChatClick = () => {
     if (!isAuthenticated) return router.push('/sign-in');
@@ -132,8 +139,8 @@ export default function Homepage() {
                 </div>
                 {/* CTA buttons — single row */}
                 <div className="flex items-center gap-2 sm:gap-3 md:gap-6 flex-nowrap">
-                  <Link href="/sign-in" className="bg-[#7b00e0] text-white font-bold text-xs sm:text-sm md:text-lg px-5 sm:px-7 md:px-10 py-2.5 sm:py-3 md:py-3.5 rounded-full hover:bg-[#6600bc] transition-colors whitespace-nowrap shrink-0">
-                    {t('home.startCheckin')}
+                  <Link href={loggedIn ? '/dashboard' : '/sign-in'} className="bg-[#7b00e0] text-white font-bold text-xs sm:text-sm md:text-lg px-5 sm:px-7 md:px-10 py-2.5 sm:py-3 md:py-3.5 rounded-full hover:bg-[#6600bc] transition-colors whitespace-nowrap shrink-0">
+                    {loggedIn ? t('home.goToDashboard') : t('home.startCheckin')}
                   </Link>
                   <Link href="#features" className="backdrop-blur-sm bg-white/80 border border-[#cfc2d8] text-gray-600 font-semibold text-xs sm:text-sm md:text-lg px-5 sm:px-7 md:px-10 py-2.5 sm:py-3 md:py-3.5 rounded-full hover:bg-white transition-colors whitespace-nowrap shrink-0">
                     {t('home.howItWorks')}

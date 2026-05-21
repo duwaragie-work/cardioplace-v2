@@ -50,7 +50,7 @@ type ProviderAlert = PatientAlert & {
   followUpScheduledAt: string | null;
 };
 
-type TierFilter = 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'OTHER';
+type TierFilter = 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'TIER_3' | 'OTHER';
 type TopTab = 'alerts' | 'notifications';
 type NotifFilter = 'all' | 'unread' | 'read';
 
@@ -61,6 +61,28 @@ function tierBucket(t: string | null | undefined): TierFilter {
   if (t === 'TIER_1_CONTRAINDICATION' || t === 'TIER_1_ANGIOEDEMA') return 'TIER_1';
   if (t === 'TIER_2_DISCREPANCY') return 'TIER_2';
   if (t === 'BP_LEVEL_1_HIGH' || t === 'BP_LEVEL_1_LOW') return 'BP_L1';
+  if (t === 'TIER_3_INFO') return 'TIER_3';
+  return 'OTHER';
+}
+
+/**
+ * Notification rows don't carry an explicit tier field — derive it from
+ * the title/body text. Mirrors the escalation builder's title format:
+ *   [T+0] TIER 1 CONTRAINDICATION — Patient needs review
+ *   [T0] AIRWAY EMERGENCY (ANGIOEDEMA) — Patient needs review
+ *   [T+4h] BP EMERGENCY — Patient needs review
+ * Keyword match is intentionally permissive so future tier-label tweaks
+ * still bucket correctly. Falls back to 'OTHER' for non-alert
+ * notifications (gap alerts, system messages, etc.).
+ */
+function tierBucketFromText(title: string, body: string): TierFilter {
+  const text = `${title} ${body}`.toUpperCase();
+  if (/ANGIOEDEMA|AIRWAY EMERGENCY/.test(text)) return 'TIER_1';
+  if (/TIER\s*1|CONTRAINDICATION/.test(text)) return 'TIER_1';
+  if (/BP\s*L2|BP\s*LEVEL\s*2|BP\s*EMERGENCY/.test(text)) return 'BP_L2';
+  if (/TIER\s*2|DISCREPANCY/.test(text)) return 'TIER_2';
+  if (/BP\s*L1|BP\s*LEVEL\s*1/.test(text)) return 'BP_L1';
+  if (/TIER\s*3|SURVEILLANCE|INFORMATIONAL/.test(text)) return 'TIER_3';
   return 'OTHER';
 }
 
@@ -79,6 +101,8 @@ function bucketChrome(b: TierFilter): {
       return { label: 'Tier 2', accent: 'var(--brand-warning-amber)', light: 'var(--brand-warning-amber-light)', icon: <ArrowUp className="w-3 h-3" /> };
     case 'BP_L1':
       return { label: 'BP L1', accent: 'var(--brand-warning-amber)', light: 'var(--brand-warning-amber-light)', icon: <Activity className="w-3 h-3" /> };
+    case 'TIER_3':
+      return { label: 'Tier 3', accent: 'var(--brand-accent-teal)', light: 'var(--brand-accent-teal-light)', icon: <Activity className="w-3 h-3" /> };
     default:
       return { label: 'Other', accent: 'var(--brand-text-muted)', light: 'var(--brand-background)', icon: <Bell className="w-3 h-3" /> };
   }
@@ -159,6 +183,10 @@ export default function NotificationsScreen() {
   const [acking, setAcking] = useState<Set<string>>(new Set());
   const [topTab, setTopTab] = useState<TopTab>(initialTab);
   const [notifFilter, setNotifFilter] = useState<NotifFilter>('all');
+  // Tier filter for the Notifications tab — mirrors the Alerts tab pills
+  // but derives the tier from notification title/body since the
+  // Notification row doesn't carry an explicit tier field.
+  const [notifTierFilter, setNotifTierFilter] = useState<TierFilter>('ALL');
   const [markingAll, setMarkingAll] = useState(false);
 
   // First mount sets `loading` so the skeleton shows; subsequent
@@ -206,7 +234,7 @@ export default function NotificationsScreen() {
   // Per-tier counts drive the filter chips (always show even tier-empty
   // chips so the filter row doesn't reflow as alerts come and go).
   const counts = useMemo(() => {
-    const acc: Record<TierFilter, number> = { ALL: 0, BP_L2: 0, TIER_1: 0, TIER_2: 0, BP_L1: 0, OTHER: 0 };
+    const acc: Record<TierFilter, number> = { ALL: 0, BP_L2: 0, TIER_1: 0, TIER_2: 0, BP_L1: 0, TIER_3: 0, OTHER: 0 };
     for (const a of alerts) {
       acc.ALL++;
       acc[tierBucket(a.tier)]++;
@@ -232,10 +260,34 @@ export default function NotificationsScreen() {
   const unreadCount = useMemo(() => notifs.filter((n) => !n.watched).length, [notifs]);
 
   const filteredNotifs = useMemo(() => {
-    if (notifFilter === 'unread') return notifs.filter((n) => !n.watched);
-    if (notifFilter === 'read') return notifs.filter((n) => n.watched);
-    return notifs;
-  }, [notifs, notifFilter]);
+    let base = notifs;
+    if (notifFilter === 'unread') base = base.filter((n) => !n.watched);
+    if (notifFilter === 'read') base = base.filter((n) => n.watched);
+    if (notifTierFilter !== 'ALL') {
+      base = base.filter(
+        (n) => tierBucketFromText(n.title, n.body) === notifTierFilter,
+      );
+    }
+    return base;
+  }, [notifs, notifFilter, notifTierFilter]);
+
+  // Per-tier counts for the pill row — show all-time counts (not just
+  // post-filter) so the user can see what's hidden by the active tier.
+  const notifTierCounts = useMemo(() => {
+    const c: Record<TierFilter, number> = {
+      ALL: notifs.length,
+      BP_L2: 0,
+      TIER_1: 0,
+      TIER_2: 0,
+      BP_L1: 0,
+      TIER_3: 0,
+      OTHER: 0,
+    };
+    for (const n of notifs) {
+      c[tierBucketFromText(n.title, n.body)]++;
+    }
+    return c;
+  }, [notifs]);
 
   const resolvable: ResolvableAlert | null = useMemo(() => {
     if (!resolving) return null;
@@ -412,6 +464,7 @@ export default function NotificationsScreen() {
                   ['TIER_1', 'Tier 1'],
                   ['TIER_2', 'Tier 2'],
                   ['BP_L1', 'BP L1'],
+                  ['TIER_3', 'Tier 3'],
                 ] as [TierFilter, string][]).map(([key, label]) => {
                   const active = tierFilter === key;
                   const chrome = key === 'ALL'
@@ -470,13 +523,18 @@ export default function NotificationsScreen() {
                       <AlertCard
                         alert={a}
                         expanded={expanded}
-                        // Row click navigates — replaces the v1 "Review" button.
+                        // Row click navigates to the patient + deep-links the
+                        // specific alert via ?alert= so the patient-detail
+                        // AlertsTab auto-expands + scrolls to this row.
                         // Falls back to expand-toggle if patient.id is missing
                         // (rare — orphaned alert) so the card still does
                         // something.
                         onRowClick={() => {
-                          if (a.patient?.id) router.push(`/patients/${a.patient.id}`);
-                          else setExpandedId(expanded ? null : a.id);
+                          if (a.patient?.id) {
+                            router.push(`/patients/${a.patient.id}?alert=${a.id}`);
+                          } else {
+                            setExpandedId(expanded ? null : a.id);
+                          }
                         }}
                         onToggleExpand={() => setExpandedId(expanded ? null : a.id)}
                         onResolve={() => setResolving(a)}
@@ -500,6 +558,54 @@ export default function NotificationsScreen() {
               unreadCount={unreadCount}
             />
 
+            {/* Tier filter chips — same chrome as the Alerts tab so the
+                row reads as "filter the inbox by tier". Notifications
+                don't carry an explicit tier field so we derive from the
+                title/body text via tierBucketFromText. */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {([
+                ['ALL', 'All'],
+                ['BP_L2', 'BP L2'],
+                ['TIER_1', 'Tier 1'],
+                ['TIER_2', 'Tier 2'],
+                ['BP_L1', 'BP L1'],
+                ['TIER_3', 'Tier 3'],
+              ] as [TierFilter, string][]).map(([key, label]) => {
+                const active = notifTierFilter === key;
+                const chrome = key === 'ALL'
+                  ? { accent: 'var(--brand-primary-purple)', light: 'var(--brand-primary-purple-light)' }
+                  : bucketChrome(key);
+                const count = notifTierCounts[key];
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    data-testid={`admin-notif-tier-pill-${key}`}
+                    onClick={() => setNotifTierFilter(key)}
+                    className="px-2.5 h-7 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                    style={{
+                      backgroundColor: active ? chrome.accent : chrome.light,
+                      color: active ? 'white' : chrome.accent,
+                      border: `1.5px solid ${active ? chrome.accent : 'transparent'}`,
+                    }}
+                  >
+                    {label}
+                    <span
+                      className="text-[10px] font-bold px-1.5 rounded-full"
+                      style={{
+                        backgroundColor: active ? 'rgba(255,255,255,0.25)' : 'white',
+                        color: active ? 'white' : chrome.accent,
+                        minWidth: 18,
+                        textAlign: 'center',
+                      }}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
             {loading && notifs.length === 0 ? (
               <NotifListSkeleton />
             ) : filteredNotifs.length === 0 ? (
@@ -521,10 +627,17 @@ export default function NotificationsScreen() {
                       onRead={() => void handleMarkRead(n)}
                       onOpen={() => {
                         if (!n.watched) void handleMarkRead(n);
-                        // Alert-linked notification → switch to Alerts tab so
-                        // the user can act on it; bare notifications just
-                        // mark-read on tap.
-                        if (n.alertId) setTopTab('alerts');
+                        // Alert-linked notification → deep-link to the
+                        // patient detail Alerts tab with ?alert= so the
+                        // target alert auto-expands. Falls back to the
+                        // local Alerts tab when patientUserId is missing.
+                        if (n.alertId && n.patientUserId) {
+                          router.push(
+                            `/patients/${n.patientUserId}?alert=${n.alertId}`,
+                          );
+                        } else if (n.alertId) {
+                          setTopTab('alerts');
+                        }
                       }}
                     />
                   </div>

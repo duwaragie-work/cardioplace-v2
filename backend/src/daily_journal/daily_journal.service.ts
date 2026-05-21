@@ -506,6 +506,12 @@ export class DailyJournalService {
         this.prisma.notification.findMany({
           where,
           orderBy: { sentAt: 'desc' },
+          // Pull the patient userId via the linked alert so the bell can
+          // deep-link clicks to /patients/{patientUserId}?alert={alertId}.
+          // notification.userId is the *recipient* (admin/provider/ops), not
+          // the patient — without this join the bell can't reconstruct the
+          // patient URL.
+          include: { alert: { select: { userId: true } } },
         }),
       'getNotifications',
     )
@@ -515,6 +521,7 @@ export class DailyJournalService {
       message: 'Notifications retrieved successfully',
       data: notifications.map((notification) => ({
         ...notification,
+        patientUserId: notification.alert?.userId ?? null,
         watched: notification.readAt != null,
       })),
     }

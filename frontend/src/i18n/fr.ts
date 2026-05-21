@@ -111,6 +111,14 @@ const fr: Record<TranslationKey, string> = {
 
   // ─── Check-In v2 (Flow B) ──────────────────────────────────────────────────
   // B1 — pre-measurement checklist
+  'checkin.resume.title': 'Reprendre votre suivi ?',
+  'checkin.resume.body': "Vous avez commencé un suivi sans le terminer. Reprenez où vous en étiez ou commencez-en un nouveau.",
+  'checkin.resume.resume': 'Reprendre le suivi',
+  'checkin.resume.startNew': 'Commencer un nouveau suivi',
+  'checkin.saveExit.title': 'Enregistrer et terminer plus tard ?',
+  'checkin.saveExit.body': "Votre suivi est enregistré sur cet appareil. Vous pourrez reprendre là où vous vous êtes arrêté la prochaine fois.",
+  'checkin.saveExit.confirm': 'Enregistrer et quitter',
+  'checkin.saveExit.keepGoing': 'Continuer',
   'checkin.b1.title': 'Avant de mesurer',
   'checkin.b1.subtitle': 'Une liste rapide pour une lecture précise.',
   'checkin.b1.audio': 'Avant de mesurer. Une liste rapide pour une lecture précise. Touchez chaque élément qui est vrai pour vous maintenant.',
@@ -124,6 +132,8 @@ const fr: Record<TranslationKey, string> = {
   'checkin.b1.itemCuff': 'Brassard sur le bras nu (pas sur les vêtements)',
   'checkin.b1.allSet': 'Tout est prêt — votre lecture sera la plus précise.',
   'checkin.b1.progress': '{n} sur 8 confirmés.',
+  'checkin.b1.selectAll': 'Tout sélectionner',
+  'checkin.b1.unselectAll': 'Tout désélectionner',
   'checkin.b1.footer': 'Cela aide votre équipe soignante à faire confiance à la lecture. Vous pouvez ignorer les éléments qui ne s\'appliquent pas.',
 
   // B2 — reading
@@ -240,6 +250,8 @@ const fr: Record<TranslationKey, string> = {
 
   // Wizard chrome + session banner
   'checkin.nav.back': 'Retour',
+  'checkin.nav.save': 'Enregistrer',
+  'checkin.nav.saveAria': 'Enregistrer et aller au tableau de bord',
   'checkin.nav.stepOf': 'Étape {current} sur {total}',
   'checkin.nav.sessionBanner': 'Lecture {n} dans cette session',
   'checkin.nav.sessionBannerAfib': 'Lecture {n} dans cette session · La fibrillation auriculaire nécessite 3 de suite',
@@ -251,12 +263,14 @@ const fr: Record<TranslationKey, string> = {
   'checkin.err.dateTime': 'Veuillez choisir la date et l\'heure.',
   'checkin.err.dateInvalid': 'Cette date ne semble pas correcte.',
   'checkin.err.timeFuture': 'L\'heure est dans le futur.',
+  'checkin.err.dateFuture': 'La date est dans le futur.',
   'checkin.err.timeOld': 'C\'est il y a plus de 30 jours.',
   'checkin.err.position': 'Choisissez une position.',
   'checkin.err.bpMissing': 'Entrez les deux chiffres de tension artérielle.',
   'checkin.err.systolic': 'Le chiffre du haut doit être entre 60 et 250.',
   'checkin.err.diastolic': 'Le chiffre du bas doit être entre 40 et 150.',
   'checkin.err.pulse': 'Le pouls doit être entre 30 et 220.',
+  'checkin.err.weight': 'Le poids doit être entre {min} et {max} {unit}.',
   'checkin.err.submit': 'Impossible d\'envoyer la lecture. Réessayez.',
 
 
@@ -529,6 +543,7 @@ const fr: Record<TranslationKey, string> = {
   // ─── Readings (audit sweep additions) ──────────────────────────────────────
   'readings.validate.bpBoth': 'Entrez les deux chiffres de tension artérielle (ou effacez les deux).',
   'readings.validate.weightRange': 'Le poids doit être entre 20 et 600.',
+  'readings.validate.missedReason': 'Veuillez choisir une raison pour chaque médicament oublié.',
   'readings.sameMinute': 'même minute',
   'readings.sessionReadings': 'Session · {count} lectures',
   'readings.readingsCount': '{count} lectures',
@@ -804,6 +819,7 @@ const fr: Record<TranslationKey, string> = {
   'home.chip2': 'Conseils médicaments',
   'home.chip3': 'Comment je vais ?',
   'home.startCheckin': 'Commencez Votre Contrôle',
+  'home.goToDashboard': 'Aller au tableau de bord',
   'home.howItWorks': 'Comment Ça Marche',
   'home.partnershipBanner': 'En partenariat avec la DC Hospital Association.',
   'home.forPatientsOpening': 'Voici à quoi ressemble le soin continu pour les patients qui n\'en ont jamais bénéficié.',
@@ -949,6 +965,9 @@ const fr: Record<TranslationKey, string> = {
   'intake.a0b.audio': 'Créons votre profil de santé. Cela aide votre équipe soignante à vous offrir le bon soutien. Vos réponses restent privées.',
   'intake.a0b.begin': 'Commencer',
   'intake.a0b.saveForLater': 'Enregistrer pour plus tard',
+
+  // Shared placeholder shown inside empty date fields (DateField.tsx)
+  'intake.datePlaceholder': 'JJ / MM / AAAA',
 
   // A1 — demographics
   'intake.a1.title': 'Un peu sur vous',
@@ -1096,9 +1115,9 @@ const fr: Record<TranslationKey, string> = {
   'intake.a9.title': 'Combien de fois par jour ?',
   'intake.a9.subtitle': 'Juste le nombre — votre équipe soignante remplira la dose.',
   'intake.a9.audio': 'Combien de fois par jour prenez-vous chaque médicament ? Juste le nombre — votre équipe soignante remplira la dose.',
-  'intake.a9.freqOnce': 'Une fois',
-  'intake.a9.freqTwice': 'Deux fois',
-  'intake.a9.freqThree': 'Trois fois',
+  'intake.a9.freqOnce': '1 fois',
+  'intake.a9.freqTwice': '2 fois',
+  'intake.a9.freqThree': '3 fois',
   'intake.a9.freqAsNeeded': 'Au besoin',
   'intake.a9.freqUnsure': 'Je ne sais pas',
   'intake.a9.medAudio': 'Combien de fois par jour prenez-vous {name} ?',
@@ -1143,6 +1162,7 @@ const fr: Record<TranslationKey, string> = {
   'intake.exitSave.body': 'Vous pouvez continuer à tout moment depuis votre tableau de bord.',
   'intake.exitSave.cta': 'Retour au tableau de bord',
   'intake.exitSave.keepGoing': 'Continuer',
+  'intake.exitSave.leaveWithoutSaving': 'Quitter sans enregistrer',
   'intake.exitSave.editTitle': 'Enregistrer vos modifications ?',
   'intake.exitSave.editBody': 'Nous mettrons à jour votre profil et vos médicaments avec les modifications de cette page, puis vous ramènerons au tableau de bord.',
   'intake.exitSave.editCta': 'Enregistrer et quitter',
@@ -1162,6 +1182,7 @@ const fr: Record<TranslationKey, string> = {
   'intake.nav.saving': 'Enregistrement…',
   'intake.nav.submit': 'Envoyer le profil',
   'intake.nav.continue': 'Continuer',
+  'intake.nav.saveChanges': 'Enregistrer les modifications',
   'intake.nav.errorGender': 'Veuillez sélectionner un genre.',
   'intake.nav.errorDob': 'Veuillez saisir votre date de naissance.',
   'intake.nav.errorHeight': 'Veuillez entrer une taille réaliste (environ 3 ft 4 in à 8 ft 2 in).',

@@ -83,6 +83,7 @@ import OtherMedicationsList from '@/components/intake/OtherMedicationsList';
 import OtherMedEditModal from '@/components/intake/OtherMedEditModal';
 import { cmToFtIn, ftInToCm } from '@/lib/units';
 import StepDots from '@/components/intake/StepDots';
+import DateField from '@/components/intake/DateField';
 import ChoiceCard from '@/components/intake/ChoiceCard';
 import MedicationCard from '@/components/intake/MedicationCard';
 import SpinnerIndicator from '@/components/ui/SpinnerIndicator';
@@ -201,6 +202,17 @@ function detectDedupConflicts(meds: SelectedMedication[]): DedupConflict[] {
   return conflicts;
 }
 
+// Normalize a stored date (which the API serializes as an ISO datetime, e.g.
+// "2026-08-15T00:00:00.000Z") to the YYYY-MM-DD form that <input type="date">
+// requires — otherwise the edit form shows an empty "mm/dd/yyyy" instead of the
+// saved value. Slicing the date portion (rather than new Date()) keeps the
+// stored calendar day intact regardless of timezone.
+function toDateInput(s: string | null | undefined): string | undefined {
+  if (!s) return undefined;
+  const datePart = s.split('T')[0];
+  return /^\d{4}-\d{2}-\d{2}$/.test(datePart) ? datePart : undefined;
+}
+
 function buildProfilePayload(s: IntakeFormState): IntakeProfilePayload {
   return {
     gender: s.gender,
@@ -259,7 +271,7 @@ interface StepProps {
 function A0bIntro({ onBegin, onSaveLater }: { onBegin: () => void; onSaveLater: () => void }) {
   const { t } = useLanguage();
   return (
-    <div className="flex flex-col items-center text-center px-6 py-10">
+    <div className="flex flex-col items-center text-center px-6 py-6 sm:py-10">
       <motion.div
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -355,22 +367,13 @@ function A1Demographics({ state, setState }: StepProps) {
 
       <div>
         <SectionLabel text={t('intake.a1.dobQuestion')} audio={t('intake.a1.dobQuestion')} />
-        <input
+        <DateField
           id="intake-a1-dob"
-          data-testid="intake-dob"
-          type="date"
+          testId="intake-dob"
           value={state.dateOfBirth ?? ''}
           max={maxDobIso()}
-          onChange={(e) => setState((p) => ({ ...p, dateOfBirth: e.target.value || undefined }))}
-          className="w-full h-14 px-4 rounded-xl text-[18px] outline-none transition box-border"
-          style={{
-            border: '2px solid var(--brand-border)',
-            color: 'var(--brand-text-primary)',
-            backgroundColor: 'white',
-            colorScheme: 'light',
-          }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+          placeholder={t('intake.datePlaceholder')}
+          onChange={(v) => setState((p) => ({ ...p, dateOfBirth: v || undefined }))}
         />
         <p className="text-[12px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
           {t('intake.a1.dobHint')}
@@ -430,7 +433,10 @@ function A1Demographics({ state, setState }: StepProps) {
                         value={storedFeet || ''}
                         onChange={(e) => {
                           const v = parseInt(e.target.value, 10);
-                          updateHeightFromFtIn(Number.isFinite(v) ? v : 0, storedInches);
+                          // Clamp to a realistic range so a stray digit can't
+                          // produce an out-of-bounds height.
+                          const feet = Number.isFinite(v) ? Math.min(8, Math.max(0, v)) : 0;
+                          updateHeightFromFtIn(feet, storedInches);
                         }}
                         placeholder="5"
                         className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
@@ -447,7 +453,7 @@ function A1Demographics({ state, setState }: StepProps) {
                         numeric
                         onTranscript={(text) => {
                           const n = parseInt(text, 10);
-                          if (Number.isFinite(n)) updateHeightFromFtIn(n, storedInches);
+                          if (Number.isFinite(n)) updateHeightFromFtIn(Math.min(8, Math.max(0, n)), storedInches);
                         }}
                       />
                     </div>
@@ -463,10 +469,15 @@ function A1Demographics({ state, setState }: StepProps) {
                         inputMode="numeric"
                         min={0}
                         max={11}
-                        value={storedInches || (storedFeet ? '0' : '')}
+                        value={storedInches || ''}
                         onChange={(e) => {
                           const v = parseInt(e.target.value, 10);
-                          updateHeightFromFtIn(storedFeet, Number.isFinite(v) ? v : 0);
+                          // Clamp to 0–11. Without this, an inches value > 11
+                          // rolls over into feet through the cm round-trip
+                          // (e.g. 4 ft + 50 in = 98 in = 8 ft 2 in), which is
+                          // what made the feet field jump while typing inches.
+                          const inches = Number.isFinite(v) ? Math.min(11, Math.max(0, v)) : 0;
+                          updateHeightFromFtIn(storedFeet, inches);
                         }}
                         placeholder="9"
                         className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
@@ -483,7 +494,7 @@ function A1Demographics({ state, setState }: StepProps) {
                         numeric
                         onTranscript={(text) => {
                           const n = parseInt(text, 10);
-                          if (Number.isFinite(n)) updateHeightFromFtIn(storedFeet, n);
+                          if (Number.isFinite(n)) updateHeightFromFtIn(storedFeet, Math.min(11, Math.max(0, n)));
                         }}
                       />
                     </div>
@@ -612,18 +623,12 @@ function A2Pregnancy({ state, setState }: StepProps) {
             exit={{ opacity: 0, y: -8 }}
           >
             <SectionLabel text={t('intake.a2.dueDateLabel')} audio={t('intake.a2.dueDateAudio')} />
-            <input
-              type="date"
-              aria-label={t('intake.a2.dueDateLabel')}
+            <DateField
+              ariaLabel={t('intake.a2.dueDateLabel')}
               value={state.pregnancyDueDate ?? ''}
-              onChange={(e) => setState((p) => ({ ...p, pregnancyDueDate: e.target.value || undefined }))}
-              className="w-full h-14 px-5 rounded-xl text-[15px] outline-none transition box-border"
-              style={{
-                border: '2px solid var(--brand-border)',
-                color: 'var(--brand-text-primary)',
-                backgroundColor: 'white',
-                colorScheme: 'light',
-              }}
+              placeholder={t('intake.datePlaceholder')}
+              textSizeClass="text-[15px]"
+              onChange={(v) => setState((p) => ({ ...p, pregnancyDueDate: v || undefined }))}
             />
           </motion.div>
         )}
@@ -1170,9 +1175,20 @@ function A8Categories({ state, setState }: StepProps) {
   // a Furosemide tick when they go check the blood-thinner list. Selections
   // already persist cross-category in state.selectedMedications; this just
   // matches the UI affordance to that reality.
-  const [activeCategories, setActiveCategories] = useState<Set<string>>(
-    () => new Set(),
-  );
+  const [activeCategories, setActiveCategories] = useState<Set<string>>(() => {
+    // Auto-expand any category that already has a selected med — e.g. a
+    // prescription scan matched a water pill / blood thinner that lives inside
+    // one of these dropdowns. Without this the med is selected but hidden, so
+    // the patient can't see it was picked up. (selectedIds already shows it as
+    // checked; this just reveals the right dropdown on entry.)
+    const set = new Set<string>();
+    for (const m of state.selectedMedications) {
+      if (!m.catalogId) continue;
+      const cat = CATEGORY_MEDS.find((c) => c.id === m.catalogId);
+      if (cat?.category) set.add(cat.category);
+    }
+    return set;
+  });
   const [otherText, setOtherText] = useState(state.otherDraft?.text ?? '');
   // Phase/25 — inline dedup error for the voice/photo "anything else" path.
   // Cleared on next keystroke or after a 3.5s timeout so the UI doesn't
@@ -1521,7 +1537,7 @@ function A9Frequency({ state, setState }: StepProps) {
               </div>
               <AudioButton text={t('intake.a9.medAudio').replace('{name}', m.drugName)} size="sm" />
             </div>
-            <div className="grid grid-cols-4 gap-2" data-testid={`intake-a9-row-${i}`}>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" data-testid={`intake-a9-row-${i}`}>
               {options.map((o) => {
                 const active = m.frequency === o.value;
                 return (
@@ -1668,7 +1684,7 @@ function A10Review({ state, goTo }: StepProps) {
 function A11Complete({ onDone }: { onDone: () => void }) {
   const { t } = useLanguage();
   return (
-    <div className="flex flex-col items-center text-center px-4 py-10">
+    <div className="flex flex-col items-center text-center px-4 py-6 sm:py-10">
       <motion.div
         initial={{ scale: 0 }}
         animate={{ scale: 1 }}
@@ -1871,12 +1887,16 @@ function ExitSaveModal({
   error,
   onConfirm,
   onCancel,
+  onDiscard,
 }: {
   editMode: boolean;
   saving: boolean;
   error: string;
   onConfirm: () => void;
   onCancel: () => void;
+  /** When provided (nav-guard case), renders a "Leave without saving" action
+   *  that abandons the edits and continues to the requested destination. */
+  onDiscard?: () => void;
 }) {
   const { t } = useLanguage();
   const title = editMode ? t('intake.exitSave.editTitle') : t('intake.exitSave.title');
@@ -1930,6 +1950,20 @@ function ExitSaveModal({
         >
           {saving ? t('intake.exitSave.saving') : cta}
         </button>
+        {onDiscard && (
+          <button
+            type="button"
+            onClick={onDiscard}
+            disabled={saving}
+            className="w-full mt-2 h-11 rounded-full font-semibold text-[14px] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+            style={{
+              backgroundColor: 'var(--brand-alert-red-light)',
+              color: 'var(--brand-alert-red-text)',
+            }}
+          >
+            {t('intake.exitSave.leaveWithoutSaving')}
+          </button>
+        )}
         <button
           type="button"
           onClick={onCancel}
@@ -1957,7 +1991,7 @@ export default function ClinicalIntakePage() {
   return (
     <Suspense fallback={
       <div
-        className="min-h-screen flex items-center justify-center"
+        className="min-h-[calc(100dvh-4rem)] flex items-center justify-center"
         style={{ backgroundColor: 'var(--brand-background)' }}
       >
         <SpinnerIndicator size={40} className="text-[#7B00E0]" />
@@ -1979,6 +2013,9 @@ function ClinicalIntakeWizard() {
   const [direction, setDirection] = useState(1);
   const [pendingDedup, setPendingDedup] = useState<DedupConflict[]>([]);
   const [showExitSave, setShowExitSave] = useState(false);
+  // Destination stashed when the patient tries to navigate away mid-edit —
+  // we hold it until they choose Save or Leave in the exit prompt.
+  const [pendingNav, setPendingNav] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Stored as a translation-key (+ optional interpolation values) OR a raw
   // backend message — never as the rendered string. We translate at render
@@ -2031,7 +2068,7 @@ function ClinicalIntakeWizard() {
         // returning users who set DOB during the old onboarding flow before
         // it moved here. Best-effort — DOB is optional fallback only.
         const authProfile = await getAuthProfile().catch(() => null);
-        const carriedDob = authProfile?.dateOfBirth ?? undefined;
+        const carriedDob = toDateInput(authProfile?.dateOfBirth);
         if (cancelled) return;
 
         // Branch 3 — show the all-set page only when the patient is truly
@@ -2056,7 +2093,7 @@ function ClinicalIntakeWizard() {
             heightCm: profile.heightCm ?? undefined,
             dateOfBirth: carriedDob,
             isPregnant: profile.isPregnant ?? undefined,
-            pregnancyDueDate: profile.pregnancyDueDate ?? undefined,
+            pregnancyDueDate: toDateInput(profile.pregnancyDueDate),
             historyPreeclampsia: profile.historyPreeclampsia ?? false,
             hasHeartFailure: profile.hasHeartFailure ?? false,
             hasAFib: profile.hasAFib ?? false,
@@ -2171,11 +2208,50 @@ function ClinicalIntakeWizard() {
     }
   }, [step]);
 
+  // Edit-mode navigation guard. Edit mode keeps NO localStorage draft, so
+  // leaving the page would silently drop unsaved edits. Intercept in-app link
+  // clicks (the navbar tabs / logo / bell / avatar) and hard unloads so the
+  // patient must explicitly Save or Leave first.
+  useEffect(() => {
+    if (!editMode) return;
+    const onClickCapture = (e: MouseEvent) => {
+      // Let modified clicks (new tab, etc.) and non-primary buttons through.
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const anchor = (e.target as HTMLElement | null)?.closest('a');
+      if (!anchor) return;
+      const href = anchor.getAttribute('href');
+      if (!href || href.startsWith('#') || anchor.target === '_blank' || anchor.hasAttribute('download')) return;
+      let dest: URL;
+      try { dest = new URL(href, window.location.href); } catch { return; }
+      if (dest.origin !== window.location.origin) return; // external — let it go
+      if (dest.pathname === window.location.pathname) return; // same page
+      // Block the navigation and prompt Save / Leave instead.
+      e.preventDefault();
+      e.stopPropagation();
+      setExitError('');
+      setPendingNav(dest.pathname + dest.search);
+      setShowExitSave(true);
+    };
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    document.addEventListener('click', onClickCapture, true);
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      document.removeEventListener('click', onClickCapture, true);
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
+  }, [editMode]);
+
   // Wrap setState to persist draft on every change.
   const setState = (updater: (prev: IntakeFormState) => IntakeFormState) => {
     setStateRaw((prev) => {
       const next = updater(prev);
-      if (user?.id) {
+      // Edit mode deliberately keeps NO localStorage draft — edits commit
+      // straight to the backend via Save changes, and a draft here would make
+      // the dashboard's "Resume" card reappear for an already-complete profile.
+      if (user?.id && !editMode) {
         saveDraft(user.id, { ...next, currentStep: step });
       }
       return next;
@@ -2189,51 +2265,48 @@ function ClinicalIntakeWizard() {
   const visibleIndex = Math.max(1, Math.min(visibleTotal, stepIndex));
 
   const persistStep = (next: IntakeStepKey) => {
-    if (user?.id) {
+    // No draft in edit mode (see setState) — just move the step in memory.
+    if (user?.id && !editMode) {
       saveDraft(user.id, { ...state, currentStep: next });
     }
     setStep(next);
   };
 
-  const goNext = async () => {
-    // Validation gates.
-    if (step === 'A1') {
-      if (!state.gender) { setSubmitError({ kind: 'key', key: 'intake.nav.errorGender' }); return; }
-      if (!state.dateOfBirth) {
-        setSubmitError({ kind: 'key', key: 'intake.nav.errorDob' });
-        return;
-      }
+  // Per-step field validation, shared by Continue (goNext) and the edit-mode
+  // Save-changes quick-save so both reject the same invalid input.
+  const validateStep = (s: IntakeStepKey): typeof submitError => {
+    if (s === 'A1') {
+      if (!state.gender) return { kind: 'key', key: 'intake.nav.errorGender' };
+      if (!state.dateOfBirth) return { kind: 'key', key: 'intake.nav.errorDob' };
       const dobErrKey = validateDateOfBirth(state.dateOfBirth);
-      if (dobErrKey) {
-        setSubmitError({ kind: 'key', key: dobErrKey });
-        return;
-      }
+      if (dobErrKey) return { kind: 'key', key: dobErrKey };
       if (!state.heightCm || state.heightCm < 100 || state.heightCm > 250) {
-        setSubmitError({ kind: 'key', key: 'intake.nav.errorHeight' });
-        return;
+        return { kind: 'key', key: 'intake.nav.errorHeight' };
       }
     }
-    if (step === 'A2') {
+    if (s === 'A2') {
       if (state.isPregnant !== true && state.isPregnant !== false) {
-        setSubmitError({ kind: 'key', key: 'intake.nav.errorPregnancy' });
-        return;
+        return { kind: 'key', key: 'intake.nav.errorPregnancy' };
       }
       if (state.historyPreeclampsia !== true && state.historyPreeclampsia !== false) {
-        setSubmitError({ kind: 'key', key: 'intake.nav.errorPreeclampsia' });
-        return;
+        return { kind: 'key', key: 'intake.nav.errorPreeclampsia' };
       }
     }
-    if (step === 'A4' && !state.heartFailureType) {
-      setSubmitError({ kind: 'key', key: 'intake.nav.errorHfType' });
-      return;
+    if (s === 'A4' && !state.heartFailureType) {
+      return { kind: 'key', key: 'intake.nav.errorHfType' };
     }
-    if (step === 'A9') {
+    if (s === 'A9') {
       const missingFreq = state.selectedMedications.find((m) => !m.frequency);
       if (missingFreq) {
-        setSubmitError({ kind: 'key', key: 'intake.nav.errorFreq', values: { name: missingFreq.drugName } });
-        return;
+        return { kind: 'key', key: 'intake.nav.errorFreq', values: { name: missingFreq.drugName } };
       }
     }
+    return null;
+  };
+
+  const goNext = async () => {
+    const stepErr = validateStep(step);
+    if (stepErr) { setSubmitError(stepErr); return; }
     setSubmitError(null);
 
     // A6 (combos — the last med screen) → A9 transition: surface dedup
@@ -2317,12 +2390,16 @@ function ClinicalIntakeWizard() {
   const handleExitSave = async () => {
     if (exitSaving) return;
     setExitError('');
+    // When triggered by the nav guard, return to where the patient was
+    // headed; otherwise fall back to the dashboard.
+    const dest = pendingNav ?? '/dashboard';
 
     // No gender yet → can't create a profile server-side. Keep the draft
     // and let them resume later. (Backend POST /intake/profile rejects
     // payloads with no gender.)
     if (!state.gender) {
-      router.push('/dashboard');
+      setPendingNav(null);
+      router.push(dest);
       return;
     }
 
@@ -2332,6 +2409,7 @@ function ClinicalIntakeWizard() {
         saveIntakeProfile(buildProfilePayload(state)),
         replaceIntakeMedications(buildMedsPayload(state)),
       ]);
+      setPendingNav(null);
       // Keep the local draft on partial save — without a server-side
       // intakeCompletedAt field the dashboard's Action-Required card uses
       // the draft's presence + currentStep as the "still in progress"
@@ -2339,9 +2417,42 @@ function ClinicalIntakeWizard() {
       // "done" even though the patient hasn't submitted A10 → A11. The
       // draft is only cleared by handleSubmit on final submit. Edit mode
       // never had a draft to begin with, so this no-op for edits.
-      router.push('/dashboard');
+      router.push(dest);
     } catch (e) {
       setExitError(e instanceof Error ? e.message : t('intake.exitSave.errorFallback'));
+      setExitSaving(false);
+    }
+  };
+
+  // Edit-mode quick-save: commit the current answers right away and go back to
+  // the profile, instead of forcing the patient to click Continue through every
+  // remaining step to reach the final submit. The upsert sends the full state
+  // — which in edit mode is the existing profile pre-loaded + their change — so
+  // unchanged fields are preserved and only what they edited differs. Validates
+  // the current step (and surfaces combo dedup on A6) so we never persist the
+  // same invalid input Continue would reject.
+  const handleQuickSave = async () => {
+    if (exitSaving || submitting) return;
+    const stepErr = validateStep(step);
+    if (stepErr) { setSubmitError(stepErr); return; }
+    if (step === 'A6') {
+      const conflicts = detectDedupConflicts(state.selectedMedications);
+      if (conflicts.length > 0) { setPendingDedup(conflicts); return; }
+    }
+    setSubmitError(null);
+    setExitSaving(true);
+    try {
+      await Promise.all([
+        saveIntakeProfile(buildProfilePayload(state)),
+        replaceIntakeMedications(buildMedsPayload(state)),
+      ]);
+      router.push('/profile');
+    } catch (e) {
+      setSubmitError(
+        e instanceof Error
+          ? { kind: 'raw', text: e.message }
+          : { kind: 'key', key: 'intake.nav.errorSubmit' },
+      );
       setExitSaving(false);
     }
   };
@@ -2395,7 +2506,7 @@ function ClinicalIntakeWizard() {
 
   if (isLoading || !user || bootstrapping) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
+      <div className="min-h-[calc(100dvh-4rem)] flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
         <SpinnerIndicator size={40} className="text-[#7B00E0]" />
       </div>
     );
@@ -2408,7 +2519,25 @@ function ClinicalIntakeWizard() {
   const stepProps: StepProps = { state, setState, goTo };
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: 'var(--brand-background)' }}>
+    <div
+      className={
+        'flex flex-col ' +
+        // Intro (A0b) + complete (A11) are single-screen panels: pin them to
+        // the viewport so they never grow past the screen or introduce a page
+        // scroll. Other steps keep min-h-screen and scroll.
+        (isIntro || isComplete ? '' : 'min-h-screen')
+      }
+      style={{
+        backgroundColor: 'var(--brand-background)',
+        // The global navbar is fixed (h-16) and NavbarWrapper reserves space
+        // for it with pt-16, so this route already sits 4rem below the top.
+        // Cap the single-screen panels at viewport MINUS that 4rem, otherwise
+        // 4rem (navbar) + 100dvh (page) overflows and shows a browser scroll.
+        // Inline style, not a Tailwind calc class — arbitrary calc() values
+        // get stripped on some builds (see the main padding note below).
+        ...(isIntro || isComplete ? { height: 'calc(100dvh - 4rem)' } : null),
+      }}
+    >
       {/* Top bar — visible when not on intro/complete */}
       {showNav && (
         <header
@@ -2476,10 +2605,21 @@ function ClinicalIntakeWizard() {
       <main
         id="main"
         className={
-          'flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 ' +
-          (isIntro || isComplete
-            ? 'flex items-center justify-center py-8'
-            : 'py-5 sm:py-8')
+          // overflow-x-clip on every step clips the page-transition slide
+          // (steps animate in from x:±60) so it never flashes a horizontal
+          // scrollbar mid-transition.
+          'flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 overflow-x-clip ' +
+          (isComplete
+            // Complete (A11) is a short, fixed-height panel: clip BOTH axes so
+            // the brief moment when the tall previous step is still exiting
+            // doesn't flash a vertical scrollbar before A11 settles.
+            ? 'flex items-center-safe justify-center overflow-y-clip min-h-0 py-6'
+            : isIntro
+              // min-h-0 lets the flex child shrink so overflow-y-auto can take
+              // over; items-center-safe centers when it fits and falls back to
+              // top-aligned + scroll when content is taller than the screen.
+              ? 'flex items-center-safe justify-center overflow-y-auto min-h-0 py-6'
+              : 'py-5 sm:py-8')
         }
         style={
           isIntro || isComplete
@@ -2541,20 +2681,51 @@ function ClinicalIntakeWizard() {
           }}
         >
           <div className="max-w-3xl mx-auto">
-            <motion.button
-              type="button"
-              data-testid="intake-submit"
-              onClick={goNext}
-              disabled={submitting}
-              className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
-              style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              {submitting ? t('intake.nav.saving') : step === 'A10' ? t('intake.nav.submit') : t('intake.nav.continue')}
-              {!submitting && step !== 'A10' && <ArrowRight className="w-4 h-4" />}
-              {!submitting && step === 'A10' && <Check className="w-4 h-4" />}
-            </motion.button>
+            {editMode ? (
+              // Edit mode — a one-tap "Save changes" that commits immediately
+              // (no stepping to the last screen), with Continue kept as a
+              // secondary action for patients who want to review other steps.
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  data-testid="intake-submit"
+                  onClick={goNext}
+                  disabled={submitting || exitSaving}
+                  className="flex-1 h-12 rounded-full border-2 font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                  style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                >
+                  {step === 'A10' ? t('intake.nav.submit') : t('intake.nav.continue')}
+                </button>
+                <motion.button
+                  type="button"
+                  data-testid="intake-quick-save"
+                  onClick={handleQuickSave}
+                  disabled={submitting || exitSaving}
+                  className="flex-1 h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                  style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  {exitSaving ? t('intake.nav.saving') : t('intake.nav.saveChanges')}
+                  {!exitSaving && <Check className="w-4 h-4" />}
+                </motion.button>
+              </div>
+            ) : (
+              <motion.button
+                type="button"
+                data-testid="intake-submit"
+                onClick={goNext}
+                disabled={submitting}
+                className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                {submitting ? t('intake.nav.saving') : step === 'A10' ? t('intake.nav.submit') : t('intake.nav.continue')}
+                {!submitting && step !== 'A10' && <ArrowRight className="w-4 h-4" />}
+                {!submitting && step === 'A10' && <Check className="w-4 h-4" />}
+              </motion.button>
+            )}
           </div>
         </div>
       )}
@@ -2577,7 +2748,18 @@ function ClinicalIntakeWizard() {
               if (exitSaving) return;
               setExitError('');
               setShowExitSave(false);
+              setPendingNav(null);
             }}
+            onDiscard={
+              pendingNav
+                ? () => {
+                    const dest = pendingNav;
+                    setShowExitSave(false);
+                    setPendingNav(null);
+                    router.push(dest);
+                  }
+                : undefined
+            }
           />
         )}
       </AnimatePresence>

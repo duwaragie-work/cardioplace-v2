@@ -1,0 +1,21 @@
+// Many-to-many MED_DIR ↔ Practice membership. A MED_DIR can head multiple
+// practices and a practice can have multiple MEDs. Powers role-scoped
+// queries where MED_DIR sees only patients in their own practice(s) — see
+// docs/ACCESS_SCOPE.md §3 and docs/ADMIN_ROLE_ACCESS.md §3 (May 2026
+// decision: MED_DIR loses all-patient visibility, gains practice scope).
+//
+// Backfilled from existing PatientProviderAssignment rows so already-
+// assigned MDs retain access on day 1 (see the migration's INSERT…SELECT).
+model PracticeMedicalDirector {
+  id         String   @id @default(uuid())
+  practiceId String
+  userId     String
+  assignedAt DateTime @default(now())
+
+  practice Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  user     User     @relation("PracticeMedicalDirectorMemberships", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([practiceId, userId])
+  @@index([practiceId])
+  @@index([userId])
+}

@@ -38,6 +38,8 @@ import EscalationAuditTrail from './patient-detail/EscalationAuditTrail';
 import {
   resolutionTierFor,
 } from '@/lib/services/provider.service';
+import { useAuth } from '@/lib/auth-context';
+import { canResolveAlerts } from '@/lib/roleGates';
 import type {
   PatientAlert,
 } from '@/lib/services/patient-detail.service';
@@ -145,12 +147,18 @@ export default function AlertCard({
   heightCm,
   rowClickable = true,
 }: Props) {
+  const { user } = useAuth();
+  // May 2026 access-scope — HEALPLACE_OPS sees the alert row + audit trail
+  // (they receive the T+24h / T+48h notification and need context for
+  // operational follow-up) but cannot close it. Hide both write buttons.
+  // Backend rejects with 403 either way; this just keeps the UI honest.
+  const canResolve = canResolveAlerts(user);
   const bucket = tierBucket(alert.tier);
   const chrome = bucketChrome(bucket);
   const isResolvable = resolutionTierFor(alert.tier) != null;
-  const showResolve = alert.status === 'OPEN' && isResolvable;
+  const showResolve = alert.status === 'OPEN' && isResolvable && canResolve;
   const showAcknowledge =
-    alert.status === 'OPEN' && bucket === 'BP_L1' && alert.acknowledgedAt == null;
+    alert.status === 'OPEN' && bucket === 'BP_L1' && alert.acknowledgedAt == null && canResolve;
 
   return (
     <div>

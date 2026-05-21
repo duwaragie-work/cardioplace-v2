@@ -18,13 +18,20 @@ import { ResolveAlertDto } from '../dto/resolve-alert.dto.js'
 import { AlertResolutionService } from '../services/alert-resolution.service.js'
 
 /**
- * Phase/7 — admin-only endpoints for acknowledging, resolving, and auditing
+ * Phase/7 — admin endpoints for acknowledging, resolving, and auditing
  * DeviationAlert rows. Mounted under /admin/alerts so the phase/11 admin UI
  * can consume them without naming collisions with the patient-facing
  * /daily-journal routes.
  *
- * Authorization: SUPER_ADMIN, MEDICAL_DIRECTOR, PROVIDER, HEALPLACE_OPS.
- * PATIENT role is excluded — resolution is always clinician-driven.
+ * Authorization (May 2026 access-scope decision — see docs/ACCESS_SCOPE.md):
+ *   • READ (GET :id/audit) — all four admin roles. HEALPLACE_OPS receives the
+ *     T+24h / T+48h escalation notification and needs read context for
+ *     operational follow-up (phone the patient, page the assigned provider).
+ *   • WRITE (acknowledge / resolve) — SUPER_ADMIN, MEDICAL_DIRECTOR, PROVIDER
+ *     only. Closing an alert is a clinical disposition. HEALPLACE_OPS is
+ *     excluded — they reassign care team or escalate by phone instead.
+ *   • PATIENT role is excluded from everything here.
+ * Method-level @Roles() overrides the controller-level decorator.
  */
 @Controller('admin/alerts')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -39,20 +46,28 @@ export class AlertResolutionController {
 
   @Post(':id/acknowledge')
   @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.PROVIDER)
   acknowledge(@Req() req: Request, @Param('id') id: string) {
-    const { id: adminId } = req.user as { id: string }
-    return this.service.acknowledge(id, adminId)
+    const { id: actorId, roles } = req.user as {
+      id: string
+      roles: UserRole[]
+    }
+    return this.service.acknowledge(id, { id: actorId, roles })
   }
 
   @Post(':id/resolve')
   @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.PROVIDER)
   resolve(
     @Req() req: Request,
     @Param('id') id: string,
     @Body() dto: ResolveAlertDto,
   ) {
-    const { id: adminId } = req.user as { id: string }
-    return this.service.resolve(id, adminId, dto)
+    const { id: actorId, roles } = req.user as {
+      id: string
+      roles: UserRole[]
+    }
+    return this.service.resolve(id, { id: actorId, roles }, dto)
   }
 
   @Get(':id/audit')

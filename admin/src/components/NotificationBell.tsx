@@ -185,10 +185,15 @@ export default function NotificationBell() {
   async function handleItemClick(n: AdminNotificationDto) {
     if (!n.watched) await markOne(n);
     setOpen(false);
-    // The bell is the entry point for the personal notification inbox, so
-    // route to the Notifications tab — alert-linked rows still land users
-    // there first; the page itself lets them switch to the Alerts tab.
-    if (n.alertId) router.push(`/notifications?tab=notifications`);
+    // Deep-link directly to the patient + alert when we have both ids —
+    // the patient-detail Alerts tab consumes the ?alert= param and auto-
+    // expands + scrolls to that row. Falls back to the notifications page
+    // when the alert is orphaned (no patientUserId on the row).
+    if (n.alertId && n.patientUserId) {
+      router.push(`/patients/${n.patientUserId}?alert=${n.alertId}`);
+    } else if (n.alertId) {
+      router.push(`/notifications?tab=notifications`);
+    }
   }
 
   async function handleMarkAll() {

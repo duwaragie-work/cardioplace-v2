@@ -22,10 +22,16 @@ import {
   getPractice,
   updatePractice,
   listPracticeStaff,
+  listClinicians,
+  addPracticeProvider,
+  removePracticeProvider,
+  addPracticeMedicalDirector,
+  removePracticeMedicalDirector,
   COMMON_TIMEZONES,
   type Practice,
   type PracticeStaff,
   type StaffSlot,
+  type Clinician,
 } from '@/lib/services/practice.service';
 import { useAuth } from '@/lib/auth-context';
 import { canManagePractices } from '@/lib/roleGates';
@@ -63,6 +69,18 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // ── Staff management (May 2026 — PracticeProvider/MD join) ───────────────
+  // Inline picker for adding a clinician to this practice. Loaded lazily
+  // the first time the user opens the picker so the page-mount fetch stays
+  // small. Includes both PROVIDER + MEDICAL_DIRECTOR pools — the role
+  // selector below tells the backend which join table to write.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerRole, setPickerRole] = useState<'PROVIDER' | 'MEDICAL_DIRECTOR'>('PROVIDER');
+  const [pickerUserId, setPickerUserId] = useState('');
+  const [pickerPool, setPickerPool] = useState<Clinician[] | null>(null);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [staffMutating, setStaffMutating] = useState<string | null>(null);
+  const [staffError, setStaffError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -93,6 +111,65 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
     setSuccess(null);
+  }
+
+  async function openPicker(role: 'PROVIDER' | 'MEDICAL_DIRECTOR') {
+    setPickerRole(role);
+    setPickerUserId('');
+    setPickerOpen(true);
+    setStaffError(null);
+    // Lazy-load the global clinician pool on first open. Refetch on role
+    // change so we always show only PROVIDERs OR MEDICAL_DIRECTORs (not
+    // both — picker role drives both the visible list and the endpoint).
+    setPickerLoading(true);
+    try {
+      const pool = await listClinicians(role);
+      setPickerPool(pool);
+    } catch (e) {
+      setStaffError(e instanceof Error ? e.message : 'Could not load clinicians.');
+    } finally {
+      setPickerLoading(false);
+    }
+  }
+
+  async function confirmAddStaff() {
+    if (!pickerUserId) return;
+    setStaffMutating(pickerUserId);
+    setStaffError(null);
+    try {
+      if (pickerRole === 'PROVIDER') {
+        await addPracticeProvider(id, pickerUserId);
+      } else {
+        await addPracticeMedicalDirector(id, pickerUserId);
+      }
+      setPickerOpen(false);
+      setPickerUserId('');
+      // Refresh staff list so the new member appears immediately.
+      const refreshed = await listPracticeStaff(id);
+      setStaff(refreshed);
+    } catch (e) {
+      setStaffError(e instanceof Error ? e.message : 'Could not add staff member.');
+    } finally {
+      setStaffMutating(null);
+    }
+  }
+
+  async function removeStaff(userId: string, slot: 'PROVIDER' | 'MEDICAL_DIRECTOR') {
+    setStaffMutating(userId);
+    setStaffError(null);
+    try {
+      if (slot === 'PROVIDER') {
+        await removePracticeProvider(id, userId);
+      } else {
+        await removePracticeMedicalDirector(id, userId);
+      }
+      const refreshed = await listPracticeStaff(id);
+      setStaff(refreshed);
+    } catch (e) {
+      setStaffError(e instanceof Error ? e.message : 'Could not remove staff member.');
+    } finally {
+      setStaffMutating(null);
+    }
   }
 
   async function save() {
@@ -314,7 +391,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
 
             {/* Staff list */}
             <div data-testid="admin-practice-staff-list" className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
-              <div className="px-5 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--brand-border)' }}>
+              <div className="px-5 py-3 flex items-center justify-between gap-3 flex-wrap" style={{ borderBottom: '1px solid var(--brand-border)' }}>
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4" style={{ color: 'var(--brand-primary-purple)' }} />
                   <h2 className="text-[14px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
@@ -327,10 +404,93 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
                     {staff.length}
                   </span>
                 </div>
-                <p className="text-[10.5px]" style={{ color: 'var(--brand-text-muted)' }}>
-                  Derived from active patient assignments at this practice.
-                </p>
+                {canManage && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      data-testid="admin-practice-add-provider"
+                      onClick={() => openPicker('PROVIDER')}
+                      className="inline-flex items-center gap-1 px-2.5 h-8 rounded-lg text-[11.5px] font-semibold cursor-pointer"
+                      style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
+                    >
+                      <UserPlus className="w-3 h-3" />
+                      Add provider
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="admin-practice-add-md"
+                      onClick={() => openPicker('MEDICAL_DIRECTOR')}
+                      className="inline-flex items-center gap-1 px-2.5 h-8 rounded-lg text-[11.5px] font-semibold cursor-pointer"
+                      style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
+                    >
+                      <ShieldCheck className="w-3 h-3" />
+                      Add medical director
+                    </button>
+                  </div>
+                )}
               </div>
+
+              {/* Inline picker — minimal modal-less form. Renders as a
+                  panel above the staff list when open. Closes on cancel or
+                  successful add. */}
+              {pickerOpen && canManage && (
+                <div className="px-5 py-4 bg-[#F8F4FF]" style={{ borderBottom: '1px solid var(--brand-border)' }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[12px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-text-primary)' }}>
+                      Add {pickerRole === 'PROVIDER' ? 'provider' : 'medical director'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => { setPickerOpen(false); setPickerUserId(''); }}
+                      className="text-[11px] font-semibold cursor-pointer"
+                      style={{ color: 'var(--brand-text-muted)' }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <select
+                      data-testid="admin-practice-staff-picker"
+                      value={pickerUserId}
+                      onChange={(e) => setPickerUserId(e.target.value)}
+                      disabled={pickerLoading}
+                      className="flex-1 min-w-[200px] px-3 h-9 rounded-lg text-[13px] outline-none bg-white"
+                      style={{ border: '1px solid var(--brand-border)' }}
+                    >
+                      <option value="">
+                        {pickerLoading
+                          ? 'Loading clinicians…'
+                          : `— Select ${pickerRole === 'PROVIDER' ? 'provider' : 'medical director'} —`}
+                      </option>
+                      {pickerPool?.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name ?? c.email}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      data-testid="admin-practice-staff-confirm"
+                      onClick={confirmAddStaff}
+                      disabled={!pickerUserId || staffMutating !== null}
+                      className="btn-admin-primary disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {staffMutating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
+                      Add
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {staffError && (
+                <div
+                  className="mx-5 mt-3 rounded-lg px-3 py-2 text-[12px] font-semibold"
+                  style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
+                >
+                  {staffError}
+                </div>
+              )}
+
               {staff.length === 0 ? (
                 <div className="p-8 text-center">
                   <UserPlus className="w-7 h-7 mx-auto mb-2" style={{ color: 'var(--brand-text-muted)' }} />
@@ -338,39 +498,64 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
                     No staff yet
                   </p>
                   <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
-                    Staff appear here when they&apos;re assigned to a patient at this practice (Care team tab on a patient detail).
+                    {canManage
+                      ? 'Add a provider or medical director above to staff this practice.'
+                      : 'Staff appear here when an operations admin adds them.'}
                   </p>
                 </div>
               ) : (
                 <ul>
-                  {staff.map((s, i) => (
-                    <li
-                      key={s.id}
-                      className="px-5 py-3 flex items-center gap-3"
-                      style={{ borderTop: i > 0 ? '1px solid var(--brand-border)' : 'none' }}
-                    >
-                      <div
-                        className="w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0"
-                        style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
+                  {staff.map((s, i) => {
+                    // The remove button only works for join-table memberships
+                    // (PracticeProvider / PracticeMedicalDirector). When the
+                    // user is only on the list via patient assignments, we
+                    // can't unilaterally drop them — they have to be removed
+                    // from the patient's Care Team first.
+                    const hasMd = s.slots.includes('MEDICAL_DIRECTOR');
+                    const hasAssignmentSlot = s.slots.includes('PRIMARY') || s.slots.includes('BACKUP');
+                    const hasProviderRole = s.roles.includes('PROVIDER');
+                    return (
+                      <li
+                        key={s.id}
+                        className="px-5 py-3 flex items-center gap-3"
+                        style={{ borderTop: i > 0 ? '1px solid var(--brand-border)' : 'none' }}
                       >
-                        {initialsOf(s.name ?? s.email)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[13px] font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>
-                          {s.name ?? 'Unnamed clinician'}
-                        </p>
-                        <p className="text-[11px] inline-flex items-center gap-1 truncate" style={{ color: 'var(--brand-text-muted)' }}>
-                          <Mail className="w-2.5 h-2.5 shrink-0" />
-                          {s.email}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-1 justify-end shrink-0">
-                        {s.slots.map((slot) => (
-                          <SlotBadge key={slot} slot={slot} />
-                        ))}
-                      </div>
-                    </li>
-                  ))}
+                        <div
+                          className="w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0"
+                          style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
+                        >
+                          {initialsOf(s.name ?? s.email)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>
+                            {s.name ?? 'Unnamed clinician'}
+                          </p>
+                          <p className="text-[11px] inline-flex items-center gap-1 truncate" style={{ color: 'var(--brand-text-muted)' }}>
+                            <Mail className="w-2.5 h-2.5 shrink-0" />
+                            {s.email}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-1 justify-end shrink-0">
+                          {s.slots.map((slot) => (
+                            <SlotBadge key={slot} slot={slot} />
+                          ))}
+                        </div>
+                        {canManage && !hasAssignmentSlot && (
+                          <button
+                            type="button"
+                            data-testid={`admin-practice-staff-remove-${s.id}`}
+                            disabled={staffMutating === s.id}
+                            onClick={() => removeStaff(s.id, hasMd ? 'MEDICAL_DIRECTOR' : 'PROVIDER')}
+                            className="text-[11px] font-semibold px-2 py-1 rounded-md cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                            style={{ color: 'var(--brand-alert-red)' }}
+                            title={hasProviderRole && hasMd ? 'Remove both memberships' : 'Remove from practice'}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

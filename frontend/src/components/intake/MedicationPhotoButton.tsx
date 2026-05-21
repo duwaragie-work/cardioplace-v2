@@ -67,9 +67,18 @@ export default function MedicationPhotoButton({
     setError(null);
     setUploading(true);
     try {
+      // uploadMedicationPhoto downscales large phone photos before upload.
       const result = await uploadMedicationPhoto(file);
+      // If nothing readable came back, surface the error inline (in red)
+      // instead of opening a confirm modal with empty rows. (The backend
+      // already 422s on a fully empty read; this also catches blank rows.)
+      const readable = result.medications.filter((m) => m.drugName?.trim());
+      if (readable.length === 0) {
+        setError(t('ocr.med.errEmpty'));
+        return;
+      }
       const previewUrl = URL.createObjectURL(file);
-      setPending({ result, previewUrl });
+      setPending({ result: { ...result, medications: readable }, previewUrl });
     } catch (err) {
       if (err instanceof MedOcrError) {
         setError(messageFor(err.code, t));
@@ -102,47 +111,52 @@ export default function MedicationPhotoButton({
 
   return (
     <>
-      <motion.button
-        type="button"
-        data-testid="intake-medication-photo-button"
-        onClick={() => fileInputRef.current?.click()}
-        aria-label={uploading ? t('ocr.med.uploading') : buttonLabel}
-        aria-pressed={uploading}
-        disabled={uploading}
-        className={`inline-flex items-center gap-2 px-4 h-11 rounded-full font-semibold text-[13px] transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--brand-primary-purple)] disabled:cursor-wait ${className ?? ''}`}
-        style={{
-          backgroundColor: uploading
-            ? 'var(--brand-primary-purple)'
-            : 'var(--brand-primary-purple-light)',
-          color: uploading ? 'white' : 'var(--brand-primary-purple)',
-        }}
-        whileHover={{ scale: uploading ? 1 : 1.03 }}
-        whileTap={{ scale: uploading ? 1 : 0.96 }}
-      >
-        {uploading ? (
-          <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-        ) : (
-          <Camera size={16} aria-hidden="true" />
-        )}
-        <span>{uploading ? t('ocr.med.uploading') : buttonLabel}</span>
-      </motion.button>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept={ACCEPT}
-        capture="environment"
-        className="sr-only"
-        onChange={handleFile}
-      />
-      {error && (
-        <p
-          role="alert"
-          className="mt-2 text-[12px]"
-          style={{ color: 'var(--brand-error)' }}
+      {/* Self-contained column so the error always stacks BELOW the button —
+          the parent may be a flex row, which would otherwise push the error
+          off to the right of the button. */}
+      <div className="flex flex-col items-start gap-2 max-w-full">
+        <motion.button
+          type="button"
+          data-testid="intake-medication-photo-button"
+          onClick={() => fileInputRef.current?.click()}
+          aria-label={uploading ? t('ocr.med.uploading') : buttonLabel}
+          aria-pressed={uploading}
+          disabled={uploading}
+          className={`inline-flex shrink-0 items-center justify-center gap-2 px-4 h-11 rounded-full font-semibold text-[13px] whitespace-nowrap transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--brand-primary-purple)] disabled:cursor-wait ${className ?? ''}`}
+          style={{
+            backgroundColor: uploading
+              ? 'var(--brand-primary-purple)'
+              : 'var(--brand-primary-purple-light)',
+            color: uploading ? 'white' : 'var(--brand-primary-purple)',
+          }}
+          whileHover={{ scale: uploading ? 1 : 1.03 }}
+          whileTap={{ scale: uploading ? 1 : 0.96 }}
         >
-          {error}
-        </p>
-      )}
+          {uploading ? (
+            <Loader2 size={16} className="animate-spin shrink-0" aria-hidden="true" />
+          ) : (
+            <Camera size={16} className="shrink-0" aria-hidden="true" />
+          )}
+          <span>{uploading ? t('ocr.med.uploading') : buttonLabel}</span>
+        </motion.button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={ACCEPT}
+          capture="environment"
+          className="sr-only"
+          onChange={handleFile}
+        />
+        {error && (
+          <p
+            role="alert"
+            className="text-[12px] font-medium"
+            style={{ color: 'var(--brand-alert-red)' }}
+          >
+            {error}
+          </p>
+        )}
+      </div>
       {pending && (
         <MedicationPhotoConfirmModal
           medications={pending.result.medications}
