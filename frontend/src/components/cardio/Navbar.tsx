@@ -8,7 +8,7 @@ import { Bell, Menu, X, Globe } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { getAlerts, getNotifications } from '@/lib/services/journal.service';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { ALL_LOCALES, isLocaleSupported, type LocaleCode } from '@/i18n';
+import { ALL_LOCALES, isLocaleSupported } from '@/i18n';
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -108,8 +108,6 @@ export default function Navbar() {
     { labelKey: 'nav.chat' as const, href: '/chat' },
   ];
 
-  const currentLocale = ALL_LOCALES.find((l) => l.code === locale);
-
   return (
     <>
       <nav
@@ -122,7 +120,7 @@ export default function Navbar() {
         {/* Logo — dark-background variant of the wordmark (white paths
             baked into the SVG, no CSS filter needed). The SVG already
             includes "Cardioplace" so no separate text span. */}
-        <Link href="/" className="flex items-center shrink-0">
+        <Link href="/" className="flex items-center shrink-0" onClick={() => setMobileOpen(false)}>
           <Image
             src="/cardioplace-dark.svg"
             alt="Cardioplace"
@@ -173,7 +171,7 @@ export default function Navbar() {
               aria-label="Change language"
             >
               <Globe className="w-4 h-4" />
-              <span className="hidden sm:inline uppercase">{locale}</span>
+              <span className="uppercase">{locale}</span>
             </button>
 
             {langOpen && (
@@ -229,7 +227,7 @@ export default function Navbar() {
             )}
           </div>
 
-          <Link data-testid="notification-bell" href="/notifications" className="relative p-1" aria-label="Alerts">
+          <Link data-testid="notification-bell" href="/notifications" className="relative p-1" aria-label="Alerts" onClick={() => setMobileOpen(false)}>
             <Bell
               className="w-5 h-5"
               style={{
@@ -252,6 +250,7 @@ export default function Navbar() {
           <Link
             href="/profile"
             data-testid="navbar-sign-out-button"
+            onClick={() => setMobileOpen(false)}
             className="w-9 h-9 rounded-full flex items-center justify-center font-semibold text-sm shrink-0"
             style={{ backgroundColor: 'rgba(255,255,255,0.2)', color: 'white', border: '1.5px solid rgba(255,255,255,0.3)' }}
           >
@@ -300,39 +299,6 @@ export default function Navbar() {
                 </Link>
               );
             })}
-            {/* Language selector inside mobile menu */}
-            <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--brand-border)' }}>
-              <div className="relative" ref={langRef}>
-                <button
-                  onClick={() => setLangOpen((v) => !v)}
-                  className="flex items-center gap-2 w-full px-4 py-3 rounded-xl text-sm font-semibold"
-                  style={{ color: 'var(--brand-text-secondary)' }}
-                >
-                  <Globe className="w-4 h-4" />
-                  <span>{currentLocale?.flag} {currentLocale?.nativeName}</span>
-                </button>
-                {langOpen && (
-                  <div className="mt-1 mx-2 bg-white rounded-xl overflow-hidden" style={{ boxShadow: '0 4px 16px rgba(0,0,0,0.1)', border: '1px solid var(--brand-border)' }}>
-                    {ALL_LOCALES.map((l) => {
-                      const supported = isLocaleSupported(l.code);
-                      const active = locale === l.code;
-                      return (
-                        <button
-                          key={l.code}
-                          onClick={() => { setLocale(l.code); setLangOpen(false); setMobileOpen(false); }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-[13px]"
-                          style={{ backgroundColor: active ? 'var(--brand-primary-purple-light)' : undefined, color: active ? 'var(--brand-primary-purple)' : 'var(--brand-text-primary)', fontWeight: active ? 700 : 500 }}
-                        >
-                          <span className="text-base">{l.flag}</span>
-                          <span className="flex-1">{l.nativeName}</span>
-                          {!supported && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold" style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}>Soon</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
           </nav>
         </div>
       )}

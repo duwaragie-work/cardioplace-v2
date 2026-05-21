@@ -728,7 +728,7 @@ export default function Dashboard() {
             ) : (
               <span
                 data-testid="latest-bp-status"
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                className="inline-flex items-center justify-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-center"
                 style={{ backgroundColor: bpVsTargetStyle.bg, color: bpVsTargetStyle.fg }}
                 // Known WCAG debt — chip pattern at 10px is below AA Normal
                 // threshold with vibrant tokens. Same accepted tradeoff.
@@ -864,7 +864,7 @@ export default function Dashboard() {
                 </div>
               ) : visibleChartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={visibleChartData}>
+                  <AreaChart data={visibleChartData} margin={{ top: 5, right: 24, left: 5, bottom: 5 }}>
                     <defs>
                       <linearGradient id="colorSystolic" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#7B00E0" stopOpacity={0.18} />
@@ -883,7 +883,7 @@ export default function Dashboard() {
                         </g>
                       );
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    }) as any} interval={Math.max(0, Math.floor(visibleChartData.length / 8) - 1)} tickFormatter={(v: string) => v.replace(/ #\d+$/, '')}>
+                    }) as any} interval="preserveStartEnd" minTickGap={24} tickFormatter={(v: string) => v.replace(/ #\d+$/, '')}>
                       <Label value={t('dashboard.chartDateAxis')} position="insideBottom" offset={-2} style={{ fill: '#1d1d1d', fontSize: 10, fontWeight: 600 }} />
                     </XAxis>
                     <YAxis domain={bpDomain} axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} width={38}>

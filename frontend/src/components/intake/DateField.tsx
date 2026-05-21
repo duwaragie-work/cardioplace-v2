@@ -43,7 +43,7 @@ export default function DateField({
   const showPlaceholder = !value && !focused;
 
   return (
-    <div className="relative w-full">
+    <div className="relative w-full min-w-0">
       <input
         id={id}
         data-testid={testId}
@@ -61,7 +61,7 @@ export default function DateField({
           setFocused(false);
           e.currentTarget.style.borderColor = 'var(--brand-border)';
         }}
-        className={`date-field w-full h-14 pl-4 pr-12 rounded-xl ${textSizeClass} outline-none transition box-border`}
+        className={`date-field w-full min-w-0 h-14 pl-4 pr-12 rounded-xl ${textSizeClass} outline-none transition box-border`}
         style={{
           border: '2px solid var(--brand-border)',
           // Hide the native (often invisible/white) placeholder text while we

@@ -2189,45 +2189,41 @@ function ClinicalIntakeWizard() {
     setStep(next);
   };
 
-  const goNext = async () => {
-    // Validation gates.
-    if (step === 'A1') {
-      if (!state.gender) { setSubmitError({ kind: 'key', key: 'intake.nav.errorGender' }); return; }
-      if (!state.dateOfBirth) {
-        setSubmitError({ kind: 'key', key: 'intake.nav.errorDob' });
-        return;
-      }
+  // Per-step field validation, shared by Continue (goNext) and the edit-mode
+  // Save-changes quick-save so both reject the same invalid input.
+  const validateStep = (s: IntakeStepKey): typeof submitError => {
+    if (s === 'A1') {
+      if (!state.gender) return { kind: 'key', key: 'intake.nav.errorGender' };
+      if (!state.dateOfBirth) return { kind: 'key', key: 'intake.nav.errorDob' };
       const dobErrKey = validateDateOfBirth(state.dateOfBirth);
-      if (dobErrKey) {
-        setSubmitError({ kind: 'key', key: dobErrKey });
-        return;
-      }
+      if (dobErrKey) return { kind: 'key', key: dobErrKey };
       if (!state.heightCm || state.heightCm < 100 || state.heightCm > 250) {
-        setSubmitError({ kind: 'key', key: 'intake.nav.errorHeight' });
-        return;
+        return { kind: 'key', key: 'intake.nav.errorHeight' };
       }
     }
-    if (step === 'A2') {
+    if (s === 'A2') {
       if (state.isPregnant !== true && state.isPregnant !== false) {
-        setSubmitError({ kind: 'key', key: 'intake.nav.errorPregnancy' });
-        return;
+        return { kind: 'key', key: 'intake.nav.errorPregnancy' };
       }
       if (state.historyPreeclampsia !== true && state.historyPreeclampsia !== false) {
-        setSubmitError({ kind: 'key', key: 'intake.nav.errorPreeclampsia' });
-        return;
+        return { kind: 'key', key: 'intake.nav.errorPreeclampsia' };
       }
     }
-    if (step === 'A4' && !state.heartFailureType) {
-      setSubmitError({ kind: 'key', key: 'intake.nav.errorHfType' });
-      return;
+    if (s === 'A4' && !state.heartFailureType) {
+      return { kind: 'key', key: 'intake.nav.errorHfType' };
     }
-    if (step === 'A9') {
+    if (s === 'A9') {
       const missingFreq = state.selectedMedications.find((m) => !m.frequency);
       if (missingFreq) {
-        setSubmitError({ kind: 'key', key: 'intake.nav.errorFreq', values: { name: missingFreq.drugName } });
-        return;
+        return { kind: 'key', key: 'intake.nav.errorFreq', values: { name: missingFreq.drugName } };
       }
     }
+    return null;
+  };
+
+  const goNext = async () => {
+    const stepErr = validateStep(step);
+    if (stepErr) { setSubmitError(stepErr); return; }
     setSubmitError(null);
 
     // A6 (combos — the last med screen) → A9 transition: surface dedup
@@ -2336,6 +2332,39 @@ function ClinicalIntakeWizard() {
       router.push('/dashboard');
     } catch (e) {
       setExitError(e instanceof Error ? e.message : t('intake.exitSave.errorFallback'));
+      setExitSaving(false);
+    }
+  };
+
+  // Edit-mode quick-save: commit the current answers right away and go back to
+  // the profile, instead of forcing the patient to click Continue through every
+  // remaining step to reach the final submit. The upsert sends the full state
+  // — which in edit mode is the existing profile pre-loaded + their change — so
+  // unchanged fields are preserved and only what they edited differs. Validates
+  // the current step (and surfaces combo dedup on A6) so we never persist the
+  // same invalid input Continue would reject.
+  const handleQuickSave = async () => {
+    if (exitSaving || submitting) return;
+    const stepErr = validateStep(step);
+    if (stepErr) { setSubmitError(stepErr); return; }
+    if (step === 'A6') {
+      const conflicts = detectDedupConflicts(state.selectedMedications);
+      if (conflicts.length > 0) { setPendingDedup(conflicts); return; }
+    }
+    setSubmitError(null);
+    setExitSaving(true);
+    try {
+      await Promise.all([
+        saveIntakeProfile(buildProfilePayload(state)),
+        replaceIntakeMedications(buildMedsPayload(state)),
+      ]);
+      router.push('/profile');
+    } catch (e) {
+      setSubmitError(
+        e instanceof Error
+          ? { kind: 'raw', text: e.message }
+          : { kind: 'key', key: 'intake.nav.errorSubmit' },
+      );
       setExitSaving(false);
     }
   };
@@ -2556,20 +2585,51 @@ function ClinicalIntakeWizard() {
           }}
         >
           <div className="max-w-3xl mx-auto">
-            <motion.button
-              type="button"
-              data-testid="intake-submit"
-              onClick={goNext}
-              disabled={submitting}
-              className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
-              style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              {submitting ? t('intake.nav.saving') : step === 'A10' ? t('intake.nav.submit') : t('intake.nav.continue')}
-              {!submitting && step !== 'A10' && <ArrowRight className="w-4 h-4" />}
-              {!submitting && step === 'A10' && <Check className="w-4 h-4" />}
-            </motion.button>
+            {editMode ? (
+              // Edit mode — a one-tap "Save changes" that commits immediately
+              // (no stepping to the last screen), with Continue kept as a
+              // secondary action for patients who want to review other steps.
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  data-testid="intake-submit"
+                  onClick={goNext}
+                  disabled={submitting || exitSaving}
+                  className="flex-1 h-12 rounded-full border-2 font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                  style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                >
+                  {step === 'A10' ? t('intake.nav.submit') : t('intake.nav.continue')}
+                </button>
+                <motion.button
+                  type="button"
+                  data-testid="intake-quick-save"
+                  onClick={handleQuickSave}
+                  disabled={submitting || exitSaving}
+                  className="flex-1 h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                  style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  {exitSaving ? t('intake.nav.saving') : t('intake.nav.saveChanges')}
+                  {!exitSaving && <Check className="w-4 h-4" />}
+                </motion.button>
+              </div>
+            ) : (
+              <motion.button
+                type="button"
+                data-testid="intake-submit"
+                onClick={goNext}
+                disabled={submitting}
+                className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                {submitting ? t('intake.nav.saving') : step === 'A10' ? t('intake.nav.submit') : t('intake.nav.continue')}
+                {!submitting && step !== 'A10' && <ArrowRight className="w-4 h-4" />}
+                {!submitting && step === 'A10' && <Check className="w-4 h-4" />}
+              </motion.button>
+            )}
           </div>
         </div>
       )}

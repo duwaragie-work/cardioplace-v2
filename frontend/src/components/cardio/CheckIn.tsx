@@ -493,6 +493,10 @@ function B1Checklist({ form, setField }: StepProps) {
 
 function B2Reading({ form, setField }: StepProps) {
   const { t } = useLanguage();
+  // BP photo OCR error is lifted out of the icon button so it can render
+  // full-width below the button (above the reading inputs) instead of being
+  // squeezed in beside the camera icon inside the label row.
+  const [bpPhotoError, setBpPhotoError] = useState<string | null>(null);
 
   return (
     <div data-testid="checkin-step-2" className="space-y-6">
@@ -591,6 +595,7 @@ function B2Reading({ form, setField }: StepProps) {
                 in modal, then values flow into systolicBP/diastolicBP/pulse like a
                 manual entry. Hidden when NEXT_PUBLIC_BP_OCR_ENABLED !== 'true'. */}
             <BpPhotoButton
+              onError={setBpPhotoError}
               onConfirm={(r) => {
                 setField('systolicBP', String(r.sbp));
                 setField('diastolicBP', String(r.dbp));
@@ -600,6 +605,15 @@ function B2Reading({ form, setField }: StepProps) {
             <AudioButton text={t('checkin.b2.bpAudio')} size="sm" />
           </span>
         </label>
+        {bpPhotoError && (
+          <p
+            role="alert"
+            className="-mt-1 mb-3 text-[12px] leading-snug"
+            style={{ color: 'var(--brand-error)' }}
+          >
+            {bpPhotoError}
+          </p>
+        )}
         <div className="flex items-end gap-2 sm:gap-3">
           <div data-testid="check-in-systolic" className="flex-1 min-w-0">
             <input

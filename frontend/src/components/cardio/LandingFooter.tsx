@@ -1,17 +1,25 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { Mail, Send } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useAuth } from '@/lib/auth-context';
 
 export default function LandingFooter() {
   const { t } = useLanguage();
+  const { isAuthenticated, isLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [sent, setSent] = useState(false);
 
   const [sending, setSending] = useState(false);
+  // Mount gate so the server-rendered (logged-out) markup matches first paint;
+  // the "Start check-in" CTA is hidden only once we know the patient is signed in.
+  const [mounted, setMounted] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setMounted(true); }, []);
+  const showStartCheckin = !(mounted && !isLoading && isAuthenticated);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,14 +47,16 @@ export default function LandingFooter() {
       id="contact"
       style={{ backgroundImage: 'linear-gradient(159deg, #5c00a9 0%, #a04cee 46%, #c79afd 93%)' }}
     >
-      <div className="max-w-[1280px] mx-auto px-4 sm:px-6 md:px-8 lg:px-12 pt-10 md:pt-16 pb-2">
-        <a
-          href="/sign-in"
-          className="block w-full md:w-auto md:inline-flex items-center justify-center bg-white text-[#5c00a9] font-bold text-base px-8 py-3 rounded-full hover:bg-white/90 transition-colors text-center"
-        >
-          {t('home.startCheckin')}
-        </a>
-      </div>
+      {showStartCheckin && (
+        <div className="max-w-[1280px] mx-auto px-4 sm:px-6 md:px-8 lg:px-12 pt-10 md:pt-16 pb-2">
+          <a
+            href="/sign-in"
+            className="block w-full md:w-auto md:inline-flex items-center justify-center bg-white text-[#5c00a9] font-bold text-base px-8 py-3 rounded-full hover:bg-white/90 transition-colors text-center"
+          >
+            {t('home.startCheckin')}
+          </a>
+        </div>
+      )}
       <div className="max-w-[1280px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-10 px-4 sm:px-6 md:px-8 lg:px-12 py-8 md:py-12">
         {/* Col 1 - Brand */}
         <div className="flex flex-col gap-6">
