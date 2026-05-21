@@ -199,8 +199,10 @@ function verificationStatusVerb(prev: unknown, next: unknown): string {
       return 'verified by admin';
     case 'REJECTED':
       return 'marked rejected by admin';
-    case 'AWAITING_PROVIDER':
+    case 'HOLD':
       return 'placed on hold by admin';
+    case 'AWAITING_PROVIDER':
+      return 'flagged for provider review';
     case 'UNVERIFIED':
       return prev === 'VERIFIED'
         ? 'returned to unverified by admin'
