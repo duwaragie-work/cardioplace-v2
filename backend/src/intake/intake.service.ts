@@ -1,4 +1,8 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
+import {
+  ActorUser,
+  PatientAccessService,
+} from '../common/patient-access.service.js'
 import { DrugEnrichmentService } from '../drug-enrichment/drug-enrichment.service.js'
 import {
   DrugClass,
@@ -73,6 +77,7 @@ export class IntakeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly drugEnrichment: DrugEnrichmentService,
+    private readonly access: PatientAccessService,
   ) {}
 
   /**
@@ -507,10 +512,11 @@ export class IntakeService {
   // ─── Admin: POST /admin/users/:id/verify-profile ─────────────────────────
 
   async verifyProfile(
-    adminId: string,
+    actor: ActorUser,
     patientUserId: string,
     dto: VerifyProfileDto,
   ) {
+    await this.access.assertCanAccessPatient(actor, patientUserId)
     const profile = await this.prisma.patientProfile.findUnique({
       where: { userId: patientUserId },
     })
@@ -524,7 +530,7 @@ export class IntakeService {
         data: {
           profileVerificationStatus: ProfileVerificationStatus.VERIFIED,
           profileVerifiedAt: new Date(),
-          profileVerifiedBy: adminId,
+          profileVerifiedBy: actor.id,
         },
       }),
       this.prisma.profileVerificationLog.create({
@@ -533,7 +539,7 @@ export class IntakeService {
           fieldPath: 'profile.verificationStatus',
           previousValue: profile.profileVerificationStatus,
           newValue: ProfileVerificationStatus.VERIFIED,
-          changedBy: adminId,
+          changedBy: actor.id,
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_VERIFY,
           rationale: dto.rationale,
@@ -553,10 +559,11 @@ export class IntakeService {
   // audit row pinned to the field the admin flagged. Used by the Flow H
   // Profile tab when an admin rejects a single field after a prior verify.
   async rejectProfileField(
-    adminId: string,
+    actor: ActorUser,
     patientUserId: string,
     dto: { field: string; rationale?: string },
   ) {
+    await this.access.assertCanAccessPatient(actor, patientUserId)
     const profile = await this.prisma.patientProfile.findUnique({
       where: { userId: patientUserId },
     })
@@ -587,7 +594,7 @@ export class IntakeService {
           fieldPath: `profile.${dto.field}`,
           previousValue: previousValue as Prisma.InputJsonValue,
           newValue: Prisma.JsonNull,
-          changedBy: adminId,
+          changedBy: actor.id,
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_REJECT,
           rationale: dto.rationale,
@@ -602,7 +609,7 @@ export class IntakeService {
           fieldPath: 'profile.verificationStatus',
           previousValue: previousStatus,
           newValue: ProfileVerificationStatus.UNVERIFIED,
-          changedBy: adminId,
+          changedBy: actor.id,
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_REJECT,
           rationale: `Reverted to unverified — ${dto.field} rejected`,
@@ -620,10 +627,11 @@ export class IntakeService {
   // ─── Admin: POST /admin/users/:id/correct-profile ────────────────────────
 
   async correctProfile(
-    adminId: string,
+    actor: ActorUser,
     patientUserId: string,
     dto: CorrectProfileDto,
   ) {
+    await this.access.assertCanAccessPatient(actor, patientUserId)
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.patientProfile.findUnique({
         where: { userId: patientUserId },
@@ -679,14 +687,14 @@ export class IntakeService {
           pregnancyDueDate: this.coerceDate(patch.pregnancyDueDate),
           profileVerificationStatus: ProfileVerificationStatus.CORRECTED,
           profileVerifiedAt: new Date(),
-          profileVerifiedBy: adminId,
+          profileVerifiedBy: actor.id,
         },
       })
 
       await this.writeProfileLogs(tx, {
         userId: patientUserId,
         changes,
-        changedBy: adminId,
+        changedBy: actor.id,
         changedByRole: VerifierRole.ADMIN,
         changeType: VerificationChangeType.ADMIN_CORRECT,
         discrepancyFlag: true,
@@ -708,7 +716,7 @@ export class IntakeService {
               dobPatch === null
                 ? Prisma.JsonNull
                 : (new Date(dobPatch).toISOString() as Prisma.InputJsonValue),
-            changedBy: adminId,
+            changedBy: actor.id,
             changedByRole: VerifierRole.ADMIN,
             changeType: VerificationChangeType.ADMIN_CORRECT,
             discrepancyFlag: true,
@@ -733,7 +741,7 @@ export class IntakeService {
   // ─── Admin: POST /admin/medications/:id/verify ───────────────────────────
 
   async verifyMedication(
-    adminId: string,
+    actor: ActorUser,
     medicationId: string,
     dto: VerifyMedicationDto,
   ) {
@@ -743,6 +751,9 @@ export class IntakeService {
     if (!med) {
       throw new NotFoundException('Medication not found')
     }
+    // Access check after the med lookup so we can pivot off med.userId.
+    // Throws 403 if PROVIDER isn't in panel / MED_DIR doesn't head practice.
+    await this.access.assertCanAccessPatient(actor, med.userId)
 
     const nextStatus = dto.status as MedicationVerificationStatus
     const changeType =
@@ -764,7 +775,7 @@ export class IntakeService {
         where: { id: medicationId },
         data: {
           verificationStatus: nextStatus,
-          verifiedByAdminId: adminId,
+          verifiedByAdminId: actor.id,
           verifiedAt: new Date(),
         },
       }),
@@ -774,7 +785,7 @@ export class IntakeService {
           fieldPath: `medication:${medicationId}.verificationStatus`,
           previousValue: med.verificationStatus,
           newValue: nextStatus,
-          changedBy: adminId,
+          changedBy: actor.id,
           changedByRole: VerifierRole.ADMIN,
           changeType,
           rationale: dto.rationale,

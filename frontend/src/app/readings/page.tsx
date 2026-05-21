@@ -21,6 +21,10 @@ import {
   deleteJournalEntry,
 } from '@/lib/services/journal.service';
 import { getMyPatientProfile } from '@/lib/services/intake.service';
+import {
+  listMyMedications,
+  type PatientMedication,
+} from '@/lib/services/patient-medications.service';
 import { getBMI } from '@cardioplace/shared';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
@@ -61,6 +65,16 @@ type Entry = {
   chestPainOrDyspnea?: boolean;
   focalNeuroDeficit?: boolean;
   severeEpigastricPain?: boolean;
+  // Cluster 6/7/8 symptoms — same set the check-in surfaces.
+  dizziness?: boolean;
+  syncope?: boolean;
+  palpitations?: boolean;
+  legSwelling?: boolean;
+  fatigue?: boolean;
+  shortnessOfBreath?: boolean;
+  dryCough?: boolean;
+  faceSwelling?: boolean;
+  throatTightness?: boolean;
   newOnsetHeadache?: boolean;
   ruqPain?: boolean;
   edema?: boolean;
@@ -77,9 +91,28 @@ type SymptomKey =
   | 'chestPainOrDyspnea'
   | 'focalNeuroDeficit'
   | 'severeEpigastricPain'
+  | 'dizziness'
+  | 'syncope'
+  | 'palpitations'
+  | 'legSwelling'
+  | 'fatigue'
+  | 'shortnessOfBreath'
+  | 'dryCough'
+  | 'faceSwelling'
+  | 'throatTightness'
   | 'newOnsetHeadache'
   | 'ruqPain'
   | 'edema';
+
+type MissedReason = 'FORGOT' | 'SIDE_EFFECTS' | 'RAN_OUT' | 'COST' | 'INTENTIONAL' | 'OTHER';
+
+type MedEntry = {
+  taken: 'yes' | 'no' | 'scheduledLater' | null;
+  reason: MissedReason | null;
+  missedDoses: number;
+};
+
+const DEFAULT_MED_ENTRY: MedEntry = { taken: null, reason: null, missedDoses: 1 };
 
 type EditForm = {
   /** Split date + time so the patient sees two clean pickers (cleaner than
@@ -91,11 +124,10 @@ type EditForm = {
   diastolic: string;
   pulse: string;
   weight: string;
-  medication: 'yes' | 'no' | 'scheduledLater' | '';
-  /** Why the patient missed at least one med — only meaningful when medication==='no'. */
-  missedReason: 'FORGOT' | 'SIDE_EFFECTS' | 'RAN_OUT' | 'COST' | 'INTENTIONAL' | 'OTHER' | '';
-  /** Count of missed doses — only meaningful when medication==='no'. */
-  missedDosesCount: number;
+  /** Per-medication adherence keyed by medicationId — mirrors CheckIn's
+   *  StepMedication so the editor shows every active med with its selected
+   *  status (taken / missed / not due yet) and lets the patient change each. */
+  medicationStatus: Record<string, MedEntry>;
   // V2 structured symptoms — checkbox grid in the modal
   severeHeadache: boolean;
   visualChanges: boolean;
@@ -103,6 +135,15 @@ type EditForm = {
   chestPainOrDyspnea: boolean;
   focalNeuroDeficit: boolean;
   severeEpigastricPain: boolean;
+  dizziness: boolean;
+  syncope: boolean;
+  palpitations: boolean;
+  legSwelling: boolean;
+  fatigue: boolean;
+  shortnessOfBreath: boolean;
+  dryCough: boolean;
+  faceSwelling: boolean;
+  throatTightness: boolean;
   newOnsetHeadache: boolean;
   ruqPain: boolean;
   edema: boolean;
@@ -118,10 +159,24 @@ const SYMPTOM_KEYS: SymptomKey[] = [
   'chestPainOrDyspnea',
   'focalNeuroDeficit',
   'severeEpigastricPain',
+  'dizziness',
+  'syncope',
+  'palpitations',
+  'legSwelling',
+  'fatigue',
+  'shortnessOfBreath',
+  'dryCough',
+  'faceSwelling',
+  'throatTightness',
   'newOnsetHeadache',
   'ruqPain',
   'edema',
 ];
+
+// Pregnancy-specific symptoms (CheckIn B3) — only relevant to a pregnant
+// patient, so they're hidden from everyone else (e.g. male accounts) in the
+// edit modal, matching the patient check-in flow.
+const PREGNANCY_SYMPTOM_KEYS: SymptomKey[] = ['newOnsetHeadache', 'ruqPain', 'edema'];
 
 // Symptom labels reuse Flow B's reviewer-approved copy (checkin.b3.symptom*)
 // so intake and readings present identical wording in every locale.
@@ -132,6 +187,15 @@ const SYMPTOM_LABEL_KEYS: Record<SymptomKey, TranslationKey> = {
   chestPainOrDyspnea: 'checkin.b3.symptomChestPain',
   focalNeuroDeficit: 'checkin.b3.symptomNeuro',
   severeEpigastricPain: 'checkin.b3.symptomStomach',
+  dizziness: 'checkin.b3.symptomDizziness',
+  syncope: 'checkin.b3.symptomSyncope',
+  palpitations: 'checkin.b3.symptomPalpitations',
+  legSwelling: 'checkin.b3.symptomLegSwelling',
+  fatigue: 'checkin.b3.symptomFatigue',
+  shortnessOfBreath: 'checkin.b3.symptomShortnessOfBreath',
+  dryCough: 'checkin.b3.symptomDryCough',
+  faceSwelling: 'checkin.b3.symptomFaceSwelling',
+  throatTightness: 'checkin.b3.symptomThroatTightness',
   newOnsetHeadache: 'checkin.b3.symptomNewHeadache',
   ruqPain: 'checkin.b3.symptomRuq',
   edema: 'checkin.b3.symptomEdema',
@@ -147,6 +211,9 @@ function validateEditForm(f: EditForm, t: TFn): string | null {
   const dt = new Date(`${f.measuredDate}T${f.measuredTime}`);
   if (isNaN(dt.getTime())) return t('checkin.err.dateInvalid');
   const now = Date.now();
+  // A future *day* gets a date-specific message; a same-day time past now
+  // (beyond the 5-min clock-skew grace) keeps the time-specific message.
+  if (f.measuredDate > localDateKey(new Date().toISOString())) return t('checkin.err.dateFuture');
   if (dt.getTime() > now + 5 * 60 * 1000) return t('checkin.err.timeFuture');
   if (dt.getTime() < now - 30 * 24 * 60 * 60 * 1000) return t('checkin.err.timeOld');
   // BP — both required if either entered
@@ -186,6 +253,50 @@ function formatDate(dateStr: string) {
   } catch {
     return dateStr;
   }
+}
+
+// Grouping key in the patient's LOCAL timezone. Bucketing on
+// `measuredAt.split('T')[0]` (the UTC date) pushes late-evening readings into
+// the next day and disagrees with each card's date (which renders in local
+// time), so derive Y-M-D from the local Date instead.
+function localDateKey(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Reconstruct per-medication adherence for the edit modal from the entry's
+// stored rollup (medicationTaken / medicationScheduledLater) + the
+// missedMedications JSON snapshot. That snapshot only lists MISSED meds, so an
+// active med absent from it is assumed taken when the reading recorded an
+// explicit answer; "not due yet" applies when the whole reading was flagged
+// scheduled-later; otherwise the med is left unanswered.
+function buildMedStatus(
+  entry: Entry,
+  meds: { id: string }[],
+): Record<string, MedEntry> {
+  const missedById = new Map<string, NonNullable<Entry['missedMedications']>[number]>();
+  for (const m of entry.missedMedications ?? []) {
+    if (m.medicationId) missedById.set(m.medicationId, m);
+  }
+  const status: Record<string, MedEntry> = {};
+  for (const med of meds) {
+    const missed = missedById.get(med.id);
+    if (missed) {
+      status[med.id] = {
+        taken: 'no',
+        reason: (missed.reason as MissedReason | null) ?? null,
+        missedDoses: missed.missedDoses ?? 1,
+      };
+    } else if (entry.medicationScheduledLater) {
+      status[med.id] = { taken: 'scheduledLater', reason: null, missedDoses: 1 };
+    } else if (entry.medicationTaken === true || entry.medicationTaken === false) {
+      status[med.id] = { taken: 'yes', reason: null, missedDoses: 1 };
+    } else {
+      status[med.id] = { taken: null, reason: null, missedDoses: 1 };
+    }
+  }
+  return status;
 }
 
 // Phase/26 TTS pass 2 — humanise the reading audio summary into a single
@@ -357,38 +468,63 @@ function EntryCard({
       exit={{ opacity: 0, scale: 0.97 }}
       layout
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          {/* Date + Time — derived from single measuredAt timestamp */}
-          <div className="flex items-center gap-2 mb-2">
-            <p
-              data-testid="reading-row-date"
-              className="text-[12px] font-semibold"
-              style={{ color: 'var(--brand-text-muted)' }}
-            >
-              {formatDate(entry.measuredAt)}
-            </p>
-            {(() => {
-              const dt = new Date(entry.measuredAt);
-              if (isNaN(dt.getTime())) return null;
-              const hh = String(dt.getHours()).padStart(2, '0');
-              const mi = String(dt.getMinutes()).padStart(2, '0');
-              return (
-                <span
-                  className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
-                  style={{
-                    backgroundColor: 'var(--brand-primary-purple-light)',
-                    color: 'var(--brand-primary-purple)',
-                  }}
-                >
-                  {`${hh}:${mi}`}
-                </span>
-              );
-            })()}
-          </div>
+      {/* Header row: date + time on the left, actions on the right. Keeping the
+          actions here (instead of a fixed side column) lets the BP value and
+          the detail chips use the full card width, so the chips wrap nicely on
+          mobile rather than stacking one-per-line in a squeezed column. */}
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <p
+            data-testid="reading-row-date"
+            className="text-[12px] font-semibold"
+            style={{ color: 'var(--brand-text-muted)' }}
+          >
+            {formatDate(entry.measuredAt)}
+          </p>
+          {(() => {
+            const dt = new Date(entry.measuredAt);
+            if (isNaN(dt.getTime())) return null;
+            const hh = String(dt.getHours()).padStart(2, '0');
+            const mi = String(dt.getMinutes()).padStart(2, '0');
+            return (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                style={{
+                  backgroundColor: 'var(--brand-primary-purple-light)',
+                  color: 'var(--brand-primary-purple)',
+                }}
+              >
+                {`${hh}:${mi}`}
+              </span>
+            );
+          })()}
+        </div>
 
-          {/* BP reading */}
-          {hasBP ? (
+        {/* Actions */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <AudioButton size="sm" text={audioSummary} />
+          <button
+            onClick={onEdit}
+            className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
+            style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
+            aria-label={t('accessibility.editReading')}
+          >
+            <Pencil className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
+          </button>
+          <button
+            data-testid={`readings-delete-button-${entry.id}`}
+            onClick={onDelete}
+            className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
+            style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
+            aria-label={t('accessibility.deleteReading')}
+          >
+            <Trash2 className="w-3.5 h-3.5" style={{ color: 'var(--brand-alert-red)' }} />
+          </button>
+        </div>
+      </div>
+
+      {/* BP reading */}
+      {hasBP ? (
             <div className="flex items-center gap-3 mb-2 flex-wrap">
               <div className="flex items-baseline gap-0.5">
                 <span className="text-[30px] font-bold leading-none" style={{ color: 'var(--brand-text-primary)' }}>
@@ -511,30 +647,6 @@ function EntryCard({
               &ldquo;{entry.notes}&rdquo;
             </p>
           )}
-        </div>
-
-        {/* Actions */}
-        <div className="flex items-center gap-2 shrink-0">
-          <AudioButton size="sm" text={audioSummary} />
-          <button
-            onClick={onEdit}
-            className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
-            style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
-            aria-label={t('accessibility.editReading')}
-          >
-            <Pencil className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
-          </button>
-          <button
-            data-testid={`readings-delete-button-${entry.id}`}
-            onClick={onDelete}
-            className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
-            style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
-            aria-label={t('accessibility.deleteReading')}
-          >
-            <Trash2 className="w-3.5 h-3.5" style={{ color: 'var(--brand-alert-red)' }} />
-          </button>
-        </div>
-      </div>
     </motion.div>
   );
 }
@@ -665,6 +777,8 @@ function EditModal({
   error,
   isDirty,
   heightCm,
+  isPregnant,
+  medications,
   onChange,
   onSave,
   onClose,
@@ -676,7 +790,11 @@ function EditModal({
   isDirty: boolean;
   /** From PatientProfile.heightCm — used to compute BMI in the audio summary. */
   heightCm: number | null;
-  onChange: (key: keyof EditForm, val: string | boolean | number) => void;
+  /** From PatientProfile.isPregnant — gates the pregnancy-specific symptoms. */
+  isPregnant: boolean;
+  /** Active medications — rendered as a per-med adherence list. */
+  medications: PatientMedication[];
+  onChange: (key: keyof EditForm, val: string | boolean | number | Record<string, MedEntry>) => void;
   onSave: () => void;
   onClose: () => void;
 }) {
@@ -697,6 +815,14 @@ function EditModal({
   const formWeightKg = form.weight ? parseFloat(form.weight) : null;
   const formBmi = getBMI(heightCm, formWeightKg ?? undefined);
   const formSymptomCount = SYMPTOM_KEYS.reduce((n, k) => (form[k] ? n + 1 : n), 0);
+  // Roll the per-med statuses up to a single taken/missed/null for the audio
+  // summary: missed if any med is "no", taken if at least one explicit yes/no
+  // and none missed, null otherwise.
+  const medTakens = medications
+    .map((m) => form.medicationStatus[m.id]?.taken)
+    .filter((s): s is 'yes' | 'no' | 'scheduledLater' => !!s);
+  const anyMedExplicit = medTakens.some((s) => s === 'yes' || s === 'no');
+  const anyMedMissed = medTakens.some((s) => s === 'no');
   const editAudio = humanizeReading(
     {
       measuredAt: formMeasuredAt,
@@ -706,13 +832,32 @@ function EditModal({
       position: form.position || null,
       weight: Number.isFinite(formWeightKg) ? formWeightKg : null,
       bmi: formBmi,
-      medicationTaken:
-        form.medication === 'yes' ? true : form.medication === 'no' ? false : null,
+      medicationTaken: anyMedExplicit ? !anyMedMissed : null,
       symptomCount: formSymptomCount,
       notes: form.notes,
     },
     t,
   );
+
+  // Per-med helpers — mirror CheckIn's StepMedication setters. Updates flow
+  // through onChange('medicationStatus', nextMap) so the parent's generic
+  // setEditForm spread persists them.
+  const getMed = (id: string): MedEntry => form.medicationStatus[id] ?? DEFAULT_MED_ENTRY;
+  const setMedTaken = (id: string, value: 'yes' | 'no' | 'scheduledLater') => {
+    const cur = getMed(id);
+    const next: MedEntry =
+      value === 'no'
+        ? { ...cur, taken: 'no' }
+        : { taken: value, reason: null, missedDoses: 1 };
+    onChange('medicationStatus', { ...form.medicationStatus, [id]: next });
+  };
+  const patchMed = (id: string, patch: Partial<MedEntry>) => {
+    onChange('medicationStatus', {
+      ...form.medicationStatus,
+      [id]: { ...getMed(id), ...patch },
+    });
+  };
+  const drugClassLabel = (cls: string) => cls.replace(/_/g, ' ').toLowerCase();
 
   return (
     <motion.div
@@ -990,8 +1135,10 @@ function EditModal({
               </div>
             </div>
 
-            {/* Medication — mirrors CheckIn StepMedication: yes / no / not due yet,
-                with reason + missed-dose counter revealed when the patient picks "no". */}
+            {/* Medication — one row per active med, mirroring CheckIn's
+                StepMedication. Each med shows its current status (taken / missed
+                / not due yet) and can be changed independently; "No" reveals a
+                per-med reason + missed-dose counter. */}
             <div>
               <label
                 className="block text-[12px] font-semibold mb-2"
@@ -999,98 +1146,143 @@ function EditModal({
               >
                 {t('readings.medicationTaken')}
               </label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['yes', 'no', 'scheduledLater'] as const).map((val) => (
-                  <button
-                    key={val}
-                    type="button"
-                    onClick={() => onChange('medication', val)}
-                    className="h-10 rounded-xl border-2 text-[12px] font-semibold transition cursor-pointer"
-                    style={{
-                      borderColor:
-                        form.medication === val
-                          ? 'var(--brand-primary-purple)'
-                          : 'var(--brand-border)',
-                      backgroundColor:
-                        form.medication === val
-                          ? 'var(--brand-primary-purple-light)'
-                          : 'transparent',
-                      color:
-                        form.medication === val
-                          ? 'var(--brand-primary-purple)'
-                          : 'var(--brand-text-muted)',
-                    }}
-                  >
-                    {val === 'yes'
-                      ? t('common.yes')
-                      : val === 'no'
-                        ? t('common.no')
-                        : t('readings.notDueYet')}
-                  </button>
-                ))}
-              </div>
 
-              {form.medication === 'no' && (
-                <div className="mt-3 space-y-3 p-3 rounded-xl" style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}>
-                  <div>
-                    <label
-                      htmlFor="edit-missed-reason"
-                      className="block text-[11px] font-semibold uppercase tracking-wide mb-1"
-                      style={{ color: 'var(--brand-text-muted)' }}
-                    >
-                      {t('readings.whyMissed')}
-                    </label>
-                    <select
-                      id="edit-missed-reason"
-                      value={form.missedReason}
-                      onChange={(e) => onChange('missedReason', e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border text-[14px] bg-white"
-                      style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
-                    >
-                      <option value="">{t('readings.selectReason')}</option>
-                      <option value="FORGOT">{t('readings.reasonForgot')}</option>
-                      <option value="SIDE_EFFECTS">{t('readings.reasonSideEffects')}</option>
-                      <option value="RAN_OUT">{t('readings.reasonRanOut')}</option>
-                      <option value="COST">{t('readings.reasonCost')}</option>
-                      <option value="INTENTIONAL">{t('readings.reasonIntentional')}</option>
-                      <option value="OTHER">{t('readings.reasonOther')}</option>
-                    </select>
-                  </div>
+              {medications.length === 0 ? (
+                <p
+                  className="text-[12.5px] rounded-xl p-3 leading-relaxed"
+                  style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-text-primary)' }}
+                >
+                  {t('checkin.b4.noMeds')}
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {medications.map((med) => {
+                    const med_entry = getMed(med.id);
+                    const missed = med_entry.taken === 'no';
+                    const took = med_entry.taken === 'yes';
+                    return (
+                      <div
+                        key={med.id}
+                        className="rounded-xl border-2 transition"
+                        style={{
+                          borderColor: missed
+                            ? 'var(--brand-warning-amber)'
+                            : took
+                              ? 'var(--brand-success-green)'
+                              : 'var(--brand-border)',
+                          backgroundColor: missed
+                            ? 'var(--brand-warning-amber-light)'
+                            : took
+                              ? 'var(--brand-success-green-light)'
+                              : 'white',
+                        }}
+                      >
+                        <div className="px-3 py-3">
+                          <div className="mb-2 min-w-0">
+                            <p
+                              className="text-[13.5px] font-semibold truncate"
+                              style={{ color: 'var(--brand-text-primary)' }}
+                            >
+                              {med.drugName}
+                            </p>
+                            <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
+                              {drugClassLabel(med.drugClass)}
+                            </p>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {(['yes', 'no', 'scheduledLater'] as const).map((val) => {
+                              const active = med_entry.taken === val;
+                              return (
+                                <button
+                                  key={val}
+                                  type="button"
+                                  onClick={() => setMedTaken(med.id, val)}
+                                  className="h-10 rounded-xl border-2 text-[12px] font-semibold transition cursor-pointer"
+                                  style={{
+                                    borderColor: active ? 'var(--brand-primary-purple)' : 'var(--brand-border)',
+                                    backgroundColor: active ? 'var(--brand-primary-purple-light)' : 'white',
+                                    color: active ? 'var(--brand-primary-purple)' : 'var(--brand-text-muted)',
+                                  }}
+                                >
+                                  {val === 'yes'
+                                    ? t('common.yes')
+                                    : val === 'no'
+                                      ? t('common.no')
+                                      : t('readings.notDueYet')}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
 
-                  <fieldset className="border-0 p-0 m-0">
-                    <legend
-                      className="text-[11px] font-semibold uppercase tracking-wide"
-                      style={{ color: 'var(--brand-text-muted)' }}
-                    >
-                      {t('readings.howManyDoses')}
-                    </legend>
-                    <div className="mt-1 flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => onChange('missedDosesCount', Math.max(1, form.missedDosesCount - 1))}
-                        className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer bg-white"
-                        style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
-                        aria-label={t('readings.decreaseDoses')}
-                      >
-                        −
-                      </button>
-                      <span
-                        className="text-[16px] font-bold w-6 text-center"
-                        style={{ color: 'var(--brand-text-primary)' }}
-                      >
-                        {form.missedDosesCount}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => onChange('missedDosesCount', Math.min(10, form.missedDosesCount + 1))}
-                        className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer bg-white"
-                        style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
-                        aria-label={t('readings.increaseDoses')}
-                      >
-                        +
-                      </button>
-                    </div>
-                  </fieldset>
+                        {missed && (
+                          <div className="px-3 pb-3 space-y-3 border-t" style={{ borderColor: 'var(--brand-border)' }}>
+                            <div className="pt-3">
+                              <label
+                                htmlFor={`edit-missed-reason-${med.id}`}
+                                className="block text-[11px] font-semibold uppercase tracking-wide mb-1"
+                                style={{ color: 'var(--brand-text-muted)' }}
+                              >
+                                {t('readings.whyMissed')}
+                              </label>
+                              <select
+                                id={`edit-missed-reason-${med.id}`}
+                                value={med_entry.reason ?? ''}
+                                onChange={(e) =>
+                                  patchMed(med.id, { reason: (e.target.value || null) as MedEntry['reason'] })
+                                }
+                                className="w-full px-3 py-2 rounded-lg border text-[14px] bg-white"
+                                style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+                              >
+                                <option value="">{t('readings.selectReason')}</option>
+                                <option value="FORGOT">{t('readings.reasonForgot')}</option>
+                                <option value="SIDE_EFFECTS">{t('readings.reasonSideEffects')}</option>
+                                <option value="RAN_OUT">{t('readings.reasonRanOut')}</option>
+                                <option value="COST">{t('readings.reasonCost')}</option>
+                                <option value="INTENTIONAL">{t('readings.reasonIntentional')}</option>
+                                <option value="OTHER">{t('readings.reasonOther')}</option>
+                              </select>
+                            </div>
+
+                            <fieldset className="border-0 p-0 m-0">
+                              <legend
+                                className="text-[11px] font-semibold uppercase tracking-wide"
+                                style={{ color: 'var(--brand-text-muted)' }}
+                              >
+                                {t('readings.howManyDoses')}
+                              </legend>
+                              <div className="mt-1 flex items-center gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => patchMed(med.id, { missedDoses: Math.max(1, med_entry.missedDoses - 1) })}
+                                  className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer bg-white"
+                                  style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                                  aria-label={t('readings.decreaseDoses')}
+                                >
+                                  −
+                                </button>
+                                <span
+                                  className="text-[16px] font-bold w-6 text-center"
+                                  style={{ color: 'var(--brand-text-primary)' }}
+                                >
+                                  {med_entry.missedDoses}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => patchMed(med.id, { missedDoses: Math.min(10, med_entry.missedDoses + 1) })}
+                                  className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer bg-white"
+                                  style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                                  aria-label={t('readings.increaseDoses')}
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </fieldset>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1104,7 +1296,9 @@ function EditModal({
                 {t('readings.symptoms')}
               </label>
               <div className="space-y-2">
-                {SYMPTOM_KEYS.map((key) => {
+                {SYMPTOM_KEYS.filter(
+                  (key) => isPregnant || !PREGNANCY_SYMPTOM_KEYS.includes(key),
+                ).map((key) => {
                   const checked = Boolean(form[key]);
                   return (
                     <button
@@ -1320,6 +1514,14 @@ export default function ReadingsPage() {
   // Fetched once alongside the journal list — small endpoint, never blocks
   // the page render (BMI just hides until it lands).
   const [heightCm, setHeightCm] = useState<number | null>(null);
+  // Pregnancy flag — gates the pregnancy-specific symptoms in the edit modal so
+  // they never show for patients who can't be pregnant (e.g. male accounts).
+  const [isPregnant, setIsPregnant] = useState(false);
+  // Active medications — fetched once so the edit modal can show every med with
+  // its per-reading status (taken / missed / not due yet), matching CheckIn's
+  // medication step. AS_NEEDED (PRN) meds are excluded: "missed today" is not
+  // meaningful for them.
+  const [medications, setMedications] = useState<PatientMedication[]>([]);
   const [editEntry, setEditEntry] = useState<Entry | null>(null);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   // Snapshot of the form taken at openEdit time — used to compute isDirty
@@ -1356,7 +1558,24 @@ export default function ReadingsPage() {
     let cancelled = false;
     getMyPatientProfile()
       .then((p) => {
-        if (!cancelled) setHeightCm(p?.heightCm ?? null);
+        if (!cancelled) {
+          setHeightCm(p?.heightCm ?? null);
+          setIsPregnant(p?.isPregnant === true);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Fetch active medications once so the edit modal can render the per-med
+  // adherence list. Best-effort; on failure the modal just shows no meds.
+  useEffect(() => {
+    let cancelled = false;
+    listMyMedications()
+      .then((meds) => {
+        if (!cancelled) setMedications(meds.filter((m) => m.frequency !== 'AS_NEEDED'));
       })
       .catch(() => {});
     return () => {
@@ -1385,25 +1604,22 @@ export default function ReadingsPage() {
       diastolic: entry.diastolicBP?.toString() ?? '',
       pulse: entry.pulse?.toString() ?? '',
       weight: entry.weight?.toString() ?? '',
-      medication:
-        entry.medicationTaken === true
-          ? 'yes'
-          : entry.medicationTaken === false
-            ? 'no'
-            : entry.medicationScheduledLater
-              ? 'scheduledLater'
-              : '',
-      // Pull reason from the first per-med entry (the EditModal collects a
-      // single representative answer for the whole reading; CheckIn's
-      // per-med detail is preserved on submit but collapsed for the editor).
-      missedReason: (entry.missedMedications?.[0]?.reason as EditForm['missedReason']) ?? '',
-      missedDosesCount: entry.missedDoses ?? 1,
+      medicationStatus: buildMedStatus(entry, medications),
       severeHeadache: entry.severeHeadache ?? false,
       visualChanges: entry.visualChanges ?? false,
       alteredMentalStatus: entry.alteredMentalStatus ?? false,
       chestPainOrDyspnea: entry.chestPainOrDyspnea ?? false,
       focalNeuroDeficit: entry.focalNeuroDeficit ?? false,
       severeEpigastricPain: entry.severeEpigastricPain ?? false,
+      dizziness: entry.dizziness ?? false,
+      syncope: entry.syncope ?? false,
+      palpitations: entry.palpitations ?? false,
+      legSwelling: entry.legSwelling ?? false,
+      fatigue: entry.fatigue ?? false,
+      shortnessOfBreath: entry.shortnessOfBreath ?? false,
+      dryCough: entry.dryCough ?? false,
+      faceSwelling: entry.faceSwelling ?? false,
+      throatTightness: entry.throatTightness ?? false,
       newOnsetHeadache: entry.newOnsetHeadache ?? false,
       ruqPain: entry.ruqPain ?? false,
       edema: entry.edema ?? false,
@@ -1434,6 +1650,17 @@ export default function ReadingsPage() {
       setEditError(validation);
       return;
     }
+    // Per-medication: a med marked "No" must carry a reason — the backend
+    // requires `reason` on every missedMedications entry.
+    const missingReason = medications.some(
+      (m) =>
+        editForm.medicationStatus[m.id]?.taken === 'no' &&
+        !editForm.medicationStatus[m.id]?.reason,
+    );
+    if (missingReason) {
+      setEditError(t('readings.validate.missedReason'));
+      return;
+    }
     setEditSaving(true);
     setEditError('');
     try {
@@ -1448,41 +1675,36 @@ export default function ReadingsPage() {
       if (editForm.diastolic) payload.diastolicBP = parseInt(editForm.diastolic, 10);
       if (editForm.pulse) payload.pulse = parseInt(editForm.pulse, 10);
       if (editForm.weight) payload.weight = parseFloat(editForm.weight);
-      // Mirror CheckIn's submit shape: yes → taken=true, no → taken=false
-      // (with a single representative reason + dose count), scheduledLater
-      // → scheduledLater=true so the rule engine treats the gap as
-      // intentional rather than a missed dose.
-      if (editForm.medication === 'yes') {
-        payload.medicationTaken = true;
-        payload.medicationScheduledLater = false;
-        payload.missedDoses = 0;
-        payload.missedMedications = [];
-      } else if (editForm.medication === 'no') {
-        payload.medicationTaken = false;
-        payload.medicationScheduledLater = false;
-        payload.missedDoses = editForm.missedDosesCount;
-        // The editor collects ONE representative reason for the whole reading
-        // (we don't have per-medication context here). Ship a sentinel
-        // missedMedications entry only when a reason was picked, so the
-        // backend's adherence engine still has the metadata.
-        payload.missedMedications = editForm.missedReason
-          ? [{
-              medicationId: 'edit-rollup',
-              drugName: 'Edit rollup',
-              drugClass: 'OTHER',
-              reason: editForm.missedReason,
-              missedDoses: editForm.missedDosesCount,
-            }]
-          : [];
-      } else if (editForm.medication === 'scheduledLater') {
-        // Clear medicationTaken so the adherence rule (engine/adherence.ts)
-        // doesn't fire — it triggers on `medicationTaken === false`. The
-        // separate scheduledLater flag tells downstream consumers the gap
-        // was intentional rather than a missed dose.
-        payload.medicationTaken = null;
-        payload.medicationScheduledLater = true;
-        payload.missedDoses = 0;
-        payload.missedMedications = [];
+      // Per-medication adherence → the rollup shape the backend stores.
+      // Mirrors CheckIn's submit: each med marked "no" becomes a
+      // missedMedications entry (with its reason + dose count); "not due yet"
+      // sets the scheduled-later flag; medicationTaken is true only when at
+      // least one med got an explicit yes/no and none were missed, null when
+      // every answer was "not due yet" (so the adherence rule doesn't fire).
+      // Skipped entirely when the patient has no active meds, so existing
+      // medication data on the entry is preserved rather than wiped.
+      if (medications.length > 0) {
+        const medEntries = medications.map((m) => ({
+          med: m,
+          state: editForm.medicationStatus[m.id] ?? DEFAULT_MED_ENTRY,
+        }));
+        const missedMedications = medEntries
+          .filter((e) => e.state.taken === 'no' && e.state.reason)
+          .map((e) => ({
+            medicationId: e.med.id,
+            drugName: e.med.drugName,
+            drugClass: e.med.drugClass,
+            reason: e.state.reason as MissedReason,
+            missedDoses: e.state.missedDoses,
+          }));
+        const anyExplicitYesNo = medEntries.some(
+          (e) => e.state.taken === 'yes' || e.state.taken === 'no',
+        );
+        const scheduledLater = medEntries.some((e) => e.state.taken === 'scheduledLater');
+        payload.medicationTaken = anyExplicitYesNo ? missedMedications.length === 0 : null;
+        payload.medicationScheduledLater = scheduledLater;
+        payload.missedDoses = missedMedications.reduce((s, m) => s + (m.missedDoses ?? 0), 0);
+        payload.missedMedications = missedMedications;
       }
       // Structured V2 symptoms — always send so toggling off is persisted.
       payload.severeHeadache = editForm.severeHeadache;
@@ -1491,9 +1713,21 @@ export default function ReadingsPage() {
       payload.chestPainOrDyspnea = editForm.chestPainOrDyspnea;
       payload.focalNeuroDeficit = editForm.focalNeuroDeficit;
       payload.severeEpigastricPain = editForm.severeEpigastricPain;
-      payload.newOnsetHeadache = editForm.newOnsetHeadache;
-      payload.ruqPain = editForm.ruqPain;
-      payload.edema = editForm.edema;
+      payload.dizziness = editForm.dizziness;
+      payload.syncope = editForm.syncope;
+      payload.palpitations = editForm.palpitations;
+      payload.legSwelling = editForm.legSwelling;
+      payload.fatigue = editForm.fatigue;
+      payload.shortnessOfBreath = editForm.shortnessOfBreath;
+      payload.dryCough = editForm.dryCough;
+      payload.faceSwelling = editForm.faceSwelling;
+      payload.throatTightness = editForm.throatTightness;
+      // Pregnancy-specific symptoms are only meaningful for a pregnant patient
+      // and are hidden from everyone else, so force them false otherwise
+      // (matches CheckIn's submit) rather than persisting a stale value.
+      payload.newOnsetHeadache = isPregnant ? editForm.newOnsetHeadache : false;
+      payload.ruqPain = isPregnant ? editForm.ruqPain : false;
+      payload.edema = isPregnant ? editForm.edema : false;
       payload.otherSymptoms = editForm.otherSymptomsText.trim()
         ? [editForm.otherSymptomsText.trim()]
         : [];
@@ -1618,7 +1852,7 @@ export default function ReadingsPage() {
             const grouped: { date: string; items: Entry[] }[] = [];
             const dateMap = new Map<string, Entry[]>();
             for (const entry of entries) {
-              const dateKey = entry.measuredAt?.split('T')[0] ?? entry.measuredAt;
+              const dateKey = localDateKey(entry.measuredAt);
               if (!dateMap.has(dateKey)) dateMap.set(dateKey, []);
               dateMap.get(dateKey)!.push(entry);
             }
@@ -1645,15 +1879,16 @@ export default function ReadingsPage() {
                   }
                   return (
                     <div key={group.date} data-testid="reading-group" className="space-y-2">
-                      {group.items.length > 1 && (
-                        <p
-                          data-testid="reading-group-date"
-                          className="text-[11px] font-bold uppercase tracking-wider px-1 pt-2"
-                          style={{ color: 'var(--brand-text-muted)' }}
-                        >
-                          {formatDate(group.date)} — {group.items.length} readings
-                        </p>
-                      )}
+                      <p
+                        data-testid="reading-group-date"
+                        className="text-[11px] font-bold uppercase tracking-wider px-1 pt-2"
+                        style={{ color: 'var(--brand-text-muted)' }}
+                      >
+                        {formatDate(group.items[0].measuredAt)}
+                        {group.items.length > 1
+                          ? ` — ${t('readings.readingsCount').replace('{count}', String(group.items.length))}`
+                          : ''}
+                      </p>
                       {buckets.map((bucket, i) =>
                         bucket.sessionId && bucket.items.length > 1 ? (
                           <SessionCard
@@ -1691,6 +1926,8 @@ export default function ReadingsPage() {
             saving={editSaving}
             error={editError}
             heightCm={heightCm}
+            isPregnant={isPregnant}
+            medications={medications}
             // JSON.stringify is fine here — EditForm is small + flat. Returns
             // false when the user reopens the modal without touching anything.
             isDirty={

@@ -450,19 +450,26 @@ test.describe('Phase 3 §M — RBAC matrix', () => {
     await expect(page.locator(byTestId(T.admin.practiceCreateButton))).toHaveCount(0)
   })
 
-  test('30m.3 — PROVIDER thresholds tab is read-only', async ({ page }) => {
+  test('30m.3 — PROVIDER can edit thresholds for an assigned patient', async ({ page }) => {
+    // May-2026 role-scope decision: PROVIDER gained threshold-write on their
+    // assigned panel (was read-only). James is assigned to primaryProvider,
+    // so the editor renders. assertCanAccessPatient enforces the panel scope
+    // server-side; an unassigned patient would 403 (covered by 30x LOCAL).
     test.setTimeout(90_000)
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const james = await tc.findUser(PATIENTS.james.email) // assigned to primaryProvider
     await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
     await page.goto(`${ADMIN_BASE_URL}/patients/${james.id}`)
     await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
-    await expect(page.locator(byTestId(T.admin.thresholdReadonlyBanner))).toBeVisible({ timeout: 25_000 })
-    await expect(page.locator(byTestId(T.admin.thresholdSave))).toHaveCount(0)
+    await expect(page.locator(byTestId(T.admin.thresholdSave))).toBeVisible({ timeout: 25_000 })
+    await expect(page.locator(byTestId(T.admin.thresholdReadonlyBanner))).toHaveCount(0)
     await tc.dispose()
   })
 
-  test('30m.4 — MEDICAL_DIRECTOR can edit thresholds AND manage practices', async ({ page }) => {
+  test('30m.4 — MEDICAL_DIRECTOR can edit thresholds but NOT manage practices', async ({ page }) => {
+    // May-2026 role-scope decision: practice CRUD moved to OPS + SUPER_ADMIN
+    // only. MED_DIR keeps clinical authority (thresholds) but no longer
+    // manages practice metadata — the "Add practice" CTA is absent.
     test.setTimeout(90_000)
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const aisha = await tc.findUser(PATIENTS.aisha.email)
@@ -471,9 +478,11 @@ test.describe('Phase 3 §M — RBAC matrix', () => {
     await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
     await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
     await expect(page.locator(byTestId(T.admin.thresholdSave))).toBeVisible({ timeout: 25_000 })
-    // Practice management IS allowed for MED_DIR (doc matrix was wrong).
+    // Practice management is NO LONGER allowed for MED_DIR — list renders
+    // (read-only) but no create CTA.
     await page.goto(`${ADMIN_BASE_URL}/practices`)
-    await expect(page.locator(byTestId(T.admin.practiceCreateButton)).first()).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator(byTestId(T.admin.practiceList)).first()).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator(byTestId(T.admin.practiceCreateButton))).toHaveCount(0)
     await tc.dispose()
   })
 

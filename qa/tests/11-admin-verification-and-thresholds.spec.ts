@@ -153,11 +153,13 @@ test.describe('Admin medication verification', () => {
 test.describe('Admin threshold editor', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
-  test('MEDICAL_DIRECTOR can write PatientThreshold; PROVIDER cannot', async () => {
+  test('MEDICAL_DIRECTOR + assigned PROVIDER can write PatientThreshold', async () => {
+    // May-2026 role-scope decision: PROVIDER gained threshold-write on their
+    // assigned panel. Priya is assigned to primaryProvider, so both MD and
+    // the assigned PROVIDER can author her threshold. (A PROVIDER off the
+    // panel still 403s — covered by the Phase 2 cross-practice guard below
+    // and the 30x LOCAL negative spec.)
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
-    // Use Priya — she has no seeded threshold (Aisha picks one up across
-    // runs and would 409 on re-POST). Keeps this test idempotent on first
-    // run; subsequent runs fall back to PATCH if a threshold exists.
     const u = await tc.findUser(PATIENTS.priya.email)
 
     const mdApi = await authedApi(API_BASE_URL, ADMINS.medicalDirector.email, 'admin')
@@ -179,8 +181,10 @@ test.describe('Admin threshold editor', () => {
     }
     expect(mdRes.ok(), `MD threshold write: ${await mdRes.text()}`).toBeTruthy()
 
+    // Assigned PROVIDER can now write (PATCH — a threshold exists after the
+    // MD write above, so POST would 409).
     const provApi = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
-    const provRes = await provApi.post(`admin/patients/${u.id}/threshold`, {
+    const provRes = await provApi.patch(`admin/patients/${u.id}/threshold`, {
       data: {
         sbpUpperTarget: 140,
         sbpLowerTarget: 100,
@@ -188,7 +192,10 @@ test.describe('Admin threshold editor', () => {
         dbpLowerTarget: 60,
       },
     })
-    expect(provRes.status(), 'PROVIDER must not write thresholds').toBe(403)
+    expect(
+      provRes.ok(),
+      `assigned PROVIDER must write thresholds now: ${provRes.status()} ${await provRes.text()}`,
+    ).toBeTruthy()
 
     await mdApi.dispose()
     await provApi.dispose()
@@ -557,7 +564,10 @@ test.describe('Phase 3 §E — patient-detail Profile + Thresholds (UI)', () => 
     ).toHaveValue(String(sbpTarget), { timeout: 20_000 })
   })
 
-  test('30e.10 — PROVIDER sees the thresholds tab read-only (no editor, banner shown)', async ({ page }) => {
+  test('30e.10 — assigned PROVIDER sees the thresholds editor (write enabled)', async ({ page }) => {
+    // May-2026 role-scope decision: PROVIDER can author thresholds for their
+    // assigned panel. James is baseline-assigned to primaryProvider, so the
+    // editor (inputs + Save) renders instead of the read-only banner.
     test.setTimeout(90_000)
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const james = await tc.findUser(PATIENTS.james.email) // baseline-assigned to primaryProvider
@@ -566,10 +576,8 @@ test.describe('Phase 3 §E — patient-detail Profile + Thresholds (UI)', () => 
     await page.goto(`${ADMIN_BASE_URL}/patients/${james.id}`)
     await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
 
-    await expect(
-      page.locator(byTestId(T.admin.thresholdReadonlyBanner)),
-    ).toBeVisible({ timeout: 20_000 })
-    await expect(page.locator(byTestId(T.admin.thresholdSbpUpper))).toHaveCount(0)
-    await expect(page.locator(byTestId(T.admin.thresholdSave))).toHaveCount(0)
+    await expect(page.locator(byTestId(T.admin.thresholdSbpUpper))).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator(byTestId(T.admin.thresholdSave))).toBeVisible()
+    await expect(page.locator(byTestId(T.admin.thresholdReadonlyBanner))).toHaveCount(0)
   })
 })

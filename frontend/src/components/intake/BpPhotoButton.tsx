@@ -21,16 +21,28 @@ interface Props {
   onConfirm: (result: BpOcrSuccess) => void;
   /** Optional className for layout overrides. */
   className?: string;
+  /** When provided, error messages are reported here instead of being rendered
+   *  inline next to the icon — lets the parent place the message in a tidier
+   *  spot (e.g. full-width, below the button). Called with null when a new
+   *  attempt starts so the parent can clear any stale message. */
+  onError?: (message: string | null) => void;
 }
 
 const ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif';
 
-export default function BpPhotoButton({ onConfirm, className }: Props) {
+export default function BpPhotoButton({ onConfirm, className, onError }: Props) {
   const { t } = useLanguage();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<{ result: BpOcrSuccess; previewUrl: string } | null>(null);
+
+  // Route errors to the parent when onError is given (so it can render the
+  // message full-width below the button); otherwise fall back to inline.
+  const reportError = (message: string | null) => {
+    if (onError) onError(message);
+    else setError(message);
+  };
 
   // Feature flag — hide the camera button entirely when disabled.
   const enabled = process.env.NEXT_PUBLIC_BP_OCR_ENABLED === 'true';
@@ -42,7 +54,7 @@ export default function BpPhotoButton({ onConfirm, className }: Props) {
     e.target.value = '';
     if (!file) return;
 
-    setError(null);
+    reportError(null);
     setUploading(true);
     try {
       const result = await uploadBpPhoto(file);
@@ -50,9 +62,9 @@ export default function BpPhotoButton({ onConfirm, className }: Props) {
       setPending({ result, previewUrl });
     } catch (err) {
       if (err instanceof BpOcrError) {
-        setError(messageFor(err.code, t));
+        reportError(messageFor(err.code, t));
       } else {
-        setError(t('ocr.bp.errNetwork'));
+        reportError(t('ocr.bp.errNetwork'));
       }
     } finally {
       setUploading(false);
@@ -113,11 +125,11 @@ export default function BpPhotoButton({ onConfirm, className }: Props) {
         className="sr-only"
         onChange={handleFile}
       />
-      {error && (
+      {!onError && error && (
         <p
           role="alert"
-          className="mt-2 text-[12px]"
-          style={{ color: 'var(--brand-error)' }}
+          className="mt-2 text-[12px] font-medium"
+          style={{ color: 'var(--brand-alert-red)' }}
         >
           {error}
         </p>

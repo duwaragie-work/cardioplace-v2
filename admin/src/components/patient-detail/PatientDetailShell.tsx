@@ -165,7 +165,18 @@ export default function PatientDetailShell({ patientId }: Props) {
       })
       .catch((e) => {
         if (cancelled) return;
-        setHeaderError(e instanceof Error ? e.message : 'Could not load patient.');
+        const msg = e instanceof Error ? e.message : String(e);
+        // 403 means the caller's role scope doesn't grant access to this
+        // patient (PROVIDER not on panel, MED_DIR not heading the practice,
+        // or patient has no assignment yet). Bounce back to the list with
+        // an out-of-scope reason so the user sees a clear "not authorized"
+        // instead of a raw error banner. Backend is authoritative on this
+        // check via assertCanAccessPatient.
+        if (msg.includes('403') || /forbidden/i.test(msg) || /outside your role scope/i.test(msg)) {
+          router.replace('/patients?reason=out-of-scope');
+          return;
+        }
+        setHeaderError(msg || 'Could not load patient.');
       })
       .finally(() => {
         if (!cancelled) setHeaderLoading(false);
@@ -175,8 +186,9 @@ export default function PatientDetailShell({ patientId }: Props) {
     };
     // headerRefreshTick is intentionally a dep — bumping it re-runs the
     // fetch (e.g. after enrollment succeeds) so the activation state
-    // reflects the new server-side value.
-  }, [patientId, headerRefreshTick]);
+    // reflects the new server-side value. router is in deps because the
+    // 403 branch calls router.replace() to bounce out-of-scope patients.
+  }, [patientId, headerRefreshTick, router]);
 
   // ── Per-tab loaders ───────────────────────────────────────────────────────
   // Every loader has a `catch` so a transient network blip (dev backend

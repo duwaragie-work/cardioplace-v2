@@ -24,8 +24,14 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   /** Match path prefix as well as exact (e.g. /patients/123). */
   matchPrefix?: boolean;
+  /** Predicate; when present and false, item is hidden from the nav. */
+  show?: (roles: string[] | null | undefined) => boolean;
 }
 
+// /practices is visible to all four admin roles. PROVIDER + MED_DIR see
+// only their scoped practices (backend filter via PatientAccessService);
+// OPS + SUPER see all. CRUD buttons are hidden on the page itself for
+// non-OPS/SUPER. See docs/ACCESS_SCOPE.md (May 2026 — scope-not-hide).
 const PRIMARY_NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/patients', label: 'Patients', icon: Users, matchPrefix: true },
@@ -94,6 +100,15 @@ export default function AdminSidebar({ withCloseButton, onClose }: Props) {
   const pathname = usePathname() ?? '';
   const { user, logout } = useAuth();
   const role = user?.roles?.[0] ?? 'ADMIN';
+  // Filter nav items through their `show` predicate. Items without a
+  // predicate stay visible to all admin roles (default behaviour).
+  const visibleRoles = user?.roles ?? [];
+  const visiblePrimary = PRIMARY_NAV.filter((item) =>
+    item.show ? item.show(visibleRoles) : true,
+  );
+  const visibleSecondary = SECONDARY_NAV.filter((item) =>
+    item.show ? item.show(visibleRoles) : true,
+  );
 
   return (
     <aside
@@ -162,7 +177,7 @@ export default function AdminSidebar({ withCloseButton, onClose }: Props) {
         >
           Workspace
         </p>
-        {PRIMARY_NAV.map((item) => (
+        {visiblePrimary.map((item) => (
           <NavLink key={item.href} item={item} pathname={pathname} />
         ))}
 
@@ -172,7 +187,7 @@ export default function AdminSidebar({ withCloseButton, onClose }: Props) {
         >
           More
         </p>
-        {SECONDARY_NAV.map((item) => (
+        {visibleSecondary.map((item) => (
           <NavLink key={item.href} item={item} pathname={pathname} />
         ))}
       </nav>

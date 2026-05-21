@@ -807,9 +807,14 @@ export class EscalationService {
     for (let i = 0; i < recipientIds.length; i++) {
       const userId = recipientIds[i]
       const role = recipientRoles[i] ?? 'PRIMARY_PROVIDER'
-      const body = this.pickMessageForRole(alert, role)
-      if (!body) continue
-      const title = this.titleForRoleAndTier(role, args.step.step, alert.tier)
+      const content = this.buildNotificationContent(
+        alert,
+        role,
+        args.step.step,
+        args.now,
+      )
+      if (!content) continue
+      const { title, body } = content
 
       for (const channel of step.channels) {
         // DASHBOARD notifications are implicit via DeviationAlert rows; we
@@ -835,17 +840,23 @@ export class EscalationService {
         if (channel === 'EMAIL') {
           const email = await this.emailFor(userId)
           if (email) {
-            const rendered = escalationEmailBody({
-              alert,
-              step: step.step,
-              role,
-              message: body,
-              adminBaseUrl: this.adminBaseUrl,
-              patientBaseUrl: this.patientBaseUrl,
-              afterHours: args.afterHours,
-              now: args.now,
-            })
-            await this.emailService.sendEmail(email, rendered.subject, rendered.html)
+            // Email template builds its own patient-identifier block, so
+            // pass the raw clinical message (not the bell-prefixed body)
+            // to avoid double-printing "Patient: …" in the email.
+            const rawMessage = this.pickMessageForRole(alert, role)
+            if (rawMessage) {
+              const rendered = escalationEmailBody({
+                alert,
+                step: step.step,
+                role,
+                message: rawMessage,
+                adminBaseUrl: this.adminBaseUrl,
+                patientBaseUrl: this.patientBaseUrl,
+                afterHours: args.afterHours,
+                now: args.now,
+              })
+              await this.emailService.sendEmail(email, rendered.subject, rendered.html)
+            }
           }
         }
       }
@@ -1150,6 +1161,60 @@ export class EscalationService {
         ? 'TIER 1 CONTRAINDICATION'
         : 'Tier 2 Review'
     return `[${step}] ${prefix} — Patient needs review`
+  }
+
+  /**
+   * Build the in-app notification {title, body} for one (alert, recipient)
+   * pair. Centralises wording so the bell + Alerts & Notifications page
+   * stay consistent with the email template across every tier.
+   *
+   * Non-PATIENT recipients get the patient identifier prepended to both
+   * title and body — without it, OPS/MED_DIR/SUPER/PROVIDER can't tell
+   * which patient triggered the alert from the bell preview. The body
+   * keeps the canonical Manisha-signed-off physicianMessage verbatim
+   * (no truncation — clinical instructions like "do not take any more
+   * of your medicine" in angioedema must reach the provider intact).
+   *
+   * PATIENT recipients keep the existing wording — they don't need to be
+   * told their own name, and tier-specific titles ("Urgent — get medical
+   * help now") are already tuned by clinical sign-off.
+   */
+  private buildNotificationContent(
+    alert: AlertRow,
+    role: RecipientRole,
+    step: LadderStepId,
+    now: Date,
+  ): { title: string; body: string } | null {
+    const message = this.pickMessageForRole(alert, role)
+    if (!message) return null
+
+    const baseTitle = this.titleForRoleAndTier(role, step, alert.tier)
+    if (role === 'PATIENT') {
+      return { title: baseTitle, body: message }
+    }
+
+    // Non-PATIENT — prepend patient identity to title + body. Name falls
+    // back to email when missing (seed accounts), then to "patient" as a
+    // last resort so we never render a bare "[T+0] — Tier 1 …".
+    const name =
+      alert.user.name ??
+      alert.user.email ??
+      'patient'
+    const age = ageFromDob(alert.user.dateOfBirth, now)
+    const identifier = age != null ? `${name} (age ${age})` : name
+
+    // Title — replace "Patient needs review" suffix with the patient label
+    // so the bell preview tells the reader who, not just what.
+    const title = baseTitle.replace(
+      / — Patient needs review$/,
+      ` — ${identifier}`,
+    )
+
+    // Body — patient header line + canonical clinical message. Two newlines
+    // so the bell + notifications page can render them as separate blocks.
+    const body = `Patient: ${identifier}\n\n${message}`
+
+    return { title, body }
   }
 
   private async emailFor(userId: string): Promise<string | null> {

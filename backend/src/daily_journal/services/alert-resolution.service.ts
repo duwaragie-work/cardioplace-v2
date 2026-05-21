@@ -5,6 +5,10 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common'
+import {
+  ActorUser,
+  PatientAccessService,
+} from '../../common/patient-access.service.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import {
   RESOLUTION_CATALOG,
@@ -17,8 +21,8 @@ import { patientLabelForResolutionAction } from '@cardioplace/shared'
  * Phase/7 AlertResolutionService — business logic for the three admin
  * endpoints exposed by AlertResolutionController:
  *
- *  - acknowledge(alertId, adminId) — stops the cron scanner from advancing.
- *  - resolve(alertId, adminId, dto) — terminal state. Writes resolution
+ *  - acknowledge(alertId, actor) — stops the cron scanner from advancing.
+ *  - resolve(alertId, actor, dto) — terminal state. Writes resolution
  *    fields on DeviationAlert + marks all open EscalationEvent rows resolved.
  *    Validates rationale per CLINICAL_SPEC §V2-D (required for Tier 1 +
  *    BP Level 2, plus specific Tier 2 actions).
@@ -39,10 +43,15 @@ export class AlertResolutionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly escalation: EscalationService,
+    private readonly access: PatientAccessService,
   ) {}
 
-  async acknowledge(alertId: string, adminId: string): Promise<{ acknowledgedAt: Date }> {
+  async acknowledge(alertId: string, actor: ActorUser): Promise<{ acknowledgedAt: Date }> {
     const alert = await this.loadAlertOrThrow(alertId)
+    // Role-scope check uses the alert's patient — same as every other
+    // patient-detail mutation. PROVIDER must be in panel; MED_DIR must
+    // head the patient's practice; OPS/SUPER unscoped.
+    await this.access.assertCanAccessPatient(actor, alert.userId)
     if (alert.status === 'RESOLVED') {
       throw new BadRequestException('Alert is already resolved')
     }
@@ -58,24 +67,25 @@ export class AlertResolutionService {
         // Phase 1 polish Finding 1 — alert-level actor (symmetric with the
         // /provider/alerts/:id/acknowledge path); was omitted so the audit
         // footer showed "Acknowledged" with no name.
-        acknowledgedByUserId: adminId,
+        acknowledgedByUserId: actor.id,
       },
     })
     // Mark open escalation events acknowledged so the cron skips them.
     await this.prisma.escalationEvent.updateMany({
       where: { alertId, acknowledgedAt: null, resolvedAt: null },
-      data: { acknowledgedAt: now, acknowledgedBy: adminId },
+      data: { acknowledgedAt: now, acknowledgedBy: actor.id },
     })
-    this.logger.log(`Alert ${alertId} acknowledged by ${adminId}`)
+    this.logger.log(`Alert ${alertId} acknowledged by ${actor.id}`)
     return { acknowledgedAt: now }
   }
 
   async resolve(
     alertId: string,
-    adminId: string,
+    actor: ActorUser,
     dto: { resolutionAction: ResolutionAction; resolutionRationale?: string },
   ): Promise<{ status: string; resolvedAt: Date | null; retryScheduledFor?: Date }> {
     const alert = await this.loadAlertOrThrow(alertId)
+    await this.access.assertCanAccessPatient(actor, alert.userId)
     const actionDef = RESOLUTION_CATALOG[dto.resolutionAction]
 
     // 1. Tier-compat check — reject resolution actions from the wrong tier.
@@ -117,14 +127,14 @@ export class AlertResolutionService {
         data: {
           resolutionAction: dto.resolutionAction,
           resolutionRationale: dto.resolutionRationale ?? null,
-          resolvedBy: adminId,
+          resolvedBy: actor.id,
         },
       })
       const retryScheduledFor = new Date(
         now.getTime() + AlertResolutionService.BP_L2_RETRY_OFFSET_MS,
       )
       this.logger.log(
-        `Alert ${alertId} BP L2 retry scheduled for ${retryScheduledFor.toISOString()} by ${adminId}`,
+        `Alert ${alertId} BP L2 retry scheduled for ${retryScheduledFor.toISOString()} by ${actor.id}`,
       )
       return { status: 'OPEN', resolvedAt: null, retryScheduledFor }
     }
@@ -146,12 +156,12 @@ export class AlertResolutionService {
         resolvedAt: now,
         resolutionAction: dto.resolutionAction,
         resolutionRationale: dto.resolutionRationale ?? null,
-        resolvedBy: adminId,
+        resolvedBy: actor.id,
       },
     })
     await this.prisma.escalationEvent.updateMany({
       where: { alertId, resolvedAt: null },
-      data: { resolvedAt: now, resolvedBy: adminId },
+      data: { resolvedAt: now, resolvedBy: actor.id },
     })
 
     // 5. Patient notification — let the patient know an action was taken so
@@ -183,7 +193,7 @@ export class AlertResolutionService {
     }
 
     this.logger.log(
-      `Alert ${alertId} resolved by ${adminId} via ${dto.resolutionAction}`,
+      `Alert ${alertId} resolved by ${actor.id} via ${dto.resolutionAction}`,
     )
     return { status: 'RESOLVED', resolvedAt: now }
   }

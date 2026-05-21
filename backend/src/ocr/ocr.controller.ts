@@ -20,7 +20,11 @@ import type { Request } from 'express'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js'
 import { BpOcrFailure, MedOcrFailure, OcrService } from './ocr.service.js'
 
-const MAX_BYTES = 4 * 1024 * 1024 // 4 MB
+// 10 MB — modern phone cameras easily produce 5–8 MB photos; the frontend
+// downscales most uploads well below this, but the cap stays generous so a
+// high-resolution shot is never rejected outright. Kept in sync with the
+// frontend cap in frontend/src/lib/services/ocr.service.ts.
+const MAX_BYTES = 10 * 1024 * 1024 // 10 MB
 const ALLOWED_MIME = new Set([
   'image/jpeg',
   'image/png',

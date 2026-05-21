@@ -611,7 +611,7 @@ function ProfileSkeleton() {
 
 export default function ProfilePage() {
   const router = useRouter();
-  const { user, isLoading, isAuthenticated, logout } = useAuth();
+  const { user, isLoading, isAuthenticated, logout, updateUser } = useAuth();
   const { t } = useLanguage();
 
   const [profile, setProfile] = useState<PatientProfileDto | null>(null);
@@ -1139,7 +1139,12 @@ export default function ProfilePage() {
           <PersonalInfoModal
             current={authProfile}
             onClose={() => setShowPersonalEdit(false)}
-            onSaved={(next) => setAuthProfile(next)}
+            onSaved={(next) => {
+              setAuthProfile(next);
+              // Sync the global auth user so the navbar avatar + dashboard
+              // greeting update immediately, without waiting for a reload.
+              updateUser({ name: next.name ?? undefined });
+            }}
           />
         )}
       </AnimatePresence>

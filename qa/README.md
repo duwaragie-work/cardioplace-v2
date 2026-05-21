@@ -5,12 +5,13 @@ End-to-end browser-level testing for the patient frontend (`:3000`), admin app
 escalation + cron flows driven through dev-only `/test-control/*` HTTP hooks
 on the backend.
 
-> **Status (2026-05-15):** Mature. 18 spec files / ~195 `test()` declarations,
-> CI green on all shards (6 `test.fixme()` in spec 09 + accepted WCAG debt
-> excluded). Covers Cluster 6 + Cluster 7 engine rules, JCAHO 15-field audit,
-> escalation ladders, and the A1/B4 bug-fix cycle. Single living run record:
-> **`qa/reports/RESULTS.md`** (one file, updated in place each cycle — old
-> dated `STATUS_*` snapshots were consolidated into it on 2026-05-15).
+> **Status (2026-05-21):** Mature. Covers Cluster 6 + Cluster 7 engine rules,
+> JCAHO 15-field audit, escalation ladders, the A1/B4 bug-fix cycle, and the
+> May-2026 **role-scope refactor** (`30r`/`30s` committed, 12/12 green live; a
+> local-only `30x` true-negative spec 6/6 green — see role-scope section below).
+> Single living run record: **`qa/reports/RESULTS.md`** (one file, updated in
+> place each cycle — old dated `STATUS_*` snapshots were consolidated into it
+> on 2026-05-15).
 
 ---
 
@@ -48,11 +49,40 @@ qa/
     16-cross-cutting-a11y-and-security.spec.ts    axe hard-fails on 7 patient pages + admin dashboard, no PHI in URL, no localStorage refresh token
     17-cluster-6-engine-via-api.spec.ts           Cluster 6 engine coverage (Manisha 5/9 + 5/10 sign-off) — brady/symptom rules via API
     19-cluster-7-side-effects-via-api.spec.ts     Cluster 7 Appendix A — β-blocker fatigue/SOB, NSAID, ACE cough, HCM low, HF caregiver edema, HOLD
+    30r-role-scope-lists.spec.ts                  May-2026 role-scope: /patients renders per role, "Active Patients" KPI label, /practices "Add" gated to OPS/SUPER
+    30s-role-scope-detail-access.spec.ts          May-2026 role-scope: out-of-scope patient detail → /patients?reason=out-of-scope (PROVIDER+MED_DIR), OPS unscoped, API 403 parity
 ```
 
 **~195 `test()` declarations across 18 spec files** (write-side gated tests
 run only with `RUN_WRITE_TESTS=1`). Spec 18 is reserved; 17 + 19 are the
-Cluster 6 / Cluster 7 API-level engine suites.
+Cluster 6 / Cluster 7 API-level engine suites. The `30*` series are the
+phase-3 admin-UI + role-scope specs (added incrementally; not all listed
+above).
+
+### Role-scope true-negative testing (local-only)
+
+The committed `30r`/`30s` specs prove the role-scope **integration** surface
+(scoped lists render, out-of-scope detail bounces, labels/buttons gate). They
+**cannot** prove a true negative ("PROVIDER does NOT see patient X") because
+the shared seed assigns every patient to one practice with one provider trio.
+
+To exercise true cross-practice negatives, an **uncommitted** local fixture
+adds a second isolated practice:
+
+```bash
+# 1. seed Practice B (BridgePoint) + isolated provider-b / md-b / patient-b
+cd backend && npx tsx prisma/seed-role-scope-local.ts
+
+# 2. run the local negative spec (also uncommitted)
+cd qa && npx playwright test 30x-LOCAL-negative-scope
+```
+
+Both files are intentionally **not committed** (they depend on local-only seed
+data that would break CI): `backend/prisma/seed-role-scope-local.ts` and
+`qa/tests/30x-LOCAL-negative-scope.spec.ts`. Last local run **6/6 green**
+(2026-05-21) — see `reports/RESULTS.md`. The backend scope-filter logic itself
+is unit-covered (`patient-access.service.spec.ts` + `assignment.service.spec.ts`,
+32 cases), so CI doesn't depend on these local fixtures.
 
 ---
 

@@ -5,6 +5,7 @@
 // `BpOcrError.code` so the UI can show the right toast string.
 
 import { fetchWithAuth } from './token';
+import { compressImageForUpload } from '../image-compress';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -31,15 +32,19 @@ export class BpOcrError extends Error {
   }
 }
 
-const MAX_BYTES = 4 * 1024 * 1024; // mirror backend cap
+const MAX_BYTES = 10 * 1024 * 1024; // mirror backend cap (ocr.controller.ts)
 
 export async function uploadBpPhoto(file: File): Promise<BpOcrSuccess> {
-  if (file.size > MAX_BYTES) {
-    throw new BpOcrError('TOO_LARGE', 'Image exceeds 4 MB');
+  // Downscale large phone photos before the size check so a high-quality
+  // camera shot isn't rejected for being too big (falls back to the original
+  // when it can't be decoded — e.g. HEIC outside Safari).
+  const prepared = await compressImageForUpload(file);
+  if (prepared.size > MAX_BYTES) {
+    throw new BpOcrError('TOO_LARGE', 'Image exceeds 10 MB');
   }
 
   const formData = new FormData();
-  formData.append('image', file);
+  formData.append('image', prepared);
 
   let res: Response;
   try {
@@ -112,12 +117,14 @@ export class MedOcrError extends Error {
 }
 
 export async function uploadMedicationPhoto(file: File): Promise<MedOcrSuccess> {
-  if (file.size > MAX_BYTES) {
-    throw new MedOcrError('TOO_LARGE', 'Image exceeds 4 MB');
+  // Downscale large phone photos before the size check (see uploadBpPhoto).
+  const prepared = await compressImageForUpload(file);
+  if (prepared.size > MAX_BYTES) {
+    throw new MedOcrError('TOO_LARGE', 'Image exceeds 10 MB');
   }
 
   const formData = new FormData();
-  formData.append('image', file);
+  formData.append('image', prepared);
 
   let res: Response;
   try {

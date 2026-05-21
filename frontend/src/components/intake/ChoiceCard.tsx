@@ -75,7 +75,10 @@ export default function ChoiceCard({
       {compact ? (
         // Vertical stack: icon on top, title centered below — works in tight
         // 3-up / 4-up grids without text overflowing or icons overlapping.
-        <div className="flex flex-col items-center gap-2 text-center">
+        // When a speaker button is present it sits absolutely in the top-left
+        // corner (44px WCAG tap target), so reserve top room for it; otherwise
+        // it overlaps the centered icon on narrow phones.
+        <div className={`flex flex-col items-center gap-2 text-center ${audioText ? 'pt-9' : ''}`}>
           <div
             className="shrink-0 flex items-center justify-center rounded-xl"
             style={{

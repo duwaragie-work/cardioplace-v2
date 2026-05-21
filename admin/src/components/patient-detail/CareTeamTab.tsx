@@ -31,9 +31,11 @@ import {
   updatePatientAssignment,
   listPractices,
   listClinicians,
+  listPracticeStaff,
   type Practice,
   type Clinician,
   type PatientAssignment,
+  type PracticeStaff,
   type UpsertAssignmentPayload,
 } from '@/lib/services/practice.service';
 import { useAuth } from '@/lib/auth-context';
@@ -83,6 +85,11 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
   const [practices, setPractices] = useState<Practice[]>([]);
   const [providers, setProviders] = useState<Clinician[]>([]);
   const [medicalDirectors, setMedicalDirectors] = useState<Clinician[]>([]);
+  // Practice-scoped staff list — populated on practice-dropdown change so the
+  // Primary / Backup / MD selects only show clinicians actually attached to
+  // the selected practice. Null = "no practice picked yet, show full pool".
+  const [practiceStaff, setPracticeStaff] = useState<PracticeStaff[] | null>(null);
+  const [staffLoading, setStaffLoading] = useState(false);
 
   const [assignment, setAssignment] = useState<PatientAssignment | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
@@ -124,23 +131,82 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
     refresh();
   }, [refresh]);
 
+  // Cascading dropdown: whenever practice changes, refetch staff for that
+  // specific practice. The Primary / Backup / MD dropdowns then filter to
+  // clinicians explicitly attached to the practice (via PracticeProvider /
+  // PracticeMedicalDirector joins or existing assignments). Empty practice
+  // ID = clear scoped pool and fall back to the global clinician list.
+  useEffect(() => {
+    if (!form.practiceId) {
+      setPracticeStaff(null);
+      return;
+    }
+    let cancelled = false;
+    setStaffLoading(true);
+    listPracticeStaff(form.practiceId)
+      .then((s) => {
+        if (!cancelled) setPracticeStaff(s);
+      })
+      .catch(() => {
+        // Soft-fail — fall back to global pool so the dropdowns still work.
+        if (!cancelled) setPracticeStaff(null);
+      })
+      .finally(() => {
+        if (!cancelled) setStaffLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.practiceId]);
+
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
     setSuccess(null);
   }
 
-  // For Primary + Backup we accept PROVIDER OR MEDICAL_DIRECTOR. Build a
-  // unioned, dedup'd pool so the dropdowns include both.
+  // Primary + Backup accept PROVIDER OR MEDICAL_DIRECTOR. When the practice
+  // dropdown has a value AND staff loaded, intersect the global clinician
+  // pool with that practice's staff so we only show in-practice clinicians.
+  // Falls back to the full pool when no practice is picked yet (initial
+  // state) so the dropdown isn't empty on first open.
   const providerOrMdPool = useMemo(() => {
     const seen = new Set<string>();
     const out: Clinician[] = [];
+    const practiceIds = practiceStaff
+      ? new Set(practiceStaff.map((s) => s.id))
+      : null;
     for (const c of [...providers, ...medicalDirectors]) {
       if (seen.has(c.id)) continue;
+      if (practiceIds && !practiceIds.has(c.id)) continue;
       seen.add(c.id);
       out.push(c);
     }
     return out;
-  }, [providers, medicalDirectors]);
+  }, [providers, medicalDirectors, practiceStaff]);
+
+  // MD dropdown: same intersection rule against the global MD pool.
+  const scopedMedicalDirectors = useMemo(() => {
+    if (!practiceStaff) return medicalDirectors;
+    const practiceIds = new Set(practiceStaff.map((s) => s.id));
+    return medicalDirectors.filter((m) => practiceIds.has(m.id));
+  }, [medicalDirectors, practiceStaff]);
+
+  // Validation: primary and backup must differ — backend rejects with 400
+  // when they match, but we surface it inline so the user doesn't lose
+  // their save click. Empty values pass (form isn't complete yet anyway).
+  const primaryBackupCollision =
+    form.primaryProviderId.length > 0 &&
+    form.backupProviderId.length > 0 &&
+    form.primaryProviderId === form.backupProviderId;
+
+  // Soft warning when MED_DIR is also primary or backup. Doesn't block save
+  // (small practices may legitimately have one clinician with both roles),
+  // just flags the escalation-coverage implication — every escalation rung
+  // routes to the same inbox.
+  const mdProviderCollision =
+    form.medicalDirectorId.length > 0 &&
+    (form.medicalDirectorId === form.primaryProviderId ||
+      form.medicalDirectorId === form.backupProviderId);
 
   const isComplete =
     form.practiceId.length > 0 &&
@@ -149,7 +215,7 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
     form.medicalDirectorId.length > 0;
 
   const dirty = JSON.stringify(form) !== JSON.stringify(toForm(assignment));
-  const canSubmit = isComplete && dirty && !saving;
+  const canSubmit = isComplete && dirty && !saving && !primaryBackupCollision;
 
   async function save() {
     if (!canSubmit) return;
@@ -286,7 +352,9 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
           onChange={(v) => set('primaryProviderId', v)}
           disabledHint={
             providerOrMdPool.length === 0
-              ? 'No providers in the system yet.'
+              ? form.practiceId
+                ? 'No clinicians attached to this practice yet. Add staff from the practice page.'
+                : 'Pick a practice first to see its clinicians.'
               : null
           }
         />
@@ -300,7 +368,9 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
           onChange={(v) => set('backupProviderId', v)}
           disabledHint={
             providerOrMdPool.length === 0
-              ? 'No providers in the system yet.'
+              ? form.practiceId
+                ? 'No clinicians attached to this practice yet. Add staff from the practice page.'
+                : 'Pick a practice first to see its clinicians.'
               : null
           }
         />
@@ -309,16 +379,58 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
           testId="admin-careteam-md-select"
           icon={<ShieldCheck className="w-2.5 h-2.5" />}
           accent="var(--brand-warning-amber)"
-          options={medicalDirectors}
+          options={scopedMedicalDirectors}
           value={form.medicalDirectorId}
           onChange={(v) => set('medicalDirectorId', v)}
           disabledHint={
-            medicalDirectors.length === 0
-              ? 'No users with the MEDICAL_DIRECTOR role yet.'
+            scopedMedicalDirectors.length === 0
+              ? form.practiceId
+                ? 'No medical directors attached to this practice yet. Add one from the practice page.'
+                : 'No users with the MEDICAL_DIRECTOR role yet.'
               : null
           }
           requiredRoleHint="Must be a MEDICAL_DIRECTOR per clinical policy."
         />
+
+        {/* Primary == Backup inline validation banner. Mirror of the
+            backend BadRequestException so the user sees the problem
+            before clicking Save. */}
+        {primaryBackupCollision && (
+          <div
+            data-testid="admin-careteam-primary-backup-collision"
+            className="rounded-lg px-3 py-2 text-[12px] font-semibold"
+            style={{
+              backgroundColor: 'var(--brand-alert-red-light)',
+              color: 'var(--brand-alert-red-text)',
+            }}
+          >
+            Primary and backup providers must be different — pick a different
+            backup so escalation has a real fallback.
+          </div>
+        )}
+
+        {/* MED_DIR == primary/backup soft warning. Allowed (multi-role
+            clinicians exist; small practices often have one person
+            covering both roles) — flagged so the user understands the
+            escalation-coverage implication: every escalation rung routes
+            to the same inbox. Save stays enabled. */}
+        {mdProviderCollision && !primaryBackupCollision && (
+          <div
+            data-testid="admin-careteam-md-provider-collision"
+            className="rounded-lg px-3 py-2 text-[12px] font-semibold"
+            style={{
+              backgroundColor: 'var(--brand-warning-amber-light)',
+              color: 'var(--brand-warning-amber-text)',
+            }}
+          >
+            Medical director is the same clinician as the
+            {form.medicalDirectorId === form.primaryProviderId
+              ? ' primary'
+              : ' backup'}
+            {' '}provider — escalation will route to one inbox at every
+            rung. Save anyway if that matches your practice's coverage.
+          </div>
+        )}
 
         {/* Errors / success */}
         {error && (

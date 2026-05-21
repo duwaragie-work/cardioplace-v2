@@ -4,6 +4,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
+import {
+  ActorUser,
+  PatientAccessService,
+} from '../common/patient-access.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import type { CreatePracticeDto } from './dto/create-practice.dto.js'
 import type { UpdatePracticeDto } from './dto/update-practice.dto.js'
@@ -16,7 +20,10 @@ const DEFAULT_BUSINESS_HOURS = {
 
 @Injectable()
 export class PracticeService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly access: PatientAccessService,
+  ) {}
 
   async create(dto: CreatePracticeDto) {
     const start = dto.businessHoursStart ?? DEFAULT_BUSINESS_HOURS.start
@@ -42,8 +49,15 @@ export class PracticeService {
     }
   }
 
-  async list() {
+  async list(actor: ActorUser) {
+    // Role-scoped: PROVIDER + MED_DIR see only practices they're members
+    // of (via PracticeProvider / PracticeMedicalDirector joins). OPS/SUPER
+    // get undefined back = no filter. Empty array short-circuits to zero
+    // practices for a scoped role with no memberships yet.
+    const scopeIds = await this.access.practiceScopeIds(actor)
+    const where = scopeIds === undefined ? {} : { id: { in: scopeIds } }
     const practices = await this.prisma.practice.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
       include: { _count: { select: { assignments: true } } },
     })
@@ -70,7 +84,14 @@ export class PracticeService {
     }
   }
 
-  async findOne(id: string) {
+  async findOne(actor: ActorUser, id: string) {
+    // Scope enforcement: PROVIDER + MED_DIR can only view their own
+    // practices. Treat out-of-scope as 404 (not 403) so the caller can't
+    // probe practice-id existence by reading the error code.
+    const scopeIds = await this.access.practiceScopeIds(actor)
+    if (scopeIds !== undefined && !scopeIds.includes(id)) {
+      throw new NotFoundException('Practice not found')
+    }
     const practice = await this.prisma.practice.findUnique({
       where: { id },
       include: { _count: { select: { assignments: true } } },
@@ -99,23 +120,49 @@ export class PracticeService {
   // Deduplicated list of providers (any of primary / backup / medical-director
   // slots) referenced by any patient assignment at this practice. Powers the
   // J2 staff list and the J3 reassignment dropdowns.
-  async listStaff(id: string) {
+  async listStaff(actor: ActorUser, id: string) {
+    // Same scope rule as findOne — keep the staff list behind the same
+    // practice-visibility gate.
+    const scopeIds = await this.access.practiceScopeIds(actor)
+    if (scopeIds !== undefined && !scopeIds.includes(id)) {
+      throw new NotFoundException('Practice not found')
+    }
     const practice = await this.prisma.practice.findUnique({
       where: { id },
       select: { id: true },
     })
     if (!practice) throw new NotFoundException('Practice not found')
 
-    const assignments = await this.prisma.patientProviderAssignment.findMany({
-      where: { practiceId: id },
-      select: {
-        primaryProviderId: true,
-        backupProviderId: true,
-        medicalDirectorId: true,
-      },
-    })
+    // Three sources of practice staff, unioned:
+    //   1. PatientProviderAssignment slots (primary/backup/MD) — historical
+    //      derivation that still works for existing data
+    //   2. PracticeProvider — explicit provider membership (May 2026 add)
+    //   3. PracticeMedicalDirector — explicit MD membership (May 2026 add)
+    // The explicit joins let a practice be staffed BEFORE the first patient
+    // assignment, which the care-team cascading dropdown depends on.
+    const [assignments, providerMembers, mdMembers] = await Promise.all([
+      this.prisma.patientProviderAssignment.findMany({
+        where: { practiceId: id },
+        select: {
+          primaryProviderId: true,
+          backupProviderId: true,
+          medicalDirectorId: true,
+        },
+      }),
+      this.prisma.practiceProvider.findMany({
+        where: { practiceId: id },
+        select: { userId: true },
+      }),
+      this.prisma.practiceMedicalDirector.findMany({
+        where: { practiceId: id },
+        select: { userId: true },
+      }),
+    ])
 
     // Track which slots each user has filled so the UI can show role badges.
+    // Users sourced only from the explicit joins (no current patient
+    // assignment) carry an empty slot set — they're staffed for the
+    // practice but not yet on anyone's care team.
     const slots = new Map<string, Set<'PRIMARY' | 'BACKUP' | 'MEDICAL_DIRECTOR'>>()
     const ensure = (uid: string) => {
       const s = slots.get(uid) ?? new Set()
@@ -127,6 +174,8 @@ export class PracticeService {
       ensure(a.backupProviderId).add('BACKUP')
       ensure(a.medicalDirectorId).add('MEDICAL_DIRECTOR')
     }
+    for (const m of providerMembers) ensure(m.userId)
+    for (const m of mdMembers) ensure(m.userId).add('MEDICAL_DIRECTOR')
 
     const ids = Array.from(slots.keys())
     if (ids.length === 0) {
@@ -231,5 +280,84 @@ export class PracticeService {
       select: { id: true },
     })
     if (!found) throw new ConflictException(`Practice ${id} does not exist`)
+  }
+
+  // ─── PracticeProvider / PracticeMedicalDirector explicit membership ──────
+  // Lets OPS / SUPER_ADMIN populate a practice with staff BEFORE the first
+  // patient assignment so the care-team cascading dropdown is populated on
+  // first use. Both joins are many-to-many — a user can belong to multiple
+  // practices. Idempotent: ON CONFLICT DO NOTHING via Prisma's @@unique.
+
+  async addProvider(practiceId: string, userId: string) {
+    await this.assertPracticeAndUser(practiceId, userId, 'PROVIDER')
+    try {
+      await this.prisma.practiceProvider.create({
+        data: { practiceId, userId },
+      })
+    } catch (err) {
+      // P2002 = already a member. Idempotent — silent success.
+      if (
+        err instanceof Error &&
+        (err as { code?: string }).code !== 'P2002'
+      ) {
+        throw err
+      }
+    }
+    return { statusCode: 200, message: 'Provider added to practice' }
+  }
+
+  async removeProvider(practiceId: string, userId: string) {
+    await this.prisma.practiceProvider.deleteMany({
+      where: { practiceId, userId },
+    })
+    return { statusCode: 200, message: 'Provider removed from practice' }
+  }
+
+  async addMedicalDirector(practiceId: string, userId: string) {
+    await this.assertPracticeAndUser(practiceId, userId, 'MEDICAL_DIRECTOR')
+    try {
+      await this.prisma.practiceMedicalDirector.create({
+        data: { practiceId, userId },
+      })
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        (err as { code?: string }).code !== 'P2002'
+      ) {
+        throw err
+      }
+    }
+    return { statusCode: 200, message: 'Medical director added to practice' }
+  }
+
+  async removeMedicalDirector(practiceId: string, userId: string) {
+    await this.prisma.practiceMedicalDirector.deleteMany({
+      where: { practiceId, userId },
+    })
+    return { statusCode: 200, message: 'Medical director removed from practice' }
+  }
+
+  private async assertPracticeAndUser(
+    practiceId: string,
+    userId: string,
+    requiredRole: 'PROVIDER' | 'MEDICAL_DIRECTOR',
+  ) {
+    const [practice, user] = await Promise.all([
+      this.prisma.practice.findUnique({
+        where: { id: practiceId },
+        select: { id: true },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, roles: true },
+      }),
+    ])
+    if (!practice) throw new NotFoundException('Practice not found')
+    if (!user) throw new NotFoundException(`User ${userId} not found`)
+    if (!user.roles.includes(requiredRole)) {
+      throw new BadRequestException(
+        `User ${userId} lacks required role ${requiredRole} (has: ${user.roles.join(', ')})`,
+      )
+    }
   }
 }

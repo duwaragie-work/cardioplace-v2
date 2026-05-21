@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common'
 import type { Request } from 'express'
 import { Roles } from '../auth/decorators/roles.decorator.js'
+import { PatientAccessService } from '../common/patient-access.service.js'
 import { UserRole } from '../generated/prisma/enums.js'
 import { IntakeService } from './intake.service.js'
 import {
@@ -18,7 +19,7 @@ import {
 } from './dto/correct-profile.dto.js'
 import { VerifyMedicationDto } from './dto/verify-medication.dto.js'
 
-type AuthedReq = Request & { user: { id: string } }
+type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
 
 // Admin-scoped intake surface.
 //   • READ — open to all four admin roles. HEALPLACE_OPS needs to view
@@ -35,7 +36,10 @@ type AuthedReq = Request & { user: { id: string } }
   UserRole.HEALPLACE_OPS,
 )
 export class AdminIntakeController {
-  constructor(private readonly intake: IntakeService) {}
+  constructor(
+    private readonly intake: IntakeService,
+    private readonly access: PatientAccessService,
+  ) {}
 
   @Post('users/:id/verify-profile')
   @HttpCode(HttpStatus.OK)
@@ -45,7 +49,11 @@ export class AdminIntakeController {
     @Param('id') patientUserId: string,
     @Body() dto: VerifyProfileDto,
   ) {
-    return this.intake.verifyProfile(req.user.id, patientUserId, dto)
+    return this.intake.verifyProfile(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+      dto,
+    )
   }
 
   @Post('users/:id/correct-profile')
@@ -56,7 +64,11 @@ export class AdminIntakeController {
     @Param('id') patientUserId: string,
     @Body() dto: CorrectProfileDto,
   ) {
-    return this.intake.correctProfile(req.user.id, patientUserId, dto)
+    return this.intake.correctProfile(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+      dto,
+    )
   }
 
   @Post('users/:id/reject-profile-field')
@@ -67,7 +79,11 @@ export class AdminIntakeController {
     @Param('id') patientUserId: string,
     @Body() dto: { field: string; rationale?: string },
   ) {
-    return this.intake.rejectProfileField(req.user.id, patientUserId, dto)
+    return this.intake.rejectProfileField(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+      dto,
+    )
   }
 
   @Post('medications/:id/verify')
@@ -78,25 +94,50 @@ export class AdminIntakeController {
     @Param('id') medicationId: string,
     @Body() dto: VerifyMedicationDto,
   ) {
-    return this.intake.verifyMedication(req.user.id, medicationId, dto)
+    return this.intake.verifyMedication(
+      { id: req.user.id, roles: req.user.roles },
+      medicationId,
+      dto,
+    )
   }
 
   @Get('users/:id/verification-logs')
-  listVerificationLogs(@Param('id') patientUserId: string) {
+  async listVerificationLogs(
+    @Req() req: AuthedReq,
+    @Param('id') patientUserId: string,
+  ) {
+    await this.access.assertCanAccessPatient(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+    )
     return this.intake.listVerificationLogs(patientUserId)
   }
 
-  // Admin-scoped reads for the Flow H patient detail screen. These delegate
-  // to the same intake service the patient self-serves; the admin guard on
-  // the controller is what enforces who is allowed to view another patient's
-  // profile / medications.
+  // Admin-scoped reads for the Flow H patient detail screen. Controller-
+  // level @Roles() gates "what role can call at all"; assertCanAccessPatient
+  // adds the runtime scope check — PROVIDER must be on the patient's panel,
+  // MED_DIR must head the patient's practice. OPS/SUPER short-circuit.
   @Get('users/:id/profile')
-  getProfile(@Param('id') patientUserId: string) {
+  async getProfile(
+    @Req() req: AuthedReq,
+    @Param('id') patientUserId: string,
+  ) {
+    await this.access.assertCanAccessPatient(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+    )
     return this.intake.getProfile(patientUserId)
   }
 
   @Get('users/:id/medications')
-  listMedications(@Param('id') patientUserId: string) {
+  async listMedications(
+    @Req() req: AuthedReq,
+    @Param('id') patientUserId: string,
+  ) {
+    await this.access.assertCanAccessPatient(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+    )
     // includeDiscontinued = true so the medications tab can show the full
     // history (discontinued meds are rendered with a strike-through).
     return this.intake.listMedications(patientUserId, true)

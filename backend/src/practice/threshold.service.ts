@@ -4,6 +4,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
+import {
+  ActorUser,
+  PatientAccessService,
+} from '../common/patient-access.service.js'
 import { Prisma } from '../generated/prisma/client.js'
 import {
   VerifierRole,
@@ -31,9 +35,15 @@ interface ThresholdSnapshot {
 
 @Injectable()
 export class ThresholdService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly access: PatientAccessService,
+  ) {}
 
-  async create(adminId: string, patientUserId: string, dto: UpsertThresholdDto) {
+  async create(actor: ActorUser, patientUserId: string, dto: UpsertThresholdDto) {
+    // Role-scope gate: PROVIDER must be in panel; MED_DIR must head the
+    // patient's practice. OPS/SUPER short-circuit through.
+    await this.access.assertCanAccessPatient(actor, patientUserId)
     await this.assertPatientExists(patientUserId)
     this.validateRanges(dto)
 
@@ -41,7 +51,7 @@ export class ThresholdService {
       const threshold = await this.prisma.patientThreshold.create({
         data: {
           userId: patientUserId,
-          setByProviderId: adminId,
+          setByProviderId: actor.id,
           ...dto,
         },
       })
@@ -49,7 +59,7 @@ export class ThresholdService {
       // state-change action and must leave an actor + before/after trail.
       await this.writeThresholdAudit(
         patientUserId,
-        adminId,
+        actor.id,
         Prisma.JsonNull,
         this.thresholdSnapshot(threshold),
       )
@@ -103,7 +113,8 @@ export class ThresholdService {
     }
   }
 
-  async update(adminId: string, patientUserId: string, dto: UpsertThresholdDto) {
+  async update(actor: ActorUser, patientUserId: string, dto: UpsertThresholdDto) {
+    await this.access.assertCanAccessPatient(actor, patientUserId)
     const existing = await this.prisma.patientThreshold.findUnique({
       where: { userId: patientUserId },
     })
@@ -125,14 +136,14 @@ export class ThresholdService {
       where: { userId: patientUserId },
       data: {
         ...dto,
-        setByProviderId: adminId,
+        setByProviderId: actor.id,
         setAt: new Date(),
       },
     })
     // Finding 4 — JCAHO audit: capture the prior targets → new targets diff.
     await this.writeThresholdAudit(
       patientUserId,
-      adminId,
+      actor.id,
       this.thresholdSnapshot(existing),
       this.thresholdSnapshot(updated),
     )

@@ -37,11 +37,25 @@ export function hasAdminRole(input: RoleInput | UserInput): boolean {
 
 // ─── Alerts (read + resolve) ────────────────────────────────────────────────
 /**
- * @Roles(SUPER_ADMIN, MEDICAL_DIRECTOR, PROVIDER, HEALPLACE_OPS)
- * backend/src/daily_journal/controllers/alert-resolution.controller.ts
+ * READ (audit + queue list): all four admin roles. HEALPLACE_OPS receives
+ * the T+24h / T+48h escalation notification — they see the alert row
+ * read-only for operational follow-up but cannot close it.
+ *   backend/src/daily_journal/controllers/alert-resolution.controller.ts @Get
+ */
+export function canViewAlerts(input: RoleInput | UserInput): boolean {
+  return has(input, ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER', 'HEALPLACE_OPS'])
+}
+
+/**
+ * WRITE (acknowledge / resolve): clinical disposition — HEALPLACE_OPS
+ * removed in the May 2026 access-scope decision (they reassign care team
+ * or phone the patient instead).
+ *   @Roles(SUPER_ADMIN, MEDICAL_DIRECTOR, PROVIDER)  // HEALPLACE_OPS excluded
+ *   backend/src/daily_journal/controllers/alert-resolution.controller.ts
+ *     POST :id/acknowledge + POST :id/resolve
  */
 export function canResolveAlerts(input: RoleInput | UserInput): boolean {
-  return has(input, ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER', 'HEALPLACE_OPS'])
+  return has(input, ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER'])
 }
 
 // ─── Profile + medication verification ─────────────────────────────────────
@@ -60,17 +74,24 @@ export function canVerifyMedications(input: RoleInput | UserInput): boolean {
 
 // ─── Practice CRUD ──────────────────────────────────────────────────────────
 /**
- * @Roles(SUPER_ADMIN, MEDICAL_DIRECTOR, HEALPLACE_OPS)    // PROVIDER excluded
- * backend/src/practice/practice.controller.ts
+ * Practice CRUD is an operational/admin function (May 2026 access-scope
+ * decision). MED_DIR removed — their clinical authority is per-patient
+ * inside their practice, not over practice metadata.
+ *   @Roles(SUPER_ADMIN, HEALPLACE_OPS)  // MED_DIR + PROVIDER excluded
+ *   backend/src/practice/practice.controller.ts
  */
 export function canManagePractices(input: RoleInput | UserInput): boolean {
-  return has(input, ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'HEALPLACE_OPS'])
+  return has(input, ['SUPER_ADMIN', 'HEALPLACE_OPS'])
 }
 
 // ─── Care team assignment ───────────────────────────────────────────────────
 /**
- * @Roles(SUPER_ADMIN, MEDICAL_DIRECTOR, HEALPLACE_OPS)    // PROVIDER excluded
+ * @Roles(SUPER_ADMIN, MEDICAL_DIRECTOR, HEALPLACE_OPS)   // PROVIDER excluded
  * backend/src/practice/assignment.controller.ts
+ *
+ * MED_DIR is further runtime-scoped by PatientAccessService to practices
+ * they head — the frontend can show the button but a MED_DIR trying to
+ * edit assignments outside their practice gets a 403 from the backend.
  */
 export function canAssignCareTeam(input: RoleInput | UserInput): boolean {
   return has(input, ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'HEALPLACE_OPS'])
@@ -78,20 +99,25 @@ export function canAssignCareTeam(input: RoleInput | UserInput): boolean {
 
 // ─── Enrollment gate (Complete Onboarding) ─────────────────────────────────
 /**
- * @Roles(SUPER_ADMIN, MEDICAL_DIRECTOR, HEALPLACE_OPS)    // PROVIDER excluded
- * backend/src/practice/enrollment.controller.ts
+ * Clinical readiness call — May 2026 access-scope decision moved this to
+ * the clinician group. PROVIDER added; HEALPLACE_OPS removed (they handle
+ * practice↔patient assignment, not clinical readiness).
+ *   @Roles(SUPER_ADMIN, MEDICAL_DIRECTOR, PROVIDER)  // HEALPLACE_OPS excluded
+ *   backend/src/practice/enrollment.controller.ts
  */
 export function canCompleteEnrollment(input: RoleInput | UserInput): boolean {
-  return has(input, ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'HEALPLACE_OPS'])
+  return has(input, ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER'])
 }
 
 // ─── Thresholds (clinical directive) ────────────────────────────────────────
 /**
- * @Roles(SUPER_ADMIN, MEDICAL_DIRECTOR)    // MD-only clinical authority
- * backend/src/practice/threshold.controller.ts
+ * PROVIDER added in May 2026 access-scope decision — they can author
+ * thresholds for their assigned patients. HEALPLACE_OPS still read-only.
+ *   @Roles(SUPER_ADMIN, MEDICAL_DIRECTOR, PROVIDER)
+ *   backend/src/practice/threshold.controller.ts
  */
 export function canEditThresholds(input: RoleInput | UserInput): boolean {
-  return has(input, ['SUPER_ADMIN', 'MEDICAL_DIRECTOR'])
+  return has(input, ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER'])
 }
 
 // ─── Legacy v1 / scheduled calls ────────────────────────────────────────────
@@ -114,5 +140,35 @@ export function isProviderOnly(input: RoleInput | UserInput): boolean {
   const roles = rolesOf(input)
   if (!roles.includes('PROVIDER')) return false
   const broader = ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'HEALPLACE_OPS']
+  return !roles.some((r) => broader.includes(r))
+}
+
+// ─── HEALPLACE_OPS scope helper ─────────────────────────────────────────────
+/**
+ * True when the caller is OPS without an overlapping clinical role. Used to
+ * keep clinical surfaces (alerts/readings/timeline/escalation audit) in
+ * read-only state and hide acknowledge / resolve / complete-onboarding /
+ * verify buttons. OPS is the T+24h / T+48h escalation target so the data
+ * stays visible — only the action buttons disappear. See ADMIN_ROLE_ACCESS
+ * §5 for the per-tab matrix.
+ */
+export function isHealplaceOpsOnly(input: RoleInput | UserInput): boolean {
+  const roles = rolesOf(input)
+  if (!roles.includes('HEALPLACE_OPS')) return false
+  const broader = ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER']
+  return !roles.some((r) => broader.includes(r))
+}
+
+// ─── MEDICAL_DIRECTOR scope helper ──────────────────────────────────────────
+/**
+ * True when the caller is MED_DIR without an OPS/SUPER overlap. Used by the
+ * frontend to decide whether to hide /practices nav (MED_DIR doesn't manage
+ * practice metadata in v2 — that's OPS/SUPER). They can still co-hold
+ * PROVIDER and act through their assigned panel.
+ */
+export function isMedicalDirectorOnly(input: RoleInput | UserInput): boolean {
+  const roles = rolesOf(input)
+  if (!roles.includes('MEDICAL_DIRECTOR')) return false
+  const broader = ['SUPER_ADMIN', 'HEALPLACE_OPS']
   return !roles.some((r) => broader.includes(r))
 }

@@ -308,7 +308,7 @@ const am: Record<TranslationKey, string> = {
 
   // ─── Provider ──────────────────────────────────────────────────────────────
   'provider.dashboard': 'የእንክብካቤ ቡድን ዳሽቦርድ',
-  'provider.totalPatients': 'ጠቅላላ ታካሚዎች',
+  'provider.totalPatients': 'ንቁ ታካሚዎች',
   'provider.readingsThisMonth': 'የዚህ ወር ንባቦች',
   'provider.bpReadingsSubmitted': 'የደም ግፊት ንባቦች ቀርበዋል',
   'provider.activeAlerts': 'ንቁ ማንቂያዎች',

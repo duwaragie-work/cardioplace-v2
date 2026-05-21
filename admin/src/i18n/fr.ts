@@ -308,7 +308,7 @@ const fr: Record<TranslationKey, string> = {
 
   // ─── Provider ──────────────────────────────────────────────────────────────
   'provider.dashboard': 'Tableau de Bord Soignant',
-  'provider.totalPatients': 'Patients Totaux',
+  'provider.totalPatients': 'Patients Actifs',
   'provider.readingsThisMonth': 'Lectures Ce Mois',
   'provider.bpReadingsSubmitted': 'lectures de TA soumises',
   'provider.activeAlerts': 'Alertes Actives',

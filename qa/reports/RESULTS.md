@@ -1,5 +1,47 @@
 # Cardioplace v2 — Playwright E2E Run Results
 
+## Role-scope refactor (2026-05-21)
+
+**Branch:** `phase/role-scope-refactor` (pushed; CI partially red on pre-existing
+unrelated jobs). **Engine:** chromium-desktop (1440×900). **Stack:** local
+NestJS `:4000` + Next 16 admin `:3001`, shared remote `db.prisma.io`,
+`ENABLE_TEST_CONTROL=true`.
+
+Live UI verification of the May-2026 role-based access-scope work (MED_DIR =
+practice scope, PROVIDER = panel scope, OPS = read-only clinical surfaces,
+practice CRUD = OPS/SUPER only). **18/18 role-scope UI tests green.**
+
+| Spec | Result | Coverage |
+|---|---:|---|
+| `30r-role-scope-lists` | **7/7** ✅ | `/patients` renders for PROVIDER/MED_DIR/OPS; dashboard KPI card reads "Active Patients" (renamed from "Total Patients"); "Add practice" button shown for OPS, hidden for PROVIDER + MED_DIR |
+| `30s-role-scope-detail-access` | **5/5** ✅ | assigned-patient detail loads; PROVIDER + MED_DIR out-of-scope → `/patients?reason=out-of-scope`; OPS never bounced; API `GET /admin/users/:id/profile` → 403 for out-of-scope |
+| `30x-LOCAL-negative-scope` *(local-only, uncommitted)* | **6/6** ✅ | TRUE cross-practice negatives — see below |
+
+**True negative cross-practice coverage (30x):** the committed specs can't
+express "PROVIDER does NOT see patient X" because the shared seed puts every
+patient in one practice with one provider trio. A **local-only** fixture
+(`backend/prisma/seed-role-scope-local.ts`, NOT committed) adds an isolated
+Practice B (BridgePoint) with `provider-b` / `md-b` / `patient-b`. Against it,
+verified at UI level:
+- providerB sees patientB but **not** Priya (Practice A) — list scoped
+- primaryProvider + medicalDirector (Practice A) do **not** see patientB
+- providerB **can** open patientB detail; opening a Practice-A patient bounces
+- primaryProvider opening patientB bounces to out-of-scope
+
+Backend scope-filter logic itself is unit-covered: `patient-access.service.spec.ts`
+(scope rules) + `assignment.service.spec.ts` (primary≠backup, MED_DIR practice
+guard) = **32 jest cases** added this branch.
+
+**Known flake:** the first `/patients` hit timed out at 30s once (cold Turbopack
+route compile); passed on warm re-run (7/7). CI `retries: 2` covers it — not a
+logic bug.
+
+**Local-only artifacts (intentionally uncommitted, delete when done):**
+`backend/prisma/seed-role-scope-local.ts`, `qa/tests/30x-LOCAL-negative-scope.spec.ts`.
+Re-seed: `cd backend && npx tsx prisma/seed-role-scope-local.ts`.
+
+---
+
 **Run date:** 2026-05-15 (A1 small-bugs + B4 translation-pipeline cycle, on top of Cluster 6/7)
 **Branch:** `duwaragie-dev` (12 commits ahead of `origin/dev`) → PR `duwaragie-dev → dev`
 **Engine:** chromium-desktop (1440×900)
