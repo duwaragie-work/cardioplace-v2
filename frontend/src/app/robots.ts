@@ -8,7 +8,7 @@ import type { MetadataRoute } from 'next'
  * paths even though the proxy already 302s them away.
  *
  * Sitemap URL is built from NEXT_PUBLIC_PATIENT_BASE_URL when set
- * (production: https://app.cardioplace.ai); otherwise falls back to the
+ * (production: https://www.cardioplace.ai); otherwise falls back to the
  * local dev origin so the value is always valid.
  */
 const BASE_URL =

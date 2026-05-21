@@ -9,8 +9,8 @@ Live v1 app runs at `www.cardioplaceai.com` — this repo (`cardioplace-v2`) is 
 ## Monorepo structure (npm workspaces)
 
 - `/backend`       → NestJS + Prisma + PostgreSQL (shared API for both frontends; voice runs in-process via @google/genai Live)
-- `/frontend`      → Next.js 16 patient app → app.cardioplaceai.com
-- `/admin`         → Next.js 16 admin/provider app → admin.cardioplaceai.com (NEW, being scaffolded in phase/1)
+- `/frontend`      → Next.js 16 patient app → www.cardioplace.ai (dev: www.dev.cardioplace.ai)
+- `/admin`         → Next.js 16 admin/provider app → admin.cardioplace.ai (dev: admin.dev.cardioplace.ai)
 - `/shared`        → npm workspace package: DTOs, enums, alert-message registry (NEW)
 
 ## Key reference docs (READ FIRST)

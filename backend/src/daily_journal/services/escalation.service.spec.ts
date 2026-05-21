@@ -152,8 +152,8 @@ describe('EscalationService', () => {
           provide: ConfigService,
           useValue: {
             get: (key: string, fallback?: string) => {
-              if (key === 'ADMIN_BASE_URL') return 'https://admin.cardioplaceai.com'
-              if (key === 'PATIENT_BASE_URL') return 'https://app.cardioplaceai.com'
+              if (key === 'ADMIN_BASE_URL') return 'https://admin.cardioplace.ai'
+              if (key === 'PATIENT_BASE_URL') return 'https://www.cardioplace.ai'
               return fallback ?? undefined
             },
           },
@@ -875,7 +875,7 @@ describe('EscalationService', () => {
       expect(html).toContain('pulse <strong>88</strong>')
       expect(html).toContain('Tier 1 — ACE/ARB in pregnancy.')
       expect(html).toContain(
-        'https://admin.cardioplaceai.com/patients/patient-1?alert=alert-1',
+        'https://admin.cardioplace.ai/patients/patient-1?alert=alert-1',
       )
       expect(html).toContain('within 4 hours')
       // Detail richness — recipient role banner, alert metadata strip,
@@ -896,8 +896,8 @@ describe('EscalationService', () => {
         step: 'T0',
         role: 'PRIMARY_PROVIDER',
         message: 'Tier 1 — ACE/ARB in pregnancy.',
-        adminBaseUrl: 'https://admin.cardioplaceai.com',
-        patientBaseUrl: 'https://app.cardioplaceai.com',
+        adminBaseUrl: 'https://admin.cardioplace.ai',
+        patientBaseUrl: 'https://www.cardioplace.ai',
         afterHours: false,
         now: new Date('2026-04-22T15:00:00Z'),
       })
@@ -911,8 +911,8 @@ describe('EscalationService', () => {
         step: 'T0',
         role: 'BACKUP_PROVIDER',
         message: 'Tier 1 — ACE/ARB in pregnancy.',
-        adminBaseUrl: 'https://admin.cardioplaceai.com',
-        patientBaseUrl: 'https://app.cardioplaceai.com',
+        adminBaseUrl: 'https://admin.cardioplace.ai',
+        patientBaseUrl: 'https://www.cardioplace.ai',
         afterHours: true,
         now: new Date('2026-04-22T10:00:00Z'),
       })
@@ -928,8 +928,8 @@ describe('EscalationService', () => {
         step: 'T0',
         role: 'PRIMARY_PROVIDER',
         message: 'Tier 1 — ACE/ARB in pregnancy.',
-        adminBaseUrl: 'https://admin.cardioplaceai.com',
-        patientBaseUrl: 'https://app.cardioplaceai.com',
+        adminBaseUrl: 'https://admin.cardioplace.ai',
+        patientBaseUrl: 'https://www.cardioplace.ai',
         afterHours: false,
         now: new Date('2026-04-22T15:00:00Z'),
       })
@@ -996,8 +996,8 @@ describe('EscalationService', () => {
         step: 'T0',
         role: 'PATIENT',
         message: 'Your BP is 190/120. If you have chest pain, call 911 now.',
-        adminBaseUrl: 'https://admin.cardioplaceai.com',
-        patientBaseUrl: 'https://app.cardioplaceai.com',
+        adminBaseUrl: 'https://admin.cardioplace.ai',
+        patientBaseUrl: 'https://www.cardioplace.ai',
         afterHours: false,
         now: new Date('2026-04-22T15:00:00Z'),
       })
@@ -1015,16 +1015,16 @@ describe('EscalationService', () => {
         step: 'T0',
         role: 'PATIENT',
         message: 'Your BP is 190/120.',
-        adminBaseUrl: 'https://admin.cardioplaceai.com',
-        patientBaseUrl: 'https://app.cardioplaceai.com',
+        adminBaseUrl: 'https://admin.cardioplace.ai',
+        patientBaseUrl: 'https://www.cardioplace.ai',
         afterHours: false,
         now: new Date('2026-04-22T15:00:00Z'),
       })
       // Patient gets the patient-app URL and the patient-flavored CTA label.
-      expect(out.html).toContain('https://app.cardioplaceai.com/alerts/alert-1')
+      expect(out.html).toContain('https://www.cardioplace.ai/alerts/alert-1')
       expect(out.html).toContain('View your alert')
       // Crucially — does NOT include the admin-app URL anywhere.
-      expect(out.html).not.toContain('https://admin.cardioplaceai.com')
+      expect(out.html).not.toContain('https://admin.cardioplace.ai')
       expect(out.html).not.toContain('/patients/patient-1')
     })
 
@@ -1034,17 +1034,17 @@ describe('EscalationService', () => {
         step: 'T0',
         role: 'PRIMARY_PROVIDER',
         message: 'BP Level 2 — 190/120 mmHg.',
-        adminBaseUrl: 'https://admin.cardioplaceai.com',
-        patientBaseUrl: 'https://app.cardioplaceai.com',
+        adminBaseUrl: 'https://admin.cardioplace.ai',
+        patientBaseUrl: 'https://www.cardioplace.ai',
         afterHours: false,
         now: new Date('2026-04-22T15:00:00Z'),
       })
       expect(out.html).toContain(
-        'https://admin.cardioplaceai.com/patients/patient-1?alert=alert-1',
+        'https://admin.cardioplace.ai/patients/patient-1?alert=alert-1',
       )
       expect(out.html).toContain('View in dashboard')
       // Provider should NOT see the patient-app URL.
-      expect(out.html).not.toContain('https://app.cardioplaceai.com')
+      expect(out.html).not.toContain('https://www.cardioplace.ai')
     })
 
     it('escalationEmailBody handles missing DOB gracefully', () => {
@@ -1063,8 +1063,8 @@ describe('EscalationService', () => {
         step: 'T0',
         role: 'PRIMARY_PROVIDER',
         message: 'Tier 1 — ACE/ARB in pregnancy.',
-        adminBaseUrl: 'https://admin.cardioplaceai.com',
-        patientBaseUrl: 'https://app.cardioplaceai.com',
+        adminBaseUrl: 'https://admin.cardioplace.ai',
+        patientBaseUrl: 'https://www.cardioplace.ai',
         afterHours: false,
         now: new Date('2026-04-22T15:00:00Z'),
       })
@@ -1088,8 +1088,8 @@ describe('EscalationService', () => {
         step: 'T0',
         role: 'PRIMARY_PROVIDER',
         message: 'Tier 1 — ACE/ARB in pregnancy.',
-        adminBaseUrl: 'https://admin.cardioplaceai.com',
-        patientBaseUrl: 'https://app.cardioplaceai.com',
+        adminBaseUrl: 'https://admin.cardioplace.ai',
+        patientBaseUrl: 'https://www.cardioplace.ai',
         afterHours: false,
         now: new Date('2026-04-22T15:00:00Z'),
       })
@@ -1241,8 +1241,8 @@ describe('EscalationService', () => {
         step: 'T0',
         role: 'PRIMARY_PROVIDER',
         message: 'BP Level 1 High — pregnancy SBP ≥140 / DBP ≥90.',
-        adminBaseUrl: 'https://admin.cardioplaceai.com',
-        patientBaseUrl: 'https://app.cardioplaceai.com',
+        adminBaseUrl: 'https://admin.cardioplace.ai',
+        patientBaseUrl: 'https://www.cardioplace.ai',
         afterHours: false,
         now: new Date('2026-04-22T15:00:00Z'),
       })
@@ -1265,8 +1265,8 @@ describe('EscalationService', () => {
         step: 'T72H',
         role: 'MEDICAL_DIRECTOR',
         message: 'BP Level 1 High',
-        adminBaseUrl: 'https://admin.cardioplaceai.com',
-        patientBaseUrl: 'https://app.cardioplaceai.com',
+        adminBaseUrl: 'https://admin.cardioplace.ai',
+        patientBaseUrl: 'https://www.cardioplace.ai',
         afterHours: false,
         now: new Date('2026-04-22T15:00:00Z'),
       })
@@ -1277,8 +1277,8 @@ describe('EscalationService', () => {
         step: 'T7D',
         role: 'HEALPLACE_OPS',
         message: 'BP Level 1 High',
-        adminBaseUrl: 'https://admin.cardioplaceai.com',
-        patientBaseUrl: 'https://app.cardioplaceai.com',
+        adminBaseUrl: 'https://admin.cardioplace.ai',
+        patientBaseUrl: 'https://www.cardioplace.ai',
         afterHours: false,
         now: new Date('2026-04-22T15:00:00Z'),
       })
