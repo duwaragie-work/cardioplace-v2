@@ -272,6 +272,7 @@ export default function Dashboard() {
 
   const baselineStr = baseline?.baselineSystolic && baseline?.baselineDiastolic
     ? `${Math.round(Number(baseline.baselineSystolic))}/${Math.round(Number(baseline.baselineDiastolic))}` : '--/--';
+  const hasBaseline = baselineStr !== '--/--';
 
   // Patient-actionable open alerts. Excludes TIER_2_DISCREPANCY because
   // those are admin-facing per the v2 clinical spec — patients can't action
@@ -919,9 +920,35 @@ export default function Dashboard() {
               )}
             </div>
 
-            <span className="block text-[10px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
-              {loading ? <Bone w="60%" h={9} r={5} /> : `${t('dashboard.baseline')}: ${baselineStr} mmHg`}
-            </span>
+            {/* Baseline — highlighted as a pill so patients actually notice
+                their average BP (it used to be tiny muted text they overlooked). */}
+            <div className="mt-2">
+              {loading ? (
+                <Bone w="55%" h={20} r={999} />
+              ) : (
+                <span
+                  data-testid="dashboard-baseline"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full"
+                  style={{
+                    backgroundColor: hasBaseline ? 'var(--brand-accent-teal-light)' : '#F1F5F9',
+                  }}
+                >
+                  <Target
+                    className="w-3.5 h-3.5 shrink-0"
+                    style={{ color: hasBaseline ? 'var(--brand-accent-teal)' : 'var(--brand-text-muted)' }}
+                  />
+                  <span className="text-[11px] font-medium leading-none" style={{ color: 'var(--brand-text-secondary)' }}>
+                    {t('dashboard.baseline')}
+                  </span>
+                  <span
+                    className="text-[12px] font-bold leading-none"
+                    style={{ color: hasBaseline ? 'var(--brand-accent-teal)' : 'var(--brand-text-muted)' }}
+                  >
+                    {baselineStr} mmHg
+                  </span>
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Check-In CTA + Alerts */}
