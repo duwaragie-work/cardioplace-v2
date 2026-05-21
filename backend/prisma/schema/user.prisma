@@ -43,6 +43,7 @@ model User {
   providerAssignmentsAsBackup          PatientProviderAssignment[] @relation("BackupProvider")
   providerAssignmentsAsMedicalDirector PatientProviderAssignment[] @relation("MedicalDirector")
   profileVerificationLogs              ProfileVerificationLog[]
+  caregivers                           PatientCaregiver[]          @relation("PatientCaregivers")
 }
 
 enum UserRole {

@@ -42,9 +42,10 @@ model DeviationAlert {
   resolvedAt           DateTime?
   updatedAt            DateTime  @updatedAt @default(now())
 
-  escalationEvents EscalationEvent[]
-  notifications    Notification[]
-  scheduledCalls   ScheduledCall[]
+  escalationEvents     EscalationEvent[]
+  notifications        Notification[]
+  scheduledCalls       ScheduledCall[]
+  caregiverDispatchLogs CaregiverDispatchLog[]
 
   // Phase/7 — dropped @@unique([journalEntryId, type]). v2 allows multiple
   // alerts per entry (e.g. Tier 3 pulse-pressure annotation alongside a Tier 1
