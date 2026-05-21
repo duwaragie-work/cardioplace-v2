@@ -31,7 +31,12 @@ import type {
   NotificationChannel,
 } from '@/lib/services/patient-detail.service';
 import { resolutionTierFor } from '@/lib/services/provider.service';
-import { getBMI, formatTriggeringValue } from '@cardioplace/shared';
+import {
+  getBMI,
+  formatTriggeringValue,
+  ladderDisplayForTier,
+  type LadderDisplayStep,
+} from '@cardioplace/shared';
 
 // ─── Canonical ladder ────────────────────────────────────────────────────────
 // Mirrors the LadderStep enum from
@@ -39,95 +44,16 @@ import { getBMI, formatTriggeringValue } from '@cardioplace/shared';
 // declared in /backend/src/daily_journal/escalation/ladder-defs.ts. Each
 // alert tier has its OWN ladder shape — what we render here must match
 // what the backend cron actually fires, otherwise rows sit "Not yet
-// triggered" forever (canonical phantom-row bug). Hint text mirrors the
-// backend's recipientRoles per step so the timeline reads accurately.
+// triggered" forever (canonical phantom-row bug).
 //
-// Drift-prevention note: if these ladders change, update both this file
-// AND /backend/src/daily_journal/escalation/ladder-defs.ts. Centralizing
-// the step-shape constants in /shared is a follow-up.
+// B.3 — the per-tier ladder shapes are now the SINGLE source of truth in
+// @cardioplace/shared (escalation-ladders.ts), imported above. The backend
+// ladder-defs.ts is drift-guarded against the same LADDER_STEP_CODES via a
+// shared spec, so a step change on either side fails CI instead of rendering
+// a phantom "Not yet triggered" row.
+type LadderStep = LadderDisplayStep;
 
-interface LadderStep {
-  code: string;
-  label: string;
-  /** Brief description shown under the step heading. */
-  hint: string;
-}
-
-// Tier 1 — contraindications / non-BP safety. T0 → T4H → T8H → T24H → T48H.
-const TIER_1_LADDER: LadderStep[] = [
-  { code: 'T0', label: 'T+0', hint: 'Primary provider notified' },
-  { code: 'T4H', label: 'T+4h', hint: 'Primary + backup re-notified' },
-  { code: 'T8H', label: 'T+8h', hint: 'Medical director paged' },
-  { code: 'T24H', label: 'T+24h', hint: 'Healplace ops escalation' },
-  { code: 'T48H', label: 'T+48h', hint: 'Final compliance review' },
-];
-
-// Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema compressed escalation.
-// Airway-obstruction risk progresses within hours, so this ladder NEVER
-// queues for business hours and walks far faster than the standard Tier 1.
-// MUST mirror backend ladder-defs.ts TIER_1_ANGIOEDEMA_LADDER — post-pilot:
-// hoist to @cardioplace/shared so admin + backend share the canonical shape.
-const TIER_1_ANGIOEDEMA_LADDER: LadderStep[] = [
-  { code: 'T0',   label: 'T+0',   hint: 'Primary provider notified' },
-  { code: 'T15M', label: 'T+15m', hint: 'Backup provider paged' },
-  { code: 'T1H',  label: 'T+1h',  hint: 'Medical director + Healplace ops' },
-  { code: 'T4H',  label: 'T+4h',  hint: 'Healplace ops final' },
-];
-
-// Tier 2 — medication discrepancies. Slow ladder, weeks not hours.
-const TIER_2_LADDER: LadderStep[] = [
-  { code: 'T0', label: 'T+0', hint: 'Dashboard badge' },
-  { code: 'TIER2_48H', label: 'T+48h', hint: 'First Tier 2 reminder' },
-  { code: 'TIER2_7D', label: 'T+7d', hint: 'Backup provider follow-up' },
-  { code: 'TIER2_14D', label: 'T+14d', hint: 'Healplace ops compliance' },
-];
-
-// BP Level 1 — non-emergent stage-2 HTN / hypotension. T0 → T24H → T72H → T7D.
-// Backend ALSO fires a separate patient-side T+0 row (BP_LEVEL_1_PATIENT_T0);
-// that event has step='T0' so it buckets into the T+0 row alongside the
-// provider event and renders as a second event card under the same step.
-const BP_LEVEL_1_LADDER: LadderStep[] = [
-  { code: 'T0', label: 'T+0', hint: 'Primary provider + patient' },
-  { code: 'T24H', label: 'T+24h', hint: 'Primary + backup notified' },
-  { code: 'T72H', label: 'T+72h', hint: 'Medical director' },
-  { code: 'T7D', label: 'T+7d', hint: 'Healplace ops compliance' },
-];
-
-// BP Level 2 — emergency. Fires regardless of business hours. T0 → T2H → T4H.
-// BP_LEVEL_2_SYMPTOM_OVERRIDE shares this shape — the only difference is
-// the T+2h recipients (which include PATIENT for the "Have you called 911?"
-// follow-up). Rendered identically since recipient detail comes from the
-// EscalationEvent rows, not the ladder shape.
-const BP_LEVEL_2_LADDER: LadderStep[] = [
-  { code: 'T0', label: 'T+0', hint: 'Primary + backup + patient' },
-  { code: 'T2H', label: 'T+2h', hint: 'Medical director' },
-  { code: 'T4H', label: 'T+4h', hint: 'Healplace ops phone' },
-];
-
-function ladderFor(tier: string | null): LadderStep[] {
-  switch (tier) {
-    case 'TIER_1_CONTRAINDICATION':
-      return TIER_1_LADDER;
-    // Cluster 8 — angioedema uses a DISTINCT compressed ladder (NOT
-    // TIER_1_LADDER). Mapping it to TIER_1_LADDER would render T+8h /
-    // T+24h / T+48h placeholder rungs that never fire in the backend.
-    case 'TIER_1_ANGIOEDEMA':
-      return TIER_1_ANGIOEDEMA_LADDER;
-    case 'TIER_2_DISCREPANCY':
-      return TIER_2_LADDER;
-    case 'BP_LEVEL_1_HIGH':
-    case 'BP_LEVEL_1_LOW':
-      return BP_LEVEL_1_LADDER;
-    case 'BP_LEVEL_2':
-    case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
-      return BP_LEVEL_2_LADDER;
-    // Tier 3 / unknown — informational only, no escalation. Caller checks
-    // for empty array and renders the no-ladder placeholder instead of an
-    // empty timeline.
-    default:
-      return [];
-  }
-}
+const ladderFor = ladderDisplayForTier;
 
 // ─── Channel chrome ──────────────────────────────────────────────────────────
 
