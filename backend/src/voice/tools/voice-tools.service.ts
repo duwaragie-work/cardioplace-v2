@@ -107,6 +107,11 @@ export class VoiceToolsService {
             syncope: { type: Type.BOOLEAN, description: 'Patient fainted or had a near-fainting episode recently.' },
             palpitations: { type: Type.BOOLEAN, description: "Patient reports heart racing or fluttering." },
             leg_swelling: { type: Type.BOOLEAN, description: 'Patient reports new leg/foot swelling or rapid weight gain. Routes to HF decompensation and DHP-CCB rules.' },
+            // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
+            // Fires TIER_1_ANGIOEDEMA from a single reading, any patient. Voice
+            // parity with text — pilot blocker resolved on the voice surface.
+            face_swelling: { type: Type.BOOLEAN, description: 'Patient reports new swelling of the face, lips, or tongue. Airway-emergency trigger (TIER_1_ANGIOEDEMA) — fires regardless of BP value.' },
+            throat_tightness: { type: Type.BOOLEAN, description: 'Patient reports throat tightening or difficulty swallowing. Airway-emergency trigger (TIER_1_ANGIOEDEMA) — fires regardless of BP value.' },
             other_symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Patient-described symptoms not covered by the structured booleans. ALWAYS English.' },
             measurement_conditions: {
               type: Type.OBJECT,
@@ -315,6 +320,11 @@ export class VoiceToolsService {
     dto.syncope = toBool(args.syncope, false)
     dto.palpitations = toBool(args.palpitations, false)
     dto.legSwelling = toBool(args.leg_swelling, false)
+    // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
+    // Setting either of these on a JournalEntry trips TIER_1_ANGIOEDEMA in
+    // the rule engine regardless of BP value (single-reading, any patient).
+    dto.faceSwelling = toBool(args.face_swelling, false)
+    dto.throatTightness = toBool(args.throat_tightness, false)
     const otherSymptoms = toStringArray(args.other_symptoms)
     if (otherSymptoms.length) dto.otherSymptoms = otherSymptoms
 

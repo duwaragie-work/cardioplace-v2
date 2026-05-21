@@ -33,15 +33,22 @@ describe('journal-tools', () => {
   })
 
   describe('getJournalToolDeclarations', () => {
-    it('should return 5 tool declarations', () => {
+    // Updated 2026-05 (Phase/27) — catalog grew from 5 to 8 with the
+    // addition of log_medication_adherence, log_symptom_quick, and
+    // submit_bp_from_photo. See chat-voice-parity.spec.ts for the
+    // cross-surface assertion and rationale.
+    it('should return 8 tool declarations', () => {
       const declarations = getJournalToolDeclarations()
-      expect(declarations).toHaveLength(5)
-      expect(declarations.map((d) => d.name)).toEqual([
-        'submit_checkin',
-        'get_recent_readings',
-        'update_checkin',
+      expect(declarations).toHaveLength(8)
+      expect(declarations.map((d) => d.name).sort()).toEqual([
         'delete_checkin',
         'flag_emergency',
+        'get_recent_readings',
+        'log_medication_adherence',
+        'log_symptom_quick',
+        'submit_bp_from_photo',
+        'submit_checkin',
+        'update_checkin',
       ])
     })
 
@@ -87,7 +94,17 @@ describe('journal-tools', () => {
 
       const result = await executeJournalTool(
         'submit_checkin',
-        { entry_date: '2026-04-06', systolic_bp: 120, diastolic_bp: 80, medication_taken: true, symptoms: ['headache'] },
+        {
+          entry_date: '2026-04-06',
+          // Updated 2026-05 (Phase/27) — measurement_time is now a
+          // required-field gate ahead of journal.create. Provide it so
+          // the happy path reaches the executor.
+          measurement_time: '08:30',
+          systolic_bp: 120,
+          diastolic_bp: 80,
+          medication_taken: true,
+          symptoms: ['headache'],
+        },
         mockJournalService as any,
         'user-1',
       )
@@ -111,10 +128,14 @@ describe('journal-tools', () => {
       const parsed = JSON.parse(result)
       expect(parsed.saved).toBe(false)
       expect(parsed._internal).toBe(true)
-      // Guard prompts the model to ask about the first missing field —
-      // medication_taken is listed before symptoms in the guard logic.
+      // Updated 2026-05 (Phase/27) — measurement_time is now the first
+      // required field that hits the missing-field gate after entry_date.
+      // The guard returns the FIRST missing field as next_action, so we
+      // assert measurement_time. medication_taken would only surface as
+      // first-missing if entry_date AND measurement_time were both
+      // supplied. See journal-tools.scenarios.spec.ts for the full set.
       expect(parsed.next_action).toContain('Ask about')
-      expect(parsed.next_action).toContain('medication_taken')
+      expect(parsed.next_action).toContain('measurement_time')
       expect(mockJournalService.create).not.toHaveBeenCalled()
     })
 
