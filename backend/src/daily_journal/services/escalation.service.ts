@@ -1005,6 +1005,7 @@ export class EscalationService {
         })
         if (logged.count === 0) continue // already dispatched for this alert+channel
 
+        let delivered = false
         switch (caregiver.notifyChannel) {
           case 'EMAIL': {
             if (!caregiver.email) break
@@ -1013,6 +1014,7 @@ export class EscalationService {
               'Cardioplace — a health update about someone you care for',
               caregiverEmailHtml(caregiver.name, message),
             )
+            delivered = true
             break
           }
           case 'DASHBOARD': {
@@ -1027,6 +1029,7 @@ export class EscalationService {
                 body: message,
               },
             })
+            delivered = true
             break
           }
           case 'SMS': {
@@ -1034,10 +1037,34 @@ export class EscalationService {
             // NoopSmsService throws until a provider is wired — caught below
             // so one un-deliverable caregiver doesn't block the others.
             await this.smsService.sendSms(caregiver.phone, message)
+            delivered = true
             break
           }
           default:
             break // NONE — captured but not notifiable
+        }
+
+        // A6 — surface the caregiver dispatch in the canonical audit stream
+        // (EscalationEvent) so it shows in the admin timeline + the 15-field
+        // trail as a "Caregiver notified" row, not just CaregiverDispatchLog.
+        if (delivered) {
+          await this.prisma.escalationEvent.create({
+            data: {
+              alertId: alert.id,
+              userId: alert.userId,
+              escalationLevel: 'LEVEL_1',
+              reason: `Caregiver notified (${caregiver.notifyChannel.toLowerCase()})`,
+              ladderStep: 'T0',
+              recipientIds: [caregiver.caregiverUserId ?? caregiver.id],
+              recipientRoles: ['CAREGIVER'],
+              // NotificationChannel enum has no SMS — map text to PHONE for
+              // the audit row's channel chrome.
+              notificationChannel:
+                caregiver.notifyChannel === 'SMS' ? 'PHONE' : caregiver.notifyChannel,
+              notificationSentAt: new Date(),
+              dispatchedBySystem: true,
+            },
+          })
         }
       } catch (err) {
         this.logger.warn(

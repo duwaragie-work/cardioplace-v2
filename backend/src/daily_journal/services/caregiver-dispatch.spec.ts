@@ -183,6 +183,14 @@ describe('EscalationService — caregiver dispatch (Gap 5)', () => {
     expect(typeof subject).toBe('string')
     // Minimum Necessary — the caregiverMessage text is present in the body.
     expect(html).toContain('ankle swelling')
+
+    // A6 — a CAREGIVER EscalationEvent is written so the dispatch shows in
+    // the admin audit trail, not just CaregiverDispatchLog.
+    expect(prisma.escalationEvent.create).toHaveBeenCalledTimes(1)
+    const evt = prisma.escalationEvent.create.mock.calls[0][0].data
+    expect(evt.recipientRoles).toEqual(['CAREGIVER'])
+    expect(evt.notificationChannel).toBe('EMAIL')
+    expect(evt.ladderStep).toBe('T0')
   })
 
   it('is idempotent — a re-fired alert (createMany count 0) does not re-send', async () => {
