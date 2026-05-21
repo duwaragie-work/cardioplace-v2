@@ -1162,6 +1162,7 @@ const de: Record<TranslationKey, string> = {
   'intake.exitSave.body': 'Sie können jederzeit von Ihrem Dashboard aus fortfahren.',
   'intake.exitSave.cta': 'Zurück zum Dashboard',
   'intake.exitSave.keepGoing': 'Weitermachen',
+  'intake.exitSave.leaveWithoutSaving': 'Ohne Speichern verlassen',
   'intake.exitSave.editTitle': 'Änderungen speichern?',
   'intake.exitSave.editBody': 'Wir aktualisieren Ihr Profil und Ihre Medikamente mit den Änderungen auf dieser Seite und bringen Sie dann zurück zum Dashboard.',
   'intake.exitSave.editCta': 'Speichern und beenden',

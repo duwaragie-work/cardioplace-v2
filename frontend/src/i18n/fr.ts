@@ -1162,6 +1162,7 @@ const fr: Record<TranslationKey, string> = {
   'intake.exitSave.body': 'Vous pouvez continuer à tout moment depuis votre tableau de bord.',
   'intake.exitSave.cta': 'Retour au tableau de bord',
   'intake.exitSave.keepGoing': 'Continuer',
+  'intake.exitSave.leaveWithoutSaving': 'Quitter sans enregistrer',
   'intake.exitSave.editTitle': 'Enregistrer vos modifications ?',
   'intake.exitSave.editBody': 'Nous mettrons à jour votre profil et vos médicaments avec les modifications de cette page, puis vous ramènerons au tableau de bord.',
   'intake.exitSave.editCta': 'Enregistrer et quitter',

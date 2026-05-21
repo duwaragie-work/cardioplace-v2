@@ -1173,6 +1173,7 @@ const en = {
   'intake.exitSave.body': 'You can continue anytime from your dashboard.',
   'intake.exitSave.cta': 'Back to dashboard',
   'intake.exitSave.keepGoing': 'Keep going',
+  'intake.exitSave.leaveWithoutSaving': 'Leave without saving',
   'intake.exitSave.editTitle': 'Save your changes?',
   'intake.exitSave.editBody': "We'll update your profile and medications with the changes on this page, then take you back to the dashboard.",
   'intake.exitSave.editCta': 'Save and exit',
