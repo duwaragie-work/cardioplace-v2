@@ -438,6 +438,11 @@ export function actionsForTier(tier: AlertTier | string | null): ResolutionActio
 export interface AdminNotificationDto {
   id: string
   alertId: string | null
+  /** Patient who triggered the linked alert (NULL when alertId is null).
+   *  Needed for the bell / notifications row to deep-link to
+   *  /patients/{patientUserId}?alert={alertId} — `id` is the recipient's
+   *  user id, not the patient. */
+  patientUserId: string | null
   /** Set when the row originated from the escalation ladder. Used for
    *  multi-channel dedupe so the same step doesn't appear twice in the
    *  inbox. */

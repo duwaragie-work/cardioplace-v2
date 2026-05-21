@@ -11,19 +11,20 @@ import {
 } from '@nestjs/common'
 import type { Request } from 'express'
 import { Roles } from '../auth/decorators/roles.decorator.js'
+import { PatientAccessService } from '../common/patient-access.service.js'
 import { UserRole } from '../generated/prisma/enums.js'
 import { UpsertThresholdDto } from './dto/upsert-threshold.dto.js'
 import { ThresholdService } from './threshold.service.js'
 
-type AuthedReq = Request & { user: { id: string } }
+type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
 
 // Thresholds are a clinical directive per CLINICAL_SPEC.
-//   • READ — open to all four admin roles (PROVIDER + HEALPLACE_OPS need
-//     to see the configured target on the patient detail screen, even
-//     though they can't change it).
-//   • WRITE — MEDICAL_DIRECTOR + SUPER_ADMIN only. PROVIDER/OPS cannot
-//     author thresholds; they'd be making a clinical decision they're
-//     not authorized for.
+//   • READ — open to all four admin roles (HEALPLACE_OPS sees the configured
+//     target read-only on the patient detail screen).
+//   • WRITE — SUPER_ADMIN, MEDICAL_DIRECTOR, PROVIDER (May 2026 scope
+//     decision — see docs/ACCESS_SCOPE.md). PROVIDER previously read-only;
+//     now writes on their assigned patients. HEALPLACE_OPS still excluded
+//     from writes (clinical decision they're not authorized for).
 // Method-level @Roles() overrides the controller-level decorator.
 @Controller('admin/patients/:userId/threshold')
 @Roles(
@@ -33,31 +34,49 @@ type AuthedReq = Request & { user: { id: string } }
   UserRole.HEALPLACE_OPS,
 )
 export class ThresholdController {
-  constructor(private readonly service: ThresholdService) {}
+  constructor(
+    private readonly service: ThresholdService,
+    private readonly access: PatientAccessService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.PROVIDER)
   create(
     @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,
     @Body() dto: UpsertThresholdDto,
   ) {
-    return this.service.create(req.user.id, patientUserId, dto)
+    return this.service.create(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+      dto,
+    )
   }
 
   @Get()
-  findOne(@Param('userId') patientUserId: string) {
+  async findOne(
+    @Req() req: AuthedReq,
+    @Param('userId') patientUserId: string,
+  ) {
+    await this.access.assertCanAccessPatient(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+    )
     return this.service.findByPatient(patientUserId)
   }
 
   @Patch()
-  @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.PROVIDER)
   update(
     @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,
     @Body() dto: UpsertThresholdDto,
   ) {
-    return this.service.update(req.user.id, patientUserId, dto)
+    return this.service.update(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+      dto,
+    )
   }
 }

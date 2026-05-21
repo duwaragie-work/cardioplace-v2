@@ -308,7 +308,7 @@ const de: Record<TranslationKey, string> = {
 
   // ─── Provider ──────────────────────────────────────────────────────────────
   'provider.dashboard': 'Pflegeteam-Dashboard',
-  'provider.totalPatients': 'Patienten Gesamt',
+  'provider.totalPatients': 'Aktive Patienten',
   'provider.readingsThisMonth': 'Messungen Diesen Monat',
   'provider.bpReadingsSubmitted': 'BD-Messungen eingereicht',
   'provider.activeAlerts': 'Aktive Warnungen',

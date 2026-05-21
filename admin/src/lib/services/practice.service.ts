@@ -131,6 +131,42 @@ export async function listClinicians(role?: 'PROVIDER' | 'MEDICAL_DIRECTOR'): Pr
   return jsonOrThrow<Clinician[]>(res, 'Could not load clinicians')
 }
 
+// ─── Explicit practice ↔ staff membership (May 2026) ───────────────────────
+// OPS + SUPER_ADMIN only. Lets the practice be populated before any patient
+// assignment so the care-team cascading dropdown is populated on first use.
+
+export async function addPracticeProvider(practiceId: string, userId: string): Promise<void> {
+  const res = await fetchWithAuth(
+    `${API}/api/admin/practices/${practiceId}/providers/${userId}`,
+    { method: 'POST' },
+  )
+  await jsonOrThrow<unknown>(res, 'Could not add provider')
+}
+
+export async function removePracticeProvider(practiceId: string, userId: string): Promise<void> {
+  const res = await fetchWithAuth(
+    `${API}/api/admin/practices/${practiceId}/providers/${userId}`,
+    { method: 'DELETE' },
+  )
+  await jsonOrThrow<unknown>(res, 'Could not remove provider')
+}
+
+export async function addPracticeMedicalDirector(practiceId: string, userId: string): Promise<void> {
+  const res = await fetchWithAuth(
+    `${API}/api/admin/practices/${practiceId}/medical-directors/${userId}`,
+    { method: 'POST' },
+  )
+  await jsonOrThrow<unknown>(res, 'Could not add medical director')
+}
+
+export async function removePracticeMedicalDirector(practiceId: string, userId: string): Promise<void> {
+  const res = await fetchWithAuth(
+    `${API}/api/admin/practices/${practiceId}/medical-directors/${userId}`,
+    { method: 'DELETE' },
+  )
+  await jsonOrThrow<unknown>(res, 'Could not remove medical director')
+}
+
 // ─── Patient assignment (J3) ────────────────────────────────────────────────
 
 export async function getPatientAssignment(patientUserId: string): Promise<PatientAssignment | null> {

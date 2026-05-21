@@ -389,8 +389,13 @@ export async function seedPatients(
 ) {
   const otpHash = await hashOtp(DEMO_OTP)
   const { practiceA } = practices
-  const { supportAdmin, primaryProvider, backupProvider, medicalDirector } =
-    admins
+  const {
+    supportAdmin,
+    primaryProvider,
+    backupProvider,
+    medicalDirector,
+    manishaPatel,
+  } = admins
 
   for (const p of patients) {
     const user = await prisma.user.upsert({
@@ -500,4 +505,41 @@ export async function seedPatients(
       `  patient: ${p.email} — ${p.archetype} (${p.medications.length} meds, ${p.readings.length} readings${p.threshold ? ', +threshold' : ''})`,
     )
   }
+
+  // ── Explicit practice ↔ staff join rows (May 2026 role-scope) ─────────────
+  // The PracticeProvider / PracticeMedicalDirector join tables are the source
+  // of truth for PROVIDER (panel) + MED_DIR (practice) scoping. The original
+  // backfill migration derived them from existing PatientProviderAssignment
+  // rows, but a FRESH DB (CI: migrate deploy → seed) runs that backfill
+  // against an empty assignment table, leaving the joins empty — which makes
+  // every PROVIDER/MED_DIR see zero patients/practices. Seeding the rows here
+  // (after the assignment loop) keeps a freshly-seeded DB consistent with the
+  // scope queries. Idempotent via the composite unique key.
+  const staffLinks: Array<{ practiceId: string; userId: string }> = [
+    { practiceId: practiceA.id, userId: primaryProvider.id },
+    { practiceId: practiceA.id, userId: backupProvider.id },
+    // Manisha Patel (PROVIDER + SUPER_ADMIN) is also Cedar Hill staff so the
+    // practice-scoped care-team dropdowns offer a SECOND selectable provider
+    // besides the primary/backup trio — the 30e.4 idempotency-alternation
+    // test toggles backup between Reyes and Patel. Her own data scope is
+    // unaffected (SUPER_ADMIN short-circuits PatientAccessService.isUnscoped).
+    { practiceId: practiceA.id, userId: manishaPatel.id },
+  ]
+  for (const link of staffLinks) {
+    await prisma.practiceProvider.upsert({
+      where: { practiceId_userId: link },
+      update: {},
+      create: link,
+    })
+  }
+  await prisma.practiceMedicalDirector.upsert({
+    where: {
+      practiceId_userId: { practiceId: practiceA.id, userId: medicalDirector.id },
+    },
+    update: {},
+    create: { practiceId: practiceA.id, userId: medicalDirector.id },
+  })
+  console.log(
+    `  staff joins: ${staffLinks.length} providers + 1 medical director → ${practiceA.name}`,
+  )
 }

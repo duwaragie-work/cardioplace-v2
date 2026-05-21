@@ -4,7 +4,12 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, KeyRound, Eye, EyeOff } from "lucide-react";
 import { useAuth, type AdminAuthResponse } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
+import { hasAdminRole } from "@/lib/roleGates";
 import { getOrCreateDeviceId } from "@/lib/device";
+
+// Where a rehydrated NON-admin user (the shared API refresh-token cookie can
+// resolve a PATIENT profile on the admin origin) gets sent — their own app.
+const PATIENT_URL = process.env.NEXT_PUBLIC_PATIENT_URL || "http://localhost:3000";
 import { useLanguage } from "@/contexts/LanguageContext";
 import type { TranslationKey } from "@/i18n";
 import LandingHeader from "@/components/LandingHeader";
@@ -87,8 +92,16 @@ export default function RegisterPage() {
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
-    if (!isLoading && user) {
+    if (isLoading || !user) return;
+    // A live session resolved. If it carries an admin-tier role, go to the
+    // admin dashboard. If NOT (e.g. a PATIENT whose shared API refresh-token
+    // cookie rehydrated here), cross-redirect to the patient app instead of
+    // router.replace("/dashboard") — that bounced off proxy.ts back to
+    // /sign-in?reason=forbidden in an infinite loop (blank page).
+    if (hasAdminRole(user.roles)) {
       router.replace("/dashboard");
+    } else {
+      window.location.href = `${PATIENT_URL}/dashboard`;
     }
   }, [isLoading, user, router]);
 

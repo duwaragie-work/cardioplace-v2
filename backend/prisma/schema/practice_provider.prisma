@@ -1,0 +1,26 @@
+// Many-to-many PROVIDER ↔ Practice membership. Mirror of
+// PracticeMedicalDirector (see practice_medical_director.prisma).
+//
+// Before this model, "practice staff" was derived implicitly from
+// PatientProviderAssignment rows — a provider only "belonged" to a
+// practice once a patient was assigned with them in that practice.
+// That blocks the bootstrap case where ops wants to populate a practice
+// with providers BEFORE any patients are assigned (so the care-team
+// dropdown is populated when the first assignment is made).
+//
+// Backfilled from existing PatientProviderAssignment.primaryProviderId
+// and backupProviderId rows so already-staffed practices retain their
+// providers on day 1 (see the migration's INSERT…SELECT).
+model PracticeProvider {
+  id         String   @id @default(uuid())
+  practiceId String
+  userId     String
+  assignedAt DateTime @default(now())
+
+  practice Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  user     User     @relation("PracticeProviderMemberships", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([practiceId, userId])
+  @@index([practiceId])
+  @@index([userId])
+}
