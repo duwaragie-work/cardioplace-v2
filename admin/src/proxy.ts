@@ -25,6 +25,14 @@ const ROLE_COOKIE = AUTH_ROLE_COOKIE;
 // See TESTING_FLOW_GUIDE.md §2 for the full role matrix.
 const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER', 'HEALPLACE_OPS']);
 
+// Where a logged-in NON-admin (e.g. a PATIENT whose shared API refresh-token
+// cookie rehydrated an admin marker) gets bounced to — their own app's
+// dashboard. Mirror of the patient proxy's admin-bridge redirect, so the two
+// apps cross-redirect symmetrically instead of dead-ending on a blank
+// /sign-in?reason=forbidden page (which looped: sign-in → /dashboard → proxy
+// → /sign-in …).
+const PATIENT_URL = process.env.NEXT_PUBLIC_PATIENT_URL || 'http://localhost:3000';
+
 const PUBLIC_PATHS = new Set<string>([
   '/',
   '/home',
@@ -74,9 +82,11 @@ export function proxy(request: NextRequest) {
   }
 
   if (!hasAdminRole(roles)) {
-    const signInUrl = new URL('/sign-in', request.url);
-    signInUrl.searchParams.set('reason', 'forbidden');
-    return NextResponse.redirect(signInUrl);
+    // Logged in, but not an admin-tier role — send them to their own app's
+    // dashboard instead of a dead-end /sign-in?reason=forbidden (which looped
+    // to a blank page). The patient proxy does the symmetric redirect for
+    // admin-role users landing on the patient app.
+    return NextResponse.redirect(new URL('/dashboard', PATIENT_URL));
   }
 
   const response = NextResponse.next();
