@@ -83,6 +83,7 @@ import OtherMedicationsList from '@/components/intake/OtherMedicationsList';
 import OtherMedEditModal from '@/components/intake/OtherMedEditModal';
 import { cmToFtIn, ftInToCm } from '@/lib/units';
 import StepDots from '@/components/intake/StepDots';
+import DateField from '@/components/intake/DateField';
 import ChoiceCard from '@/components/intake/ChoiceCard';
 import MedicationCard from '@/components/intake/MedicationCard';
 import SpinnerIndicator from '@/components/ui/SpinnerIndicator';
@@ -259,7 +260,7 @@ interface StepProps {
 function A0bIntro({ onBegin, onSaveLater }: { onBegin: () => void; onSaveLater: () => void }) {
   const { t } = useLanguage();
   return (
-    <div className="flex flex-col items-center text-center px-6 py-10">
+    <div className="flex flex-col items-center text-center px-6 py-6 sm:py-10">
       <motion.div
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -355,22 +356,13 @@ function A1Demographics({ state, setState }: StepProps) {
 
       <div>
         <SectionLabel text={t('intake.a1.dobQuestion')} audio={t('intake.a1.dobQuestion')} />
-        <input
+        <DateField
           id="intake-a1-dob"
-          data-testid="intake-dob"
-          type="date"
+          testId="intake-dob"
           value={state.dateOfBirth ?? ''}
           max={maxDobIso()}
-          onChange={(e) => setState((p) => ({ ...p, dateOfBirth: e.target.value || undefined }))}
-          className="w-full h-14 px-4 rounded-xl text-[18px] outline-none transition box-border"
-          style={{
-            border: '2px solid var(--brand-border)',
-            color: 'var(--brand-text-primary)',
-            backgroundColor: 'white',
-            colorScheme: 'light',
-          }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--brand-primary-purple)'; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
+          placeholder={t('intake.datePlaceholder')}
+          onChange={(v) => setState((p) => ({ ...p, dateOfBirth: v || undefined }))}
         />
         <p className="text-[12px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
           {t('intake.a1.dobHint')}
@@ -430,7 +422,10 @@ function A1Demographics({ state, setState }: StepProps) {
                         value={storedFeet || ''}
                         onChange={(e) => {
                           const v = parseInt(e.target.value, 10);
-                          updateHeightFromFtIn(Number.isFinite(v) ? v : 0, storedInches);
+                          // Clamp to a realistic range so a stray digit can't
+                          // produce an out-of-bounds height.
+                          const feet = Number.isFinite(v) ? Math.min(8, Math.max(0, v)) : 0;
+                          updateHeightFromFtIn(feet, storedInches);
                         }}
                         placeholder="5"
                         className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
@@ -447,7 +442,7 @@ function A1Demographics({ state, setState }: StepProps) {
                         numeric
                         onTranscript={(text) => {
                           const n = parseInt(text, 10);
-                          if (Number.isFinite(n)) updateHeightFromFtIn(n, storedInches);
+                          if (Number.isFinite(n)) updateHeightFromFtIn(Math.min(8, Math.max(0, n)), storedInches);
                         }}
                       />
                     </div>
@@ -463,10 +458,15 @@ function A1Demographics({ state, setState }: StepProps) {
                         inputMode="numeric"
                         min={0}
                         max={11}
-                        value={storedInches || (storedFeet ? '0' : '')}
+                        value={storedInches || ''}
                         onChange={(e) => {
                           const v = parseInt(e.target.value, 10);
-                          updateHeightFromFtIn(storedFeet, Number.isFinite(v) ? v : 0);
+                          // Clamp to 0–11. Without this, an inches value > 11
+                          // rolls over into feet through the cm round-trip
+                          // (e.g. 4 ft + 50 in = 98 in = 8 ft 2 in), which is
+                          // what made the feet field jump while typing inches.
+                          const inches = Number.isFinite(v) ? Math.min(11, Math.max(0, v)) : 0;
+                          updateHeightFromFtIn(storedFeet, inches);
                         }}
                         placeholder="9"
                         className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
@@ -483,7 +483,7 @@ function A1Demographics({ state, setState }: StepProps) {
                         numeric
                         onTranscript={(text) => {
                           const n = parseInt(text, 10);
-                          if (Number.isFinite(n)) updateHeightFromFtIn(storedFeet, n);
+                          if (Number.isFinite(n)) updateHeightFromFtIn(storedFeet, Math.min(11, Math.max(0, n)));
                         }}
                       />
                     </div>
@@ -612,18 +612,12 @@ function A2Pregnancy({ state, setState }: StepProps) {
             exit={{ opacity: 0, y: -8 }}
           >
             <SectionLabel text={t('intake.a2.dueDateLabel')} audio={t('intake.a2.dueDateAudio')} />
-            <input
-              type="date"
-              aria-label={t('intake.a2.dueDateLabel')}
+            <DateField
+              ariaLabel={t('intake.a2.dueDateLabel')}
               value={state.pregnancyDueDate ?? ''}
-              onChange={(e) => setState((p) => ({ ...p, pregnancyDueDate: e.target.value || undefined }))}
-              className="w-full h-14 px-5 rounded-xl text-[15px] outline-none transition box-border"
-              style={{
-                border: '2px solid var(--brand-border)',
-                color: 'var(--brand-text-primary)',
-                backgroundColor: 'white',
-                colorScheme: 'light',
-              }}
+              placeholder={t('intake.datePlaceholder')}
+              textSizeClass="text-[15px]"
+              onChange={(v) => setState((p) => ({ ...p, pregnancyDueDate: v || undefined }))}
             />
           </motion.div>
         )}
@@ -1521,7 +1515,7 @@ function A9Frequency({ state, setState }: StepProps) {
               </div>
               <AudioButton text={t('intake.a9.medAudio').replace('{name}', m.drugName)} size="sm" />
             </div>
-            <div className="grid grid-cols-4 gap-2" data-testid={`intake-a9-row-${i}`}>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" data-testid={`intake-a9-row-${i}`}>
               {options.map((o) => {
                 const active = m.frequency === o.value;
                 return (
@@ -2195,45 +2189,41 @@ function ClinicalIntakeWizard() {
     setStep(next);
   };
 
-  const goNext = async () => {
-    // Validation gates.
-    if (step === 'A1') {
-      if (!state.gender) { setSubmitError({ kind: 'key', key: 'intake.nav.errorGender' }); return; }
-      if (!state.dateOfBirth) {
-        setSubmitError({ kind: 'key', key: 'intake.nav.errorDob' });
-        return;
-      }
+  // Per-step field validation, shared by Continue (goNext) and the edit-mode
+  // Save-changes quick-save so both reject the same invalid input.
+  const validateStep = (s: IntakeStepKey): typeof submitError => {
+    if (s === 'A1') {
+      if (!state.gender) return { kind: 'key', key: 'intake.nav.errorGender' };
+      if (!state.dateOfBirth) return { kind: 'key', key: 'intake.nav.errorDob' };
       const dobErrKey = validateDateOfBirth(state.dateOfBirth);
-      if (dobErrKey) {
-        setSubmitError({ kind: 'key', key: dobErrKey });
-        return;
-      }
+      if (dobErrKey) return { kind: 'key', key: dobErrKey };
       if (!state.heightCm || state.heightCm < 100 || state.heightCm > 250) {
-        setSubmitError({ kind: 'key', key: 'intake.nav.errorHeight' });
-        return;
+        return { kind: 'key', key: 'intake.nav.errorHeight' };
       }
     }
-    if (step === 'A2') {
+    if (s === 'A2') {
       if (state.isPregnant !== true && state.isPregnant !== false) {
-        setSubmitError({ kind: 'key', key: 'intake.nav.errorPregnancy' });
-        return;
+        return { kind: 'key', key: 'intake.nav.errorPregnancy' };
       }
       if (state.historyPreeclampsia !== true && state.historyPreeclampsia !== false) {
-        setSubmitError({ kind: 'key', key: 'intake.nav.errorPreeclampsia' });
-        return;
+        return { kind: 'key', key: 'intake.nav.errorPreeclampsia' };
       }
     }
-    if (step === 'A4' && !state.heartFailureType) {
-      setSubmitError({ kind: 'key', key: 'intake.nav.errorHfType' });
-      return;
+    if (s === 'A4' && !state.heartFailureType) {
+      return { kind: 'key', key: 'intake.nav.errorHfType' };
     }
-    if (step === 'A9') {
+    if (s === 'A9') {
       const missingFreq = state.selectedMedications.find((m) => !m.frequency);
       if (missingFreq) {
-        setSubmitError({ kind: 'key', key: 'intake.nav.errorFreq', values: { name: missingFreq.drugName } });
-        return;
+        return { kind: 'key', key: 'intake.nav.errorFreq', values: { name: missingFreq.drugName } };
       }
     }
+    return null;
+  };
+
+  const goNext = async () => {
+    const stepErr = validateStep(step);
+    if (stepErr) { setSubmitError(stepErr); return; }
     setSubmitError(null);
 
     // A6 (combos — the last med screen) → A9 transition: surface dedup
@@ -2346,6 +2336,39 @@ function ClinicalIntakeWizard() {
     }
   };
 
+  // Edit-mode quick-save: commit the current answers right away and go back to
+  // the profile, instead of forcing the patient to click Continue through every
+  // remaining step to reach the final submit. The upsert sends the full state
+  // — which in edit mode is the existing profile pre-loaded + their change — so
+  // unchanged fields are preserved and only what they edited differs. Validates
+  // the current step (and surfaces combo dedup on A6) so we never persist the
+  // same invalid input Continue would reject.
+  const handleQuickSave = async () => {
+    if (exitSaving || submitting) return;
+    const stepErr = validateStep(step);
+    if (stepErr) { setSubmitError(stepErr); return; }
+    if (step === 'A6') {
+      const conflicts = detectDedupConflicts(state.selectedMedications);
+      if (conflicts.length > 0) { setPendingDedup(conflicts); return; }
+    }
+    setSubmitError(null);
+    setExitSaving(true);
+    try {
+      await Promise.all([
+        saveIntakeProfile(buildProfilePayload(state)),
+        replaceIntakeMedications(buildMedsPayload(state)),
+      ]);
+      router.push('/profile');
+    } catch (e) {
+      setSubmitError(
+        e instanceof Error
+          ? { kind: 'raw', text: e.message }
+          : { kind: 'key', key: 'intake.nav.errorSubmit' },
+      );
+      setExitSaving(false);
+    }
+  };
+
   const resolveDedup = (mode: 'KEEP_BOTH' | 'KEEP_COMBO' | 'KEEP_SINGLE', conflict: DedupConflict) => {
     setStateRaw((prev) => {
       let next = prev.selectedMedications;
@@ -2408,7 +2431,25 @@ function ClinicalIntakeWizard() {
   const stepProps: StepProps = { state, setState, goTo };
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: 'var(--brand-background)' }}>
+    <div
+      className={
+        'flex flex-col ' +
+        // Intro (A0b) + complete (A11) are single-screen panels: pin them to
+        // the viewport so they never grow past the screen or introduce a page
+        // scroll. Other steps keep min-h-screen and scroll.
+        (isIntro || isComplete ? '' : 'min-h-screen')
+      }
+      style={{
+        backgroundColor: 'var(--brand-background)',
+        // The global navbar is fixed (h-16) and NavbarWrapper reserves space
+        // for it with pt-16, so this route already sits 4rem below the top.
+        // Cap the single-screen panels at viewport MINUS that 4rem, otherwise
+        // 4rem (navbar) + 100dvh (page) overflows and shows a browser scroll.
+        // Inline style, not a Tailwind calc class — arbitrary calc() values
+        // get stripped on some builds (see the main padding note below).
+        ...(isIntro || isComplete ? { height: 'calc(100dvh - 4rem)' } : null),
+      }}
+    >
       {/* Top bar — visible when not on intro/complete */}
       {showNav && (
         <header
@@ -2478,7 +2519,10 @@ function ClinicalIntakeWizard() {
         className={
           'flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 ' +
           (isIntro || isComplete
-            ? 'flex items-center justify-center py-8'
+            // min-h-0 lets the flex child shrink so overflow-y-auto can take
+            // over; items-center-safe centers when it fits and falls back to
+            // top-aligned + scroll when content is taller than the screen.
+            ? 'flex items-center-safe justify-center overflow-y-auto min-h-0 py-6'
             : 'py-5 sm:py-8')
         }
         style={
@@ -2541,20 +2585,51 @@ function ClinicalIntakeWizard() {
           }}
         >
           <div className="max-w-3xl mx-auto">
-            <motion.button
-              type="button"
-              data-testid="intake-submit"
-              onClick={goNext}
-              disabled={submitting}
-              className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
-              style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              {submitting ? t('intake.nav.saving') : step === 'A10' ? t('intake.nav.submit') : t('intake.nav.continue')}
-              {!submitting && step !== 'A10' && <ArrowRight className="w-4 h-4" />}
-              {!submitting && step === 'A10' && <Check className="w-4 h-4" />}
-            </motion.button>
+            {editMode ? (
+              // Edit mode — a one-tap "Save changes" that commits immediately
+              // (no stepping to the last screen), with Continue kept as a
+              // secondary action for patients who want to review other steps.
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  data-testid="intake-submit"
+                  onClick={goNext}
+                  disabled={submitting || exitSaving}
+                  className="flex-1 h-12 rounded-full border-2 font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                  style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                >
+                  {step === 'A10' ? t('intake.nav.submit') : t('intake.nav.continue')}
+                </button>
+                <motion.button
+                  type="button"
+                  data-testid="intake-quick-save"
+                  onClick={handleQuickSave}
+                  disabled={submitting || exitSaving}
+                  className="flex-1 h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                  style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  {exitSaving ? t('intake.nav.saving') : t('intake.nav.saveChanges')}
+                  {!exitSaving && <Check className="w-4 h-4" />}
+                </motion.button>
+              </div>
+            ) : (
+              <motion.button
+                type="button"
+                data-testid="intake-submit"
+                onClick={goNext}
+                disabled={submitting}
+                className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                {submitting ? t('intake.nav.saving') : step === 'A10' ? t('intake.nav.submit') : t('intake.nav.continue')}
+                {!submitting && step !== 'A10' && <ArrowRight className="w-4 h-4" />}
+                {!submitting && step === 'A10' && <Check className="w-4 h-4" />}
+              </motion.button>
+            )}
           </div>
         </div>
       )}

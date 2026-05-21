@@ -12,13 +12,15 @@
 // taken within ~30 minutes so the rule engine averages them. AFib patients see
 // a banner reminding them ≥3 readings per session are required.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
   ArrowRight,
   Check,
+  CheckCheck,
+  Square,
   CheckCircle,
   Coffee,
   Cigarette,
@@ -40,6 +42,7 @@ import {
   Baby,
   Pill,
   Scale,
+  Save,
   CalendarClock,
   Plus,
   Home,
@@ -53,6 +56,12 @@ import type { TranslationKey } from '@/i18n';
 import { ClinicalIntakeRequiredError, createJournalEntry, finalizeSingleReadingSession } from '@/lib/services/journal.service';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
 import { hasDraft, loadDraft } from '@/lib/intake/draft';
+import {
+  loadCheckInDraft,
+  saveCheckInDraft,
+  clearCheckInDraft,
+  type CheckInDraft,
+} from '@/lib/checkin/draft';
 import {
   listMyMedications,
   type PatientMedication,
@@ -208,6 +217,50 @@ function emptyForm(): FormData {
   };
 }
 
+// Weight bounds. Weight is stored in kg on the backend (@Min(20) @Max(300)
+// in create-journal-entry.dto.ts), so the lbs bounds are simply the kg
+// bounds converted. KG_PER_LB matches the lbs→kg factor used at submit.
+const KG_PER_LB = 0.45359237;
+const WEIGHT_MIN_KG = 20;
+const WEIGHT_MAX_KG = 300;
+// Round the lbs window inward (min up, max down) so any value that passes the
+// lbs check still converts to a kg value inside the backend's 20–300 window.
+const WEIGHT_MIN_LBS = Math.ceil(WEIGHT_MIN_KG / KG_PER_LB); // 45
+const WEIGHT_MAX_LBS = Math.floor(WEIGHT_MAX_KG / KG_PER_LB); // 661
+
+/** Min/max for the weight input in the currently-selected unit. */
+function weightBounds(unit: 'lbs' | 'kg'): { min: number; max: number } {
+  return unit === 'lbs'
+    ? { min: WEIGHT_MIN_LBS, max: WEIGHT_MAX_LBS }
+    : { min: WEIGHT_MIN_KG, max: WEIGHT_MAX_KG };
+}
+
+// Max length for the free-text "Anything else?" note (B3). The backend column
+// is unbounded text, so this is the only guard against an oversized note. Both
+// input paths (typing + voice dictation) clamp to it.
+const OTHER_SYMPTOMS_MAX = 500;
+
+/** True when the patient has entered anything worth keeping as a draft, so a
+ *  pristine first-paint form never creates a resume prompt. */
+function hasCheckinProgress(form: FormData, step: StepKey): boolean {
+  if (step !== 'B1') return true;
+  const checklist =
+    form.noCaffeine || form.noSmoking || form.noExercise || form.bladderEmpty ||
+    form.seatedQuietly || form.posturalSupport || form.notTalking || form.cuffOnBareArm;
+  const reading =
+    form.position !== null || form.systolicBP !== '' || form.diastolicBP !== '' || form.pulse !== '';
+  const weight = form.weight !== '';
+  const meds = Object.keys(form.medicationStatus).length > 0;
+  const symptoms =
+    form.severeHeadache || form.visualChanges || form.alteredMentalStatus ||
+    form.chestPainOrDyspnea || form.focalNeuroDeficit || form.severeEpigastricPain ||
+    form.newOnsetHeadache || form.ruqPain || form.edema || form.dizziness ||
+    form.syncope || form.palpitations || form.legSwelling || form.fatigue ||
+    form.shortnessOfBreath || form.dryCough || form.faceSwelling || form.throatTightness ||
+    form.otherSymptomsText.trim() !== '';
+  return Boolean(checklist || reading || weight || meds || symptoms);
+}
+
 /** RFC4122 v4 UUID — used for sessionId (client-generated). */
 function uuid(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -359,6 +412,15 @@ function B1Checklist({ form, setField }: StepProps) {
   ];
 
   const checkedCount = items.filter((it) => Boolean(form[it.key])).length;
+  const allChecked = checkedCount === items.length;
+
+  // Select-all / unselect-all toggle. Setting each field in a loop is safe:
+  // React batches the functional setForm updates inside this handler into a
+  // single re-render, so all 8 items flip at once.
+  const toggleAll = () => {
+    const next = !allChecked;
+    items.forEach((it) => setField(it.key, next as FormData[typeof it.key]));
+  };
 
   return (
     <div data-testid="checkin-step-1" className="space-y-5">
@@ -370,22 +432,42 @@ function B1Checklist({ form, setField }: StepProps) {
         total={5}
       />
 
-      <div className="flex items-center justify-between rounded-xl p-3"
+      {/* Progress line + select-all toggle share one row. The status text
+          shrinks/ellipsizes first so the toggle + count stay intact on narrow
+          phones; on very small screens the whole row wraps cleanly. */}
+      <div className="flex items-center justify-between gap-2 flex-wrap rounded-xl p-3"
         style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
-        <p className="text-[12.5px]" style={{ color: 'var(--brand-text-secondary)' }}>
-          {checkedCount === 8
+        <p className="text-[12.5px] min-w-0 flex-1 truncate" style={{ color: 'var(--brand-text-secondary)' }}>
+          {allChecked
             ? t('checkin.b1.allSet')
             : t('checkin.b1.progress').replace('{n}', String(checkedCount))}
         </p>
-        <span
-          className="text-[11px] font-bold px-2 py-0.5 rounded-full"
-          style={{
-            backgroundColor: checkedCount === 8 ? 'var(--brand-success-green)' : 'white',
-            color: checkedCount === 8 ? 'white' : 'var(--brand-primary-purple)',
-          }}
-        >
-          {checkedCount}/8
-        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            data-testid="checkin-b1-toggle-all"
+            onClick={toggleAll}
+            aria-pressed={allChecked}
+            className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-2.5 py-1 rounded-full transition-all cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary-purple)]"
+            style={{
+              backgroundColor: 'white',
+              color: 'var(--brand-primary-purple)',
+              border: '1.5px solid var(--brand-border)',
+            }}
+          >
+            {allChecked ? <Square className="w-3.5 h-3.5" /> : <CheckCheck className="w-3.5 h-3.5" />}
+            {allChecked ? t('checkin.b1.unselectAll') : t('checkin.b1.selectAll')}
+          </button>
+          <span
+            className="text-[11px] font-bold px-2 py-0.5 rounded-full"
+            style={{
+              backgroundColor: allChecked ? 'var(--brand-success-green)' : 'white',
+              color: allChecked ? 'white' : 'var(--brand-primary-purple)',
+            }}
+          >
+            {checkedCount}/{items.length}
+          </span>
+        </div>
       </div>
 
       <div className="space-y-2.5">
@@ -411,6 +493,10 @@ function B1Checklist({ form, setField }: StepProps) {
 
 function B2Reading({ form, setField }: StepProps) {
   const { t } = useLanguage();
+  // BP photo OCR error is lifted out of the icon button so it can render
+  // full-width below the button (above the reading inputs) instead of being
+  // squeezed in beside the camera icon inside the label row.
+  const [bpPhotoError, setBpPhotoError] = useState<string | null>(null);
 
   return (
     <div data-testid="checkin-step-2" className="space-y-6">
@@ -502,13 +588,14 @@ function B2Reading({ form, setField }: StepProps) {
 
       {/* BP */}
       <div>
-        <label htmlFor="checkin-systolic" className="flex items-center justify-between text-[13px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
-          <span>{t('checkin.b2.bpLabel')}</span>
-          <span className="flex items-center gap-2">
+        <label htmlFor="checkin-systolic" className="flex items-center justify-between gap-2 text-[13px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
+          <span className="min-w-0">{t('checkin.b2.bpLabel')}</span>
+          <span className="flex items-center gap-2 shrink-0">
             {/* Phase/27 BP photo OCR — patient snaps cuff display, confirms numbers
                 in modal, then values flow into systolicBP/diastolicBP/pulse like a
                 manual entry. Hidden when NEXT_PUBLIC_BP_OCR_ENABLED !== 'true'. */}
             <BpPhotoButton
+              onError={setBpPhotoError}
               onConfirm={(r) => {
                 setField('systolicBP', String(r.sbp));
                 setField('diastolicBP', String(r.dbp));
@@ -518,8 +605,17 @@ function B2Reading({ form, setField }: StepProps) {
             <AudioButton text={t('checkin.b2.bpAudio')} size="sm" />
           </span>
         </label>
-        <div className="flex items-end gap-3">
-          <div data-testid="check-in-systolic" className="flex-1">
+        {bpPhotoError && (
+          <p
+            role="alert"
+            className="-mt-1 mb-3 text-[12px] leading-snug"
+            style={{ color: 'var(--brand-error)' }}
+          >
+            {bpPhotoError}
+          </p>
+        )}
+        <div className="flex items-end gap-2 sm:gap-3">
+          <div data-testid="check-in-systolic" className="flex-1 min-w-0">
             <input
               data-testid="checkin-systolic"
               id="checkin-systolic"
@@ -540,7 +636,7 @@ function B2Reading({ form, setField }: StepProps) {
                 backgroundColor: 'white',
               }}
             />
-            <div className="mt-1.5 flex items-center justify-center gap-2">
+            <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
               <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpTopLabel')}</p>
               <MicButton
                 inputId="checkin-systolic"
@@ -549,8 +645,8 @@ function B2Reading({ form, setField }: StepProps) {
               />
             </div>
           </div>
-          <div className="pb-7 text-[32px] font-light" style={{ color: 'var(--brand-text-muted)' }}>/</div>
-          <div data-testid="check-in-diastolic" className="flex-1">
+          <div className="pb-7 text-[28px] sm:text-[32px] font-light shrink-0" style={{ color: 'var(--brand-text-muted)' }}>/</div>
+          <div data-testid="check-in-diastolic" className="flex-1 min-w-0">
             <input
               data-testid="checkin-diastolic"
               id="checkin-diastolic"
@@ -571,7 +667,7 @@ function B2Reading({ form, setField }: StepProps) {
                 backgroundColor: 'white',
               }}
             />
-            <div className="mt-1.5 flex items-center justify-center gap-2">
+            <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
               <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpBottomLabel')}</p>
               <MicButton
                 inputId="checkin-diastolic"
@@ -601,7 +697,7 @@ function B2Reading({ form, setField }: StepProps) {
             value={form.pulse}
             onChange={(e) => setField('pulse', e.target.value)}
             placeholder="72"
-            className="flex-1 h-12 px-4 rounded-xl text-center outline-none transition box-border"
+            className="flex-1 min-w-0 h-12 px-4 rounded-xl text-center outline-none transition box-border"
             style={{
               border: '2px solid var(--brand-border)',
               color: form.pulse ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
@@ -622,6 +718,44 @@ function B2Reading({ form, setField }: StepProps) {
 
 function StepWeight({ form, setField }: StepProps) {
   const { t } = useLanguage();
+
+  // Anchor for unit conversion: the value + unit the patient last *typed*.
+  // Toggles always convert from this single anchor (one hop) and restore it
+  // verbatim when switching back to the unit it was entered in, so repeated
+  // lbs↔kg taps never drift (10 lb → 4.5 kg → 10 lb, not 9.9). Re-converting
+  // the already-rounded display each time is what caused the drift.
+  const anchorRef = useRef<{ value: string; unit: 'lbs' | 'kg' }>({
+    value: form.weight,
+    unit: form.weightUnit,
+  });
+
+  // Any direct edit (typing or voice) re-anchors to that exact value + unit.
+  const setWeight = (raw: string) => {
+    anchorRef.current = { value: raw, unit: form.weightUnit };
+    setField('weight', raw);
+  };
+
+  // Switching units converts the anchor so the patient doesn't have to re-key
+  // it. setField runs twice but React batches both updates into one re-render.
+  // An empty / non-numeric field just flips the unit. The anchor is left
+  // untouched here so a later toggle-back can restore the original entry.
+  const changeUnit = (unit: 'lbs' | 'kg') => {
+    if (unit === form.weightUnit) return;
+    const anchor = anchorRef.current;
+    if (anchor.value.trim() !== '' && !Number.isNaN(parseFloat(anchor.value))) {
+      if (anchor.unit === unit) {
+        setField('weight', anchor.value); // exact restore — no drift
+      } else {
+        const n = parseFloat(anchor.value);
+        const converted = unit === 'kg' ? n * KG_PER_LB : n / KG_PER_LB;
+        setField('weight', String(Math.round(converted * 10) / 10));
+      }
+    }
+    setField('weightUnit', unit);
+  };
+
+  const bounds = weightBounds(form.weightUnit);
+
   return (
     <div data-testid="checkin-step-3" className="space-y-6">
       <StepHeader
@@ -642,7 +776,7 @@ function StepWeight({ form, setField }: StepProps) {
             <button
               key={unit}
               type="button"
-              onClick={() => setField('weightUnit', unit)}
+              onClick={() => changeUnit(unit)}
               className="px-5 py-1.5 rounded-full text-sm font-semibold transition-all cursor-pointer"
               style={{
                 backgroundColor: form.weightUnit === unit ? 'var(--brand-primary-purple)' : 'transparent',
@@ -660,13 +794,15 @@ function StepWeight({ form, setField }: StepProps) {
           {t('checkin.weight.weightLabel').replace('{unit}', form.weightUnit)}
         </label>
         <div className="flex items-center gap-2">
-          <div className="relative flex-1">
+          <div className="relative flex-1 min-w-0">
             <input
               id="checkin-weight"
               type="number"
               inputMode="decimal"
+              min={bounds.min}
+              max={bounds.max}
               value={form.weight}
-              onChange={(e) => setField('weight', e.target.value)}
+              onChange={(e) => setWeight(e.target.value)}
               placeholder={form.weightUnit === 'lbs' ? '185' : '84'}
               className="w-full outline-none transition text-center"
               style={{
@@ -685,7 +821,7 @@ function StepWeight({ form, setField }: StepProps) {
           <MicButton
             inputId="checkin-weight"
             numeric
-            onTranscript={(text) => setField('weight', text)}
+            onTranscript={(text) => setWeight(text)}
           />
         </div>
       </div>
@@ -1152,9 +1288,10 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
             onTranscript={(text) =>
               setField(
                 'otherSymptomsText',
-                form.otherSymptomsText
+                (form.otherSymptomsText
                   ? `${form.otherSymptomsText} ${text}`.trim()
-                  : text,
+                  : text
+                ).slice(0, OTHER_SYMPTOMS_MAX),
               )
             }
           />
@@ -1163,9 +1300,11 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
           id="checkin-other-symptoms"
           data-testid="checkin-other-symptoms"
           rows={3}
+          maxLength={OTHER_SYMPTOMS_MAX}
           value={form.otherSymptomsText}
-          onChange={(e) => setField('otherSymptomsText', e.target.value)}
+          onChange={(e) => setField('otherSymptomsText', e.target.value.slice(0, OTHER_SYMPTOMS_MAX))}
           placeholder={t('checkin.b3.otherPlaceholder')}
+          aria-describedby="checkin-other-symptoms-count"
           className="w-full rounded-xl px-4 py-3 text-[13px] resize-none outline-none transition"
           style={{
             border: '2px solid var(--brand-border)',
@@ -1173,6 +1312,18 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
             backgroundColor: 'white',
           }}
         />
+        <p
+          id="checkin-other-symptoms-count"
+          className="mt-1 text-[11px] text-right tabular-nums"
+          style={{
+            color:
+              form.otherSymptomsText.length >= OTHER_SYMPTOMS_MAX
+                ? 'var(--brand-alert-red-text)'
+                : 'var(--brand-text-muted)',
+          }}
+        >
+          {form.otherSymptomsText.length}/{OTHER_SYMPTOMS_MAX}
+        </p>
       </div>
     </div>
   );
@@ -1491,6 +1642,11 @@ export default function CheckIn() {
   const [direction, setDirection] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  // A saved, unfinished check-in found in localStorage on mount. While set, the
+  // resume prompt is shown (Resume vs Start new) before the wizard renders.
+  const [resumeDraft, setResumeDraft] = useState<CheckInDraft<FormData> | null>(null);
+  // Save-and-exit confirmation (header Save button) — mirrors the intake form.
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
 
   // Session state — sessionId is generated once via lazy init so we don't
   // need a setState-in-effect to bootstrap it (Next 16 lint).
@@ -1502,6 +1658,30 @@ export default function CheckIn() {
   // non-preDay3 reading. Drives the "Take a second reading" prompt + 5-min
   // finalize timer in <ConfirmationScreen>. Null otherwise.
   const [pendingFinalizeEntryId, setPendingFinalizeEntryId] = useState<string | null>(null);
+
+  // Resume: on mount, surface any saved unfinished check-in so the patient can
+  // pick up where they left off (refresh / navigated away). Read in an effect
+  // — not a lazy initializer — so the localStorage access happens after
+  // hydration and can't cause an SSR mismatch.
+  useEffect(() => {
+    if (!user?.id) return;
+    const draft = loadCheckInDraft<FormData>(user.id);
+    if (draft?.form && hasCheckinProgress(draft.form, (draft.step as StepKey) || 'B1')) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setResumeDraft(draft);
+    }
+  }, [user?.id]);
+
+  // Auto-save: persist the in-progress reading whenever it changes so a refresh
+  // or navigation never loses it. Skipped while the resume prompt is up (no
+  // decision made yet) and after submit (confirmation screen) so we don't
+  // re-create a draft of an already-saved reading.
+  useEffect(() => {
+    if (!user?.id || resumeDraft || showConfirmation) return;
+    if (hasCheckinProgress(form, step)) {
+      saveCheckInDraft(user.id, { form, step, savedAt: Date.now() });
+    }
+  }, [form, step, user?.id, resumeDraft, showConfirmation]);
 
   // Fetch patient profile to know isPregnant + hasAFib.
   useEffect(() => {
@@ -1571,6 +1751,9 @@ export default function CheckIn() {
       const measuredDate = new Date(`${form.measuredDate}T${form.measuredTime}`);
       if (isNaN(measuredDate.getTime())) return t('checkin.err.dateInvalid');
       const now = Date.now();
+      // A future *day* gets a date-specific message; a same-day time past now
+      // (beyond the 5-min clock-skew grace) keeps the time-specific message.
+      if (form.measuredDate > nowDate()) return t('checkin.err.dateFuture');
       if (measuredDate.getTime() > now + 5 * 60 * 1000) return t('checkin.err.timeFuture');
       if (measuredDate.getTime() < now - 30 * 24 * 60 * 60 * 1000) return t('checkin.err.timeOld');
       if (!form.position) return t('checkin.err.position');
@@ -1582,6 +1765,22 @@ export default function CheckIn() {
       if (form.pulse) {
         const p = parseInt(form.pulse, 10);
         if (p < 30 || p > 220) return t('checkin.err.pulse');
+      }
+    }
+    if (s === 'WEIGHT') {
+      // Weight is optional — an empty field is fine. But once entered it must
+      // be in range for the active unit, caught here (step 3) instead of
+      // bouncing off the backend at submit (the final step). Bounds mirror
+      // the backend kg limits converted to the selected unit.
+      if (form.weight.trim() !== '') {
+        const w = parseFloat(form.weight);
+        const { min, max } = weightBounds(form.weightUnit);
+        if (Number.isNaN(w) || w < min || w > max) {
+          return t('checkin.err.weight')
+            .replace('{min}', String(min))
+            .replace('{max}', String(max))
+            .replace('{unit}', form.weightUnit);
+        }
       }
     }
     if (s === 'MEDICATION') {
@@ -1698,6 +1897,10 @@ export default function CheckIn() {
         otherSymptoms: form.otherSymptomsText.trim() ? [form.otherSymptomsText.trim()] : undefined,
       });
 
+      // Reading saved — drop the draft so the patient isn't prompted to resume
+      // a check-in they already submitted.
+      if (user?.id) clearCheckInDraft(user.id);
+
       const reading: SessionReading = {
         measuredAt: measuredAtIso,
         systolicBP: sys,
@@ -1730,6 +1933,37 @@ export default function CheckIn() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // Resume prompt — load the saved draft into the wizard. Merge over a fresh
+  // emptyForm() so a draft saved before a schema change still has every field.
+  // Clamp the saved step to the current flow (meds may have changed since).
+  function resumeCheckin() {
+    if (!resumeDraft) return;
+    const s = (resumeDraft.step as StepKey) || 'B1';
+    setForm({ ...emptyForm(), ...resumeDraft.form });
+    setStep(flow.includes(s) ? s : (flow[0] ?? 'B1'));
+    setResumeDraft(null);
+  }
+
+  // Resume prompt — discard the saved draft and begin a clean check-in. The
+  // form is still pristine here (the draft was never loaded), so we only need
+  // to clear storage and dismiss the prompt.
+  function startNewCheckin() {
+    if (user?.id) clearCheckInDraft(user.id);
+    setResumeDraft(null);
+  }
+
+  // Header "Save" — persist the in-progress reading to localStorage and leave
+  // for the dashboard (mirrors the intake form's save-and-exit). Auto-save
+  // already keeps the draft current; we write once more explicitly so a save
+  // tapped right after a keystroke can't race the effect, then navigate. With
+  // nothing entered there's nothing to save — just go.
+  function handleSaveExit() {
+    if (user?.id && hasCheckinProgress(form, step)) {
+      saveCheckInDraft(user.id, { form, step, savedAt: Date.now() });
+    }
+    router.push('/dashboard');
   }
 
   function goNext() {
@@ -1846,6 +2080,74 @@ export default function CheckIn() {
     );
   }
 
+  // Resume prompt — a saved, unfinished check-in was found. Ask before we
+  // either restore it or start fresh, so the patient never silently loses work
+  // and never accidentally overwrites a draft by starting new.
+  if (resumeDraft) {
+    // Progress of the saved draft, measured against the canonical 5-step order
+    // (not the live flow, which may still be settling as meds load).
+    const resumeStepNum = Math.max(0, STEP_FLOW.indexOf((resumeDraft.step as StepKey) || 'B1')) + 1;
+    const resumeTotal = STEP_FLOW.length;
+    return (
+      <div
+        className="h-[calc(100dvh-4rem)] flex flex-col overflow-hidden"
+        style={{ backgroundColor: 'var(--brand-background)' }}
+      >
+        <main id="main" className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-8">
+          <div
+            data-testid="checkin-resume-prompt"
+            className="w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 text-center"
+            style={{ boxShadow: '0 4px 24px rgba(123,0,224,0.08)' }}
+          >
+            <div
+              className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5"
+              style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}
+              aria-hidden
+            >
+              <ClipboardCheck className="w-8 h-8 text-white" strokeWidth={2.25} />
+            </div>
+            <h1 className="text-xl sm:text-2xl font-bold text-[#170c1d] mb-3">
+              {t('checkin.resume.title')}
+            </h1>
+            <p className="text-[#4b5563] text-sm sm:text-base leading-relaxed mb-5">
+              {t('checkin.resume.body')}
+            </p>
+
+            {/* Progress of the unfinished check-in */}
+            <div className="flex flex-col items-center gap-2 mb-6">
+              <StepDots current={resumeStepNum} total={resumeTotal} />
+              <p className="text-[12px] font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
+                {t('checkin.nav.stepOf')
+                  .replace('{current}', String(resumeStepNum))
+                  .replace('{total}', String(resumeTotal))}
+              </p>
+            </div>
+
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                data-testid="checkin-resume-btn"
+                onClick={resumeCheckin}
+                className="w-full h-12 sm:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm sm:text-base hover:bg-[#6600BC] transition-colors cursor-pointer inline-flex items-center justify-center gap-2"
+              >
+                {t('checkin.resume.resume')}
+                <ArrowRight className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                data-testid="checkin-startnew-btn"
+                onClick={startNewCheckin}
+                className="w-full h-11 sm:h-12 rounded-full font-semibold text-[#7B00E0] text-sm sm:text-base hover:bg-[#f5f3ff] transition-colors cursor-pointer"
+              >
+                {t('checkin.resume.startNew')}
+              </button>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   // Confirmation overlays the whole flow
   if (showConfirmation) {
     const last = sessionReadings[sessionReadings.length - 1];
@@ -1890,7 +2192,17 @@ export default function CheckIn() {
             {t('checkin.nav.back')}
           </button>
           <StepDots current={visibleIndex} total={visibleTotal} />
-          <div className="w-[60px]" aria-hidden /> {/* spacer to keep dots centered */}
+          <button
+            type="button"
+            data-testid="checkin-save-exit-btn"
+            onClick={() => setShowSaveConfirm(true)}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[13px] font-semibold cursor-pointer"
+            style={{ color: 'var(--brand-text-muted)' }}
+            aria-label={t('checkin.nav.saveAria')}
+          >
+            <Save className="w-4 h-4" />
+            <span className="hidden sm:inline">{t('checkin.nav.save')}</span>
+          </button>
         </div>
         {readingNumber > 0 && (
           <div
@@ -1972,6 +2284,68 @@ export default function CheckIn() {
           </motion.button>
         </div>
       </div>
+
+      {/* Save-and-exit confirmation — mirrors the intake form's exit-save
+          modal. The reading is already auto-saved to this device; this just
+          confirms leaving for the dashboard. */}
+      <AnimatePresence>
+        {showSaveConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ backgroundColor: 'rgba(15,23,42,0.5)' }}
+          >
+            <div
+              className="absolute inset-0"
+              onClick={() => setShowSaveConfirm(false)}
+              aria-hidden
+            />
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              data-testid="checkin-save-confirm"
+              initial={{ scale: 0.92, y: 12 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.92, y: 12 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 26 }}
+              className="relative bg-white rounded-3xl p-6 max-w-sm w-full text-center"
+              style={{ boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}
+            >
+              <div
+                className="rounded-full mx-auto mb-4 flex items-center justify-center"
+                style={{ width: 64, height: 64, backgroundColor: 'var(--brand-primary-purple-light)' }}
+              >
+                <Save className="w-7 h-7" style={{ color: 'var(--brand-primary-purple)' }} />
+              </div>
+              <h3 className="text-[18px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+                {t('checkin.saveExit.title')}
+              </h3>
+              <p className="text-[13px] mb-5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+                {t('checkin.saveExit.body')}
+              </p>
+              <button
+                type="button"
+                data-testid="checkin-save-confirm-btn"
+                onClick={handleSaveExit}
+                className="w-full h-11 rounded-full text-white font-bold text-[14px] cursor-pointer"
+                style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
+              >
+                {t('checkin.saveExit.confirm')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSaveConfirm(false)}
+                className="w-full mt-2 text-[12px] font-semibold cursor-pointer"
+                style={{ color: 'var(--brand-text-muted)' }}
+              >
+                {t('checkin.saveExit.keepGoing')}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

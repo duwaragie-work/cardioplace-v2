@@ -111,6 +111,14 @@ const de: Record<TranslationKey, string> = {
 
   // ─── Check-In v2 (Flow B) ──────────────────────────────────────────────────
   // B1 — pre-measurement checklist
+  'checkin.resume.title': 'Check-in fortsetzen?',
+  'checkin.resume.body': 'Sie haben einen Check-in begonnen, aber nicht abgeschlossen. Machen Sie dort weiter, wo Sie aufgehört haben, oder beginnen Sie neu.',
+  'checkin.resume.resume': 'Check-in fortsetzen',
+  'checkin.resume.startNew': 'Neuen Check-in beginnen',
+  'checkin.saveExit.title': 'Speichern und später fortfahren?',
+  'checkin.saveExit.body': 'Ihr Check-in ist auf diesem Gerät gespeichert. Beim nächsten Mal können Sie dort weitermachen, wo Sie aufgehört haben.',
+  'checkin.saveExit.confirm': 'Speichern und beenden',
+  'checkin.saveExit.keepGoing': 'Weitermachen',
   'checkin.b1.title': 'Bevor Sie messen',
   'checkin.b1.subtitle': 'Eine kurze Liste für eine genaue Messung.',
   'checkin.b1.audio': 'Bevor Sie messen. Eine kurze Liste für eine genaue Messung. Tippen Sie auf jeden Punkt, der jetzt auf Sie zutrifft.',
@@ -124,6 +132,8 @@ const de: Record<TranslationKey, string> = {
   'checkin.b1.itemCuff': 'Manschette auf dem nackten Oberarm (nicht über Kleidung)',
   'checkin.b1.allSet': 'Alles bereit — Ihre Messung wird am genauesten.',
   'checkin.b1.progress': '{n} von 8 bestätigt.',
+  'checkin.b1.selectAll': 'Alle auswählen',
+  'checkin.b1.unselectAll': 'Alle abwählen',
   'checkin.b1.footer': 'Das hilft Ihrem Behandlungsteam, der Messung zu vertrauen. Sie können Punkte überspringen, die nicht zutreffen.',
 
   // B2 — reading
@@ -240,6 +250,8 @@ const de: Record<TranslationKey, string> = {
 
   // Wizard chrome + session banner
   'checkin.nav.back': 'Zurück',
+  'checkin.nav.save': 'Speichern',
+  'checkin.nav.saveAria': 'Speichern und zum Dashboard',
   'checkin.nav.stepOf': 'Schritt {current} von {total}',
   'checkin.nav.sessionBanner': 'Messung {n} in dieser Sitzung',
   'checkin.nav.sessionBannerAfib': 'Messung {n} in dieser Sitzung · Vorhofflimmern braucht 3 hintereinander',
@@ -251,12 +263,14 @@ const de: Record<TranslationKey, string> = {
   'checkin.err.dateTime': 'Bitte wählen Sie Datum und Uhrzeit.',
   'checkin.err.dateInvalid': 'Dieses Datum sieht nicht richtig aus.',
   'checkin.err.timeFuture': 'Die Uhrzeit liegt in der Zukunft.',
+  'checkin.err.dateFuture': 'Das Datum liegt in der Zukunft.',
   'checkin.err.timeOld': 'Das ist mehr als 30 Tage her.',
   'checkin.err.position': 'Wählen Sie eine Position.',
   'checkin.err.bpMissing': 'Geben Sie beide Blutdruckzahlen ein.',
   'checkin.err.systolic': 'Die obere Zahl sollte zwischen 60 und 250 liegen.',
   'checkin.err.diastolic': 'Die untere Zahl sollte zwischen 40 und 150 liegen.',
   'checkin.err.pulse': 'Puls sollte zwischen 30 und 220 liegen.',
+  'checkin.err.weight': 'Das Gewicht sollte zwischen {min} und {max} {unit} liegen.',
   'checkin.err.submit': 'Messung konnte nicht gesendet werden. Versuchen Sie es erneut.',
 
 
@@ -529,6 +543,7 @@ const de: Record<TranslationKey, string> = {
   // ─── Readings (audit sweep additions) ──────────────────────────────────────
   'readings.validate.bpBoth': 'Geben Sie beide Blutdruckwerte ein (oder löschen Sie beide).',
   'readings.validate.weightRange': 'Das Gewicht muss zwischen 20 und 600 liegen.',
+  'readings.validate.missedReason': 'Bitte wählen Sie für jedes ausgelassene Medikament einen Grund.',
   'readings.sameMinute': 'gleiche Minute',
   'readings.sessionReadings': 'Sitzung · {count} Messungen',
   'readings.readingsCount': '{count} Messungen',
@@ -804,6 +819,7 @@ const de: Record<TranslationKey, string> = {
   'home.chip2': 'Medikamententipps',
   'home.chip3': 'Wie geht es mir?',
   'home.startCheckin': 'Starten Sie Ihre Kontrolle',
+  'home.goToDashboard': 'Zum Dashboard',
   'home.howItWorks': 'So funktioniert es',
   'home.partnershipBanner': 'In Partnerschaft mit der DC Hospital Association.',
   'home.forPatientsOpening': 'So sieht kontinuierliche Versorgung für Patienten aus, die sie noch nie hatten.',
@@ -949,6 +965,9 @@ const de: Record<TranslationKey, string> = {
   'intake.a0b.audio': 'Erstellen wir Ihr Gesundheitsprofil. Dies hilft Ihrem Behandlungsteam, Sie richtig zu unterstützen. Ihre Antworten bleiben privat.',
   'intake.a0b.begin': 'Beginnen',
   'intake.a0b.saveForLater': 'Für später speichern',
+
+  // Shared placeholder shown inside empty date fields (DateField.tsx)
+  'intake.datePlaceholder': 'TT / MM / JJJJ',
 
   // A1 — demographics
   'intake.a1.title': 'Etwas über Sie',
@@ -1096,9 +1115,9 @@ const de: Record<TranslationKey, string> = {
   'intake.a9.title': 'Wie oft pro Tag?',
   'intake.a9.subtitle': 'Nur die Anzahl — Ihr Behandlungsteam trägt die Dosis ein.',
   'intake.a9.audio': 'Wie oft nehmen Sie jedes Medikament pro Tag? Nur die Anzahl — Ihr Behandlungsteam trägt die Dosis ein.',
-  'intake.a9.freqOnce': 'Einmal',
-  'intake.a9.freqTwice': 'Zweimal',
-  'intake.a9.freqThree': 'Dreimal',
+  'intake.a9.freqOnce': '1 Mal',
+  'intake.a9.freqTwice': '2 Mal',
+  'intake.a9.freqThree': '3 Mal',
   'intake.a9.freqAsNeeded': 'Bei Bedarf',
   'intake.a9.freqUnsure': 'Unsicher',
   'intake.a9.medAudio': 'Wie oft pro Tag nehmen Sie {name}?',
@@ -1162,6 +1181,7 @@ const de: Record<TranslationKey, string> = {
   'intake.nav.saving': 'Speichern…',
   'intake.nav.submit': 'Profil senden',
   'intake.nav.continue': 'Weiter',
+  'intake.nav.saveChanges': 'Änderungen speichern',
   'intake.nav.errorGender': 'Bitte wählen Sie ein Geschlecht.',
   'intake.nav.errorDob': 'Bitte geben Sie Ihr Geburtsdatum ein.',
   'intake.nav.errorHeight': 'Bitte geben Sie eine realistische Größe ein (etwa 3 ft 4 in bis 8 ft 2 in).',

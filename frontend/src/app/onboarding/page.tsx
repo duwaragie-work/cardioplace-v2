@@ -147,7 +147,7 @@ export default function OnboardingPage() {
   return (
     <div className="bg-white">
       <LandingHeader activeLink="" />
-      <main id="main" className="lg:min-h-screen pt-28 pb-10 lg:pb-0 flex items-start lg:items-center justify-center px-4 sm:px-6 lg:px-12">
+      <main id="main" className="min-h-[100dvh] pt-24 pb-10 flex items-center-safe justify-center px-4 sm:px-6 lg:px-12">
       <div className="w-full max-w-300 mx-auto">
         <div className="flex flex-col items-center md:items-center md:flex-row gap-8 lg:gap-20">
           {/* Left side - Form */}

@@ -111,6 +111,14 @@ const es: Record<TranslationKey, string> = {
 
   // ─── Check-In v2 (Flow B) ──────────────────────────────────────────────────
   // B1 — pre-measurement checklist
+  'checkin.resume.title': '¿Reanudar su control?',
+  'checkin.resume.body': 'Comenzó un control pero no lo terminó. Continúe donde lo dejó o comience uno nuevo.',
+  'checkin.resume.resume': 'Reanudar control',
+  'checkin.resume.startNew': 'Comenzar un control nuevo',
+  'checkin.saveExit.title': '¿Guardar y continuar después?',
+  'checkin.saveExit.body': 'Su control se guarda en este dispositivo. La próxima vez podrá continuar donde lo dejó.',
+  'checkin.saveExit.confirm': 'Guardar y salir',
+  'checkin.saveExit.keepGoing': 'Seguir',
   'checkin.b1.title': 'Antes de medir',
   'checkin.b1.subtitle': 'Una lista rápida para una lectura precisa.',
   'checkin.b1.audio': 'Antes de medir. Una lista rápida para una lectura precisa. Toque cada ítem que sea cierto para usted ahora.',
@@ -124,6 +132,8 @@ const es: Record<TranslationKey, string> = {
   'checkin.b1.itemCuff': 'Manguito en brazo desnudo (no sobre la ropa)',
   'checkin.b1.allSet': 'Todo listo — su lectura será la más precisa.',
   'checkin.b1.progress': '{n} de 8 confirmados.',
+  'checkin.b1.selectAll': 'Seleccionar todo',
+  'checkin.b1.unselectAll': 'Deseleccionar todo',
   'checkin.b1.footer': 'Esto ayuda a que su equipo de atención confíe en la lectura. Puede omitir ítems que no apliquen.',
 
   // B2 — reading
@@ -240,6 +250,8 @@ const es: Record<TranslationKey, string> = {
 
   // Wizard chrome + session banner
   'checkin.nav.back': 'Atrás',
+  'checkin.nav.save': 'Guardar',
+  'checkin.nav.saveAria': 'Guardar e ir al panel',
   'checkin.nav.stepOf': 'Paso {current} de {total}',
   'checkin.nav.sessionBanner': 'Lectura {n} en esta sesión',
   'checkin.nav.sessionBannerAfib': 'Lectura {n} en esta sesión · Fibrilación auricular necesita 3 seguidas',
@@ -251,12 +263,14 @@ const es: Record<TranslationKey, string> = {
   'checkin.err.dateTime': 'Por favor elija la fecha y hora.',
   'checkin.err.dateInvalid': 'Esa fecha no parece correcta.',
   'checkin.err.timeFuture': 'La hora está en el futuro.',
+  'checkin.err.dateFuture': 'La fecha está en el futuro.',
   'checkin.err.timeOld': 'Eso es hace más de 30 días.',
   'checkin.err.position': 'Elija una posición.',
   'checkin.err.bpMissing': 'Ingrese ambos números de presión arterial.',
   'checkin.err.systolic': 'El número de arriba debe estar entre 60 y 250.',
   'checkin.err.diastolic': 'El número de abajo debe estar entre 40 y 150.',
   'checkin.err.pulse': 'El pulso debe estar entre 30 y 220.',
+  'checkin.err.weight': 'El peso debe estar entre {min} y {max} {unit}.',
   'checkin.err.submit': 'No se pudo enviar la lectura. Intente de nuevo.',
 
 
@@ -529,6 +543,7 @@ const es: Record<TranslationKey, string> = {
   // ─── Readings (audit sweep additions) ──────────────────────────────────────
   'readings.validate.bpBoth': 'Ingrese ambos números de presión arterial (o borre los dos).',
   'readings.validate.weightRange': 'El peso debe estar entre 20 y 600.',
+  'readings.validate.missedReason': 'Elija un motivo para cada medicamento que omitió.',
   'readings.sameMinute': 'mismo minuto',
   'readings.sessionReadings': 'Sesión · {count} lecturas',
   'readings.readingsCount': '{count} lecturas',
@@ -804,6 +819,7 @@ const es: Record<TranslationKey, string> = {
   'home.chip2': 'Consejos de medicación',
   'home.chip3': '¿Cómo estoy?',
   'home.startCheckin': 'Comienza Tu Control',
+  'home.goToDashboard': 'Ir al Panel',
   'home.howItWorks': 'Cómo Funciona',
   'home.partnershipBanner': 'En asociación con la DC Hospital Association.',
   'home.forPatientsOpening': 'Así es como se ve la atención continua para los pacientes que nunca la han tenido.',
@@ -949,6 +965,9 @@ const es: Record<TranslationKey, string> = {
   'intake.a0b.audio': 'Construyamos su perfil de salud. Esto ayuda a su equipo de atención a darle el apoyo adecuado. Sus respuestas permanecen privadas.',
   'intake.a0b.begin': 'Comenzar',
   'intake.a0b.saveForLater': 'Guardar para más tarde',
+
+  // Shared placeholder shown inside empty date fields (DateField.tsx)
+  'intake.datePlaceholder': 'DD / MM / AAAA',
 
   // A1 — demographics
   'intake.a1.title': 'Un poco sobre usted',
@@ -1096,9 +1115,9 @@ const es: Record<TranslationKey, string> = {
   'intake.a9.title': '¿Con qué frecuencia cada día?',
   'intake.a9.subtitle': 'Solo el número — su equipo de atención completará la dosis.',
   'intake.a9.audio': '¿Con qué frecuencia toma cada uno cada día? Solo el número — su equipo de atención completará la dosis.',
-  'intake.a9.freqOnce': 'Una vez',
-  'intake.a9.freqTwice': 'Dos veces',
-  'intake.a9.freqThree': 'Tres veces',
+  'intake.a9.freqOnce': '1 vez',
+  'intake.a9.freqTwice': '2 veces',
+  'intake.a9.freqThree': '3 veces',
   'intake.a9.freqAsNeeded': 'Según sea necesario',
   'intake.a9.freqUnsure': 'No sé',
   'intake.a9.medAudio': '¿Cuántas veces al día toma {name}?',
@@ -1162,6 +1181,7 @@ const es: Record<TranslationKey, string> = {
   'intake.nav.saving': 'Guardando…',
   'intake.nav.submit': 'Enviar perfil',
   'intake.nav.continue': 'Continuar',
+  'intake.nav.saveChanges': 'Guardar cambios',
   'intake.nav.errorGender': 'Por favor seleccione un género.',
   'intake.nav.errorDob': 'Por favor ingresa tu fecha de nacimiento.',
   'intake.nav.errorHeight': 'Por favor ingrese una altura realista (aproximadamente 3 ft 4 in a 8 ft 2 in).',

@@ -272,6 +272,7 @@ export default function Dashboard() {
 
   const baselineStr = baseline?.baselineSystolic && baseline?.baselineDiastolic
     ? `${Math.round(Number(baseline.baselineSystolic))}/${Math.round(Number(baseline.baselineDiastolic))}` : '--/--';
+  const hasBaseline = baselineStr !== '--/--';
 
   // Patient-actionable open alerts. Excludes TIER_2_DISCREPANCY because
   // those are admin-facing per the v2 clinical spec — patients can't action
@@ -728,7 +729,7 @@ export default function Dashboard() {
             ) : (
               <span
                 data-testid="latest-bp-status"
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                className="inline-flex items-center justify-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-center"
                 style={{ backgroundColor: bpVsTargetStyle.bg, color: bpVsTargetStyle.fg }}
                 // Known WCAG debt — chip pattern at 10px is below AA Normal
                 // threshold with vibrant tokens. Same accepted tradeoff.
@@ -864,7 +865,7 @@ export default function Dashboard() {
                 </div>
               ) : visibleChartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={visibleChartData}>
+                  <AreaChart data={visibleChartData} margin={{ top: 5, right: 24, left: 5, bottom: 5 }}>
                     <defs>
                       <linearGradient id="colorSystolic" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#7B00E0" stopOpacity={0.18} />
@@ -883,7 +884,7 @@ export default function Dashboard() {
                         </g>
                       );
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    }) as any} interval={Math.max(0, Math.floor(visibleChartData.length / 8) - 1)} tickFormatter={(v: string) => v.replace(/ #\d+$/, '')}>
+                    }) as any} interval="preserveStartEnd" minTickGap={24} tickFormatter={(v: string) => v.replace(/ #\d+$/, '')}>
                       <Label value={t('dashboard.chartDateAxis')} position="insideBottom" offset={-2} style={{ fill: '#1d1d1d', fontSize: 10, fontWeight: 600 }} />
                     </XAxis>
                     <YAxis domain={bpDomain} axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} width={38}>
@@ -919,9 +920,35 @@ export default function Dashboard() {
               )}
             </div>
 
-            <span className="block text-[10px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
-              {loading ? <Bone w="60%" h={9} r={5} /> : `${t('dashboard.baseline')}: ${baselineStr} mmHg`}
-            </span>
+            {/* Baseline — highlighted as a pill so patients actually notice
+                their average BP (it used to be tiny muted text they overlooked). */}
+            <div className="mt-2">
+              {loading ? (
+                <Bone w="55%" h={20} r={999} />
+              ) : (
+                <span
+                  data-testid="dashboard-baseline"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full"
+                  style={{
+                    backgroundColor: hasBaseline ? 'var(--brand-accent-teal-light)' : '#F1F5F9',
+                  }}
+                >
+                  <Target
+                    className="w-3.5 h-3.5 shrink-0"
+                    style={{ color: hasBaseline ? 'var(--brand-accent-teal)' : 'var(--brand-text-muted)' }}
+                  />
+                  <span className="text-[11px] font-medium leading-none" style={{ color: 'var(--brand-text-secondary)' }}>
+                    {t('dashboard.baseline')}
+                  </span>
+                  <span
+                    className="text-[12px] font-bold leading-none"
+                    style={{ color: hasBaseline ? 'var(--brand-accent-teal)' : 'var(--brand-text-muted)' }}
+                  >
+                    {baselineStr} mmHg
+                  </span>
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Check-In CTA + Alerts */}

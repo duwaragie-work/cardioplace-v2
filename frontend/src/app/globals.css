@@ -106,3 +106,29 @@ body {
 .thin-scrollbar::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* ── Date fields (components/intake/DateField.tsx) ────────────────────────
+   Native <input type="date"> shows a calendar/chevron indicator on the right
+   that renders as a stray "collapse" button in several Android browsers, and
+   gives no usable placeholder when empty. We render our own placeholder +
+   calendar icon, so hide the native indicator here — but keep it clickable
+   (opacity 0, stretched over the right edge) so clicking that area still
+   opens the picker on desktop. On mobile, tapping anywhere on the field opens
+   the native picker regardless. */
+.date-field::-webkit-calendar-picker-indicator {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 3rem;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+/* Remove the spin/clear affordances some engines add so only our icon shows. */
+.date-field::-webkit-inner-spin-button,
+.date-field::-webkit-clear-button {
+  display: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
