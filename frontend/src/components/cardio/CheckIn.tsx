@@ -608,8 +608,8 @@ function B2Reading({ form, setField }: StepProps) {
         {bpPhotoError && (
           <p
             role="alert"
-            className="-mt-1 mb-3 text-[12px] leading-snug"
-            style={{ color: 'var(--brand-error)' }}
+            className="-mt-1 mb-3 text-[12px] leading-snug font-medium"
+            style={{ color: 'var(--brand-alert-red)' }}
           >
             {bpPhotoError}
           </p>

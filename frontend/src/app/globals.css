@@ -132,3 +132,23 @@ body {
   -webkit-appearance: none;
   appearance: none;
 }
+
+/* ── Native date/time inputs must shrink to their container ───────────────
+   iOS Safari (and iOS Chrome, which uses the same WebKit engine) gives
+   <input type="date"|"time"> a UA intrinsic width via -webkit-appearance and
+   ignores width:100% / min-width:0 / max-width, so the control overflows its
+   flex/grid column (the intake "date of birth" + "due date" fields, the
+   check-in "When" date+time row, the readings edit modal) and breaks the page
+   spacing/alignment. Resetting the appearance removes that intrinsic sizing so
+   the control finally honors its width box and shrinks to fit. The native
+   picker still opens on tap (it's tied to the input type, not its appearance),
+   and on desktop the calendar/clock indicator still renders. */
+input[type="date"],
+input[type="time"] {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}

@@ -1162,6 +1162,7 @@ const es: Record<TranslationKey, string> = {
   'intake.exitSave.body': 'Puede continuar en cualquier momento desde su panel.',
   'intake.exitSave.cta': 'Volver al panel',
   'intake.exitSave.keepGoing': 'Seguir',
+  'intake.exitSave.leaveWithoutSaving': 'Salir sin guardar',
   'intake.exitSave.editTitle': '¿Guardar sus cambios?',
   'intake.exitSave.editBody': 'Actualizaremos su perfil y medicamentos con los cambios de esta página y lo llevaremos de vuelta al panel.',
   'intake.exitSave.editCta': 'Guardar y salir',

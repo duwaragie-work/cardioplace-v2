@@ -202,6 +202,17 @@ function detectDedupConflicts(meds: SelectedMedication[]): DedupConflict[] {
   return conflicts;
 }
 
+// Normalize a stored date (which the API serializes as an ISO datetime, e.g.
+// "2026-08-15T00:00:00.000Z") to the YYYY-MM-DD form that <input type="date">
+// requires — otherwise the edit form shows an empty "mm/dd/yyyy" instead of the
+// saved value. Slicing the date portion (rather than new Date()) keeps the
+// stored calendar day intact regardless of timezone.
+function toDateInput(s: string | null | undefined): string | undefined {
+  if (!s) return undefined;
+  const datePart = s.split('T')[0];
+  return /^\d{4}-\d{2}-\d{2}$/.test(datePart) ? datePart : undefined;
+}
+
 function buildProfilePayload(s: IntakeFormState): IntakeProfilePayload {
   return {
     gender: s.gender,
@@ -1164,9 +1175,20 @@ function A8Categories({ state, setState }: StepProps) {
   // a Furosemide tick when they go check the blood-thinner list. Selections
   // already persist cross-category in state.selectedMedications; this just
   // matches the UI affordance to that reality.
-  const [activeCategories, setActiveCategories] = useState<Set<string>>(
-    () => new Set(),
-  );
+  const [activeCategories, setActiveCategories] = useState<Set<string>>(() => {
+    // Auto-expand any category that already has a selected med — e.g. a
+    // prescription scan matched a water pill / blood thinner that lives inside
+    // one of these dropdowns. Without this the med is selected but hidden, so
+    // the patient can't see it was picked up. (selectedIds already shows it as
+    // checked; this just reveals the right dropdown on entry.)
+    const set = new Set<string>();
+    for (const m of state.selectedMedications) {
+      if (!m.catalogId) continue;
+      const cat = CATEGORY_MEDS.find((c) => c.id === m.catalogId);
+      if (cat?.category) set.add(cat.category);
+    }
+    return set;
+  });
   const [otherText, setOtherText] = useState(state.otherDraft?.text ?? '');
   // Phase/25 — inline dedup error for the voice/photo "anything else" path.
   // Cleared on next keystroke or after a 3.5s timeout so the UI doesn't
@@ -1662,7 +1684,7 @@ function A10Review({ state, goTo }: StepProps) {
 function A11Complete({ onDone }: { onDone: () => void }) {
   const { t } = useLanguage();
   return (
-    <div className="flex flex-col items-center text-center px-4 py-10">
+    <div className="flex flex-col items-center text-center px-4 py-6 sm:py-10">
       <motion.div
         initial={{ scale: 0 }}
         animate={{ scale: 1 }}
@@ -1865,12 +1887,16 @@ function ExitSaveModal({
   error,
   onConfirm,
   onCancel,
+  onDiscard,
 }: {
   editMode: boolean;
   saving: boolean;
   error: string;
   onConfirm: () => void;
   onCancel: () => void;
+  /** When provided (nav-guard case), renders a "Leave without saving" action
+   *  that abandons the edits and continues to the requested destination. */
+  onDiscard?: () => void;
 }) {
   const { t } = useLanguage();
   const title = editMode ? t('intake.exitSave.editTitle') : t('intake.exitSave.title');
@@ -1924,6 +1950,20 @@ function ExitSaveModal({
         >
           {saving ? t('intake.exitSave.saving') : cta}
         </button>
+        {onDiscard && (
+          <button
+            type="button"
+            onClick={onDiscard}
+            disabled={saving}
+            className="w-full mt-2 h-11 rounded-full font-semibold text-[14px] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+            style={{
+              backgroundColor: 'var(--brand-alert-red-light)',
+              color: 'var(--brand-alert-red-text)',
+            }}
+          >
+            {t('intake.exitSave.leaveWithoutSaving')}
+          </button>
+        )}
         <button
           type="button"
           onClick={onCancel}
@@ -1951,7 +1991,7 @@ export default function ClinicalIntakePage() {
   return (
     <Suspense fallback={
       <div
-        className="min-h-screen flex items-center justify-center"
+        className="min-h-[calc(100dvh-4rem)] flex items-center justify-center"
         style={{ backgroundColor: 'var(--brand-background)' }}
       >
         <SpinnerIndicator size={40} className="text-[#7B00E0]" />
@@ -1973,6 +2013,9 @@ function ClinicalIntakeWizard() {
   const [direction, setDirection] = useState(1);
   const [pendingDedup, setPendingDedup] = useState<DedupConflict[]>([]);
   const [showExitSave, setShowExitSave] = useState(false);
+  // Destination stashed when the patient tries to navigate away mid-edit —
+  // we hold it until they choose Save or Leave in the exit prompt.
+  const [pendingNav, setPendingNav] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Stored as a translation-key (+ optional interpolation values) OR a raw
   // backend message — never as the rendered string. We translate at render
@@ -2025,7 +2068,7 @@ function ClinicalIntakeWizard() {
         // returning users who set DOB during the old onboarding flow before
         // it moved here. Best-effort — DOB is optional fallback only.
         const authProfile = await getAuthProfile().catch(() => null);
-        const carriedDob = authProfile?.dateOfBirth ?? undefined;
+        const carriedDob = toDateInput(authProfile?.dateOfBirth);
         if (cancelled) return;
 
         // Branch 3 — show the all-set page only when the patient is truly
@@ -2050,7 +2093,7 @@ function ClinicalIntakeWizard() {
             heightCm: profile.heightCm ?? undefined,
             dateOfBirth: carriedDob,
             isPregnant: profile.isPregnant ?? undefined,
-            pregnancyDueDate: profile.pregnancyDueDate ?? undefined,
+            pregnancyDueDate: toDateInput(profile.pregnancyDueDate),
             historyPreeclampsia: profile.historyPreeclampsia ?? false,
             hasHeartFailure: profile.hasHeartFailure ?? false,
             hasAFib: profile.hasAFib ?? false,
@@ -2165,11 +2208,50 @@ function ClinicalIntakeWizard() {
     }
   }, [step]);
 
+  // Edit-mode navigation guard. Edit mode keeps NO localStorage draft, so
+  // leaving the page would silently drop unsaved edits. Intercept in-app link
+  // clicks (the navbar tabs / logo / bell / avatar) and hard unloads so the
+  // patient must explicitly Save or Leave first.
+  useEffect(() => {
+    if (!editMode) return;
+    const onClickCapture = (e: MouseEvent) => {
+      // Let modified clicks (new tab, etc.) and non-primary buttons through.
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const anchor = (e.target as HTMLElement | null)?.closest('a');
+      if (!anchor) return;
+      const href = anchor.getAttribute('href');
+      if (!href || href.startsWith('#') || anchor.target === '_blank' || anchor.hasAttribute('download')) return;
+      let dest: URL;
+      try { dest = new URL(href, window.location.href); } catch { return; }
+      if (dest.origin !== window.location.origin) return; // external — let it go
+      if (dest.pathname === window.location.pathname) return; // same page
+      // Block the navigation and prompt Save / Leave instead.
+      e.preventDefault();
+      e.stopPropagation();
+      setExitError('');
+      setPendingNav(dest.pathname + dest.search);
+      setShowExitSave(true);
+    };
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    document.addEventListener('click', onClickCapture, true);
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      document.removeEventListener('click', onClickCapture, true);
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
+  }, [editMode]);
+
   // Wrap setState to persist draft on every change.
   const setState = (updater: (prev: IntakeFormState) => IntakeFormState) => {
     setStateRaw((prev) => {
       const next = updater(prev);
-      if (user?.id) {
+      // Edit mode deliberately keeps NO localStorage draft — edits commit
+      // straight to the backend via Save changes, and a draft here would make
+      // the dashboard's "Resume" card reappear for an already-complete profile.
+      if (user?.id && !editMode) {
         saveDraft(user.id, { ...next, currentStep: step });
       }
       return next;
@@ -2183,7 +2265,8 @@ function ClinicalIntakeWizard() {
   const visibleIndex = Math.max(1, Math.min(visibleTotal, stepIndex));
 
   const persistStep = (next: IntakeStepKey) => {
-    if (user?.id) {
+    // No draft in edit mode (see setState) — just move the step in memory.
+    if (user?.id && !editMode) {
       saveDraft(user.id, { ...state, currentStep: next });
     }
     setStep(next);
@@ -2307,12 +2390,16 @@ function ClinicalIntakeWizard() {
   const handleExitSave = async () => {
     if (exitSaving) return;
     setExitError('');
+    // When triggered by the nav guard, return to where the patient was
+    // headed; otherwise fall back to the dashboard.
+    const dest = pendingNav ?? '/dashboard';
 
     // No gender yet → can't create a profile server-side. Keep the draft
     // and let them resume later. (Backend POST /intake/profile rejects
     // payloads with no gender.)
     if (!state.gender) {
-      router.push('/dashboard');
+      setPendingNav(null);
+      router.push(dest);
       return;
     }
 
@@ -2322,6 +2409,7 @@ function ClinicalIntakeWizard() {
         saveIntakeProfile(buildProfilePayload(state)),
         replaceIntakeMedications(buildMedsPayload(state)),
       ]);
+      setPendingNav(null);
       // Keep the local draft on partial save — without a server-side
       // intakeCompletedAt field the dashboard's Action-Required card uses
       // the draft's presence + currentStep as the "still in progress"
@@ -2329,7 +2417,7 @@ function ClinicalIntakeWizard() {
       // "done" even though the patient hasn't submitted A10 → A11. The
       // draft is only cleared by handleSubmit on final submit. Edit mode
       // never had a draft to begin with, so this no-op for edits.
-      router.push('/dashboard');
+      router.push(dest);
     } catch (e) {
       setExitError(e instanceof Error ? e.message : t('intake.exitSave.errorFallback'));
       setExitSaving(false);
@@ -2418,7 +2506,7 @@ function ClinicalIntakeWizard() {
 
   if (isLoading || !user || bootstrapping) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
+      <div className="min-h-[calc(100dvh-4rem)] flex items-center justify-center" style={{ backgroundColor: 'var(--brand-background)' }}>
         <SpinnerIndicator size={40} className="text-[#7B00E0]" />
       </div>
     );
@@ -2517,13 +2605,21 @@ function ClinicalIntakeWizard() {
       <main
         id="main"
         className={
-          'flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 ' +
-          (isIntro || isComplete
-            // min-h-0 lets the flex child shrink so overflow-y-auto can take
-            // over; items-center-safe centers when it fits and falls back to
-            // top-aligned + scroll when content is taller than the screen.
-            ? 'flex items-center-safe justify-center overflow-y-auto min-h-0 py-6'
-            : 'py-5 sm:py-8')
+          // overflow-x-clip on every step clips the page-transition slide
+          // (steps animate in from x:±60) so it never flashes a horizontal
+          // scrollbar mid-transition.
+          'flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 overflow-x-clip ' +
+          (isComplete
+            // Complete (A11) is a short, fixed-height panel: clip BOTH axes so
+            // the brief moment when the tall previous step is still exiting
+            // doesn't flash a vertical scrollbar before A11 settles.
+            ? 'flex items-center-safe justify-center overflow-y-clip min-h-0 py-6'
+            : isIntro
+              // min-h-0 lets the flex child shrink so overflow-y-auto can take
+              // over; items-center-safe centers when it fits and falls back to
+              // top-aligned + scroll when content is taller than the screen.
+              ? 'flex items-center-safe justify-center overflow-y-auto min-h-0 py-6'
+              : 'py-5 sm:py-8')
         }
         style={
           isIntro || isComplete
@@ -2652,7 +2748,18 @@ function ClinicalIntakeWizard() {
               if (exitSaving) return;
               setExitError('');
               setShowExitSave(false);
+              setPendingNav(null);
             }}
+            onDiscard={
+              pendingNav
+                ? () => {
+                    const dest = pendingNav;
+                    setShowExitSave(false);
+                    setPendingNav(null);
+                    router.push(dest);
+                  }
+                : undefined
+            }
           />
         )}
       </AnimatePresence>

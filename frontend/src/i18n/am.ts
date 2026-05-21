@@ -1165,6 +1165,7 @@ const am: Record<TranslationKey, string> = {
   'intake.exitSave.body': 'በማንኛውም ጊዜ ከዳሽቦርድዎ መቀጠል ይችላሉ።',
   'intake.exitSave.cta': 'ወደ ዳሽቦርድ ተመለስ',
   'intake.exitSave.keepGoing': 'ቀጥል',
+  'intake.exitSave.leaveWithoutSaving': 'ሳያስቀምጡ ይውጡ',
   'intake.exitSave.editTitle': 'ለውጦችዎን ያስቀምጡ?',
   'intake.exitSave.editBody': 'በዚህ ገጽ ላይ ያሉትን ለውጦች በፕሮፋይልዎ እና በመድኃኒቶችዎ ላይ እናዘምናለን፣ ከዚያም ወደ ዳሽቦርድ እንመልስዎታለን።',
   'intake.exitSave.editCta': 'አስቀምጥ እና ውጣ',

@@ -69,8 +69,16 @@ export default function MedicationPhotoButton({
     try {
       // uploadMedicationPhoto downscales large phone photos before upload.
       const result = await uploadMedicationPhoto(file);
+      // If nothing readable came back, surface the error inline (in red)
+      // instead of opening a confirm modal with empty rows. (The backend
+      // already 422s on a fully empty read; this also catches blank rows.)
+      const readable = result.medications.filter((m) => m.drugName?.trim());
+      if (readable.length === 0) {
+        setError(t('ocr.med.errEmpty'));
+        return;
+      }
       const previewUrl = URL.createObjectURL(file);
-      setPending({ result, previewUrl });
+      setPending({ result: { ...result, medications: readable }, previewUrl });
     } catch (err) {
       if (err instanceof MedOcrError) {
         setError(messageFor(err.code, t));
@@ -142,8 +150,8 @@ export default function MedicationPhotoButton({
         {error && (
           <p
             role="alert"
-            className="text-[12px]"
-            style={{ color: 'var(--brand-error)' }}
+            className="text-[12px] font-medium"
+            style={{ color: 'var(--brand-alert-red)' }}
           >
             {error}
           </p>
