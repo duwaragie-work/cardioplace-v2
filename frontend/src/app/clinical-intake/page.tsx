@@ -74,6 +74,7 @@ import {
   STEP_ORDER,
 } from '@/lib/intake/draft';
 import { EMPTY_INTAKE_STATE, type IntakeFormState, type IntakeStepKey, type SelectedMedication } from '@/lib/intake/types';
+import CaregiversCard from '@/components/cardio/CaregiversCard';
 
 import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
@@ -101,7 +102,8 @@ function computeFlow(state: IntakeFormState): IntakeStepKey[] {
   // an empty list the patient just sees "you can skip ahead" copy and a
   // disabled Continue — drop the step entirely instead.
   if (state.selectedMedications.length > 0) flow.push('A9');
-  flow.push('A10', 'A11');
+  // Gap 5 — optional caregiver capture sits just before review.
+  flow.push('ACG', 'A10', 'A11');
   return flow;
 }
 
@@ -1550,6 +1552,26 @@ function A9Frequency({ state, setState }: StepProps) {
   );
 }
 
+// Gap 5 — optional caregiver capture during intake. Reuses the self-contained
+// CaregiversCard (same add/edit/remove + consent the profile page uses); it
+// persists each caregiver immediately via /api/me/caregivers, so the sticky
+// "Continue" button just advances — no special submit wiring needed. Fully
+// optional: the patient can continue without adding anyone.
+function ACGCaregivers(_props: StepProps) {
+  return (
+    <div data-testid="intake-step-caregivers">
+      <StepHeader
+        title="Add a caregiver (optional)"
+        subtitle="A family member or friend we can notify if a serious health alert comes up. They’re only contacted for care-team-approved alerts, and only after you give consent. You can skip this and add someone later from your profile."
+        audio="Optionally add a caregiver — a family member or friend we can notify if a serious health alert comes up. They are only contacted after you give consent. You can skip this and add someone later from your profile."
+      />
+      <div className="mt-4">
+        <CaregiversCard />
+      </div>
+    </div>
+  );
+}
+
 function A10Review({ state, goTo }: StepProps) {
   const { t } = useLanguage();
 
@@ -2506,6 +2528,7 @@ function ClinicalIntakeWizard() {
             {step === 'A6' && <A6Combos {...stepProps} />}
             {step === 'A8' && <A8Categories {...stepProps} />}
             {step === 'A9' && <A9Frequency {...stepProps} />}
+            {step === 'ACG' && <ACGCaregivers {...stepProps} />}
             {step === 'A10' && <A10Review {...stepProps} />}
             {step === 'A11' && <A11Complete onDone={() => router.push('/dashboard')} />}
           </motion.div>

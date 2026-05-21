@@ -19,6 +19,8 @@ export type IntakeStepKey =
   | 'A6'
   | 'A8'
   | 'A9'
+  // Gap 5 — optional caregiver capture + consent, just before review.
+  | 'ACG'
   | 'A10'
   | 'A11';
 
