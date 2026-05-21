@@ -101,6 +101,7 @@ const es: Record<TranslationKey, string> = {
   'dashboard.chartDateAxis': 'Fecha',
   'dashboard.chartAt': 'a las',
   'dashboard.viewAllAlerts': 'Ver todas las alertas',
+  'dashboard.viewAllNotifications': 'Ver todas las notificaciones',
 
   // ─── Check-In (legacy — kept for surfaces not yet migrated to v2) ─────────
   'checkin.systolic': 'Sistólica',
@@ -456,6 +457,7 @@ const es: Record<TranslationKey, string> = {
   'profile.correctedByTeam': 'Corregido por su equipo',
   'profile.awaitingVerification': 'Esperando verificación',
   'profile.rejectedByTeam': 'Rechazado por el equipo',
+  'profile.medOnHold': 'En pausa',
   'profile.editPersonalInfo': 'Editar información personal',
   'profile.nameLabel': 'Nombre',
   'profile.namePlaceholder': 'Su nombre',
@@ -1053,6 +1055,9 @@ const es: Record<TranslationKey, string> = {
 
   // A5 — core medications
   'intake.a5.title': 'Sus medicamentos',
+  'intake.reAddRejectedConfirm': 'Su equipo de atención rechazó previamente {drug}. ¿Volver a agregarlo de todos modos? Lo revisarán de nuevo.',
+  'intake.reAddRejectedTitle': '¿Volver a agregar este medicamento?',
+  'intake.reAddRejectedConfirmBtn': 'Volver a agregar',
   'intake.a5.subtitle': 'Toque cada pastilla que toma. No se preocupe por la dosis — solo si la toma.',
   'intake.a5.audio': 'Sus medicamentos. Toque cada pastilla que toma. No se preocupe por la dosis, solo si la toma.',
   'intake.a5.groupAce': 'Pastillas para la presión (inhibidores de la ECA)',

@@ -96,6 +96,7 @@ const en = {
   'dashboard.chartDateAxis': 'Date',
   'dashboard.chartAt': 'at',
   'dashboard.viewAllAlerts': 'View all alerts',
+  'dashboard.viewAllNotifications': 'View all notifications',
 
   // ─── Check-In (legacy — kept for surfaces not yet migrated to v2) ─────────
   'checkin.systolic': 'Systolic',
@@ -456,6 +457,7 @@ const en = {
   'profile.correctedByTeam': 'Corrected by your team',
   'profile.awaitingVerification': 'Awaiting verification',
   'profile.rejectedByTeam': 'Rejected by team',
+  'profile.medOnHold': 'On hold',
   'profile.editPersonalInfo': 'Edit personal info',
   'profile.nameLabel': 'Name',
   'profile.namePlaceholder': 'Your name',
@@ -1061,6 +1063,9 @@ const en = {
 
   // A5 — core medications
   'intake.a5.title': 'Your medications',
+  'intake.reAddRejectedConfirm': 'Your care team previously rejected {drug}. Re-add it anyway? They will review it again.',
+  'intake.reAddRejectedTitle': 'Re-add this medication?',
+  'intake.reAddRejectedConfirmBtn': 'Re-add',
   'intake.a5.subtitle': "Tap each pill you take. Don't worry about dose — just whether you take it.",
   'intake.a5.audio': 'Your medications. Tap each pill you take. Do not worry about dose, just whether you take it.',
   'intake.a5.groupAce': 'Blood pressure pills (ACE inhibitors)',

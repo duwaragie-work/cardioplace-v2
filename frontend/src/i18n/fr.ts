@@ -101,6 +101,7 @@ const fr: Record<TranslationKey, string> = {
   'dashboard.chartDateAxis': 'Date',
   'dashboard.chartAt': 'à',
   'dashboard.viewAllAlerts': 'Voir toutes les alertes',
+  'dashboard.viewAllNotifications': 'Voir toutes les notifications',
 
   // ─── Check-In (legacy — kept for surfaces not yet migrated to v2) ─────────
   'checkin.systolic': 'Systolique',
@@ -456,6 +457,7 @@ const fr: Record<TranslationKey, string> = {
   'profile.correctedByTeam': 'Corrigé par votre équipe',
   'profile.awaitingVerification': 'En attente de validation',
   'profile.rejectedByTeam': "Rejeté par l'équipe",
+  'profile.medOnHold': 'En pause',
   'profile.editPersonalInfo': 'Modifier les informations personnelles',
   'profile.nameLabel': 'Nom',
   'profile.namePlaceholder': 'Votre nom',
@@ -1053,6 +1055,9 @@ const fr: Record<TranslationKey, string> = {
 
   // A5 — core medications
   'intake.a5.title': 'Vos médicaments',
+  'intake.reAddRejectedConfirm': "Votre équipe soignante a précédemment rejeté {drug}. Le rajouter quand même ? Elle le réexaminera.",
+  'intake.reAddRejectedTitle': 'Rajouter ce médicament ?',
+  'intake.reAddRejectedConfirmBtn': 'Rajouter',
   'intake.a5.subtitle': 'Touchez chaque pilule que vous prenez. Pas besoin de la dose — juste si vous la prenez.',
   'intake.a5.audio': 'Vos médicaments. Touchez chaque pilule que vous prenez. Pas besoin de la dose, juste si vous la prenez.',
   'intake.a5.groupAce': 'Pilules pour la tension (inhibiteurs de l\'ECA)',

@@ -103,6 +103,7 @@ const am: Record<TranslationKey, string> = {
   'dashboard.chartDateAxis': 'ቀን',
   'dashboard.chartAt': 'በ',
   'dashboard.viewAllAlerts': 'ሁሉንም ማንቂያዎች ይመልከቱ',
+  'dashboard.viewAllNotifications': 'ሁሉንም ማሳወቂያዎች ይመልከቱ',
 
   // ─── Check-In (legacy — kept for surfaces not yet migrated to v2) ─────────
   'checkin.systolic': 'ሲስቶሊክ',
@@ -459,6 +460,7 @@ const am: Record<TranslationKey, string> = {
   'profile.correctedByTeam': 'በቡድንዎ ተስተካክሏል',
   'profile.awaitingVerification': 'ማረጋገጫ በመጠበቅ ላይ',
   'profile.rejectedByTeam': 'በቡድንዎ ውድቅ ሆኗል',
+  'profile.medOnHold': 'ለጊዜው ቆሟል',
   'profile.editPersonalInfo': 'የግል መረጃን አርትዕ',
   'profile.nameLabel': 'ስም',
   'profile.namePlaceholder': 'ስምዎ',
@@ -1056,6 +1058,9 @@ const am: Record<TranslationKey, string> = {
 
   // A5 — core medications
   'intake.a5.title': 'መድሃኒቶችዎ',
+  'intake.reAddRejectedConfirm': 'የእንክብካቤ ቡድንዎ ቀደም ሲል {drug}ን ውድቅ አድርጓል። ለማንኛውም እንደገና ይታከል? እንደገና ይገመግሙታል።',
+  'intake.reAddRejectedTitle': 'ይህን መድሃኒት እንደገና ይታከል?',
+  'intake.reAddRejectedConfirmBtn': 'እንደገና ያክሉ',
   'intake.a5.subtitle': 'የሚወስዱትን እያንዳንዱን ኪኒን ይንኩ። ስለ መጠኑ አይጨነቁ — ይወስዱት እንደሆነ ብቻ።',
   'intake.a5.audio': 'መድሃኒቶችዎ። የሚወስዱትን እያንዳንዱን ኪኒን ይንኩ። ስለ መጠኑ አይጨነቁ፣ ይወስዱት እንደሆነ ብቻ።',
   'intake.a5.groupAce': 'የደም ግፊት ኪኒኖች (ACE ኢንሂቢተሮች)',
