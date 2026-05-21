@@ -7,3 +7,4 @@ export * from './resolved-context.js';
 export * from './rule-ids.js';
 export * from './alert-messages.js';
 export * from './resolution-action-labels.js';
+export * from './caregiver.js';

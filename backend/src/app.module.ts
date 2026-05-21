@@ -23,6 +23,7 @@ import { VoiceModule } from './voice/voice.module.js'
 import { CommonModule } from './common/common.module.js'
 import { OcrModule } from './ocr/ocr.module.js'
 import { DrugEnrichmentModule } from './drug-enrichment/drug-enrichment.module.js'
+import { CaregiverModule } from './caregiver/caregiver.module.js'
 import { TestControlModule } from './test-control/test-control.module.js'
 
 // Dev-only test-control endpoints (Playwright cron + escalation drivers).
@@ -76,6 +77,7 @@ const TEST_CONTROL_MODULES = [TestControlModule]
     VoiceModule,
     OcrModule,
     DrugEnrichmentModule,
+    CaregiverModule,
     ...TEST_CONTROL_MODULES,
   ],
   controllers: [AppController],
