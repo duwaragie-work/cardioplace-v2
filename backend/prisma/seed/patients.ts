@@ -389,8 +389,13 @@ export async function seedPatients(
 ) {
   const otpHash = await hashOtp(DEMO_OTP)
   const { practiceA } = practices
-  const { supportAdmin, primaryProvider, backupProvider, medicalDirector } =
-    admins
+  const {
+    supportAdmin,
+    primaryProvider,
+    backupProvider,
+    medicalDirector,
+    manishaPatel,
+  } = admins
 
   for (const p of patients) {
     const user = await prisma.user.upsert({
@@ -513,6 +518,12 @@ export async function seedPatients(
   const staffLinks: Array<{ practiceId: string; userId: string }> = [
     { practiceId: practiceA.id, userId: primaryProvider.id },
     { practiceId: practiceA.id, userId: backupProvider.id },
+    // Manisha Patel (PROVIDER + SUPER_ADMIN) is also Cedar Hill staff so the
+    // practice-scoped care-team dropdowns offer a SECOND selectable provider
+    // besides the primary/backup trio — the 30e.4 idempotency-alternation
+    // test toggles backup between Reyes and Patel. Her own data scope is
+    // unaffected (SUPER_ADMIN short-circuits PatientAccessService.isUnscoped).
+    { practiceId: practiceA.id, userId: manishaPatel.id },
   ]
   for (const link of staffLinks) {
     await prisma.practiceProvider.upsert({
@@ -529,6 +540,6 @@ export async function seedPatients(
     create: { practiceId: practiceA.id, userId: medicalDirector.id },
   })
   console.log(
-    `  staff joins: 2 providers + 1 medical director → ${practiceA.name}`,
+    `  staff joins: ${staffLinks.length} providers + 1 medical director → ${practiceA.name}`,
   )
 }
