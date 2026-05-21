@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config'
 import { EventEmitter2 } from '@nestjs/event-emitter'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
+import { SmsService } from '../../sms/sms.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import { EscalationService, escalationEmailBody } from './escalation.service.js'
 import type { AlertCreatedEvent } from '../interfaces/events.interface.js'
@@ -148,6 +149,10 @@ describe('EscalationService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: EventEmitter2, useValue: eventEmitter },
         { provide: EmailService, useValue: email },
+        {
+          provide: SmsService,
+          useValue: { isConfigured: () => false, sendSms: jest.fn() },
+        },
         {
           provide: ConfigService,
           useValue: {

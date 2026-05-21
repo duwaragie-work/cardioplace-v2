@@ -4,6 +4,8 @@ import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter'
 import { Cron } from '@nestjs/schedule'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
+import { caregiverEmailHtml } from '../../email/email-templates.js'
+import { SmsService } from '../../sms/sms.service.js'
 import { withDeadlockRetry } from '../../common/deadlock-retry.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import type {
@@ -38,7 +40,7 @@ import {
 const CAREGIVER_ROUTED_RULES: ReadonlySet<string> = new Set<string>([
   'RULE_HF_CAREGIVER_EDEMA',
   // Cluster 8 — angioedema dispatches the approved caregiver message at T+0
-  // (idle until CAREGIVER_DISPATCH_ENABLED + Lakshitha's Gap-5 UI lands).
+  // (gated behind CAREGIVER_DISPATCH_ENABLED + the Gap 5 capture/consent loop).
   'RULE_ACE_ANGIOEDEMA',
   'RULE_GENERIC_ANGIOEDEMA',
 ])
@@ -71,6 +73,7 @@ export class EscalationService {
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
     private readonly emailService: EmailService,
+    private readonly smsService: SmsService,
     config: ConfigService,
   ) {
     // Used by escalation emails to deep-link recipients into the right app.
@@ -967,12 +970,13 @@ export class EscalationService {
   }
 
   /**
-   * Cluster 7 A.6 — idle caregiver dispatch path. Writes a DASHBOARD
-   * Notification carrying the alert's caregiverMessage to every caregiver
-   * linked to the patient. Lakshitha's Gap 5 will populate the patient ↔
-   * caregiver relationship; until then `findCaregiverUserIds` returns [] and
-   * this method is a no-op. Gated behind CAREGIVER_DISPATCH_ENABLED=true so
-   * production stays silent until the UI ships.
+   * Gap 5 — caregiver dispatch. For each consented, active caregiver on a
+   * real channel, delivers the signed-off caregiverMessage (Minimum Necessary
+   * — no other PHI) via their channel: EMAIL (Resend), DASHBOARD (account
+   * caregiver inbox), or SMS (NoopSmsService until a provider is wired). A
+   * CaregiverDispatchLog row (unique on alert+caregiver+channel) makes re-fired
+   * alerts idempotent. Gated behind CAREGIVER_DISPATCH_ENABLED so production
+   * stays silent until the capture/consent loop is live.
    */
   private async dispatchCaregiverNotification(
     payload: AlertCreatedEvent,
@@ -980,28 +984,109 @@ export class EscalationService {
     if (!CAREGIVER_ROUTED_RULES.has(payload.ruleId ?? '')) return
     if (process.env.CAREGIVER_DISPATCH_ENABLED !== 'true') return
 
-    const caregiverUserIds = await this.findCaregiverUserIds(payload.userId)
-    if (caregiverUserIds.length === 0) return
+    // Gap 5 — only consented, active, channel-set caregivers receive PHI.
+    const caregivers = await this.findCaregivers(payload.userId)
+    if (caregivers.length === 0) return
 
     const alert = await this.loadAlert(payload.alertId)
     if (!alert?.caregiverMessage) return
+    const message = alert.caregiverMessage
 
-    for (const caregiverUserId of caregiverUserIds) {
-      await this.prisma.notification.create({
-        data: {
-          userId: caregiverUserId,
-          alertId: alert.id,
-          channel: 'DASHBOARD',
-          title: 'Caregiver update',
-          body: alert.caregiverMessage,
-        },
-      })
+    for (const caregiver of caregivers) {
+      try {
+        // Idempotency for non-Notification channels (email/SMS) — a re-fired
+        // alert must not double-send. createMany skipDuplicates on the unique
+        // (alertId, caregiverId, channel) returns count 0 when already sent.
+        const logged = await this.prisma.caregiverDispatchLog.createMany({
+          data: [
+            { alertId: alert.id, caregiverId: caregiver.id, channel: caregiver.notifyChannel },
+          ],
+          skipDuplicates: true,
+        })
+        if (logged.count === 0) continue // already dispatched for this alert+channel
+
+        switch (caregiver.notifyChannel) {
+          case 'EMAIL': {
+            if (!caregiver.email) break
+            await this.emailService.sendEmail(
+              caregiver.email,
+              'Cardioplace — a health update about someone you care for',
+              caregiverEmailHtml(caregiver.name, message),
+            )
+            break
+          }
+          case 'DASHBOARD': {
+            // Option A — caregiver is a User with an in-app inbox.
+            if (!caregiver.caregiverUserId) break
+            await this.prisma.notification.create({
+              data: {
+                userId: caregiver.caregiverUserId,
+                alertId: alert.id,
+                channel: 'DASHBOARD',
+                title: 'Caregiver update',
+                body: message,
+              },
+            })
+            break
+          }
+          case 'SMS': {
+            if (!caregiver.phone) break
+            // NoopSmsService throws until a provider is wired — caught below
+            // so one un-deliverable caregiver doesn't block the others.
+            await this.smsService.sendSms(caregiver.phone, message)
+            break
+          }
+          default:
+            break // NONE — captured but not notifiable
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Caregiver dispatch to ${caregiver.id} (${caregiver.notifyChannel}) failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      }
     }
   }
 
-  private async findCaregiverUserIds(_patientUserId: string): Promise<string[]> {
-    // Placeholder — PatientCaregiver model ships with Lakshitha's Gap 5.
-    return []
+  /**
+   * Gap 5 — caregivers eligible to receive an alert: active, consented
+   * (consentGivenAt is the HIPAA hard gate), and on a real dispatch channel.
+   */
+  private async findCaregivers(patientUserId: string): Promise<
+    Array<{
+      id: string
+      name: string
+      email: string | null
+      phone: string | null
+      caregiverUserId: string | null
+      notifyChannel: 'DASHBOARD' | 'SMS' | 'EMAIL'
+    }>
+  > {
+    const rows = await this.prisma.patientCaregiver.findMany({
+      where: {
+        patientUserId,
+        active: true,
+        consentGivenAt: { not: null },
+        notifyChannel: { not: 'NONE' },
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        caregiverUserId: true,
+        notifyChannel: true,
+      },
+    })
+    return rows as Array<{
+      id: string
+      name: string
+      email: string | null
+      phone: string | null
+      caregiverUserId: string | null
+      notifyChannel: 'DASHBOARD' | 'SMS' | 'EMAIL'
+    }>
   }
 
   private pickMessageForRole(alert: AlertRow, role: RecipientRole): string | null {
