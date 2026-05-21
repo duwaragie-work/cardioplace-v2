@@ -36,6 +36,15 @@ const FULL_AUDIO = `${MESSAGE_TITLE} ${MESSAGE_BODY} ${REASSURANCE}`;
 const FOLLOWUP_AUDIO =
   "Have you called 911 yet? Tap Yes if you have, or Not yet if you haven't.";
 
+// Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema. NEUTRAL non-diagnostic
+// title; the clinical content lives in the SIGNED-OFF registry body
+// (RULE_ACE_ANGIOEDEMA / RULE_GENERIC_ANGIOEDEMA — "do not take medicine"
+// for ACE branch, no-medicine-line for generic). We never invent clinical
+// wording here — body always comes from alert.patientMessage (or the
+// locale-aware i18n fallback for translated languages).
+const ANGIOEDEMA_TITLE = 'This needs urgent care.';
+const ANGIOEDEMA_REASSURANCE = 'Your care team has been notified.';
+
 const STORAGE_PREFIX = 'cardioplace_emergency_understood:';
 const FOLLOWUP_DELAY_MS = 2 * 60 * 60 * 1000; // 2 hours
 
@@ -86,12 +95,36 @@ function clearUnderstood(alertId: string) {
 
 export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
   const router = useRouter();
-  const { t } = useLanguage();
+  const { t, locale } = useLanguage();
   type Mode = 'urgent' | 'followup' | 'closed';
   const [mode, setMode] = useState<Mode>('urgent');
   const [audioBlocked, setAudioBlocked] = useState(false);
 
   const isResolved = alert.status === 'ACKNOWLEDGED' || alert.status === 'RESOLVED';
+
+  // Cluster 8 — branch by tier. Angioedema reuses the signed-off registry
+  // patient message + a neutral non-diagnostic title; BP Level 2 keeps the
+  // existing hardcoded copy. Same pattern as TierAlertView (commit f0bfd78):
+  // prefer the i18n locale string by ruleId, fall back to the backend-
+  // persisted alert.patientMessage (English JCAHO audit record).
+  const isAngioedema = alert.tier === 'TIER_1_ANGIOEDEMA';
+  const angioedemaKey =
+    alert.ruleId === 'RULE_ACE_ANGIOEDEMA'
+      ? 'alert.angioedema.patientAce'
+      : alert.ruleId === 'RULE_GENERIC_ANGIOEDEMA'
+        ? 'alert.angioedema.patientGeneric'
+        : null;
+  const angioedemaBody = isAngioedema
+    ? (angioedemaKey && t(angioedemaKey)) ||
+      alert.patientMessage?.trim() ||
+      ''
+    : '';
+  const angioedemaBodyLang = isAngioedema && angioedemaKey ? locale : 'en';
+  // TTS reads the same signed-off body the patient sees — no invented copy.
+  const ANGIOEDEMA_AUDIO = isAngioedema
+    ? `${ANGIOEDEMA_TITLE} ${angioedemaBody} ${ANGIOEDEMA_REASSURANCE}`
+    : '';
+  const urgentAudio = isAngioedema ? ANGIOEDEMA_AUDIO : FULL_AUDIO;
 
   // Decide initial mode on mount: if previously dismissed + T+2h elapsed
   // + alert still open → C2. Otherwise → C1. If the backend has marked
@@ -114,7 +147,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
   // surface a "Tap to hear" hint and let the patient trigger it manually.
   useEffect(() => {
     if (mode === 'closed') return;
-    const text = mode === 'followup' ? FOLLOWUP_AUDIO : FULL_AUDIO;
+    const text = mode === 'followup' ? FOLLOWUP_AUDIO : urgentAudio;
     const ok = speak(text);
     if (!ok) setAudioBlocked(true);
     return () => {
@@ -122,10 +155,10 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
         window.speechSynthesis.cancel();
       }
     };
-  }, [mode]);
+  }, [mode, urgentAudio]);
 
   function manualPlay() {
-    const text = mode === 'followup' ? FOLLOWUP_AUDIO : FULL_AUDIO;
+    const text = mode === 'followup' ? FOLLOWUP_AUDIO : urgentAudio;
     speak(text);
     setAudioBlocked(false);
   }
@@ -224,23 +257,47 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
         </motion.div>
 
         {mode === 'urgent' ? (
-          // lang="en" on clinical copy: MESSAGE_TITLE/body/REASSURANCE stay in
-          // English until Dr. Singal signs off per-locale (matches alert-messages.ts).
-          // Without this, screen readers + TTS try to pronounce English as the
-          // page locale on es/fr/de/am.
-          <>
-            <h1
-              lang="en"
-              className="text-[26px] sm:text-[32px] font-extrabold leading-tight mb-4"
-              style={{ wordBreak: 'break-word' }}
-            >
-              {MESSAGE_TITLE}
-            </h1>
-            <p data-testid="emergency-screen-message" lang="en" className="text-[16px] sm:text-[18px] leading-relaxed mb-3 opacity-95">
-              If you have <b>chest pain</b>, <b>severe headache</b>, <b>difficulty breathing</b>, or <b>vision changes</b>, call 911 now.
-            </p>
-            <p lang="en" className="text-[13px] sm:text-[14px] opacity-90">{REASSURANCE}</p>
-          </>
+          isAngioedema ? (
+            // Cluster 8 — angioedema branch. Title is the neutral
+            // non-diagnostic English wording; body comes from the signed-off
+            // registry (locale-aware via i18n key when the patient's
+            // preferredLanguage is es/am). NO invented clinical wording.
+            <>
+              <h1
+                lang="en"
+                className="text-[26px] sm:text-[32px] font-extrabold leading-tight mb-4"
+                style={{ wordBreak: 'break-word' }}
+              >
+                {ANGIOEDEMA_TITLE}
+              </h1>
+              <p
+                data-testid="emergency-screen-message"
+                lang={angioedemaBodyLang}
+                className="text-[16px] sm:text-[18px] leading-relaxed mb-3 opacity-95"
+              >
+                {angioedemaBody}
+              </p>
+              <p lang="en" className="text-[13px] sm:text-[14px] opacity-90">
+                {ANGIOEDEMA_REASSURANCE}
+              </p>
+            </>
+          ) : (
+            // BP Level 2 — original hardcoded clinical copy. lang="en" stays
+            // until Dr. Singal signs off per-locale (matches alert-messages.ts).
+            <>
+              <h1
+                lang="en"
+                className="text-[26px] sm:text-[32px] font-extrabold leading-tight mb-4"
+                style={{ wordBreak: 'break-word' }}
+              >
+                {MESSAGE_TITLE}
+              </h1>
+              <p data-testid="emergency-screen-message" lang="en" className="text-[16px] sm:text-[18px] leading-relaxed mb-3 opacity-95">
+                If you have <b>chest pain</b>, <b>severe headache</b>, <b>difficulty breathing</b>, or <b>vision changes</b>, call 911 now.
+              </p>
+              <p lang="en" className="text-[13px] sm:text-[14px] opacity-90">{REASSURANCE}</p>
+            </>
+          )
         ) : (
           <>
             <h1

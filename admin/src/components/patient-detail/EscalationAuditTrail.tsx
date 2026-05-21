@@ -62,6 +62,18 @@ const TIER_1_LADDER: LadderStep[] = [
   { code: 'T48H', label: 'T+48h', hint: 'Final compliance review' },
 ];
 
+// Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema compressed escalation.
+// Airway-obstruction risk progresses within hours, so this ladder NEVER
+// queues for business hours and walks far faster than the standard Tier 1.
+// MUST mirror backend ladder-defs.ts TIER_1_ANGIOEDEMA_LADDER — post-pilot:
+// hoist to @cardioplace/shared so admin + backend share the canonical shape.
+const TIER_1_ANGIOEDEMA_LADDER: LadderStep[] = [
+  { code: 'T0',   label: 'T+0',   hint: 'Primary provider notified' },
+  { code: 'T15M', label: 'T+15m', hint: 'Backup provider paged' },
+  { code: 'T1H',  label: 'T+1h',  hint: 'Medical director + Healplace ops' },
+  { code: 'T4H',  label: 'T+4h',  hint: 'Healplace ops final' },
+];
+
 // Tier 2 — medication discrepancies. Slow ladder, weeks not hours.
 const TIER_2_LADDER: LadderStep[] = [
   { code: 'T0', label: 'T+0', hint: 'Dashboard badge' },
@@ -96,6 +108,11 @@ function ladderFor(tier: string | null): LadderStep[] {
   switch (tier) {
     case 'TIER_1_CONTRAINDICATION':
       return TIER_1_LADDER;
+    // Cluster 8 — angioedema uses a DISTINCT compressed ladder (NOT
+    // TIER_1_LADDER). Mapping it to TIER_1_LADDER would render T+8h /
+    // T+24h / T+48h placeholder rungs that never fire in the backend.
+    case 'TIER_1_ANGIOEDEMA':
+      return TIER_1_ANGIOEDEMA_LADDER;
     case 'TIER_2_DISCREPANCY':
       return TIER_2_LADDER;
     case 'BP_LEVEL_1_HIGH':

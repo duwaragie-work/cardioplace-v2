@@ -1161,6 +1161,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
         </div>
         <textarea
           id="checkin-other-symptoms"
+          data-testid="checkin-other-symptoms"
           rows={3}
           value={form.otherSymptomsText}
           onChange={(e) => setField('otherSymptomsText', e.target.value)}

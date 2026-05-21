@@ -77,7 +77,9 @@ const CONDITION_LABELS: Record<string, string> = {
 
 function tierBucket(t: string | null): TierFilter | 'OTHER' {
   if (t === 'BP_LEVEL_2' || t === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'BP_L2';
-  if (t === 'TIER_1_CONTRAINDICATION') return 'TIER_1';
+  // Cluster 8 — angioedema buckets into TIER_1 (same red chrome on the
+  // readings card) per Manisha "resolved like all Tier 1 alerts".
+  if (t === 'TIER_1_CONTRAINDICATION' || t === 'TIER_1_ANGIOEDEMA') return 'TIER_1';
   if (t === 'TIER_2_DISCREPANCY') return 'TIER_2';
   if (t === 'BP_LEVEL_1_HIGH' || t === 'BP_LEVEL_1_LOW') return 'BP_L1';
   if (t === 'TIER_3_INFO') return 'TIER_3';
@@ -317,6 +319,7 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
                 return (
                   <span
                     key={d.id}
+                    data-testid="admin-readings-brady-surveillance-pill"
                     className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
                     style={{
                       backgroundColor: 'var(--brand-warning-amber-light)',

@@ -229,6 +229,17 @@ export class TestControlService {
     return { usersTouched: users.length, rowsDeleted }
   }
 
+  /**
+   * Cluster 8 §D — wipe ALL PatientMedication rows for a user. Niva's
+   * setUserMedication dedupes by drugName, so swapping a test's med roster
+   * (e.g., ACE → ARB-only for the angioedema ARB-variant test) requires
+   * clearing first. Test-control only; no production caller.
+   */
+  async clearUserMedications(userId: string): Promise<{ rowsDeleted: number }> {
+    const result = await this.prisma.patientMedication.deleteMany({ where: { userId } })
+    return { rowsDeleted: result.count }
+  }
+
   async resetUser(userId: string): Promise<{ rowsDeleted: number }> {
     // Niva's co-fire pipeline ~doubles alert volume per scenario, which
     // multiplies the queued escalation/notification/email-retry transactions
