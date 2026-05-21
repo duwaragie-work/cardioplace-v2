@@ -202,8 +202,15 @@ export class IntakeService {
       // makes POST idempotent so a re-render or double-tap on the intake
       // screen can't produce phantom rows. The DB-level partial unique index
       // (uq_patientmed_active) is the belt to this suspenders.
+      // Exclude REJECTED rows from the dedup set — re-adding a drug the
+      // provider rejected must create a fresh UNVERIFIED row for re-review
+      // (IVR-19), not silently match the terminal rejected record.
       const existingActive = await tx.patientMedication.findMany({
-        where: { userId, discontinuedAt: null },
+        where: {
+          userId,
+          discontinuedAt: null,
+          verificationStatus: { not: MedicationVerificationStatus.REJECTED },
+        },
       })
       const existingByKey = new Map(
         existingActive.map((m) => [this.medicationKey(m), m]),
@@ -415,8 +422,17 @@ export class IntakeService {
         where: { userId, discontinuedAt: null },
       })
 
+      // Rejected rows are terminal audit records — a patient self-edit must
+      // NEVER auto-close them (IVR-19: the old REJECTED row is preserved as-is,
+      // not discontinued). Excluding them from the diff also guarantees that
+      // re-selecting the same drug creates a fresh UNVERIFIED row rather than
+      // matching/reviving the rejected one.
+      const closeable = current.filter(
+        (m) => m.verificationStatus !== MedicationVerificationStatus.REJECTED,
+      )
+
       const { toClose, toCreate } = this.diffMedications(
-        current,
+        closeable,
         dto.medications,
       )
 
@@ -803,7 +819,12 @@ export class IntakeService {
         await this.prisma.notification.create({
           data: {
             userId: med.userId,
-            channel: NotificationChannel.DASHBOARD,
+            // PUSH (not DASHBOARD) so it lands in the patient's Notifications
+            // tab — that tab renders only PUSH/null channels; DASHBOARD rows
+            // are treated as alert-linked and surface on the Alerts tab. This
+            // is a standalone care-team message (CLINICAL_SPEC §14.2), so it
+            // belongs with gap-alert / monthly-reask / care-team-update (all PUSH).
+            channel: NotificationChannel.PUSH,
             title: 'Medication on hold',
             body: systemMsgMedicationHold(med.drugName),
           },
@@ -845,15 +866,25 @@ export class IntakeService {
     }
   }
 
-  async listMedications(userId: string, includeDiscontinued = false) {
-    // Exclude REJECTED meds so a provider's "this isn't the patient's med" call
-    // doesn't get re-asked on the patient's daily check-in. UNVERIFIED stays
-    // visible — patient's word is still actionable pending provider review.
+  async listMedications(
+    userId: string,
+    includeDiscontinued = false,
+    includeRejected = false,
+  ) {
+    // Exclude REJECTED meds by default so a provider's "this isn't the patient's
+    // med" call doesn't get re-asked on the patient's daily check-in or
+    // re-prefilled into the intake/edit wizard. UNVERIFIED stays visible —
+    // patient's word is still actionable pending provider review.
+    //
+    // Callers that need the full picture *with* status (the admin
+    // reconciliation tab and the patient's read-only profile) pass
+    // includeRejected=true so the REJECTED rows surface with their badge
+    // (IVR-18). The daily-check-in and wizard-prefill paths keep the default.
     const meds = await this.prisma.patientMedication.findMany({
       where: {
         userId,
         ...(includeDiscontinued ? {} : { discontinuedAt: null }),
-        verificationStatus: { not: 'REJECTED' },
+        ...(includeRejected ? {} : { verificationStatus: { not: 'REJECTED' } }),
       },
       orderBy: { reportedAt: 'desc' },
     })

@@ -139,7 +139,9 @@ export class AdminIntakeController {
       patientUserId,
     )
     // includeDiscontinued = true so the medications tab can show the full
-    // history (discontinued meds are rendered with a strike-through).
-    return this.intake.listMedications(patientUserId, true)
+    // history (discontinued meds are rendered with a strike-through);
+    // includeRejected = true so the reconciliation tab surfaces REJECTED rows
+    // with their status badge instead of hiding them (IVR-18).
+    return this.intake.listMedications(patientUserId, true, true)
   }
 }
