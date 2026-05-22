@@ -56,6 +56,26 @@ import {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Patient-facing labels for fields the care team can reject (mirror the admin
+// Profile tab labels). Used by the "please re-check" banner so the patient sees
+// exactly what the team flagged.
+const REJECTABLE_FIELD_LABELS: Record<string, string> = {
+  gender: 'Sex',
+  heightCm: 'Height',
+  isPregnant: 'Pregnancy status',
+  pregnancyDueDate: 'Pregnancy due date',
+  historyPreeclampsia: 'History of preeclampsia',
+  hasHeartFailure: 'Heart failure',
+  heartFailureType: 'Heart failure type',
+  hasAFib: 'Atrial fibrillation',
+  hasCAD: 'Coronary artery disease',
+  hasHCM: 'Hypertrophic cardiomyopathy',
+  hasDCM: 'Dilated cardiomyopathy',
+  hasTachycardia: 'Tachycardia',
+  hasBradycardia: 'Bradycardia',
+  diagnosedHypertension: 'High blood pressure',
+};
+
 function formatDate(iso?: string | null): string {
   if (!iso) return '';
   try {
@@ -681,6 +701,11 @@ export default function ProfilePage() {
   if (isLoading || loading) return <ProfileSkeleton />;
 
   const verificationStatus = profile?.profileVerificationStatus ?? 'UNVERIFIED';
+  // Fields the care team rejected and asked the patient to re-check (named in
+  // the re-check banner below). Mapped to patient-facing labels.
+  const rejectedFieldLabels = (profile?.rejectedFields ?? [])
+    .map((f) => REJECTABLE_FIELD_LABELS[f] ?? f)
+    .filter(Boolean);
   const showPregnancy = profile?.gender === 'FEMALE';
   const activeMeds = meds.filter((m) => !m.discontinuedAt);
   // Condition labels reuse Flow A intake keys — they're the same strings the
@@ -1127,8 +1152,24 @@ export default function ProfilePage() {
         </div>
         {/* /grid */}
 
-        {/* Re-verification reminder — visible whenever the profile is unverified */}
-        {profile && verificationStatus === 'UNVERIFIED' && (
+        {/* Re-check prompt — when the care team rejected specific fields, name
+            them so the patient knows exactly what to update. Falls back to the
+            generic "reviewing changes" reminder for a plain-unverified profile. */}
+        {profile && verificationStatus === 'UNVERIFIED' && rejectedFieldLabels.length > 0 ? (
+          <div
+            data-testid="profile-recheck-banner"
+            className="rounded-2xl px-4 py-3 flex items-start gap-3"
+            style={{
+              backgroundColor: 'var(--brand-alert-red-light)',
+              border: '1px solid var(--brand-alert-red)',
+            }}
+          >
+            <ShieldAlert className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-alert-red-text)' }} />
+            <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+              {t('profile.fieldsNeedRecheck').replace('{fields}', rejectedFieldLabels.join(', '))}
+            </p>
+          </div>
+        ) : profile && verificationStatus === 'UNVERIFIED' ? (
           <div
             className="rounded-2xl px-4 py-3 flex items-start gap-3"
             style={{
@@ -1141,7 +1182,7 @@ export default function ProfilePage() {
               {t('profile.reviewingChanges')}
             </p>
           </div>
-        )}
+        ) : null}
       </div>
 
       <AnimatePresence>

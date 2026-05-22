@@ -508,6 +508,7 @@ const es: Record<TranslationKey, string> = {
   'profile.noMedications': 'No se reportaron medicamentos.',
   'profile.combinationPill': '2-en-1',
   'profile.reviewingChanges': 'Su equipo de atención está revisando sus últimos cambios. Esto suele tardar de 48 a 72 horas.',
+  'profile.fieldsNeedRecheck': 'Su equipo de atención le pidió que verifique de nuevo: {fields}. Toque Editar en esa sección para confirmar o actualizar.',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'Mis Lecturas',

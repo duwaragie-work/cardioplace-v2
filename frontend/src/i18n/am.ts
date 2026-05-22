@@ -511,6 +511,7 @@ const am: Record<TranslationKey, string> = {
   'profile.noMedications': 'ምንም መድሃኒት አልተዘገበም።',
   'profile.combinationPill': '2-በ-1',
   'profile.reviewingChanges': 'የተንከባካቢ ቡድንዎ የቅርብ ጊዜ ለውጦችዎን እየገመገመ ነው። ይህ ብዙውን ጊዜ ከ48 እስከ 72 ሰዓታት ይወስዳል።',
+  'profile.fieldsNeedRecheck': 'የተንከባካቢ ቡድንዎ እንዲያረጋግጡ ጠይቋል፦ {fields}። ለማረጋገጥ ወይም ለማዘመን በዚያ ክፍል ላይ አርትዕን ይንኩ።',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'ንባቦቼ',

@@ -145,6 +145,10 @@ export interface ProfileVerificationLog {
    *  truncated UUID. */
   changedByName: string | null
   changedByRole: VerifierRole
+  /** The actor's real role resolved from their account (e.g. PROVIDER), since
+   *  changedByRole stores a coarse ADMIN for every admin action. Falls back to
+   *  changedByRole. Used by the Timeline actor line. */
+  changedByRoleResolved: string | null
   changeType: VerificationChangeType
   discrepancyFlag: boolean
   rationale: string | null

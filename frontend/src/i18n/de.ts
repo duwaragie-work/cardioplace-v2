@@ -508,6 +508,7 @@ const de: Record<TranslationKey, string> = {
   'profile.noMedications': 'Keine Medikamente gemeldet.',
   'profile.combinationPill': '2-in-1',
   'profile.reviewingChanges': 'Ihr Behandlungsteam prüft Ihre letzten Änderungen. Das dauert in der Regel 48 bis 72 Stunden.',
+  'profile.fieldsNeedRecheck': 'Ihr Behandlungsteam bittet Sie, Folgendes erneut zu prüfen: {fields}. Tippen Sie in diesem Abschnitt auf Bearbeiten, um es zu bestätigen oder zu aktualisieren.',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'Meine Messwerte',

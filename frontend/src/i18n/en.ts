@@ -509,6 +509,7 @@ const en = {
   'profile.noMedications': 'No medications reported.',
   'profile.combinationPill': '2-in-1',
   'profile.reviewingChanges': 'Your care team is reviewing your latest changes. This usually takes 48 to 72 hours.',
+  'profile.fieldsNeedRecheck': 'Your care team asked you to re-check: {fields}. Please tap Edit on that section to confirm or update it.',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'My Readings',

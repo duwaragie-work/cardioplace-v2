@@ -358,7 +358,9 @@ function entriesFromLogs(
     // when name is missing — e.g. self-served patient log without a name on
     // file). Suffix the drug name on medication-scoped events so the reader
     // can tell which med was changed without scanning IDs.
-    const roleLabel = l.changedByRole.toLowerCase();
+    const roleLabel = (l.changedByRoleResolved ?? l.changedByRole)
+      .replace(/_/g, ' ')
+      .toLowerCase();
     const who = l.changedByName
       ? `${l.changedByName} (${roleLabel})`
       : roleLabel;

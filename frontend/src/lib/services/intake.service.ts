@@ -31,6 +31,9 @@ export interface PatientProfileDto {
   profileLastEditedAt?: string;
   createdAt?: string;
   updatedAt?: string;
+  /** Field keys whose latest verification log is ADMIN_REJECT — the care team
+   *  asked the patient to re-check these. Drives the "please re-check" banner. */
+  rejectedFields?: string[];
 }
 
 export interface PatientMedicationDto {
