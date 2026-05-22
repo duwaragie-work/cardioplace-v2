@@ -2520,11 +2520,28 @@ function ClinicalIntakeWizard() {
   // same invalid input Continue would reject.
   const handleQuickSave = async () => {
     if (exitSaving || submitting) return;
-    const stepErr = validateStep(step);
-    if (stepErr) { setSubmitError(stepErr); return; }
-    if (step === 'A6') {
-      const conflicts = detectDedupConflicts(state.selectedMedications);
-      if (conflicts.length > 0) { setPendingDedup(conflicts); return; }
+    // Enforce EVERY cross-step dependency, not just the step being edited —
+    // editing one answer can make a field on another step newly required
+    // (e.g. switching conditions to Heart failure makes HF type required on
+    // A4; a female patient must have answered pregnancy on A2; every med
+    // needs a frequency on A9). `flow` already encodes those conditionals,
+    // so validating each step in it catches all of them. Jump to the first
+    // offending step so the patient sees exactly what to fix.
+    for (const s of flow) {
+      const err = validateStep(s);
+      if (err) {
+        goTo(s);
+        setSubmitError(err);
+        return;
+      }
+    }
+    // Combo/single medication dedup — surface conflicts before saving so we
+    // never persist a combo pill alongside one of its components.
+    const conflicts = detectDedupConflicts(state.selectedMedications);
+    if (conflicts.length > 0) {
+      if (flow.includes('A6')) goTo('A6');
+      setPendingDedup(conflicts);
+      return;
     }
     setSubmitError(null);
     setExitSaving(true);

@@ -211,6 +211,10 @@ const en = {
     "One reading on its own can be off — a second one helps your care team get the full picture. We'll wait a few minutes for you to take it.",
   'checkin.b3.otherLabel': 'Anything else? (optional)',
   'checkin.b3.otherPlaceholder': 'In your own words…',
+  'checkin.b3.otherSymptomsLabel': 'Any other symptoms? (optional)',
+  'checkin.b3.addSymptom': 'Add',
+  'checkin.b3.removeSymptom': 'Remove',
+  'checkin.b3.notesLabel': 'Notes (optional)',
 
   // B4 — per-medication step (Yes / No / Not due yet for each med on file)
   'checkin.b4.title': 'Medications today',
@@ -536,6 +540,9 @@ const en = {
   'readings.symptoms': 'Symptoms',
   'readings.notes': 'Notes',
   'readings.notesPlaceholder': 'Any additional notes...',
+  'readings.otherSymptoms': 'Other symptoms',
+  'readings.detailTitle': 'Reading details',
+  'readings.viewDetails': 'View reading details',
   'readings.noBpRecorded': 'No BP recorded',
   'readings.meds': 'Meds',
   'readings.taken': 'Taken',
