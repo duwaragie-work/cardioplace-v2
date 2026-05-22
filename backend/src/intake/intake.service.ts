@@ -15,7 +15,10 @@ import {
   VerifierRole,
 } from '../generated/prisma/client.js'
 import { canCompleteEnrollment } from '../practice/enrollment-gate.js'
-import { systemMsgMedicationHold } from '@cardioplace/shared'
+import {
+  systemMsgMedicationHold,
+  systemMsgProfileFieldRejected,
+} from '@cardioplace/shared'
 import type {
   PatientMedication,
   PatientProfile,
@@ -23,6 +26,7 @@ import type {
 import { PrismaService } from '../prisma/prisma.service.js'
 import {
   pickDisplayName,
+  pickDisplayRole,
   resolveUserDisplays,
 } from '../common/user-name-resolver.js'
 import type { PrismaClient } from '../generated/prisma/client.js'
@@ -79,6 +83,26 @@ const SERIOUS_CONDITION_LABELS: Partial<Record<VerifiableField, string>> = {
   heartFailureType: 'heart failure type',
   hasHCM: 'HCM',
   hasDCM: 'DCM',
+}
+
+// Patient-facing labels used in the "please re-check your {field}" inbox notice
+// dispatched when an admin rejects a self-reported field. Lowercase nouns so
+// they read naturally mid-sentence. NEEDS Dr. Singal sign-off on wording.
+const PROFILE_FIELD_LABELS: Record<VerifiableField, string> = {
+  gender: 'sex',
+  heightCm: 'height',
+  isPregnant: 'pregnancy status',
+  pregnancyDueDate: 'pregnancy due date',
+  historyPreeclampsia: 'history of preeclampsia',
+  hasHeartFailure: 'heart failure history',
+  heartFailureType: 'heart failure type',
+  hasAFib: 'atrial fibrillation history',
+  hasCAD: 'coronary artery disease history',
+  hasHCM: 'hypertrophic cardiomyopathy history',
+  hasDCM: 'dilated cardiomyopathy history',
+  hasTachycardia: 'tachycardia history',
+  hasBradycardia: 'bradycardia history',
+  diagnosedHypertension: 'high blood pressure diagnosis',
 }
 
 @Injectable()
@@ -597,6 +621,26 @@ export class IntakeService {
       throw new NotFoundException('Patient profile not found')
     }
 
+    // Hard gate: cannot complete verification while any field is still in the
+    // rejected ("needs correction") state. Rejecting a field flags it as wrong
+    // and awaiting a correction or patient re-report; flipping the whole
+    // profile to VERIFIED around it both defeats the safety net and produces a
+    // contradictory "Verified" badge on a rejected row. The admin must Correct,
+    // re-confirm, or have the patient re-report each one first. The Profile tab
+    // disables the button and lists these — this is the backend belt.
+    const latestByField = await this.latestLogTypeForFields(
+      patientUserId,
+      VERIFIABLE_PROFILE_FIELDS,
+    )
+    const stillRejected = [...latestByField.entries()]
+      .filter(([, type]) => type === VerificationChangeType.ADMIN_REJECT)
+      .map(([path]) => path.replace(/^profile\./, ''))
+    if (stillRejected.length) {
+      throw new BadRequestException(
+        `Resolve rejected field(s) before completing verification: ${stillRejected.join(', ')}`,
+      )
+    }
+
     const [updated] = await this.prisma.$transaction([
       this.prisma.patientProfile.update({
         where: { userId: patientUserId },
@@ -803,6 +847,29 @@ export class IntakeService {
         },
       }),
     ])
+
+    // Notify the patient so they can re-check the flagged field (the value is
+    // preserved — they confirm or update it). Best-effort + post-commit: a
+    // dispatch failure must never undo the reject. Only the non-idempotent path
+    // reaches here, so a repeat reject won't re-notify. PUSH so it lands in the
+    // patient's Notifications tab (mirrors the medication-HOLD notice).
+    try {
+      const label =
+        PROFILE_FIELD_LABELS[dto.field as VerifiableField] ?? 'a profile detail'
+      await this.prisma.notification.create({
+        data: {
+          userId: patientUserId,
+          channel: NotificationChannel.PUSH,
+          title: 'Please re-check a profile detail',
+          body: systemMsgProfileFieldRejected(label),
+        },
+      })
+    } catch (err) {
+      this.logger.error(
+        `Profile-field-reject notification failed for ${patientUserId}`,
+        err instanceof Error ? err.stack : err,
+      )
+    }
 
     return {
       statusCode: 200,
@@ -1036,6 +1103,19 @@ export class IntakeService {
       }),
     ])
     const dob = user?.dateOfBirth ? user.dateOfBirth.toISOString().slice(0, 10) : null
+    // Fields whose latest log is ADMIN_REJECT — surfaced so the patient profile
+    // can flag exactly what the care team asked them to re-check (pairs with the
+    // "please re-check" inbox notice). Empty when there's no profile.
+    let rejectedFields: string[] = []
+    if (profile) {
+      const latest = await this.latestLogTypeForFields(
+        userId,
+        VERIFIABLE_PROFILE_FIELDS,
+      )
+      rejectedFields = [...latest.entries()]
+        .filter(([, type]) => type === VerificationChangeType.ADMIN_REJECT)
+        .map(([path]) => path.replace(/^profile\./, ''))
+    }
     return {
       statusCode: 200,
       message: profile ? 'Profile retrieved' : 'No profile yet',
@@ -1043,7 +1123,9 @@ export class IntakeService {
       // profile tab can show age alongside other demographics without a
       // second fetch. Read-only — patients edit it via /v2/auth/profile
       // or via clinical-intake A1.
-      data: profile ? { ...this.serializeProfile(profile), dateOfBirth: dob } : null,
+      data: profile
+        ? { ...this.serializeProfile(profile), dateOfBirth: dob, rejectedFields }
+        : null,
     }
   }
 
@@ -1092,6 +1174,10 @@ export class IntakeService {
       data: logs.map((l) => ({
         ...l,
         changedByName: pickDisplayName(l.changedBy, names),
+        // The actor's real role (e.g. PROVIDER) resolved from their account —
+        // the stored changedByRole is the coarse ADMIN for every admin action.
+        // Falls back to the stored role when the user can't be resolved.
+        changedByRoleResolved: pickDisplayRole(l.changedBy, names, l.changedByRole),
       })),
     }
   }
