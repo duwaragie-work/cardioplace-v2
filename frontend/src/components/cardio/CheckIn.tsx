@@ -53,7 +53,7 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
-import { ClinicalIntakeRequiredError, createJournalEntry, finalizeSingleReadingSession } from '@/lib/services/journal.service';
+import { ClinicalIntakeRequiredError, createJournalEntry, finalizeSingleReadingSession, getActiveSession, type ActiveSessionDto } from '@/lib/services/journal.service';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
 import { hasDraft, loadDraft } from '@/lib/intake/draft';
 import {
@@ -66,7 +66,7 @@ import {
   listMyMedications,
   type PatientMedication,
 } from '@/lib/services/patient-medications.service';
-import { getBMI } from '@cardioplace/shared';
+import { getBMI, SESSION_WINDOW_MS, SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared';
 import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
 import BpPhotoButton from '@/components/intake/BpPhotoButton';
@@ -1335,7 +1335,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
 
 function ConfirmationScreen({
   lastReading,
-  sessionReadings,
+  sessionTotal,
   hasAFib,
   heightCm,
   missedMedNames,
@@ -1345,7 +1345,10 @@ function ConfirmationScreen({
   onFinalized,
 }: {
   lastReading: SessionReading;
-  sessionReadings: SessionReading[];
+  /** True count of readings in the session — includes readings carried over
+   *  from a joined (cross-visit) session, not just those logged this visit.
+   *  Drives the "logged N readings" copy + the AFib ≥3 satisfied indicator. */
+  sessionTotal: number;
   hasAFib: boolean;
   /** From PatientProfile.heightCm — fixed at intake. Used to compute BMI
    *  when the patient logged a weight. */
@@ -1363,7 +1366,7 @@ function ConfirmationScreen({
   onFinalized: () => void;
 }) {
   const { t } = useLanguage();
-  const total = sessionReadings.length;
+  const total = sessionTotal;
   const aFibSatisfied = !hasAFib || total >= 3;
 
   // Cluster 6 Q2 (Manisha 5/9/26) — 5-min finalize timer. Arms when the
@@ -1376,7 +1379,6 @@ function ConfirmationScreen({
   useEffect(() => {
     if (!pendingFinalizeEntryId) return;
     const entryId = pendingFinalizeEntryId;
-    const FIVE_MIN_MS = 5 * 60 * 1000;
     const handle = setTimeout(() => {
       finalizeSingleReadingSession(entryId)
         .catch(() => {
@@ -1387,7 +1389,7 @@ function ConfirmationScreen({
         .finally(() => {
           onFinalized();
         });
-    }, FIVE_MIN_MS);
+    }, SINGLE_READING_FINALIZE_MS);
     return () => {
       clearTimeout(handle);
     };
@@ -1648,9 +1650,10 @@ export default function CheckIn() {
   // Save-and-exit confirmation (header Save button) — mirrors the intake form.
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
 
-  // Session state — sessionId is generated once via lazy init so we don't
-  // need a setState-in-effect to bootstrap it (Next 16 lint).
-  const [sessionId] = useState<string>(() => uuid());
+  // Session state — sessionId starts as a fresh uuid (lazy init avoids a
+  // setState-in-effect on mount, Next 16 lint). It becomes a server session's
+  // id only via the "add to this session" handler (a click, not an effect).
+  const [sessionId, setSessionId] = useState<string | null>(() => uuid());
   const [sessionReadings, setSessionReadings] = useState<SessionReading[]>([]);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [readingNumber, setReadingNumber] = useState(0); // count of submitted readings in session
@@ -1658,6 +1661,15 @@ export default function CheckIn() {
   // non-preDay3 reading. Drives the "Take a second reading" prompt + 5-min
   // finalize timer in <ConfirmationScreen>. Null otherwise.
   const [pendingFinalizeEntryId, setPendingFinalizeEntryId] = useState<string | null>(null);
+
+  // Cross-visit session continuity — the patient's currently OPEN session (if
+  // any) fetched on mount. While set + unresolved + not expired, the "add to
+  // this session or start new?" prompt shows before the wizard.
+  const [activeSession, setActiveSession] = useState<ActiveSessionDto | null>(null);
+  const [activeSessionLoading, setActiveSessionLoading] = useState(true);
+  const [sessionPromptResolved, setSessionPromptResolved] = useState(false);
+  // Bumped by a 30s interval so a prompt left open past the window auto-expires.
+  const [nowTick, setNowTick] = useState(0);
 
   // Resume: on mount, surface any saved unfinished check-in so the patient can
   // pick up where they left off (refresh / navigated away). Read in an effect
@@ -1714,6 +1726,41 @@ export default function CheckIn() {
     })();
     return () => { cancelled = true; };
   }, [isAuthenticated, isLoading]);
+
+  // Fetch any OPEN reading session so we can offer to add this reading to it.
+  // Server-side so it catches sessions opened by voice/chat too, not just the
+  // form. Failure degrades gracefully to "no prompt".
+  useEffect(() => {
+    if (isLoading || !isAuthenticated) return;
+    let cancelled = false;
+    (async () => {
+      const s = await getActiveSession().catch(() => null);
+      if (!cancelled) {
+        setActiveSession(s);
+        setActiveSessionLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isAuthenticated, isLoading]);
+
+  // Whether the open session has expired (last reading + window elapsed).
+  // Prefer the server-authoritative expiresAt; fall back to client math.
+  // nowTick forces re-evaluation so a prompt left open auto-expires.
+  const sessionExpired = useMemo(() => {
+    void nowTick;
+    if (!activeSession) return true;
+    const expiry = activeSession.expiresAt
+      ? new Date(activeSession.expiresAt).getTime()
+      : new Date(activeSession.lastReadingAt).getTime() + SESSION_WINDOW_MS;
+    return Date.now() >= expiry;
+  }, [activeSession, nowTick]);
+
+  // Re-check expiry every 30s while the prompt is up and unresolved.
+  useEffect(() => {
+    if (!activeSession || sessionPromptResolved) return;
+    const id = setInterval(() => setNowTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, [activeSession, sessionPromptResolved]);
 
   // Snap the page to the top whenever the wizard advances (or goes back) to
   // a different step — otherwise the user lands wherever the previous step's
@@ -1868,7 +1915,9 @@ export default function CheckIn() {
         pulse: pul,
         weight: weightKg ? Number(weightKg.toFixed(2)) : undefined,
         position: form.position ?? undefined,
-        sessionId,
+        // null when joining a time-window (un-tagged) session — backend groups
+        // by the measuredAt window in that case.
+        sessionId: sessionId ?? undefined,
         measurementConditions,
         medicationTaken,
         medicationScheduledLater: medicationScheduledLater ? true : undefined,
@@ -1954,6 +2003,25 @@ export default function CheckIn() {
     setResumeDraft(null);
   }
 
+  // Open-session prompt — add this reading to the existing session. Reuse the
+  // server session's id (may be null for a time-window session) so the engine
+  // averages this reading with the others, and skip B1 (the checklist was done
+  // on the first reading) by bumping readingNumber → SECOND_READING_FLOW.
+  function joinActiveSession() {
+    if (!activeSession) return;
+    setSessionId(activeSession.sessionId);
+    setReadingNumber(activeSession.readingCount);
+    setStep('B2');
+    setDirection(1);
+    setSessionPromptResolved(true);
+  }
+
+  // Open-session prompt — ignore the server session and start a fresh one.
+  function startNewSession() {
+    setSessionId(uuid());
+    setSessionPromptResolved(true);
+  }
+
   // Header "Save" — persist the in-progress reading to localStorage and leave
   // for the dashboard (mirrors the intake form's save-and-exit). Auto-save
   // already keeps the draft current; we write once more explicitly so a save
@@ -2018,7 +2086,7 @@ export default function CheckIn() {
   // Authed loading state — skeleton mirroring the wizard chrome (top bar +
   // step header + a few content rows + sticky CTA placeholder) so the page
   // doesn't flash a generic spinner before the first step renders.
-  if (isLoading || !isAuthenticated || profileLoading) {
+  if (isLoading || !isAuthenticated || profileLoading || activeSessionLoading) {
     return <CheckInSkeleton />;
   }
 
@@ -2148,6 +2216,79 @@ export default function CheckIn() {
     );
   }
 
+  // Open-session prompt — a non-expired session is in progress and the patient
+  // hasn't decided yet. Shown AFTER the resume gate (resumeDraft is null here),
+  // so in the rare both-exist case resume is decided first, then this.
+  if (activeSession && !sessionPromptResolved && !sessionExpired) {
+    const startedMinAgo = Math.max(
+      1,
+      Math.round((Date.now() - new Date(activeSession.openedAt).getTime()) / 60000),
+    );
+    return (
+      <div
+        className="h-[calc(100dvh-4rem)] flex flex-col overflow-hidden"
+        style={{ backgroundColor: 'var(--brand-background)' }}
+      >
+        <main id="main" className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-8">
+          <div
+            data-testid="checkin-open-session-prompt"
+            className="w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 text-center"
+            style={{ boxShadow: '0 4px 24px rgba(123,0,224,0.08)' }}
+          >
+            <div
+              className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5"
+              style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}
+              aria-hidden
+            >
+              <CalendarClock className="w-8 h-8 text-white" strokeWidth={2.25} />
+            </div>
+            <h1 className="text-xl sm:text-2xl font-bold text-[#170c1d] mb-3">
+              {t('checkin.openSession.title')}
+            </h1>
+            <p className="text-[#4b5563] text-sm sm:text-base leading-relaxed mb-5">
+              {t('checkin.openSession.body')
+                .replace('{min}', String(startedMinAgo))
+                .replace('{count}', String(activeSession.readingCount))}
+            </p>
+
+            {activeSession.requiresMoreReadings && (
+              <p
+                data-testid="checkin-open-session-needs-more"
+                className="text-[12px] font-semibold mb-5"
+                style={{ color: 'var(--brand-warning-amber)' }}
+              >
+                {t('checkin.openSession.needsMore').replace(
+                  '{count}',
+                  String(activeSession.readingCount),
+                )}
+              </p>
+            )}
+
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                data-testid="checkin-join-session-btn"
+                onClick={joinActiveSession}
+                className="w-full h-12 sm:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm sm:text-base hover:bg-[#6600BC] transition-colors cursor-pointer inline-flex items-center justify-center gap-2"
+              >
+                {t('checkin.openSession.join')}
+                <ArrowRight className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                data-testid="checkin-new-session-btn"
+                onClick={startNewSession}
+                className="w-full h-11 sm:h-12 rounded-full font-semibold text-[#7B00E0] text-sm sm:text-base hover:bg-[#f5f3ff] transition-colors cursor-pointer"
+              >
+                {t('checkin.openSession.startNew')}
+              </button>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   // Confirmation overlays the whole flow
   if (showConfirmation) {
     const last = sessionReadings[sessionReadings.length - 1];
@@ -2159,7 +2300,7 @@ export default function CheckIn() {
         <main id="main" className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-4">
           <ConfirmationScreen
             lastReading={last}
-            sessionReadings={sessionReadings}
+            sessionTotal={readingNumber}
             hasAFib={hasAFib}
             heightCm={profile?.heightCm ?? null}
             missedMedNames={medications

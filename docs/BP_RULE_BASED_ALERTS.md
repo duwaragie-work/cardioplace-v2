@@ -148,7 +148,7 @@ interface SessionAverage {
 }
 ```
 
-A **session** is a logical grouping of readings the patient took close together — typically two or three readings two minutes apart, per AHA technique guidance for self-measured BP. The averager assigns a `sessionId` upon receipt of the first reading and continues attributing subsequent readings to the same session for a configurable window (default 10 minutes). Symptoms recorded on any reading in the session apply to the session-level evaluation via an OR reduction.
+A **session** is a logical grouping of readings the patient took close together — typically two or three readings two minutes apart, per AHA technique guidance for self-measured BP. The averager assigns a `sessionId` upon receipt of the first reading and continues attributing subsequent readings to the same session for a configurable window (default 5 minutes, per CLINICAL_SPEC §5.2). Symptoms recorded on any reading in the session apply to the session-level evaluation via an OR reduction.
 
 **Single-reading non-emergency gate (`Q2 gate`).** When the session contains only one reading (`readingCount < 2`), an additional flag `singleReadingFinalized` has not been set, the patient is not in their pre-baseline window (`!preDay3Mode`), and the patient does not have atrial fibrillation (`!hasAFib`), the engine **withholds** all non-emergency BP rows produced by Stage C. The journal-entry response carries `pendingSecondReading: true`, prompting the client UI to ask the patient to take a second reading. The held rows fire when (a) a second reading arrives within the same `sessionId`, at which point the averager mean reflects both readings, or (b) the client posts a 5-minute finalize endpoint that sets `singleReadingFinalized = true`, releasing the held rows on the original single reading.
 
@@ -652,7 +652,7 @@ The architecture admits several variants without modifying the core orchestratio
 
 **(g) Phased rollout for any threshold.** The `cadRampApplies(ctx)` pattern is not CAD-specific. A sibling helper (e.g. `hfrefRampApplies`) can be introduced for any condition whose default threshold is being updated, reusing the same three-phase activation logic (newly-enrolled → lead-practice → all).
 
-**(h) Alternative session-window definitions.** The 10-minute session window is configurable. Variants include a fixed-2-reading window (the session closes after exactly two readings regardless of inter-reading time), a 24-hour window (one session per day), or a per-time-of-day window (separate morning/evening sessions per AHA SMBP technique guidance).
+**(h) Alternative session-window definitions.** The 5-minute session window (`SESSION_WINDOW_MS`, CLINICAL_SPEC §5.2) is configurable. Variants include a fixed-2-reading window (the session closes after exactly two readings regardless of inter-reading time), a 24-hour window (one session per day), or a per-time-of-day window (separate morning/evening sessions per AHA SMBP technique guidance).
 
 ---
 

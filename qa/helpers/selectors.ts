@@ -202,6 +202,12 @@ export const T = {
     medicationNo: 'check-in-medication-no',
     pendingSecondReading: 'pending-second-reading',
     addSecondReading: 'add-second-reading',
+    // Cross-visit "add to this session or start new?" prompt.
+    openSessionPrompt: 'checkin-open-session-prompt',
+    openSessionNeedsMore: 'checkin-open-session-needs-more',
+    joinSession: 'checkin-join-session-btn',
+    newSession: 'checkin-new-session-btn',
+    resumePrompt: 'checkin-resume-prompt',
   },
 
   // ─── Patient: readings ──────────────────────────────────────────────────

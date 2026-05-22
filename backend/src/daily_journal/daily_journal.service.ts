@@ -8,6 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
+import { SESSION_WINDOW_MS } from '@cardioplace/shared'
 import { Prisma, EntrySource, EscalationLevel } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from './constants/events.js'
@@ -64,6 +65,16 @@ export class DailyJournalService {
       dto.missedMedications,
     )
 
+    // Reject attaching this reading to an EXPIRED session. The client supplies
+    // sessionId, so a stale/reused id (e.g. a cached id from a prior sitting)
+    // could otherwise smuggle a reading hours apart into one averaged session.
+    // Dropped (not 400) so voice/chat flows that pass a cached id don't fail.
+    const effectiveSessionId = await this.resolveCreateSessionId(
+      userId,
+      dto.sessionId,
+      new Date(dto.measuredAt),
+    )
+
     try {
       const entry = await this.prisma.journalEntry.create({
         data: {
@@ -74,7 +85,7 @@ export class DailyJournalService {
           pulse: dto.pulse ?? null,
           weight: dto.weight != null ? new Prisma.Decimal(dto.weight) : null,
           position: dto.position ?? null,
-          sessionId: dto.sessionId ?? null,
+          sessionId: effectiveSessionId,
           measurementConditions: (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull,
           medicationTaken: dto.medicationTaken ?? null,
           medicationScheduledLater: dto.medicationScheduledLater ?? false,
@@ -750,9 +761,9 @@ export class DailyJournalService {
     }
 
     // Resolve the session anchor that will trigger a re-evaluation BEFORE the
-    // delete cascades. SessionAveragerService groups by sessionId OR a 30-min
-    // measuredAt window; we mirror that here so the rule engine recomputes the
-    // averaged vitals for what's left of the session.
+    // delete cascades. SessionAveragerService groups by sessionId OR a 5-min
+    // measuredAt window (CLINICAL_SPEC §5.2); we mirror that here so the rule
+    // engine recomputes the averaged vitals for what's left of the session.
     //
     // DeviationAlert / EscalationEvent rows owned by `entry` cascade-delete
     // via the FK (phase/2 schema). The re-evaluation below re-runs the rule
@@ -797,7 +808,21 @@ export class DailyJournalService {
     sessionId: string | null
     measuredAt: Date
   }) {
-    const SESSION_WINDOW_MS = 30 * 60 * 1000
+    // Window is anchored on this entry's measuredAt; mirror SessionAverager so
+    // the surviving anchor we pick is one that would actually re-average with
+    // what's left of the session (same id AND within the window, or null + window).
+    const windowStart = new Date(entry.measuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS)
+    const select = {
+      id: true,
+      userId: true,
+      sessionId: true,
+      measuredAt: true,
+      systolicBP: true,
+      diastolicBP: true,
+      pulse: true,
+      weight: true,
+    }
 
     if (entry.sessionId) {
       return this.prisma.journalEntry.findFirst({
@@ -805,23 +830,13 @@ export class DailyJournalService {
           userId: entry.userId,
           sessionId: entry.sessionId,
           id: { not: entry.id },
+          measuredAt: { gte: windowStart, lte: windowEnd },
         },
         orderBy: { measuredAt: 'desc' },
-        select: {
-          id: true,
-          userId: true,
-          sessionId: true,
-          measuredAt: true,
-          systolicBP: true,
-          diastolicBP: true,
-          pulse: true,
-          weight: true,
-        },
+        select,
       })
     }
 
-    const windowStart = new Date(entry.measuredAt.getTime() - SESSION_WINDOW_MS)
-    const windowEnd = new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS)
     return this.prisma.journalEntry.findFirst({
       where: {
         userId: entry.userId,
@@ -830,16 +845,7 @@ export class DailyJournalService {
         measuredAt: { gte: windowStart, lte: windowEnd },
       },
       orderBy: { measuredAt: 'desc' },
-      select: {
-        id: true,
-        userId: true,
-        sessionId: true,
-        measuredAt: true,
-        systolicBP: true,
-        diastolicBP: true,
-        pulse: true,
-        weight: true,
-      },
+      select,
     })
   }
 
@@ -1125,23 +1131,33 @@ export class DailyJournalService {
     userId: string,
     entry: { id: string; sessionId: string | null; measuredAt: Date },
   ): Promise<boolean> {
-    const SESSION_WINDOW_MS = 30 * 60 * 1000
+    return this.shouldFinalizeAsSingleReading(userId, entry)
+  }
+
+  /**
+   * Single source of truth for "is this a lone reading that should fire a
+   * single-reading-informational alert if no second reading arrives?" — i.e.
+   * the only sibling-free, non-AFib, post-Day-3 case. Used by:
+   *  - `computePendingSecondReading` (create-time frontend hint),
+   *  - the server-side session-finalize cron (SessionFinalizeService),
+   * so the rule lives in exactly one place. AFib (own ≥3 gate) and Pre-Day-3
+   * (rules already fire on a single reading) are excluded.
+   */
+  async shouldFinalizeAsSingleReading(
+    userId: string,
+    entry: { id: string; sessionId: string | null; measuredAt: Date },
+  ): Promise<boolean> {
     const PRE_DAY_3_THRESHOLD = 7
+    const windowStart = new Date(entry.measuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS)
 
     const [siblingCount, profile, lifetimeReadingCount] = await Promise.all([
       this.prisma.journalEntry.count({
         where: {
           userId,
           id: { not: entry.id },
-          ...(entry.sessionId
-            ? { sessionId: entry.sessionId }
-            : {
-                sessionId: null,
-                measuredAt: {
-                  gte: new Date(entry.measuredAt.getTime() - SESSION_WINDOW_MS),
-                  lte: new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS),
-                },
-              }),
+          measuredAt: { gte: windowStart, lte: windowEnd },
+          ...(entry.sessionId ? { sessionId: entry.sessionId } : { sessionId: null }),
         },
       }),
       this.prisma.patientProfile
@@ -1154,6 +1170,117 @@ export class DailyJournalService {
     if (profile?.hasAFib) return false
     if (lifetimeReadingCount < PRE_DAY_3_THRESHOLD) return false
     return true
+  }
+
+  /**
+   * Resolve the sessionId a new reading should actually be persisted with.
+   * A client-supplied sessionId is honoured for a fresh session (no existing
+   * members) or one still inside the window; an expired/stale id is dropped to
+   * null (with a log) so it can't average readings taken hours apart. Returns
+   * null when no id was supplied.
+   */
+  private async resolveCreateSessionId(
+    userId: string,
+    sessionId: string | undefined,
+    measuredAt: Date,
+  ): Promise<string | null> {
+    if (!sessionId) return null
+    const newest = await this.prisma.journalEntry.findFirst({
+      where: { userId, sessionId },
+      orderBy: { measuredAt: 'desc' },
+      select: { measuredAt: true },
+    })
+    // Fresh session — this reading establishes it; keep the id.
+    if (!newest) return sessionId
+    // Existing members but the window has elapsed → stale reuse; drop the id.
+    const gapMs = Math.abs(measuredAt.getTime() - newest.measuredAt.getTime())
+    if (gapMs > SESSION_WINDOW_MS) {
+      this.logger.warn(
+        `create: dropping stale sessionId ${sessionId} for user ${userId} ` +
+          `(gap ${Math.round(gapMs / 60000)}min exceeds session window)`,
+      )
+      return null
+    }
+    return sessionId
+  }
+
+  /**
+   * Returns the patient's currently OPEN reading session, or null. "Open" =
+   * the latest reading is within SESSION_WINDOW_MS of `now` AND the session
+   * hasn't been finalized as single-reading. Reads server state so it catches
+   * sessions opened by ANY path (form / voice / chat), not just the form.
+   * Drives the patient app's "add to this session or start new?" prompt.
+   */
+  async getActiveSession(
+    userId: string,
+    now: Date = new Date(),
+  ): Promise<{
+    sessionId: string | null
+    openedAt: string
+    lastReadingAt: string
+    readingCount: number
+    expiresAt: string
+    requiresMoreReadings: boolean
+  } | null> {
+    const PRE_DAY_3_THRESHOLD = 7
+
+    const latest = await this.prisma.journalEntry.findFirst({
+      where: { userId },
+      orderBy: { measuredAt: 'desc' },
+      select: {
+        id: true,
+        sessionId: true,
+        measuredAt: true,
+        singleReadingFinalized: true,
+      },
+    })
+    if (!latest) return null
+    // Expired — last reading older than the window.
+    if (now.getTime() - latest.measuredAt.getTime() > SESSION_WINDOW_MS) return null
+    // Closed — single-reading already finalized; its alert has fired.
+    if (latest.singleReadingFinalized) return null
+
+    // Resolve the session group exactly like SessionAverager.loadSessionSiblings.
+    const windowStart = new Date(latest.measuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(latest.measuredAt.getTime() + SESSION_WINDOW_MS)
+    const members = await this.prisma.journalEntry.findMany({
+      where: {
+        userId,
+        measuredAt: { gte: windowStart, lte: windowEnd },
+        ...(latest.sessionId ? { sessionId: latest.sessionId } : { sessionId: null }),
+      },
+      orderBy: { measuredAt: 'asc' },
+      select: { measuredAt: true },
+    })
+    if (members.length === 0) return null
+
+    const readingCount = members.length
+    const openedAt = members[0].measuredAt
+    const lastReadingAt = members[members.length - 1].measuredAt
+    const expiresAt = new Date(lastReadingAt.getTime() + SESSION_WINDOW_MS)
+
+    const [profile, lifetimeReadingCount] = await Promise.all([
+      this.prisma.patientProfile
+        .findUnique({ where: { userId }, select: { hasAFib: true } })
+        .catch(() => null),
+      this.prisma.journalEntry.count({ where: { userId } }),
+    ])
+    const hasAFib = profile?.hasAFib ?? false
+    const preDay3 = lifetimeReadingCount < PRE_DAY_3_THRESHOLD
+    // Mirror the engine gates: AFib needs ≥3, other non-emergency tiers need
+    // ≥2; Pre-Day-3 fires on a single reading so nothing more is required.
+    const requiresMoreReadings = hasAFib
+      ? readingCount < 3
+      : !preDay3 && readingCount < 2
+
+    return {
+      sessionId: latest.sessionId,
+      openedAt: openedAt.toISOString(),
+      lastReadingAt: lastReadingAt.toISOString(),
+      readingCount,
+      expiresAt: expiresAt.toISOString(),
+      requiresMoreReadings,
+    }
   }
 
   private async resolveMissedMedications(

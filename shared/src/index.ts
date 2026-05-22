@@ -9,3 +9,4 @@ export * from './alert-messages.js';
 export * from './resolution-action-labels.js';
 export * from './caregiver.js';
 export * from './escalation-ladders.js';
+export * from './session.js';

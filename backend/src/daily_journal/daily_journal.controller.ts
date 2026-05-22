@@ -149,6 +149,15 @@ export class DailyJournalController {
     return this.dailyJournalService.getLatestBaseline(userId)
   }
 
+  // The patient's currently-open reading session (or null). Drives the
+  // check-in "add to this session or start new?" prompt. Declared BEFORE
+  // the `:id` catch-all so Express matches the literal path.
+  @Get('active-session')
+  getActiveSession(@Req() req: Request) {
+    const { id: userId } = req.user as { id: string }
+    return this.dailyJournalService.getActiveSession(userId)
+  }
+
   @Get(':id')
   findOne(@Req() req: Request, @Param('id') id: string) {
     const { id: userId } = req.user as { id: string }

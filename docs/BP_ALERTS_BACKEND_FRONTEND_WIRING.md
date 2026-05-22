@@ -127,7 +127,7 @@ Status legend:
 
 | Concept | Patient | Admin | Gap |
 |---|---|---|---|
-| Session window (10 min default) | — | — | Engine-internal config |
+| Session window (5 min, CLINICAL_SPEC §5.2) | — | — | Engine-internal config |
 | Session-averaged mean SBP/DBP (the value the engine evaluates against) | ❌ | ❌ | **Verified absent** — grep for `sessionAverage`/`sessionMean` returned 0 hits in either frontend. A patient who sees a 138/89 reading but no alert (because the session mean was 134/86) cannot reconcile the discrepancy. |
 | `pendingSecondReading` response field | ✅ CheckIn renders "take a second reading in about a minute" | — | None |
 | 5-minute finalize | ✅ Auto-fires via timer | — | None |

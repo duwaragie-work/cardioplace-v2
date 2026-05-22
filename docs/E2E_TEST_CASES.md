@@ -474,7 +474,7 @@ See [daily_journal.controller.ts](../backend/src/daily_journal/daily_journal.con
 | TC | Layer | Setup | Expected alert mode |
 |---|---|---|---|
 | **TC-JNL.30** | [E2E] | Two readings with same `sessionId`, 5 min apart, both 165/95 | Mean 165/95 applied to rule engine; **one** alert, not two |
-| **TC-JNL.31** | [E2E] | Two readings no sessionId, 10 min apart | Grouped by ±30-min proximity; averaged |
+| **TC-JNL.31** | [E2E] | Two readings no sessionId, 3 min apart | Grouped by ±5-min proximity (CLINICAL_SPEC §5.2); averaged |
 | **TC-JNL.32** | [E2E] | Two readings no sessionId, 45 min apart | Separate sessions |
 | **TC-JNL.33** | [E2E] | AFib patient with **1** reading HR 115 | No alert (AFib gate) |
 | **TC-JNL.34** | [E2E] | AFib patient with **3** readings HR avg 115 | `RULE_AFIB_HR_HIGH` fires |
@@ -1355,7 +1355,7 @@ Every branch enumerated in [TESTING_FLOW_GUIDE.md §8](TESTING_FLOW_GUIDE.md) ma
 | no JWT | TC-JNL.16 |
 | authenticated + no PatientProfile (Layer A gate) | TC-JNL.GATE.01–04 |
 | has sessionId → exact match grouping | TC-JNL.30 |
-| no sessionId → ±30 min grouping | TC-JNL.31, TC-JNL.32 |
+| no sessionId → ±5 min grouping | TC-JNL.31, TC-JNL.32 |
 | legacy symptoms[] merged | TC-JNL.05 |
 | structured symptom flag | TC-JNL.03 |
 | suboptimalMeasurement propagation | TC-JNL.04 + TC-RUL.L1H.06 |

@@ -140,6 +140,33 @@ export async function createJournalEntry(
 }
 
 /**
+ * GET /daily-journal/active-session — the patient's currently OPEN reading
+ * session, or null when none/expired. Drives the check-in "add to this
+ * session or start a new one?" prompt. `sessionId` is null for a time-window
+ * (un-tagged) session — join it by sending no sessionId.
+ */
+export interface ActiveSessionDto {
+  sessionId: string | null
+  openedAt: string // ISO — first reading in the session
+  lastReadingAt: string // ISO — most recent reading
+  readingCount: number
+  expiresAt: string // ISO — lastReadingAt + SESSION_WINDOW_MS (server-authoritative)
+  requiresMoreReadings: boolean // e.g. AFib && readingCount < 3
+}
+
+export async function getActiveSession(): Promise<ActiveSessionDto | null> {
+  const res = await fetchWithAuth(`${API}/api/daily-journal/active-session`)
+  if (res.status === 204) return null
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json().catch(() => null)
+  const data = (json?.data ?? json) as ActiveSessionDto | null
+  return data ?? null
+}
+
+/**
  * Cluster 6 Q2 — fires after the patient's 5-min "take a second reading"
  * window times out without a second reading. Flips
  * JournalEntry.singleReadingFinalized = true server-side; engine then fires

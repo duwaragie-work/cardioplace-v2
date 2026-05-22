@@ -13,7 +13,7 @@ import type {
 /**
  * Session-averaged reading that feeds the rule pipeline. Computed by
  * SessionAverager from one or more JournalEntry rows grouped by sessionId or
- * a 30-min proximity window (CLINICAL_SPEC Part 5).
+ * a 5-min proximity window (CLINICAL_SPEC §5.2).
  */
 export interface SessionAverage {
   /** Primary entry id (used for DeviationAlert.journalEntryId). */

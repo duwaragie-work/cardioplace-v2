@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { SESSION_WINDOW_MS } from '@cardioplace/shared'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import type {
   SessionAverage,
@@ -10,10 +11,11 @@ import type {
  * Phase/5 SessionAverager — groups readings that belong to the same "session"
  * and returns a single averaged SessionAverage the rule engine evaluates.
  *
- * Grouping rules (CLINICAL_SPEC Part 5 + BUILD_PLAN §2.2):
- * - readings with identical non-null `sessionId` are one session
- * - readings without a sessionId are grouped if their `measuredAt` values
- *   are within 30 minutes of each other
+ * Grouping rules (CLINICAL_SPEC §5.2 — 5-minute rolling window):
+ * - readings are grouped if their `measuredAt` values are within
+ *   `SESSION_WINDOW_MS` (5 min) of the anchor — this bounds BOTH the
+ *   same-`sessionId` branch and the no-`sessionId` proximity branch, so a
+ *   stale/reused sessionId can't average readings taken far apart
  * - AFib patients require ≥3 readings in the session before any alert fires;
  *   the engine checks `session.readingCount >= 3` itself — the averager just
  *   loads everything available so far in the window
@@ -21,8 +23,6 @@ import type {
 @Injectable()
 export class SessionAveragerService {
   private readonly logger = new Logger(SessionAveragerService.name)
-
-  private static readonly SESSION_WINDOW_MS = 30 * 60 * 1000
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -49,21 +49,30 @@ export class SessionAveragerService {
     sessionId: string | null
     measuredAt: Date
   }) {
-    // If anchor has a sessionId, sibling grouping is exact.
+    // Window is anchored on this entry: readings only average together when
+    // they fall within ±SESSION_WINDOW_MS of the anchor's measuredAt.
+    const windowStart = new Date(
+      anchor.measuredAt.getTime() - SESSION_WINDOW_MS,
+    )
+    const windowEnd = new Date(
+      anchor.measuredAt.getTime() + SESSION_WINDOW_MS,
+    )
+
+    // If anchor has a sessionId, sibling grouping is by id — but still bounded
+    // by the session window so a stale/reused sessionId can't average readings
+    // taken hours apart (which could mask a hypertensive emergency).
     if (anchor.sessionId) {
       return this.prisma.journalEntry.findMany({
-        where: { userId: anchor.userId, sessionId: anchor.sessionId },
+        where: {
+          userId: anchor.userId,
+          sessionId: anchor.sessionId,
+          measuredAt: { gte: windowStart, lte: windowEnd },
+        },
         orderBy: { measuredAt: 'asc' },
       })
     }
 
-    // Otherwise, pull entries within ±30 min and take the contiguous ones.
-    const windowStart = new Date(
-      anchor.measuredAt.getTime() - SessionAveragerService.SESSION_WINDOW_MS,
-    )
-    const windowEnd = new Date(
-      anchor.measuredAt.getTime() + SessionAveragerService.SESSION_WINDOW_MS,
-    )
+    // Otherwise, pull null-session entries within the same window.
     return this.prisma.journalEntry.findMany({
       where: {
         userId: anchor.userId,
