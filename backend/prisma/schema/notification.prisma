@@ -3,6 +3,12 @@ model Notification {
   userId            String
   alertId           String?
   escalationEventId String?
+  // Subject patient for care-team notices that aren't alert-linked (e.g. the
+  // IVR-04 enrollment-paused / condition-review notifications). `userId` is the
+  // RECIPIENT (provider/MD); this is the patient the notice is ABOUT, so the
+  // admin bell/notifications page can deep-link to /patients/{patientUserId}.
+  // Alert-linked rows leave this null and derive the patient via `alert.userId`.
+  patientUserId     String?
   channel           NotificationChannel
   title             String
   body              String

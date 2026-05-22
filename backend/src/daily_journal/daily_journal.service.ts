@@ -521,7 +521,10 @@ export class DailyJournalService {
       message: 'Notifications retrieved successfully',
       data: notifications.map((notification) => ({
         ...notification,
-        patientUserId: notification.alert?.userId ?? null,
+        // Prefer the explicit subject patient (care-team notices); fall back to
+        // the linked alert's patient (alert/escalation notices). Either drives
+        // the bell's /patients/{id} deep-link.
+        patientUserId: notification.patientUserId ?? notification.alert?.userId ?? null,
         watched: notification.readAt != null,
       })),
     }

@@ -72,6 +72,15 @@ const VERIFIABLE_PROFILE_FIELDS = [
 
 type VerifiableField = (typeof VERIFIABLE_PROFILE_FIELDS)[number]
 
+// Threshold-mandatory conditions (mirrors enrollment-gate / thresholdMandatory).
+// A patient self-edit touching one of these on an enrolled profile gets a
+// care-team "review needed" notice (IVR-04 sibling for the non-revert cases).
+const SERIOUS_CONDITION_LABELS: Partial<Record<VerifiableField, string>> = {
+  heartFailureType: 'heart failure type',
+  hasHCM: 'HCM',
+  hasDCM: 'DCM',
+}
+
 @Injectable()
 export class IntakeService {
   private readonly logger = new Logger(IntakeService.name)
@@ -113,7 +122,7 @@ export class IntakeService {
   // ─── Patient: POST /intake/profile ───────────────────────────────────────
 
   async upsertProfile(userId: string, dto: IntakeProfileDto) {
-    const { result, enrollmentReverted } = await this.prisma.$transaction(async (tx) => {
+    const { result, enrollmentReverted, conditionReviewLabels } = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.patientProfile.findUnique({ where: { userId } })
 
       const patch = this.stripUndefined(dto)
@@ -158,6 +167,7 @@ export class IntakeService {
           })
 
       let enrollmentReverted = false
+      let conditionReviewLabels: string[] = []
       if (changes.length) {
         await this.writeProfileLogs(tx, {
           userId,
@@ -176,6 +186,26 @@ export class IntakeService {
           userId,
           VerifierRole.PATIENT,
         )
+
+        // Sibling case: the patient changed a serious condition but it did NOT
+        // trip the revert — i.e. they removed one, or added one while a
+        // threshold already exists. If they're ENROLLED (post-setup), nudge the
+        // care team to re-verify + revisit the threshold. Skipped when not
+        // enrolled (initial intake) — the verification queue covers that.
+        if (!enrollmentReverted) {
+          const serious = changes
+            .map((c) => SERIOUS_CONDITION_LABELS[c.field])
+            .filter((l): l is string => !!l)
+          if (serious.length) {
+            const u = await tx.user.findUnique({
+              where: { id: userId },
+              select: { enrollmentStatus: true },
+            })
+            if (u?.enrollmentStatus === EnrollmentStatus.ENROLLED) {
+              conditionReviewLabels = serious
+            }
+          }
+        }
       }
 
       return {
@@ -186,15 +216,17 @@ export class IntakeService {
           changedFields: changes.map((c) => c.field),
         },
         enrollmentReverted,
+        conditionReviewLabels,
       }
     }, TX_OPTIONS)
 
-    // IVR-04 (patient path) — dispatch the care-team notice AFTER the tx
-    // commits so a notification failure can't roll back the safety revert.
-    // Only the patient path notifies: the admin path's actor is already at the
-    // screen and sees the EnrollmentCard flip to Blocked.
+    // IVR-04 (patient path) — dispatch care-team notices AFTER the tx commits
+    // so a notification failure can't roll back the safety revert. Only the
+    // patient path notifies: the admin path's actor is already on the screen.
     if (enrollmentReverted) {
       await this.notifyCareTeamEnrollmentPaused(userId)
+    } else if (conditionReviewLabels.length) {
+      await this.notifyCareTeamConditionReview(userId, conditionReviewLabels)
     }
     return result
   }
@@ -1154,13 +1186,43 @@ export class IntakeService {
    * outside the transaction. The admin path doesn't call this — that actor is
    * already looking at the EnrollmentCard.
    */
+  // Shared care-team notice dispatch. Routes to the patient's primary provider
+  // + medical director (deduped) and stamps `patientUserId` so the admin bell /
+  // notifications page can deep-link to /patients/{patientUserId}. Throws on DB
+  // error — the public wrappers below are best-effort.
+  private async dispatchCareTeamNotice(
+    patientUserId: string,
+    title: string,
+    body: string,
+  ): Promise<void> {
+    const assignment = await this.prisma.patientProviderAssignment.findUnique({
+      where: { userId: patientUserId },
+      select: { primaryProviderId: true, medicalDirectorId: true },
+    })
+    // No care team on file → no one to route to.
+    if (!assignment) return
+    const recipients = [
+      ...new Set(
+        [assignment.primaryProviderId, assignment.medicalDirectorId].filter(
+          (id): id is string => !!id,
+        ),
+      ),
+    ]
+    if (!recipients.length) return
+    await this.prisma.notification.createMany({
+      data: recipients.map((userId) => ({
+        userId,
+        patientUserId,
+        channel: NotificationChannel.PUSH,
+        title,
+        body,
+      })),
+    })
+  }
+
   private async notifyCareTeamEnrollmentPaused(patientUserId: string): Promise<void> {
     try {
-      const [assignment, patient, profile] = await Promise.all([
-        this.prisma.patientProviderAssignment.findUnique({
-          where: { userId: patientUserId },
-          select: { primaryProviderId: true, medicalDirectorId: true },
-        }),
+      const [patient, profile] = await Promise.all([
         this.prisma.user.findUnique({
           where: { id: patientUserId },
           select: { name: true },
@@ -1170,18 +1232,6 @@ export class IntakeService {
           select: { heartFailureType: true, hasHCM: true, hasDCM: true },
         }),
       ])
-      // No care team on file → nothing to route to.
-      if (!assignment) return
-
-      const recipients = [
-        ...new Set(
-          [assignment.primaryProviderId, assignment.medicalDirectorId].filter(
-            (id): id is string => !!id,
-          ),
-        ),
-      ]
-      if (!recipients.length) return
-
       const conditions = [
         profile?.heartFailureType === 'HFREF' ? 'HFrEF' : null,
         profile?.hasHCM ? 'HCM' : null,
@@ -1193,18 +1243,50 @@ export class IntakeService {
       const body =
         `${patientName} reported ${conditions || 'a condition'} that requires a personalized BP threshold. ` +
         `Their enrollment has been paused — set a threshold and re-enroll to resume monitoring.`
-
-      await this.prisma.notification.createMany({
-        data: recipients.map((userId) => ({
-          userId,
-          channel: NotificationChannel.PUSH,
-          title: 'Enrollment paused — threshold needed',
-          body,
-        })),
-      })
+      await this.dispatchCareTeamNotice(
+        patientUserId,
+        'Enrollment paused — threshold needed',
+        body,
+      )
     } catch (err) {
       this.logger.error(
         `Care-team enrollment-paused notification failed for ${patientUserId}`,
+        err instanceof Error ? err.stack : err,
+      )
+    }
+  }
+
+  /**
+   * Patient changed a threshold-mandatory condition (HFrEF / HCM / DCM) on an
+   * already-ENROLLED profile WITHOUT it tripping the enrollment revert — i.e.
+   * they removed one, or added one while a threshold already exists. The
+   * existing threshold may no longer fit and the self-report needs re-verifying,
+   * so nudge the care team. Best-effort + post-commit.
+   */
+  private async notifyCareTeamConditionReview(
+    patientUserId: string,
+    changedLabels: string[],
+  ): Promise<void> {
+    try {
+      const patient = await this.prisma.user.findUnique({
+        where: { id: patientUserId },
+        select: { name: true },
+      })
+      const patientName = patient?.name ?? 'A patient'
+      const list = changedLabels.length
+        ? changedLabels.join(', ')
+        : 'a monitored condition'
+      const body =
+        `${patientName} changed ${list} on their profile — it is now unverified. ` +
+        `Review the change and confirm their thresholds are still appropriate.`
+      await this.dispatchCareTeamNotice(
+        patientUserId,
+        'Condition change — review needed',
+        body,
+      )
+    } catch (err) {
+      this.logger.error(
+        `Care-team condition-review notification failed for ${patientUserId}`,
         err instanceof Error ? err.stack : err,
       )
     }
