@@ -777,3 +777,12 @@ export function systemMsgMedicationHold(drugName: string): string {
 export function systemMsgProfileFieldRejected(fieldLabel: string): string {
   return `Your care team needs you to re-check your ${fieldLabel}. Please open your profile to confirm or update it. If you have questions, contact your care team.`
 }
+
+/**
+ * Patient inbox message when a provider sets or changes the patient's
+ * personalized BP monitoring targets (THR-034 — transparency). Not required by
+ * the clinical doc; NEEDS CLINICAL SIGN-OFF (Dr. Singal) — wording provisional.
+ */
+export function systemMsgThresholdUpdated(): string {
+  return `Your care team updated your blood-pressure monitoring targets. Your future check-ins will use the new targets. If you have questions, contact your care team.`
+}

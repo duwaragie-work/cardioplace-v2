@@ -146,6 +146,45 @@ describe('EnrollmentService', () => {
     })
   })
 
+  describe('revertIfThresholdGap (THR-033 delete cascade)', () => {
+    it('reverts an enrolled patient when removing the threshold leaves a gap', async () => {
+      prisma.user.findUnique.mockResolvedValue({ enrollmentStatus: 'ENROLLED' })
+      gateFailsMissingThreshold() // mandatory + no threshold → threshold-required reason
+
+      const result = await service.revertIfThresholdGap(ADMIN, 'p1')
+
+      expect(result).toBe(true)
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { enrollmentStatus: 'NOT_ENROLLED' } }),
+      )
+      expect(prisma.profileVerificationLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            fieldPath: 'user.enrollmentStatus',
+            previousValue: 'ENROLLED',
+            newValue: 'NOT_ENROLLED',
+          }),
+        }),
+      )
+    })
+
+    it('does NOT revert when the gate still passes (non-mandatory / threshold not required)', async () => {
+      prisma.user.findUnique.mockResolvedValue({ enrollmentStatus: 'ENROLLED' })
+      gatePasses()
+
+      const result = await service.revertIfThresholdGap(ADMIN, 'p1')
+      expect(result).toBe(false)
+      expect(prisma.user.update).not.toHaveBeenCalled()
+    })
+
+    it('no-ops when the patient is not enrolled', async () => {
+      prisma.user.findUnique.mockResolvedValue({ enrollmentStatus: 'NOT_ENROLLED' })
+      const result = await service.revertIfThresholdGap(ADMIN, 'p1')
+      expect(result).toBe(false)
+      expect(prisma.user.update).not.toHaveBeenCalled()
+    })
+  })
+
   describe('completeEnrollment', () => {
     it('writes a user.enrollmentStatus ADMIN_VERIFY audit row on the ENROLLED flip', async () => {
       prisma.user.findUnique.mockResolvedValue({

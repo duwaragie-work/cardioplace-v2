@@ -211,4 +211,54 @@ export class EnrollmentService {
       return false
     }
   }
+
+  /**
+   * IVR-04 sibling for threshold DELETE — removing a personalized threshold from
+   * a patient whose condition REQUIRES one (HFrEF/HCM/DCM, CLINICAL_SPEC §4.2)
+   * must drop an ENROLLED patient back to NOT_ENROLLED. Only reverts when the
+   * gap is specifically the missing threshold, so unrelated prerequisites don't
+   * cause a surprise revert. Best-effort: never throws. Returns true on revert.
+   */
+  async revertIfThresholdGap(
+    actor: ActorUser,
+    patientUserId: string,
+  ): Promise<boolean> {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: patientUserId },
+        select: { enrollmentStatus: true },
+      })
+      if (!user || user.enrollmentStatus !== EnrollmentStatus.ENROLLED) {
+        return false
+      }
+      const gate = await canCompleteEnrollment(this.prisma, patientUserId)
+      if (gate.ok || !gate.reasons.includes('threshold-required-for-condition')) {
+        return false
+      }
+      await this.prisma.user.update({
+        where: { id: patientUserId },
+        data: { enrollmentStatus: EnrollmentStatus.NOT_ENROLLED },
+      })
+      await this.prisma.profileVerificationLog.create({
+        data: {
+          userId: patientUserId,
+          fieldPath: 'user.enrollmentStatus',
+          previousValue: EnrollmentStatus.ENROLLED,
+          newValue: EnrollmentStatus.NOT_ENROLLED,
+          changedBy: actor.id,
+          changedByRole: VerifierRole.ADMIN,
+          changeType: VerificationChangeType.ADMIN_CORRECT,
+          rationale:
+            'Enrollment reverted — personalized threshold removed for a condition that requires one.',
+        },
+      })
+      return true
+    } catch (err) {
+      this.logger.error(
+        `Threshold-gap enrollment revert failed for ${patientUserId}`,
+        err instanceof Error ? err.stack : err,
+      )
+      return false
+    }
+  }
 }
