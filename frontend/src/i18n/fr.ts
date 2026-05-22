@@ -213,6 +213,10 @@ const fr: Record<TranslationKey, string> = {
     "Une seule mesure peut être inexacte — une seconde aide votre équipe à voir l'ensemble. Nous attendrons quelques minutes.",
   'checkin.b3.otherLabel': 'Autre chose ? (optionnel)',
   'checkin.b3.otherPlaceholder': 'Dans vos propres mots…',
+  'checkin.b3.otherSymptomsLabel': "D'autres symptômes ? (optionnel)",
+  'checkin.b3.addSymptom': 'Ajouter',
+  'checkin.b3.removeSymptom': 'Retirer',
+  'checkin.b3.notesLabel': 'Notes (optionnel)',
 
   // B4 — étape par médicament
   'checkin.b4.title': 'Médicaments du jour',
@@ -535,6 +539,9 @@ const fr: Record<TranslationKey, string> = {
   'readings.symptoms': 'Symptômes',
   'readings.notes': 'Notes',
   'readings.notesPlaceholder': 'Notes supplémentaires...',
+  'readings.otherSymptoms': 'Autres symptômes',
+  'readings.detailTitle': 'Détails de la mesure',
+  'readings.viewDetails': 'Voir les détails de la mesure',
   'readings.noBpRecorded': 'Pas de TA enregistrée',
   'readings.meds': 'Méds',
   'readings.taken': 'Prise',

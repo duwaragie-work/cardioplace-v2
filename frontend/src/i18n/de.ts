@@ -213,6 +213,10 @@ const de: Record<TranslationKey, string> = {
     'Eine einzelne Messung kann ungenau sein — eine zweite hilft Ihrem Behandlungsteam, das Gesamtbild zu sehen. Wir warten ein paar Minuten.',
   'checkin.b3.otherLabel': 'Noch etwas? (optional)',
   'checkin.b3.otherPlaceholder': 'In Ihren eigenen Worten…',
+  'checkin.b3.otherSymptomsLabel': 'Weitere Symptome? (optional)',
+  'checkin.b3.addSymptom': 'Hinzufügen',
+  'checkin.b3.removeSymptom': 'Entfernen',
+  'checkin.b3.notesLabel': 'Notizen (optional)',
 
   // B4 — per-medication step
   'checkin.b4.title': 'Medikamente heute',
@@ -535,6 +539,9 @@ const de: Record<TranslationKey, string> = {
   'readings.symptoms': 'Symptome',
   'readings.notes': 'Notizen',
   'readings.notesPlaceholder': 'Zusätzliche Notizen...',
+  'readings.otherSymptoms': 'Weitere Symptome',
+  'readings.detailTitle': 'Messdetails',
+  'readings.viewDetails': 'Messdetails anzeigen',
   'readings.noBpRecorded': 'Kein BD aufgezeichnet',
   'readings.meds': 'Meds',
   'readings.taken': 'Genommen',

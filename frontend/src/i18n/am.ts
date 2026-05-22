@@ -215,6 +215,10 @@ const am: Record<TranslationKey, string> = {
     'አንድ ብቻ ንባብ ሊሳሳት ይችላል — ሁለተኛ ንባብ የእንክብካቤ ቡድንዎ ሙሉ ስዕል እንዲያይ ይረዳል። ጥቂት ደቂቃዎችን እንጠብቃለን።',
   'checkin.b3.otherLabel': 'ሌላ ነገር? (አማራጭ)',
   'checkin.b3.otherPlaceholder': 'በራስዎ ቃላት…',
+  'checkin.b3.otherSymptomsLabel': 'ሌላ ምልክት አለ? (አማራጭ)',
+  'checkin.b3.addSymptom': 'አክል',
+  'checkin.b3.removeSymptom': 'አስወግድ',
+  'checkin.b3.notesLabel': 'ማስታወሻዎች (አማራጭ)',
 
   // B4 — per-medication step
   'checkin.b4.title': 'ዛሬ የወሰዷቸው መድሃኒቶች',
@@ -538,6 +542,9 @@ const am: Record<TranslationKey, string> = {
   'readings.symptoms': 'ምልክቶች',
   'readings.notes': 'ማስታወሻዎች',
   'readings.notesPlaceholder': 'ተጨማሪ ማስታወሻዎች...',
+  'readings.otherSymptoms': 'ሌሎች ምልክቶች',
+  'readings.detailTitle': 'የንባብ ዝርዝሮች',
+  'readings.viewDetails': 'የንባብ ዝርዝሮችን ይመልከቱ',
   'readings.noBpRecorded': 'ደም ግፊት አልተመዘገበም',
   'readings.meds': 'መድሃኒቶች',
   'readings.taken': 'ተወስዷል',
