@@ -18,6 +18,7 @@ import {
   pickDisplayName,
   resolveUserDisplays,
 } from '../common/user-name-resolver.js'
+import { EnrollmentService } from './enrollment.service.js'
 import type { UpsertThresholdDto } from './dto/upsert-threshold.dto.js'
 
 // JCAHO audit snapshot — the clinically-meaningful threshold targets only
@@ -38,6 +39,7 @@ export class ThresholdService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: PatientAccessService,
+    private readonly enrollment: EnrollmentService,
   ) {}
 
   async create(actor: ActorUser, patientUserId: string, dto: UpsertThresholdDto) {
@@ -63,6 +65,10 @@ export class ThresholdService {
         Prisma.JsonNull,
         this.thresholdSnapshot(threshold),
       )
+      // IVR-04 — if this threshold clears the re-enrollment gate for a patient
+      // who was auto-reverted, restore enrollment + catch up deferred alerts.
+      // No-op for first-time / still-blocked / already-enrolled patients.
+      await this.enrollment.autoReEnrollIfGateCleared(actor, patientUserId)
       return {
         statusCode: 201,
         message: 'Threshold created',
@@ -147,6 +153,9 @@ export class ThresholdService {
       this.thresholdSnapshot(existing),
       this.thresholdSnapshot(updated),
     )
+    // IVR-04 — restore enrollment if this update clears the gate for an
+    // auto-reverted patient (e.g. a threshold edit that finally fits).
+    await this.enrollment.autoReEnrollIfGateCleared(actor, patientUserId)
     return {
       statusCode: 200,
       message: 'Threshold updated',
