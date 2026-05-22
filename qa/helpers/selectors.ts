@@ -415,6 +415,9 @@ export const T = {
     thresholdReviewBanner: 'admin-threshold-review-banner',
     thresholdReviewNote: 'admin-threshold-review-note',
     thresholdAttest: 'admin-threshold-attest',
+    // THR-033 — two-step "Clear personalized targets" (delete) control.
+    thresholdClear: 'admin-threshold-clear',
+    thresholdClearConfirm: 'admin-threshold-clear-confirm',
 
     // CareTeamTab (inline <select> editor, NOT a modal)
     careTeamStatus: 'admin-careteam-status',

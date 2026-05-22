@@ -1021,14 +1021,102 @@ test.describe('Patient-list threshold signal (UI E2E)', () => {
     await expect(chip).toBeVisible({ timeout: 20_000 })
     await expect(chip).toContainText(/[1-9]/) // count ≥ 1
 
-    // olive's row carries the subtle red tint class.
+    // olive's row carries the whole-row subtle red tint class.
     const row = page.locator(byTestId(T.admin.patientListRow(olive.id)))
     await expect(row).toBeVisible({ timeout: 20_000 })
-    await expect(row).toHaveClass(/bg-\[#FEF4F4\]/)
+    await expect(row).toHaveClass(/bg-\[#FDE8E8\]/)
 
     // Filtering to "threshold needed" keeps olive in view.
     await chip.click()
     await expect(page.locator(byTestId(T.admin.patientListRow(olive.id)))).toBeVisible()
+    await tc.dispose()
+  })
+})
+
+// ── Threshold clear / delete + patient notify (UI E2E) ────────────────────────
+// THR-032 (clear a field), THR-033 (delete the row + enrollment cascade),
+// THR-034 (patient notified on a threshold change).
+test.describe('Threshold clear/delete + notify (UI E2E)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write/e2e tests gated by RUN_WRITE_TESTS=1')
+  test.describe.configure({ timeout: 120_000 })
+
+  test('31.34 — clearing a mandatory patient\'s threshold deletes it + re-flags + reverts enrollment', async ({ page }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const olive = await tc.findUser(PATIENTS.olive.email)
+    // Mandatory (HCM) + threshold + enrolled, not stale → opens clean (no flag).
+    await stageScratch(tc, olive.id, { enrolled: true, hcm: true, withThreshold: true })
+
+    await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
+
+    // Two-step clear.
+    await page.locator(byTestId(T.admin.thresholdClear)).click()
+    await page.locator(byTestId(T.admin.thresholdClearConfirm)).click()
+
+    // Threshold gone → needs-threshold flag returns; enrollment reverted (cascade).
+    await expect(page.locator(byTestId(T.admin.tabThresholdsFlag))).toBeVisible({ timeout: 20_000 })
+    await expect
+      .poll(async () => (await tc.findUser(PATIENTS.olive.email)).enrollmentStatus, { timeout: 15_000 })
+      .toBe('NOT_ENROLLED')
+
+    // Backend cross-check — the row is actually deleted (404).
+    const api = await authedApi(API_BASE_URL, ADMIN.email, 'admin')
+    const tRes = await api.get(`admin/patients/${olive.id}/threshold`)
+    expect(tRes.status()).toBe(404)
+    await api.dispose()
+    await tc.dispose()
+  })
+
+  test('31.35 — emptying a single target field clears it on save (THR-032)', async ({ page }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const olive = await tc.findUser(PATIENTS.olive.email)
+    // Non-mandatory so nothing locks/flags; seed a threshold with a DBP-upper set.
+    await stageScratch(tc, olive.id, { enrolled: true, withThreshold: false })
+    const api = await authedApi(API_BASE_URL, ADMIN.email, 'admin')
+    const create = await api.post(`admin/patients/${olive.id}/threshold`, {
+      data: { dbpUpperTarget: 140, dbpLowerTarget: 70 },
+    })
+    expect(create.ok(), `seed threshold: ${create.status()} ${await create.text()}`).toBeTruthy()
+
+    await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
+    // Clear DBP-upper, keep DBP-lower, save.
+    await page.locator(byTestId(T.admin.thresholdDbpUpper)).fill('')
+    await page.locator(byTestId(T.admin.thresholdSave)).click()
+
+    // Backend cross-check — dbpUpper is now null, dbpLower preserved.
+    await expect
+      .poll(async () => {
+        const r = await api.get(`admin/patients/${olive.id}/threshold`)
+        return (await r.json())?.data?.dbpUpperTarget
+      }, { timeout: 15_000 })
+      .toBeNull()
+    const after = await (await api.get(`admin/patients/${olive.id}/threshold`)).json()
+    expect(after?.data?.dbpLowerTarget).toBe(70)
+    await api.dispose()
+    await tc.dispose()
+  })
+
+  test('31.36 — setting a threshold notifies the patient (THR-034)', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const olive = await tc.findUser(PATIENTS.olive.email)
+    // resetUser (in stageScratch) clears the inbox, so only the new notice shows.
+    await stageScratch(tc, olive.id, { enrolled: true, withThreshold: false })
+
+    const api = await authedApi(API_BASE_URL, ADMIN.email, 'admin')
+    const res = await api.post(`admin/patients/${olive.id}/threshold`, {
+      data: { sbpUpperTarget: 140, sbpLowerTarget: 90 },
+    })
+    expect(res.ok(), `set threshold: ${res.status()} ${await res.text()}`).toBeTruthy()
+    await api.dispose()
+
+    const notes = await tc.listNotifications(olive.id)
+    expect(
+      notes.some((n) => /monitoring targets|targets updated/i.test(n.title)),
+      `titles: ${notes.map((n) => n.title).join(', ')}`,
+    ).toBe(true)
     await tc.dispose()
   })
 })
