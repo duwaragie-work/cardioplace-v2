@@ -86,6 +86,39 @@ export class AdminIntakeController {
     )
   }
 
+  // Per-field ✓ "Confirm" (IVR-08) — writes an ADMIN_VERIFY audit row for the
+  // single field without flipping the whole-profile status.
+  @Post('users/:id/confirm-profile-field')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.PROVIDER, UserRole.MEDICAL_DIRECTOR)
+  confirmProfileField(
+    @Req() req: AuthedReq,
+    @Param('id') patientUserId: string,
+    @Body() dto: { field: string; rationale?: string },
+  ) {
+    return this.intake.confirmProfileField(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+      dto,
+    )
+  }
+
+  // Bulk "Confirm all" (IVR-25) — confirms every supplied field in one call.
+  @Post('users/:id/confirm-profile-fields')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.PROVIDER, UserRole.MEDICAL_DIRECTOR)
+  confirmProfileFields(
+    @Req() req: AuthedReq,
+    @Param('id') patientUserId: string,
+    @Body() dto: { fields: string[]; rationale?: string },
+  ) {
+    return this.intake.confirmProfileFields(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+      dto,
+    )
+  }
+
   @Post('medications/:id/verify')
   @HttpCode(HttpStatus.OK)
   @Roles(UserRole.SUPER_ADMIN, UserRole.PROVIDER, UserRole.MEDICAL_DIRECTOR)
