@@ -24,6 +24,15 @@ const modalScrollStyles = `
   scrollbar-color: #E0D4F5 transparent;
 }
 `;
+
+/* Alarming pulsing red ring for the "Threshold needed" filter chip when >0
+   patients need attention — draws the provider's eye from across the list. */
+const thresholdPulseStyles = `
+@keyframes threshold-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.55); }
+  50%      { box-shadow: 0 0 0 5px rgba(220, 38, 38, 0); }
+}
+`;
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -76,6 +85,9 @@ interface Patient {
   // Flow K — verification + per-tier alert breakdown drive the new
   // verification status column and the tier-color-coded count badge.
   profileVerificationStatus: 'UNVERIFIED' | 'VERIFIED' | 'CORRECTED' | null;
+  /** Threshold attention signal (missing OR stale) — drives the subtle red row
+   *  tint + the "Threshold needed" filter chip. Matches the detail-page banner. */
+  needsThreshold?: boolean;
   latestBaseline: { baselineSystolic: number; baselineDiastolic: number } | null;
   activeAlertsCount: number;
   alertsByTier: Record<string, number>;
@@ -843,6 +855,9 @@ export default function PatientsPage() {
   const [riskFilter, setRiskFilter] = useState<string>('ALL');
   // Flow K1 — quick-toggle for "show only patients with an unverified profile".
   const [awaitingVerificationOnly, setAwaitingVerificationOnly] = useState(false);
+  // Threshold-attention quick-toggle — "show only patients who need a threshold
+  // set or re-reviewed". Mirrors the awaiting filter; the chip pulses when >0.
+  const [thresholdNeededOnly, setThresholdNeededOnly] = useState(false);
 
   // Flow K3 — per-row enrollment state. Loading state for the in-flight CTA
   // and a per-patient cache of 409 reasons returned by the backend gate.
@@ -895,6 +910,9 @@ export default function PatientsPage() {
     ) {
       return false;
     }
+    if (thresholdNeededOnly && !p.needsThreshold) {
+      return false;
+    }
     if (search) {
       const q = search.toLowerCase();
       return (
@@ -941,6 +959,7 @@ export default function PatientsPage() {
 
   return (
     <div className="h-full" style={{ backgroundColor: '#FAFBFF' }}>
+      <style>{thresholdPulseStyles}</style>
       <div className="max-w-6xl mx-auto px-4 md:px-8 py-6">
         {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
@@ -1074,6 +1093,64 @@ export default function PatientsPage() {
                   </button>
                 );
               })()}
+
+              {/* Threshold-needed quick-toggle chip. Visible to every admin role
+                  for awareness (setting/attesting stays editor-only in the
+                  detail page). Pulses a red ring only when >0 patients need
+                  attention; calm at zero. */}
+              {(() => {
+                const count = patients.filter((p) => p.needsThreshold).length;
+                const active = thresholdNeededOnly;
+                const alarming = count > 0;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setThresholdNeededOnly((v) => !v)}
+                    data-testid="admin-patient-threshold-filter"
+                    aria-pressed={active}
+                    aria-label={active ? 'Showing only patients needing a threshold' : 'Filter to patients needing a threshold'}
+                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap"
+                    style={{
+                      backgroundColor: active
+                        ? 'var(--brand-alert-red)'
+                        : alarming
+                          ? 'var(--brand-alert-red-light)'
+                          : 'var(--brand-background)',
+                      color: active
+                        ? 'white'
+                        : alarming
+                          ? 'var(--brand-alert-red-text)'
+                          : 'var(--brand-text-muted)',
+                      border: `1.5px solid ${active ? 'var(--brand-alert-red)' : 'transparent'}`,
+                      animation: alarming && !active ? 'threshold-pulse 1.6s ease-in-out infinite' : undefined,
+                    }}
+                  >
+                    <AlertTriangle className="w-3 h-3" />
+                    <span className="hidden md:inline">Threshold needed</span>
+                    <span className="md:hidden">Threshold</span>
+                    <span
+                      className="text-[10px] font-bold px-1.5 rounded-full"
+                      style={{
+                        backgroundColor: active ? 'rgba(255,255,255,0.25)' : 'white',
+                        color: active ? 'white' : 'var(--brand-alert-red-text)',
+                        minWidth: 18,
+                        textAlign: 'center',
+                      }}
+                    >
+                      {count}
+                    </span>
+                    {active && (
+                      <X
+                        className="w-3 h-3"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setThresholdNeededOnly(false);
+                        }}
+                      />
+                    )}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -1134,10 +1211,17 @@ export default function PatientsPage() {
                         router.push(`/patients/${p.id}`);
                       }
                     }}
-                    className="w-full text-left px-5 py-3.5 flex items-center gap-4 md:grid md:gap-3 transition-colors hover:bg-[#F8F4FF] cursor-pointer group"
+                    title={p.needsThreshold ? 'Threshold needed — set or re-review targets' : undefined}
+                    // Subtle red row tint + an inset left accent when a threshold
+                    // is missing/stale. The base class tints; the hover variant
+                    // still wins on hover (no inline bg, so hover isn't clobbered).
+                    className={`w-full text-left px-5 py-3.5 flex items-center gap-4 md:grid md:gap-3 transition-colors hover:bg-[#F8F4FF] cursor-pointer group ${p.needsThreshold ? 'bg-[#FEF4F4]' : ''}`}
                     style={{
                       gridTemplateColumns: '1.8fr 0.9fr 0.9fr 1fr 1fr 1fr 1.2fr 32px',
                       borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none',
+                      ...(p.needsThreshold
+                        ? { boxShadow: 'inset 3px 0 0 var(--brand-alert-red)' }
+                        : {}),
                     }}
                   >
                     {/* Patient info */}

@@ -187,13 +187,17 @@ export default function ThresholdsTab({
   // review note is prepended to the clinical rationale so the audit captures
   // why no change was made. Requires a note so the attestation is on record.
   async function attestStillCorrect() {
-    if (!reviewNote.trim()) return;
     setAttesting(true);
     setError(null);
     setSuccess(null);
     try {
       const existing = form.notes.trim();
-      const stamped = `[Re-reviewed ${new Date().toLocaleDateString()}] ${reviewNote.trim()}`;
+      const note = reviewNote.trim();
+      // Always stamp a dated attestation line so the audit captures that the
+      // targets were re-reviewed and kept — the custom note is optional.
+      const stamped = note
+        ? `[Re-reviewed ${new Date().toLocaleDateString()}] ${note}`
+        : `[Re-reviewed ${new Date().toLocaleDateString()}] Targets confirmed still correct.`;
       await upsertPatientThreshold(
         patientId,
         { ...formToPayload(form), notes: existing ? `${stamped}\n${existing}` : stamped },
@@ -246,8 +250,7 @@ export default function ThresholdsTab({
               A monitored condition (HFrEF / HCM / DCM) was added or removed
               {reviewConditionAt ? ` on ${new Date(reviewConditionAt).toLocaleDateString()}` : ''}, after
               these targets were set on {new Date(threshold.setAt).toLocaleDateString()}. Update the
-              targets, or confirm they&apos;re still correct, to continue — other tabs are locked until
-              you do.
+              targets, or confirm they&apos;re still correct below.
             </p>
           </div>
         </div>
@@ -488,14 +491,14 @@ export default function ThresholdsTab({
                 value={reviewNote}
                 onChange={(e) => setReviewNote(e.target.value)}
                 data-testid="admin-threshold-review-note"
-                placeholder="Review note (required)"
+                placeholder="Review note (optional)"
                 className="px-3 h-9 rounded-lg text-[12.5px] outline-none"
                 style={{ border: '1px solid var(--brand-border)', minWidth: 220 }}
               />
               <button
                 type="button"
                 onClick={attestStillCorrect}
-                disabled={attesting || !reviewNote.trim()}
+                disabled={attesting}
                 data-testid="admin-threshold-attest"
                 className="btn-admin-secondary shrink-0"
               >
