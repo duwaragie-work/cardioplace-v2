@@ -13,8 +13,8 @@ import { byTestId, T } from '../helpers/selectors.js'
 /**
  * UI end-to-end coverage for the threshold-review / enrollment-safety cluster
  * (IVR-04 + THR-REVIEW + IVR-08/16/23 + care-team notifications). Drives the
- * REAL admin browser — the force-to-Thresholds lock (other tabs disabled +
- * auto-redirect), the enrollment revert / auto-restore, the per-field verify
+ * REAL admin browser — the land-first Thresholds nudge (flag + persistent
+ * banner, no lock), the enrollment revert / auto-restore, the per-field verify
  * controls, and the care-team notification deep-link. test-control is used
  * ONLY to stage deterministic preconditions, never to assert behaviour.
  *
@@ -27,25 +27,29 @@ import { byTestId, T } from '../helpers/selectors.js'
 
 const ADMIN = ADMINS.support // SUPER_ADMIN — edits thresholds, corrects, enrolls; bypasses scope.
 
-// ── Lock assertions (the heart of THR-REVIEW) ───────────────────────────────
-async function expectLockedToThresholds(page: Page): Promise<void> {
-  // Forced onto Thresholds…
+// ── Needs-threshold assertions (lock removed) ───────────────────────────────
+// A needs-threshold patient lands on the Thresholds tab (one-shot), carries a
+// pulsing flag on that tab, and shows the persistent banner on other tabs — but
+// every tab stays NAVIGABLE (no lock).
+async function expectNeedsThreshold(page: Page): Promise<void> {
+  // Landed on Thresholds…
   await expect(page.locator(byTestId(T.admin.detailTab('thresholds')))).toHaveAttribute(
     'aria-selected',
     'true',
     { timeout: 20_000 },
   )
-  // …and the other tabs + Back are blocked.
-  await expect(page.locator(byTestId(T.admin.detailTab('medications')))).toBeDisabled({
-    timeout: 20_000,
-  })
-  await expect(page.locator(byTestId(T.admin.detailTab('profile')))).toBeDisabled()
+  // …but the other tabs are NOT locked — freely navigable.
+  await expect(page.locator(byTestId(T.admin.detailTab('medications')))).toBeEnabled()
+  await expect(page.locator(byTestId(T.admin.detailTab('profile')))).toBeEnabled()
+  // The flag marks the Thresholds tab until it's set / attested.
+  await expect(page.locator(byTestId(T.admin.tabThresholdsFlag))).toBeVisible({ timeout: 20_000 })
 }
 
-async function expectUnlocked(page: Page): Promise<void> {
+async function expectNoThresholdNeeded(page: Page): Promise<void> {
   await expect(page.locator(byTestId(T.admin.detailTab('medications')))).toBeEnabled({
     timeout: 20_000,
   })
+  await expect(page.locator(byTestId(T.admin.tabThresholdsFlag))).toBeHidden({ timeout: 20_000 })
 }
 
 /** Re-stage olive to a known clean baseline (non-mandatory, clean logs/threshold). */
@@ -77,7 +81,7 @@ test.describe('THR-REVIEW + enrollment safety (UI E2E)', () => {
   test.describe.configure({ timeout: 120_000 })
 
   // ── IVR-04: admin adds a mandatory condition with NO threshold ────────────
-  test('31.1 — admin adds HCM (no threshold) → enrollment reverts + locked to Thresholds', async ({ page }) => {
+  test('31.1 — admin adds HCM (no threshold) → enrollment reverts + lands on Thresholds (no lock)', async ({ page }) => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const olive = await tc.findUser(PATIENTS.olive.email)
     await stageScratch(tc, olive.id, { enrolled: true, withThreshold: false })
@@ -86,8 +90,8 @@ test.describe('THR-REVIEW + enrollment safety (UI E2E)', () => {
     // Add HCM via the Profile tab (writes the condition log + runs IVR-04).
     await correctProfileFieldViaUI(page, olive.id, 'hasHCM', 'true', 'QA: add HCM')
 
-    // Lock engaged (forced to Thresholds, other tabs disabled).
-    await expectLockedToThresholds(page)
+    // Lands on Thresholds with the flag; other tabs stay navigable.
+    await expectNeedsThreshold(page)
     // Enrollment reverted → the EnrollmentCard reappears.
     await expect(page.locator(byTestId(T.admin.enrollmentCard))).toBeVisible({ timeout: 20_000 })
     // Backend cross-check (single source of truth for the flip).
@@ -97,7 +101,7 @@ test.describe('THR-REVIEW + enrollment safety (UI E2E)', () => {
   })
 
   // ── IVR-04 auto-re-enroll: setting the threshold restores monitoring ──────
-  test('31.2 — setting the threshold auto-re-enrolls + clears the lock + logs to Timeline', async ({ page }) => {
+  test('31.2 — setting the threshold auto-re-enrolls + clears the flag + logs to Timeline', async ({ page }) => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const olive = await tc.findUser(PATIENTS.olive.email)
     // Reverted state: mandatory (HCM), no threshold, NOT_ENROLLED, with a revert
@@ -118,9 +122,9 @@ test.describe('THR-REVIEW + enrollment safety (UI E2E)', () => {
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
     await editThresholdViaUI(page, olive.id, { sbpLowerTarget: 100 })
 
-    // Auto-re-enroll → EnrollmentCard unmounts + lock clears.
+    // Auto-re-enroll → EnrollmentCard unmounts + flag clears.
     await expect(page.locator(byTestId(T.admin.enrollmentCard))).toBeHidden({ timeout: 20_000 })
-    await expectUnlocked(page)
+    await expectNoThresholdNeeded(page)
     const after = await tc.findUser(PATIENTS.olive.email)
     expect(after.enrollmentStatus).toBe('ENROLLED')
 
@@ -132,8 +136,8 @@ test.describe('THR-REVIEW + enrollment safety (UI E2E)', () => {
     await tc.dispose()
   })
 
-  // ── THR-REVIEW stale (add) + attest path ──────────────────────────────────
-  test('31.3 — admin adds HCM with a threshold on file → stale lock; attest clears it', async ({ page }) => {
+  // ── THR-REVIEW stale (add) + one-click attest path ────────────────────────
+  test('31.3 — admin adds HCM with a threshold on file → stale review; one-click attest clears it', async ({ page }) => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const olive = await tc.findUser(PATIENTS.olive.email)
     await stageScratch(tc, olive.id, { enrolled: true, withThreshold: true })
@@ -141,20 +145,19 @@ test.describe('THR-REVIEW + enrollment safety (UI E2E)', () => {
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
     await correctProfileFieldViaUI(page, olive.id, 'hasHCM', 'true', 'QA: add HCM (stale)')
 
-    // Stale lock — review banner shown, enrollment unchanged (threshold exists).
-    await expectLockedToThresholds(page)
+    // Stale review — flag + banner shown, enrollment unchanged (threshold exists).
+    await expectNeedsThreshold(page)
     await expect(page.locator(byTestId(T.admin.thresholdReviewBanner))).toBeVisible({ timeout: 20_000 })
     expect((await tc.findUser(PATIENTS.olive.email)).enrollmentStatus).toBe('ENROLLED')
 
-    // Attest "Targets still correct" with the required note → lock clears.
-    await page.locator(byTestId(T.admin.thresholdReviewNote)).fill('QA: targets still appropriate')
+    // Attest "Targets still correct" — ONE CLICK, no note required → flag clears.
     await page.locator(byTestId(T.admin.thresholdAttest)).click()
-    await expectUnlocked(page)
+    await expectNoThresholdNeeded(page)
     await tc.dispose()
   })
 
   // ── THR-REVIEW on REMOVAL (admin disables HCM) ────────────────────────────
-  test('31.4 — admin disables HCM with a threshold on file → re-review lock fires', async ({ page }) => {
+  test('31.4 — admin disables HCM with a threshold on file → re-review flag fires', async ({ page }) => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const olive = await tc.findUser(PATIENTS.olive.email)
     await stageScratch(tc, olive.id, { enrolled: true, hcm: true, withThreshold: true })
@@ -162,32 +165,42 @@ test.describe('THR-REVIEW + enrollment safety (UI E2E)', () => {
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
     await correctProfileFieldViaUI(page, olive.id, 'hasHCM', 'false', 'QA: remove HCM')
 
-    await expectLockedToThresholds(page)
+    await expectNeedsThreshold(page)
     await expect(page.locator(byTestId(T.admin.thresholdReviewBanner))).toBeVisible({ timeout: 20_000 })
     await tc.dispose()
   })
 
-  // ── Initial setup also locks; OPS is never locked ─────────────────────────
-  test('31.5 — mandatory patient with no threshold locks an editor on open', async ({ page }) => {
+  // ── Initial setup lands an editor on Thresholds; OPS is not auto-redirected ─
+  test('31.5 — mandatory patient with no threshold lands an editor on Thresholds on open', async ({ page }) => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const olive = await tc.findUser(PATIENTS.olive.email)
     await stageScratch(tc, olive.id, { enrolled: false, hcm: true, withThreshold: false })
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
     await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
-    await expectLockedToThresholds(page)
+    await expectNeedsThreshold(page)
     await tc.dispose()
   })
 
-  test('31.6 — HEALPLACE_OPS is NOT locked (read-only, cannot edit thresholds)', async ({ page }) => {
+  test('31.6 — HEALPLACE_OPS is not auto-redirected, but sees the awareness flag', async ({ page }) => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const olive = await tc.findUser(PATIENTS.olive.email)
     await stageScratch(tc, olive.id, { enrolled: false, hcm: true, withThreshold: false })
 
     await signInAdmin(page, ADMINS.ops.email, ADMIN_BASE_URL)
     await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
-    // OPS can freely navigate — the Medications tab stays enabled.
-    await expectUnlocked(page)
+    await page.locator(byTestId(T.admin.detailHeader)).waitFor({ state: 'visible', timeout: 20_000 })
+    await page.waitForTimeout(2500)
+    // OPS can't author thresholds → NOT auto-landed: stays on the default tab.
+    await expect(page.locator(byTestId(T.admin.detailTab('thresholds')))).toHaveAttribute(
+      'aria-selected',
+      'false',
+    )
+    // …but the awareness flag + banner still surface so OPS can route the case,
+    // and every tab is freely navigable.
+    await expect(page.locator(byTestId(T.admin.tabThresholdsFlag))).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator(byTestId(T.admin.thresholdNeededBanner))).toBeVisible()
+    await expect(page.locator(byTestId(T.admin.detailTab('medications')))).toBeEnabled()
     await tc.dispose()
   })
 
@@ -231,6 +244,8 @@ test.describe('THR-REVIEW + enrollment safety (UI E2E)', () => {
       'aria-selected',
       'false',
     )
+    // A valid (non-stale) threshold → no needs-threshold flag at all.
+    await expect(page.locator(byTestId(T.admin.tabThresholdsFlag))).toBeHidden()
     await tc.dispose()
   })
 })
@@ -559,7 +574,7 @@ test.describe('Variants + remaining coverage (UI E2E)', () => {
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
     await correctProfileFieldViaUI(page, olive.id, 'heartFailureType', 'HFREF', 'QA: HFrEF')
-    await expectLockedToThresholds(page)
+    await expectNeedsThreshold(page)
     await expect(page.locator(byTestId(T.admin.enrollmentCard))).toBeVisible({ timeout: 20_000 })
     expect((await tc.findUser(PATIENTS.olive.email)).enrollmentStatus).toBe('NOT_ENROLLED')
     await tc.dispose()
@@ -618,8 +633,8 @@ test.describe('Variants + remaining coverage (UI E2E)', () => {
   })
 
   // Patient adds a mandatory condition WHILE a threshold exists → no revert, a
-  // "review needed" notice, and the admin is locked on open (stale threshold).
-  test('31.18 — patient adds HCM with a threshold on file → review notice + admin locked on open', async ({ page }) => {
+  // "review needed" notice, and the admin lands on Thresholds on open (stale threshold).
+  test('31.18 — patient adds HCM with a threshold on file → review notice + admin lands on Thresholds on open', async ({ page }) => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const olive = await tc.findUser(PATIENTS.olive.email)
     const provider = await tc.findUser(ADMINS.primaryProvider.email)
@@ -644,7 +659,7 @@ test.describe('Variants + remaining coverage (UI E2E)', () => {
     // An editor opening the patient is locked (the threshold is now stale).
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
     await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
-    await expectLockedToThresholds(page)
+    await expectNeedsThreshold(page)
     await tc.dispose()
   })
 
@@ -671,26 +686,26 @@ test.describe('Variants + remaining coverage (UI E2E)', () => {
     await tc.dispose()
   })
 
-  // The lock applies to a PROVIDER (a threshold-editor), not only SUPER_ADMIN.
-  test('31.20 — a PROVIDER is also locked by a mandatory-without-threshold patient', async ({ page }) => {
+  // Land-first + flag applies to a PROVIDER (a threshold-editor), not only SUPER_ADMIN.
+  test('31.20 — a PROVIDER also lands on Thresholds for a mandatory-without-threshold patient', async ({ page }) => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const olive = await tc.findUser(PATIENTS.olive.email)
     await stageScratch(tc, olive.id, { enrolled: false, hcm: true, withThreshold: false })
 
     await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
     await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
-    await expectLockedToThresholds(page)
+    await expectNeedsThreshold(page)
     await tc.dispose()
   })
 })
 
-// ── Seed-patient lock diagnosis (UI E2E) ─────────────────────────────────────
-// Read-only: for shared seed patients (James/Paul) the lock must fire EXACTLY
+// ── Seed-patient threshold-flag diagnosis (UI E2E) ─────────────────────────────────────
+// Read-only: for shared seed patients (James/Paul) the needs-threshold flag must fire EXACTLY
 // when the threshold is missing or stale (a mandatory condition changed after
-// the threshold was set). A patient locked with a threshold and NO newer
+// the threshold was set). A patient flagged with a threshold and NO newer
 // condition change would be a false-positive bug — this asserts against that
 // and attaches the breakdown so the cause is visible.
-test.describe('Seed-patient lock diagnosis (UI E2E)', () => {
+test.describe('Seed-patient threshold-flag diagnosis (UI E2E)', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write/e2e tests gated by RUN_WRITE_TESTS=1')
   test.describe.configure({ timeout: 120_000 })
 
@@ -711,7 +726,7 @@ test.describe('Seed-patient lock diagnosis (UI E2E)', () => {
   }
 
   for (const [n, key] of [[31.21, 'james'], [31.22, 'paul']] as const) {
-    test(`${n} — ${key}: lock fires iff threshold missing or stale (diagnosis)`, async ({ page }, testInfo) => {
+    test(`${n} — ${key}: needs-threshold flag fires iff threshold missing or stale (diagnosis)`, async ({ page }, testInfo) => {
       const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
       const u = await tc.findUser(PATIENTS[key].email)
       const api = await authedApi(API_BASE_URL, ADMIN.email, 'admin')
@@ -727,15 +742,16 @@ test.describe('Seed-patient lock diagnosis (UI E2E)', () => {
       const changedAt = mandatoryChangedAtMs(logs)
       const setAt = threshold ? new Date(threshold.setAt).getTime() : 0
       const stale = !!threshold && changedAt > 0 && setAt < changedAt
-      const wouldLock = stale || (mandatory && !threshold)
+      const wouldFlag = stale || (mandatory && !threshold)
 
-      // Observe the real UI lock.
+      // Observe the real UI signal — the pulsing flag on the Thresholds tab
+      // (the hard lock is gone; the flag is the new "needs threshold" marker).
       await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
       await page.goto(`${ADMIN_BASE_URL}/patients/${u.id}`)
       await page.locator(byTestId(T.admin.detailHeader)).waitFor({ state: 'visible', timeout: 20_000 })
-      // Let the shell load logs + the gate settle before reading the lock.
+      // Let the shell load logs + the gate settle before reading the flag.
       await page.waitForTimeout(2500)
-      const uiLocked = await page.locator(byTestId(T.admin.detailTab('medications'))).isDisabled()
+      const uiFlagged = await page.locator(byTestId(T.admin.tabThresholdsFlag)).isVisible()
 
       const diagnosis = {
         patient: key,
@@ -744,25 +760,25 @@ test.describe('Seed-patient lock diagnosis (UI E2E)', () => {
         thresholdSetAt: threshold?.setAt ?? null,
         latestMandatoryConditionChangeAt: changedAt ? new Date(changedAt).toISOString() : null,
         stale,
-        // Check `stale` first: a non-mandatory patient can still lock when a
-        // mandatory condition was REMOVED after the threshold was set.
+        // Check `stale` first: a non-mandatory patient can still be flagged when
+        // a mandatory condition was REMOVED after the threshold was set.
         reason: stale
-          ? 'a mandatory condition changed AFTER the threshold was set → stale → locked (re-save/attest to clear)'
+          ? 'a mandatory condition changed AFTER the threshold was set → stale → flagged (re-save/attest to clear)'
           : mandatory && !threshold
-            ? 'mandatory + NO threshold → locked (set one to clear)'
+            ? 'mandatory + NO threshold → flagged (set one to clear)'
             : !mandatory
-              ? 'not mandatory + not stale → not locked'
-              : 'threshold present + not stale → not locked',
-        wouldLock,
-        uiLocked,
+              ? 'not mandatory + not stale → not flagged'
+              : 'threshold present + not stale → not flagged',
+        wouldFlag,
+        uiFlagged,
       }
-      await testInfo.attach(`lock-diagnosis-${key}`, {
+      await testInfo.attach(`threshold-diagnosis-${key}`, {
         body: JSON.stringify(diagnosis, null, 2),
         contentType: 'application/json',
       })
 
-      // The lock must fire EXACTLY when missing-or-stale — no false positives.
-      expect(uiLocked, `lock mismatch — diagnosis: ${JSON.stringify(diagnosis)}`).toBe(wouldLock)
+      // The flag must fire EXACTLY when missing-or-stale — no false positives.
+      expect(uiFlagged, `flag mismatch — diagnosis: ${JSON.stringify(diagnosis)}`).toBe(wouldFlag)
       await tc.dispose()
     })
   }
@@ -925,6 +941,94 @@ test.describe('Timeline actor role (UI E2E)', () => {
     await expect(tl).toContainText(/\(provider\)/i, { timeout: 20_000 })
     // The generic "(admin)" must NOT leak through for a real provider action.
     await expect(tl).not.toContainText(/\(admin\)/i)
+    await tc.dispose()
+  })
+
+  // TL-071 — a Height change should read with its unit ("170 cm → 175 cm"), not
+  // as a bare number. FE-only rendering of the existing log diff.
+  test('31.31 — a Height change renders with the cm unit in the Timeline diff', async ({ page }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const olive = await tc.findUser(PATIENTS.olive.email)
+    await stageScratch(tc, olive.id, { enrolled: true, verified: false, withThreshold: false })
+
+    // A real (changed) value so a correction is written.
+    const api = await authedApi(API_BASE_URL, ADMIN.email, 'admin')
+    const prof = await (await api.get(`admin/users/${olive.id}/profile`)).json()
+    const current = (prof?.data ?? prof)?.heightCm ?? 170
+    const next = (Number(current) || 170) === 175 ? 176 : 175
+    await api.dispose()
+
+    await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
+    await correctProfileFieldViaUI(page, olive.id, 'heightCm', String(next), 'QA: change height')
+
+    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await page.locator(byTestId(T.admin.detailTab('timeline'))).click()
+    const tl = page.locator(byTestId(T.admin.timelineList))
+    await expect(tl).toContainText(new RegExp(`${next}\\s*cm`, 'i'), { timeout: 20_000 })
+    await tc.dispose()
+  })
+})
+
+// ── No-lock navigation + persistent banner (UI E2E) ───────────────────────────
+// The core of the redesign: a needs-threshold patient is GUIDED (land-first +
+// flag + banner) but never CAGED — every tab is navigable, and the banner offers
+// a one-click jump back to Thresholds.
+test.describe('No-lock threshold navigation (UI E2E)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write/e2e tests gated by RUN_WRITE_TESTS=1')
+  test.describe.configure({ timeout: 120_000 })
+
+  test('31.32 — needs-threshold patient: lands on Thresholds but other tabs are navigable + banner jumps back', async ({ page }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const olive = await tc.findUser(PATIENTS.olive.email)
+    await stageScratch(tc, olive.id, { enrolled: false, hcm: true, withThreshold: false })
+
+    await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    // Land-first on Thresholds, with the flag.
+    await expectNeedsThreshold(page)
+
+    // Navigate AWAY to a context tab — proves there's no lock.
+    await page.locator(byTestId(T.admin.detailTab('readings'))).click()
+    await expect(page.locator(byTestId(T.admin.detailTab('readings')))).toHaveAttribute('aria-selected', 'true')
+    // The persistent banner follows across tabs.
+    await expect(page.locator(byTestId(T.admin.thresholdNeededBanner))).toBeVisible({ timeout: 20_000 })
+
+    // The banner's one-click jump returns to Thresholds.
+    await page.locator(byTestId(T.admin.thresholdNeededGoto)).click()
+    await expect(page.locator(byTestId(T.admin.detailTab('thresholds')))).toHaveAttribute('aria-selected', 'true')
+    await tc.dispose()
+  })
+})
+
+// ── Patient-list threshold signal (UI E2E) ────────────────────────────────────
+// The list surfaces "needs threshold" from the OUTSIDE: a count chip (animated
+// when >0) + a subtle red row tint, so a provider sees the work without opening
+// each patient. Requires the backend `needsThreshold` flag.
+test.describe('Patient-list threshold signal (UI E2E)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write/e2e tests gated by RUN_WRITE_TESTS=1')
+  test.describe.configure({ timeout: 120_000 })
+
+  test('31.33 — a needs-threshold patient is counted in the chip, tints their row, and filters in', async ({ page }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const olive = await tc.findUser(PATIENTS.olive.email)
+    // Mandatory + no threshold → needsThreshold=true at the backend list level.
+    await stageScratch(tc, olive.id, { enrolled: false, hcm: true, withThreshold: false })
+
+    await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients`)
+
+    const chip = page.locator(byTestId(T.admin.patientThresholdFilter))
+    await expect(chip).toBeVisible({ timeout: 20_000 })
+    await expect(chip).toContainText(/[1-9]/) // count ≥ 1
+
+    // olive's row carries the subtle red tint class.
+    const row = page.locator(byTestId(T.admin.patientListRow(olive.id)))
+    await expect(row).toBeVisible({ timeout: 20_000 })
+    await expect(row).toHaveClass(/bg-\[#FEF4F4\]/)
+
+    // Filtering to "threshold needed" keeps olive in view.
+    await chip.click()
+    await expect(page.locator(byTestId(T.admin.patientListRow(olive.id)))).toBeVisible()
     await tc.dispose()
   })
 })

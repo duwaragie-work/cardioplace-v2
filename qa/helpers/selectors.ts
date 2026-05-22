@@ -337,6 +337,8 @@ export const T = {
     patientListRow: (userId: string) => `admin-patient-list-row-${userId}`,
     patientListEmpty: 'admin-patient-list-empty',
     patientListAccessDenied: 'admin-access-denied',
+    // Threshold-needed quick filter chip (animated red ring when >0).
+    patientThresholdFilter: 'admin-patient-threshold-filter',
 
     // Patient-detail shell
     detailHeader: 'admin-patient-detail-header',
@@ -352,6 +354,11 @@ export const T = {
         | 'careteam'
         | 'timeline',
     ) => `admin-tab-${key}`,
+    // Pulsing dot on the Thresholds tab while a threshold is needed (replaces
+    // the old hard lock), plus the persistent cross-tab banner + its jump button.
+    tabThresholdsFlag: 'admin-tab-thresholds-flag',
+    thresholdNeededBanner: 'admin-threshold-needed-banner',
+    thresholdNeededGoto: 'admin-threshold-needed-goto',
 
     // ProfileTab
     profileStatusBanner: 'admin-profile-status-banner',
