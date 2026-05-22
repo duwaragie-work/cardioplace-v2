@@ -506,21 +506,23 @@ export function fieldsChangedSinceVerification(
 }
 
 /**
- * THR-REVIEW — timestamp (ms) of the most recent log that *added* a
- * threshold-mandatory condition (heartFailureType→HFREF, hasHCM→true,
- * hasDCM→true). Used to detect a threshold that predates a new condition.
- * Returns null when no such add is recorded.
+ * THR-REVIEW — timestamp (ms) of the most recent log that *changed* a
+ * threshold-mandatory condition: hasHCM/hasDCM toggled either way, or
+ * heartFailureType moving TO or FROM HFREF. Covers both adding and removing a
+ * serious condition — both invalidate the existing threshold and require a
+ * re-review. Returns null when no such change is recorded.
  */
-export function mandatoryConditionAddedAt(
+export function mandatoryConditionChangedAt(
   logs: ProfileVerificationLog[],
 ): number | null {
   let latest = 0
   for (const log of logs) {
-    const added =
-      (log.fieldPath === 'profile.heartFailureType' && log.newValue === 'HFREF') ||
-      (log.fieldPath === 'profile.hasHCM' && log.newValue === true) ||
-      (log.fieldPath === 'profile.hasDCM' && log.newValue === true)
-    if (added) latest = Math.max(latest, new Date(log.createdAt).getTime())
+    const changed =
+      log.fieldPath === 'profile.hasHCM' ||
+      log.fieldPath === 'profile.hasDCM' ||
+      (log.fieldPath === 'profile.heartFailureType' &&
+        (log.newValue === 'HFREF' || log.previousValue === 'HFREF'))
+    if (changed) latest = Math.max(latest, new Date(log.createdAt).getTime())
   }
   return latest === 0 ? null : latest
 }

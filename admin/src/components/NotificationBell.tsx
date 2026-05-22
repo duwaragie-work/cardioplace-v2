@@ -191,6 +191,10 @@ export default function NotificationBell() {
     // when the alert is orphaned (no patientUserId on the row).
     if (n.alertId && n.patientUserId) {
       router.push(`/patients/${n.patientUserId}?alert=${n.alertId}`);
+    } else if (n.patientUserId) {
+      // Non-alert care-team notice (enrollment paused / condition review) —
+      // deep-link straight to the patient detail.
+      router.push(`/patients/${n.patientUserId}`);
     } else if (n.alertId) {
       router.push(`/notifications?tab=notifications`);
     }
