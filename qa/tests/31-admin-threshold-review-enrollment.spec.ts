@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { signInAdmin, authedApi } from '../helpers/auth.js'
+import { signInAdmin, signInPatient, authedApi } from '../helpers/auth.js'
 import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl, type TestControl } from '../helpers/test-control.js'
 import {
@@ -7,7 +7,7 @@ import {
   editThresholdViaUI,
   admitPatientViaUI,
 } from '../helpers/api.js'
-import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
+import { API_BASE_URL, ADMIN_BASE_URL, PATIENT_BASE_URL } from '../playwright.config.js'
 import { byTestId, T } from '../helpers/selectors.js'
 
 /**
@@ -302,6 +302,96 @@ test.describe('Per-field profile verification (UI E2E)', () => {
     await confirmAll.click()
     // Once everything's confirmed there are no pending fields left to confirm.
     await expect(confirmAll).toBeHidden({ timeout: 20_000 })
+    await tc.dispose()
+  })
+
+  // Reject hard-gate — a rejected field is an open "needs correction" item, so
+  // "Verification complete" must stay blocked (FE button disabled + banner; BE
+  // 400) until it's resolved. Resolving (re-confirm here) releases the gate.
+  test('31.24 — a rejected field blocks "Verification complete" (UI + backend) until resolved', async ({ page }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const olive = await tc.findUser(PATIENTS.olive.email)
+    // UNVERIFIED + non-mandatory so the per-field controls render and nothing locks.
+    await stageScratch(tc, olive.id, { enrolled: true, verified: false, withThreshold: false })
+    await tc.setUserCondition(olive.id, 'hasCAD', true)
+
+    await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+
+    // Reject CAD → the gate engages.
+    await page.locator(byTestId(T.admin.profileReject('hasCAD'))).click()
+    await expect(page.locator(byTestId(T.admin.profileField('hasCAD')))).toHaveAttribute(
+      'data-status',
+      'rejected',
+      { timeout: 20_000 },
+    )
+    await expect(page.locator(byTestId(T.admin.profileRejectedBanner))).toBeVisible()
+    await expect(page.locator(byTestId(T.admin.profileVerifyComplete))).toBeDisabled()
+
+    // Backend belt: verify-profile is refused (400) while a field is rejected.
+    const api = await authedApi(API_BASE_URL, ADMIN.email, 'admin')
+    const blocked = await api.post(`admin/users/${olive.id}/verify-profile`, {
+      data: { rationale: 'QA: attempt verify with a reject open' },
+    })
+    expect(blocked.ok(), 'verify-profile should be refused while a field is rejected').toBeFalsy()
+    expect(blocked.status()).toBe(400)
+    expect(await blocked.text()).toMatch(/resolve rejected field/i)
+
+    // Resolve by confirming the field (the ✓ stays available on a rejected row).
+    await page.locator(byTestId(T.admin.profileConfirm('hasCAD'))).click()
+    await expect(page.locator(byTestId(T.admin.profileField('hasCAD')))).toHaveAttribute(
+      'data-status',
+      'confirmed',
+      { timeout: 20_000 },
+    )
+    await expect(page.locator(byTestId(T.admin.profileRejectedBanner))).toBeHidden()
+    await expect(page.locator(byTestId(T.admin.profileVerifyComplete))).toBeEnabled()
+
+    // Now completing verification succeeds end-to-end.
+    await page.locator(byTestId(T.admin.profileVerifyComplete)).click()
+    await page.locator(byTestId(T.admin.profileVerifyConfirm)).click()
+    await expect(page.locator(byTestId(T.admin.profileField('hasCAD')))).toHaveAttribute(
+      'data-status',
+      'verified',
+      { timeout: 20_000 },
+    )
+    await api.dispose()
+    await tc.dispose()
+  })
+
+  // Display fix — the gate prevents NEW records from reaching VERIFIED + a
+  // rejected field, but a legacy record can hold that state. The row must show
+  // the field's own rejected status (not the whole-profile "Verified" flag), so
+  // the badge and the highlighted Reject button never contradict each other.
+  test('31.25 — a rejected field never reads "Verified" on a fully-verified profile (display fix)', async ({ page }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const olive = await tc.findUser(PATIENTS.olive.email)
+    await stageScratch(tc, olive.id, { enrolled: true, verified: true, withThreshold: false })
+    await tc.setUserCondition(olive.id, 'hasCAD', true)
+    // Seed an ADMIN_REJECT as the latest log for hasCAD on an otherwise-VERIFIED
+    // profile (future-dated so it wins the latest-log derivation deterministically).
+    await tc.seedAuditTrail(olive.id, [
+      {
+        changeType: 'ADMIN_REJECT',
+        fieldPath: 'profile.hasCAD',
+        changedBy: olive.id,
+        changedByRole: 'ADMIN',
+        previousValue: true,
+        newValue: null,
+        rationale: 'QA seed: legacy reject on a verified profile',
+        createdAtIso: new Date(Date.now() + 60_000).toISOString(),
+      },
+    ])
+
+    await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+
+    const field = page.locator(byTestId(T.admin.profileField('hasCAD')))
+    await expect(field).toHaveAttribute('data-status', 'rejected', { timeout: 20_000 })
+    await expect(field).toContainText(/rejected/i)
+    await expect(field).not.toContainText(/verified/i)
+    // Badge + button agree: the Reject control stays highlighted/disabled.
+    await expect(page.locator(byTestId(T.admin.profileReject('hasCAD')))).toBeDisabled()
     await tc.dispose()
   })
 })
@@ -676,4 +766,165 @@ test.describe('Seed-patient lock diagnosis (UI E2E)', () => {
       await tc.dispose()
     })
   }
+})
+
+// ── Patient re-check on field reject (cross-app UI E2E) ───────────────────────
+// When an admin rejects a self-reported field, the patient must (a) get an inbox
+// notice that names the field, and (b) see a "please re-check: {field}" banner on
+// their own profile. Drives BOTH apps: admin rejects via API, patient asserts UI.
+test.describe('Patient re-check on reject (UI E2E)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write/e2e tests gated by RUN_WRITE_TESTS=1')
+  test.describe.configure({ timeout: 120_000 })
+
+  test('31.26 — admin rejects a field → patient sees a named re-check banner + inbox notice', async ({ page }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const olive = await tc.findUser(PATIENTS.olive.email)
+    // UNVERIFIED + a field to reject. stageScratch resets the user (clears the
+    // notification inbox + verification logs), so the only notice is the new one.
+    await stageScratch(tc, olive.id, { enrolled: true, verified: false, withThreshold: false })
+    await tc.setUserCondition(olive.id, 'hasCAD', true)
+
+    // Admin rejects CAD (drives the same endpoint the Profile tab ✗ button hits).
+    const api = await authedApi(API_BASE_URL, ADMIN.email, 'admin')
+    const rej = await api.post(`admin/users/${olive.id}/reject-profile-field`, {
+      data: { field: 'hasCAD', rationale: 'QA: reject CAD to trigger patient re-check' },
+    })
+    expect(rej.ok(), `reject-profile-field: ${rej.status()} ${await rej.text()}`).toBeTruthy()
+    await api.dispose()
+
+    // (a) Patient inbox notice names the field.
+    const notes = await tc.listNotifications(olive.id)
+    const notice = notes.find((n) => /re-check a profile detail/i.test(n.title))
+    expect(notice, `titles: ${notes.map((n) => n.title).join(', ')}`).toBeTruthy()
+    expect(notice?.body).toMatch(/coronary artery disease/i)
+
+    // (b) Patient profile UI shows the named re-check banner (patient app, :3000).
+    await signInPatient(page, PATIENTS.olive.email)
+    await page.goto(`${PATIENT_BASE_URL}/profile`)
+    const banner = page.locator(byTestId(T.profile.recheckBanner))
+    await expect(banner).toBeVisible({ timeout: 20_000 })
+    await expect(banner).toContainText(/coronary artery disease/i)
+    await tc.dispose()
+  })
+})
+
+// ── Correction UX: no-op + friendly validation (UI E2E) ───────────────────────
+// "Correcting" a field to the value it already holds isn't a change — the admin
+// should be nudged to ✓ Confirm, not shown a raw "No corrections supplied" /
+// "corrections.heightCm must be an integer number" error.
+test.describe('Profile correction UX (UI E2E)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write/e2e tests gated by RUN_WRITE_TESTS=1')
+  test.describe.configure({ timeout: 120_000 })
+
+  test('31.27 — re-saving Height with the same value shows a friendly "no change" note, not an error', async ({ page }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const olive = await tc.findUser(PATIENTS.olive.email)
+    await stageScratch(tc, olive.id, { enrolled: true, verified: false, withThreshold: false })
+
+    // Read the current height so we can re-type the SAME value.
+    const api = await authedApi(API_BASE_URL, ADMIN.email, 'admin')
+    const prof = await (await api.get(`admin/users/${olive.id}/profile`)).json()
+    const current = (prof?.data ?? prof)?.heightCm ?? 170
+    await api.dispose()
+
+    await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await page.locator(byTestId(T.admin.profileCorrect('heightCm'))).click()
+    await page.locator(byTestId(T.admin.profileEditInput('heightCm'))).fill(String(current))
+    await page.locator(byTestId(T.admin.profileEditSave('heightCm'))).click()
+
+    // Friendly info note appears (no thrown error), pointing at Confirm.
+    const note = page.locator(byTestId(T.admin.profileFieldNote('heightCm')))
+    await expect(note).toBeVisible({ timeout: 20_000 })
+    await expect(note).toContainText(/no change/i)
+    await expect(note).toContainText(/confirm/i)
+    // The row was NOT marked corrected (no write happened).
+    await expect(page.locator(byTestId(T.admin.profileField('heightCm')))).not.toHaveAttribute(
+      'data-status',
+      'corrected',
+    )
+    await tc.dispose()
+  })
+
+  test('31.28 — a non-integer Height shows plain-language guidance, not the raw validator path', async ({ page }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const olive = await tc.findUser(PATIENTS.olive.email)
+    await stageScratch(tc, olive.id, { enrolled: true, verified: false, withThreshold: false })
+
+    const api = await authedApi(API_BASE_URL, ADMIN.email, 'admin')
+    const prof = await (await api.get(`admin/users/${olive.id}/profile`)).json()
+    const current = (prof?.data ?? prof)?.heightCm ?? 170
+    await api.dispose()
+
+    await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await page.locator(byTestId(T.admin.profileCorrect('heightCm'))).click()
+    // A decimal that differs from the current value → a real (invalid) change.
+    await page.locator(byTestId(T.admin.profileEditInput('heightCm'))).fill(`${current}.5`)
+    await page.locator(byTestId(T.admin.profileEditSave('heightCm'))).click()
+
+    const note = page.locator(byTestId(T.admin.profileFieldNote('heightCm')))
+    await expect(note).toBeVisible({ timeout: 20_000 })
+    await expect(note).toContainText(/whole number/i)
+    // Not the raw "corrections.heightCm" / "must be an integer number" text.
+    await expect(note).not.toContainText(/corrections\./i)
+    await tc.dispose()
+  })
+
+  test('31.30 — on an already-verified profile the no-op note omits the ✓ Confirm hint (Confirm is hidden)', async ({ page }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const olive = await tc.findUser(PATIENTS.olive.email)
+    // Fully VERIFIED → per-field ✓ Confirm buttons are hidden.
+    await stageScratch(tc, olive.id, { enrolled: true, verified: true, withThreshold: false })
+
+    const api = await authedApi(API_BASE_URL, ADMIN.email, 'admin')
+    const prof = await (await api.get(`admin/users/${olive.id}/profile`)).json()
+    const current = (prof?.data ?? prof)?.heightCm ?? 170
+    await api.dispose()
+
+    await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await page.locator(byTestId(T.admin.profileCorrect('heightCm'))).click()
+    await page.locator(byTestId(T.admin.profileEditInput('heightCm'))).fill(String(current))
+    await page.locator(byTestId(T.admin.profileEditSave('heightCm'))).click()
+
+    const note = page.locator(byTestId(T.admin.profileFieldNote('heightCm')))
+    await expect(note).toBeVisible({ timeout: 20_000 })
+    await expect(note).toContainText(/no change/i)
+    // Confirm is hidden on a verified profile, so don't point at it.
+    await expect(note).not.toContainText(/confirm/i)
+    await tc.dispose()
+  })
+})
+
+// ── Timeline actor role (UI E2E) ──────────────────────────────────────────────
+// Admin actions are stored with a coarse VerifierRole.ADMIN; the Timeline should
+// resolve and show the actor's REAL role (e.g. provider) instead of "(admin)".
+test.describe('Timeline actor role (UI E2E)', () => {
+  test.skip(!process.env.RUN_WRITE_TESTS, 'Write/e2e tests gated by RUN_WRITE_TESTS=1')
+  test.describe.configure({ timeout: 120_000 })
+
+  test('31.29 — a PROVIDER\'s action shows "(provider)" in the Timeline, not the generic "(admin)"', async ({ page }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const olive = await tc.findUser(PATIENTS.olive.email)
+    await stageScratch(tc, olive.id, { enrolled: true, verified: false, withThreshold: false })
+    await tc.setUserCondition(olive.id, 'hasCAD', true)
+
+    // Dr. Samuel Okonkwo is a PROVIDER (and olive's primary provider).
+    await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await page.locator(byTestId(T.admin.profileConfirm('hasCAD'))).click()
+    await expect(page.locator(byTestId(T.admin.profileField('hasCAD')))).toHaveAttribute(
+      'data-status',
+      'confirmed',
+      { timeout: 20_000 },
+    )
+
+    await page.locator(byTestId(T.admin.detailTab('timeline'))).click()
+    const tl = page.locator(byTestId(T.admin.timelineList))
+    await expect(tl).toContainText(/\(provider\)/i, { timeout: 20_000 })
+    // The generic "(admin)" must NOT leak through for a real provider action.
+    await expect(tl).not.toContainText(/\(admin\)/i)
+    await tc.dispose()
+  })
 })

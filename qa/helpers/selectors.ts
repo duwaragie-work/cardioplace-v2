@@ -268,6 +268,9 @@ export const T = {
     name: 'profile-name',
     email: 'profile-email',
     verifiedBadge: 'profile-verified-badge',
+    // "Please re-check: {fields}" banner shown when the care team rejected
+    // specific self-reported fields (names them so the patient knows what to fix).
+    recheckBanner: 'profile-recheck-banner',
     signOut: 'profile-signout',
     careTeamPractice: 'care-team-practice',
     careTeamPrimary: 'care-team-primary',
@@ -358,12 +361,18 @@ export const T = {
     profileReject: (key: string) => `admin-profile-reject-${key}`,
     profileEditInput: (key: string) => `admin-profile-edit-input-${key}`,
     profileEditSave: (key: string) => `admin-profile-edit-save-${key}`,
+    // Friendly inline note under a row: no-op "correction" (info) or a mapped
+    // validation error (e.g. height must be a whole number).
+    profileFieldNote: (key: string) => `admin-profile-field-note-${key}`,
     profileVerifyComplete: 'admin-profile-verify-complete',
     profileVerifyRationale: 'admin-profile-verify-rationale',
     profileVerifyConfirm: 'admin-profile-verify-confirm',
     // IVR-08/25 — real per-field confirm + bulk confirm-all; IVR-23 banner.
     profileConfirmAll: 'admin-profile-confirm-all',
     profileChangedBanner: 'admin-profile-changed-banner',
+    // Reject hard-gate — "Verification complete" is blocked while any field is
+    // rejected; this banner lists the fields that must be resolved first.
+    profileRejectedBanner: 'admin-profile-rejected-banner',
     // Cluster 8.1 Gap 3 — persistent CAD treatment-target note rendered on
     // the cardiac section of ProfileTab whenever profile.hasCAD. Documents
     // the AHA/ACC 130/80 target + the Q2-ramp default thresholds the
