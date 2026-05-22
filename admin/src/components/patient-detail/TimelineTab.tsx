@@ -263,6 +263,10 @@ function formatMedicationObject(v: unknown): string | null {
   return parts.join(' · ');
 }
 
+// Units appended to a field's numeric value in the diff line (TL-071). Keyed by
+// the raw field key from parseFieldPath (e.g. profile.heightCm → "heightCm").
+const FIELD_UNITS: Record<string, string> = { heightCm: 'cm' };
+
 function prettifyEnumValue(v: string): string {
   // ALL_CAPS_WITH_UNDERSCORES → "All caps with underscores"
   if (/^[A-Z0-9_]+$/.test(v)) {
@@ -271,14 +275,18 @@ function prettifyEnumValue(v: string): string {
   return v;
 }
 
-function describeChange(prev: unknown, next: unknown): string | null {
+function describeChange(prev: unknown, next: unknown, unit?: string): string | null {
   const a = formatValue(prev);
   const b = formatValue(next);
   if (a == null && b == null) return null;
-  if (a == null) return `Set to ${b}`;
-  if (b == null) return `Was ${a}`;
+  // Append a unit (e.g. "cm") to real values so a height change reads
+  // "170 cm → 175 cm" instead of a bare number (TL-071). Skip the "—" placeholder.
+  const withUnit = (s: string | null) =>
+    unit && s != null && s !== '—' ? `${s} ${unit}` : (s ?? '');
+  if (a == null) return `Set to ${withUnit(b)}`;
+  if (b == null) return `Was ${withUnit(a)}`;
   if (a === b) return null;
-  return `${a} → ${b}`;
+  return `${withUnit(a)} → ${withUnit(b)}`;
 }
 
 function entriesFromLogs(
@@ -346,7 +354,8 @@ function entriesFromLogs(
           ? `${drugName} · ${parsed.field}`
           : parsed.field;
       title = `${fieldLabel} ${verb}`;
-      body = describeChange(l.previousValue, l.newValue) ?? l.rationale ?? undefined;
+      const unit = parsed.fieldKey ? FIELD_UNITS[parsed.fieldKey] : undefined;
+      body = describeChange(l.previousValue, l.newValue, unit) ?? l.rationale ?? undefined;
     }
 
     // If we used the diff for body, surface the rationale on a third line
