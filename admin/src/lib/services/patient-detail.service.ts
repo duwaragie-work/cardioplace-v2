@@ -394,6 +394,21 @@ export async function upsertPatientThreshold(
   return jsonOrThrow<PatientThreshold>(res, 'Could not save threshold')
 }
 
+/**
+ * THR-033 — clear (delete) a patient's personalized threshold. The patient
+ * reverts to the standard table; the backend cascades an enrollment revert when
+ * the condition still requires a threshold. 404 is treated as already-clear.
+ */
+export async function deletePatientThreshold(userId: string): Promise<void> {
+  const res = await fetchWithAuth(`${API}/api/admin/patients/${userId}/threshold`, {
+    method: 'DELETE',
+  })
+  if (!res.ok && res.status !== 404) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Could not clear threshold: ${res.status}`)
+  }
+}
+
 // ─── Verification logs / Timeline (H5) ──────────────────────────────────────
 
 export async function getVerificationLogs(userId: string): Promise<ProfileVerificationLog[]> {

@@ -1212,16 +1212,13 @@ export default function PatientsPage() {
                       }
                     }}
                     title={p.needsThreshold ? 'Threshold needed — set or re-review targets' : undefined}
-                    // Subtle red row tint + an inset left accent when a threshold
-                    // is missing/stale. The base class tints; the hover variant
-                    // still wins on hover (no inline bg, so hover isn't clobbered).
-                    className={`w-full text-left px-5 py-3.5 flex items-center gap-4 md:grid md:gap-3 transition-colors hover:bg-[#F8F4FF] cursor-pointer group ${p.needsThreshold ? 'bg-[#FEF4F4]' : ''}`}
+                    // Whole-row subtle red tint when a threshold is missing/stale
+                    // (no left stripe). The base class tints the entire row; the
+                    // hover variant still wins on hover (no inline bg to clobber it).
+                    className={`w-full text-left px-5 py-3.5 flex items-center gap-4 md:grid md:gap-3 transition-colors hover:bg-[#F8F4FF] cursor-pointer group ${p.needsThreshold ? 'bg-[#FDE8E8]' : ''}`}
                     style={{
                       gridTemplateColumns: '1.8fr 0.9fr 0.9fr 1fr 1fr 1fr 1.2fr 32px',
                       borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none',
-                      ...(p.needsThreshold
-                        ? { boxShadow: 'inset 3px 0 0 var(--brand-alert-red)' }
-                        : {}),
                     }}
                   >
                     {/* Patient info */}

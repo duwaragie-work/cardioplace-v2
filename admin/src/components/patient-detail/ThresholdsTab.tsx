@@ -24,11 +24,13 @@ import {
   ShieldAlert,
   AlertTriangle,
   Wand2,
+  Trash2,
 } from 'lucide-react';
 import {
   thresholdDefaultsFor,
   thresholdMandatory,
   upsertPatientThreshold,
+  deletePatientThreshold,
   type PatientProfile,
   type PatientThreshold,
   type UpsertThresholdPayload,
@@ -84,7 +86,10 @@ function thresholdToForm(t: PatientThreshold | null): FormState {
 }
 
 function formToPayload(f: FormState): UpsertThresholdPayload {
-  const num = (s: string) => (s.trim() === '' ? undefined : Number(s));
+  // THR-032 — an emptied field sends null (not undefined) so the backend
+  // actually clears that target. With undefined, Prisma's update ignored it and
+  // the old value stuck, so a cleared field never persisted.
+  const num = (s: string) => (s.trim() === '' ? null : Number(s));
   return {
     sbpUpperTarget: num(f.sbpUpperTarget),
     sbpLowerTarget: num(f.sbpLowerTarget),
@@ -117,6 +122,9 @@ export default function ThresholdsTab({
   const [reviewNote, setReviewNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // THR-033 — two-step "Clear personalized targets" (delete) confirm.
+  const [clearing, setClearing] = useState(false);
+  const [confirmingClear, setConfirmingClear] = useState(false);
 
   // Sync the form when the underlying threshold (re)loads. Derived state
   // pattern is intentional here — the parent owns the canonical row and
@@ -210,6 +218,26 @@ export default function ThresholdsTab({
       setError(e instanceof Error ? e.message : 'Could not confirm targets.');
     } finally {
       setAttesting(false);
+    }
+  }
+
+  // THR-033 — clear the personalized threshold. The backend removes the row and
+  // (for a still-mandatory enrolled patient) reverts enrollment; onChanged()
+  // reloads so the editor empties and the mandatory banner / needs-threshold
+  // flag reappear when appropriate.
+  async function clearTargets() {
+    setClearing(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await deletePatientThreshold(patientId);
+      setConfirmingClear(false);
+      setSuccess('Personalized targets cleared.');
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not clear targets.');
+    } finally {
+      setClearing(false);
     }
   }
 
@@ -551,6 +579,56 @@ export default function ThresholdsTab({
             <AlertTriangle className="w-2.5 h-2.5" />
             Full audit history of edits is in the Timeline tab.
           </p>
+
+          {/* THR-033 — clear the personalized threshold (two-step confirm).
+              Only for the threshold-author roles. Reverts the patient to the
+              standard table; a still-mandatory enrolled patient is dropped back
+              to NOT_ENROLLED by the backend cascade. */}
+          {canEdit && (
+            <div className="mt-4 pt-3" style={{ borderTop: '1px solid var(--brand-border)' }}>
+              {confirmingClear ? (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <span className="text-[12px] flex-1" style={{ color: 'var(--brand-alert-red-text)' }}>
+                    Clear these targets? The patient reverts to the standard
+                    table; if their condition still requires a threshold, their
+                    enrollment is paused.
+                  </span>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingClear(false)}
+                      disabled={clearing}
+                      className="btn-admin-secondary"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearTargets}
+                      disabled={clearing}
+                      data-testid="admin-threshold-clear-confirm"
+                      className="h-9 px-3 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-all hover:brightness-95 disabled:opacity-60"
+                      style={{ backgroundColor: 'var(--brand-alert-red)', color: 'white' }}
+                    >
+                      {clearing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                      Clear targets
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { setConfirmingClear(true); setSuccess(null); setError(null); }}
+                  data-testid="admin-threshold-clear"
+                  className="text-[12px] font-semibold inline-flex items-center gap-1.5 cursor-pointer hover:underline"
+                  style={{ color: 'var(--brand-alert-red-text)' }}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Clear personalized targets
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
