@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -77,6 +78,21 @@ export class ThresholdController {
       { id: req.user.id, roles: req.user.roles },
       patientUserId,
       dto,
+    )
+  }
+
+  // THR-033 — clear a patient's personalized threshold (reverts them to the
+  // standard table; cascades an enrollment revert when the condition still
+  // requires one). Same write-role scope as create/update.
+  @Delete()
+  @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.PROVIDER)
+  remove(
+    @Req() req: AuthedReq,
+    @Param('userId') patientUserId: string,
+  ) {
+    return this.service.delete(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
     )
   }
 }

@@ -879,6 +879,15 @@ export default function NotificationsPage() {
     return () => clearInterval(interval);
   }, [load]);
 
+  // Deep-link support: /notifications?tab=notifications opens straight to the
+  // Notifications tab (the dashboard panel + bell link here). Read client-side
+  // to avoid a useSearchParams Suspense boundary. Defaults to Alerts otherwise.
+  useEffect(() => {
+    const tabParam = new URLSearchParams(window.location.search).get('tab');
+    if (tabParam === 'notifications') setTopTab('notifications');
+    else if (tabParam === 'alerts') setTopTab('alerts');
+  }, []);
+
   // Sibling components (e.g. the Navbar bell) keep their own count and
   // cache their own state. After any local mutation that changes the
   // alert/notification surface, broadcast a window-level event so they can

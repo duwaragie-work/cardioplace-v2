@@ -23,12 +23,20 @@ import {
   Loader2,
   AlertTriangle,
   Info,
+  History,
+  CheckCheck,
 } from 'lucide-react';
 import {
   verifyPatientProfile,
   correctPatientProfile,
   rejectProfileField,
+  confirmProfileField,
+  confirmProfileFields,
+  deriveFieldStatuses,
+  fieldsChangedSinceVerification,
+  type FieldVerificationStatus,
   type PatientProfile,
+  type ProfileVerificationLog,
 } from '@/lib/services/patient-detail.service';
 import { useAuth } from '@/lib/auth-context';
 import { canVerifyProfile } from '@/lib/roleGates';
@@ -36,6 +44,10 @@ import { canVerifyProfile } from '@/lib/roleGates';
 interface Props {
   patientId: string;
   profile: PatientProfile | null;
+  /** Verification logs (from the shell) — drives per-field confirmed/corrected/
+   *  rejected/pending status (IVR-08) and the "changed since verification"
+   *  banner (IVR-23). */
+  logs: ProfileVerificationLog[];
   loading: boolean;
   onChanged: () => void;
 }
@@ -100,29 +112,115 @@ function ageFromDob(dob: string | null): number | null {
   return age >= 0 ? age : null;
 }
 
-type FieldStatus = 'pending' | 'confirmed' | 'editing' | 'rejected';
+// True when a "correction" wouldn't actually change the stored value — the
+// admin opened the editor and saved the same value (or didn't change it).
+// Dates compare by calendar day; everything else by value (null/undefined alike).
+function isNoopCorrection(field: FieldDef, value: unknown, current: unknown): boolean {
+  if (field.type === 'date') {
+    const a = value ? String(value).slice(0, 10) : '';
+    const b = current ? String(current).slice(0, 10) : '';
+    return a === b;
+  }
+  return (value ?? null) === (current ?? null);
+}
 
-export default function ProfileTab({ patientId, profile, loading, onChanged }: Props) {
+// Map raw backend / class-validator messages to plain language for the admin.
+// e.g. "corrections.heightCm must be an integer number" → "Height must be a
+// whole number." Range bounds are pulled from the validator text when present.
+function friendlyCorrectionError(raw: string, field: FieldDef): string {
+  const r = raw.toLowerCase();
+  if (r.includes('no corrections')) {
+    return `No change to ${field.label}. Use the ✓ Confirm button to mark it reviewed.`;
+  }
+  if (field.type === 'number') {
+    const max = raw.match(/greater than (\d+)/)?.[1];
+    const min = raw.match(/less than (\d+)/)?.[1];
+    const unit = field.unit ? ` ${field.unit}` : '';
+    if (min && max) {
+      return `${field.label} must be a whole number between ${min} and ${max}${unit}.`;
+    }
+    if (r.includes('integer') || r.includes('number')) {
+      return `${field.label} must be a whole number${unit}.`;
+    }
+  }
+  return `Couldn't save ${field.label}. Please check the value and try again.`;
+}
+
+// Display status for a row's right cell. The verified/confirmed/corrected/
+// rejected/pending states are DERIVED from the verification logs (IVR-08);
+// `editing` is the only purely-local UI state (inline edit open).
+type FieldStatus = FieldVerificationStatus | 'editing';
+
+export default function ProfileTab({ patientId, profile, logs, loading, onChanged }: Props) {
   const { user } = useAuth();
   // Verify / correct / reject + "Verification complete" only for the
   // clinical roles (SUPER_ADMIN, PROVIDER, MEDICAL_DIRECTOR). HEALPLACE_OPS
   // sees the same data but no action buttons.
   const canVerify = canVerifyProfile(user);
-  // Local row state — per-field action state. Reset whenever the underlying
-  // profile changes (new fetch).
+  // Local UI state. `edits` holds in-flight inline-edit values; `editingFields`
+  // tracks which rows are open for edit. The confirmed/corrected/rejected
+  // status itself is derived from `logs`, not held locally — an action calls
+  // the backend then onChanged() reloads the logs so the badge reflects truth.
   const [edits, setEdits] = useState<Partial<Record<keyof PatientProfile, unknown>>>({});
-  const [statuses, setStatuses] = useState<Partial<Record<keyof PatientProfile, FieldStatus>>>({});
+  const [editingFields, setEditingFields] = useState<Set<string>>(new Set());
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
   const [savingField, setSavingField] = useState<keyof PatientProfile | null>(null);
+  const [confirmingAll, setConfirmingAll] = useState(false);
   const [showCompleteRationale, setShowCompleteRationale] = useState(false);
   const [completeRationale, setCompleteRationale] = useState('');
+  // Per-field inline note (friendly): 'info' for a no-op "correction" (value
+  // unchanged → use Confirm), 'error' for a mapped validation failure. Keyed by
+  // field so it shows right under the row the admin acted on.
+  const [fieldNotes, setFieldNotes] = useState<
+    Partial<Record<keyof PatientProfile, { text: string; tone: 'info' | 'error' }>>
+  >({});
+
+  // IVR-08 — per-field status from the latest log at profile.{field}.
+  const fieldStatuses = useMemo(() => deriveFieldStatuses(logs), [logs]);
+  // IVR-23 — fields the patient changed since the last admin review.
+  const changedSinceVerification = useMemo(
+    () => fieldsChangedSinceVerification(logs),
+    [logs],
+  );
 
   const grouped = useMemo(() => {
     const m: Record<FieldDef['group'], FieldDef[]> = { demographics: [], pregnancy: [], cardiac: [] };
     for (const f of FIELDS) m[f.group].push(f);
     return m;
   }, []);
+
+  const fieldLabel = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const f of FIELDS) m[f.key as string] = f.label;
+    return m;
+  }, []);
+
+  // IVR-25 — keys eligible for "Confirm all": pending (no admin action yet),
+  // not mid-edit, and visible (pregnancy rows hidden for non-FEMALE patients).
+  const pendingFieldKeys = useMemo(
+    () =>
+      FIELDS.filter((f) => {
+        if (f.group === 'pregnancy' && profile?.gender !== 'FEMALE') return false;
+        if (editingFields.has(f.key as string)) return false;
+        return (fieldStatuses.get(f.key as string) ?? 'pending') === 'pending';
+      }).map((f) => f.key),
+    [fieldStatuses, editingFields, profile],
+  );
+
+  // Reject hard-gate — visible fields whose latest log is ADMIN_REJECT. A
+  // rejected field is an open "needs correction" item, so "Verification
+  // complete" must stay blocked until each is resolved (corrected, re-confirmed,
+  // or re-reported by the patient). Mirrors the backend guard in verifyProfile.
+  const rejectedFieldKeys = useMemo(
+    () =>
+      FIELDS.filter((f) => {
+        if (f.group === 'pregnancy' && profile?.gender !== 'FEMALE') return false;
+        return (fieldStatuses.get(f.key as string) ?? 'pending') === 'rejected';
+      }).map((f) => f.key),
+    [fieldStatuses, profile],
+  );
+  const hasRejectedFields = rejectedFieldKeys.length > 0;
 
   if (loading) {
     return (
@@ -156,23 +254,110 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
 
   const isFullyVerified = profile.profileVerificationStatus === 'VERIFIED';
 
-  function setStatus(key: keyof PatientProfile, status: FieldStatus) {
-    setStatuses((prev) => ({ ...prev, [key]: status }));
+  // Effective display status: an open inline edit wins; otherwise the
+  // log-derived status (defaulting to 'pending').
+  function statusOf(key: keyof PatientProfile): FieldStatus {
+    if (editingFields.has(key as string)) return 'editing';
+    return fieldStatuses.get(key as string) ?? 'pending';
+  }
+  function setFieldNote(
+    key: keyof PatientProfile,
+    text: string,
+    tone: 'info' | 'error',
+  ) {
+    setFieldNotes((prev) => ({ ...prev, [key]: { text, tone } }));
+  }
+  function clearFieldNote(key: keyof PatientProfile) {
+    setFieldNotes((prev) => {
+      const { [key]: _drop, ...rest } = prev;
+      void _drop;
+      return rest;
+    });
+  }
+  function startEditing(key: keyof PatientProfile) {
+    clearFieldNote(key); // a fresh edit clears any prior note on this row
+    setEditingFields((prev) => new Set(prev).add(key as string));
+  }
+  function stopEditing(key: keyof PatientProfile) {
+    setEditingFields((prev) => {
+      const next = new Set(prev);
+      next.delete(key as string);
+      return next;
+    });
   }
   function setEdit(key: keyof PatientProfile, value: unknown) {
     setEdits((prev) => ({ ...prev, [key]: value }));
   }
 
-  async function saveCorrection(field: FieldDef) {
+  // ✅ Confirm a single field (IVR-08) — writes an ADMIN_VERIFY log; the badge
+  // updates once onChanged() reloads the logs.
+  async function confirmField(field: FieldDef) {
     if (!profile) return;
     setSavingField(field.key);
+    setCompleteError(null);
+    clearFieldNote(field.key);
     try {
-      const value = edits[field.key];
-      // Send the single-field correction with a server-mandated rationale.
-      // The backend's correctProfile path expects a full IntakeProfileDto, so
-      // we shallow-merge the change onto a snapshot of the current profile.
+      await confirmProfileField(patientId, field.key, `Admin confirmed: ${field.label}`);
+      onChanged();
+    } catch (e) {
+      setCompleteError(e instanceof Error ? e.message : 'Could not confirm field.');
+    } finally {
+      setSavingField(null);
+    }
+  }
+
+  // ✅ Confirm all currently-pending fields (IVR-25).
+  async function confirmAllPending() {
+    if (!profile || !pendingFieldKeys.length) return;
+    setConfirmingAll(true);
+    setCompleteError(null);
+    try {
+      await confirmProfileFields(patientId, pendingFieldKeys, 'Admin confirmed all pending fields');
+      onChanged();
+    } catch (e) {
+      setCompleteError(e instanceof Error ? e.message : 'Could not confirm fields.');
+    } finally {
+      setConfirmingAll(false);
+    }
+  }
+
+  async function saveCorrection(field: FieldDef) {
+    if (!profile) return;
+    const value = edits[field.key] ?? profile[field.key];
+
+    // No-op guard: "correcting" a field to the value it already holds is not a
+    // change. The backend rejects it ("No corrections supplied"), which read as
+    // a confusing error to the admin. Catch it here and nudge them toward the
+    // ✓ Confirm button instead — Correct is for changing a value, Confirm is
+    // for affirming an unchanged one.
+    if (isNoopCorrection(field, value, profile[field.key])) {
+      // Only point at ✓ Confirm when it's actually on screen — it's hidden once
+      // the whole profile is verified, so there'd be nothing to click.
+      setFieldNote(
+        field.key,
+        isFullyVerified
+          ? `No change to ${field.label}.`
+          : `No change to ${field.label}. Use the ✓ Confirm button to mark it reviewed.`,
+        'info',
+      );
+      stopEditing(field.key);
+      setEdits((prev) => {
+        const { [field.key]: _drop, ...rest } = prev;
+        void _drop;
+        return rest;
+      });
+      return;
+    }
+
+    setSavingField(field.key);
+    try {
+      // Send ONLY the edited field. correctProfile diffs against the stored
+      // profile and logs/updates just what changed, so a partial is correct —
+      // and crucially it avoids re-submitting unrelated fields. Previously this
+      // shallow-merged the whole profile snapshot, which re-sent dateOfBirth
+      // every time and tripped a UTC round-trip off-by-one that silently
+      // shifted the DOB on unrelated corrections.
       const corrections: Partial<PatientProfile> = {
-        ...stripServerOnlyFields(profile),
         [field.key]: value as never,
       };
       await correctPatientProfile(
@@ -180,15 +365,23 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
         corrections,
         `Admin correction: ${field.label}`,
       );
-      setStatus(field.key, 'confirmed');
+      stopEditing(field.key);
       setEdits((prev) => {
         const { [field.key]: _drop, ...rest } = prev;
         void _drop;
         return rest;
       });
+      clearFieldNote(field.key);
       onChanged();
     } catch (e) {
-      setCompleteError(e instanceof Error ? e.message : 'Could not save correction.');
+      // Map the raw backend / class-validator text to plain language inline on
+      // the row, instead of surfacing "corrections.heightCm must be an integer
+      // number" near the footer.
+      setFieldNote(
+        field.key,
+        friendlyCorrectionError(e instanceof Error ? e.message : '', field),
+        'error',
+      );
     } finally {
       setSavingField(null);
     }
@@ -199,17 +392,19 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
    *   • An ADMIN_REJECT audit row is written for the field.
    *   • profileVerificationStatus flips back to UNVERIFIED.
    *   • The whole profile lights up the "awaiting verification" banner again.
+   * IVR-16: the button is disabled once a field is already rejected, so a
+   * second call (and its duplicate audit row) can't be triggered from the UI.
    */
   async function rejectField(field: FieldDef) {
     if (!profile) return;
     setSavingField(field.key);
+    clearFieldNote(field.key);
     try {
       await rejectProfileField(
         patientId,
         field.key,
         `Field rejected by admin: ${field.label}`,
       );
-      setStatus(field.key, 'rejected');
       onChanged();
     } catch (e) {
       setCompleteError(e instanceof Error ? e.message : 'Could not reject field.');
@@ -220,6 +415,14 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
 
   async function completeVerification() {
     if (!profile) return;
+    if (hasRejectedFields) {
+      setCompleteError(
+        `Resolve rejected field${rejectedFieldKeys.length === 1 ? '' : 's'} first: ${rejectedFieldKeys
+          .map((k) => fieldLabel[k as string] ?? k)
+          .join(', ')}.`,
+      );
+      return;
+    }
     setCompleting(true);
     setCompleteError(null);
     try {
@@ -235,11 +438,32 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
   }
 
   function renderRightCell(field: FieldDef) {
-    const status: FieldStatus = statuses[field.key] ?? 'pending';
+    const status: FieldStatus = statusOf(field.key);
     const fromPatient = profile?.[field.key];
     const editing = status === 'editing';
+    const confirmed = status === 'confirmed';
+    const corrected = status === 'corrected';
+    const rejected = status === 'rejected';
     const editValue = edits[field.key] ?? fromPatient;
     const saving = savingField === field.key;
+    const note = fieldNotes[field.key];
+    // Rendered in BOTH the editing and display blocks: a validation error keeps
+    // the editor open (so the value can be fixed), while a no-op note shows on
+    // the closed row. Same testid either way — only one block renders at a time.
+    const noteEl = note ? (
+      <p
+        data-testid={`admin-profile-field-note-${field.key}`}
+        className="text-[11px] leading-snug"
+        style={{
+          color:
+            note.tone === 'error'
+              ? 'var(--brand-alert-red-text)'
+              : 'var(--brand-warning-amber-text)',
+        }}
+      >
+        {note.text}
+      </p>
+    ) : null;
 
     if (editing) {
       return (
@@ -260,7 +484,7 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
             <button
               type="button"
               onClick={() => {
-                setStatus(field.key, 'pending');
+                stopEditing(field.key);
                 setEdits((prev) => {
                   const { [field.key]: _drop, ...rest } = prev;
                   void _drop;
@@ -274,37 +498,42 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
               Cancel
             </button>
           </div>
+          {noteEl}
         </div>
       );
     }
 
     return (
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between gap-2">
         <span
           className="text-[12.5px] truncate"
           data-testid={`admin-profile-field-${field.key}`}
+          // A rejected field is an open item even on an otherwise-verified
+          // profile — its status must win over the whole-profile "verified"
+          // flag so the badge never contradicts the highlighted Reject button.
+          data-status={rejected ? 'rejected' : isFullyVerified ? 'verified' : status}
           style={{
-            color:
-              isFullyVerified
+            color: rejected
+              ? 'var(--brand-alert-red)'
+              : isFullyVerified || confirmed || corrected
                 ? 'var(--brand-success-green)'
-                : status === 'confirmed'
-                  ? 'var(--brand-success-green)'
-                  : status === 'rejected'
-                    ? 'var(--brand-alert-red)'
-                    : 'var(--brand-text-primary)',
+                : 'var(--brand-text-primary)',
             fontWeight: isFullyVerified || status !== 'pending' ? 600 : 500,
           }}
         >
           {fmtValue(fromPatient, field.type)}
-          {isFullyVerified ? (
+          {rejected ? (
+            <span className="ml-1.5 text-[10px] uppercase tracking-wider">Rejected — needs correction</span>
+          ) : isFullyVerified ? (
             <span className="ml-1.5 text-[10px] uppercase tracking-wider inline-flex items-center gap-0.5">
               <Check className="w-2.5 h-2.5" />
               Verified
             </span>
-          ) : status === 'confirmed' ? (
+          ) : confirmed ? (
             <span className="ml-1.5 text-[10px] uppercase tracking-wider">Confirmed</span>
-          ) : status === 'rejected' ? (
-            <span className="ml-1.5 text-[10px] uppercase tracking-wider">Rejected — needs correction</span>
+          ) : corrected ? (
+            <span className="ml-1.5 text-[10px] uppercase tracking-wider">Corrected</span>
           ) : null}
         </span>
         {/* Edit + Reject are always available so a clinician can revisit
@@ -314,27 +543,34 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
             can read but not write per spec. */}
         {canVerify && (
           <div className="flex gap-1 shrink-0">
-            {!isFullyVerified && (
+            {/* Confirm shows while unverified, and also on a rejected row of an
+                otherwise-verified profile so a legacy reject can be cleared
+                without forcing an Edit. Hidden on a clean verified row. */}
+            {(!isFullyVerified || rejected) && (
               <button
                 type="button"
-                title="Confirm"
+                // IVR-08: disabled once confirmed so a repeat click can't write
+                // a duplicate ADMIN_VERIFY audit row.
+                title={confirmed ? 'Already confirmed' : 'Confirm'}
                 data-testid={`admin-profile-confirm-${field.key}`}
-                onClick={() => setStatus(field.key, 'confirmed')}
-                className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-green-50 cursor-pointer"
+                onClick={() => confirmField(field)}
+                disabled={saving || confirmed}
+                className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-green-50 cursor-pointer disabled:cursor-default"
                 style={{
-                  border: `1px solid ${status === 'confirmed' ? 'var(--brand-success-green)' : 'var(--brand-border)'}`,
-                  backgroundColor: status === 'confirmed' ? 'var(--brand-success-green-light)' : 'white',
+                  border: `1px solid ${confirmed ? 'var(--brand-success-green)' : 'var(--brand-border)'}`,
+                  backgroundColor: confirmed ? 'var(--brand-success-green-light)' : 'white',
                   color: 'var(--brand-success-green)',
+                  opacity: confirmed ? 0.85 : 1,
                 }}
               >
-                <Check className="w-3 h-3" />
+                {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
               </button>
             )}
             <button
               type="button"
               title={isFullyVerified ? 'Edit (re-opens verification)' : 'Correct'}
               data-testid={`admin-profile-correct-${field.key}`}
-              onClick={() => setStatus(field.key, 'editing')}
+              onClick={() => startEditing(field.key)}
               disabled={saving}
               className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-purple-50 cursor-pointer disabled:opacity-60"
               style={{
@@ -347,21 +583,32 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
             </button>
             <button
               type="button"
-              title={isFullyVerified ? 'Reject (returns profile to unverified)' : 'Reject'}
+              // IVR-16: disabled once already rejected so a second click can't
+              // write a duplicate ADMIN_REJECT audit row.
+              title={
+                rejected
+                  ? 'Already rejected'
+                  : isFullyVerified
+                    ? 'Reject (returns profile to unverified)'
+                    : 'Reject'
+              }
               data-testid={`admin-profile-reject-${field.key}`}
               onClick={() => rejectField(field)}
-              disabled={saving}
-              className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-[var(--brand-alert-red-light)] cursor-pointer disabled:opacity-60"
+              disabled={saving || rejected}
+              className="w-6 h-6 rounded-md flex items-center justify-center transition-all hover:bg-[var(--brand-alert-red-light)] cursor-pointer disabled:cursor-default"
               style={{
-                border: `1px solid ${status === 'rejected' ? 'var(--brand-alert-red)' : 'var(--brand-border)'}`,
-                backgroundColor: status === 'rejected' ? 'var(--brand-alert-red-light)' : 'white',
+                border: `1px solid ${rejected ? 'var(--brand-alert-red)' : 'var(--brand-border)'}`,
+                backgroundColor: rejected ? 'var(--brand-alert-red-light)' : 'white',
                 color: 'var(--brand-alert-red-text)',
+                opacity: rejected ? 0.85 : 1,
               }}
             >
               {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <XIcon className="w-3 h-3" />}
             </button>
           </div>
         )}
+        </div>
+        {noteEl}
       </div>
     );
   }
@@ -399,6 +646,60 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
           </div>
         </div>
       </div>
+
+      {/* IVR-23 — fields the patient changed since the last admin review.
+          Surfaces a "re-check these" prompt so a post-verification edit doesn't
+          slip past unnoticed. Hidden once the profile is fully verified again. */}
+      {!isFullyVerified && changedSinceVerification.length > 0 && (
+        <div
+          className="rounded-2xl p-4 flex items-start gap-2.5"
+          data-testid="admin-profile-changed-banner"
+          style={{
+            backgroundColor: 'var(--brand-warning-amber-light)',
+            borderLeft: '4px solid var(--brand-warning-amber)',
+          }}
+        >
+          <History className="w-5 h-5 shrink-0" style={{ color: 'var(--brand-warning-amber-text)' }} />
+          <div>
+            <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+              {changedSinceVerification.length} field
+              {changedSinceVerification.length === 1 ? '' : 's'} changed since last verification
+            </p>
+            <p className="text-[11.5px] mt-0.5" style={{ color: 'var(--brand-text-secondary)' }}>
+              The patient updated:{' '}
+              {changedSinceVerification.map((f) => fieldLabel[f] ?? f).join(', ')}. Re-confirm or
+              correct {changedSinceVerification.length === 1 ? 'it' : 'them'} below.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Reject hard-gate banner — verification is blocked while any field is
+          rejected. Lists the fields so the admin knows exactly what to resolve
+          (correct it, re-confirm it, or have the patient re-report). */}
+      {canVerify && !isFullyVerified && hasRejectedFields && (
+        <div
+          className="rounded-2xl p-4 flex items-start gap-2.5"
+          data-testid="admin-profile-rejected-banner"
+          style={{
+            backgroundColor: 'var(--brand-alert-red-light)',
+            borderLeft: '4px solid var(--brand-alert-red)',
+          }}
+        >
+          <AlertTriangle className="w-5 h-5 shrink-0" style={{ color: 'var(--brand-alert-red-text)' }} />
+          <div>
+            <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+              {rejectedFieldKeys.length} field
+              {rejectedFieldKeys.length === 1 ? '' : 's'} rejected — resolve before completing verification
+            </p>
+            <p className="text-[11.5px] mt-0.5" style={{ color: 'var(--brand-text-secondary)' }}>
+              {rejectedFieldKeys.map((k) => fieldLabel[k as string] ?? k).join(', ')}. Correct{' '}
+              {rejectedFieldKeys.length === 1 ? 'it' : 'each'}, re-confirm, or have the patient
+              re-report — then you can lock in the verification.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Two-column reconciliation grid. The pregnancy group is irrelevant
           for non-FEMALE patients and is hidden — the patient frontend
@@ -543,15 +844,40 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
               </div>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={() => setShowCompleteRationale(true)}
-              data-testid="admin-profile-verify-complete"
-              className="btn-admin-primary"
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              Verification complete
-            </button>
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+              {/* IVR-25 — one-click confirm of every still-pending field. */}
+              {pendingFieldKeys.length > 0 && (
+                <button
+                  type="button"
+                  onClick={confirmAllPending}
+                  disabled={confirmingAll}
+                  data-testid="admin-profile-confirm-all"
+                  className="btn-admin-secondary"
+                >
+                  {confirmingAll ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <CheckCheck className="w-3.5 h-3.5" />
+                  )}
+                  Confirm all ({pendingFieldKeys.length})
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowCompleteRationale(true)}
+                disabled={hasRejectedFields}
+                title={
+                  hasRejectedFields
+                    ? `Resolve rejected field${rejectedFieldKeys.length === 1 ? '' : 's'} first`
+                    : undefined
+                }
+                data-testid="admin-profile-verify-complete"
+                className="btn-admin-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Verification complete
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -560,24 +886,6 @@ export default function ProfileTab({ patientId, profile, loading, onChanged }: P
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-function stripServerOnlyFields(profile: PatientProfile): Partial<PatientProfile> {
-  // The correctProfile DTO expects an intake-profile-shaped object; we strip
-  // the server-only fields (id, audit timestamps, status) before submitting.
-  const {
-    id: _id,
-    userId: _userId,
-    profileVerificationStatus: _ps,
-    profileVerifiedAt: _pa,
-    profileVerifiedBy: _pb,
-    profileLastEditedAt: _ple,
-    createdAt: _ca,
-    updatedAt: _ua,
-    ...rest
-  } = profile;
-  void _id; void _userId; void _ps; void _pa; void _pb; void _ple; void _ca; void _ua;
-  return rest;
-}
 
 function renderEditor(field: FieldDef, value: unknown, onChange: (v: unknown) => void) {
   if (field.type === 'boolean') {

@@ -252,6 +252,23 @@ export class TestControl {
   }
 
   /**
+   * THR-REVIEW / IVR-04 — delete a user's PatientThreshold so the "no
+   * threshold" branches (enrollment revert + missing-threshold lock) are
+   * deterministically reachable. Idempotent.
+   */
+  async clearPatientThreshold(userId: string): Promise<{ rowsDeleted: number }> {
+    return this.post('test-control/reset/user-threshold', { userId })
+  }
+
+  /**
+   * THR-REVIEW — wipe a user's ProfileVerificationLog rows so the Timeline +
+   * the stale-condition lock detector start clean across re-runs. Idempotent.
+   */
+  async clearProfileVerificationLogs(userId: string): Promise<{ rowsDeleted: number }> {
+    return this.post('test-control/reset/user-profile-logs', { userId })
+  }
+
+  /**
    * Replace this user's `enrollmentStatus`. Used by tests that need a
    * deterministic state without driving the full 4-piece enrollment gate.
    */

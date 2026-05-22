@@ -49,10 +49,15 @@ export class IntakeController {
   listMedications(
     @Req() req: AuthedReq,
     @Query('includeDiscontinued') includeDiscontinued?: string,
+    @Query('includeRejected') includeRejected?: string,
   ) {
+    // includeRejected lets the read-only profile show REJECTED meds with a
+    // status badge (IVR-18); the daily check-in + intake-edit prefill omit it
+    // so rejected meds aren't re-asked or re-prefilled.
     return this.intake.listMedications(
       req.user.id,
       includeDiscontinued === 'true',
+      includeRejected === 'true',
     )
   }
 

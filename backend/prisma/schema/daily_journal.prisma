@@ -20,6 +20,15 @@ model JournalEntry {
   // stable even if PatientMedication rows are later discontinued or renamed.
   // Shape: Array<{ medicationId, drugName, drugClass, reason, missedDoses }>.
   missedMedications     Json?
+  // Per-medication status snapshot for EVERY answered med (taken / missed /
+  // scheduledLater), not just the missed ones. Lets the readings edit modal +
+  // detail view reconstruct each med's exact answer on reopen — the aggregate
+  // medicationTaken + medicationScheduledLater booleans can't disambiguate
+  // "med A taken, med B not due yet". Additive + nullable: legacy rows without
+  // it fall back to the heuristic rebuild. The rule engine still reads
+  // medicationTaken + missedMedications, so this is UI-reconstruction only.
+  // Shape: Array<{ medicationId, drugName, drugClass, taken, reason, missedDoses }>.
+  medicationStatuses    Json?
 
   severeHeadache       Boolean @default(false)
   visualChanges        Boolean @default(false)

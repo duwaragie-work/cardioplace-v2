@@ -4,7 +4,7 @@
 // alerts, threshold, verification logs) and renders the 5-tab layout. Each
 // tab is a separate file so the shell stays focused on coordination.
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -33,12 +33,16 @@ import {
   getPatientAlerts,
   getPatientThreshold,
   getVerificationLogs,
+  thresholdMandatory,
+  mandatoryConditionChangedAt,
   type PatientProfile,
   type PatientMedication,
   type PatientAlert,
   type PatientThreshold,
   type ProfileVerificationLog,
 } from '@/lib/services/patient-detail.service';
+import { useAuth } from '@/lib/auth-context';
+import { canEditThresholds } from '@/lib/roleGates';
 import ProfileTab from './ProfileTab';
 import MedicationsTab from './MedicationsTab';
 import AlertsTab from './AlertsTab';
@@ -87,6 +91,7 @@ interface Props {
 
 export default function PatientDetailShell({ patientId }: Props) {
   const router = useRouter();
+  const { user } = useAuth();
   const [tab, setTab] = useState<TabKey>('profile');
 
   // Header (always loaded — top-of-page summary card)
@@ -115,6 +120,12 @@ export default function PatientDetailShell({ patientId }: Props) {
   const [alertsLoading, setAlertsLoading] = useState(false);
   const [thresholdLoading, setThresholdLoading] = useState(false);
   const [logsLoading, setLogsLoading] = useState(false);
+  // THR-REVIEW gate readiness — the lock must not compute off a not-yet-loaded
+  // threshold. While `threshold` is still null mid-fetch it would read as
+  // "no threshold" and falsely lock + redirect a patient who actually has one
+  // (e.g. James/Priya). These flip true once the first fetch completes.
+  const [thresholdFetched, setThresholdFetched] = useState(false);
+  const [logsFetched, setLogsFetched] = useState(false);
 
   // Per-tab load errors. Stored separately so a profile failure doesn't
   // wipe a healthy medications cache. Each loader catches and writes here
@@ -247,6 +258,7 @@ export default function PatientDetailShell({ patientId }: Props) {
       setThresholdError(errMsg(e));
     } finally {
       setThresholdLoading(false);
+      setThresholdFetched(true);
     }
   }, [patientId]);
 
@@ -260,6 +272,7 @@ export default function PatientDetailShell({ patientId }: Props) {
       setLogsError(errMsg(e));
     } finally {
       setLogsLoading(false);
+      setLogsFetched(true);
     }
   }, [patientId]);
 
@@ -280,6 +293,10 @@ export default function PatientDetailShell({ patientId }: Props) {
   const onProfileChanged = useCallback(async () => {
     await Promise.all([loadProfile(), loadLogs()]);
     bumpEnrollmentCheck();
+    // A profile correction can change conditions (header pills) and, via the
+    // IVR-04 re-gate, revert enrollment — refetch the header so the activation
+    // pill / EnrollmentCard reflect the new state without a manual refresh.
+    setHeaderRefreshTick((t) => t + 1);
   }, [loadProfile, loadLogs, bumpEnrollmentCheck]);
 
   const onMedicationsChanged = useCallback(async () => {
@@ -293,6 +310,10 @@ export default function PatientDetailShell({ patientId }: Props) {
   const onThresholdChanged = useCallback(async () => {
     await Promise.all([loadThreshold(), loadLogs()]);
     bumpEnrollmentCheck();
+    // A threshold save can auto-restore enrollment (IVR-04) for a reverted
+    // patient — refetch the header so the EnrollmentCard disappears + the
+    // activation pill flips back to enrolled without a manual refresh.
+    setHeaderRefreshTick((t) => t + 1);
   }, [loadThreshold, loadLogs, bumpEnrollmentCheck]);
 
   const onCareTeamChanged = useCallback(() => {
@@ -332,7 +353,68 @@ export default function PatientDetailShell({ patientId }: Props) {
   useEffect(() => {
     if (tab === 'thresholds' && !profile && !profileLoading) loadProfile();
   }, [tab]);
+
+  // THR-REVIEW + IVR-08/23 need threshold + logs available regardless of which
+  // tab is active (the review-lock and the Profile tab's per-field statuses both
+  // read them on entry), so load them once on mount.
+  useEffect(() => {
+    setThresholdFetched(false);
+    setLogsFetched(false);
+    loadThreshold();
+    loadLogs();
+  }, [patientId]);
   /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
+
+  // ── THR-REVIEW gate ───────────────────────────────────────────────────────
+  // Forces a threshold-editing admin into the Thresholds tab whenever the
+  // patient's personalized threshold is out of date w.r.t. their mandatory
+  // conditions (HFrEF/HCM/DCM). Two cases:
+  //   • STALE   — a mandatory condition was added OR removed AFTER the threshold
+  //               was last set, so the targets no longer match the diagnosis.
+  //   • MISSING — the patient is mandatory now but has no threshold at all.
+  // The lock always clears once a threshold is saved/attested (escapable, so no
+  // setup deadlock — the only effect is "threshold first"). Covers admin edits
+  // (redirect on save) and patient self-edits (engages when an admin opens the
+  // patient).
+  const mandatoryConditionAt = useMemo(
+    () => mandatoryConditionChangedAt(logs),
+    [logs],
+  );
+  const thresholdReviewNeeded = useMemo(() => {
+    if (!profile) return false;
+    // STALE: a mandatory-condition change postdates the current threshold.
+    if (
+      threshold &&
+      mandatoryConditionAt != null &&
+      new Date(threshold.setAt).getTime() < mandatoryConditionAt
+    ) {
+      return true;
+    }
+    // MISSING: patient is mandatory now but has no threshold on file.
+    if (thresholdMandatory(profile) && !threshold) return true;
+    return false;
+  }, [profile, threshold, mandatoryConditionAt]);
+  // Don't decide until threshold + logs have actually loaded — while `threshold`
+  // is still null mid-fetch the check would read "missing" and falsely flag a
+  // patient who has a valid threshold (James/Priya bug).
+  const gateReady = thresholdFetched && logsFetched && !!profile;
+  // "Needs threshold" — missing or stale. NO tab lock (a clinician must be able
+  // to read the other tabs to choose good targets). It drives the persistent
+  // banner + the Thresholds-tab highlight for awareness across all roles; the
+  // actual set/attest action stays editor-only inside ThresholdsTab.
+  const needsThreshold = gateReady && thresholdReviewNeeded;
+
+  // One-shot land-first: when a threshold-editor opens a patient who needs one,
+  // open the Thresholds tab first — but it's a single nudge, not a pin, so they
+  // can freely navigate every other tab afterward.
+  const landedOnThresholds = useRef(false);
+  useEffect(() => {
+    if (landedOnThresholds.current) return;
+    if (needsThreshold && canEditThresholds(user)) {
+      landedOnThresholds.current = true;
+      setTab('thresholds');
+    }
+  }, [needsThreshold, user]);
 
   const initials = (() => {
     if (!header?.name) return 'P';
@@ -368,16 +450,15 @@ export default function PatientDetailShell({ patientId }: Props) {
     };
   })();
 
+  // Order mirrors the clinical setup/review flow and the THR-REVIEW lock:
+  // Profile (who they are) → Thresholds (their targets — pinned here when a
+  // condition changes) → Medications → Alerts → Readings → Care team → Timeline.
   const tabs: { key: TabKey; label: string; icon: React.ReactNode; count?: number }[] = [
     { key: 'profile', label: 'Profile', icon: <UserIcon className="w-3.5 h-3.5" /> },
+    { key: 'thresholds', label: 'Thresholds', icon: <Sliders className="w-3.5 h-3.5" /> },
     { key: 'medications', label: 'Medications', icon: <Pill className="w-3.5 h-3.5" />, count: medications.length || undefined },
     { key: 'alerts', label: 'Alerts', icon: <Bell className="w-3.5 h-3.5" />, count: header?.activeAlertsCount },
-    // Readings sits between Alerts and Thresholds — provider triages alerts
-    // first, then drills into the underlying journal entries for context
-    // (BP trend + symptoms + notes + suboptimal flags), then adjusts
-    // thresholds. Mirrors the natural review workflow.
     { key: 'readings', label: 'Readings', icon: <Activity className="w-3.5 h-3.5" /> },
-    { key: 'thresholds', label: 'Thresholds', icon: <Sliders className="w-3.5 h-3.5" /> },
     { key: 'careteam', label: 'Care team', icon: <UsersIcon className="w-3.5 h-3.5" /> },
     { key: 'timeline', label: 'Timeline', icon: <Clock className="w-3.5 h-3.5" /> },
   ];
@@ -385,7 +466,7 @@ export default function PatientDetailShell({ patientId }: Props) {
   return (
     <div className="h-full" style={{ backgroundColor: 'var(--brand-background)' }}>
       <main className="p-4 md:p-8 space-y-5 md:space-y-6 max-w-[1400px] mx-auto">
-        {/* ── Back link ─────────────────────────────────────────────────── */}
+        {/* ── Back link ───────────────────────────────────────────────────── */}
         <button
           type="button"
           onClick={() => router.push('/patients')}
@@ -604,6 +685,44 @@ export default function PatientDetailShell({ patientId }: Props) {
           />
         )}
 
+        {/* ── Threshold-needed banner ───────────────────────────────────────
+            Persistent across every tab (except Thresholds, which carries its
+            own review/missing banner) until the threshold is set/saved. This
+            replaces the old hard lock — visible + a one-click jump, not a cage,
+            so the clinician can read the other tabs for context first. */}
+        {needsThreshold && tab !== 'thresholds' && (
+          <div
+            className="rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+            data-testid="admin-threshold-needed-banner"
+            style={{
+              backgroundColor: 'var(--brand-alert-red-light)',
+              borderLeft: '4px solid var(--brand-alert-red)',
+            }}
+          >
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="w-5 h-5 shrink-0" style={{ color: 'var(--brand-alert-red-text)' }} />
+              <div>
+                <p className="text-[13px] font-bold" style={{ color: 'var(--brand-alert-red-text)' }}>
+                  Threshold needed
+                </p>
+                <p className="text-[11.5px] mt-0.5" style={{ color: 'var(--brand-text-secondary)' }}>
+                  This patient has a monitored condition that needs personalized targets set or
+                  re-reviewed. Review the other tabs for context, then set the targets.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setTab('thresholds')}
+              data-testid="admin-threshold-needed-goto"
+              className="btn-admin-primary shrink-0"
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              Go to Thresholds
+            </button>
+          </div>
+        )}
+
         {/* ── Tab nav ──────────────────────────────────────────────────────── */}
         <div
           className="bg-white rounded-2xl p-1.5 inline-flex flex-wrap gap-1"
@@ -612,6 +731,9 @@ export default function PatientDetailShell({ patientId }: Props) {
         >
           {tabs.map(({ key, label, icon, count }) => {
             const active = tab === key;
+            // Pulsing red dot on the Thresholds tab while a threshold is
+            // needed — the visible nudge that replaces the old hard lock.
+            const flagThreshold = key === 'thresholds' && needsThreshold;
             return (
               <button
                 key={key}
@@ -628,6 +750,14 @@ export default function PatientDetailShell({ patientId }: Props) {
               >
                 {icon}
                 {label}
+                {flagThreshold && (
+                  <span
+                    data-testid="admin-tab-thresholds-flag"
+                    className="w-1.5 h-1.5 rounded-full animate-pulse"
+                    style={{ backgroundColor: active ? 'white' : 'var(--brand-alert-red)' }}
+                    aria-hidden
+                  />
+                )}
                 {count != null && count > 0 && (
                   <span
                     className="text-[10px] font-bold px-1.5 rounded-full"
@@ -661,6 +791,7 @@ export default function PatientDetailShell({ patientId }: Props) {
                 <ProfileTab
                   patientId={patientId}
                   profile={profile}
+                  logs={logs}
                   loading={profileLoading}
                   onChanged={onProfileChanged}
                 />
@@ -699,6 +830,8 @@ export default function PatientDetailShell({ patientId }: Props) {
                   threshold={threshold}
                   loading={thresholdLoading || profileLoading}
                   onChanged={onThresholdChanged}
+                  reviewActive={needsThreshold}
+                  reviewConditionAt={mandatoryConditionAt}
                 />
               </>
             )}

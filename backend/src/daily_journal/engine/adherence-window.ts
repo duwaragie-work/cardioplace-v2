@@ -79,6 +79,15 @@ export async function loadAdherenceWindow(
     orderBy: { measuredAt: 'desc' },
   })
 
+  // HOLD-ADHERENCE (CLINICAL_SPEC §14.2) — meds the care team has placed on
+  // hold must be excluded from the miss count: the patient is correctly NOT
+  // taking them, so a logged "miss" for a held med is not non-adherence.
+  const heldMeds = await prisma.patientMedication.findMany({
+    where: { userId, verificationStatus: 'HOLD', discontinuedAt: null },
+    select: { id: true },
+  })
+  const heldMedIds = new Set(heldMeds.map((m) => m.id))
+
   // Bucket by calendar day in patient timezone so two sessions on the same
   // day don't double-count.
   const recentCutoff = new Date(anchorDate.getTime() - RECENT_DAYS * 24 * 60 * 60 * 1000)
@@ -99,8 +108,13 @@ export async function loadAdherenceWindow(
     // alone (no per-med array) still counts toward the miss-day total but
     // does NOT add a synthetic "Medication" row — preserves the
     // "no medication specified" branch of the physician message.
-    const rows = parseMissedMedications(e.missedMedications) ?? []
-    const legacyMissOnly = rows.length === 0 && e.medicationTaken === false
+    const allRows = parseMissedMedications(e.missedMedications) ?? []
+    // Drop held meds before tallying (HOLD-ADHERENCE). If an entry's only
+    // misses were held meds, it no longer counts as a miss-day at all.
+    const rows = allRows.filter(
+      (r) => !(r.medicationId && heldMedIds.has(r.medicationId)),
+    )
+    const legacyMissOnly = allRows.length === 0 && e.medicationTaken === false
 
     if (rows.length === 0 && !legacyMissOnly) continue
 

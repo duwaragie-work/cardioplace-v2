@@ -101,6 +101,10 @@ export default function EnrollmentCard({
   if (!canEnroll) return null;
 
   const blocked = reasons != null && reasons.length > 0;
+  // First-load gate check in flight — show a neutral "checking" state instead of
+  // the purple "ready to enroll" look, so we don't flash green→amber when the
+  // check resolves to Blocked (e.g. right after an IVR-04 enrollment revert).
+  const checking = checkLoading && reasons === null;
 
   const handleEnroll = async () => {
     setEnrolling(true);
@@ -128,7 +132,13 @@ export default function EnrollmentCard({
       className="bg-white rounded-2xl p-4 md:p-5"
       style={{
         boxShadow: 'var(--brand-shadow-card)',
-        borderLeft: `4px solid ${blocked ? 'var(--brand-warning-amber)' : 'var(--brand-primary-purple)'}`,
+        borderLeft: `4px solid ${
+          checking
+            ? 'var(--brand-border)'
+            : blocked
+              ? 'var(--brand-warning-amber)'
+              : 'var(--brand-primary-purple)'
+        }`,
       }}
       role="region"
       aria-label="Enrollment"
@@ -138,25 +148,37 @@ export default function EnrollmentCard({
         <div
           className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center"
           style={{
-            backgroundColor: blocked
-              ? 'var(--brand-warning-amber-light)'
-              : 'var(--brand-primary-purple-light)',
-            color: blocked
-              ? 'var(--brand-warning-amber)'
-              : 'var(--brand-primary-purple)',
+            backgroundColor: checking
+              ? 'var(--brand-background)'
+              : blocked
+                ? 'var(--brand-warning-amber-light)'
+                : 'var(--brand-primary-purple-light)',
+            color: checking
+              ? 'var(--brand-text-muted)'
+              : blocked
+                ? 'var(--brand-warning-amber)'
+                : 'var(--brand-primary-purple)',
           }}
           aria-hidden
         >
-          {blocked ? <ShieldAlert className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+          {checking ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : blocked ? (
+            <ShieldAlert className="w-4 h-4" />
+          ) : (
+            <UserCheck className="w-4 h-4" />
+          )}
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-[13.5px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }} data-testid="admin-enrollment-status">
             Patient not enrolled
           </p>
           <p className="text-[11.5px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
-            {blocked
-              ? 'Resolve the prerequisites below to activate clinical monitoring.'
-              : 'Activate this patient to start the alert + escalation pipeline.'}
+            {checking
+              ? 'Checking enrollment prerequisites…'
+              : blocked
+                ? 'Resolve the prerequisites below to activate clinical monitoring.'
+                : 'Activate this patient to start the alert + escalation pipeline.'}
           </p>
 
           {/* Inline reason list when prerequisites are missing. Mirrors

@@ -31,6 +31,9 @@ export interface PatientProfileDto {
   profileLastEditedAt?: string;
   createdAt?: string;
   updatedAt?: string;
+  /** Field keys whose latest verification log is ADMIN_REJECT — the care team
+   *  asked the patient to re-check these. Drives the "please re-check" banner. */
+  rejectedFields?: string[];
 }
 
 export interface PatientMedicationDto {
@@ -42,7 +45,7 @@ export interface PatientMedicationDto {
   combinationComponents: string[];
   frequency: 'ONCE_DAILY' | 'TWICE_DAILY' | 'THREE_TIMES_DAILY' | 'AS_NEEDED' | 'UNSURE';
   source: 'PATIENT_SELF_REPORT' | 'PROVIDER_ENTERED' | 'PATIENT_VOICE' | 'PATIENT_PHOTO';
-  verificationStatus: 'UNVERIFIED' | 'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER';
+  verificationStatus: 'UNVERIFIED' | 'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER' | 'HOLD';
   reportedAt: string;
   discontinuedAt?: string | null;
   rawInputText?: string | null;
@@ -116,10 +119,17 @@ export async function replaceIntakeMedications(
 }
 
 // ── GET /me/medications ─────────────────────────────────────────────────────
+// includeRejected surfaces REJECTED meds (with their status badge) for the
+// read-only profile view (IVR-18). Leave it false for the daily check-in and
+// the intake/edit wizard so rejected meds aren't re-asked or re-prefilled.
 export async function getMyMedications(
   includeDiscontinued = false,
+  includeRejected = false,
 ): Promise<PatientMedicationDto[]> {
-  const qs = includeDiscontinued ? '?includeDiscontinued=true' : '';
+  const params = new URLSearchParams();
+  if (includeDiscontinued) params.set('includeDiscontinued', 'true');
+  if (includeRejected) params.set('includeRejected', 'true');
+  const qs = params.toString() ? `?${params.toString()}` : '';
   const res = await fetchWithAuth(`${API}/api/me/medications${qs}`);
   return unwrap<PatientMedicationDto[]>(res);
 }

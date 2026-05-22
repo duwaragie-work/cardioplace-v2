@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common'
 import {
@@ -10,14 +11,17 @@ import {
 } from '../common/patient-access.service.js'
 import { Prisma } from '../generated/prisma/client.js'
 import {
+  NotificationChannel,
   VerifierRole,
   VerificationChangeType,
 } from '../generated/prisma/enums.js'
+import { systemMsgThresholdUpdated } from '@cardioplace/shared'
 import { PrismaService } from '../prisma/prisma.service.js'
 import {
   pickDisplayName,
   resolveUserDisplays,
 } from '../common/user-name-resolver.js'
+import { EnrollmentService } from './enrollment.service.js'
 import type { UpsertThresholdDto } from './dto/upsert-threshold.dto.js'
 
 // JCAHO audit snapshot — the clinically-meaningful threshold targets only
@@ -35,9 +39,12 @@ interface ThresholdSnapshot {
 
 @Injectable()
 export class ThresholdService {
+  private readonly logger = new Logger(ThresholdService.name)
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: PatientAccessService,
+    private readonly enrollment: EnrollmentService,
   ) {}
 
   async create(actor: ActorUser, patientUserId: string, dto: UpsertThresholdDto) {
@@ -63,6 +70,12 @@ export class ThresholdService {
         Prisma.JsonNull,
         this.thresholdSnapshot(threshold),
       )
+      // IVR-04 — if this threshold clears the re-enrollment gate for a patient
+      // who was auto-reverted, restore enrollment + catch up deferred alerts.
+      // No-op for first-time / still-blocked / already-enrolled patients.
+      await this.enrollment.autoReEnrollIfGateCleared(actor, patientUserId)
+      // THR-034 — let the patient know their monitoring targets were set.
+      await this.notifyPatientThresholdUpdated(patientUserId)
       return {
         statusCode: 201,
         message: 'Threshold created',
@@ -147,10 +160,70 @@ export class ThresholdService {
       this.thresholdSnapshot(existing),
       this.thresholdSnapshot(updated),
     )
+    // IVR-04 — restore enrollment if this update clears the gate for an
+    // auto-reverted patient (e.g. a threshold edit that finally fits).
+    await this.enrollment.autoReEnrollIfGateCleared(actor, patientUserId)
+    // THR-034 — notify the patient their monitoring targets changed.
+    await this.notifyPatientThresholdUpdated(patientUserId)
     return {
       statusCode: 200,
       message: 'Threshold updated',
       data: updated,
+    }
+  }
+
+  /**
+   * THR-033 — clear a patient's personalized threshold. Removes the row (the
+   * patient reverts to the standard threshold table) and, when the condition
+   * still REQUIRES one (§4.2), drops an enrolled patient back to NOT_ENROLLED
+   * via the enrollment-gap revert. Writes a JCAHO "threshold cleared" audit row.
+   */
+  async delete(actor: ActorUser, patientUserId: string) {
+    await this.access.assertCanAccessPatient(actor, patientUserId)
+    const existing = await this.prisma.patientThreshold.findUnique({
+      where: { userId: patientUserId },
+    })
+    if (!existing) throw new NotFoundException('Threshold not found')
+
+    await this.prisma.patientThreshold.delete({ where: { userId: patientUserId } })
+    // JCAHO audit — previous targets → cleared (null).
+    await this.prisma.profileVerificationLog.create({
+      data: {
+        userId: patientUserId,
+        fieldPath: 'threshold',
+        previousValue: this.thresholdSnapshot(
+          existing,
+        ) as unknown as Prisma.InputJsonValue,
+        newValue: Prisma.JsonNull,
+        changedBy: actor.id,
+        changedByRole: VerifierRole.ADMIN,
+        changeType: VerificationChangeType.ADMIN_THRESHOLD_UPDATE,
+        rationale: 'Personalized threshold cleared.',
+      },
+    })
+    // Cascade: a still-mandatory enrolled patient must drop back to NOT_ENROLLED.
+    await this.enrollment.revertIfThresholdGap(actor, patientUserId)
+    return { statusCode: 200, message: 'Threshold cleared', data: null }
+  }
+
+  // THR-034 — best-effort patient inbox notice that their targets changed.
+  // PUSH so it lands in the patient's Notifications tab; failure never blocks
+  // the threshold write. NEEDS Dr. Singal sign-off on the wording.
+  private async notifyPatientThresholdUpdated(patientUserId: string): Promise<void> {
+    try {
+      await this.prisma.notification.create({
+        data: {
+          userId: patientUserId,
+          channel: NotificationChannel.PUSH,
+          title: 'Monitoring targets updated',
+          body: systemMsgThresholdUpdated(),
+        },
+      })
+    } catch (err) {
+      this.logger.error(
+        `Threshold-updated notification failed for ${patientUserId}`,
+        err instanceof Error ? err.stack : err,
+      )
     }
   }
 

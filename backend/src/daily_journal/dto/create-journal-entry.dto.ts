@@ -11,13 +11,20 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  ArrayMaxSize,
   Max,
+  MaxLength,
   Min,
   registerDecorator,
   ValidateNested,
   ValidationOptions,
 } from 'class-validator'
 import { Type } from 'class-transformer'
+import {
+  JOURNAL_NOTE_MAX_LENGTH,
+  JOURNAL_CUSTOM_SYMPTOM_MAX_LENGTH,
+  JOURNAL_CUSTOM_SYMPTOMS_MAX_COUNT,
+} from '@cardioplace/shared'
 
 function IsMeasuredAtReasonable(validationOptions?: ValidationOptions) {
   return (object: object, propertyName: string) => {
@@ -87,6 +94,47 @@ export class MissedMedicationDto {
   @Min(1)
   @Max(10)
   missedDoses!: number
+}
+
+/**
+ * Per-medication status snapshot for EVERY answered medication on a reading
+ * (taken / missed / scheduledLater) — not just the missed ones. Persisted as-is
+ * into JournalEntry.medicationStatuses (JSON) so the readings edit modal +
+ * detail view can reconstruct each med's exact answer on reopen. The aggregate
+ * medicationTaken + medicationScheduledLater booleans can't disambiguate
+ * "med A taken, med B not due yet"; this can.
+ *
+ * UI-reconstruction only — the rule engine still reads medicationTaken +
+ * missedMedications. `medicationId` / `drugClass` are optional so a loose
+ * (voice) client can submit drugName alone.
+ */
+export class MedicationStatusDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  medicationId?: string
+
+  @IsString()
+  @IsNotEmpty()
+  drugName!: string
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  drugClass?: string
+
+  @IsIn(['yes', 'no', 'scheduledLater'])
+  taken!: 'yes' | 'no' | 'scheduledLater'
+
+  @IsOptional()
+  @IsEnum(MissedMedicationReason)
+  reason?: MissedMedicationReason
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  missedDoses?: number
 }
 
 export class CreateJournalEntryDto {
@@ -160,6 +208,15 @@ export class CreateJournalEntryDto {
   @Type(() => MissedMedicationDto)
   missedMedications?: MissedMedicationDto[]
 
+  // Per-medication status snapshot for every answered med (UI reconstruction).
+  // Capped well above any realistic active-med count.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => MedicationStatusDto)
+  medicationStatuses?: MedicationStatusDto[]
+
   // Legacy field — v1 clients send freeform symptom strings; we route them
   // to JournalEntry.otherSymptoms. New v2 clients (Flow B) prefer the
   // explicit `otherSymptoms` field below plus the structured booleans.
@@ -204,11 +261,14 @@ export class CreateJournalEntryDto {
   @IsOptional() @IsBoolean() faceSwelling?: boolean
   @IsOptional() @IsBoolean() throatTightness?: boolean
 
-  // Patient's freeform "anything else" — sent as String[] so the schema
-  // column can hold multiple notes if a future UI captures more than one.
+  // Patient-typed custom symptoms — one string per chip the patient added in
+  // the check-in step 5 / readings edit tag input. Bounded so a runaway client
+  // can't store an oversized array or oversized individual entries.
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(JOURNAL_CUSTOM_SYMPTOMS_MAX_COUNT)
   @IsString({ each: true })
+  @MaxLength(JOURNAL_CUSTOM_SYMPTOM_MAX_LENGTH, { each: true })
   otherSymptoms?: string[]
 
   @IsOptional()
@@ -221,6 +281,7 @@ export class CreateJournalEntryDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(JOURNAL_NOTE_MAX_LENGTH)
   notes?: string
 
   @IsOptional()
