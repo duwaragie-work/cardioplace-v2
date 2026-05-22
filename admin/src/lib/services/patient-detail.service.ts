@@ -298,6 +298,41 @@ export async function rejectProfileField(
   return jsonOrThrow<PatientProfile>(res, 'Could not reject field')
 }
 
+/**
+ * Confirm a single profile field (IVR-08) — writes an ADMIN_VERIFY audit row
+ * pinned to `profile.{field}` without flipping the whole-profile status. The
+ * Profile tab derives the field's "Confirmed" state from this log row.
+ */
+export async function confirmProfileField(
+  userId: string,
+  field: keyof PatientProfile,
+  rationale?: string,
+): Promise<PatientProfile> {
+  const res = await fetchWithAuth(`${API}/api/admin/users/${userId}/confirm-profile-field`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ field, rationale }),
+  })
+  return jsonOrThrow<PatientProfile>(res, 'Could not confirm field')
+}
+
+/**
+ * Bulk "Confirm all" (IVR-25) — confirms every supplied field in one call.
+ * Already-confirmed fields are skipped server-side (no duplicate audit rows).
+ */
+export async function confirmProfileFields(
+  userId: string,
+  fields: (keyof PatientProfile)[],
+  rationale?: string,
+): Promise<PatientProfile> {
+  const res = await fetchWithAuth(`${API}/api/admin/users/${userId}/confirm-profile-fields`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields, rationale }),
+  })
+  return jsonOrThrow<PatientProfile>(res, 'Could not confirm fields')
+}
+
 // ─── Medications (H2) ────────────────────────────────────────────────────────
 
 export async function getPatientMedications(userId: string): Promise<PatientMedication[]> {
@@ -368,17 +403,19 @@ export async function getVerificationLogs(userId: string): Promise<ProfileVerifi
  * Per the Dr. Singal clinical spec:
  *   • CAD                       → DBP lower target = 70
  *   • HFrEF                     → SBP lower target = 85
+ *   • DCM   (managed as HFrEF)  → SBP lower target = 85   (spec §4.8)
  *   • HCM                       → SBP lower target = 100
  * Returns the partial threshold to suggest as defaults given a profile.
  */
 export function thresholdDefaultsFor(
-  profile: Pick<PatientProfile, 'hasCAD' | 'hasHCM' | 'heartFailureType'> | null,
+  profile: Pick<PatientProfile, 'hasCAD' | 'hasHCM' | 'hasDCM' | 'heartFailureType'> | null,
 ): UpsertThresholdPayload {
   if (!profile) return {}
   const out: UpsertThresholdPayload = {}
   if (profile.hasCAD) out.dbpLowerTarget = 70
-  if (profile.heartFailureType === 'HFREF') out.sbpLowerTarget = 85
-  if (profile.hasHCM) out.sbpLowerTarget = 100 // HCM trumps HFrEF if both
+  // THR-016 — DCM is managed as HFrEF (spec §4.8): default lower-bound SBP <85.
+  if (profile.heartFailureType === 'HFREF' || profile.hasDCM) out.sbpLowerTarget = 85
+  if (profile.hasHCM) out.sbpLowerTarget = 100 // HCM trumps HFrEF/DCM if both
   return out
 }
 
@@ -388,4 +425,102 @@ export function thresholdMandatory(
 ): boolean {
   if (!profile) return false
   return profile.hasHCM || profile.hasDCM || profile.heartFailureType === 'HFREF'
+}
+
+// ─── Verification-log derivation (IVR-08 / IVR-23 / THR-REVIEW) ──────────────
+
+/** Per-field verification state derived from the latest log at profile.{field}. */
+export type FieldVerificationStatus = 'confirmed' | 'corrected' | 'rejected' | 'pending'
+
+const CHANGE_TYPE_TO_STATUS: Record<VerificationChangeType, FieldVerificationStatus> = {
+  ADMIN_VERIFY: 'confirmed',
+  ADMIN_CORRECT: 'corrected',
+  ADMIN_REJECT: 'rejected',
+  PATIENT_REPORT: 'pending',
+}
+
+/**
+ * Latest log per `profile.{field}` fieldPath, keyed by the bare field name.
+ * Logs are scanned newest-first so the first hit per field wins.
+ */
+export function latestProfileFieldLogs(
+  logs: ProfileVerificationLog[],
+): Map<string, ProfileVerificationLog> {
+  const sorted = [...logs].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  )
+  const out = new Map<string, ProfileVerificationLog>()
+  for (const log of sorted) {
+    if (!log.fieldPath.startsWith('profile.')) continue
+    const field = log.fieldPath.slice('profile.'.length)
+    if (field === 'verificationStatus') continue // whole-profile flip, not a field
+    if (!out.has(field)) out.set(field, log)
+  }
+  return out
+}
+
+/**
+ * Derive each profile field's status from the verification logs (IVR-08):
+ * ADMIN_VERIFY→confirmed, ADMIN_CORRECT→corrected, ADMIN_REJECT→rejected,
+ * PATIENT_REPORT→pending. Fields with no log default to 'pending'.
+ */
+export function deriveFieldStatuses(
+  logs: ProfileVerificationLog[],
+): Map<string, FieldVerificationStatus> {
+  const latest = latestProfileFieldLogs(logs)
+  const out = new Map<string, FieldVerificationStatus>()
+  for (const [field, log] of latest) {
+    out.set(field, CHANGE_TYPE_TO_STATUS[log.changeType] ?? 'pending')
+  }
+  return out
+}
+
+/**
+ * IVR-23 — count of fields the patient changed since the last admin review.
+ * A field "changed since verification" when its latest log is a PATIENT_REPORT
+ * that post-dates the most recent admin verify/correct anywhere on the profile.
+ * Returns 0 when the profile has never been admin-reviewed (the unverified
+ * banner already covers that case).
+ */
+export function fieldsChangedSinceVerification(
+  logs: ProfileVerificationLog[],
+): string[] {
+  const lastAdminReviewAt = logs
+    .filter(
+      (l) =>
+        l.changeType === 'ADMIN_VERIFY' || l.changeType === 'ADMIN_CORRECT',
+    )
+    .reduce<number>((max, l) => Math.max(max, new Date(l.createdAt).getTime()), 0)
+  if (lastAdminReviewAt === 0) return []
+
+  const changed: string[] = []
+  for (const [field, log] of latestProfileFieldLogs(logs)) {
+    if (
+      log.changeType === 'PATIENT_REPORT' &&
+      new Date(log.createdAt).getTime() > lastAdminReviewAt
+    ) {
+      changed.push(field)
+    }
+  }
+  return changed
+}
+
+/**
+ * THR-REVIEW — timestamp (ms) of the most recent log that *added* a
+ * threshold-mandatory condition (heartFailureType→HFREF, hasHCM→true,
+ * hasDCM→true). Used to detect a threshold that predates a new condition.
+ * Returns null when no such add is recorded.
+ */
+export function mandatoryConditionAddedAt(
+  logs: ProfileVerificationLog[],
+): number | null {
+  let latest = 0
+  for (const log of logs) {
+    const added =
+      (log.fieldPath === 'profile.heartFailureType' && log.newValue === 'HFREF') ||
+      (log.fieldPath === 'profile.hasHCM' && log.newValue === true) ||
+      (log.fieldPath === 'profile.hasDCM' && log.newValue === true)
+    if (added) latest = Math.max(latest, new Date(log.createdAt).getTime())
+  }
+  return latest === 0 ? null : latest
 }
