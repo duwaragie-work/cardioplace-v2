@@ -12,6 +12,11 @@ import {
   pickDisplayName,
   resolveUserDisplays,
 } from '../common/user-name-resolver.js'
+import {
+  computeNeedsThreshold,
+  MANDATORY_CONDITION_FIELDPATHS,
+  type ConditionChangeLog,
+} from './threshold-need.js'
 
 const SEVERITY_ORDER: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 }
 
@@ -385,6 +390,9 @@ export class ProviderService {
       where,
       include: {
         patientProfile: { select: this.profileSelect },
+        // Threshold setAt drives the "needs threshold" list signal (missing /
+        // stale). Only the timestamp is needed here.
+        patientThreshold: { select: { setAt: true } },
         journalEntries: {
           orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
           take: 1,
@@ -407,6 +415,33 @@ export class ProviderService {
         },
       },
     })
+
+    // "Needs threshold" (missing OR stale) signal for the list row tint +
+    // filter. One batched query for the condition-change logs of every listed
+    // patient, grouped by user, then compared against each threshold's setAt.
+    const userIds = users.map((u) => u.id)
+    const conditionLogs = userIds.length
+      ? await this.prisma.profileVerificationLog.findMany({
+          where: {
+            userId: { in: userIds },
+            fieldPath: { in: [...MANDATORY_CONDITION_FIELDPATHS] },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: {
+            userId: true,
+            fieldPath: true,
+            previousValue: true,
+            newValue: true,
+            createdAt: true,
+          },
+        })
+      : []
+    const logsByUser = new Map<string, ConditionChangeLog[]>()
+    for (const l of conditionLogs) {
+      const arr = logsByUser.get(l.userId) ?? []
+      arr.push(l)
+      logsByUser.set(l.userId, arr)
+    }
 
     let patients = users.map((u) => {
       const latestEntry = u.journalEntries[0] ?? null
@@ -454,6 +489,14 @@ export class ProviderService {
         profileVerificationStatus:
           (profile as { profileVerificationStatus?: string } | null)
             ?.profileVerificationStatus ?? null,
+        // Threshold-attention signal for the list (missing OR stale). Drives
+        // the subtle red row tint + the "Threshold needed" filter chip; matches
+        // the per-patient detail-page banner.
+        needsThreshold: computeNeedsThreshold({
+          profile,
+          thresholdSetAt: u.patientThreshold?.setAt ?? null,
+          conditionLogs: logsByUser.get(u.id) ?? [],
+        }),
         // latestBaseline (rolling snapshot) is gone in v2. Frontend should
         // request the BP trend endpoint when it needs averages.
         latestBaseline: null,
