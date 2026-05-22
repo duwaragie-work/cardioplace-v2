@@ -361,6 +361,9 @@ export const T = {
     profileVerifyComplete: 'admin-profile-verify-complete',
     profileVerifyRationale: 'admin-profile-verify-rationale',
     profileVerifyConfirm: 'admin-profile-verify-confirm',
+    // IVR-08/25 — real per-field confirm + bulk confirm-all; IVR-23 banner.
+    profileConfirmAll: 'admin-profile-confirm-all',
+    profileChangedBanner: 'admin-profile-changed-banner',
     // Cluster 8.1 Gap 3 — persistent CAD treatment-target note rendered on
     // the cardiac section of ProfileTab whenever profile.hasCAD. Documents
     // the AHA/ACC 130/80 target + the Q2-ramp default thresholds the
@@ -391,6 +394,11 @@ export const T = {
     thresholdHrLower: 'admin-threshold-hr-lower',
     thresholdNotes: 'admin-threshold-notes',
     thresholdSave: 'admin-threshold-save',
+    // THR-REVIEW — stale-threshold re-review banner + the attest ("Targets
+    // still correct") path that clears the lock without changing values.
+    thresholdReviewBanner: 'admin-threshold-review-banner',
+    thresholdReviewNote: 'admin-threshold-review-note',
+    thresholdAttest: 'admin-threshold-attest',
 
     // CareTeamTab (inline <select> editor, NOT a modal)
     careTeamStatus: 'admin-careteam-status',

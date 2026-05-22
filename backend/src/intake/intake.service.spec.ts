@@ -58,3 +58,145 @@ describe('IntakeService.listMedications filter scoping', () => {
     expect(whereOf()).toEqual({ userId: 'u1' })
   })
 })
+
+// Profile fixture with the Date fields serializeProfile() needs.
+function makeProfile(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'prof1',
+    userId: 'p1',
+    gender: 'FEMALE',
+    heightCm: 165,
+    isPregnant: false,
+    pregnancyDueDate: null,
+    historyPreeclampsia: false,
+    hasHeartFailure: false,
+    heartFailureType: 'NOT_APPLICABLE',
+    hasAFib: false,
+    hasCAD: false,
+    hasHCM: false,
+    hasDCM: false,
+    hasTachycardia: false,
+    hasBradycardia: false,
+    diagnosedHypertension: true,
+    profileVerificationStatus: 'VERIFIED',
+    profileVerifiedAt: null,
+    profileVerifiedBy: null,
+    profileLastEditedAt: new Date(),
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  }
+}
+
+const ADMIN = { id: 'admin', roles: [] } as never
+
+async function makeService(prisma: unknown): Promise<IntakeService> {
+  const module: TestingModule = await Test.createTestingModule({
+    providers: [
+      IntakeService,
+      { provide: PrismaService, useValue: prisma },
+      { provide: DrugEnrichmentService, useValue: {} },
+      { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
+    ],
+  }).compile()
+  return module.get<IntakeService>(IntakeService)
+}
+
+describe('IntakeService.confirmProfileFields (IVR-08)', () => {
+  let service: IntakeService
+  let prisma: any
+
+  beforeEach(async () => {
+    prisma = {
+      patientProfile: {
+        findUnique: (jest.fn() as jest.Mock<any>).mockResolvedValue(makeProfile()),
+      },
+      profileVerificationLog: {
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+        createMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 0 }),
+      },
+    }
+    service = await makeService(prisma)
+  })
+
+  it('writes one ADMIN_VERIFY log per valid field', async () => {
+    const res = await service.confirmProfileFields(ADMIN, 'p1', {
+      fields: ['gender', 'hasHCM'],
+    })
+    expect(prisma.profileVerificationLog.createMany).toHaveBeenCalledTimes(1)
+    const rows = prisma.profileVerificationLog.createMany.mock.calls[0][0].data
+    expect(rows).toHaveLength(2)
+    expect(rows.every((r: any) => r.changeType === 'ADMIN_VERIFY')).toBe(true)
+    expect(rows.map((r: any) => r.fieldPath).sort()).toEqual([
+      'profile.gender',
+      'profile.hasHCM',
+    ])
+    expect([...res.confirmedFields].sort()).toEqual(['gender', 'hasHCM'])
+  })
+
+  it('skips a field already confirmed (no duplicate ADMIN_VERIFY row)', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([
+      { fieldPath: 'profile.gender', changeType: 'ADMIN_VERIFY' },
+    ])
+    await service.confirmProfileFields(ADMIN, 'p1', { fields: ['gender', 'hasHCM'] })
+    const rows = prisma.profileVerificationLog.createMany.mock.calls[0][0].data
+    expect(rows.map((r: any) => r.fieldPath)).toEqual(['profile.hasHCM'])
+  })
+
+  it('writes nothing when every requested field is already confirmed', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([
+      { fieldPath: 'profile.gender', changeType: 'ADMIN_VERIFY' },
+    ])
+    const res = await service.confirmProfileFields(ADMIN, 'p1', { fields: ['gender'] })
+    expect(prisma.profileVerificationLog.createMany).not.toHaveBeenCalled()
+    expect(res.confirmedFields).toEqual([])
+  })
+
+  it('rejects when no valid profile fields are supplied', async () => {
+    await expect(
+      service.confirmProfileFields(ADMIN, 'p1', { fields: ['bogusField'] }),
+    ).rejects.toThrow()
+    expect(prisma.profileVerificationLog.createMany).not.toHaveBeenCalled()
+  })
+})
+
+describe('IntakeService.rejectProfileField idempotency (IVR-16)', () => {
+  let service: IntakeService
+  let prisma: any
+
+  beforeEach(async () => {
+    prisma = {
+      patientProfile: {
+        findUnique: (jest.fn() as jest.Mock<any>).mockResolvedValue(
+          makeProfile({ hasHCM: true }),
+        ),
+        update: (jest.fn() as jest.Mock<any>).mockResolvedValue(
+          makeProfile({ profileVerificationStatus: 'UNVERIFIED' }),
+        ),
+      },
+      profileVerificationLog: {
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+        create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
+      },
+      $transaction: jest.fn((ops: any[]) => Promise.all(ops)),
+    }
+    service = await makeService(prisma)
+  })
+
+  it('no-ops (no audit rows) when the field is already rejected', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([
+      { fieldPath: 'profile.hasHCM', changeType: 'ADMIN_REJECT' },
+    ])
+    const res = await service.rejectProfileField(ADMIN, 'p1', { field: 'hasHCM' })
+    expect(res.message).toMatch(/already rejected/i)
+    expect(prisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('writes the field-reject + status-flip rows when not already rejected', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([])
+    await service.rejectProfileField(ADMIN, 'p1', { field: 'hasHCM' })
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1)
+    const ops = prisma.$transaction.mock.calls[0][0]
+    expect(ops).toHaveLength(3) // update + ADMIN_REJECT(field) + ADMIN_REJECT(status flip)
+  })
+})

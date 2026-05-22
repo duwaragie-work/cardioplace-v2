@@ -34,7 +34,7 @@ import {
   getPatientThreshold,
   getVerificationLogs,
   thresholdMandatory,
-  mandatoryConditionAddedAt,
+  mandatoryConditionChangedAt,
   type PatientProfile,
   type PatientMedication,
   type PatientAlert,
@@ -120,6 +120,12 @@ export default function PatientDetailShell({ patientId }: Props) {
   const [alertsLoading, setAlertsLoading] = useState(false);
   const [thresholdLoading, setThresholdLoading] = useState(false);
   const [logsLoading, setLogsLoading] = useState(false);
+  // THR-REVIEW gate readiness — the lock must not compute off a not-yet-loaded
+  // threshold. While `threshold` is still null mid-fetch it would read as
+  // "no threshold" and falsely lock + redirect a patient who actually has one
+  // (e.g. James/Priya). These flip true once the first fetch completes.
+  const [thresholdFetched, setThresholdFetched] = useState(false);
+  const [logsFetched, setLogsFetched] = useState(false);
 
   // Per-tab load errors. Stored separately so a profile failure doesn't
   // wipe a healthy medications cache. Each loader catches and writes here
@@ -252,6 +258,7 @@ export default function PatientDetailShell({ patientId }: Props) {
       setThresholdError(errMsg(e));
     } finally {
       setThresholdLoading(false);
+      setThresholdFetched(true);
     }
   }, [patientId]);
 
@@ -265,6 +272,7 @@ export default function PatientDetailShell({ patientId }: Props) {
       setLogsError(errMsg(e));
     } finally {
       setLogsLoading(false);
+      setLogsFetched(true);
     }
   }, [patientId]);
 
@@ -302,6 +310,10 @@ export default function PatientDetailShell({ patientId }: Props) {
   const onThresholdChanged = useCallback(async () => {
     await Promise.all([loadThreshold(), loadLogs()]);
     bumpEnrollmentCheck();
+    // A threshold save can auto-restore enrollment (IVR-04) for a reverted
+    // patient — refetch the header so the EnrollmentCard disappears + the
+    // activation pill flips back to enrolled without a manual refresh.
+    setHeaderRefreshTick((t) => t + 1);
   }, [loadThreshold, loadLogs, bumpEnrollmentCheck]);
 
   const onCareTeamChanged = useCallback(() => {
@@ -346,34 +358,51 @@ export default function PatientDetailShell({ patientId }: Props) {
   // tab is active (the review-lock and the Profile tab's per-field statuses both
   // read them on entry), so load them once on mount.
   useEffect(() => {
+    setThresholdFetched(false);
+    setLogsFetched(false);
     loadThreshold();
     loadLogs();
   }, [patientId]);
   /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 
   // ── THR-REVIEW gate ───────────────────────────────────────────────────────
-  // Fires when the patient has a threshold-mandatory condition (HFrEF/HCM/DCM),
-  // a threshold IS on file, but that threshold predates the most recent log
-  // that added a mandatory condition — i.e. the targets were set for an earlier
-  // clinical picture and must be re-reviewed. The pure no-threshold case is
-  // covered by the enrollment gate + the Thresholds tab's red "mandatory"
-  // banner (deliberately no hard lock there, so the admin can still set up the
-  // care team etc. that enrollment also requires).
+  // Forces a threshold-editing admin into the Thresholds tab whenever the
+  // patient's personalized threshold is out of date w.r.t. their mandatory
+  // conditions (HFrEF/HCM/DCM). Two cases:
+  //   • STALE   — a mandatory condition was added OR removed AFTER the threshold
+  //               was last set, so the targets no longer match the diagnosis.
+  //   • MISSING — the patient is mandatory now but has no threshold at all.
+  // The lock always clears once a threshold is saved/attested (escapable, so no
+  // setup deadlock — the only effect is "threshold first"). Covers admin edits
+  // (redirect on save) and patient self-edits (engages when an admin opens the
+  // patient).
   const mandatoryConditionAt = useMemo(
-    () => mandatoryConditionAddedAt(logs),
+    () => mandatoryConditionChangedAt(logs),
     [logs],
   );
   const thresholdReviewNeeded = useMemo(() => {
-    if (!profile || !threshold) return false;
-    if (!thresholdMandatory(profile)) return false;
-    return (
+    if (!profile) return false;
+    // STALE: a mandatory-condition change postdates the current threshold.
+    if (
+      threshold &&
       mandatoryConditionAt != null &&
       new Date(threshold.setAt).getTime() < mandatoryConditionAt
-    );
+    ) {
+      return true;
+    }
+    // MISSING: patient is mandatory now but has no threshold on file.
+    if (thresholdMandatory(profile) && !threshold) return true;
+    return false;
   }, [profile, threshold, mandatoryConditionAt]);
+  // Don't engage the lock until threshold + logs have actually loaded — while
+  // `threshold` is still null mid-fetch the gate would read "missing" and
+  // falsely redirect a patient who has a valid threshold (James/Priya bug).
+  const gateReady = thresholdFetched && logsFetched && !!profile;
   // Only roles that can actually author the threshold get pinned to the tab —
   // otherwise (HEALPLACE_OPS) they'd be locked with no way to clear the gate.
-  const lockToThresholds = thresholdReviewNeeded && canEditThresholds(user);
+  // (OPS handles care-team assignment, which is never blocked by this lock.)
+  const lockToThresholds =
+    gateReady && thresholdReviewNeeded && canEditThresholds(user);
 
   // Pin the locked user to the Thresholds tab until they re-save / attest.
   useEffect(() => {
@@ -414,16 +443,15 @@ export default function PatientDetailShell({ patientId }: Props) {
     };
   })();
 
+  // Order mirrors the clinical setup/review flow and the THR-REVIEW lock:
+  // Profile (who they are) → Thresholds (their targets — pinned here when a
+  // condition changes) → Medications → Alerts → Readings → Care team → Timeline.
   const tabs: { key: TabKey; label: string; icon: React.ReactNode; count?: number }[] = [
     { key: 'profile', label: 'Profile', icon: <UserIcon className="w-3.5 h-3.5" /> },
+    { key: 'thresholds', label: 'Thresholds', icon: <Sliders className="w-3.5 h-3.5" /> },
     { key: 'medications', label: 'Medications', icon: <Pill className="w-3.5 h-3.5" />, count: medications.length || undefined },
     { key: 'alerts', label: 'Alerts', icon: <Bell className="w-3.5 h-3.5" />, count: header?.activeAlertsCount },
-    // Readings sits between Alerts and Thresholds — provider triages alerts
-    // first, then drills into the underlying journal entries for context
-    // (BP trend + symptoms + notes + suboptimal flags), then adjusts
-    // thresholds. Mirrors the natural review workflow.
     { key: 'readings', label: 'Readings', icon: <Activity className="w-3.5 h-3.5" /> },
-    { key: 'thresholds', label: 'Thresholds', icon: <Sliders className="w-3.5 h-3.5" /> },
     { key: 'careteam', label: 'Care team', icon: <UsersIcon className="w-3.5 h-3.5" /> },
     { key: 'timeline', label: 'Timeline', icon: <Clock className="w-3.5 h-3.5" /> },
   ];

@@ -240,6 +240,26 @@ export class TestControlService {
     return { rowsDeleted: result.count }
   }
 
+  /**
+   * Delete a user's PatientThreshold so a test can assert the "no threshold"
+   * branches — IVR-04 enrollment revert + the THR-REVIEW "missing" lock. There
+   * is no production threshold-delete (THR-033), so this is test-control only.
+   */
+  async clearPatientThreshold(userId: string): Promise<{ rowsDeleted: number }> {
+    const r = await this.prisma.patientThreshold.deleteMany({ where: { userId } })
+    return { rowsDeleted: r.count }
+  }
+
+  /**
+   * Delete a user's ProfileVerificationLog rows so the Timeline and the
+   * threshold-review lock detector (mandatoryConditionChangedAt) start from a
+   * clean slate across re-runs. Test-control only.
+   */
+  async clearProfileVerificationLogs(userId: string): Promise<{ rowsDeleted: number }> {
+    const r = await this.prisma.profileVerificationLog.deleteMany({ where: { userId } })
+    return { rowsDeleted: r.count }
+  }
+
   async resetUser(userId: string): Promise<{ rowsDeleted: number }> {
     // Niva's co-fire pipeline ~doubles alert volume per scenario, which
     // multiplies the queued escalation/notification/email-retry transactions

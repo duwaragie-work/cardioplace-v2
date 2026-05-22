@@ -224,10 +224,11 @@ export default function ThresholdsTab({
 
   return (
     <div className="space-y-4">
-      {/* THR-REVIEW — re-review gate banner. Shown when a threshold-mandatory
-          condition was added after these targets were set; the shell locks the
-          other tabs until the clinician re-saves or attests below. */}
-      {reviewActive && (
+      {/* THR-REVIEW — re-review gate banner (STALE case only: a threshold
+          exists but a mandatory condition was added OR removed after it was set).
+          The no-threshold case is covered by the red "Mandatory configuration
+          required" banner below. The shell locks the other tabs either way. */}
+      {reviewActive && threshold && (
         <div
           className="rounded-2xl p-4 flex items-start gap-3"
           data-testid="admin-threshold-review-banner"
@@ -242,19 +243,11 @@ export default function ThresholdsTab({
               Threshold re-review required
             </p>
             <p className="text-[11.5px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
-              A threshold-mandatory condition (
-              {[
-                profile?.heartFailureType === 'HFREF' ? 'HFrEF' : null,
-                profile?.hasHCM ? 'HCM' : null,
-                profile?.hasDCM ? 'DCM' : null,
-              ]
-                .filter(Boolean)
-                .join(' / ')}
-              ) was added
-              {reviewConditionAt ? ` on ${new Date(reviewConditionAt).toLocaleDateString()}` : ''}
-              {threshold ? `, after these targets were set on ${new Date(threshold.setAt).toLocaleDateString()}` : ''}.
-              Update the targets for the new condition, or confirm they&apos;re still correct, to
-              continue. Other tabs are locked until you do.
+              A monitored condition (HFrEF / HCM / DCM) was added or removed
+              {reviewConditionAt ? ` on ${new Date(reviewConditionAt).toLocaleDateString()}` : ''}, after
+              these targets were set on {new Date(threshold.setAt).toLocaleDateString()}. Update the
+              targets, or confirm they&apos;re still correct, to continue — other tabs are locked until
+              you do.
             </p>
           </div>
         </div>
@@ -478,15 +471,17 @@ export default function ThresholdsTab({
             the action button stays a fixed size on the right with a real gap. */}
         <div className="mt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           <p className="text-[11px] flex-1 min-w-0" style={{ color: 'var(--brand-text-muted)' }}>
-            {reviewActive
-              ? 'Update the targets for the new condition, or confirm they’re still correct below.'
-              : 'All fields are optional except the mandatory configuration above.'}
+            {reviewActive && threshold
+              ? 'A condition changed — update the targets, or confirm they’re still correct below.'
+              : reviewActive
+                ? 'This patient needs personalized targets — set them below to continue.'
+                : 'All fields are optional except the mandatory configuration above.'}
           </p>
           {/* THR-REVIEW: when the gate is active and nothing's been edited, the
               clinician confirms the targets are still correct (with a required
               note) — re-saving bumps setAt and clears the lock. Once they edit a
               value the normal Update path takes over (enabled because dirty). */}
-          {reviewActive && !dirty ? (
+          {reviewActive && threshold && !dirty ? (
             <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto shrink-0">
               <input
                 type="text"

@@ -635,6 +635,10 @@ export default function NotificationsScreen() {
                           router.push(
                             `/patients/${n.patientUserId}?alert=${n.alertId}`,
                           );
+                        } else if (n.patientUserId) {
+                          // Non-alert care-team notice (enrollment paused /
+                          // condition review) → straight to the patient detail.
+                          router.push(`/patients/${n.patientUserId}`);
                         } else if (n.alertId) {
                           setTopTab('alerts');
                         }
