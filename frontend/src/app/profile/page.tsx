@@ -353,6 +353,17 @@ function MedVerifiedBadge({ status }: { status: PatientMedicationDto['verificati
       </span>
     );
   }
+  if (status === 'HOLD') {
+    return (
+      <span
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+        style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
+      >
+        <Clock aria-hidden="true" className="w-3 h-3" />
+        {t('profile.medOnHold')}
+      </span>
+    );
+  }
   return <VerifiedBadge status="UNVERIFIED" />;
 }
 
@@ -650,7 +661,10 @@ export default function ProfilePage() {
       setLoading(true);
       const [p, m, c, a] = await Promise.all([
         getMyPatientProfile().catch(() => null),
-        getMyMedications().catch(() => []),
+        // includeRejected so the profile shows meds the care team rejected
+        // (with a "Rejected by team" badge); the check-in + edit wizard still
+        // omit them (IVR-18).
+        getMyMedications(false, true).catch(() => []),
         getMyCareTeam().catch(() => null),
         fetchAuthProfile().catch(() => null),
       ]);

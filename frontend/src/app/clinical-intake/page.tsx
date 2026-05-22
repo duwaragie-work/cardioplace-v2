@@ -44,6 +44,7 @@ import {
   CORE_MEDS,
   CATEGORY_MEDS,
   COMBO_MEDS,
+  matchToCatalog,
   type DrugClassInput,
   type IntakeProfilePayload,
   type IntakeMedicationsPayload,
@@ -86,6 +87,7 @@ import StepDots from '@/components/intake/StepDots';
 import DateField from '@/components/intake/DateField';
 import ChoiceCard from '@/components/intake/ChoiceCard';
 import MedicationCard from '@/components/intake/MedicationCard';
+import ReAddConfirmModal from '@/components/intake/ReAddConfirmModal';
 import SpinnerIndicator from '@/components/ui/SpinnerIndicator';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -940,41 +942,114 @@ function useOtherMedHandlers(
   };
 }
 
+// IVR-19 — load the CANONICAL keys of drugs the care team previously REJECTED
+// (option c: warn, then allow re-add). Fetched with includeRejected so the
+// rejected rows reach the wizard even though they're never pre-filled into the
+// selection. We key by catalog id (resolved via matchToCatalog) rather than the
+// raw drug name so a med rejected under its generic name (e.g. "Carvedilol")
+// still matches the brand-named catalog tile the patient taps (e.g. "Coreg").
+function canonicalMedKey(drugName: string): string {
+  return matchToCatalog(drugName)?.catalogId ?? drugName.trim().toLowerCase();
+}
+
+function useRejectedDrugKeys(): Set<string> {
+  const [keys, setKeys] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    let cancelled = false;
+    getMyMedications(false, true)
+      .then((meds) => {
+        if (cancelled) return;
+        setKeys(
+          new Set(
+            meds
+              .filter((m) => m.verificationStatus === 'REJECTED')
+              .map((m) => canonicalMedKey(m.drugName)),
+          ),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return keys;
+}
+
+// Pairs the canonical rejected-key lookup with the styled ReAddConfirmModal.
+// `requestAdd` runs `doAdd` immediately for a drug that wasn't previously
+// rejected, or defers it behind the modal when it was (option c: warn → allow).
+// Render the returned `modal` somewhere in the consuming step's JSX.
+function useReAddConfirm(): {
+  requestAdd: (canonicalKey: string, displayName: string, doAdd: () => void) => void;
+  modal: React.ReactNode;
+} {
+  const rejectedKeys = useRejectedDrugKeys();
+  const [pending, setPending] = useState<{ name: string; onConfirm: () => void } | null>(null);
+
+  const requestAdd = (canonicalKey: string, displayName: string, doAdd: () => void) => {
+    if (!rejectedKeys.has(canonicalKey)) {
+      doAdd();
+      return;
+    }
+    setPending({ name: displayName, onConfirm: doAdd });
+  };
+
+  const modal = (
+    <ReAddConfirmModal
+      open={pending != null}
+      drugName={pending?.name ?? ''}
+      onConfirm={() => {
+        const p = pending;
+        setPending(null);
+        p?.onConfirm();
+      }}
+      onCancel={() => setPending(null)}
+    />
+  );
+
+  return { requestAdd, modal };
+}
+
 function A5CoreMeds({ state, setState }: StepProps) {
+  const { requestAdd, modal: reAddModal } = useReAddConfirm();
   const selectedIds = useMemo(
     () => new Set(state.selectedMedications.filter((m) => !m.isCombination).map((m) => m.catalogId).filter(Boolean) as string[]),
     [state.selectedMedications],
   );
 
-  const toggle = (medId: string) => {
-    setState((prev) => {
-      const med = CORE_MEDS.find((m) => m.id === medId);
-      if (!med) return prev;
-      const isSelected = selectedIds.has(medId);
-      const next = isSelected
-        ? prev.selectedMedications.filter((m) => m.catalogId !== medId)
-        : [
-            // Auto-promote: strip any prior voice/photo entry naming the
-            // same drug so we don't end up with two rows (one OTHER_UNVERIFIED
-            // and one ACE_INHIBITOR / etc.) for the same medication.
-            ...stripUnverifiedDuplicates(
-              prev.selectedMedications,
-              med.brandName,
-              med.genericName,
-            ),
-            {
-              catalogId: med.id,
-              drugName: med.brandName,
-              drugClass: med.drugClass,
-              isCombination: false,
-              source: 'PATIENT_SELF_REPORT' as const,
-            },
-          ];
-      return { ...prev, selectedMedications: next };
-    });
-  };
-
   const { t } = useLanguage();
+
+  const addMed = (med: (typeof CORE_MEDS)[number]) =>
+    setState((prev) => ({
+      ...prev,
+      selectedMedications: [
+        // Auto-promote: strip any prior voice/photo entry naming the same drug
+        // so we don't end up with two rows (one OTHER_UNVERIFIED and one
+        // ACE_INHIBITOR / etc.) for the same medication.
+        ...stripUnverifiedDuplicates(prev.selectedMedications, med.brandName, med.genericName),
+        {
+          catalogId: med.id,
+          drugName: med.brandName,
+          drugClass: med.drugClass,
+          isCombination: false,
+          source: 'PATIENT_SELF_REPORT' as const,
+        },
+      ],
+    }));
+
+  const toggle = (medId: string) => {
+    const med = CORE_MEDS.find((m) => m.id === medId);
+    if (!med) return;
+    if (selectedIds.has(medId)) {
+      setState((prev) => ({
+        ...prev,
+        selectedMedications: prev.selectedMedications.filter((m) => m.catalogId !== medId),
+      }));
+      return;
+    }
+    // IVR-19 — re-adding a med the care team rejected: confirm via modal first.
+    requestAdd(med.id, med.brandName, () => addMed(med));
+  };
 
   // Phase/28 — OTHER_UNVERIFIED meds list at the bottom of A5. The hook
   // derives the freeform subset + handlers; the modal opens when the
@@ -1031,6 +1106,7 @@ function A5CoreMeds({ state, setState }: StepProps) {
 
   return (
     <div className="space-y-7">
+      {reAddModal}
       <StepHeader
         title={t('intake.a5.title')}
         subtitle={t('intake.a5.subtitle')}
@@ -1105,45 +1181,50 @@ function A5CoreMeds({ state, setState }: StepProps) {
 }
 
 function A6Combos({ state, setState }: StepProps) {
+  const { t } = useLanguage();
+  const { requestAdd, modal: reAddModal } = useReAddConfirm();
   const selectedIds = useMemo(
     () => new Set(state.selectedMedications.filter((m) => m.isCombination).map((m) => m.catalogId).filter(Boolean) as string[]),
     [state.selectedMedications],
   );
 
-  const toggle = (comboId: string) => {
-    setState((prev) => {
-      const combo = COMBO_MEDS.find((c) => c.id === comboId);
-      if (!combo) return prev;
-      const isSelected = selectedIds.has(comboId);
-      const next = isSelected
-        ? prev.selectedMedications.filter((m) => m.catalogId !== comboId)
-        : [
-            // Auto-promote: strip any prior voice/photo entry naming the
-            // combo brand (e.g., voice "Zestoretic" → catalog tick).
-            ...stripUnverifiedDuplicates(
-              prev.selectedMedications,
-              combo.brandName,
-              null,
-            ),
-            {
-              catalogId: combo.id,
-              drugName: combo.brandName,
-              // Pick first registered class as the primary; full set goes into combinationComponents.
-              drugClass: combo.registersAs[0] as DrugClassInput,
-              isCombination: true,
-              combinationComponents: combo.registersAs,
-              source: 'PATIENT_SELF_REPORT' as const,
-            },
-          ];
-      return { ...prev, selectedMedications: next };
-    });
-  };
+  const addCombo = (combo: (typeof COMBO_MEDS)[number]) =>
+    setState((prev) => ({
+      ...prev,
+      selectedMedications: [
+        // Auto-promote: strip any prior voice/photo entry naming the combo
+        // brand (e.g., voice "Zestoretic" → catalog tick).
+        ...stripUnverifiedDuplicates(prev.selectedMedications, combo.brandName, null),
+        {
+          catalogId: combo.id,
+          drugName: combo.brandName,
+          // Pick first registered class as the primary; full set goes into combinationComponents.
+          drugClass: combo.registersAs[0] as DrugClassInput,
+          isCombination: true,
+          combinationComponents: combo.registersAs,
+          source: 'PATIENT_SELF_REPORT' as const,
+        },
+      ],
+    }));
 
-  const { t } = useLanguage();
+  const toggle = (comboId: string) => {
+    const combo = COMBO_MEDS.find((c) => c.id === comboId);
+    if (!combo) return;
+    if (selectedIds.has(comboId)) {
+      setState((prev) => ({
+        ...prev,
+        selectedMedications: prev.selectedMedications.filter((m) => m.catalogId !== comboId),
+      }));
+      return;
+    }
+    // IVR-19 — re-adding a combo the care team rejected: confirm via modal first.
+    requestAdd(combo.id, combo.brandName, () => addCombo(combo));
+  };
   const contains = t('intake.a6.audioContains');
   const andWord = t('intake.a6.audioAnd');
   return (
     <div className="space-y-6">
+      {reAddModal}
       <StepHeader
         title={t('intake.a6.title')}
         subtitle={t('intake.a6.subtitle')}
@@ -1198,36 +1279,41 @@ function A8Categories({ state, setState }: StepProps) {
   // dictation instead. Backend still accepts PATIENT_PHOTO source for
   // back-compat; we just don't surface that path in the UI any more.
 
+  const { requestAdd, modal: reAddModal } = useReAddConfirm();
   const selectedIds = useMemo(
     () => new Set(state.selectedMedications.map((m) => m.catalogId).filter(Boolean) as string[]),
     [state.selectedMedications],
   );
 
+  const addCategoryMed = (med: (typeof CATEGORY_MEDS)[number]) =>
+    setState((prev) => ({
+      ...prev,
+      selectedMedications: [
+        // Auto-promote: strip any prior voice/photo entry naming the same drug
+        // (e.g., voice "Furosemide" → tap Furosemide tile).
+        ...stripUnverifiedDuplicates(prev.selectedMedications, med.brandName, med.genericName),
+        {
+          catalogId: med.id,
+          drugName: med.brandName,
+          drugClass: med.drugClass,
+          isCombination: false,
+          source: 'PATIENT_SELF_REPORT' as const,
+        },
+      ],
+    }));
+
   const toggleCategoryMed = (medId: string) => {
-    setState((prev) => {
-      const med = CATEGORY_MEDS.find((m) => m.id === medId);
-      if (!med) return prev;
-      const isSelected = selectedIds.has(medId);
-      const next = isSelected
-        ? prev.selectedMedications.filter((m) => m.catalogId !== medId)
-        : [
-            // Auto-promote: strip any prior voice/photo entry naming the
-            // same drug (e.g., voice "Furosemide" → tap Furosemide tile).
-            ...stripUnverifiedDuplicates(
-              prev.selectedMedications,
-              med.brandName,
-              med.genericName,
-            ),
-            {
-              catalogId: med.id,
-              drugName: med.brandName,
-              drugClass: med.drugClass,
-              isCombination: false,
-              source: 'PATIENT_SELF_REPORT' as const,
-            },
-          ];
-      return { ...prev, selectedMedications: next };
-    });
+    const med = CATEGORY_MEDS.find((m) => m.id === medId);
+    if (!med) return;
+    if (selectedIds.has(medId)) {
+      setState((prev) => ({
+        ...prev,
+        selectedMedications: prev.selectedMedications.filter((m) => m.catalogId !== medId),
+      }));
+      return;
+    }
+    // IVR-19 — re-adding a med the care team rejected: confirm via modal first.
+    requestAdd(med.id, med.brandName, () => addCategoryMed(med));
   };
 
   const addOther = (source: 'PATIENT_VOICE' | 'PATIENT_PHOTO', rawText: string) => {
@@ -1288,6 +1374,7 @@ function A8Categories({ state, setState }: StepProps) {
 
   return (
     <div className="space-y-6">
+      {reAddModal}
       <StepHeader
         title={t('intake.a8.title')}
         subtitle={t('intake.a8.subtitle')}
@@ -2433,11 +2520,28 @@ function ClinicalIntakeWizard() {
   // same invalid input Continue would reject.
   const handleQuickSave = async () => {
     if (exitSaving || submitting) return;
-    const stepErr = validateStep(step);
-    if (stepErr) { setSubmitError(stepErr); return; }
-    if (step === 'A6') {
-      const conflicts = detectDedupConflicts(state.selectedMedications);
-      if (conflicts.length > 0) { setPendingDedup(conflicts); return; }
+    // Enforce EVERY cross-step dependency, not just the step being edited —
+    // editing one answer can make a field on another step newly required
+    // (e.g. switching conditions to Heart failure makes HF type required on
+    // A4; a female patient must have answered pregnancy on A2; every med
+    // needs a frequency on A9). `flow` already encodes those conditionals,
+    // so validating each step in it catches all of them. Jump to the first
+    // offending step so the patient sees exactly what to fix.
+    for (const s of flow) {
+      const err = validateStep(s);
+      if (err) {
+        goTo(s);
+        setSubmitError(err);
+        return;
+      }
+    }
+    // Combo/single medication dedup — surface conflicts before saving so we
+    // never persist a combo pill alongside one of its components.
+    const conflicts = detectDedupConflicts(state.selectedMedications);
+    if (conflicts.length > 0) {
+      if (flow.includes('A6')) goTo('A6');
+      setPendingDedup(conflicts);
+      return;
     }
     setSubmitError(null);
     setExitSaving(true);

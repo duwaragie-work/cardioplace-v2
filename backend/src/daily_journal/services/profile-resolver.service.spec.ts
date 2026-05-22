@@ -222,6 +222,43 @@ describe('ProfileResolverService', () => {
 
       expect(ctx.contextMeds).toHaveLength(1)
     })
+
+    // ── RESOLVER-AWAIT (2026-05-21) — safety-net for machine-captured meds ──
+    // Voice/photo meds are persisted as AWAITING_PROVIDER (intake.service.ts:
+    // 252,458). They must be held out of the alert engine until a provider
+    // VERIFIES them — the speech/OCR capture itself may be misread. The gate
+    // is "voice/photo AND not VERIFIED", so both AWAITING_PROVIDER and
+    // UNVERIFIED voice/photo meds are excluded.
+    it('excludes AWAITING_PROVIDER PATIENT_VOICE med from contextMeds', async () => {
+      prisma.user.findUnique.mockResolvedValue(
+        userFixture({
+          patientMedications: [
+            { ...medDefaults, id: 'm1', drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR', source: 'PATIENT_VOICE', verificationStatus: 'AWAITING_PROVIDER' },
+          ],
+        }),
+      )
+
+      const ctx = await service.resolve('user-1')
+
+      expect(ctx.contextMeds).toHaveLength(0)
+      expect(ctx.excludedMeds).toHaveLength(1)
+      expect(ctx.excludedMeds[0].verificationStatus).toBe('AWAITING_PROVIDER')
+    })
+
+    it('excludes AWAITING_PROVIDER PATIENT_PHOTO med from contextMeds', async () => {
+      prisma.user.findUnique.mockResolvedValue(
+        userFixture({
+          patientMedications: [
+            { ...medDefaults, id: 'm1', drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR', source: 'PATIENT_PHOTO', verificationStatus: 'AWAITING_PROVIDER' },
+          ],
+        }),
+      )
+
+      const ctx = await service.resolve('user-1')
+
+      expect(ctx.contextMeds).toHaveLength(0)
+      expect(ctx.excludedMeds).toHaveLength(1)
+    })
   })
 
   // ──────────────────────────────────────────────────────────────────────

@@ -101,6 +101,7 @@ const es: Record<TranslationKey, string> = {
   'dashboard.chartDateAxis': 'Fecha',
   'dashboard.chartAt': 'a las',
   'dashboard.viewAllAlerts': 'Ver todas las alertas',
+  'dashboard.viewAllNotifications': 'Ver todas las notificaciones',
 
   // ─── Check-In (legacy — kept for surfaces not yet migrated to v2) ─────────
   'checkin.systolic': 'Sistólica',
@@ -212,6 +213,10 @@ const es: Record<TranslationKey, string> = {
     'Una sola medición puede ser inexacta — una segunda ayuda a su equipo de atención a ver el panorama completo. Esperaremos unos minutos.',
   'checkin.b3.otherLabel': '¿Algo más? (opcional)',
   'checkin.b3.otherPlaceholder': 'En sus propias palabras…',
+  'checkin.b3.otherSymptomsLabel': '¿Algún otro síntoma? (opcional)',
+  'checkin.b3.addSymptom': 'Agregar',
+  'checkin.b3.removeSymptom': 'Quitar',
+  'checkin.b3.notesLabel': 'Notas (opcional)',
 
   // B4 — paso por medicamento
   'checkin.b4.title': 'Medicamentos de hoy',
@@ -456,6 +461,7 @@ const es: Record<TranslationKey, string> = {
   'profile.correctedByTeam': 'Corregido por su equipo',
   'profile.awaitingVerification': 'Esperando verificación',
   'profile.rejectedByTeam': 'Rechazado por el equipo',
+  'profile.medOnHold': 'En pausa',
   'profile.editPersonalInfo': 'Editar información personal',
   'profile.nameLabel': 'Nombre',
   'profile.namePlaceholder': 'Su nombre',
@@ -533,6 +539,9 @@ const es: Record<TranslationKey, string> = {
   'readings.symptoms': 'Síntomas',
   'readings.notes': 'Notas',
   'readings.notesPlaceholder': 'Notas adicionales...',
+  'readings.otherSymptoms': 'Otros síntomas',
+  'readings.detailTitle': 'Detalles de la lectura',
+  'readings.viewDetails': 'Ver detalles de la lectura',
   'readings.noBpRecorded': 'Sin PA registrada',
   'readings.meds': 'Medicamentos',
   'readings.taken': 'Tomada',
@@ -1053,6 +1062,9 @@ const es: Record<TranslationKey, string> = {
 
   // A5 — core medications
   'intake.a5.title': 'Sus medicamentos',
+  'intake.reAddRejectedConfirm': 'Su equipo de atención rechazó previamente {drug}. ¿Volver a agregarlo de todos modos? Lo revisarán de nuevo.',
+  'intake.reAddRejectedTitle': '¿Volver a agregar este medicamento?',
+  'intake.reAddRejectedConfirmBtn': 'Volver a agregar',
   'intake.a5.subtitle': 'Toque cada pastilla que toma. No se preocupe por la dosis — solo si la toma.',
   'intake.a5.audio': 'Sus medicamentos. Toque cada pastilla que toma. No se preocupe por la dosis, solo si la toma.',
   'intake.a5.groupAce': 'Pastillas para la presión (inhibidores de la ECA)',

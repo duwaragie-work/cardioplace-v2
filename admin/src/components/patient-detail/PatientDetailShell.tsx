@@ -4,7 +4,7 @@
 // alerts, threshold, verification logs) and renders the 5-tab layout. Each
 // tab is a separate file so the shell stays focused on coordination.
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -33,12 +33,16 @@ import {
   getPatientAlerts,
   getPatientThreshold,
   getVerificationLogs,
+  thresholdMandatory,
+  mandatoryConditionAddedAt,
   type PatientProfile,
   type PatientMedication,
   type PatientAlert,
   type PatientThreshold,
   type ProfileVerificationLog,
 } from '@/lib/services/patient-detail.service';
+import { useAuth } from '@/lib/auth-context';
+import { canEditThresholds } from '@/lib/roleGates';
 import ProfileTab from './ProfileTab';
 import MedicationsTab from './MedicationsTab';
 import AlertsTab from './AlertsTab';
@@ -87,6 +91,7 @@ interface Props {
 
 export default function PatientDetailShell({ patientId }: Props) {
   const router = useRouter();
+  const { user } = useAuth();
   const [tab, setTab] = useState<TabKey>('profile');
 
   // Header (always loaded — top-of-page summary card)
@@ -280,6 +285,10 @@ export default function PatientDetailShell({ patientId }: Props) {
   const onProfileChanged = useCallback(async () => {
     await Promise.all([loadProfile(), loadLogs()]);
     bumpEnrollmentCheck();
+    // A profile correction can change conditions (header pills) and, via the
+    // IVR-04 re-gate, revert enrollment — refetch the header so the activation
+    // pill / EnrollmentCard reflect the new state without a manual refresh.
+    setHeaderRefreshTick((t) => t + 1);
   }, [loadProfile, loadLogs, bumpEnrollmentCheck]);
 
   const onMedicationsChanged = useCallback(async () => {
@@ -332,7 +341,44 @@ export default function PatientDetailShell({ patientId }: Props) {
   useEffect(() => {
     if (tab === 'thresholds' && !profile && !profileLoading) loadProfile();
   }, [tab]);
+
+  // THR-REVIEW + IVR-08/23 need threshold + logs available regardless of which
+  // tab is active (the review-lock and the Profile tab's per-field statuses both
+  // read them on entry), so load them once on mount.
+  useEffect(() => {
+    loadThreshold();
+    loadLogs();
+  }, [patientId]);
   /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
+
+  // ── THR-REVIEW gate ───────────────────────────────────────────────────────
+  // Fires when the patient has a threshold-mandatory condition (HFrEF/HCM/DCM),
+  // a threshold IS on file, but that threshold predates the most recent log
+  // that added a mandatory condition — i.e. the targets were set for an earlier
+  // clinical picture and must be re-reviewed. The pure no-threshold case is
+  // covered by the enrollment gate + the Thresholds tab's red "mandatory"
+  // banner (deliberately no hard lock there, so the admin can still set up the
+  // care team etc. that enrollment also requires).
+  const mandatoryConditionAt = useMemo(
+    () => mandatoryConditionAddedAt(logs),
+    [logs],
+  );
+  const thresholdReviewNeeded = useMemo(() => {
+    if (!profile || !threshold) return false;
+    if (!thresholdMandatory(profile)) return false;
+    return (
+      mandatoryConditionAt != null &&
+      new Date(threshold.setAt).getTime() < mandatoryConditionAt
+    );
+  }, [profile, threshold, mandatoryConditionAt]);
+  // Only roles that can actually author the threshold get pinned to the tab —
+  // otherwise (HEALPLACE_OPS) they'd be locked with no way to clear the gate.
+  const lockToThresholds = thresholdReviewNeeded && canEditThresholds(user);
+
+  // Pin the locked user to the Thresholds tab until they re-save / attest.
+  useEffect(() => {
+    if (lockToThresholds && tab !== 'thresholds') setTab('thresholds');
+  }, [lockToThresholds, tab]);
 
   const initials = (() => {
     if (!header?.name) return 'P';
@@ -385,11 +431,17 @@ export default function PatientDetailShell({ patientId }: Props) {
   return (
     <div className="h-full" style={{ backgroundColor: 'var(--brand-background)' }}>
       <main className="p-4 md:p-8 space-y-5 md:space-y-6 max-w-[1400px] mx-auto">
-        {/* ── Back link ─────────────────────────────────────────────────── */}
+        {/* ── Back link ─────────────────────────────────────────────────────
+            Disabled while the threshold re-review gate is active so the
+            clinician can't navigate away before re-saving / attesting the
+            now-stale targets (THR-REVIEW). In-app nav only — a browser back/
+            close simply re-fires the gate on the next visit. */}
         <button
           type="button"
           onClick={() => router.push('/patients')}
-          className="inline-flex items-center gap-1 text-[12px] font-semibold cursor-pointer hover:underline"
+          disabled={lockToThresholds}
+          title={lockToThresholds ? 'Finish the required threshold review first' : undefined}
+          className="inline-flex items-center gap-1 text-[12px] font-semibold cursor-pointer hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline"
           style={{ color: 'var(--brand-text-secondary)' }}
         >
           <ChevronLeft className="w-3.5 h-3.5" />
@@ -612,6 +664,10 @@ export default function PatientDetailShell({ patientId }: Props) {
         >
           {tabs.map(({ key, label, icon, count }) => {
             const active = tab === key;
+            // THR-REVIEW: while the threshold re-review gate is active, every
+            // tab except Thresholds is locked so the clinician can't sidestep
+            // the required re-review.
+            const locked = lockToThresholds && key !== 'thresholds';
             return (
               <button
                 key={key}
@@ -619,8 +675,10 @@ export default function PatientDetailShell({ patientId }: Props) {
                 role="tab"
                 data-testid={`admin-tab-${key}`}
                 aria-selected={active}
-                onClick={() => setTab(key)}
-                className="inline-flex items-center gap-1.5 px-3 md:px-4 h-9 rounded-xl text-[12.5px] font-semibold transition-all cursor-pointer"
+                disabled={locked}
+                title={locked ? 'Finish the required threshold review first' : undefined}
+                onClick={() => { if (!locked) setTab(key); }}
+                className="inline-flex items-center gap-1.5 px-3 md:px-4 h-9 rounded-xl text-[12.5px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{
                   backgroundColor: active ? 'var(--brand-primary-purple)' : 'transparent',
                   color: active ? 'white' : 'var(--brand-text-secondary)',
@@ -661,6 +719,7 @@ export default function PatientDetailShell({ patientId }: Props) {
                 <ProfileTab
                   patientId={patientId}
                   profile={profile}
+                  logs={logs}
                   loading={profileLoading}
                   onChanged={onProfileChanged}
                 />
@@ -699,6 +758,8 @@ export default function PatientDetailShell({ patientId }: Props) {
                   threshold={threshold}
                   loading={thresholdLoading || profileLoading}
                   onChanged={onThresholdChanged}
+                  reviewActive={lockToThresholds}
+                  reviewConditionAt={mandatoryConditionAt}
                 />
               </>
             )}

@@ -101,6 +101,7 @@ const de: Record<TranslationKey, string> = {
   'dashboard.chartDateAxis': 'Datum',
   'dashboard.chartAt': 'um',
   'dashboard.viewAllAlerts': 'Alle Warnungen anzeigen',
+  'dashboard.viewAllNotifications': 'Alle Benachrichtigungen anzeigen',
 
   // ─── Check-In (legacy — kept for surfaces not yet migrated to v2) ─────────
   'checkin.systolic': 'Systolisch',
@@ -212,6 +213,10 @@ const de: Record<TranslationKey, string> = {
     'Eine einzelne Messung kann ungenau sein — eine zweite hilft Ihrem Behandlungsteam, das Gesamtbild zu sehen. Wir warten ein paar Minuten.',
   'checkin.b3.otherLabel': 'Noch etwas? (optional)',
   'checkin.b3.otherPlaceholder': 'In Ihren eigenen Worten…',
+  'checkin.b3.otherSymptomsLabel': 'Weitere Symptome? (optional)',
+  'checkin.b3.addSymptom': 'Hinzufügen',
+  'checkin.b3.removeSymptom': 'Entfernen',
+  'checkin.b3.notesLabel': 'Notizen (optional)',
 
   // B4 — per-medication step
   'checkin.b4.title': 'Medikamente heute',
@@ -456,6 +461,7 @@ const de: Record<TranslationKey, string> = {
   'profile.correctedByTeam': 'Korrigiert von Ihrem Team',
   'profile.awaitingVerification': 'Wartet auf Bestätigung',
   'profile.rejectedByTeam': 'Vom Team abgelehnt',
+  'profile.medOnHold': 'Pausiert',
   'profile.editPersonalInfo': 'Persönliche Daten bearbeiten',
   'profile.nameLabel': 'Name',
   'profile.namePlaceholder': 'Ihr Name',
@@ -533,6 +539,9 @@ const de: Record<TranslationKey, string> = {
   'readings.symptoms': 'Symptome',
   'readings.notes': 'Notizen',
   'readings.notesPlaceholder': 'Zusätzliche Notizen...',
+  'readings.otherSymptoms': 'Weitere Symptome',
+  'readings.detailTitle': 'Messdetails',
+  'readings.viewDetails': 'Messdetails anzeigen',
   'readings.noBpRecorded': 'Kein BD aufgezeichnet',
   'readings.meds': 'Meds',
   'readings.taken': 'Genommen',
@@ -1053,6 +1062,9 @@ const de: Record<TranslationKey, string> = {
 
   // A5 — core medications
   'intake.a5.title': 'Ihre Medikamente',
+  'intake.reAddRejectedConfirm': 'Ihr Behandlungsteam hat {drug} zuvor abgelehnt. Trotzdem erneut hinzufügen? Es wird erneut überprüft.',
+  'intake.reAddRejectedTitle': 'Dieses Medikament erneut hinzufügen?',
+  'intake.reAddRejectedConfirmBtn': 'Erneut hinzufügen',
   'intake.a5.subtitle': 'Tippen Sie auf jede Pille, die Sie einnehmen. Keine Sorge um die Dosis — nur ob Sie sie nehmen.',
   'intake.a5.audio': 'Ihre Medikamente. Tippen Sie auf jede Pille, die Sie einnehmen. Keine Sorge um die Dosis, nur ob Sie sie nehmen.',
   'intake.a5.groupAce': 'Blutdruckpillen (ACE-Hemmer)',

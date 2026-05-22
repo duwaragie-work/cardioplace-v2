@@ -12,11 +12,11 @@ import {
   CartesianGrid,
   ResponsiveContainer,
 } from 'recharts';
-import { Flame, Clock, ArrowRight, Heart, Target, ShieldCheck, AlertTriangle, Pill, ArrowUp, ArrowDown } from 'lucide-react';
+import { Flame, Clock, ArrowRight, Heart, Bell, Target, ShieldCheck, AlertTriangle, Pill, ArrowUp, ArrowDown } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
-import { getJournalEntries, getLatestBaseline, getAlerts, getJournalStats, type AlertTier } from '@/lib/services/journal.service';
+import { getJournalEntries, getNotifications, getAlerts, getJournalStats, type AlertTier } from '@/lib/services/journal.service';
 import { getMyPatientProfile, getMyMedications, type PatientProfileDto } from '@/lib/services/intake.service';
 import { getMyThreshold, type PatientThresholdDto } from '@/lib/services/threshold.service';
 import { loadDraft, hasDraft, stepProgress } from '@/lib/intake/draft';
@@ -63,9 +63,14 @@ interface JournalEntry {
   pulse?: number | null;
   medicationTaken?: boolean | null;
 }
-interface Baseline {
-  baselineSystolic?: number | string;
-  baselineDiastolic?: number | string;
+interface DashboardNotif {
+  id: string;
+  title: string;
+  body: string;
+  sentAt: string;
+  watched: boolean;
+  channel?: string;
+  alertId?: string | null;
 }
 interface DeviationAlert {
   id: string;
@@ -102,7 +107,7 @@ export default function Dashboard() {
   const [bpChartData, setBpChartData] = useState<{ day: string; systolic: number; diastolic: number; fullDate: string; time: string }[]>([]);
   const [chartRange, setChartRange] = useState<7 | 90>(7);
   const [latestEntry, setLatestEntry] = useState<JournalEntry | null>(null);
-  const [baseline, setBaseline] = useState<Baseline | null>(null);
+  const [notifs, setNotifs] = useState<DashboardNotif[]>([]);
   const [alerts, setAlerts] = useState<DeviationAlert[]>([]);
   const [streak, setStreak] = useState(0);
   const [totalEntries, setTotalEntries] = useState(0);
@@ -195,10 +200,10 @@ export default function Dashboard() {
     setDataLoading(true);
     Promise.all([
       getJournalEntries({ limit: 200 }).catch(() => []),
-      getLatestBaseline().catch(() => null),
+      getNotifications('all').catch(() => []),
       getAlerts().catch(() => []),
       getJournalStats().catch(() => null),
-    ]).then(([entries, baselineData, alertsData, stats]) => {
+    ]).then(([entries, notifData, alertsData, stats]) => {
       const arr: JournalEntry[] = Array.isArray(entries) ? entries : [];
       const sortedAsc = [...arr].sort((a, b) => new Date(a.measuredAt).getTime() - new Date(b.measuredAt).getTime());
       const dateCounts = new Map<string, number>();
@@ -222,7 +227,14 @@ export default function Dashboard() {
       setLatestEntry(sortedDesc[0] ?? null);
       setTotalEntries(stats?.totalEntries ?? arr.length);
       setStreak(stats?.currentStreak ?? 0);
-      setBaseline(baselineData ?? null);
+      // Only PUSH/null channels are patient-facing in-app messages (matches
+      // the Notifications page filter); DASHBOARD rows are alert-linked.
+      const notifArr: DashboardNotif[] = Array.isArray(notifData) ? (notifData as DashboardNotif[]) : [];
+      setNotifs(
+        notifArr
+          .filter((n) => !n.channel || n.channel === 'PUSH')
+          .sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime()),
+      );
       setAlerts(Array.isArray(alertsData) ? alertsData : []);
     }).finally(() => setDataLoading(false));
   }, [isAuthenticated, isLoading]);
@@ -270,9 +282,6 @@ export default function Dashboard() {
       ? { backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }
       : { backgroundColor: '#F1F5F9', color: 'var(--brand-text-muted)' };
 
-  const baselineStr = baseline?.baselineSystolic && baseline?.baselineDiastolic
-    ? `${Math.round(Number(baseline.baselineSystolic))}/${Math.round(Number(baseline.baselineDiastolic))}` : '--/--';
-  const hasBaseline = baselineStr !== '--/--';
 
   // Patient-actionable open alerts. Excludes TIER_2_DISCREPANCY because
   // those are admin-facing per the v2 clinical spec — patients can't action
@@ -920,35 +929,6 @@ export default function Dashboard() {
               )}
             </div>
 
-            {/* Baseline — highlighted as a pill so patients actually notice
-                their average BP (it used to be tiny muted text they overlooked). */}
-            <div className="mt-2">
-              {loading ? (
-                <Bone w="55%" h={20} r={999} />
-              ) : (
-                <span
-                  data-testid="dashboard-baseline"
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full"
-                  style={{
-                    backgroundColor: hasBaseline ? 'var(--brand-accent-teal-light)' : '#F1F5F9',
-                  }}
-                >
-                  <Target
-                    className="w-3.5 h-3.5 shrink-0"
-                    style={{ color: hasBaseline ? 'var(--brand-accent-teal)' : 'var(--brand-text-muted)' }}
-                  />
-                  <span className="text-[11px] font-medium leading-none" style={{ color: 'var(--brand-text-secondary)' }}>
-                    {t('dashboard.baseline')}
-                  </span>
-                  <span
-                    className="text-[12px] font-bold leading-none"
-                    style={{ color: hasBaseline ? 'var(--brand-accent-teal)' : 'var(--brand-text-muted)' }}
-                  >
-                    {baselineStr} mmHg
-                  </span>
-                </span>
-              )}
-            </div>
           </div>
 
           {/* Check-In CTA + Alerts */}
@@ -1015,22 +995,27 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Recent Alerts */}
+            {/* Notifications — patient-facing PUSH messages (med holds,
+                reminders, care-team updates). BP alerts surface separately as
+                dashboard banners, so this panel is notifications-only. */}
             <div
               className="bg-white/80 backdrop-blur-sm p-4 md:p-5 rounded-2xl flex flex-col"
               style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}
               aria-live="polite"
               aria-relevant="additions"
-              aria-label={t('accessibility.alertsRegion')}
+              aria-label={t('notifications.title')}
             >
-              <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
-                {t('dashboard.recentAlerts')}
-              </h3>
+              <div className="flex items-center gap-2 mb-3">
+                <Bell className="w-4 h-4 shrink-0" style={{ color: 'var(--brand-warning-amber-text)' }} />
+                <h3 className="text-sm font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                  {t('notifications.title')}
+                </h3>
+              </div>
 
               {loading ? (
                 <div className="space-y-2">
                   {[1, 2].map((i) => (
-                    <div key={i} className="p-3 rounded-xl" style={{ backgroundColor: '#F8F4FF', borderLeft: '3px solid #EDE9F6' }}>
+                    <div key={i} className="p-3 rounded-xl" style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}>
                       <Bone w="75%" h={11} />
                       <div className="mt-1.5"><Bone w="45%" h={9} r={5} /></div>
                     </div>
@@ -1038,53 +1023,65 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <>
-                  {openAlerts.length === 0 && streak === 0 && (
-                    <p className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>
-                      {t('dashboard.noAlertsGreat')}
-                    </p>
+                  {notifs.length === 0 && (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center py-5">
+                      <div
+                        className="w-9 h-9 rounded-full flex items-center justify-center mb-2"
+                        style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}
+                      >
+                        <Bell className="w-4 h-4" style={{ color: 'var(--brand-warning-amber-text)' }} />
+                      </div>
+                      <p className="text-xs" style={{ color: 'var(--brand-text-muted)' }}>
+                        {t('notifications.noMessages')}
+                      </p>
+                    </div>
                   )}
 
                   <div className="space-y-2">
-                    {/* Show max 2 alert items; if streak is shown, only 1 alert */}
-                    {openAlerts.slice(0, streak > 0 ? 1 : 2).map((alert) => (
+                    {notifs.slice(0, 3).map((n) => (
                       <button
                         type="button"
-                        key={alert.id}
-                        onClick={() => router.push(`/alerts/${alert.id}`)}
+                        key={n.id}
+                        onClick={() => router.push(n.alertId ? `/alerts/${n.alertId}` : '/notifications?tab=notifications')}
                         className="w-full text-left p-3 rounded-xl cursor-pointer transition hover:scale-[1.01] active:scale-[0.99]"
                         style={{
-                          backgroundColor: alert.severity === 'HIGH' ? 'var(--brand-alert-red-light)' : 'var(--brand-warning-amber-light)',
-                          borderLeft: `3px solid ${alert.severity === 'HIGH' ? 'var(--brand-alert-red)' : 'var(--brand-warning-amber)'}`,
-                        }}>
-                        <p className="text-[11px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-                          {formatAlertType(alert.type, t)}
-                        </p>
-                        <p className="text-[10px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
-                          {formatAlertDate(alert.journalEntry?.measuredAt ?? alert.createdAt ?? '')} {'· ' + t('dashboard.careTeamNotified')}
-                        </p>
+                          backgroundColor: n.watched ? 'var(--brand-background)' : 'var(--brand-warning-amber-light)',
+                          border: `1px solid ${n.watched ? 'var(--brand-border)' : 'var(--brand-warning-amber)'}`,
+                        }}
+                      >
+                        <div className="flex items-start gap-2">
+                          {!n.watched && (
+                            <span
+                              className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0"
+                              style={{ backgroundColor: 'var(--brand-warning-amber)' }}
+                              aria-hidden
+                            />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[11.5px] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
+                              {n.title}
+                            </p>
+                            <p className="text-[10.5px] mt-0.5 leading-snug line-clamp-2" style={{ color: 'var(--brand-text-secondary)' }}>
+                              {n.body}
+                            </p>
+                            <p className="text-[9.5px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
+                              {formatAlertDate(n.sentAt)}
+                            </p>
+                          </div>
+                        </div>
                       </button>
                     ))}
-
-                    {streak > 0 && (
-                      <div className="p-3 rounded-xl"
-                        style={{ backgroundColor: 'var(--brand-success-green-light)', borderLeft: '3px solid var(--brand-success-green)' }}>
-                        <p className="text-[11px] font-semibold mb-0.5" style={{ color: 'var(--brand-text-primary)' }}>
-                          {streak} {t('dashboard.day')} {t('dashboard.medicationStreak')} 🔥
-                        </p>
-                        <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>{t('dashboard.keepItUp')}</p>
-                      </div>
-                    )}
                   </div>
 
-                  {openAlerts.length > 2 || (openAlerts.length > 1 && streak > 0) ? (
+                  {notifs.length > 3 && (
                     <button
-                      onClick={() => router.push('/notifications')}
+                      onClick={() => router.push('/notifications?tab=notifications')}
                       className="mt-2 w-full flex items-center justify-center gap-1 py-1.5 rounded-full text-[11px] font-semibold transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
-                      style={{ color: 'var(--brand-primary-purple)', backgroundColor: 'var(--brand-primary-purple-light)' }}
+                      style={{ color: 'var(--brand-warning-amber-text)', backgroundColor: 'var(--brand-warning-amber-light)' }}
                     >
-                      {t('dashboard.viewAllAlerts')} <ArrowRight aria-hidden="true" className="w-3 h-3" />
+                      {t('dashboard.viewAllNotifications')} <ArrowRight aria-hidden="true" className="w-3 h-3" />
                     </button>
-                  ) : null}
+                  )}
                 </>
               )}
             </div>

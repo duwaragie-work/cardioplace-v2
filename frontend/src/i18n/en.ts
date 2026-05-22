@@ -96,6 +96,7 @@ const en = {
   'dashboard.chartDateAxis': 'Date',
   'dashboard.chartAt': 'at',
   'dashboard.viewAllAlerts': 'View all alerts',
+  'dashboard.viewAllNotifications': 'View all notifications',
 
   // ─── Check-In (legacy — kept for surfaces not yet migrated to v2) ─────────
   'checkin.systolic': 'Systolic',
@@ -210,6 +211,10 @@ const en = {
     "One reading on its own can be off — a second one helps your care team get the full picture. We'll wait a few minutes for you to take it.",
   'checkin.b3.otherLabel': 'Anything else? (optional)',
   'checkin.b3.otherPlaceholder': 'In your own words…',
+  'checkin.b3.otherSymptomsLabel': 'Any other symptoms? (optional)',
+  'checkin.b3.addSymptom': 'Add',
+  'checkin.b3.removeSymptom': 'Remove',
+  'checkin.b3.notesLabel': 'Notes (optional)',
 
   // B4 — per-medication step (Yes / No / Not due yet for each med on file)
   'checkin.b4.title': 'Medications today',
@@ -456,6 +461,7 @@ const en = {
   'profile.correctedByTeam': 'Corrected by your team',
   'profile.awaitingVerification': 'Awaiting verification',
   'profile.rejectedByTeam': 'Rejected by team',
+  'profile.medOnHold': 'On hold',
   'profile.editPersonalInfo': 'Edit personal info',
   'profile.nameLabel': 'Name',
   'profile.namePlaceholder': 'Your name',
@@ -534,6 +540,9 @@ const en = {
   'readings.symptoms': 'Symptoms',
   'readings.notes': 'Notes',
   'readings.notesPlaceholder': 'Any additional notes...',
+  'readings.otherSymptoms': 'Other symptoms',
+  'readings.detailTitle': 'Reading details',
+  'readings.viewDetails': 'View reading details',
   'readings.noBpRecorded': 'No BP recorded',
   'readings.meds': 'Meds',
   'readings.taken': 'Taken',
@@ -1061,6 +1070,9 @@ const en = {
 
   // A5 — core medications
   'intake.a5.title': 'Your medications',
+  'intake.reAddRejectedConfirm': 'Your care team previously rejected {drug}. Re-add it anyway? They will review it again.',
+  'intake.reAddRejectedTitle': 'Re-add this medication?',
+  'intake.reAddRejectedConfirmBtn': 'Re-add',
   'intake.a5.subtitle': "Tap each pill you take. Don't worry about dose — just whether you take it.",
   'intake.a5.audio': 'Your medications. Tap each pill you take. Do not worry about dose, just whether you take it.',
   'intake.a5.groupAce': 'Blood pressure pills (ACE inhibitors)',
