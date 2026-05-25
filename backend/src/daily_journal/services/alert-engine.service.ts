@@ -70,6 +70,7 @@ import {
   bradySymptomaticRule,
   buildTachyRule,
   getHrContextAnnotation,
+  tachySevereRule,
 } from '../engine/hr-branches.js'
 import {
   getWidePulsePressureAnnotation,
@@ -419,6 +420,12 @@ export class AlertEngineService {
       // axis so only the first match claims it.
       symptomOverridePregnancyRule,
       symptomOverrideGeneralRule,
+      // HR<40 absolute bradycardia (Tier 1) — a hard emergency floor that
+      // must fire on a SINGLE reading, so it runs pre-gate (NIVA_HR doc /
+      // Cluster 6). Listed AFTER the contraindication rules above so they
+      // keep priority on the shared 'contraindication' axis. Bypasses the
+      // single-reading gate AND fires for AFib <3 (like angioedema).
+      bradyAbsoluteRule,
     ]
     for (const rule of preGateRules) {
       const r = rule(session, ctx)
@@ -470,6 +477,12 @@ export class AlertEngineService {
     const emergencyRules: RuleFunction[] = [
       absoluteEmergencyRule,
       pregnancyL2Rule,
+      // HR>130 severe tachycardia (Cluster 6 Q5) — fires immediately on a
+      // single reading, so it runs in the emergency set to bypass the
+      // single-reading gate. Placed in Stage B (after the AFib gate) so AFib
+      // patients keep their ≥3-reading gate, since AFib rapid-HR is expected.
+      // Claims the 'hr' axis.
+      tachySevereRule,
     ]
     for (const rule of emergencyRules) {
       const r = rule(session, ctx)
@@ -541,11 +554,10 @@ export class AlertEngineService {
       standardL1LowRule,
       afibHrRule,
       tachyRule,
-      // Cluster 6 — brady split into two emitters. bradyAbsoluteRule (HR<40)
-      // claims 'contraindication' (Tier 1); bradySymptomaticRule (HR<50 +
-      // dizziness/syncope/AMS/etc.) claims 'hr'. They're on different axes
-      // so both can co-fire on the same reading.
-      bradyAbsoluteRule,
+      // Cluster 6 — bradyAbsoluteRule (HR<40, Tier 1 'contraindication') was
+      // moved to the Stage A pre-gate set so the emergency floor fires on a
+      // single reading. bradySymptomaticRule (HR<50 + dizziness/syncope/AMS/
+      // etc., 'hr' axis) stays gated here — it needs symptom confirmation.
       bradySymptomaticRule,
       // Cluster 6 — HF decompensation + DHP-CCB side-effect + the six
       // symptom-rules.ts entries. Each claims a distinct axis so they

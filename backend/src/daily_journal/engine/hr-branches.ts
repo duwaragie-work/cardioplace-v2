@@ -60,23 +60,47 @@ export const afibHrRule: RuleFunction = (session, ctx) => {
 }
 
 /**
- * Tachycardia — fires when the patient is flagged hasTachycardia.
- *
- * Cluster 6 Q5 (Manisha 5/9/26):
- *  - Consecutive-reading branch: HR > 100 AND `priorElevated` (a reading
- *    within the prior 8h was also > 100). The 8h window is enforced by
- *    `wasPriorReadingPulseElevated`; this rule only consumes the boolean.
- *  - Single-reading Tier 2 exception: HR > 130 fires immediately,
- *    regardless of `priorElevated` — severe tachy doesn't need a second
- *    reading to confirm.
+ * Severe tachycardia (HR > 130) — Cluster 6 Q5 single-reading Tier 2
+ * exception: fires immediately on ONE reading, no consecutive-reading wait.
+ * Split out of `buildTachyRule` so it can run in the engine's pre-gate
+ * emergency set (Stage B) and bypass the single-reading non-emergency gate,
+ * exactly like the BP ≥180 absolute-emergency rule. Claims the `hr` axis
+ * (same as the consecutive-reading tachy path), so the two never double-fire.
+ */
+export const tachySevereRule: RuleFunction = (session, ctx) => {
+  if (!ctx.profile.hasTachycardia) return null
+  if (session.pulse == null) return null
+  if (session.pulse <= TACHY_SEVERE_HR) return null
+
+  return {
+    ruleId: RULE_IDS.TACHY_HR,
+    tier: 'BP_LEVEL_1_HIGH',
+    mode: 'STANDARD',
+    pulsePressure: getPulsePressure(session.systolicBP, session.diastolicBP),
+    suboptimalMeasurement: session.suboptimalMeasurement,
+    actualValue: session.pulse,
+    reason: `Severe tachycardia HR ${session.pulse} > ${TACHY_SEVERE_HR} (single-reading Tier 2 exception per Manisha 5/9 Q5).`,
+    metadata: {
+      conditionLabel: 'Tachycardia',
+      thresholdValue: TACHY_SEVERE_HR,
+    },
+  }
+}
+
+/**
+ * Tachycardia consecutive-reading branch — HR > 100 AND `priorElevated` (a
+ * reading within the prior 8h was also > 100). The 8h window is enforced by
+ * `wasPriorReadingPulseElevated`; this rule only consumes the boolean. The
+ * HR > 130 single-reading exception is owned by `tachySevereRule` above (which
+ * runs in the pre-gate emergency set); this branch stays in Stage C since it
+ * inherently needs ≥2 readings. Both share `RULE_TACHY_HR` / the `hr` axis.
  */
 export function buildTachyRule(priorElevated: boolean): RuleFunction {
   return (session, ctx) => {
     if (!ctx.profile.hasTachycardia) return null
     if (session.pulse == null) return null
     if (session.pulse <= TACHY_HR) return null
-    const isSevereSingleReading = session.pulse > TACHY_SEVERE_HR
-    if (!isSevereSingleReading && !priorElevated) return null
+    if (!priorElevated) return null
 
     return {
       ruleId: RULE_IDS.TACHY_HR,
@@ -85,12 +109,10 @@ export function buildTachyRule(priorElevated: boolean): RuleFunction {
       pulsePressure: getPulsePressure(session.systolicBP, session.diastolicBP),
       suboptimalMeasurement: session.suboptimalMeasurement,
       actualValue: session.pulse,
-      reason: isSevereSingleReading
-        ? `Severe tachycardia HR ${session.pulse} > ${TACHY_SEVERE_HR} (single-reading Tier 2 exception per Manisha 5/9 Q5).`
-        : `Tachycardia HR ${session.pulse} > ${TACHY_HR} (≥2 consecutive within 8h).`,
+      reason: `Tachycardia HR ${session.pulse} > ${TACHY_HR} (≥2 consecutive within 8h).`,
       metadata: {
         conditionLabel: 'Tachycardia',
-        thresholdValue: isSevereSingleReading ? TACHY_SEVERE_HR : TACHY_HR,
+        thresholdValue: TACHY_HR,
       },
     }
   }
