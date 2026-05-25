@@ -23,6 +23,7 @@ import {
   getNotifications,
   markNotificationRead,
 } from '@/lib/services/journal.service';
+import { consolidateAlertsByEntry } from '@/lib/alerts/consolidate';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 
@@ -960,30 +961,9 @@ export default function NotificationsPage() {
     }
   }
 
-  // Consolidate alerts from the same journal entry into one
-  // (e.g., systolic + diastolic from same reading = 1 alert card)
-  const consolidatedAlerts = (() => {
-    const byEntry = new Map<string, Alert[]>();
-    for (const a of alerts) {
-      const key = a.journalEntry?.id ?? a.id;
-      if (!byEntry.has(key)) byEntry.set(key, []);
-      byEntry.get(key)!.push(a);
-    }
-    return [...byEntry.values()].map((group) => {
-      if (group.length === 1) return group[0];
-      // Merge: pick worst severity, combine types, keep first alert's ID for actions
-      const worst = group.find((a) => a.severity === 'HIGH') ?? group[0];
-      const types = group.map((a) => a.type);
-      const hasBoth = types.includes('SYSTOLIC_BP') && types.includes('DIASTOLIC_BP');
-      return {
-        ...worst,
-        type: (hasBoth ? 'BP_COMBINED' : worst.type) as AlertType,
-        // Keep OPEN status if any in group is OPEN
-        status: (group.some((a) => a.status === 'OPEN') ? 'OPEN' : worst.status) as AlertStatus,
-        escalated: group.some((a) => a.escalated),
-      };
-    });
-  })();
+  // Consolidate alerts from the same journal entry into one card (e.g. systolic
+  // + diastolic from the same reading). Logic extracted to a tested helper.
+  const consolidatedAlerts = consolidateAlertsByEntry(alerts);
 
   const openAlerts = consolidatedAlerts.filter((a) => a.status === 'OPEN');
   const pastAlerts = consolidatedAlerts.filter((a) => a.status !== 'OPEN');
