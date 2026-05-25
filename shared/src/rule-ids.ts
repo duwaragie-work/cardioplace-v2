@@ -53,6 +53,10 @@ export const RULE_IDS = {
 
   // Physician-only
   PULSE_PRESSURE_WIDE: 'RULE_PULSE_PRESSURE_WIDE',
+  // Manisha 5/24 Q2 — narrow pulse pressure on the session average (<25 mmHg),
+  // condition-specific physician note. Distinct from the per-reading <15
+  // artifact flag (JournalEntry.narrowPpArtifact, set at entry).
+  PULSE_PRESSURE_NARROW: 'RULE_PULSE_PRESSURE_NARROW',
   LOOP_DIURETIC_HYPOTENSION: 'RULE_LOOP_DIURETIC_HYPOTENSION',
 
   // Medication adherence (Tier 2 discrepancy, dismissable) — fires on a
@@ -201,6 +205,7 @@ export const RULE_AXIS: Record<RuleId, RuleAxis> = {
   [RULE_IDS.SYMPTOM_OVERRIDE_PREGNANCY]: 'systolic',
   [RULE_IDS.LOOP_DIURETIC_HYPOTENSION]: 'systolic',
   [RULE_IDS.PULSE_PRESSURE_WIDE]: 'systolic',
+  [RULE_IDS.PULSE_PRESSURE_NARROW]: 'systolic',
 
   // Profile / medication / symptom-driven rules (actualValue is null)
   [RULE_IDS.NDHP_HFREF]: 'profile',

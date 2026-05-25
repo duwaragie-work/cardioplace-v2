@@ -81,6 +81,9 @@ export interface ContextProfile {
   hasCAD: boolean
   hasHCM: boolean
   hasDCM: boolean
+  // Manisha 5/24 Q5C — aortic stenosis (fixed outflow obstruction; HCM-like
+  // hemodynamics). Interim: HCM-equivalent SBP lower bound + narrow-PP context.
+  hasAorticStenosis: boolean
   hasTachycardia: boolean
   hasBradycardia: boolean
   diagnosedHypertension: boolean

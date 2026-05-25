@@ -1230,16 +1230,49 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   })
 
   it('Scenario 54 — Standard SBP=90 boundary → no low alert', async () => {
-    const { result } = await run(buildSession({ systolicBP: 90 }), buildCtx())
+    // DBP 60 keeps PP=30 (normal) so this stays a pure SBP-boundary test — the
+    // default 90/78 would trip the new narrow-PP (<25) physician note.
+    const { result } = await run(buildSession({ systolicBP: 90, diastolicBP: 60 }), buildCtx())
     expect(result).toBeNull()
   })
 
   it('Scenario 55 — Age 65+ + SBP=100 boundary → no alert', async () => {
     const { result } = await run(
-      buildSession({ systolicBP: 100 }),
+      buildSession({ systolicBP: 100, diastolicBP: 70 }),
       buildCtx({ ageGroup: '65+', dateOfBirth: new Date('1953-01-01') }),
     )
     expect(result).toBeNull()
+  })
+
+  // ── Manisha 5/24 Q2 — narrow pulse pressure (session-averaged < 25) ───────
+  it('NARROW-PP — generic patient at 110/90 (PP 20) → RULE_PULSE_PRESSURE_NARROW (physician-only)', async () => {
+    const { result, createArgs } = await run(
+      buildSession({ systolicBP: 110, diastolicBP: 90 }),
+      buildCtx(),
+    )
+    expect(result?.ruleId).toBe('RULE_PULSE_PRESSURE_NARROW')
+    expect(createArgs.data.tier).toBe('TIER_3_INFO')
+    expect(createArgs.data.patientMessage).toBe('')
+    expect(createArgs.data.physicianMessage).toMatch(/narrow pulse pressure/i)
+    expect(createArgs.data.physicianMessage).toMatch(/reduced cardiac output/i)
+  })
+
+  it('NARROW-PP — HFrEF patient gets the reduced-stroke-volume wording', async () => {
+    const { createArgs } = await run(
+      buildSession({ systolicBP: 110, diastolicBP: 92 }),
+      buildCtx({ profile: { hasHeartFailure: true, heartFailureType: 'HFREF', resolvedHFType: 'HFREF' } }),
+    )
+    // HFrEF SBP 110 is above the 85 lower bound, so the narrow-PP note is the row.
+    expect(createArgs.data.ruleId).toBe('RULE_PULSE_PRESSURE_NARROW')
+    expect(createArgs.data.physicianMessage).toMatch(/reduced stroke volume/i)
+  })
+
+  it('NARROW-PP — PP ≥ 25 does not fire', async () => {
+    const { result } = await run(
+      buildSession({ systolicBP: 120, diastolicBP: 80 }),
+      buildCtx(),
+    )
+    expect(result?.ruleId).not.toBe('RULE_PULSE_PRESSURE_NARROW')
   })
 
   // ========================================================================

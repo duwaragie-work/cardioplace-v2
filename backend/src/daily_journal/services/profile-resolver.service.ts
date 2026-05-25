@@ -174,6 +174,7 @@ export class ProfileResolverService {
     hasCAD: boolean
     hasHCM: boolean
     hasDCM: boolean
+    hasAorticStenosis: boolean
     hasTachycardia: boolean
     hasBradycardia: boolean
     diagnosedHypertension: boolean
@@ -201,6 +202,7 @@ export class ProfileResolverService {
       hasCAD: p.hasCAD,
       hasHCM: p.hasHCM,
       hasDCM: p.hasDCM,
+      hasAorticStenosis: p.hasAorticStenosis,
       hasTachycardia: p.hasTachycardia,
       hasBradycardia: p.hasBradycardia,
       diagnosedHypertension: p.diagnosedHypertension,

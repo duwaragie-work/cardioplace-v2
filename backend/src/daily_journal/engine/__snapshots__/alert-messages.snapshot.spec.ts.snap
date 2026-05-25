@@ -516,6 +516,18 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_L2 ST
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_L2 STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"BP Level 2 — pregnancy ≥160/110 at 145/85 mmHg. Severe-range hypertension; treat within 15 minutes per ACOG."`;
 
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PULSE_PRESSURE_NARROW ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PULSE_PRESSURE_NARROW ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PULSE_PRESSURE_NARROW ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — Narrow pulse pressure: 145/85 mmHg (PP = 60 mmHg). If confirmed on repeat measurement, consider evaluation for reduced cardiac output. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PULSE_PRESSURE_NARROW STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PULSE_PRESSURE_NARROW STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PULSE_PRESSURE_NARROW STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"Tier 3 — Narrow pulse pressure: 145/85 mmHg (PP = 60 mmHg). If confirmed on repeat measurement, consider evaluation for reduced cardiac output."`;
+
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PULSE_PRESSURE_WIDE ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `""`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PULSE_PRESSURE_WIDE ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `""`;

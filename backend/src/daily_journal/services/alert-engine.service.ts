@@ -74,7 +74,9 @@ import {
 } from '../engine/hr-branches.js'
 import {
   getWidePulsePressureAnnotation,
+  getNarrowPulsePressureAnnotation,
   pulsePressureWideRule,
+  pulsePressureNarrowRule,
 } from '../engine/pulse-pressure.js'
 import {
   getLoopDiureticAnnotation,
@@ -603,6 +605,7 @@ export class AlertEngineService {
       const fallbackRules: RuleFunction[] = [
         loopDiureticHypotensionRule,
         pulsePressureWideRule,
+        pulsePressureNarrowRule,
       ]
       for (const rule of fallbackRules) {
         const r = rule(session, ctx)
@@ -692,6 +695,16 @@ export class AlertEngineService {
         session.diastolicBP,
       )
       if (ppNote) annotations.push(ppNote)
+    }
+
+    // Manisha 5/24 Q2 — narrow PP rides as a physician annotation when a
+    // higher-tier finding already fired (mirrors the wide-PP pattern).
+    if (result.ruleId !== 'RULE_PULSE_PRESSURE_NARROW') {
+      const narrowNote = getNarrowPulsePressureAnnotation(
+        session.systolicBP,
+        session.diastolicBP,
+      )
+      if (narrowNote) annotations.push(narrowNote)
     }
 
     if (result.ruleId !== 'RULE_LOOP_DIURETIC_HYPOTENSION') {
