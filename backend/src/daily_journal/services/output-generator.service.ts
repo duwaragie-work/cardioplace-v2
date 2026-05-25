@@ -50,13 +50,14 @@ export class OutputGeneratorService implements OnModuleInit {
     result: RuleResult,
     session: SessionAverage,
     preDay3: boolean,
+    patientName: string | null = null,
   ): {
     patientMessage: string
     caregiverMessage: string
     physicianMessage: string
   } {
     const entry = alertMessageRegistry[result.ruleId]
-    const ctx = this.buildContext(result, session, preDay3)
+    const ctx = this.buildContext(result, session, preDay3, patientName)
     return {
       patientMessage: entry.patientMessage(ctx),
       caregiverMessage: entry.caregiverMessage(ctx),
@@ -68,6 +69,7 @@ export class OutputGeneratorService implements OnModuleInit {
     result: RuleResult,
     session: SessionAverage,
     preDay3: boolean,
+    patientName: string | null = null,
   ): AlertContext {
     // Default `drugNames` from rule metadata; fall back to a single-element
     // array of `drugName` so legacy single-drug rules still satisfy the
@@ -118,6 +120,8 @@ export class OutputGeneratorService implements OnModuleInit {
       // "— confirm with next reading" physician-message annotation.
       singleReadingSession:
         session.singleReadingFinalized && session.readingCount < 2,
+      // Gap 5 — name the patient in caregiver-facing message templates.
+      patientName,
     }
   }
 }

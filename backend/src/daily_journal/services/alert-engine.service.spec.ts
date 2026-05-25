@@ -89,6 +89,7 @@ function baseCtx(over: Partial<ResolvedContext> = {}): ResolvedContext {
     triggerPregnancyContraindicationCheck: false,
     enrolledAt: null,
     practiceName: null,
+    patientName: null,
     resolvedAt: new Date('2026-04-22T10:00:00Z'),
     ...over,
   }

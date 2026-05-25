@@ -1024,6 +1024,10 @@ export class EscalationService {
     const alert = await this.loadAlert(payload.alertId)
     if (!alert?.caregiverMessage) return
     const message = alert.caregiverMessage
+    // Gap 5 (Bug 2) — name the patient in the email subject so the caregiver
+    // can tell who it's about. The message body already names them via the
+    // registry (ctx.patientName). Name only — Minimum Necessary.
+    const patientDisplayName = alert.user?.name?.trim() || 'someone you care for'
 
     for (const caregiver of caregivers) {
       try {
@@ -1044,7 +1048,7 @@ export class EscalationService {
             if (!caregiver.email) break
             await this.emailService.sendEmail(
               caregiver.email,
-              'Cardioplace — a health update about someone you care for',
+              `Cardioplace — a health update about ${patientDisplayName}`,
               caregiverEmailHtml(caregiver.name, message),
             )
             delivered = true

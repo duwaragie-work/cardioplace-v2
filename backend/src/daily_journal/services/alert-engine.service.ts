@@ -748,7 +748,12 @@ export class AlertEngineService {
     const legacyType = this.legacyTypeFor(result, session)
     const legacySeverity = this.legacySeverityFor(result)
     const dismissible = !isNonDismissableTier(result.tier)
-    const messages = this.outputGenerator.generate(result, session, ctx.preDay3Mode)
+    const messages = this.outputGenerator.generate(
+      result,
+      session,
+      ctx.preDay3Mode,
+      ctx.patientName,
+    )
 
     const actualValue =
       result.actualValue != null

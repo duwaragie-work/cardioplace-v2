@@ -138,6 +138,7 @@ function buildCtx(over: {
     triggerPregnancyContraindicationCheck: isPregnant,
     enrolledAt: null,
     practiceName: null,
+    patientName: null,
     resolvedAt: FIXED_NOW,
   }
 }

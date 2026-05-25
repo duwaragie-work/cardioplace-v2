@@ -170,6 +170,7 @@ function ctx(over: {
       over.triggerPregnancyContraindicationCheck ?? profile.isPregnant,
     enrolledAt: null,
     practiceName: null,
+    patientName: null,
     resolvedAt: FIXED_NOW,
   }
 }
