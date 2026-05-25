@@ -8,7 +8,8 @@ import {
   markOnboardingSkipped,
   shouldShowOnboardingForUser,
 } from "@/lib/onboarding";
-import { CheckCircle2 } from "lucide-react";
+import { POLICY_VERSION } from "@cardioplace/shared";
+import { CheckCircle2, ShieldCheck, Ban, UserCheck, Lock } from "lucide-react";
 import SpinnerIndicator from "@/components/ui/SpinnerIndicator";
 import { useLanguage } from "@/contexts/LanguageContext";
 import LandingHeader from "@/components/cardio/LandingHeader";
@@ -34,6 +35,15 @@ export default function OnboardingPage() {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
+  // Privacy/trust screen shows FIRST (V2-E Gap 7) — patients in the immigrant
+  // cohort must see the "your data is private, not shared with government /
+  // employer / anyone else" promise BEFORE they disclose any clinical info,
+  // or they won't enroll. "privacy" → reassurance step, "profile" → the form.
+  const [step, setStep] = useState<"privacy" | "profile">("privacy");
+  // Terms + Privacy consent — collected once here on the privacy step. Only new
+  // users reach onboarding, so returning users are never re-asked. Recorded on
+  // the AuthLog audit trail (event 'policy_acknowledged') via POST /v2/auth/consent.
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   useEffect(() => {
     if (isLoading) return;
@@ -146,8 +156,115 @@ export default function OnboardingPage() {
 
   return (
     <div className="bg-white">
-      <LandingHeader activeLink="" />
+      <LandingHeader activeLink="" hideAuthCta />
       <main id="main" className="min-h-[100dvh] pt-24 pb-10 flex items-center-safe justify-center px-4 sm:px-6 lg:px-12">
+      {step === "privacy" ? (
+        /* ─── Privacy / Trust screen (V2-E Gap 7) ─────────────────────────────
+           The hero fills exactly one viewport (min-h-[100dvh] on <main>, header
+           is fixed) so the whole promise fits the default height with no inner
+           scroll; the footer sits just below the fold. Spacing is compact +
+           responsive across phone → desktop. */
+        <div className="w-full max-w-xl mx-auto">
+          <div className="bg-white border border-[#e5d9f2] rounded-3xl shadow-[0px_10px_40px_rgba(123,0,224,0.08)] p-4 sm:p-6">
+            {/* Shield icon */}
+            <div className="flex justify-center mb-2 sm:mb-3">
+              <div className="bg-[#f3e8ff] size-12 sm:size-14 rounded-2xl flex items-center justify-center">
+                <ShieldCheck aria-hidden="true" className="w-6 h-6 sm:w-7 sm:h-7 text-[#7B00E0]" strokeWidth={2} />
+              </div>
+            </div>
+
+            {/* Title + read-aloud button */}
+            <div className="flex items-center justify-center gap-2 sm:gap-3 mb-2">
+              <h1 className="font-semibold text-[#171717] text-xl sm:text-2xl lg:text-3xl tracking-[-0.03em] text-center">
+                {t('onboarding.privacy.title')}
+              </h1>
+              <AudioButton text={t('onboarding.privacy.audio')} size="md" />
+            </div>
+
+            {/* Intro promise */}
+            <p className="text-[#4b5563] text-sm lg:text-base leading-relaxed text-center max-w-md mx-auto mb-3 sm:mb-4">
+              {t('onboarding.privacy.intro')}
+            </p>
+
+            {/* The three promises — icon + few words (V2-E silent literacy) */}
+            <ul className="space-y-2 max-w-md mx-auto mb-3 sm:mb-4">
+              <li className="flex items-center gap-3 bg-[#fef2f2] border border-[#fecaca] rounded-2xl px-4 py-2 sm:py-3">
+                <Ban aria-hidden="true" className="w-5 h-5 text-[#dc2626] shrink-0" strokeWidth={2.2} />
+                <span className="text-[#171717] text-sm lg:text-base">{t('onboarding.privacy.point1')}</span>
+              </li>
+              <li className="flex items-center gap-3 bg-[#fef2f2] border border-[#fecaca] rounded-2xl px-4 py-2 sm:py-3">
+                <Ban aria-hidden="true" className="w-5 h-5 text-[#dc2626] shrink-0" strokeWidth={2.2} />
+                <span className="text-[#171717] text-sm lg:text-base">{t('onboarding.privacy.point2')}</span>
+              </li>
+              <li className="flex items-center gap-3 bg-[#f3e8ff] border border-[#e5d9f2] rounded-2xl px-4 py-2 sm:py-3">
+                <UserCheck aria-hidden="true" className="w-5 h-5 text-[#7B00E0] shrink-0" strokeWidth={2.2} />
+                <span className="text-[#171717] text-sm lg:text-base">{t('onboarding.privacy.point3')}</span>
+              </li>
+            </ul>
+
+            {/* Closing reassurance */}
+            <div className="flex items-center justify-center gap-2 text-[#4b5563] text-xs lg:text-sm mb-3 sm:mb-4">
+              <Lock aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />
+              <span className="text-center">{t('onboarding.privacy.reassure')}</span>
+            </div>
+
+            {/* Terms + Privacy consent — required to continue. New users agree
+                here once; the box toggles (small visible box + 44px tap target)
+                and the links open the policies. */}
+            <div className="max-w-md mx-auto mb-3 flex items-center gap-2">
+              <label className="relative flex size-4 shrink-0 cursor-pointer">
+                <input
+                  id="onboarding-agree-terms"
+                  data-no-min-target
+                  data-testid="onboarding-agree-terms"
+                  type="checkbox"
+                  checked={agreedToTerms}
+                  onChange={(e) => setAgreedToTerms(e.target.checked)}
+                  aria-labelledby="onboarding-agree-terms-label"
+                  className="size-4 shrink-0 rounded accent-[#7B00E0] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-[#7B00E0] cursor-pointer"
+                />
+                <span aria-hidden="true" className="absolute left-1/2 top-1/2 size-11 -translate-x-1/2 -translate-y-1/2" />
+              </label>
+              <span id="onboarding-agree-terms-label" className="text-[#4b5563] text-xs lg:text-sm leading-snug">
+                {t('register.agreeToTerms')}{" "}
+                <a href="/terms" target="_blank" rel="noopener noreferrer" className="font-medium text-[#7B00E0] hover:underline">
+                  {t('register.termsOfService')}
+                </a>{" "}
+                {t('register.and')}{" "}
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" className="font-medium text-[#7B00E0] hover:underline">
+                  {t('register.privacyPolicy')}
+                </a>
+                .
+              </span>
+            </div>
+
+            {/* Continue → records consent, then advances to the profile step */}
+            <div className="max-w-md mx-auto">
+              <button
+                type="button"
+                data-testid="onboarding-privacy-continue-btn"
+                onClick={async () => {
+                  if (!agreedToTerms) return;
+                  try {
+                    await fetchWithAuth(`${process.env.NEXT_PUBLIC_API_URL}/api/v2/auth/consent`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ policyVersion: POLICY_VERSION }),
+                    });
+                  } catch {
+                    // best-effort — consent logging must not block onboarding
+                  }
+                  setStep("profile");
+                }}
+                disabled={!agreedToTerms}
+                className="w-full h-12 lg:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm lg:text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                {t('onboarding.privacy.continue')}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className="w-full max-w-300 mx-auto">
         <div className="flex flex-col items-center md:items-center md:flex-row gap-8 lg:gap-20">
           {/* Left side - Form */}
@@ -304,6 +421,7 @@ export default function OnboardingPage() {
           </div>
         </div>
       </div>
+      )}
       </main>
       <LandingFooter />
     </div>

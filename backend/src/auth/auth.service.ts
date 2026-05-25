@@ -267,6 +267,56 @@ export class AuthService {
     }
   }
 
+  // ─── Policy / Consent Acknowledgment ─────────────────────────────────────────
+  // Records that a patient agreed to the Terms + Privacy Policy as a dedicated
+  // event on the existing AuthLog audit trail — no separate table. Captures who
+  // (userId / identifier), when (createdAt), which version + channel (metadata),
+  // and IP / userAgent. logAuthEvent already swallows its own errors, so a
+  // failed audit write never breaks the login flow.
+  private async logConsent(params: {
+    userId?: string
+    identifier?: string
+    policyVersion?: string | null
+    ipAddress?: string
+    userAgent?: string
+    via: string
+  }): Promise<void> {
+    if (!params.policyVersion?.trim()) return
+    await this.logAuthEvent({
+      event: 'policy_acknowledged',
+      identifier: params.identifier,
+      userId: params.userId,
+      method: 'otp',
+      ipAddress: params.ipAddress,
+      userAgent: params.userAgent,
+      metadata: {
+        policyType: 'TERMS_AND_PRIVACY',
+        policyVersion: params.policyVersion,
+        via: params.via,
+      },
+      success: true,
+    })
+  }
+
+  // Public entry point used by the post-login consent gate (onboarding privacy
+  // step). Records the patient's Terms + Privacy agreement once, on the AuthLog
+  // audit trail (no new table). Idempotent in spirit — a returning user who
+  // already consented never reaches the gate, so it isn't called again.
+  async recordConsent(
+    userId: string,
+    policyVersion: string,
+    context?: { ipAddress?: string; userAgent?: string },
+  ): Promise<{ recorded: boolean }> {
+    await this.logConsent({
+      userId,
+      policyVersion,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      via: 'onboarding',
+    })
+    return { recorded: true }
+  }
+
   // ─── Timezone Auto-Update ───────────────────────────────────────────────────
 
   private async silentlyUpdateTimezone(
