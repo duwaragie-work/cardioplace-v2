@@ -39,7 +39,7 @@ import {
   standardL1HighRule,
   standardL1LowRule,
 } from './standard.js'
-import { afibHrRule, bradyAbsoluteRule, bradySymptomaticRule, buildTachyRule } from './hr-branches.js'
+import { afibHrRule, bradyAbsoluteRule, bradySymptomaticRule, buildTachyRule, tachySevereRule } from './hr-branches.js'
 import { pulsePressureWideRule } from './pulse-pressure.js'
 import { loopDiureticHypotensionRule } from './loop-diuretic.js'
 import { medicationMissedRule, medicationMissedRuleWithWindow } from './adherence.js'
@@ -959,29 +959,31 @@ describe('tachy rule (P) — Cluster 6 Q5 (Manisha 5/9)', () => {
     expect(r?.reason).toMatch(/8h/)
   })
 
-  it('HR=132 single-reading (prior=false) → Q5 severe-tachy exception fires immediately', () => {
-    const rule = buildTachyRule(false)
-    const r = rule(session({ pulse: 132 }), tctx)
+  // The HR>130 single-reading Q5 exception moved out of buildTachyRule into
+  // tachySevereRule (NIVA_HR), so it can run pre-gate and fire on one reading.
+  it('HR=132 single-reading → Q5 severe-tachy exception fires immediately (tachySevereRule)', () => {
+    const r = tachySevereRule(session({ pulse: 132 }), tctx)
     expect(r?.tier).toBe('BP_LEVEL_1_HIGH')
     expect(r?.ruleId).toBe('RULE_TACHY_HR')
     expect(r?.reason).toMatch(/severe|130/i)
   })
 
-  it('HR=130 (boundary, not strictly >130) + prior=false → no alert', () => {
-    const rule = buildTachyRule(false)
-    expect(rule(session({ pulse: 130 }), tctx)).toBeNull()
+  it('HR=130 (boundary, not strictly >130) → no severe-tachy alert', () => {
+    expect(tachySevereRule(session({ pulse: 130 }), tctx)).toBeNull()
   })
 
-  it('HR=131 single-reading → severe exception fires', () => {
-    const rule = buildTachyRule(false)
-    const r = rule(session({ pulse: 131 }), tctx)
+  it('HR=131 single-reading → severe exception fires (tachySevereRule)', () => {
+    const r = tachySevereRule(session({ pulse: 131 }), tctx)
     expect(r?.ruleId).toBe('RULE_TACHY_HR')
+  })
+
+  it('buildTachyRule no longer fires on HR>130 alone (prior=false) — that path is tachySevereRule now', () => {
+    expect(buildTachyRule(false)(session({ pulse: 132 }), tctx)).toBeNull()
   })
 
   it('non-tachycardia patient HR=132 → no alert (gate stays on flag)', () => {
     const noFlagCtx = ctx({ profile: { hasTachycardia: false } })
-    const rule = buildTachyRule(false)
-    expect(rule(session({ pulse: 132 }), noFlagCtx)).toBeNull()
+    expect(tachySevereRule(session({ pulse: 132 }), noFlagCtx)).toBeNull()
   })
 })
 

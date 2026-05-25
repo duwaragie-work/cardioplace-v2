@@ -891,6 +891,66 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.physicianMessage).toContain('Absolute bradycardia')
   })
 
+  // ── NIVA_HR doc — HR<40 / HR>130 bypass the single-reading gate ──────────
+  // The emergency HR floors must fire on a SINGLE reading for an established
+  // (post-Day-3), non-AFib patient — they were previously trapped behind the
+  // Cluster 6 Q2 single-reading non-emergency gate. readingCount:1 +
+  // preDay3Mode:false reproduces the established-single-reading state (preDay3
+  // would otherwise auto-derive true from readingCount<7 and mask the bug).
+  it('NIVA_HR — established single reading HR<40 fires RULE_BRADY_ABSOLUTE (regression anchor)', async () => {
+    const { result, createArgs } = await run(
+      buildSession({ systolicBP: 115, diastolicBP: 70, pulse: 38, readingCount: 1 }),
+      buildCtx({ readingCount: 1, preDay3Mode: false, profile: { hasBradycardia: true } }),
+    )
+    expect(result?.ruleId).toBe('RULE_BRADY_ABSOLUTE')
+    expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
+  })
+
+  it('NIVA_HR — established single reading HR>130 fires RULE_TACHY_HR immediately', async () => {
+    const { result, createArgs } = await run(
+      buildSession({ systolicBP: 125, diastolicBP: 78, pulse: 135, readingCount: 1 }),
+      buildCtx({ readingCount: 1, preDay3Mode: false, profile: { hasTachycardia: true } }),
+    )
+    expect(result?.ruleId).toBe('RULE_TACHY_HR')
+    expect(result?.actualValue).toBe(135)
+  })
+
+  it('NIVA_HR — guard: established single reading HR 45 + dizziness stays HELD (symptomatic brady is still gated)', async () => {
+    const { result, createArgs } = await run(
+      buildSession({
+        systolicBP: 115,
+        diastolicBP: 70,
+        pulse: 45,
+        readingCount: 1,
+        symptoms: { ...noSymptoms(), dizziness: true },
+      }),
+      buildCtx({ readingCount: 1, preDay3Mode: false, profile: { hasBradycardia: true } }),
+    )
+    expect(result).toBeNull()
+    expect(createArgs).toBeUndefined()
+  })
+
+  it('NIVA_HR — AFib <3 single reading HR<40 still fires RULE_BRADY_ABSOLUTE (Stage A runs before the AFib gate)', async () => {
+    const { result } = await run(
+      buildSession({ systolicBP: 115, diastolicBP: 70, pulse: 38, readingCount: 1 }),
+      buildCtx({
+        readingCount: 1,
+        preDay3Mode: false,
+        profile: { hasAFib: true, hasBradycardia: true },
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_BRADY_ABSOLUTE')
+  })
+
+  it('NIVA_HR — established single reading HR 105 (no prior elevated) does NOT fire (consecutive path still needs 2 readings)', async () => {
+    const { result, createArgs } = await run(
+      buildSession({ systolicBP: 125, diastolicBP: 78, pulse: 105, readingCount: 1 }),
+      buildCtx({ readingCount: 1, preDay3Mode: false, profile: { hasTachycardia: true } }),
+    )
+    expect(result).toBeNull()
+    expect(createArgs).toBeUndefined()
+  })
+
   it('Scenario 37 — Wide PP standalone 145/80 (PP 65) → RULE_PULSE_PRESSURE_WIDE', async () => {
     const { result, createArgs } = await run(
       buildSession({ systolicBP: 145, diastolicBP: 80, pulse: 74 }),
