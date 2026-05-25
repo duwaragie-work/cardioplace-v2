@@ -1272,6 +1272,27 @@ function A8Categories({ state, setState }: StepProps) {
     }
     return set;
   });
+  // The lazy initializer above runs once on mount. A prescription scan
+  // (addOcrMedications) or any other LATE add updates selectedMedications
+  // afterwards, so a newly-matched category med would be ticked yet its card
+  // left collapsed. React to selection changes and union the matched
+  // categories in — add-only, so we never auto-collapse a card the patient
+  // manually closed.
+  useEffect(() => {
+    setActiveCategories((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const m of state.selectedMedications) {
+        if (!m.catalogId) continue;
+        const cat = CATEGORY_MEDS.find((c) => c.id === m.catalogId);
+        if (cat?.category && !next.has(cat.category)) {
+          next.add(cat.category);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [state.selectedMedications]);
   const [otherText, setOtherText] = useState(state.otherDraft?.text ?? '');
   // Phase/25 — inline dedup error for the voice/photo "anything else" path.
   // Cleared on next keystroke or after a 3.5s timeout so the UI doesn't
@@ -1411,6 +1432,7 @@ function A8Categories({ state, setState }: StepProps) {
           .map((cat) => (
             <motion.div
               key={cat.key}
+              data-testid={`intake-cat-expanded-${cat.key}`}
               initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
