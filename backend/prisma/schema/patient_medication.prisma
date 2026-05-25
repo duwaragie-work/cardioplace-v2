@@ -18,6 +18,11 @@ model PatientMedication {
   // the 7/14/30/45-day reconciliation escalation ladder.
   holdReason               MedicationHoldReason?
   holdSetAt                DateTime?
+  // Manisha 5/24 Med §4 — reconciliation escalation ladder progress (0 = none,
+  // 1 = day-7, 2 = day-14, 3 = day-30, 4 = day-45). Bumped by the hold-
+  // escalation cron so a given rung never double-fires; reset to 0 when the
+  // medication leaves HOLD.
+  holdEscalationLevel      Int                          @default(0)
   rawInputText             String?
   notes                    String?                      @db.Text
   pillImageUrl             String?

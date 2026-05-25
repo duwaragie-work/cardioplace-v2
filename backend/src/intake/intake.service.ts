@@ -1051,9 +1051,11 @@ export class IntakeService {
           verifiedAt: new Date(),
           // Stamp/clear the structured hold metadata. holdSetAt anchors the
           // 7/14/30/45-day reconciliation escalation ladder; leaving a hold
-          // clears both so a re-held med restarts the clock.
+          // clears both so a re-held med restarts the clock. holdEscalationLevel
+          // always resets to 0 (entering OR leaving a hold restarts the ladder).
           holdReason: isHold ? (dto.holdReason as MedicationHoldReason) : null,
           holdSetAt: isHold ? new Date() : null,
+          holdEscalationLevel: 0,
         },
       }),
       this.prisma.profileVerificationLog.create({

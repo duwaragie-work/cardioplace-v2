@@ -19,6 +19,9 @@ CREATE TYPE "MedicationHoldReason" AS ENUM ('AWAITING_RECORDS', 'UNCLEAR_NAME', 
 
 ALTER TABLE "PatientMedication" ADD COLUMN "holdReason" "MedicationHoldReason";
 ALTER TABLE "PatientMedication" ADD COLUMN "holdSetAt" TIMESTAMP(3);
+-- holdEscalationLevel anchors the 7/14/30/45-day reconciliation escalation
+-- ladder idempotency (0 = none, 1 = day-7, 2 = day-14, 3 = day-30, 4 = day-45).
+ALTER TABLE "PatientMedication" ADD COLUMN "holdEscalationLevel" INTEGER NOT NULL DEFAULT 0;
 
 -- ── 2. PatientProfile — aortic stenosis + ACE contraindication ──────────────
 ALTER TABLE "PatientProfile" ADD COLUMN "hasAorticStenosis" BOOLEAN NOT NULL DEFAULT false;
