@@ -196,6 +196,7 @@ export class TestControl {
       | 'hasCAD'
       | 'hasHCM'
       | 'hasDCM'
+      | 'hasAorticStenosis'
       | 'hasBradycardia'
       | 'hasTachycardia'
       | 'diagnosedHypertension',

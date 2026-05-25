@@ -441,7 +441,10 @@ export async function getVerificationLogs(userId: string): Promise<ProfileVerifi
  * Returns the partial threshold to suggest as defaults given a profile.
  */
 export function thresholdDefaultsFor(
-  profile: Pick<PatientProfile, 'hasCAD' | 'hasHCM' | 'hasDCM' | 'heartFailureType'> | null,
+  profile: Pick<
+    PatientProfile,
+    'hasCAD' | 'hasHCM' | 'hasDCM' | 'hasAorticStenosis' | 'heartFailureType'
+  > | null,
 ): UpsertThresholdPayload {
   if (!profile) return {}
   const out: UpsertThresholdPayload = {}
@@ -449,15 +452,26 @@ export function thresholdDefaultsFor(
   // THR-016 — DCM is managed as HFrEF (spec §4.8): default lower-bound SBP <85.
   if (profile.heartFailureType === 'HFREF' || profile.hasDCM) out.sbpLowerTarget = 85
   if (profile.hasHCM) out.sbpLowerTarget = 100 // HCM trumps HFrEF/DCM if both
+  // Manisha 5/24 Q5C — aortic stenosis shares HCM's interim lower bound (100).
+  if (profile.hasAorticStenosis) out.sbpLowerTarget = 100
   return out
 }
 
-/** Patients flagged HFrEF / HCM / DCM require an explicit threshold per spec. */
+/** Patients flagged HFrEF / HCM / DCM / aortic stenosis require an explicit
+ *  threshold per spec (Manisha 5/24 Q5C adds aortic stenosis). */
 export function thresholdMandatory(
-  profile: Pick<PatientProfile, 'hasHCM' | 'hasDCM' | 'heartFailureType'> | null,
+  profile: Pick<
+    PatientProfile,
+    'hasHCM' | 'hasDCM' | 'hasAorticStenosis' | 'heartFailureType'
+  > | null,
 ): boolean {
   if (!profile) return false
-  return profile.hasHCM || profile.hasDCM || profile.heartFailureType === 'HFREF'
+  return (
+    profile.hasHCM ||
+    profile.hasDCM ||
+    profile.hasAorticStenosis ||
+    profile.heartFailureType === 'HFREF'
+  )
 }
 
 // ─── Verification-log derivation (IVR-08 / IVR-23 / THR-REVIEW) ──────────────
@@ -553,6 +567,8 @@ export function mandatoryConditionChangedAt(
     const changed =
       log.fieldPath === 'profile.hasHCM' ||
       log.fieldPath === 'profile.hasDCM' ||
+      // Manisha 5/24 Q5C — aortic stenosis is threshold-mandatory too.
+      log.fieldPath === 'profile.hasAorticStenosis' ||
       (log.fieldPath === 'profile.heartFailureType' &&
         (log.newValue === 'HFREF' || log.previousValue === 'HFREF'))
     if (changed) latest = Math.max(latest, new Date(log.createdAt).getTime())

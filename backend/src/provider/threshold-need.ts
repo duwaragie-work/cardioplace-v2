@@ -7,6 +7,8 @@
 export const MANDATORY_CONDITION_FIELDPATHS = [
   'profile.hasHCM',
   'profile.hasDCM',
+  // Manisha 5/24 Q5C — aortic stenosis is threshold-mandatory too.
+  'profile.hasAorticStenosis',
   'profile.heartFailureType',
 ] as const
 
@@ -20,15 +22,18 @@ export interface ConditionChangeLog {
 interface MandatoryProfile {
   hasHCM?: boolean | null
   hasDCM?: boolean | null
+  hasAorticStenosis?: boolean | null
   heartFailureType?: string | null
 }
 
-/** HFrEF / HCM / DCM require an explicit personalized threshold per spec. */
+/** HFrEF / HCM / DCM / aortic stenosis require an explicit personalized
+ *  threshold per spec (Manisha 5/24 Q5C adds aortic stenosis). */
 export function thresholdMandatory(profile: MandatoryProfile | null): boolean {
   if (!profile) return false
   return (
     !!profile.hasHCM ||
     !!profile.hasDCM ||
+    !!profile.hasAorticStenosis ||
     profile.heartFailureType === 'HFREF'
   )
 }
@@ -46,6 +51,7 @@ export function mandatoryConditionChangedAt(
     const changed =
       log.fieldPath === 'profile.hasHCM' ||
       log.fieldPath === 'profile.hasDCM' ||
+      log.fieldPath === 'profile.hasAorticStenosis' ||
       (log.fieldPath === 'profile.heartFailureType' &&
         (log.newValue === 'HFREF' || log.previousValue === 'HFREF'))
     if (changed) latest = Math.max(latest, new Date(log.createdAt).getTime())

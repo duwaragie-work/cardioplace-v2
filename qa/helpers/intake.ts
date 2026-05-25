@@ -18,6 +18,7 @@ export type IntakeProfile = {
   hasCAD?: boolean
   hasHCM?: boolean
   hasDCM?: boolean
+  hasAorticStenosis?: boolean
   hasAFib?: boolean
   hasTachycardia?: boolean
   hasBradycardia?: boolean

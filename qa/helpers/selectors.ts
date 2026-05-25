@@ -109,6 +109,7 @@ export const T = {
         | 'hasCAD'
         | 'hasHCM'
         | 'hasDCM'
+        | 'hasAorticStenosis'
         | 'hasAFib'
         | 'hasTachycardia'
         | 'hasBradycardia'

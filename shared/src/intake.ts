@@ -86,6 +86,8 @@ export interface IntakeProfilePayload {
   hasCAD?: boolean
   hasHCM?: boolean
   hasDCM?: boolean
+  // Manisha 5/24 Q5C — aortic stenosis (interim HCM-style thresholds).
+  hasAorticStenosis?: boolean
   hasTachycardia?: boolean
   hasBradycardia?: boolean
   diagnosedHypertension?: boolean

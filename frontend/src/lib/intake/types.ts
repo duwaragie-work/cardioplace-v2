@@ -72,6 +72,8 @@ export interface IntakeFormState {
   hasCAD?: boolean;
   hasHCM?: boolean;
   hasDCM?: boolean;
+  // Manisha 5/24 Q5C — aortic stenosis (interim HCM-style thresholds).
+  hasAorticStenosis?: boolean;
   diagnosedHypertension?: boolean;
   /** True only when the patient explicitly clicked "None of the above" on
    *  step A3. Lets the UI distinguish "no conditions answered yet" from
@@ -104,6 +106,7 @@ export const CARDIAC_CONDITION_KEYS = [
   'hasCAD',
   'hasHCM',
   'hasDCM',
+  'hasAorticStenosis',
 ] as const;
 
 export type CardiacConditionKey = (typeof CARDIAC_CONDITION_KEYS)[number];

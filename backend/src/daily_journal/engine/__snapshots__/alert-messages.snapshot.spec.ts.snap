@@ -84,6 +84,30 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AGE_65_LOW STAN
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AGE_65_LOW STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"BP Level 1 Low — age 65+ override: SBP <100 at 145/85 mmHg."`;
 
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AORTIC_STENOSIS_HIGH ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `"The patient's BP is elevated at 145/85 mmHg (aortic stenosis)."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AORTIC_STENOSIS_HIGH ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"Your blood pressure reading is 145/85 mmHg, which is higher than the goal for you. Please contact your care team today. Please retake the reading following the measurement checklist."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AORTIC_STENOSIS_HIGH ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"BP Level 1 High — aortic stenosis SBP ≥ 140: 145/85 mmHg. Interim HCM-style thresholds pending provider-set targets. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AORTIC_STENOSIS_HIGH STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"The patient's BP is elevated at 145/85 mmHg (aortic stenosis)."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AORTIC_STENOSIS_HIGH STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `"Your blood pressure reading is 145/85 mmHg, which is higher than the goal for you. Please contact your care team today."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AORTIC_STENOSIS_HIGH STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"BP Level 1 High — aortic stenosis SBP ≥ 140: 145/85 mmHg. Interim HCM-style thresholds pending provider-set targets."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AORTIC_STENOSIS_LOW ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `"The patient's BP is low at 145/85 mmHg (aortic stenosis). Watch for dizziness, lightheadedness, chest pain, or fainting and help them contact their care team."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AORTIC_STENOSIS_LOW ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"Your blood pressure reading is 145/85 mmHg, which is too low for you. With your heart valve condition, low blood pressure can reduce blood flow to your body — watch for dizziness, lightheadedness, chest pain, or feeling faint. Please contact your care team today. Please retake the reading following the measurement checklist."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AORTIC_STENOSIS_LOW ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"BP Level 1 Low — aortic stenosis SBP < 140: 145/85 mmHg. Fixed outflow obstruction — afterload/preload sensitive; hypotension risks syncope + coronary under-perfusion. Interim HCM-style thresholds pending provider-set targets. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AORTIC_STENOSIS_LOW STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"The patient's BP is low at 145/85 mmHg (aortic stenosis). Watch for dizziness, lightheadedness, chest pain, or fainting and help them contact their care team."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AORTIC_STENOSIS_LOW STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `"Your blood pressure reading is 145/85 mmHg, which is too low for you. With your heart valve condition, low blood pressure can reduce blood flow to your body — watch for dizziness, lightheadedness, chest pain, or feeling faint. Please contact your care team today."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AORTIC_STENOSIS_LOW STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"BP Level 1 Low — aortic stenosis SBP < 140: 145/85 mmHg. Fixed outflow obstruction — afterload/preload sensitive; hypotension risks syncope + coronary under-perfusion. Interim HCM-style thresholds pending provider-set targets."`;
+
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_DIZZINESS ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `""`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_DIZZINESS ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You reported feeling dizzy, and your blood pressure looks lower than usual. Please sit or lie down until it passes, and let your care team know — they may want to review your medicine."`;

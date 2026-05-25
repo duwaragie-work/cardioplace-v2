@@ -348,6 +348,26 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       `Tier 3 — HCM + ${ctx.drugClass ?? 'vasodilator/nitrate/loop'} (${ctx.drugName ?? 'unknown'}): may worsen LVOT obstruction. Review per 2024 AHA/ACC HCM guideline.${physSuffix(ctx)}`,
   },
 
+  // ── Aortic stenosis (Manisha 5/24 Q5C) ────────────────────────────────
+  // Interim HCM-style thresholds (low <100, high ≥160). Fixed valvular outflow
+  // obstruction → preload/afterload sensitive; low BP is the bigger concern.
+  RULE_AORTIC_STENOSIS_LOW: {
+    patientMessage: (ctx) =>
+      `Your blood pressure reading is ${bp(ctx)}, which is too low for you. With your heart valve condition, low blood pressure can reduce blood flow to your body — watch for dizziness, lightheadedness, chest pain, or feeling faint. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+    caregiverMessage: (ctx) =>
+      `The patient's BP is low at ${bp(ctx)} (aortic stenosis). Watch for dizziness, lightheadedness, chest pain, or fainting and help them contact their care team.`,
+    physicianMessage: (ctx) =>
+      `BP Level 1 Low — aortic stenosis SBP < ${ctx.thresholdValue ?? 100}: ${bp(ctx)}. Fixed outflow obstruction — afterload/preload sensitive; hypotension risks syncope + coronary under-perfusion. Interim HCM-style thresholds pending provider-set targets.${physSuffix(ctx)}`,
+  },
+  RULE_AORTIC_STENOSIS_HIGH: {
+    patientMessage: (ctx) =>
+      `Your blood pressure reading is ${bp(ctx)}, which is higher than the goal for you. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+    caregiverMessage: (ctx) =>
+      `The patient's BP is elevated at ${bp(ctx)} (aortic stenosis).`,
+    physicianMessage: (ctx) =>
+      `BP Level 1 High — aortic stenosis SBP ≥ ${ctx.thresholdValue ?? 160}: ${bp(ctx)}. Interim HCM-style thresholds pending provider-set targets.${physSuffix(ctx)}`,
+  },
+
   // ── DCM ───────────────────────────────────────────────────────────────
   RULE_DCM_LOW: {
     patientMessage: (ctx) =>

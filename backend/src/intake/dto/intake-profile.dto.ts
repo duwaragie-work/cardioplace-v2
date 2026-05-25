@@ -71,6 +71,11 @@ export class IntakeProfileDto implements IntakeProfilePayload {
   @IsBoolean()
   hasDCM?: boolean
 
+  // Manisha 5/24 Q5C — aortic stenosis (interim HCM-style thresholds).
+  @IsOptional()
+  @IsBoolean()
+  hasAorticStenosis?: boolean
+
   @IsOptional()
   @IsBoolean()
   hasTachycardia?: boolean

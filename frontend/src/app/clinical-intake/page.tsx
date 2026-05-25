@@ -246,6 +246,7 @@ function buildProfilePayload(s: IntakeFormState): IntakeProfilePayload {
     hasCAD: s.hasCAD ?? false,
     hasHCM: s.hasHCM ?? false,
     hasDCM: s.hasDCM ?? false,
+    hasAorticStenosis: s.hasAorticStenosis ?? false,
     diagnosedHypertension: s.diagnosedHypertension ?? false,
   };
 }
@@ -734,6 +735,15 @@ function A3Conditions({ state, setState }: StepProps) {
           audioText={t('intake.a3.dcmAudio')}
         />
         <ChoiceCard
+          icon={<Stethoscope className="w-6 h-6" />}
+          title={t('intake.a3.aorticStenosisTitle')}
+          description={t('intake.a3.aorticStenosisDesc')}
+          selected={has('hasAorticStenosis')}
+          onClick={() => set('hasAorticStenosis', !state.hasAorticStenosis)}
+          audioText={t('intake.a3.aorticStenosisAudio')}
+          testId="intake-condition-AORTIC_STENOSIS"
+        />
+        <ChoiceCard
           icon={<X className="w-6 h-6" />}
           title={t('intake.a3.noneTitle')}
           description={t('intake.a3.noneDesc')}
@@ -746,6 +756,7 @@ function A3Conditions({ state, setState }: StepProps) {
             hasCAD: false,
             hasHCM: false,
             hasDCM: false,
+            hasAorticStenosis: false,
             heartFailureType: undefined,
             // Explicit acknowledgement — distinguishes "user said no"
             // from "user hasn't touched the step yet".
@@ -1710,6 +1721,7 @@ function A10Review({ state, goTo }: StepProps) {
   if (state.hasCAD) conditionList.push(t('intake.a10.conditionCad'));
   if (state.hasHCM) conditionList.push(t('intake.a10.conditionHcm'));
   if (state.hasDCM) conditionList.push(t('intake.a10.conditionDcm'));
+  if (state.hasAorticStenosis) conditionList.push(t('intake.a10.conditionAorticStenosis'));
 
   const pregnancyValue = state.isPregnant === true
     ? (state.pregnancyDueDate
@@ -2223,6 +2235,7 @@ function ClinicalIntakeWizard() {
             hasCAD: profile.hasCAD ?? false,
             hasHCM: profile.hasHCM ?? false,
             hasDCM: profile.hasDCM ?? false,
+            hasAorticStenosis: profile.hasAorticStenosis ?? false,
             heartFailureType:
               profile.heartFailureType && profile.heartFailureType !== 'NOT_APPLICABLE'
                 ? profile.heartFailureType

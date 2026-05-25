@@ -28,6 +28,7 @@ import {
   pregnancyL2Rule,
 } from '../engine/pregnancy-thresholds.js'
 import {
+  aorticStenosisRule,
   cadDbpRule,
   cadDbpHighRule,
   cadDefaultUpper,
@@ -550,6 +551,9 @@ export class AlertEngineService {
       // RULE_HCM_VASODILATOR (Tier 3, physician-only) AND RULE_HCM_LOW
       // (BP_LEVEL_1_LOW, patient-facing) per §4.6.
       hcmVasodilatorRule,
+      // Manisha 5/24 Q5C — aortic stenosis (interim HCM-style thresholds).
+      // Claims the systolic axis like the other condition rules.
+      aorticStenosisRule,
       personalizedHighRule,
       personalizedLowRule,
       standardL1HighRule,

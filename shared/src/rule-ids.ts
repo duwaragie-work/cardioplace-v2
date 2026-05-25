@@ -32,6 +32,10 @@ export const RULE_IDS = {
   HCM_VASODILATOR: 'RULE_HCM_VASODILATOR',
   DCM_LOW: 'RULE_DCM_LOW',
   DCM_HIGH: 'RULE_DCM_HIGH',
+  // Manisha 5/24 Q5C — aortic stenosis (interim HCM-style thresholds: low <100,
+  // high ≥160; provider-overridable, mandatory provider thresholds).
+  AORTIC_STENOSIS_LOW: 'RULE_AORTIC_STENOSIS_LOW',
+  AORTIC_STENOSIS_HIGH: 'RULE_AORTIC_STENOSIS_HIGH',
 
   // Personalized (threshold + ≥7 readings)
   PERSONALIZED_HIGH: 'RULE_PERSONALIZED_HIGH',
@@ -198,6 +202,8 @@ export const RULE_AXIS: Record<RuleId, RuleAxis> = {
   [RULE_IDS.HCM_HIGH]: 'systolic',
   [RULE_IDS.DCM_LOW]: 'systolic',
   [RULE_IDS.DCM_HIGH]: 'systolic',
+  [RULE_IDS.AORTIC_STENOSIS_LOW]: 'systolic',
+  [RULE_IDS.AORTIC_STENOSIS_HIGH]: 'systolic',
   [RULE_IDS.AGE_65_LOW]: 'systolic',
   [RULE_IDS.PREGNANCY_L1_HIGH]: 'systolic',
   [RULE_IDS.PREGNANCY_L2]: 'systolic',

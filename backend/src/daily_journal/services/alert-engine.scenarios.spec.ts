@@ -115,6 +115,7 @@ function buildCtx(over: {
     hasCAD: false,
     hasHCM: false,
     hasDCM: false,
+    hasAorticStenosis: false,
     hasTachycardia: false,
     hasBradycardia: false,
     diagnosedHypertension: false,
@@ -769,6 +770,45 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
     expect(result?.ruleId).toBe('RULE_HCM_HIGH')
     expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
+  })
+
+  // Manisha 5/24 Q5C — aortic stenosis interim thresholds (low <100, high ≥160).
+  it('Scenario 28a — aortic stenosis + SBP 98 → RULE_AORTIC_STENOSIS_LOW', async () => {
+    const { result, createArgs } = await run(
+      buildSession({ systolicBP: 98, diastolicBP: 70 }),
+      buildCtx({ profile: { hasAorticStenosis: true } }),
+    )
+    expect(result?.ruleId).toBe('RULE_AORTIC_STENOSIS_LOW')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
+    expect(createArgs.data.physicianMessage).toContain('outflow obstruction')
+  })
+
+  it('Scenario 28b — aortic stenosis + SBP 162 → RULE_AORTIC_STENOSIS_HIGH', async () => {
+    const { result, createArgs } = await run(
+      buildSession({ systolicBP: 162, diastolicBP: 88 }),
+      buildCtx({ profile: { hasAorticStenosis: true } }),
+    )
+    expect(result?.ruleId).toBe('RULE_AORTIC_STENOSIS_HIGH')
+    expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
+  })
+
+  it('Scenario 28c — aortic stenosis + SBP 130 (in interim range) → no alert', async () => {
+    const { result } = await run(
+      buildSession({ systolicBP: 130, diastolicBP: 80 }),
+      buildCtx({ profile: { hasAorticStenosis: true } }),
+    )
+    expect(result).toBeNull()
+  })
+
+  it('Scenario 28d — aortic stenosis provider threshold (low 105) overrides default', async () => {
+    const { result } = await run(
+      buildSession({ systolicBP: 102, diastolicBP: 72 }),
+      buildCtx({
+        profile: { hasAorticStenosis: true },
+        threshold: { sbpLowerTarget: 105, sbpUpperTarget: 160 },
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_AORTIC_STENOSIS_LOW')
   })
 
   it('Scenario 29 — DCM only (no HF flag) + SBP 82 → RULE_DCM_LOW', async () => {

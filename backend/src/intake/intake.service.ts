@@ -70,6 +70,7 @@ const VERIFIABLE_PROFILE_FIELDS = [
   'hasCAD',
   'hasHCM',
   'hasDCM',
+  'hasAorticStenosis',
   'hasTachycardia',
   'hasBradycardia',
   'diagnosedHypertension',
@@ -84,6 +85,7 @@ const SERIOUS_CONDITION_LABELS: Partial<Record<VerifiableField, string>> = {
   heartFailureType: 'heart failure type',
   hasHCM: 'HCM',
   hasDCM: 'DCM',
+  hasAorticStenosis: 'aortic stenosis',
 }
 
 // Patient-facing labels used in the "please re-check your {field}" inbox notice
@@ -101,6 +103,7 @@ const PROFILE_FIELD_LABELS: Record<VerifiableField, string> = {
   hasCAD: 'coronary artery disease history',
   hasHCM: 'hypertrophic cardiomyopathy history',
   hasDCM: 'dilated cardiomyopathy history',
+  hasAorticStenosis: 'aortic stenosis history',
   hasTachycardia: 'tachycardia history',
   hasBradycardia: 'bradycardia history',
   diagnosedHypertension: 'high blood pressure diagnosis',
@@ -1335,13 +1338,19 @@ export class IntakeService {
         }),
         this.prisma.patientProfile.findUnique({
           where: { userId: patientUserId },
-          select: { heartFailureType: true, hasHCM: true, hasDCM: true },
+          select: {
+            heartFailureType: true,
+            hasHCM: true,
+            hasDCM: true,
+            hasAorticStenosis: true,
+          },
         }),
       ])
       const conditions = [
         profile?.heartFailureType === 'HFREF' ? 'HFrEF' : null,
         profile?.hasHCM ? 'HCM' : null,
         profile?.hasDCM ? 'DCM' : null,
+        profile?.hasAorticStenosis ? 'aortic stenosis' : null,
       ]
         .filter(Boolean)
         .join(' / ')

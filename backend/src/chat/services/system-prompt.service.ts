@@ -645,6 +645,7 @@ function appendConditions(lines: string[], ctx: ResolvedContext): void {
   if (p.hasCAD) parts.push('Coronary artery disease (CAD)')
   if (p.hasAFib) parts.push('Atrial fibrillation (AFib)')
   if (p.hasHCM) parts.push('Hypertrophic cardiomyopathy (HCM)')
+  if (p.hasAorticStenosis) parts.push('Aortic stenosis')
   if (p.hasTachycardia) parts.push('Tachycardia')
   if (p.hasBradycardia) parts.push('Bradycardia')
   if (p.diagnosedHypertension) parts.push('Hypertension (on treatment)')

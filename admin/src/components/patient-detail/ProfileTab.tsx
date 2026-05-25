@@ -79,6 +79,7 @@ const FIELDS: FieldDef[] = [
   { key: 'hasAFib', label: 'Atrial fibrillation', type: 'boolean', group: 'cardiac' },
   { key: 'hasHCM', label: 'Hypertrophic cardiomyopathy (HCM)', type: 'boolean', group: 'cardiac' },
   { key: 'hasDCM', label: 'Dilated cardiomyopathy (DCM)', type: 'boolean', group: 'cardiac' },
+  { key: 'hasAorticStenosis', label: 'Aortic stenosis', type: 'boolean', group: 'cardiac' },
   { key: 'hasTachycardia', label: 'Tachycardia', type: 'boolean', group: 'cardiac' },
   { key: 'hasBradycardia', label: 'Bradycardia', type: 'boolean', group: 'cardiac' },
 ];

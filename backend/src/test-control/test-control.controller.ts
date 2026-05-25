@@ -210,6 +210,7 @@ export class TestControlController {
         | 'hasCAD'
         | 'hasHCM'
         | 'hasDCM'
+        | 'hasAorticStenosis'
         | 'hasBradycardia'
         | 'hasTachycardia'
         | 'diagnosedHypertension'

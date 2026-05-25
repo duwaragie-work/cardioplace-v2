@@ -24,6 +24,7 @@ export interface PatientProfileDto {
   hasCAD?: boolean;
   hasHCM?: boolean;
   hasDCM?: boolean;
+  hasAorticStenosis?: boolean;
   diagnosedHypertension?: boolean;
   profileVerificationStatus?: 'UNVERIFIED' | 'VERIFIED' | 'CORRECTED';
   profileVerifiedAt?: string | null;
