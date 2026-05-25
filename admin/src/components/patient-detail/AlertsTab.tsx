@@ -365,6 +365,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
               >
                 {isGroupStart && (
                   <div
+                    data-testid="admin-alert-group-header"
                     className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider"
                     style={{
                       backgroundColor: 'var(--brand-background)',

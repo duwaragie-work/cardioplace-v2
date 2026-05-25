@@ -220,6 +220,20 @@ export default function AlertCard({
               {chrome.icon}
               {chrome.label}
             </span>
+            {/* Mode badge — which threshold set this alert was evaluated
+                against (STANDARD AHA vs PERSONALIZED provider targets). Was
+                only visible in the expanded audit trail; surface it on the row
+                so a clinician scanning the list can tell at a glance. */}
+            {alert.mode && (
+              <span
+                data-testid={`admin-alert-mode-badge-${alert.id}`}
+                title="Thresholds this alert was evaluated against"
+                className="inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+                style={{ backgroundColor: 'var(--brand-surface-muted, #f1f5f9)', color: 'var(--brand-text-secondary)' }}
+              >
+                {alert.mode === 'PERSONALIZED' ? 'Personalized' : 'Standard'}
+              </span>
+            )}
             {alert.status === 'RESOLVED' && (
               <span
                 data-testid={`admin-alert-status-badge-${alert.id}`}
