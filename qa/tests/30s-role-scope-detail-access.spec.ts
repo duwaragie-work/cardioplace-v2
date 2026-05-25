@@ -124,4 +124,16 @@ test.describe('30s — admin caregiver endpoints enforce per-patient scope (PHI)
     expect(res.status()).not.toBe(403)
     await api.dispose()
   })
+
+  test('assigned PROVIDER GET caregivers → allowed (in-scope patient)', async () => {
+    // Every seed patient is on primaryProvider's panel (see 30s happy path),
+    // so Priya is in scope — the per-patient check passes and the read returns.
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const priya = await tc.findUser(PATIENTS.priya.email)
+    await tc.dispose()
+    const api = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
+    const res = await api.get(`admin/patients/${priya.id}/caregivers`)
+    expect(res.status(), await res.text()).toBe(200)
+    await api.dispose()
+  })
 })
