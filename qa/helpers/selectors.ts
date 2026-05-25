@@ -87,6 +87,9 @@ export const T = {
         | 'SGLT2'
         | 'OTHER',
     ) => `intake-cat-tile-${key}`,
+    catExpanded: (
+      key: 'WATER_PILL' | 'BLOOD_THINNER' | 'CHOLESTEROL' | 'HEART_RHYTHM' | 'SGLT2',
+    ) => `intake-cat-expanded-${key}`,
     otherMedInput: 'intake-other-med-input',
     // A1: gender + height + DOB
     genderRadio: (v: 'MALE' | 'FEMALE' | 'OTHER') => `intake-gender-${v.toLowerCase()}`,
@@ -136,6 +139,7 @@ export const T = {
     medicationStreak: 'medication-streak',
     totalCheckins: 'total-checkins',
     bpGoal: 'bp-goal',
+    goalTolerance: 'dashboard-goal-tolerance',
     bpChart: 'bp-chart',
     bpChartXTick: 'bp-chart-x-tick',
     bpChartRangeToggle: (range: '7d' | '30d' | '90d') => `bp-chart-range-${range}`,
@@ -409,6 +413,7 @@ export const T = {
     // ThresholdsTab
     thresholdReadonlyBanner: 'admin-threshold-readonly',
     thresholdSbpUpper: 'admin-threshold-sbp-upper',
+    thresholdSbpBandHelper: 'admin-threshold-sbp-band-helper',
     thresholdSbpLower: 'admin-threshold-sbp-lower',
     thresholdDbpUpper: 'admin-threshold-dbp-upper',
     thresholdDbpLower: 'admin-threshold-dbp-lower',
@@ -478,6 +483,8 @@ export const T = {
     alertCard: (id: string) => `admin-alert-card-${id}`,
     alertRow: (id: string) => `admin-alert-row-${id}`,
     alertTierBadge: (id: string) => `admin-alert-tier-badge-${id}`,
+    alertModeBadge: (id: string) => `admin-alert-mode-badge-${id}`,
+    alertGroupHeader: 'admin-alert-group-header',
     alertStatusBadge: (id: string) => `admin-alert-status-badge-${id}`,
     alertAckBtn: (id: string) => `admin-alert-ack-button-${id}`,
     alertResolveBtnFor: (id: string) => `admin-alert-resolve-button-${id}`,
