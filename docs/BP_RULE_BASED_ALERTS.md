@@ -723,7 +723,7 @@ The current implementation captures the core architecture described above. The f
 
 - **Additional phased-rollout activation predicates.** The current `cadRampApplies(ctx)` predicate keys on enrollment date and practice name (§10, §18(d)). Additional predicates — including cardiovascular-risk-score-stratified rollout, age-band-stratified rollout, and randomized A/B rollout — are supported by the same predicate-pluggable design and may be enabled through additional helpers that share the three-phase activation pattern.
 - **Provider-notice idempotency invariant.** The one-time provider notice (§10(b)) is idempotent per patient at the first `RULE_CAD_HIGH` firing under the new default — by design, to bound notification volume during cohort-wide rollouts. Subsequent threshold-edit events are surfaced through the persistent admin-side disclosure (§10(c)) rather than through repeated dashboard notices.
-- **Additional condition-specific rules.** The narrow-pulse-pressure rule (`SBP − DBP < 20`) and additional Stage-1 thresholds (`SBP ≥ 140` / `DBP ≥ 90` for non-CAD non-pregnant patients) are planned extensions following the same condition-branch pattern (§18(a)) and the same phased-rollout pattern (§18(g)) used for the existing rules.
+- **Additional condition-specific rules.** The narrow-pulse-pressure rule is now **implemented** (Manisha 2026-05-24 Q1/Q2 — see §24): a per-reading entry artifact flag at `SBP − DBP < 15` (physician-only, no alert tier) plus a session-averaged hemodynamic note at `SBP − DBP < 25` (Tier 3, condition-specific physician wording). Additional Stage-1 thresholds (`SBP ≥ 140` / `DBP ≥ 90` for non-CAD non-pregnant patients) remain planned extensions following the same condition-branch pattern (§18(a)) and the same phased-rollout pattern (§18(g)).
 - **Caregiver-channel dispatch.** Three-tier message generation (§12) persists `caregiverMessage` for every BP alert. Operational dispatch through the caregiver channel is gated behind `CAREGIVER_DISPATCH_ENABLED`; enabling the flag activates the existing dispatch path with no schema or rule-pipeline changes (§18(f)).
 
 ---
@@ -851,5 +851,59 @@ flowchart TD
   class R_PHIGH,R_PLOW,M_PERS pers
   class R_HCM_VASO,R_CAD_ANN,R_PP,R_LOOP,L_T3 info
 ```
+
+---
+
+## 24. Manisha 2026-05-24 sign-off addendum
+
+This section reconciles the document with Dr. Singal's 2026-05-24 sign-offs (Pending Clinical Clarifications Q1–Q5 + Medication Workflow §1–§6). All items below are implemented; the canonical implementation references are the linked sources.
+
+### 24.1 Reading-validation rules (Q1)
+
+| Rule / behavior | Trigger | Effect | Source |
+|---|---|---|---|
+| Implausible-reading rejection | `DBP ≥ SBP` at entry | Reading is **not persisted** and the engine event is **not emitted** (prevents a false `RULE_ABSOLUTE_EMERGENCY` on `DBP ≥ 120`). A `RejectedReadingLog` row is written; the patient is re-prompted to re-take (escalated copy on the 2nd consecutive attempt). | `daily_journal.service.ts` |
+| Narrow-PP entry artifact | `0 < SBP − DBP < 15` (single reading) | `JournalEntry.narrowPpArtifact = true`. Physician-only flag, **no alert tier**, surfaced on the admin Readings tab. | `daily_journal.service.ts` |
+
+### 24.2 Narrow pulse-pressure hemodynamic note (Q1/Q2)
+
+`RULE_PULSE_PRESSURE_NARROW` fires when the session-averaged `0 < SBP − DBP < 25`. Tier 3, **empty patient/caregiver message**, condition-specific `physicianMessage`: HFrEF/DCM (reduced stroke volume), HFpEF ("less prognostically significant"), HCM / aortic stenosis (fixed outflow obstruction), else generic reduced cardiac output. Co-fires as a physician annotation alongside any BP/HR row (mirrors the wide-PP annotation path). Wide-PP (> 60) unchanged.
+
+### 24.3 Pre-personalization Level 1 (Q3)
+
+Supersedes the prior "non-emergency suppressed (log only)" rule: pre-personalization **fires Level 1 with the standard-threshold disclaimer** (option a). Disclaimer wording is anchored on the reading count — "personalization begins after 7 readings" (not "Day 3"). The admin alert detail surfaces an "X of 7 baseline readings" progress note. See CLINICAL_SPEC Part 6.
+
+### 24.4 Angioedema bespoke resolution actions (Q4)
+
+Angioedema (`TIER_1_ANGIOEDEMA`) now resolves via its own 6-option catalog (split out of the generic Tier-1 catalog):
+
+| Action | Sub-fields | Side-effect |
+|---|---|---|
+| `ANGIO_ADVISED_ED` | `willGo` (Y/N) | `willGo = N` → alert stays OPEN + immediate Medical Director escalation |
+| `ANGIO_CONFIRMED_ED` | `facility` | terminal resolve |
+| `ANGIO_ACE_DISCONTINUED` | `replacementOrdered` (Y/N), `replacementMed` | transactional: discontinue all active ACE/ARB meds + set permanent `PatientProfile.aceContraindicatedAt` |
+| `ANGIO_SEEN_IN_OFFICE` | `outcome` | terminal resolve |
+| `ANGIO_FALSE_ALARM` | `actualCause` | terminal resolve, **no** contraindication flag |
+| `ANGIO_UNABLE_TO_REACH` | — | alert stays OPEN; the existing compressed angioedema ladder (T0/T15M/T1H/T4H) keeps escalating |
+
+Sub-fields persist to `DeviationAlert.resolutionDetails`. The permanent ACE-inhibitor contraindication renders a pinned banner on the admin profile. The two pre-existing angioedema **engine** rules (`RULE_ACE_ANGIOEDEMA`, `RULE_GENERIC_ANGIOEDEMA`, Cluster 8) are unchanged and match the sign-off. Source: `resolution-actions.ts`, `alert-resolution.service.ts`.
+
+### 24.5 Aortic stenosis (Q5C)
+
+New condition `PatientProfile.hasAorticStenosis`. `aorticStenosisRule` mirrors HCM (interim thresholds: low < 100, high ≥ 160, provider-overridable). Threshold-mandatory (gates enrollment + the admin "needs threshold" signal); interim default lower bound 100. Wired through intake (A3 card + 5 locales), the resolver, the admin profile/threshold surfaces, and the narrow-PP condition branch (§24.2). Rules `RULE_AORTIC_STENOSIS_LOW` / `RULE_AORTIC_STENOSIS_HIGH`. Source: `condition-branches.ts`.
+
+### 24.6 Medication workflow (§3–§5)
+
+- **Structured HOLD reason codes (§3).** `MedicationHoldReason ∈ {AWAITING_RECORDS, UNCLEAR_NAME, UNCLEAR_DOSE, PROVIDER_DIRECTED_HOLD, OTHER}` drive a **two-path patient message**: `PROVIDER_DIRECTED_HOLD` = "pause [drug]" (clinical instruction, names the drug); the administrative reasons = "keep taking your medicines as usual" (does **not** name the drug). `OTHER` requires a free-text rationale.
+- **HOLD reconciliation escalation ladder (§4).** Daily cron escalates meds stuck on HOLD: Day 7 → primary-provider dashboard badge; Day 14 → primary provider; Day 30 → primary provider + Medical Director; Day 45 → CMO review queue (Medical Director + HEALPLACE_OPS). Idempotent per rung via `PatientMedication.holdEscalationLevel`. Source: `crons/medication-hold-escalation.service.ts`.
+- **First-month nudge carve-out (§5).** The one-time first-month educational adherence nudge is **suppressed** for patients who qualify for the beta-blocker single-miss carve-out (HFrEF/HCM/AFib + a beta-blocker miss); they get the Tier-2 adherence alert instead. Source: `adherence.ts`.
+- **Combination-pill de-dup (§ intake).** The A7 dedup modal offers the three decision choices (keep combo only / keep component only / take both) plus a go-back; confirmed against the 5/24 wording.
+
+### 24.7 Confirm-only (no code change)
+
+- BP Level 2 "unable to reach" (5D) follows the standard BP-L2 ladder via `BP_L2_UNABLE_TO_REACH_RETRY` (T+4h retry) — already implemented, unchanged.
+- Post-pregnancy preeclampsia flag (5A) — `historyPreeclampsia` already captured and consumed by the pregnancy symptom-override branch.
+
+---
 
 — end of document —
