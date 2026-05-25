@@ -2451,4 +2451,42 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     ).map((c) => c[0].data.ruleId)
     expect(ruleIds).not.toContain('RULE_FIRST_MONTH_ADHERENCE_NUDGE')
   })
+
+  it('Scenario 95a (Manisha 5/24 Med §5) — first-month HFrEF patient misses a beta-blocker → Tier 2 carve-out, NOT the gentle nudge', async () => {
+    // Within the 30-day window but the patient qualifies for the beta-blocker
+    // single-miss carve-out (HFrEF + BB miss). They must get the Tier-2
+    // RULE_MEDICATION_MISSED alert, and the softer first-month nudge must be
+    // suppressed so the safety-critical signal isn't diluted.
+    const now = FIXED_NOW
+    prisma.journalEntry.findMany.mockResolvedValue([
+      {
+        id: 'prev-1',
+        measuredAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        medicationTaken: false,
+        missedMedications: [
+          {
+            medicationId: 'bb-1',
+            drugName: 'Metoprolol',
+            drugClass: 'BETA_BLOCKER',
+            reason: 'FORGOT',
+            missedDoses: 1,
+          },
+        ],
+      },
+    ])
+
+    await run(
+      buildSession({ systolicBP: 124, diastolicBP: 78, pulse: 72 }),
+      buildCtx({
+        profile: { hasHeartFailure: true, heartFailureType: 'HFREF', resolvedHFType: 'HFREF' },
+        enrolledAt: NUDGE_RECENT_ENROLLED_AT,
+      }),
+    )
+
+    const ruleIds = (
+      prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
+    ).map((c) => c[0].data.ruleId)
+    expect(ruleIds).toContain('RULE_MEDICATION_MISSED')
+    expect(ruleIds).not.toContain('RULE_FIRST_MONTH_ADHERENCE_NUDGE')
+  })
 })

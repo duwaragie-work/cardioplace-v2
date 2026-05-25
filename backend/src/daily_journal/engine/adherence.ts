@@ -20,16 +20,30 @@ import type { AdherenceWindow } from './adherence-window.js'
 const RECENT_MISS_THRESHOLD = 2
 const EXTENDED_MISS_THRESHOLD = 3
 
+/**
+ * Carve-out predicate: a SINGLE missed beta-blocker dose in an HFrEF / HCM /
+ * AFib patient (rebound tachycardia + hypertensive risk). Shared by the Tier-2
+ * adherence rule (which fires on it) and the first-month nudge (which skips it —
+ * those patients get the Tier-2 alert, not the gentle educational nudge).
+ */
+function betaBlockerSingleMissCarveOut(
+  window: AdherenceWindow,
+  profile: { hasHeartFailure: boolean; hasHCM: boolean; hasAFib: boolean },
+): boolean {
+  return (
+    (profile.hasHeartFailure || profile.hasHCM || profile.hasAFib) &&
+    (window.missesByDrugClass.get('BETA_BLOCKER') ?? 0) >= 1
+  )
+}
+
 export function medicationMissedRuleWithWindow(
   recentMisses: AdherenceWindow,
 ): RuleFunction {
   return (session, ctx) => {
-    const { daysWithMiss, daysWithMissOver7d, missesByDrugClass, missedMedications } = recentMisses
+    const { daysWithMiss, daysWithMissOver7d, missedMedications } = recentMisses
 
     // Carve-out: single beta-blocker miss for HFrEF / HCM / AFib patients.
-    const isBetaBlockerCarveOut =
-      (ctx.profile.hasHeartFailure || ctx.profile.hasHCM || ctx.profile.hasAFib) &&
-      (missesByDrugClass.get('BETA_BLOCKER') ?? 0) >= 1
+    const isBetaBlockerCarveOut = betaBlockerSingleMissCarveOut(recentMisses, ctx.profile)
 
     if (!isBetaBlockerCarveOut && daysWithMiss < RECENT_MISS_THRESHOLD) {
       return null
@@ -85,6 +99,11 @@ export function firstMonthAdherenceNudge(
     if (ctx.enrolledAt == null) return null
     const ageMs = ctx.resolvedAt.getTime() - ctx.enrolledAt.getTime()
     if (ageMs < 0 || ageMs > FIRST_MONTH_DAYS * 24 * 60 * 60 * 1000) return null
+
+    // Manisha 5/24 Med §5 — patients who qualify for the beta-blocker single-
+    // miss carve-out get the Tier-2 adherence alert, NOT this gentle first-month
+    // nudge. Suppress the nudge so the safety-critical alert isn't softened.
+    if (betaBlockerSingleMissCarveOut(window, ctx.profile)) return null
 
     // Any miss reported in the rolling window (3- or 7-day) counts as the
     // patient's "first missed dose" — the engine's one-time guard ensures
