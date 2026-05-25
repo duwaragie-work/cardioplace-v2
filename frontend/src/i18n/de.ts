@@ -97,6 +97,7 @@ const de: Record<TranslationKey, string> = {
   'dashboard.hearSummary': 'Zusammenfassung anhören',
   'dashboard.yourGoal': 'Ihr Ziel',
   'dashboard.belowTarget': 'Unter {target} mmHg',
+  'dashboard.goalTolerance': 'Hohe Warnungen beginnen bei {value} — Ihr Ziel plus eine kleine Toleranz.',
   'dashboard.setByCareTeam': '· festgelegt von Ihrem Behandlungsteam',
   'dashboard.chartDateAxis': 'Datum',
   'dashboard.chartAt': 'um',

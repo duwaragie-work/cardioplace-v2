@@ -815,6 +815,21 @@ export default function Dashboard() {
                   {thresholdSetAt ? ` · ${thresholdSetAt}` : ''}
                 </span>
               </p>
+              {/* PERSONALIZED +20 tolerance band (CLINICAL_SPEC §4.1) — alerts
+                  begin 20 mmHg above the goal, not at the goal. Explain it so a
+                  reading just over the goal doesn't read as a missed alert. */}
+              {threshold?.sbpUpperTarget != null && (
+                <p
+                  data-testid="dashboard-goal-tolerance"
+                  className="text-[11.5px] mt-0.5"
+                  style={{ color: 'var(--brand-text-muted)' }}
+                >
+                  {t('dashboard.goalTolerance').replace(
+                    '{value}',
+                    String(threshold.sbpUpperTarget + 20),
+                  )}
+                </p>
+              )}
             </div>
           </div>
         )}

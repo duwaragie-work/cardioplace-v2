@@ -92,6 +92,7 @@ const en = {
   'dashboard.hearSummary': 'Hear summary',
   'dashboard.yourGoal': 'Your goal',
   'dashboard.belowTarget': 'Below {target} mmHg',
+  'dashboard.goalTolerance': 'High alerts begin at {value} — your goal plus a small tolerance.',
   'dashboard.setByCareTeam': '· set by your care team',
   'dashboard.chartDateAxis': 'Date',
   'dashboard.chartAt': 'at',

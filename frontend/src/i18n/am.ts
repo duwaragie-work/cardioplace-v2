@@ -99,6 +99,7 @@ const am: Record<TranslationKey, string> = {
   'dashboard.hearSummary': 'ማጠቃለያውን ያዳምጡ',
   'dashboard.yourGoal': 'ግብዎ',
   'dashboard.belowTarget': 'ከ{target} mmHg በታች',
+  'dashboard.goalTolerance': 'ከፍተኛ ማንቂያዎች የሚጀምሩት በ{value} ነው — ግብዎ ላይ ትንሽ ተጨማሪ ገደብ።',
   'dashboard.setByCareTeam': '· በተንከባካቢ ቡድንዎ የተዘጋጀ',
   'dashboard.chartDateAxis': 'ቀን',
   'dashboard.chartAt': 'በ',
