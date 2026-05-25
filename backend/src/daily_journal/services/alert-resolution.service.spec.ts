@@ -48,6 +48,17 @@ describe('AlertResolutionService', () => {
         // Mocked here so the resolve path doesn't crash on undefined.
         create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
       },
+      // Manisha 5/24 Q4 — angioedema #3 side-effects run inside $transaction.
+      patientMedication: {
+        updateMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 1 }),
+      },
+      patientProfile: {
+        updateMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 1 }),
+      },
+      // $transaction receives an array of prepared queries; resolve them all.
+      $transaction: (jest.fn() as jest.Mock<any>).mockImplementation((ops: any) =>
+        Array.isArray(ops) ? Promise.all(ops) : ops(prisma),
+      ),
     }
     ;(prisma.deviationAlert.findUnique as jest.Mock<any>).mockResolvedValue(
       baseAlert,
@@ -382,6 +393,115 @@ describe('AlertResolutionService', () => {
       await expect(service.buildAuditPayload(alertId)).rejects.toThrow(
         NotFoundException,
       )
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // resolve — angioedema bespoke actions (Manisha 5/24 Q4)
+  // ────────────────────────────────────────────────────────────────────────
+  describe('resolve — angioedema (Q4)', () => {
+    beforeEach(() => {
+      prisma.deviationAlert.findUnique.mockResolvedValue({
+        ...baseAlert,
+        tier: 'TIER_1_ANGIOEDEMA',
+        ruleId: 'RULE_ACE_ANGIOEDEMA',
+      })
+    })
+
+    it('rejects a generic Tier 1 action on an angioedema alert', async () => {
+      await expect(
+        service.resolve(alertId, actor, {
+          resolutionAction: 'TIER1_DISCONTINUED',
+          resolutionRationale: 'explanation here',
+        }),
+      ).rejects.toThrow(/not valid for alert tier/)
+    })
+
+    it('requires the willGo sub-field for ANGIO_ADVISED_ED', async () => {
+      await expect(
+        service.resolve(alertId, actor, {
+          resolutionAction: 'ANGIO_ADVISED_ED',
+          resolutionRationale: 'Told patient to go to ED',
+        }),
+      ).rejects.toThrow(/Missing required sub-fields/)
+    })
+
+    it('willGo=NO → leaves OPEN + fires immediate MD escalation', async () => {
+      const r = await service.resolve(alertId, actor, {
+        resolutionAction: 'ANGIO_ADVISED_ED',
+        resolutionRationale: 'Patient refuses ED',
+        resolutionDetails: { willGo: 'NO' },
+      })
+      expect(r.status).toBe('OPEN')
+      expect(escalation.scheduleRetry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          alertId,
+          recipientRoles: ['MEDICAL_DIRECTOR'],
+          offsetMs: 0,
+        }),
+      )
+      expect(prisma.deviationAlert.update).toHaveBeenCalledWith({
+        where: { id: alertId },
+        data: expect.not.objectContaining({ status: 'RESOLVED' }),
+      })
+    })
+
+    it('willGo=YES → resolves terminally, no MD escalation', async () => {
+      const r = await service.resolve(alertId, actor, {
+        resolutionAction: 'ANGIO_ADVISED_ED',
+        resolutionRationale: 'Patient agreed to go',
+        resolutionDetails: { willGo: 'YES' },
+      })
+      expect(r.status).toBe('RESOLVED')
+      expect(escalation.scheduleRetry).not.toHaveBeenCalled()
+    })
+
+    it('ANGIO_ACE_DISCONTINUED → discontinues ACE/ARB meds + sets permanent contraindication flag', async () => {
+      const r = await service.resolve(alertId, actor, {
+        resolutionAction: 'ANGIO_ACE_DISCONTINUED',
+        resolutionRationale: 'Stopped lisinopril after angioedema',
+        resolutionDetails: { replacementOrdered: 'YES', replacementMed: 'amlodipine' },
+      })
+      expect(r.status).toBe('RESOLVED')
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1)
+      expect(prisma.patientMedication.updateMany).toHaveBeenCalledWith({
+        where: {
+          userId: 'user-1',
+          drugClass: { in: ['ACE_INHIBITOR', 'ARB'] },
+          discontinuedAt: null,
+        },
+        data: { discontinuedAt: expect.any(Date) },
+      })
+      expect(prisma.patientProfile.updateMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+        data: expect.objectContaining({
+          aceContraindicatedAt: expect.any(Date),
+        }),
+      })
+    })
+
+    it('ANGIO_FALSE_ALARM → resolves WITHOUT setting the contraindication flag', async () => {
+      const r = await service.resolve(alertId, actor, {
+        resolutionAction: 'ANGIO_FALSE_ALARM',
+        resolutionRationale: 'Symptoms were from a food allergy',
+        resolutionDetails: { actualCause: 'food allergy' },
+      })
+      expect(r.status).toBe('RESOLVED')
+      expect(prisma.patientProfile.updateMany).not.toHaveBeenCalled()
+      expect(prisma.patientMedication.updateMany).not.toHaveBeenCalled()
+    })
+
+    it('ANGIO_UNABLE_TO_REACH → leaves OPEN, no escalation scheduled (existing ladder runs)', async () => {
+      const r = await service.resolve(alertId, actor, {
+        resolutionAction: 'ANGIO_UNABLE_TO_REACH',
+        resolutionRationale: 'No answer on two calls',
+      })
+      expect(r.status).toBe('OPEN')
+      expect(escalation.scheduleRetry).not.toHaveBeenCalled()
+      expect(prisma.deviationAlert.update).toHaveBeenCalledWith({
+        where: { id: alertId },
+        data: expect.not.objectContaining({ status: 'RESOLVED' }),
+      })
     })
   })
 })

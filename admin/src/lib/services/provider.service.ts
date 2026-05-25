@@ -109,6 +109,9 @@ export interface PatientJournalEntry {
   otherSymptoms: string[]
   measurementConditions: Record<string, unknown> | null
   suboptimalMeasurement: boolean
+  // Manisha 5/24 Q1 — narrow pulse pressure (<15) flagged at entry as a
+  // possible measurement artifact (physician-only, no patient alert tier).
+  narrowPpArtifact?: boolean
   failedConditions: string[]
   notes: string | null
   source: string
@@ -131,6 +134,36 @@ export async function getPatientJournalEntries(
 ): Promise<PatientJournalEntry[]> {
   const data = await getPatientJournal(userId, 1, opts?.limit ?? 200)
   return Array.isArray(data) ? (data as PatientJournalEntry[]) : []
+}
+
+// Manisha 5/24 Q1 — readings rejected at entry (DBP ≥ SBP). Never persisted as
+// journal rows; surfaced on the Readings tab as an informational QA note.
+export interface RejectedReading {
+  id: string
+  systolicBP: number | null
+  diastolicBP: number | null
+  pulse: number | null
+  reason: string
+  createdAt: string
+}
+
+export async function getPatientRejectedReadings(
+  userId: string,
+  opts?: { limit?: number },
+): Promise<RejectedReading[]> {
+  const qs = new URLSearchParams()
+  if (opts?.limit) qs.append('limit', String(opts.limit))
+  const query = qs.toString()
+  const res = await fetchWithAuth(
+    `${API}/api/provider/patients/${userId}/rejected-readings${query ? `?${query}` : ''}`,
+  )
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json()
+  const data = json.data ?? json
+  return Array.isArray(data) ? (data as RejectedReading[]) : []
 }
 
 export async function getPatientBpTrend(userId: string, startDate: string, endDate: string) {
@@ -279,8 +312,24 @@ export type ResolutionAction =
   | 'BP_L2_SEEN_IN_OFFICE'
   | 'BP_L2_REVIEWED_TRENDING_DOWN'
   | 'BP_L2_UNABLE_TO_REACH_RETRY'
+  // Tier 1 angioedema (Manisha 5/24 Q4) — bespoke 6-option set
+  | 'ANGIO_ADVISED_ED'
+  | 'ANGIO_CONFIRMED_ED'
+  | 'ANGIO_ACE_DISCONTINUED'
+  | 'ANGIO_SEEN_IN_OFFICE'
+  | 'ANGIO_FALSE_ALARM'
+  | 'ANGIO_UNABLE_TO_REACH'
 
-export type ResolutionTier = 'TIER_1' | 'TIER_2' | 'BP_LEVEL_2'
+export type ResolutionTier = 'TIER_1' | 'TIER_2' | 'BP_LEVEL_2' | 'TIER_1_ANGIOEDEMA'
+
+/** Conditional sub-field rendered under an angioedema resolution action and
+ *  posted into resolutionDetails. Mirrors backend ResolutionSubField. */
+export interface ResolutionSubField {
+  key: string
+  label: string
+  kind: 'yesno' | 'text'
+  required: boolean
+}
 
 export interface ResolutionActionDef {
   tier: ResolutionTier
@@ -289,6 +338,11 @@ export interface ResolutionActionDef {
   description?: string
   requiresRationale: boolean
   triggersBpL2Retry?: boolean
+  /** Conditional sub-fields (angioedema actions). */
+  subFields?: ResolutionSubField[]
+  /** UI hint — this action carries a destructive/clinical side-effect
+   *  (auto-discontinue ACE/ARB + permanent contraindication flag). */
+  warnSideEffect?: string
 }
 
 /**
@@ -388,23 +442,71 @@ export const RESOLUTION_CATALOG: Record<ResolutionAction, ResolutionActionDef> =
     requiresRationale: true,
     triggersBpL2Retry: true,
   },
+
+  // ── Tier 1 Angioedema (Manisha 5/24 Q4) ─────────────────────────────────
+  ANGIO_ADVISED_ED: {
+    tier: 'TIER_1_ANGIOEDEMA',
+    label: 'Advised patient to call 911 / go to the ED',
+    description: 'If the patient declines, an immediate Medical Director escalation fires and the alert stays open.',
+    requiresRationale: true,
+    subFields: [
+      { key: 'willGo', label: 'Patient agreed to go to the ED', kind: 'yesno', required: true },
+    ],
+  },
+  ANGIO_CONFIRMED_ED: {
+    tier: 'TIER_1_ANGIOEDEMA',
+    label: 'Confirmed patient is being evaluated in the ED',
+    requiresRationale: true,
+    subFields: [
+      { key: 'facility', label: 'Facility / ED name', kind: 'text', required: true },
+    ],
+  },
+  ANGIO_ACE_DISCONTINUED: {
+    tier: 'TIER_1_ANGIOEDEMA',
+    label: 'ACE inhibitor / ARB discontinued',
+    requiresRationale: true,
+    warnSideEffect:
+      'This discontinues the patient’s ACE/ARB medications and sets a permanent ACE-inhibitor contraindication on their profile.',
+    subFields: [
+      { key: 'replacementOrdered', label: 'Replacement therapy ordered', kind: 'yesno', required: true },
+      { key: 'replacementMed', label: 'Replacement medication (if ordered)', kind: 'text', required: false },
+    ],
+  },
+  ANGIO_SEEN_IN_OFFICE: {
+    tier: 'TIER_1_ANGIOEDEMA',
+    label: 'Patient seen in office',
+    requiresRationale: true,
+    subFields: [
+      { key: 'outcome', label: 'Office visit outcome', kind: 'text', required: true },
+    ],
+  },
+  ANGIO_FALSE_ALARM: {
+    tier: 'TIER_1_ANGIOEDEMA',
+    label: 'False alarm — not angioedema',
+    description: 'No contraindication flag is set.',
+    requiresRationale: true,
+    subFields: [
+      { key: 'actualCause', label: 'Actual cause of symptoms', kind: 'text', required: true },
+    ],
+  },
+  ANGIO_UNABLE_TO_REACH: {
+    tier: 'TIER_1_ANGIOEDEMA',
+    label: 'Unable to reach patient — continue escalation',
+    description: 'Alert stays open; the compressed angioedema ladder keeps escalating.',
+    requiresRationale: true,
+  },
 }
 
 /** AlertTier (DB enum) → ResolutionTier (catalog grouping). */
 export function resolutionTierFor(tier: AlertTier | string | null): ResolutionTier | null {
   switch (tier) {
     case 'TIER_1_CONTRAINDICATION':
-    // Cluster 8 (Manisha 5/18/26, P0) — angioedema is non-dismissible and
-    // "resolved like all Tier 1 alerts" with 15-field audit rationale.
-    // Same resolution catalog (TIER1_FALSE_POSITIVE,
-    // TIER1_MEDICATION_CORRECTED, etc.) as the Tier 1 contraindication.
-    // B.5 GATE (Manisha sign-off pending): an angioedema-specific catalog
-    // (e.g. "ACE discontinued in ED", "patient admitted", "evaluated — not
-    // angioedema") plugs in HERE — split TIER_1_ANGIOEDEMA into its own
-    // ResolutionTier + RESOLUTION_CATALOG entries once Dr. Singal signs off
-    // the action wording. Until then the Tier-1 catalog is the approved set.
-    case 'TIER_1_ANGIOEDEMA':
       return 'TIER_1'
+    // Manisha 5/24 Q4 — angioedema now has its own bespoke 6-option catalog
+    // (auto-discontinue ACE/ARB, permanent contraindication flag, targeted MD
+    // escalation, compressed re-escalation), split out of the generic Tier 1.
+    case 'TIER_1_ANGIOEDEMA':
+      return 'TIER_1_ANGIOEDEMA'
     case 'TIER_2_DISCREPANCY':
       return 'TIER_2'
     case 'BP_LEVEL_2':
@@ -545,11 +647,16 @@ export async function resolveAlert(
   alertId: string,
   action: ResolutionAction,
   rationale?: string,
+  resolutionDetails?: Record<string, unknown>,
 ): Promise<{ status: 'RESOLVED' | 'OPEN'; resolvedAt: string | null; retryScheduledFor?: string }> {
   const res = await fetchWithAuth(`${API}/api/admin/alerts/${alertId}/resolve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ resolutionAction: action, resolutionRationale: rationale }),
+    body: JSON.stringify({
+      resolutionAction: action,
+      resolutionRationale: rationale,
+      ...(resolutionDetails ? { resolutionDetails } : {}),
+    }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))

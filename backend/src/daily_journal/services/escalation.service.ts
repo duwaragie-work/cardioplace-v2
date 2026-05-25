@@ -168,27 +168,33 @@ export class EscalationService {
     recipientRoles: RecipientRole[]
     channels: LadderChannel[]
     now: Date
+    /** Override the audit reason. Defaults to the BP L2 retry text. */
+    reason?: string
+    /** Override the escalation level. Defaults to LEVEL_2. */
+    escalationLevel?: 'LEVEL_1' | 'LEVEL_2'
   }): Promise<void> {
     const scheduledFor = new Date(args.now.getTime() + args.offsetMs)
     await this.prisma.escalationEvent.create({
       data: {
         alertId: args.alertId,
         userId: args.userId,
-        escalationLevel: 'LEVEL_2',
-        reason: `BP L2 retry — ${args.ladderStep} scheduled ${scheduledFor.toISOString()}`,
+        escalationLevel: args.escalationLevel ?? 'LEVEL_2',
+        reason:
+          args.reason ??
+          `BP L2 retry — ${args.ladderStep} scheduled ${scheduledFor.toISOString()}`,
         ladderStep: args.ladderStep,
         recipientIds: [],
         recipientRoles: args.recipientRoles,
         scheduledFor,
         triggeredByResolution: true,
-        // Finding 5 — scheduled by an admin's BP_L2_UNABLE_TO_REACH_RETRY
-        // resolution action, not the cron scheduler. Human-attributed.
+        // Finding 5 — scheduled by an admin resolution action, not the cron
+        // scheduler. Human-attributed.
         dispatchedBySystem: false,
         afterHours: false,
       },
     })
     this.logger.log(
-      `Scheduled BP L2 retry for alert ${args.alertId} at ${scheduledFor.toISOString()}`,
+      `Scheduled retry for alert ${args.alertId} at ${scheduledFor.toISOString()}`,
     )
   }
 

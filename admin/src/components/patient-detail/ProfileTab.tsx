@@ -615,6 +615,32 @@ export default function ProfileTab({ patientId, profile, logs, loading, onChange
 
   return (
     <div className="space-y-5">
+      {/* Manisha 5/24 Q4 — permanent ACE-inhibitor contraindication (angioedema
+          history). Pinned at the top of the profile so a provider never
+          re-prescribes an ACE inhibitor for this patient. */}
+      {profile.aceContraindicatedAt && (
+        <div
+          className="rounded-2xl p-4 flex items-start gap-2.5"
+          data-testid="admin-profile-ace-contraindication-banner"
+          style={{
+            backgroundColor: 'var(--brand-alert-red-light)',
+            borderLeft: '4px solid var(--brand-alert-red)',
+          }}
+        >
+          <AlertTriangle className="w-5 h-5 shrink-0" style={{ color: 'var(--brand-alert-red)' }} />
+          <div>
+            <p className="text-[13px] font-bold" style={{ color: 'var(--brand-alert-red-text)' }}>
+              ACE INHIBITOR CONTRAINDICATED — history of angioedema
+            </p>
+            <p className="text-[11.5px] mt-0.5" style={{ color: 'var(--brand-text-secondary)' }}>
+              Do not prescribe ACE inhibitors. Flagged{' '}
+              {new Date(profile.aceContraindicatedAt).toLocaleDateString()}
+              {profile.aceContraindicationReason ? ` · ${profile.aceContraindicationReason}` : ''}.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Status banner */}
       <div
         className="rounded-2xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
