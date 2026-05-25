@@ -283,6 +283,8 @@ const fr: Record<TranslationKey, string> = {
   'checkin.err.pulse': 'Le pouls doit être entre 30 et 220.',
   'checkin.err.weight': 'Le poids doit être entre {min} et {max} {unit}.',
   'checkin.err.submit': 'Impossible d\'envoyer la lecture. Réessayez.',
+  'checkin.err.implausible': "Cette mesure semble incorrecte — le chiffre du bas doit être inférieur à celui du haut. Vérifiez votre tensiomètre et réessayez.",
+  'checkin.err.implausibleRepeat': "Si votre appareil continue d'afficher des chiffres inhabituels, repositionnez le brassard et restez assis tranquillement 2 minutes avant de réessayer. Si le problème persiste, contactez votre équipe soignante.",
 
 
   // ─── Symptoms ──────────────────────────────────────────────────────────────

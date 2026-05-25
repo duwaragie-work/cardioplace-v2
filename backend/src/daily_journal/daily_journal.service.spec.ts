@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals'
 import { Test, TestingModule } from '@nestjs/testing';
+import { UnprocessableEntityException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EntrySource } from '../generated/prisma/client.js';
@@ -16,6 +17,7 @@ const mockPrisma = {
   },
   deviationAlert: { findMany: jest.fn() },
   patientProfile: { findUnique: jest.fn() },
+  rejectedReadingLog: { create: jest.fn() },
 } as any
 const mockEventEmitter = { emit: jest.fn() }
 
@@ -224,6 +226,56 @@ describe('DailyJournalService', () => {
 
       const createArg = mockPrisma.journalEntry.create.mock.calls[0][0]
       expect(createArg.data.sessionId).toBe('s-active')
+    })
+  })
+
+  describe('create — DBP>=SBP reject + narrow-PP artifact (Manisha 5/24 Q1)', () => {
+    const measuredAt = '2026-05-22T10:00:00Z'
+
+    it('rejects a physiologically-impossible reading (DBP >= SBP), logs it, does not persist', async () => {
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ userId: 'u1' }) // gate
+      mockPrisma.rejectedReadingLog.create.mockResolvedValueOnce({})
+
+      await expect(
+        service.create('u1', { measuredAt, systolicBP: 120, diastolicBP: 140 } as any),
+      ).rejects.toThrow(UnprocessableEntityException)
+
+      const logArg = mockPrisma.rejectedReadingLog.create.mock.calls[0][0]
+      expect(logArg.data).toMatchObject({ userId: 'u1', systolicBP: 120, diastolicBP: 140, reason: 'diastolic-ge-systolic' })
+      expect(mockPrisma.journalEntry.create).not.toHaveBeenCalled()
+      expect(mockEventEmitter.emit).not.toHaveBeenCalled()
+    })
+
+    it('flags narrowPpArtifact when 0 < SBP-DBP < 15', async () => {
+      mockPrisma.patientProfile.findUnique
+        .mockResolvedValueOnce({ userId: 'u1' }) // gate
+        .mockResolvedValueOnce({ hasAFib: false }) // pending-second-reading
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null)
+      mockPrisma.journalEntry.create.mockResolvedValueOnce({
+        id: 'e1', userId: 'u1', measuredAt: new Date(measuredAt), systolicBP: 118, diastolicBP: 108,
+        sessionId: null, otherSymptoms: [], teachBackAnswer: null, teachBackCorrect: null,
+        notes: null, source: EntrySource.MANUAL, sourceMetadata: null, createdAt: new Date(), updatedAt: new Date(),
+      })
+      mockPrisma.journalEntry.count.mockResolvedValue(0)
+
+      await service.create('u1', { measuredAt, systolicBP: 118, diastolicBP: 108 } as any)
+      expect(mockPrisma.journalEntry.create.mock.calls[0][0].data.narrowPpArtifact).toBe(true)
+    })
+
+    it('does NOT flag narrowPpArtifact for a normal pulse pressure', async () => {
+      mockPrisma.patientProfile.findUnique
+        .mockResolvedValueOnce({ userId: 'u1' })
+        .mockResolvedValueOnce({ hasAFib: false })
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null)
+      mockPrisma.journalEntry.create.mockResolvedValueOnce({
+        id: 'e1', userId: 'u1', measuredAt: new Date(measuredAt), systolicBP: 120, diastolicBP: 80,
+        sessionId: null, otherSymptoms: [], teachBackAnswer: null, teachBackCorrect: null,
+        notes: null, source: EntrySource.MANUAL, sourceMetadata: null, createdAt: new Date(), updatedAt: new Date(),
+      })
+      mockPrisma.journalEntry.count.mockResolvedValue(0)
+
+      await service.create('u1', { measuredAt, systolicBP: 120, diastolicBP: 80 } as any)
+      expect(mockPrisma.journalEntry.create.mock.calls[0][0].data.narrowPpArtifact).toBe(false)
     })
   })
 });

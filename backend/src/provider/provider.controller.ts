@@ -96,6 +96,17 @@ export class ProviderController {
     return this.providerService.getPatientJournal(userId, p, l)
   }
 
+  @Get('patients/:userId/rejected-readings')
+  async getPatientRejectedReadings(
+    @Req() req: AuthedReq,
+    @Param('userId') userId: string,
+    @Query('limit') limit?: string,
+  ) {
+    await this.assertCanViewPatient(req, userId)
+    const l = Math.min(100, Math.max(1, parseInt(limit ?? '20', 10) || 20))
+    return this.providerService.getPatientRejectedReadings(userId, l)
+  }
+
   @Get('patients/:userId/bp-trend')
   async getPatientBpTrend(
     @Req() req: AuthedReq,

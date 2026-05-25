@@ -913,6 +913,9 @@ export class ProviderService {
           otherSymptoms: entry.otherSymptoms,
           measurementConditions: conditions,
           suboptimalMeasurement,
+          // Manisha 5/24 Q1 — narrow pulse pressure (<15) recorded at entry as a
+          // possible measurement artifact. Physician-only flag, no patient tier.
+          narrowPpArtifact: entry.narrowPpArtifact,
           failedConditions,
           teachBackAnswer: entry.teachBackAnswer,
           teachBackCorrect: entry.teachBackCorrect,
@@ -942,6 +945,33 @@ export class ProviderService {
         total,
         totalPages: Math.ceil(total / limit),
       },
+    }
+  }
+
+  // ─── GET /provider/patients/:userId/rejected-readings ───────────────────────
+
+  // Manisha 5/24 Q1 — readings rejected at entry (DBP ≥ SBP) are never persisted
+  // as JournalEntry rows (they'd trip a false Level-2 emergency), but they ARE
+  // logged for QA + provider visibility. The Readings tab surfaces these as an
+  // informational note so a provider can see the patient attempted an
+  // implausible reading and prompt re-measurement / cuff check.
+  async getPatientRejectedReadings(userId: string, limit: number) {
+    const logs = await this.prisma.rejectedReadingLog.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    })
+    return {
+      statusCode: 200,
+      message: 'Rejected readings retrieved successfully',
+      data: logs.map((log) => ({
+        id: log.id,
+        systolicBP: log.systolicBP,
+        diastolicBP: log.diastolicBP,
+        pulse: log.pulse,
+        reason: log.reason,
+        createdAt: log.createdAt,
+      })),
     }
   }
 

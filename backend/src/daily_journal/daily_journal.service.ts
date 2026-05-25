@@ -6,6 +6,7 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
 import { SESSION_WINDOW_MS } from '@cardioplace/shared'
@@ -56,6 +57,41 @@ export class DailyJournalService {
       })
     }
 
+    // Manisha 5/24 Q1 Tier 1 — physiologically-impossible reading (diastolic at
+    // or above systolic). Reject at entry: do NOT persist, do NOT run the rule
+    // engine (a transposed 120/140 would otherwise fire a false DBP≥120 Level-2
+    // emergency). Log the rejected values for QA + the provider dashboard note.
+    if (
+      dto.systolicBP != null &&
+      dto.diastolicBP != null &&
+      dto.diastolicBP >= dto.systolicBP
+    ) {
+      await this.prisma.rejectedReadingLog.create({
+        data: {
+          userId,
+          systolicBP: dto.systolicBP,
+          diastolicBP: dto.diastolicBP,
+          pulse: dto.pulse ?? null,
+          reason: 'diastolic-ge-systolic',
+        },
+      })
+      throw new UnprocessableEntityException({
+        message: 'implausible-reading',
+        reason:
+          "That reading doesn't look right — the bottom number should be lower than the top number. Please check your cuff and try again.",
+      })
+    }
+
+    // Manisha 5/24 Q1 Tier 2 — narrow pulse pressure on THIS individual reading
+    // (artifact range, 0 < SBP−DBP < 15). Physician-only flag (no alert tier, no
+    // patient message); the reading still enters the session average where the
+    // separate <25 hemodynamic rule may fire.
+    const narrowPpArtifact =
+      dto.systolicBP != null &&
+      dto.diastolicBP != null &&
+      dto.systolicBP - dto.diastolicBP > 0 &&
+      dto.systolicBP - dto.diastolicBP < 15
+
     // Resolve any missed-medication rows that came in with only `drugName`
     // (voice agent / chat tool). Looks up PatientMedication.id by name,
     // filters out AS_NEEDED (PRN) drugs since they aren't on a daily
@@ -83,6 +119,7 @@ export class DailyJournalService {
           systolicBP: dto.systolicBP ?? null,
           diastolicBP: dto.diastolicBP ?? null,
           pulse: dto.pulse ?? null,
+          narrowPpArtifact,
           weight: dto.weight != null ? new Prisma.Decimal(dto.weight) : null,
           position: dto.position ?? null,
           sessionId: effectiveSessionId,

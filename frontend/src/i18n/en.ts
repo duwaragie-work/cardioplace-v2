@@ -283,6 +283,8 @@ const en = {
   'checkin.err.pulse': 'Pulse should be between 30 and 220.',
   'checkin.err.weight': 'Weight should be between {min} and {max} {unit}.',
   'checkin.err.submit': 'Could not send reading. Try again.',
+  'checkin.err.implausible': "That reading doesn't look right — the bottom number should be lower than the top number. Please check your cuff and try again.",
+  'checkin.err.implausibleRepeat': 'If your monitor keeps showing unusual numbers, try repositioning the cuff and sitting quietly for 2 minutes before trying again. If the problem continues, contact your care team.',
 
 
   // ─── Symptoms ──────────────────────────────────────────────────────────────

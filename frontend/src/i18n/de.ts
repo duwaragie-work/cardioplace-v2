@@ -283,6 +283,8 @@ const de: Record<TranslationKey, string> = {
   'checkin.err.pulse': 'Puls sollte zwischen 30 und 220 liegen.',
   'checkin.err.weight': 'Das Gewicht sollte zwischen {min} und {max} {unit} liegen.',
   'checkin.err.submit': 'Messung konnte nicht gesendet werden. Versuchen Sie es erneut.',
+  'checkin.err.implausible': 'Diese Messung sieht nicht richtig aus — der untere Wert sollte niedriger als der obere sein. Bitte prüfen Sie Ihre Manschette und versuchen Sie es erneut.',
+  'checkin.err.implausibleRepeat': 'Wenn Ihr Messgerät weiterhin ungewöhnliche Werte anzeigt, legen Sie die Manschette neu an und sitzen Sie 2 Minuten ruhig, bevor Sie es erneut versuchen. Wenn das Problem weiterhin besteht, wenden Sie sich an Ihr Behandlungsteam.',
 
 
   // ─── Symptoms ──────────────────────────────────────────────────────────────

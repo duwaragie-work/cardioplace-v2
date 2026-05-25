@@ -110,6 +110,19 @@ export class ClinicalIntakeRequiredError extends Error {
   }
 }
 
+/**
+ * Thrown when POST /daily-journal returns 422 `implausible-reading` — a
+ * physiologically-impossible reading (diastolic ≥ systolic, Manisha 5/24 Q1).
+ * The reading is NOT saved; callers prompt the patient to re-take it.
+ */
+export class ImplausibleReadingError extends Error {
+  readonly code = 'implausible-reading' as const
+  constructor(reason?: string) {
+    super(reason || "That reading doesn't look right — please check your cuff and try again.")
+    this.name = 'ImplausibleReadingError'
+  }
+}
+
 async function unwrap<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
@@ -145,6 +158,9 @@ export async function createJournalEntry(
     const err = await res.json().catch(() => ({}))
     if (res.status === 403 && err?.message === 'clinical-intake-required') {
       throw new ClinicalIntakeRequiredError(err.reason)
+    }
+    if (res.status === 422 && err?.message === 'implausible-reading') {
+      throw new ImplausibleReadingError(err.reason)
     }
     throw new Error(err.message || `Request failed: ${res.status}`)
   }

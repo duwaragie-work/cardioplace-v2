@@ -53,7 +53,7 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
-import { ClinicalIntakeRequiredError, createJournalEntry, finalizeSingleReadingSession, getActiveSession, type ActiveSessionDto } from '@/lib/services/journal.service';
+import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, getActiveSession, type ActiveSessionDto } from '@/lib/services/journal.service';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
 import { hasDraft, loadDraft } from '@/lib/intake/draft';
 import {
@@ -1670,6 +1670,11 @@ export default function CheckIn() {
   // Save-and-exit confirmation (header Save button) — mirrors the intake form.
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
 
+  // Manisha 5/24 Q1 — consecutive physiologically-impossible (DBP ≥ SBP)
+  // submissions. The 2nd in a row escalates the re-take copy to "reposition the
+  // cuff / contact your care team". Reset on any successful save.
+  const [implausibleCount, setImplausibleCount] = useState(0);
+
   // Session state — sessionId starts as a fresh uuid (lazy init avoids a
   // setState-in-effect on mount, Next 16 lint). It becomes a server session's
   // id only via the "add to this session" handler (a click, not an effect).
@@ -1985,8 +1990,10 @@ export default function CheckIn() {
       });
 
       // Reading saved — drop the draft so the patient isn't prompted to resume
-      // a check-in they already submitted.
+      // a check-in they already submitted. Also reset the impossible-reading
+      // streak (the 2× escalation only counts CONSECUTIVE rejections).
       if (user?.id) clearCheckInDraft(user.id);
+      setImplausibleCount(0);
 
       const reading: SessionReading = {
         measuredAt: measuredAtIso,
@@ -2014,6 +2021,15 @@ export default function CheckIn() {
       // Route them into the intake flow instead of surfacing the raw 403.
       if (e instanceof ClinicalIntakeRequiredError) {
         router.push('/clinical-intake?reason=check-in');
+        return;
+      }
+      // Manisha 5/24 Q1 — physiologically-impossible reading (DBP ≥ SBP). The
+      // reading wasn't saved; prompt a re-take. On the 2nd impossible entry in
+      // a row, escalate to the cuff-repositioning / contact-care-team message.
+      if (e instanceof ImplausibleReadingError) {
+        const next = implausibleCount + 1;
+        setImplausibleCount(next);
+        setError(next >= 2 ? t('checkin.err.implausibleRepeat') : t('checkin.err.implausible'));
         return;
       }
       setError(e instanceof Error ? e.message : t('checkin.err.submit'));

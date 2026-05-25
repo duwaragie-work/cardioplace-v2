@@ -283,6 +283,8 @@ const es: Record<TranslationKey, string> = {
   'checkin.err.pulse': 'El pulso debe estar entre 30 y 220.',
   'checkin.err.weight': 'El peso debe estar entre {min} y {max} {unit}.',
   'checkin.err.submit': 'No se pudo enviar la lectura. Intente de nuevo.',
+  'checkin.err.implausible': 'Esa lectura no parece correcta — el número de abajo debe ser menor que el de arriba. Revise su tensiómetro e intente de nuevo.',
+  'checkin.err.implausibleRepeat': 'Si su monitor sigue mostrando números inusuales, reposicione el brazalete y siéntese tranquilo 2 minutos antes de intentarlo de nuevo. Si el problema continúa, comuníquese con su equipo de atención.',
 
 
   // ─── Symptoms ──────────────────────────────────────────────────────────────

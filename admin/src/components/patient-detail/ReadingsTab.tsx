@@ -36,7 +36,9 @@ import {
 } from 'lucide-react';
 import {
   getPatientJournalEntries,
+  getPatientRejectedReadings,
   type PatientJournalEntry,
+  type RejectedReading,
 } from '@/lib/services/provider.service';
 
 interface Props {
@@ -118,6 +120,7 @@ function dateFilterCutoff(filter: DateFilter): Date | null {
 
 export default function ReadingsTab({ patientId }: Props) {
   const [entries, setEntries] = useState<PatientJournalEntry[]>([]);
+  const [rejected, setRejected] = useState<RejectedReading[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<DateFilter>('30D');
@@ -138,6 +141,15 @@ export default function ReadingsTab({ patientId }: Props) {
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
+      });
+    // Rejected readings are a separate, non-blocking QA note — a fetch failure
+    // here shouldn't break the main readings list.
+    getPatientRejectedReadings(patientId, { limit: 20 })
+      .then((data) => {
+        if (!cancelled) setRejected(data);
+      })
+      .catch(() => {
+        if (!cancelled) setRejected([]);
       });
     return () => { cancelled = true; };
   }, [patientId]);
@@ -242,6 +254,14 @@ export default function ReadingsTab({ patientId }: Props) {
           {tierFilter !== 'ALL' && <> · {tierChrome(tierFilter).label} alerts only</>}
         </p>
       </div>
+
+      {/* Rejected-reading QA note (Manisha 5/24 Q1) — readings the patient
+          tried to log with DBP ≥ SBP were rejected at entry (never persisted)
+          to avoid a false Level-2 emergency. Surfaced so a provider can prompt
+          a cuff check / re-measurement. */}
+      {!loading && rejected.length > 0 && (
+        <RejectedReadingsNote rejected={rejected} />
+      )}
 
       {/* List */}
       {loading ? (
@@ -412,6 +432,22 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
           </span>
         )}
       </div>
+
+      {/* Narrow pulse-pressure artifact (Manisha 5/24 Q1) — PP < 15 at entry;
+          physician-only flag, possible measurement artifact, no alert tier. */}
+      {entry.narrowPpArtifact && (
+        <div
+          className="mb-3 inline-flex items-start gap-1.5 text-[11.5px] px-2.5 py-1.5 rounded-lg"
+          data-testid={`admin-readings-narrow-pp-${entry.id}`}
+          style={{
+            backgroundColor: 'var(--brand-warning-amber-light)',
+            color: 'var(--brand-warning-amber-text)',
+          }}
+        >
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+          <span>Narrow pulse pressure (&lt;15 mmHg) — possible measurement artifact.</span>
+        </div>
+      )}
 
       {/* Medication row */}
       {(entry.medicationTaken != null || missedRows.length > 0) && (
@@ -651,6 +687,37 @@ function EmptyCard({ hasReadings }: { hasReadings: boolean }) {
           ? 'Widen the date range or clear the tier filter.'
           : "This patient hasn't logged any blood-pressure readings."}
       </p>
+    </div>
+  );
+}
+
+function RejectedReadingsNote({ rejected }: { rejected: RejectedReading[] }) {
+  const latest = rejected[0];
+  return (
+    <div
+      className="bg-white rounded-2xl p-4 flex items-start gap-3"
+      data-testid="admin-readings-rejected-note"
+      style={{
+        boxShadow: 'var(--brand-shadow-card)',
+        borderLeft: '4px solid var(--brand-warning-amber)',
+      }}
+    >
+      <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--brand-warning-amber)' }} />
+      <div className="flex-1 min-w-0">
+        <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+          {rejected.length} physiologically implausible {rejected.length === 1 ? 'reading' : 'readings'} rejected at entry
+        </p>
+        <p className="text-[12px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+          The patient attempted to log {rejected.length === 1 ? 'a reading' : 'readings'} where the bottom
+          number was not below the top number. These were not saved and did not
+          trigger alerts. Consider prompting a cuff check or re-measurement.
+        </p>
+        {latest && (latest.systolicBP != null || latest.diastolicBP != null) && (
+          <p className="text-[11.5px] mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+            Most recent: {latest.systolicBP ?? '—'}/{latest.diastolicBP ?? '—'} mmHg · {formatDate(latest.createdAt)} {formatTime(latest.createdAt)}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
