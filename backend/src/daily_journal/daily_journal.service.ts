@@ -729,10 +729,22 @@ export class DailyJournalService {
       }
     }
 
-    await this.prisma.journalEntry.update({
-      where: { id: entryId },
+    // Bug 1 (secondary) — atomic claim. The frontend 5-min timer and the
+    // SessionFinalizeService cron (and two cron ticks) can call this
+    // concurrently; the read-then-update above would let both pass the guard,
+    // both re-emit ENTRY_UPDATED, and double-fire the alert. updateMany flips
+    // the flag only while it's still false, so exactly one caller wins
+    // (count === 1) and proceeds to re-evaluate — the rest no-op.
+    const claim = await this.prisma.journalEntry.updateMany({
+      where: { id: entryId, singleReadingFinalized: false },
       data: { singleReadingFinalized: true },
     })
+    if (claim.count === 0) {
+      return {
+        statusCode: 200,
+        message: 'Already finalized — no-op.',
+      }
+    }
 
     // Re-trigger evaluation. AlertEngineService.handleEntryUpdated subscribes.
     this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
