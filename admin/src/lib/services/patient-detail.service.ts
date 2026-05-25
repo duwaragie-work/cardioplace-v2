@@ -236,6 +236,10 @@ export interface PatientAlert {
   /** Distinct resolution timestamp (DeviationAlert.resolvedAt). The footer
    *  previously showed acknowledgedAt mislabelled as "Resolved". */
   resolvedAt: string | null
+  // Manisha 5/24 Q3 — pre-personalization "X of 7" provider surface.
+  baselineReadingCount?: number | null
+  personalizationThreshold?: number | null
+  preDay3?: boolean | null
   journalEntry: {
     measuredAt: string | null
     systolicBP: number | null

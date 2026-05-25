@@ -756,7 +756,7 @@ function appendThreshold(lines: string[], ctx: ResolvedContext): void {
 function appendPreDay3Disclaimer(lines: string[], ctx: ResolvedContext): void {
   if (ctx.preDay3Mode) {
     lines.push(
-      `Patient has fewer than 7 readings (${ctx.readingCount} total); alerts use standard thresholds until personalization begins after Day 3.`,
+      `Patient has fewer than 7 readings (${ctx.readingCount} total); alerts use standard thresholds until personalization begins after 7 readings.`,
     )
     lines.push('')
   }

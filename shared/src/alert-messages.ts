@@ -113,8 +113,12 @@ export interface RuleMessages {
 const EMERGENCY_CTA =
   ' If you have chest pain, severe headache, trouble breathing, weakness, or vision changes, call 911 now.'
 
+// Manisha 5/24 Q3 — pre-personalization fires Level 1 WITH this disclaimer
+// (option a), and personalization is anchored on a reading count, not a calendar
+// day. Wording updated "after Day 3" → "after 7 readings" to match the actual
+// gate (PRE_DAY_3_MIN_READINGS = 7).
 const PRE_DAY_3_DISCLAIMER =
-  ' (Standard threshold — personalization begins after Day 3.)'
+  ' (Standard threshold — personalization begins after 7 readings.)'
 
 const SUBOPTIMAL_SUFFIX =
   ' Please retake the reading following the measurement checklist.'

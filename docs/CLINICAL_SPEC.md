@@ -318,7 +318,7 @@ The engine groups readings into "sessions" by `JournalEntry.sessionId` (5-minute
 | **Level 1 High / Low, Tier 2, Tier 3** | **Minimum 2 readings, ≥1 minute apart** | Session average |
 | Single-reading L1 informational | Single reading + threshold cross | Logged with "single-reading session — confirm with next session" annotation. Provider sees the row; no patient push. |
 | AFib (existing) | ≥3 readings | Unchanged. |
-| Pre-Day-3 mode | 2-reading rule still applies for averaging | Non-emergency suppressed (log only); emergency fires. See [Part 6](#part-6--pre-day-3-mode). |
+| Pre-Day-3 mode | 2-reading rule still applies for averaging | Level 1 fires with the standard-threshold disclaimer; emergency (BP Level 2) fires unchanged (Manisha 2026-05-24 Q3 — supersedes the prior "suppress" behavior). See [Part 6](#part-6--pre-day-3-mode). |
 
 **Single-reading finalization endpoint:** if a patient submits one reading and the 5-minute session window expires without a second reading arriving, the engine **finalizes the session as single-reading** (`JournalEntry.singleReadingFinalized=true`). The reading then evaluates against thresholds with the single-reading-informational annotation. This unblocks patients who legitimately took only one reading from being silently dropped.
 
@@ -334,13 +334,13 @@ Helper exists; not consumed in rule-firing — purely contextual for dashboard c
 
 ## PART 6 — Pre-Day-3 Mode
 
-For any patient with **fewer than 7 readings**, the system does not present personalized output. It applies fixed AHA thresholds and labels the alert: **"standard threshold — personalization begins after Day 3."** Protects first-cohort patients from acting on personalised thresholds the system isn't qualified to compute for their specific baseline.
+For any patient with **fewer than 7 readings**, the system does not present personalized output. It applies fixed AHA thresholds and labels the alert: **"standard threshold — personalization begins after 7 readings."** Protects first-cohort patients from acting on personalised thresholds the system isn't qualified to compute for their specific baseline.
 
 **Note:** the section title's "Day-3" framing is a historical misnomer — the gate is **7 readings**, not 3 days. Engine constant `PRE_DAY_3_MIN_READINGS = 7`.
 
-**Interaction with session averaging:** Pre-Day-3 mode suppresses non-emergency alerts during enrollment days; emergency (BP Level 2) still fires. Pre-Day-3 single-reading-informational rows are still logged for provider visibility.
+**Level 1 behavior (Manisha 2026-05-24 Q3 — option a, supersedes prior "suppress"):** Pre-personalization Level 1 alerts **fire** with the standard-threshold disclaimer rather than being suppressed. The earlier "non-emergency suppressed (log only)" rule is retired — a patient in the baseline window who crosses a Level 1 threshold still gets the alert, clearly labelled as standard-threshold. Emergency (BP Level 2) fires unchanged. The disclaimer wording reads "personalization begins after 7 readings" (not "Day 3"), and the provider alert detail surfaces an "X of 7 baseline readings" progress note.
 
-**Signed off:** ✅ Fixed thresholds + personalization disclaimer for first 7 readings.
+**Signed off:** ✅ Fixed thresholds + personalization disclaimer for first 7 readings. ✅ Level 1 fires with disclaimer (Manisha 2026-05-24 Q3).
 
 ---
 

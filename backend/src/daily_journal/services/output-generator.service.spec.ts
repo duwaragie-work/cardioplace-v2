@@ -169,7 +169,7 @@ describe('OutputGeneratorService', () => {
     it('preDay3 flag appends disclaimer on standard-mode alerts', () => {
       const r = baseResult()
       const out = service.generate(r, baseSession, true)
-      expect(out.patientMessage).toMatch(/personalization begins after Day 3/i)
+      expect(out.patientMessage).toMatch(/personalization begins after 7 readings/i)
     })
 
     it('suboptimalMeasurement flag appends retake suffix', () => {

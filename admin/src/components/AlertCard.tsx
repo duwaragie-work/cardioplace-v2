@@ -405,6 +405,25 @@ export default function AlertCard({
             />
           </div>
 
+          {/* Manisha 5/24 Q3 — pre-personalization "X of 7" note. Standard
+              thresholds are used until the patient has 7 baseline readings;
+              surface the progress so a provider reads the alert in context. */}
+          {alert.preDay3 && alert.personalizationThreshold != null && (
+            <p
+              data-testid={`admin-alert-prepersonalization-${alert.id}`}
+              className="text-[11.5px] leading-relaxed px-3 py-2 rounded-lg"
+              style={{
+                backgroundColor: 'var(--brand-surface-muted, #f1f5f9)',
+                color: 'var(--brand-text-secondary)',
+              }}
+            >
+              Standard threshold — personalization begins after{' '}
+              {alert.personalizationThreshold} readings. This patient has completed{' '}
+              {alert.baselineReadingCount ?? 0} of {alert.personalizationThreshold}{' '}
+              baseline readings.
+            </p>
+          )}
+
           <EscalationAuditTrail alert={alert} heightCm={heightCm} />
         </div>
       )}

@@ -513,7 +513,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
     expect(createArgs.data.mode).toBe('STANDARD')
     expect(createArgs.data.patientMessage).toMatch(
-      /personalization begins after Day 3/i,
+      /personalization begins after 7 readings/i,
     )
   })
 

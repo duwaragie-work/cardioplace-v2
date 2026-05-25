@@ -566,7 +566,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PULSE_PRESSURE_
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_HIGH ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `"The patient's BP is elevated at 145/85 mmHg."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_HIGH ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"Your blood pressure reading is 145/85 mmHg, which is high. Please contact your care team today. (Standard threshold — personalization begins after Day 3.) Please retake the reading following the measurement checklist."`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_HIGH ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"Your blood pressure reading is 145/85 mmHg, which is high. Please contact your care team today. (Standard threshold — personalization begins after 7 readings.) Please retake the reading following the measurement checklist."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_HIGH ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"BP Level 1 High — severe Stage 2 (≥160/100) at 145/85 mmHg. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
 
@@ -578,7 +578,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_HIG
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_LOW ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `"The patient's BP is low at 145/85 mmHg."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_LOW ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"Your blood pressure reading is 145/85 mmHg, which is low. Please contact your care team today. (Standard threshold — personalization begins after Day 3.) Please retake the reading following the measurement checklist."`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_LOW ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"Your blood pressure reading is 145/85 mmHg, which is low. Please contact your care team today. (Standard threshold — personalization begins after 7 readings.) Please retake the reading following the measurement checklist."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_LOW ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"BP Level 1 Low — SBP <90 at 145/85 mmHg. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
 

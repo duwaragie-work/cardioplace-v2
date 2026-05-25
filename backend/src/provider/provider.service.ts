@@ -607,6 +607,16 @@ export class ProviderService {
     }
     const names = await resolveUserDisplays(this.prisma, idsToResolve)
 
+    // Manisha 5/24 Q3 — provider "X of 7" pre-personalization surface. The
+    // patient's lifetime reading count drives the admin alert-detail note
+    // ("personalization begins after 7 readings; completed X of 7"). One count,
+    // attached to every alert in the list.
+    const PERSONALIZATION_READINGS = 7
+    const lifetimeReadingCount = await this.prisma.journalEntry.count({
+      where: { userId },
+    })
+    const preDay3 = lifetimeReadingCount < PERSONALIZATION_READINGS
+
     return {
       statusCode: 200,
       data: alerts.map((a) => ({
@@ -642,6 +652,10 @@ export class ProviderService {
         createdAt: a.createdAt,
         acknowledgedAt: a.acknowledgedAt,
         resolvedAt: a.resolvedAt,
+        // Manisha 5/24 Q3 — pre-personalization "X of 7" provider surface.
+        baselineReadingCount: lifetimeReadingCount,
+        personalizationThreshold: PERSONALIZATION_READINGS,
+        preDay3,
         journalEntry: a.journalEntry
           ? {
               ...a.journalEntry,

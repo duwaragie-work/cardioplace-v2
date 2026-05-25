@@ -322,7 +322,7 @@ describe('SystemPromptService — end-to-end rendering scenarios', () => {
     )
     expect(out).toContain('fewer than 7 readings')
     expect(out).toContain('3 total')
-    expect(out).toContain('personalization begins after Day 3')
+    expect(out).toContain('personalization begins after 7 readings')
   })
 
   it('Scenario 8 — Alert cap: 8 alerts provided → renders all (capping is caller-side)', () => {
