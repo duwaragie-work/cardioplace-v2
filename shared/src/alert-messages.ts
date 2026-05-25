@@ -461,6 +461,27 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     physicianMessage: (ctx) =>
       `Tier 3 — Wide pulse pressure: ${ctx.pulsePressure ?? '?'} mmHg (>60) at ${bp(ctx)}. Consider arterial stiffness / isolated systolic HTN workup.${physSuffix(ctx)}`,
   },
+  // Manisha 5/24 Q2 — narrow pulse pressure on the session average (<25 mmHg).
+  // Physician-only; condition-specific wording keyed on conditionLabel set by
+  // the rule ('HFrEF' [also DCM], 'HFpEF', 'HCM'/'aortic stenosis', else null).
+  RULE_PULSE_PRESSURE_NARROW: {
+    patientMessage: () => '',
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) => {
+      const pp = `${bp(ctx)} (PP = ${ctx.pulsePressure ?? '?'} mmHg)`
+      const label = ctx.conditionLabel
+      if (label === 'HFrEF') {
+        return `Tier 3 — Narrow pulse pressure: ${pp}. In HFrEF, narrow PP may indicate reduced stroke volume. Consider clinical correlation — echocardiography if new finding or worsening trend.${physSuffix(ctx)}`
+      }
+      if (label === 'HFpEF') {
+        return `Tier 3 — Narrow pulse pressure: ${pp}. Note: In HFpEF, narrow PP is less prognostically significant than in HFrEF. Clinical correlation recommended.${physSuffix(ctx)}`
+      }
+      if (label === 'HCM' || label === 'aortic stenosis') {
+        return `Tier 3 — Narrow pulse pressure: ${pp}. In the context of ${label}, narrow PP may reflect fixed outflow obstruction. Clinical correlation recommended.${physSuffix(ctx)}`
+      }
+      return `Tier 3 — Narrow pulse pressure: ${pp}. If confirmed on repeat measurement, consider evaluation for reduced cardiac output.${physSuffix(ctx)}`
+    },
+  },
   RULE_LOOP_DIURETIC_HYPOTENSION: {
     patientMessage: () => '',
     caregiverMessage: () => '',
@@ -759,13 +780,37 @@ function angioedemaPatientLead(ctx: AlertContext): string {
 }
 
 /**
- * Cluster 7 A.7 — system message dispatched directly to the patient's inbox
- * when a provider marks a medication on "Hold" from the admin app. Not a
- * RuleId — fires from the medication verification handler, not the alert
- * engine. Quoted from MANISHA_MASTER_GUIDE_V3 Appendix B1.7.
+ * Cluster 7 A.7 + Manisha 5/24 Med §3 — system message dispatched to the
+ * patient's inbox when a provider places a medication on HOLD. TWO PATHS
+ * (patient-safety critical): a provider-directed hold is a clinical "pause it"
+ * instruction; an administrative hold (awaiting records / unclear name or dose /
+ * other) must NOT tell the patient to stop a medication they're correctly
+ * taking — abrupt β-blocker discontinuation for a paperwork delay can cause
+ * rebound harm. The administrative message does not name the medication.
  */
-export function systemMsgMedicationHold(drugName: string): string {
-  return `Your care team has placed ${drugName} on hold while they review it. This means you should NOT take ${drugName} until they tell you it is safe to restart. If you have questions, call your care team. If you feel unwell after recently taking it — chest pain, severe weakness, fainting — call 911.`
+export type MedicationHoldMessageReason =
+  | 'AWAITING_RECORDS'
+  | 'UNCLEAR_NAME'
+  | 'UNCLEAR_DOSE'
+  | 'PROVIDER_DIRECTED_HOLD'
+  | 'OTHER'
+
+export function systemMsgMedicationHold(
+  drugName: string,
+  reason: MedicationHoldMessageReason,
+): string {
+  if (reason === 'PROVIDER_DIRECTED_HOLD') {
+    return `Your care team has asked you to pause ${drugName} until they can review it with you. Do not take it until your care team tells you it is okay.`
+  }
+  // Administrative holds — keep taking everything as usual; do not name the med.
+  return `Your care team is reviewing your medicine list to make sure everything is up to date. Keep taking your medicines as usual unless your care team tells you otherwise.`
+}
+
+/** True for the clinical "stop taking it" hold path. */
+export function isProviderDirectedHold(
+  reason: MedicationHoldMessageReason,
+): boolean {
+  return reason === 'PROVIDER_DIRECTED_HOLD'
 }
 
 /**

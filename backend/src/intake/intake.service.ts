@@ -7,6 +7,7 @@ import { DrugEnrichmentService } from '../drug-enrichment/drug-enrichment.servic
 import {
   DrugClass,
   EnrollmentStatus,
+  MedicationHoldReason,
   MedicationVerificationStatus,
   NotificationChannel,
   Prisma,
@@ -1028,12 +1029,19 @@ export class IntakeService {
     if (changeType === VerificationChangeType.ADMIN_REJECT && !dto.rationale) {
       throw new BadRequestException('Rationale is required to reject a medication')
     }
-    // Cluster 7 A.7 — Hold also requires a rationale so the audit log
-    // captures the admin's reason for pausing the medication.
-    if (nextStatus === MedicationVerificationStatus.HOLD && !dto.rationale) {
-      throw new BadRequestException('Rationale is required to place a medication on hold')
+    // Cluster 7 A.7 + Manisha 5/24 Med §3 — Hold requires a structured reason
+    // code (drives the two-path patient message); OTHER additionally requires a
+    // free-text rationale. The reason is also captured in the audit log.
+    if (nextStatus === MedicationVerificationStatus.HOLD) {
+      if (!dto.holdReason) {
+        throw new BadRequestException('A hold reason is required to place a medication on hold')
+      }
+      if (dto.holdReason === 'OTHER' && !dto.rationale) {
+        throw new BadRequestException('A rationale is required when the hold reason is "Other"')
+      }
     }
 
+    const isHold = nextStatus === MedicationVerificationStatus.HOLD
     const [updated] = await this.prisma.$transaction([
       this.prisma.patientMedication.update({
         where: { id: medicationId },
@@ -1041,6 +1049,11 @@ export class IntakeService {
           verificationStatus: nextStatus,
           verifiedByAdminId: actor.id,
           verifiedAt: new Date(),
+          // Stamp/clear the structured hold metadata. holdSetAt anchors the
+          // 7/14/30/45-day reconciliation escalation ladder; leaving a hold
+          // clears both so a re-held med restarts the clock.
+          holdReason: isHold ? (dto.holdReason as MedicationHoldReason) : null,
+          holdSetAt: isHold ? new Date() : null,
         },
       }),
       this.prisma.profileVerificationLog.create({
@@ -1073,8 +1086,13 @@ export class IntakeService {
             // is a standalone care-team message (CLINICAL_SPEC §14.2), so it
             // belongs with gap-alert / monthly-reask / care-team-update (all PUSH).
             channel: NotificationChannel.PUSH,
-            title: 'Medication on hold',
-            body: systemMsgMedicationHold(med.drugName),
+            // Provider-directed = "pause it" (names the med); administrative =
+            // "keep taking as usual" (does NOT name the med) — Manisha 5/24 §3.
+            title:
+              dto.holdReason === 'PROVIDER_DIRECTED_HOLD'
+                ? 'Please pause a medication'
+                : 'Medicine list review',
+            body: systemMsgMedicationHold(med.drugName, dto.holdReason!),
           },
         })
       } catch (err) {
@@ -1558,6 +1576,8 @@ export class IntakeService {
       pregnancyDueDate: profile.pregnancyDueDate?.toISOString() ?? null,
       profileVerifiedAt: profile.profileVerifiedAt?.toISOString() ?? null,
       profileLastEditedAt: profile.profileLastEditedAt.toISOString(),
+      // Manisha 5/24 Q4 — permanent ACE-inhibitor contraindication (angioedema).
+      aceContraindicatedAt: profile.aceContraindicatedAt?.toISOString() ?? null,
       createdAt: profile.createdAt.toISOString(),
       updatedAt: profile.updatedAt.toISOString(),
     }

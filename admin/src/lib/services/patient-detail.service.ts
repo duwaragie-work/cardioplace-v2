@@ -33,6 +33,12 @@ export interface PatientProfile {
   hasTachycardia: boolean
   hasBradycardia: boolean
   diagnosedHypertension: boolean
+  // Manisha 5/24 Q5C — aortic stenosis (HCM-interim thresholds).
+  hasAorticStenosis: boolean
+  // Manisha 5/24 Q4 — permanent ACE-inhibitor contraindication set when an
+  // angioedema alert is resolved via "ACE/ARB discontinued".
+  aceContraindicatedAt: string | null
+  aceContraindicationReason: string | null
   profileVerificationStatus: ProfileVerificationStatus
   profileVerifiedAt: string | null
   profileVerifiedBy: string | null
@@ -344,15 +350,23 @@ export async function getPatientMedications(userId: string): Promise<PatientMedi
   return jsonOrThrow<PatientMedication[]>(res, 'Could not load medications')
 }
 
+export type MedicationHoldReason =
+  | 'AWAITING_RECORDS'
+  | 'UNCLEAR_NAME'
+  | 'UNCLEAR_DOSE'
+  | 'PROVIDER_DIRECTED_HOLD'
+  | 'OTHER';
+
 export async function verifyMedication(
   medicationId: string,
   status: 'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER' | 'HOLD',
   rationale?: string,
+  holdReason?: MedicationHoldReason,
 ): Promise<PatientMedication> {
   const res = await fetchWithAuth(`${API}/api/admin/medications/${medicationId}/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status, rationale }),
+    body: JSON.stringify({ status, rationale, holdReason }),
   })
   return jsonOrThrow<PatientMedication>(res, 'Could not verify medication')
 }
