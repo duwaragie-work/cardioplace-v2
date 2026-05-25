@@ -75,6 +75,7 @@ import {
   STEP_ORDER,
 } from '@/lib/intake/draft';
 import { EMPTY_INTAKE_STATE, type IntakeFormState, type IntakeStepKey, type SelectedMedication } from '@/lib/intake/types';
+import { categoriesForSelectedMeds } from '@/lib/intake/categories';
 import CaregiversCard from '@/components/cardio/CaregiversCard';
 
 import AudioButton from '@/components/intake/AudioButton';
@@ -1258,20 +1259,13 @@ function A8Categories({ state, setState }: StepProps) {
   // a Furosemide tick when they go check the blood-thinner list. Selections
   // already persist cross-category in state.selectedMedications; this just
   // matches the UI affordance to that reality.
-  const [activeCategories, setActiveCategories] = useState<Set<string>>(() => {
-    // Auto-expand any category that already has a selected med — e.g. a
+  const [activeCategories, setActiveCategories] = useState<Set<string>>(() =>
+    // Auto-expand any category that already has a selected med on mount — e.g. a
     // prescription scan matched a water pill / blood thinner that lives inside
     // one of these dropdowns. Without this the med is selected but hidden, so
-    // the patient can't see it was picked up. (selectedIds already shows it as
-    // checked; this just reveals the right dropdown on entry.)
-    const set = new Set<string>();
-    for (const m of state.selectedMedications) {
-      if (!m.catalogId) continue;
-      const cat = CATEGORY_MEDS.find((c) => c.id === m.catalogId);
-      if (cat?.category) set.add(cat.category);
-    }
-    return set;
-  });
+    // the patient can't see it was picked up.
+    categoriesForSelectedMeds(state.selectedMedications),
+  );
   // The lazy initializer above runs once on mount. A prescription scan
   // (addOcrMedications) or any other LATE add updates selectedMedications
   // afterwards, so a newly-matched category med would be ticked yet its card
@@ -1282,11 +1276,9 @@ function A8Categories({ state, setState }: StepProps) {
     setActiveCategories((prev) => {
       let changed = false;
       const next = new Set(prev);
-      for (const m of state.selectedMedications) {
-        if (!m.catalogId) continue;
-        const cat = CATEGORY_MEDS.find((c) => c.id === m.catalogId);
-        if (cat?.category && !next.has(cat.category)) {
-          next.add(cat.category);
+      for (const cat of categoriesForSelectedMeds(state.selectedMedications)) {
+        if (!next.has(cat)) {
+          next.add(cat);
           changed = true;
         }
       }
