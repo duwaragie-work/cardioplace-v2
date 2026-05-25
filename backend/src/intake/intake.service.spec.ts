@@ -1,0 +1,270 @@
+import { jest } from '@jest/globals'
+import { Test, TestingModule } from '@nestjs/testing'
+import { PrismaService } from '../prisma/prisma.service.js'
+import { DrugEnrichmentService } from '../drug-enrichment/drug-enrichment.service.js'
+import { PatientAccessService } from '../common/patient-access.service.js'
+import { IntakeService } from './intake.service.js'
+
+// IVR-18 — listMedications filter scoping. The REJECTED exclusion is opt-out
+// (default ON) so rejected meds don't get re-asked in the check-in or
+// re-prefilled into the intake/edit wizard; the admin reconciliation tab and
+// the read-only patient profile pass includeRejected=true to surface them
+// with a status badge. The discontinued exclusion is the pre-existing opt-out.
+describe('IntakeService.listMedications filter scoping', () => {
+  let service: IntakeService
+  let findMany: jest.Mock<any>
+
+  beforeEach(async () => {
+    findMany = (jest.fn() as jest.Mock<any>).mockResolvedValue([])
+    const prisma = { patientMedication: { findMany } }
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        IntakeService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: DrugEnrichmentService, useValue: {} },
+        { provide: PatientAccessService, useValue: {} },
+      ],
+    }).compile()
+
+    service = module.get<IntakeService>(IntakeService)
+  })
+
+  function whereOf(callIndex = 0) {
+    return findMany.mock.calls[callIndex][0].where
+  }
+
+  it('default: excludes both discontinued and REJECTED', async () => {
+    await service.listMedications('u1')
+    expect(whereOf()).toEqual({
+      userId: 'u1',
+      discontinuedAt: null,
+      verificationStatus: { not: 'REJECTED' },
+    })
+  })
+
+  it('includeRejected=true: keeps REJECTED, still excludes discontinued', async () => {
+    await service.listMedications('u1', false, true)
+    expect(whereOf()).toEqual({ userId: 'u1', discontinuedAt: null })
+  })
+
+  it('includeDiscontinued=true only: keeps discontinued, still excludes REJECTED', async () => {
+    await service.listMedications('u1', true, false)
+    expect(whereOf()).toEqual({ userId: 'u1', verificationStatus: { not: 'REJECTED' } })
+  })
+
+  it('both flags true (admin reconciliation): no status/discontinued filter', async () => {
+    await service.listMedications('u1', true, true)
+    expect(whereOf()).toEqual({ userId: 'u1' })
+  })
+})
+
+// Profile fixture with the Date fields serializeProfile() needs.
+function makeProfile(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'prof1',
+    userId: 'p1',
+    gender: 'FEMALE',
+    heightCm: 165,
+    isPregnant: false,
+    pregnancyDueDate: null,
+    historyPreeclampsia: false,
+    hasHeartFailure: false,
+    heartFailureType: 'NOT_APPLICABLE',
+    hasAFib: false,
+    hasCAD: false,
+    hasHCM: false,
+    hasDCM: false,
+    hasTachycardia: false,
+    hasBradycardia: false,
+    diagnosedHypertension: true,
+    profileVerificationStatus: 'VERIFIED',
+    profileVerifiedAt: null,
+    profileVerifiedBy: null,
+    profileLastEditedAt: new Date(),
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  }
+}
+
+const ADMIN = { id: 'admin', roles: [] } as never
+
+async function makeService(prisma: unknown): Promise<IntakeService> {
+  const module: TestingModule = await Test.createTestingModule({
+    providers: [
+      IntakeService,
+      { provide: PrismaService, useValue: prisma },
+      { provide: DrugEnrichmentService, useValue: {} },
+      { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
+    ],
+  }).compile()
+  return module.get<IntakeService>(IntakeService)
+}
+
+describe('IntakeService.confirmProfileFields (IVR-08)', () => {
+  let service: IntakeService
+  let prisma: any
+
+  beforeEach(async () => {
+    prisma = {
+      patientProfile: {
+        findUnique: (jest.fn() as jest.Mock<any>).mockResolvedValue(makeProfile()),
+      },
+      profileVerificationLog: {
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+        createMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 0 }),
+      },
+    }
+    service = await makeService(prisma)
+  })
+
+  it('writes one ADMIN_VERIFY log per valid field', async () => {
+    const res = await service.confirmProfileFields(ADMIN, 'p1', {
+      fields: ['gender', 'hasHCM'],
+    })
+    expect(prisma.profileVerificationLog.createMany).toHaveBeenCalledTimes(1)
+    const rows = prisma.profileVerificationLog.createMany.mock.calls[0][0].data
+    expect(rows).toHaveLength(2)
+    expect(rows.every((r: any) => r.changeType === 'ADMIN_VERIFY')).toBe(true)
+    expect(rows.map((r: any) => r.fieldPath).sort()).toEqual([
+      'profile.gender',
+      'profile.hasHCM',
+    ])
+    expect([...res.confirmedFields].sort()).toEqual(['gender', 'hasHCM'])
+  })
+
+  it('skips a field already confirmed (no duplicate ADMIN_VERIFY row)', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([
+      { fieldPath: 'profile.gender', changeType: 'ADMIN_VERIFY' },
+    ])
+    await service.confirmProfileFields(ADMIN, 'p1', { fields: ['gender', 'hasHCM'] })
+    const rows = prisma.profileVerificationLog.createMany.mock.calls[0][0].data
+    expect(rows.map((r: any) => r.fieldPath)).toEqual(['profile.hasHCM'])
+  })
+
+  it('writes nothing when every requested field is already confirmed', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([
+      { fieldPath: 'profile.gender', changeType: 'ADMIN_VERIFY' },
+    ])
+    const res = await service.confirmProfileFields(ADMIN, 'p1', { fields: ['gender'] })
+    expect(prisma.profileVerificationLog.createMany).not.toHaveBeenCalled()
+    expect(res.confirmedFields).toEqual([])
+  })
+
+  it('rejects when no valid profile fields are supplied', async () => {
+    await expect(
+      service.confirmProfileFields(ADMIN, 'p1', { fields: ['bogusField'] }),
+    ).rejects.toThrow()
+    expect(prisma.profileVerificationLog.createMany).not.toHaveBeenCalled()
+  })
+})
+
+describe('IntakeService.rejectProfileField idempotency (IVR-16)', () => {
+  let service: IntakeService
+  let prisma: any
+
+  beforeEach(async () => {
+    prisma = {
+      patientProfile: {
+        findUnique: (jest.fn() as jest.Mock<any>).mockResolvedValue(
+          makeProfile({ hasHCM: true }),
+        ),
+        update: (jest.fn() as jest.Mock<any>).mockResolvedValue(
+          makeProfile({ profileVerificationStatus: 'UNVERIFIED' }),
+        ),
+      },
+      profileVerificationLog: {
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+        create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
+      },
+      notification: {
+        create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
+      },
+      $transaction: jest.fn((ops: any[]) => Promise.all(ops)),
+    }
+    service = await makeService(prisma)
+  })
+
+  it('no-ops (no audit rows) when the field is already rejected', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([
+      { fieldPath: 'profile.hasHCM', changeType: 'ADMIN_REJECT' },
+    ])
+    const res = await service.rejectProfileField(ADMIN, 'p1', { field: 'hasHCM' })
+    expect(res.message).toMatch(/already rejected/i)
+    expect(prisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('writes the field-reject + status-flip rows when not already rejected', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([])
+    await service.rejectProfileField(ADMIN, 'p1', { field: 'hasHCM' })
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1)
+    const ops = prisma.$transaction.mock.calls[0][0]
+    expect(ops).toHaveLength(3) // update + ADMIN_REJECT(field) + ADMIN_REJECT(status flip)
+  })
+
+  it('dispatches a patient re-check notification naming the field on a fresh reject', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([])
+    await service.rejectProfileField(ADMIN, 'p1', { field: 'hasBradycardia' })
+    expect(prisma.notification.create).toHaveBeenCalledTimes(1)
+    const arg = prisma.notification.create.mock.calls[0][0].data
+    expect(arg.userId).toBe('p1') // the patient, not the admin actor
+    expect(arg.channel).toBe('PUSH') // lands in the patient Notifications tab
+    expect(arg.body).toMatch(/bradycardia history/i) // names the rejected field
+  })
+
+  it('does not notify the patient on an idempotent no-op reject', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([
+      { fieldPath: 'profile.hasHCM', changeType: 'ADMIN_REJECT' },
+    ])
+    await service.rejectProfileField(ADMIN, 'p1', { field: 'hasHCM' })
+    expect(prisma.notification.create).not.toHaveBeenCalled()
+  })
+})
+
+// Verify hard-gate: "Verification complete" must not flip the whole profile to
+// VERIFIED while any field's latest log is ADMIN_REJECT (a rejected field is an
+// open "needs correction" item). Mirrors the FE button-disable + banner.
+describe('IntakeService.verifyProfile reject hard-gate', () => {
+  let service: IntakeService
+  let prisma: any
+
+  beforeEach(async () => {
+    prisma = {
+      patientProfile: {
+        findUnique: (jest.fn() as jest.Mock<any>).mockResolvedValue(
+          makeProfile({ profileVerificationStatus: 'UNVERIFIED' }),
+        ),
+        update: (jest.fn() as jest.Mock<any>).mockResolvedValue(
+          makeProfile({ profileVerificationStatus: 'VERIFIED' }),
+        ),
+      },
+      profileVerificationLog: {
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+        create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
+      },
+      $transaction: jest.fn((ops: any[]) => Promise.all(ops)),
+    }
+    service = await makeService(prisma)
+  })
+
+  it('throws and does not flip the profile when a field is still rejected', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([
+      { fieldPath: 'profile.gender', changeType: 'ADMIN_REJECT' },
+      { fieldPath: 'profile.hasBradycardia', changeType: 'ADMIN_REJECT' },
+    ])
+    await expect(
+      service.verifyProfile(ADMIN, 'p1', {} as never),
+    ).rejects.toThrow(/resolve rejected field/i)
+    expect(prisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('verifies when no field is rejected (latest logs are ADMIN_VERIFY)', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([
+      { fieldPath: 'profile.gender', changeType: 'ADMIN_VERIFY' },
+    ])
+    const res = await service.verifyProfile(ADMIN, 'p1', {} as never)
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1)
+    expect(res.message).toMatch(/profile verified/i)
+  })
+})

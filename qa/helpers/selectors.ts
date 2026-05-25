@@ -274,6 +274,9 @@ export const T = {
     name: 'profile-name',
     email: 'profile-email',
     verifiedBadge: 'profile-verified-badge',
+    // "Please re-check: {fields}" banner shown when the care team rejected
+    // specific self-reported fields (names them so the patient knows what to fix).
+    recheckBanner: 'profile-recheck-banner',
     signOut: 'profile-signout',
     careTeamPractice: 'care-team-practice',
     careTeamPrimary: 'care-team-primary',
@@ -340,6 +343,8 @@ export const T = {
     patientListRow: (userId: string) => `admin-patient-list-row-${userId}`,
     patientListEmpty: 'admin-patient-list-empty',
     patientListAccessDenied: 'admin-access-denied',
+    // Threshold-needed quick filter chip (animated red ring when >0).
+    patientThresholdFilter: 'admin-patient-threshold-filter',
 
     // Patient-detail shell
     detailHeader: 'admin-patient-detail-header',
@@ -355,6 +360,11 @@ export const T = {
         | 'careteam'
         | 'timeline',
     ) => `admin-tab-${key}`,
+    // Pulsing dot on the Thresholds tab while a threshold is needed (replaces
+    // the old hard lock), plus the persistent cross-tab banner + its jump button.
+    tabThresholdsFlag: 'admin-tab-thresholds-flag',
+    thresholdNeededBanner: 'admin-threshold-needed-banner',
+    thresholdNeededGoto: 'admin-threshold-needed-goto',
 
     // ProfileTab
     profileStatusBanner: 'admin-profile-status-banner',
@@ -364,9 +374,18 @@ export const T = {
     profileReject: (key: string) => `admin-profile-reject-${key}`,
     profileEditInput: (key: string) => `admin-profile-edit-input-${key}`,
     profileEditSave: (key: string) => `admin-profile-edit-save-${key}`,
+    // Friendly inline note under a row: no-op "correction" (info) or a mapped
+    // validation error (e.g. height must be a whole number).
+    profileFieldNote: (key: string) => `admin-profile-field-note-${key}`,
     profileVerifyComplete: 'admin-profile-verify-complete',
     profileVerifyRationale: 'admin-profile-verify-rationale',
     profileVerifyConfirm: 'admin-profile-verify-confirm',
+    // IVR-08/25 — real per-field confirm + bulk confirm-all; IVR-23 banner.
+    profileConfirmAll: 'admin-profile-confirm-all',
+    profileChangedBanner: 'admin-profile-changed-banner',
+    // Reject hard-gate — "Verification complete" is blocked while any field is
+    // rejected; this banner lists the fields that must be resolved first.
+    profileRejectedBanner: 'admin-profile-rejected-banner',
     // Cluster 8.1 Gap 3 — persistent CAD treatment-target note rendered on
     // the cardiac section of ProfileTab whenever profile.hasCAD. Documents
     // the AHA/ACC 130/80 target + the Q2-ramp default thresholds the
@@ -397,6 +416,14 @@ export const T = {
     thresholdHrLower: 'admin-threshold-hr-lower',
     thresholdNotes: 'admin-threshold-notes',
     thresholdSave: 'admin-threshold-save',
+    // THR-REVIEW — stale-threshold re-review banner + the attest ("Targets
+    // still correct") path that clears the lock without changing values.
+    thresholdReviewBanner: 'admin-threshold-review-banner',
+    thresholdReviewNote: 'admin-threshold-review-note',
+    thresholdAttest: 'admin-threshold-attest',
+    // THR-033 — two-step "Clear personalized targets" (delete) control.
+    thresholdClear: 'admin-threshold-clear',
+    thresholdClearConfirm: 'admin-threshold-clear-confirm',
 
     // CareTeamTab (inline <select> editor, NOT a modal)
     careTeamStatus: 'admin-careteam-status',

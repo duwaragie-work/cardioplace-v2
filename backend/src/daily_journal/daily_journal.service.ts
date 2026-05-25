@@ -91,6 +91,7 @@ export class DailyJournalService {
           medicationScheduledLater: dto.medicationScheduledLater ?? false,
           missedDoses: dto.missedDoses ?? null,
           missedMedications: (resolvedMissedMedications as unknown as JsonValue) ?? Prisma.JsonNull,
+          medicationStatuses: (dto.medicationStatuses as unknown as JsonValue) ?? Prisma.JsonNull,
           // V2 structured Level-2 symptom triggers (Flow B). Prefer the
           // explicit booleans, otherSymptoms goes to the same column. The
           // legacy `symptoms` array (v1 clients) is appended so nothing is
@@ -206,6 +207,10 @@ export class DailyJournalService {
           dto.missedMedications,
         )
         data.missedMedications = (resolved as unknown as JsonValue) ?? Prisma.JsonNull
+      }
+      if (dto.medicationStatuses !== undefined) {
+        data.medicationStatuses =
+          (dto.medicationStatuses as unknown as JsonValue) ?? Prisma.JsonNull
       }
 
       // Structured V2 symptom booleans (Flow B). Each is independently
@@ -532,7 +537,10 @@ export class DailyJournalService {
       message: 'Notifications retrieved successfully',
       data: notifications.map((notification) => ({
         ...notification,
-        patientUserId: notification.alert?.userId ?? null,
+        // Prefer the explicit subject patient (care-team notices); fall back to
+        // the linked alert's patient (alert/escalation notices). Either drives
+        // the bell's /patients/{id} deep-link.
+        patientUserId: notification.patientUserId ?? notification.alert?.userId ?? null,
         watched: notification.readAt != null,
       })),
     }
@@ -1031,6 +1039,7 @@ export class DailyJournalService {
     medicationScheduledLater?: boolean
     missedDoses: number | null
     missedMedications?: JsonValue
+    medicationStatuses?: JsonValue
     severeHeadache?: boolean
     visualChanges?: boolean
     alteredMentalStatus?: boolean
@@ -1075,6 +1084,7 @@ export class DailyJournalService {
       medicationScheduledLater: entry.medicationScheduledLater ?? false,
       missedDoses: entry.missedDoses,
       missedMedications: entry.missedMedications ?? null,
+      medicationStatuses: entry.medicationStatuses ?? null,
       severeHeadache: entry.severeHeadache ?? false,
       visualChanges: entry.visualChanges ?? false,
       alteredMentalStatus: entry.alteredMentalStatus ?? false,

@@ -196,6 +196,11 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
         // pattern in the test fixture (or beta-blocker carve-out) to fire.
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
       },
+      // HOLD-ADHERENCE — loadAdherenceWindow fetches the patient's HELD meds
+      // to exclude them from the miss count. Default: no held meds.
+      patientMedication: {
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+      },
       notification: {
         // alert-engine writes a patient-facing dashboard Notification per alert
         // (idempotent on @@unique([alertId, escalationEventId, userId, channel])).

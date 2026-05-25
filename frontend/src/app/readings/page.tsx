@@ -25,12 +25,13 @@ import {
   listMyMedications,
   type PatientMedication,
 } from '@/lib/services/patient-medications.service';
-import { getBMI } from '@cardioplace/shared';
+import { getBMI, JOURNAL_NOTE_MAX_LENGTH } from '@cardioplace/shared';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
 import BpPhotoButton from '@/components/intake/BpPhotoButton';
+import SymptomTagInput from '@/components/intake/SymptomTagInput';
 import { kgToLbs } from '@/lib/units';
 
 type TFn = (key: TranslationKey) => string;
@@ -55,6 +56,17 @@ type Entry = {
     medicationId?: string;
     drugName?: string;
     drugClass?: string;
+    reason?: 'FORGOT' | 'SIDE_EFFECTS' | 'RAN_OUT' | 'COST' | 'INTENTIONAL' | 'OTHER' | null;
+    missedDoses?: number;
+  }> | null;
+  /** Per-medication status snapshot for every answered med (taken / missed /
+   *  not due yet). Authoritative source for reconstructing the edit modal — the
+   *  aggregate flags can't disambiguate mixed answers. Null on legacy rows. */
+  medicationStatuses?: Array<{
+    medicationId?: string;
+    drugName?: string;
+    drugClass?: string;
+    taken?: 'yes' | 'no' | 'scheduledLater';
     reason?: 'FORGOT' | 'SIDE_EFFECTS' | 'RAN_OUT' | 'COST' | 'INTENTIONAL' | 'OTHER' | null;
     missedDoses?: number;
   }> | null;
@@ -147,8 +159,9 @@ type EditForm = {
   newOnsetHeadache: boolean;
   ruqPain: boolean;
   edema: boolean;
-  /** Patient's "anything else" freeform note. */
-  otherSymptomsText: string;
+  /** Patient-typed custom symptom chips → JournalEntry.otherSymptoms. */
+  otherSymptoms: string[];
+  /** Free-text note → JournalEntry.notes. */
   notes: string;
 };
 
@@ -275,6 +288,31 @@ function buildMedStatus(
   entry: Entry,
   meds: { id: string }[],
 ): Record<string, MedEntry> {
+  // Preferred path: the per-med status snapshot records each med's exact answer
+  // (yes / no / not due yet), so no guessing is needed. Only present on entries
+  // saved after the medicationStatuses column shipped.
+  if (entry.medicationStatuses && entry.medicationStatuses.length > 0) {
+    const byId = new Map<string, NonNullable<Entry['medicationStatuses']>[number]>();
+    for (const s of entry.medicationStatuses) {
+      if (s.medicationId) byId.set(s.medicationId, s);
+    }
+    const status: Record<string, MedEntry> = {};
+    for (const med of meds) {
+      const snap = byId.get(med.id);
+      status[med.id] = snap?.taken
+        ? {
+            taken: snap.taken,
+            reason: (snap.reason as MissedReason | null) ?? null,
+            missedDoses: snap.missedDoses ?? 1,
+          }
+        : { taken: null, reason: null, missedDoses: 1 };
+    }
+    return status;
+  }
+
+  // Legacy fallback: reconstruct from the aggregate flags + missedMedications
+  // snapshot. This can't disambiguate "med A taken, med B not due yet" — that's
+  // exactly why medicationStatuses was added — but keeps old rows usable.
   const missedById = new Map<string, NonNullable<Entry['missedMedications']>[number]>();
   for (const m of entry.missedMedications ?? []) {
     if (m.medicationId) missedById.set(m.medicationId, m);
@@ -417,6 +455,7 @@ function EntrySkeleton() {
 function EntryCard({
   entry,
   heightCm,
+  onView,
   onEdit,
   onDelete,
 }: {
@@ -424,6 +463,8 @@ function EntryCard({
   /** From PatientProfile.heightCm — fixed at intake. Used to compute BMI
    *  next to the weight chip. Optional — when missing, BMI is hidden. */
   heightCm: number | null;
+  /** Tapping the card body (not an action button) opens the read-only detail. */
+  onView: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -461,7 +502,20 @@ function EntryCard({
   return (
     <motion.div
       data-testid={`readings-row-${entry.id}`}
-      className="bg-white rounded-2xl p-5"
+      role="button"
+      tabIndex={0}
+      onClick={onView}
+      onKeyDown={(e) => {
+        // Only the card itself opens detail — not Enter/Space forwarded from a
+        // focused inner action button (those handle their own keys).
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onView();
+        }
+      }}
+      aria-label={t('readings.viewDetails')}
+      className="bg-white rounded-2xl p-5 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary-purple)]"
       style={{ boxShadow: '0 1px 12px rgba(123,0,224,0.06)' }}
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
@@ -500,8 +554,12 @@ function EntryCard({
           })()}
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        {/* Actions — stop click bubbling so tapping these doesn't also open
+            the detail view (which the card body's onClick handles). */}
+        <div
+          className="flex items-center gap-1.5 shrink-0"
+          onClick={(e) => e.stopPropagation()}
+        >
           <AudioButton size="sm" text={audioSummary} />
           <button
             onClick={onEdit}
@@ -638,10 +696,39 @@ function EntryCard({
             )}
           </div>
 
-          {/* Notes preview */}
+          {/* Custom symptoms — patient-typed (otherSymptoms). Captioned + given
+              a distinct amber tone so they don't read like the purple weight /
+              BMI chips above. */}
+          {entry.otherSymptoms && entry.otherSymptoms.length > 0 && (
+            <div className="mt-2.5">
+              <p
+                className="text-[10px] font-bold uppercase tracking-wider mb-1"
+                style={{ color: 'var(--brand-text-muted)' }}
+              >
+                {t('readings.otherSymptoms')}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {entry.otherSymptoms.map((s, i) => (
+                  <span
+                    key={`${s}-${i}`}
+                    className="text-[11px] px-2 py-0.5 rounded-md font-medium"
+                    style={{
+                      backgroundColor: 'var(--brand-warning-amber-light)',
+                      color: 'var(--brand-warning-amber-text)',
+                    }}
+                  >
+                    {s}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Notes preview — clamped to 2 lines (ellipsis) on the card; the
+              full note shows in the detail modal. */}
           {entry.notes && (
             <p
-              className="text-[12px] mt-2 leading-relaxed line-clamp-2"
+              className="text-[12px] mt-2.5 leading-relaxed line-clamp-2 break-words"
               style={{ color: 'var(--brand-text-muted)' }}
             >
               &ldquo;{entry.notes}&rdquo;
@@ -659,11 +746,13 @@ function EntryCard({
 function SessionCard({
   entries,
   heightCm,
+  onView,
   onEdit,
   onDelete,
 }: {
   entries: Entry[];
   heightCm: number | null;
+  onView: (e: Entry) => void;
   onEdit: (e: Entry) => void;
   onDelete: (id: string) => void;
 }) {
@@ -755,6 +844,7 @@ function SessionCard({
                   key={e.id}
                   entry={e}
                   heightCm={heightCm}
+                  onView={() => onView(e)}
                   onEdit={() => onEdit(e)}
                   onDelete={() => onDelete(e.id)}
                 />
@@ -794,7 +884,7 @@ function EditModal({
   isPregnant: boolean;
   /** Active medications — rendered as a per-med adherence list. */
   medications: PatientMedication[];
-  onChange: (key: keyof EditForm, val: string | boolean | number | Record<string, MedEntry>) => void;
+  onChange: (key: keyof EditForm, val: string | string[] | boolean | number | Record<string, MedEntry>) => void;
   onSave: () => void;
   onClose: () => void;
 }) {
@@ -1334,30 +1424,21 @@ function EditModal({
               </div>
             </div>
 
-            {/* Other / freeform symptoms */}
-            <div>
-              <label
-                htmlFor="readings-edit-other-symptoms"
-                className="block text-[12px] font-semibold mb-1.5"
-                style={{ color: 'var(--brand-text-secondary)' }}
-              >
-                {t('checkin.b3.otherLabel')}
-              </label>
-              <input
-                id="readings-edit-other-symptoms"
-                type="text"
-                value={form.otherSymptomsText}
-                onChange={(e) => onChange('otherSymptomsText', e.target.value)}
-                placeholder={t('checkin.b3.otherPlaceholder')}
-                className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none"
-                style={{
-                  borderColor: 'var(--brand-border)',
-                  color: 'var(--brand-text-primary)',
-                }}
-              />
-            </div>
+            {/* Other / custom symptoms — tag input (Enter / Add → chip, with
+                edit + remove), matching CheckIn step 5. → otherSymptoms[]. */}
+            <SymptomTagInput
+              value={form.otherSymptoms}
+              onChange={(next) => onChange('otherSymptoms', next)}
+              inputId="readings-edit-other-symptoms"
+              label={t('checkin.b3.otherSymptomsLabel')}
+              placeholder={t('checkin.b3.otherPlaceholder')}
+              addLabel={t('checkin.b3.addSymptom')}
+              removeLabel={t('checkin.b3.removeSymptom')}
+              editLabel={t('common.edit')}
+              testIdPrefix="readings-edit-other-symptoms"
+            />
 
-            {/* Notes */}
+            {/* Notes — free-text → JournalEntry.notes. Voice + bounded counter. */}
             <div>
               <div className="flex items-center justify-between gap-2 mb-1.5">
                 <label
@@ -1370,22 +1451,39 @@ function EditModal({
                 <MicButton
                   inputId="readings-edit-notes"
                   onTranscript={(text) =>
-                    onChange('notes', form.notes ? `${form.notes} ${text}`.trim() : text)
+                    onChange(
+                      'notes',
+                      (form.notes ? `${form.notes} ${text}`.trim() : text).slice(0, JOURNAL_NOTE_MAX_LENGTH),
+                    )
                   }
                 />
               </div>
               <textarea
                 id="readings-edit-notes"
                 value={form.notes}
-                onChange={(e) => onChange('notes', e.target.value)}
+                maxLength={JOURNAL_NOTE_MAX_LENGTH}
+                onChange={(e) => onChange('notes', e.target.value.slice(0, JOURNAL_NOTE_MAX_LENGTH))}
                 placeholder={t('readings.notesPlaceholder')}
                 rows={3}
+                aria-describedby="readings-edit-notes-count"
                 className="w-full px-3 py-2.5 rounded-xl border text-[14px] outline-none resize-none leading-relaxed"
                 style={{
                   borderColor: 'var(--brand-border)',
                   color: 'var(--brand-text-primary)',
                 }}
               />
+              <p
+                id="readings-edit-notes-count"
+                className="mt-1 text-[11px] text-right tabular-nums"
+                style={{
+                  color:
+                    form.notes.length >= JOURNAL_NOTE_MAX_LENGTH
+                      ? 'var(--brand-alert-red-text)'
+                      : 'var(--brand-text-muted)',
+                }}
+              >
+                {form.notes.length}/{JOURNAL_NOTE_MAX_LENGTH}
+              </p>
             </div>
           </div>
         </div>
@@ -1424,6 +1522,306 @@ function EditModal({
               aria-label={!isDirty ? 'No changes to save' : undefined}
             >
               {saving ? t('common.saving') : t('readings.saveChanges')}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// Small presentational helpers for the detail modal. Module-level so they
+// aren't re-created on every render (react-hooks/static-components).
+function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 py-1.5">
+      <span className="text-[12px] font-semibold shrink-0" style={{ color: 'var(--brand-text-muted)' }}>
+        {label}
+      </span>
+      <span className="text-[13.5px] text-right" style={{ color: 'var(--brand-text-primary)' }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function DetailSectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <p
+      className="text-[10px] font-bold uppercase tracking-wider mb-1 mt-1"
+      style={{ color: 'var(--brand-primary-purple)' }}
+    >
+      {children}
+    </p>
+  );
+}
+
+// ─── Reading Detail Modal ───────────────────────────────────────────────────────
+// Read-only "see everything" view opened by tapping a reading card. Close
+// dismisses; Edit hands off to the EditModal. Reuses the same per-med
+// reconstruction (buildMedStatus) so it reflects the fixed yes/not-due-yet
+// status, and the same symptom label keys as the check-in + edit modal.
+function ReadingDetailModal({
+  entry,
+  heightCm,
+  isPregnant,
+  medications,
+  onEdit,
+  onClose,
+}: {
+  entry: Entry;
+  heightCm: number | null;
+  isPregnant: boolean;
+  medications: PatientMedication[];
+  onEdit: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useLanguage();
+  const bmi = getBMI(heightCm, entry.weight);
+  const medStatus = buildMedStatus(entry, medications);
+  const dt = new Date(entry.measuredAt);
+  const timeStr = !isNaN(dt.getTime())
+    ? dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : '';
+
+  const trueSymptoms = SYMPTOM_KEYS.filter(
+    (k) => entry[k] && (isPregnant || !PREGNANCY_SYMPTOM_KEYS.includes(k)),
+  );
+  const legacySymptoms = entry.symptoms ?? [];
+
+  const positionLabel = (p?: string | null) =>
+    p === 'SITTING'
+      ? t('checkin.b2.positionSitting')
+      : p === 'STANDING'
+        ? t('checkin.b2.positionStanding')
+        : p === 'LYING'
+          ? t('checkin.b2.positionLying')
+          : '—';
+
+  const reasonLabel = (r?: string | null) =>
+    r === 'FORGOT'
+      ? t('readings.reasonForgot')
+      : r === 'SIDE_EFFECTS'
+        ? t('readings.reasonSideEffects')
+        : r === 'RAN_OUT'
+          ? t('readings.reasonRanOut')
+          : r === 'COST'
+            ? t('readings.reasonCost')
+            : r === 'INTENTIONAL'
+              ? t('readings.reasonIntentional')
+              : r === 'OTHER'
+                ? t('readings.reasonOther')
+                : '';
+
+  const takenLabel = (taken: MedEntry['taken']) =>
+    taken === 'yes'
+      ? t('readings.taken')
+      : taken === 'no'
+        ? t('readings.missed')
+        : taken === 'scheduledLater'
+          ? t('readings.notDueYet')
+          : '—';
+
+  const structuredSymptomCount = SYMPTOM_KEYS.reduce((n, k) => (entry[k] ? n + 1 : n), 0);
+  const audioSummary = humanizeReading(
+    {
+      measuredAt: entry.measuredAt,
+      systolicBP: entry.systolicBP ?? null,
+      diastolicBP: entry.diastolicBP ?? null,
+      pulse: entry.pulse ?? null,
+      position: entry.position ?? null,
+      weight: entry.weight ?? null,
+      bmi,
+      medicationTaken: entry.medicationTaken ?? null,
+      symptomCount: structuredSymptomCount + legacySymptoms.length,
+      notes: entry.notes ?? null,
+    },
+    t,
+  );
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reading-detail-title"
+        data-testid="reading-detail-modal"
+        className="relative w-full sm:max-w-lg bg-white sm:rounded-2xl rounded-t-2xl flex flex-col overflow-hidden"
+        style={{ maxHeight: '90dvh', boxShadow: '0 8px 48px rgba(0,0,0,0.18)' }}
+        initial={{ y: 60, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 60, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 340, damping: 30 }}
+      >
+        {/* Header */}
+        <div
+          className="shrink-0 bg-white flex items-center justify-between px-5 py-4 gap-3"
+          style={{ borderBottom: '1px solid var(--brand-border)' }}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="min-w-0">
+              <h2 id="reading-detail-title" className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                {t('readings.detailTitle')}
+              </h2>
+              <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
+                {formatDate(entry.measuredAt)}{timeStr ? ` · ${timeStr}` : ''}
+              </p>
+            </div>
+            <AudioButton size="sm" text={audioSummary} />
+          </div>
+          <button
+            onClick={onClose}
+            className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-70 cursor-pointer shrink-0"
+            style={{ backgroundColor: 'var(--brand-background)' }}
+            aria-label={t('accessibility.closeDialog')}
+          >
+            <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto thin-scrollbar">
+          <div className="p-5">
+            {/* BP hero */}
+            <div className="text-center mb-3">
+              {entry.systolicBP && entry.diastolicBP ? (
+                <div className="flex items-baseline gap-1.5 justify-center">
+                  <span className="text-[34px] font-bold leading-none" style={{ color: 'var(--brand-primary-purple)' }}>
+                    {entry.systolicBP}/{entry.diastolicBP}
+                  </span>
+                  <span className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>{t('readings.mmHg')}</span>
+                </div>
+              ) : (
+                <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>{t('readings.noBpRecorded')}</p>
+              )}
+            </div>
+
+            <div className="divide-y" style={{ borderColor: 'var(--brand-border)' }}>
+              <DetailRow label={t('readings.pulseLabel')} value={entry.pulse != null ? `${entry.pulse} ${t('readings.bpm')}` : '—'} />
+              <DetailRow label={t('readings.positionLabel')} value={positionLabel(entry.position)} />
+              <DetailRow label={t('readings.weightLbs')} value={entry.weight != null ? `${kgToLbs(entry.weight)} ${t('readings.lbs')}` : '—'} />
+              {bmi != null && <DetailRow label="BMI" value={bmi.toFixed(1)} />}
+            </div>
+
+            {/* Medications */}
+            <div className="mt-3">
+              <DetailSectionTitle>{t('readings.medicationTaken')}</DetailSectionTitle>
+              {medications.length === 0 ? (
+                entry.medicationTaken != null ? (
+                  <p className="text-[13px]" style={{ color: 'var(--brand-text-primary)' }}>
+                    {entry.medicationTaken ? t('readings.taken') : t('readings.missed')}
+                  </p>
+                ) : (
+                  <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>—</p>
+                )
+              ) : (
+                <div className="space-y-1.5">
+                  {medications.map((med) => {
+                    const s = medStatus[med.id] ?? { taken: null, reason: null, missedDoses: 1 };
+                    return (
+                      <div key={med.id} className="flex items-baseline justify-between gap-3">
+                        <span className="text-[13px] min-w-0 truncate" style={{ color: 'var(--brand-text-primary)' }}>
+                          {med.drugName}
+                        </span>
+                        <span className="text-[12.5px] text-right shrink-0" style={{ color: 'var(--brand-text-secondary)' }}>
+                          {takenLabel(s.taken)}
+                          {s.taken === 'no' && s.reason ? ` · ${reasonLabel(s.reason)}` : ''}
+                          {s.taken === 'no' && s.missedDoses ? ` · ${s.missedDoses}` : ''}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Symptoms */}
+            {(trueSymptoms.length > 0 || legacySymptoms.length > 0) && (
+              <div className="mt-3">
+                <DetailSectionTitle>{t('readings.symptoms')}</DetailSectionTitle>
+                <div className="flex flex-wrap gap-1.5">
+                  {trueSymptoms.map((k) => (
+                    <span
+                      key={k}
+                      className="text-[11.5px] px-2 py-0.5 rounded-md font-medium"
+                      style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
+                    >
+                      {t(SYMPTOM_LABEL_KEYS[k])}
+                    </span>
+                  ))}
+                  {legacySymptoms.map((s, i) => (
+                    <span
+                      key={`legacy-${s}-${i}`}
+                      className="text-[11.5px] px-2 py-0.5 rounded-md font-medium"
+                      style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
+                    >
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Custom symptoms */}
+            {entry.otherSymptoms && entry.otherSymptoms.length > 0 && (
+              <div className="mt-3">
+                <DetailSectionTitle>{t('readings.otherSymptoms')}</DetailSectionTitle>
+                <div className="flex flex-wrap gap-1.5">
+                  {entry.otherSymptoms.map((s, i) => (
+                    <span
+                      key={`${s}-${i}`}
+                      className="text-[11.5px] px-2 py-0.5 rounded-md font-medium"
+                      style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
+                    >
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Notes */}
+            {entry.notes && (
+              <div className="mt-3">
+                <DetailSectionTitle>{t('readings.notes')}</DetailSectionTitle>
+                <p
+                  className="text-[13px] leading-relaxed whitespace-pre-wrap break-words"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  {entry.notes}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="shrink-0 bg-white px-5 py-3" style={{ borderTop: '1px solid var(--brand-border)' }}>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 h-11 rounded-full border-2 text-sm font-semibold cursor-pointer"
+              style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+            >
+              {t('common.close')}
+            </button>
+            <button
+              type="button"
+              data-testid="reading-detail-edit-btn"
+              onClick={onEdit}
+              className="flex-1 h-11 rounded-full text-white text-sm font-bold transition cursor-pointer flex items-center justify-center gap-1.5"
+              style={{ backgroundColor: 'var(--brand-primary-purple)' }}
+            >
+              <Pencil className="w-4 h-4" />
+              {t('readings.editReading')}
             </button>
           </div>
         </div>
@@ -1522,6 +1920,9 @@ export default function ReadingsPage() {
   // medication step. AS_NEEDED (PRN) meds are excluded: "missed today" is not
   // meaningful for them.
   const [medications, setMedications] = useState<PatientMedication[]>([]);
+  // Read-only detail view opened by tapping a card. Separate from editEntry so
+  // the two modals never fight; Edit inside it hands off to the edit modal.
+  const [detailEntry, setDetailEntry] = useState<Entry | null>(null);
   const [editEntry, setEditEntry] = useState<Entry | null>(null);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   // Snapshot of the form taken at openEdit time — used to compute isDirty
@@ -1623,12 +2024,12 @@ export default function ReadingsPage() {
       newOnsetHeadache: entry.newOnsetHeadache ?? false,
       ruqPain: entry.ruqPain ?? false,
       edema: entry.edema ?? false,
-      // Surface the v1 freeform symptoms array (and any v2 otherSymptoms) as
-      // a single editable line so legacy data stays visible and editable.
-      otherSymptomsText: [
+      // Surface v2 otherSymptoms plus any legacy v1 freeform `symptoms` as
+      // editable chips so old data stays visible, editable, and removable.
+      otherSymptoms: [
         ...(entry.otherSymptoms ?? []),
         ...(entry.symptoms ?? []),
-      ].join(', '),
+      ],
       notes: entry.notes ?? '',
     };
     setEditForm(populated);
@@ -1705,6 +2106,20 @@ export default function ReadingsPage() {
         payload.medicationScheduledLater = scheduledLater;
         payload.missedDoses = missedMedications.reduce((s, m) => s + (m.missedDoses ?? 0), 0);
         payload.missedMedications = missedMedications;
+        // Per-med snapshot for every answered med so reopening the modal shows
+        // each med's exact answer instead of guessing from the rollup.
+        payload.medicationStatuses = medEntries
+          .filter((e) => e.state.taken !== null)
+          .map((e) => ({
+            medicationId: e.med.id,
+            drugName: e.med.drugName,
+            drugClass: e.med.drugClass,
+            taken: e.state.taken as 'yes' | 'no' | 'scheduledLater',
+            ...(e.state.taken === 'no' && e.state.reason
+              ? { reason: e.state.reason as MissedReason }
+              : {}),
+            ...(e.state.taken === 'no' ? { missedDoses: e.state.missedDoses } : {}),
+          }));
       }
       // Structured V2 symptoms — always send so toggling off is persisted.
       payload.severeHeadache = editForm.severeHeadache;
@@ -1728,9 +2143,11 @@ export default function ReadingsPage() {
       payload.newOnsetHeadache = isPregnant ? editForm.newOnsetHeadache : false;
       payload.ruqPain = isPregnant ? editForm.ruqPain : false;
       payload.edema = isPregnant ? editForm.edema : false;
-      payload.otherSymptoms = editForm.otherSymptomsText.trim()
-        ? [editForm.otherSymptomsText.trim()]
-        : [];
+      // Send the chip array as-is; trim each + drop blanks. Empty array clears
+      // any previously-stored custom symptoms.
+      payload.otherSymptoms = editForm.otherSymptoms
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
       payload.notes = editForm.notes.trim();
 
       await updateJournalEntry(editEntry.id, payload);
@@ -1895,6 +2312,7 @@ export default function ReadingsPage() {
                             key={bucket.sessionId}
                             entries={bucket.items}
                             heightCm={heightCm}
+                            onView={(e) => setDetailEntry(e)}
                             onEdit={openEdit}
                             onDelete={(id) => setDeleteId(id)}
                           />
@@ -1903,6 +2321,7 @@ export default function ReadingsPage() {
                             key={bucket.items[0].id + (bucket.sessionId ?? `solo-${i}`)}
                             entry={bucket.items[0]}
                             heightCm={heightCm}
+                            onView={() => setDetailEntry(bucket.items[0])}
                             onEdit={() => openEdit(bucket.items[0])}
                             onDelete={() => setDeleteId(bucket.items[0].id)}
                           />
@@ -1917,6 +2336,25 @@ export default function ReadingsPage() {
         )}
         </div>
       </div>
+
+      {/* Read-only detail modal — opened by tapping a card. Hidden while the
+          edit modal is open so the handoff (Edit → edit modal) shows one sheet
+          at a time. */}
+      <AnimatePresence>
+        {detailEntry && !editEntry && (
+          <ReadingDetailModal
+            entry={detailEntry}
+            heightCm={heightCm}
+            isPregnant={isPregnant}
+            medications={medications}
+            onClose={() => setDetailEntry(null)}
+            onEdit={() => {
+              openEdit(detailEntry);
+              setDetailEntry(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Edit modal */}
       <AnimatePresence>

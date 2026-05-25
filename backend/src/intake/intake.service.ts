@@ -6,6 +6,7 @@ import {
 import { DrugEnrichmentService } from '../drug-enrichment/drug-enrichment.service.js'
 import {
   DrugClass,
+  EnrollmentStatus,
   MedicationVerificationStatus,
   NotificationChannel,
   Prisma,
@@ -13,7 +14,11 @@ import {
   VerificationChangeType,
   VerifierRole,
 } from '../generated/prisma/client.js'
-import { systemMsgMedicationHold } from '@cardioplace/shared'
+import { canCompleteEnrollment } from '../practice/enrollment-gate.js'
+import {
+  systemMsgMedicationHold,
+  systemMsgProfileFieldRejected,
+} from '@cardioplace/shared'
 import type {
   PatientMedication,
   PatientProfile,
@@ -21,6 +26,7 @@ import type {
 import { PrismaService } from '../prisma/prisma.service.js'
 import {
   pickDisplayName,
+  pickDisplayRole,
   resolveUserDisplays,
 } from '../common/user-name-resolver.js'
 import type { PrismaClient } from '../generated/prisma/client.js'
@@ -70,6 +76,35 @@ const VERIFIABLE_PROFILE_FIELDS = [
 
 type VerifiableField = (typeof VERIFIABLE_PROFILE_FIELDS)[number]
 
+// Threshold-mandatory conditions (mirrors enrollment-gate / thresholdMandatory).
+// A patient self-edit touching one of these on an enrolled profile gets a
+// care-team "review needed" notice (IVR-04 sibling for the non-revert cases).
+const SERIOUS_CONDITION_LABELS: Partial<Record<VerifiableField, string>> = {
+  heartFailureType: 'heart failure type',
+  hasHCM: 'HCM',
+  hasDCM: 'DCM',
+}
+
+// Patient-facing labels used in the "please re-check your {field}" inbox notice
+// dispatched when an admin rejects a self-reported field. Lowercase nouns so
+// they read naturally mid-sentence. NEEDS Dr. Singal sign-off on wording.
+const PROFILE_FIELD_LABELS: Record<VerifiableField, string> = {
+  gender: 'sex',
+  heightCm: 'height',
+  isPregnant: 'pregnancy status',
+  pregnancyDueDate: 'pregnancy due date',
+  historyPreeclampsia: 'history of preeclampsia',
+  hasHeartFailure: 'heart failure history',
+  heartFailureType: 'heart failure type',
+  hasAFib: 'atrial fibrillation history',
+  hasCAD: 'coronary artery disease history',
+  hasHCM: 'hypertrophic cardiomyopathy history',
+  hasDCM: 'dilated cardiomyopathy history',
+  hasTachycardia: 'tachycardia history',
+  hasBradycardia: 'bradycardia history',
+  diagnosedHypertension: 'high blood pressure diagnosis',
+}
+
 @Injectable()
 export class IntakeService {
   private readonly logger = new Logger(IntakeService.name)
@@ -111,7 +146,7 @@ export class IntakeService {
   // ─── Patient: POST /intake/profile ───────────────────────────────────────
 
   async upsertProfile(userId: string, dto: IntakeProfileDto) {
-    return this.prisma.$transaction(async (tx) => {
+    const { result, enrollmentReverted, conditionReviewLabels } = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.patientProfile.findUnique({ where: { userId } })
 
       const patch = this.stripUndefined(dto)
@@ -155,6 +190,8 @@ export class IntakeService {
             },
           })
 
+      let enrollmentReverted = false
+      let conditionReviewLabels: string[] = []
       if (changes.length) {
         await this.writeProfileLogs(tx, {
           userId,
@@ -163,15 +200,59 @@ export class IntakeService {
           changedByRole: VerifierRole.PATIENT,
           changeType: VerificationChangeType.PATIENT_REPORT,
         })
+
+        // IVR-04 — a patient self-adding a threshold-mandatory condition
+        // (HFrEF / HCM / DCM) while enrolled must also revert enrollment, same
+        // as the admin correction path. No-op on create / when not enrolled.
+        enrollmentReverted = await this.revertEnrollmentIfThresholdGap(
+          tx,
+          userId,
+          userId,
+          VerifierRole.PATIENT,
+        )
+
+        // Sibling case: the patient changed a serious condition but it did NOT
+        // trip the revert — i.e. they removed one, or added one while a
+        // threshold already exists. If they're ENROLLED (post-setup), nudge the
+        // care team to re-verify + revisit the threshold. Skipped when not
+        // enrolled (initial intake) — the verification queue covers that.
+        if (!enrollmentReverted) {
+          const serious = changes
+            .map((c) => SERIOUS_CONDITION_LABELS[c.field])
+            .filter((l): l is string => !!l)
+          if (serious.length) {
+            const u = await tx.user.findUnique({
+              where: { id: userId },
+              select: { enrollmentStatus: true },
+            })
+            if (u?.enrollmentStatus === EnrollmentStatus.ENROLLED) {
+              conditionReviewLabels = serious
+            }
+          }
+        }
       }
 
       return {
-        statusCode: 200,
-        message: existing ? 'Profile updated' : 'Profile created',
-        data: this.serializeProfile(profile),
-        changedFields: changes.map((c) => c.field),
+        result: {
+          statusCode: 200,
+          message: existing ? 'Profile updated' : 'Profile created',
+          data: this.serializeProfile(profile),
+          changedFields: changes.map((c) => c.field),
+        },
+        enrollmentReverted,
+        conditionReviewLabels,
       }
     }, TX_OPTIONS)
+
+    // IVR-04 (patient path) — dispatch care-team notices AFTER the tx commits
+    // so a notification failure can't roll back the safety revert. Only the
+    // patient path notifies: the admin path's actor is already on the screen.
+    if (enrollmentReverted) {
+      await this.notifyCareTeamEnrollmentPaused(userId)
+    } else if (conditionReviewLabels.length) {
+      await this.notifyCareTeamConditionReview(userId, conditionReviewLabels)
+    }
+    return result
   }
 
   // ─── Patient: POST /me/pregnancy ─────────────────────────────────────────
@@ -202,8 +283,15 @@ export class IntakeService {
       // makes POST idempotent so a re-render or double-tap on the intake
       // screen can't produce phantom rows. The DB-level partial unique index
       // (uq_patientmed_active) is the belt to this suspenders.
+      // Exclude REJECTED rows from the dedup set — re-adding a drug the
+      // provider rejected must create a fresh UNVERIFIED row for re-review
+      // (IVR-19), not silently match the terminal rejected record.
       const existingActive = await tx.patientMedication.findMany({
-        where: { userId, discontinuedAt: null },
+        where: {
+          userId,
+          discontinuedAt: null,
+          verificationStatus: { not: MedicationVerificationStatus.REJECTED },
+        },
       })
       const existingByKey = new Map(
         existingActive.map((m) => [this.medicationKey(m), m]),
@@ -415,8 +503,17 @@ export class IntakeService {
         where: { userId, discontinuedAt: null },
       })
 
+      // Rejected rows are terminal audit records — a patient self-edit must
+      // NEVER auto-close them (IVR-19: the old REJECTED row is preserved as-is,
+      // not discontinued). Excluding them from the diff also guarantees that
+      // re-selecting the same drug creates a fresh UNVERIFIED row rather than
+      // matching/reviving the rejected one.
+      const closeable = current.filter(
+        (m) => m.verificationStatus !== MedicationVerificationStatus.REJECTED,
+      )
+
       const { toClose, toCreate } = this.diffMedications(
-        current,
+        closeable,
         dto.medications,
       )
 
@@ -524,6 +621,26 @@ export class IntakeService {
       throw new NotFoundException('Patient profile not found')
     }
 
+    // Hard gate: cannot complete verification while any field is still in the
+    // rejected ("needs correction") state. Rejecting a field flags it as wrong
+    // and awaiting a correction or patient re-report; flipping the whole
+    // profile to VERIFIED around it both defeats the safety net and produces a
+    // contradictory "Verified" badge on a rejected row. The admin must Correct,
+    // re-confirm, or have the patient re-report each one first. The Profile tab
+    // disables the button and lists these — this is the backend belt.
+    const latestByField = await this.latestLogTypeForFields(
+      patientUserId,
+      VERIFIABLE_PROFILE_FIELDS,
+    )
+    const stillRejected = [...latestByField.entries()]
+      .filter(([, type]) => type === VerificationChangeType.ADMIN_REJECT)
+      .map(([path]) => path.replace(/^profile\./, ''))
+    if (stillRejected.length) {
+      throw new BadRequestException(
+        `Resolve rejected field(s) before completing verification: ${stillRejected.join(', ')}`,
+      )
+    }
+
     const [updated] = await this.prisma.$transaction([
       this.prisma.patientProfile.update({
         where: { userId: patientUserId },
@@ -554,6 +671,101 @@ export class IntakeService {
     }
   }
 
+  // ─── Admin: POST /admin/users/:id/confirm-profile-field(s) ───────────────
+  // Per-field ✓ "Confirm" (IVR-08). Writes an ADMIN_VERIFY audit row pinned to
+  // each `profile.{field}` WITHOUT touching the whole-profile verification
+  // status (that's what the footer "Verification complete" / verify-profile is
+  // for). The admin Profile tab derives each field's status from the latest log
+  // per `profile.{field}`, so this row is what makes the ✓ "stick".
+  //
+  // Fields whose latest log is already ADMIN_VERIFY are skipped so repeat clicks
+  // / "Confirm all" don't pile up duplicate audit rows (same idempotency spirit
+  // as the IVR-16 reject guard). Only VERIFIABLE_PROFILE_FIELDS are accepted.
+  async confirmProfileFields(
+    actor: ActorUser,
+    patientUserId: string,
+    dto: { fields: string[]; rationale?: string },
+  ) {
+    await this.access.assertCanAccessPatient(actor, patientUserId)
+    const profile = await this.prisma.patientProfile.findUnique({
+      where: { userId: patientUserId },
+    })
+    if (!profile) {
+      throw new NotFoundException('Patient profile not found')
+    }
+    const requested = Array.isArray(dto.fields) ? dto.fields : []
+    const fields = requested.filter((f): f is VerifiableField =>
+      (VERIFIABLE_PROFILE_FIELDS as readonly string[]).includes(f),
+    )
+    if (!fields.length) {
+      throw new BadRequestException('No valid profile fields to confirm')
+    }
+
+    // Idempotency: drop fields already confirmed (latest log = ADMIN_VERIFY).
+    const latestByField = await this.latestLogTypeForFields(patientUserId, fields)
+    const toConfirm = fields.filter(
+      (f) => latestByField.get(`profile.${f}`) !== VerificationChangeType.ADMIN_VERIFY,
+    )
+
+    if (toConfirm.length) {
+      await this.prisma.profileVerificationLog.createMany({
+        data: toConfirm.map((field) => ({
+          userId: patientUserId,
+          fieldPath: `profile.${field}`,
+          previousValue: this.toJsonValue(profile[field as keyof PatientProfile]),
+          newValue: this.toJsonValue(profile[field as keyof PatientProfile]),
+          changedBy: actor.id,
+          changedByRole: VerifierRole.ADMIN,
+          changeType: VerificationChangeType.ADMIN_VERIFY,
+          rationale: dto.rationale,
+        })),
+      })
+    }
+
+    return {
+      statusCode: 200,
+      message: toConfirm.length
+        ? `${toConfirm.length} field(s) confirmed`
+        : 'No new fields to confirm',
+      data: this.serializeProfile(profile),
+      confirmedFields: toConfirm,
+    }
+  }
+
+  async confirmProfileField(
+    actor: ActorUser,
+    patientUserId: string,
+    dto: { field: string; rationale?: string },
+  ) {
+    if (!dto.field || typeof dto.field !== 'string') {
+      throw new BadRequestException('field is required')
+    }
+    return this.confirmProfileFields(actor, patientUserId, {
+      fields: [dto.field],
+      rationale: dto.rationale,
+    })
+  }
+
+  // Returns the most recent changeType per `profile.{field}` fieldPath for the
+  // given fields. Used by the per-field confirm/reject idempotency guards.
+  private async latestLogTypeForFields(
+    userId: string,
+    fields: readonly string[],
+  ): Promise<Map<string, VerificationChangeType>> {
+    const fieldPaths = fields.map((f) => `profile.${f}`)
+    const logs = await this.prisma.profileVerificationLog.findMany({
+      where: { userId, fieldPath: { in: fieldPaths } },
+      orderBy: { createdAt: 'desc' },
+      select: { fieldPath: true, changeType: true },
+    })
+    const latest = new Map<string, VerificationChangeType>()
+    for (const log of logs) {
+      // findMany is createdAt-desc, so the first row seen per path is the latest.
+      if (!latest.has(log.fieldPath)) latest.set(log.fieldPath, log.changeType)
+    }
+    return latest
+  }
+
   // ─── Admin: POST /admin/users/:id/reject-profile-field ───────────────────
   // Flips the whole profile back to UNVERIFIED and writes an ADMIN_REJECT
   // audit row pinned to the field the admin flagged. Used by the Flow H
@@ -572,6 +784,25 @@ export class IntakeService {
     }
     if (!dto.field || typeof dto.field !== 'string') {
       throw new BadRequestException('field is required')
+    }
+
+    // IVR-16 idempotency: rejecting an already-rejected field is a no-op so
+    // repeat clicks don't pile up duplicate ADMIN_REJECT audit rows (the
+    // profile is already UNVERIFIED from the first rejection). The FE also
+    // hides the Reject button once a field is rejected — this is the backend
+    // belt to that suspenders.
+    const latestByField = await this.latestLogTypeForFields(patientUserId, [
+      dto.field,
+    ])
+    if (
+      latestByField.get(`profile.${dto.field}`) ===
+      VerificationChangeType.ADMIN_REJECT
+    ) {
+      return {
+        statusCode: 200,
+        message: 'Field already rejected',
+        data: this.serializeProfile(profile),
+      }
     }
 
     const previousStatus = profile.profileVerificationStatus
@@ -616,6 +847,29 @@ export class IntakeService {
         },
       }),
     ])
+
+    // Notify the patient so they can re-check the flagged field (the value is
+    // preserved — they confirm or update it). Best-effort + post-commit: a
+    // dispatch failure must never undo the reject. Only the non-idempotent path
+    // reaches here, so a repeat reject won't re-notify. PUSH so it lands in the
+    // patient's Notifications tab (mirrors the medication-HOLD notice).
+    try {
+      const label =
+        PROFILE_FIELD_LABELS[dto.field as VerifiableField] ?? 'a profile detail'
+      await this.prisma.notification.create({
+        data: {
+          userId: patientUserId,
+          channel: NotificationChannel.PUSH,
+          title: 'Please re-check a profile detail',
+          body: systemMsgProfileFieldRejected(label),
+        },
+      })
+    } catch (err) {
+      this.logger.error(
+        `Profile-field-reject notification failed for ${patientUserId}`,
+        err instanceof Error ? err.stack : err,
+      )
+    }
 
     return {
       statusCode: 200,
@@ -725,6 +979,15 @@ export class IntakeService {
         })
       }
 
+      // IVR-04 — if this correction added a threshold-mandatory condition to an
+      // already-enrolled patient with no threshold on file, revert enrollment.
+      const enrollmentReverted = await this.revertEnrollmentIfThresholdGap(
+        tx,
+        patientUserId,
+        actor.id,
+        VerifierRole.ADMIN,
+      )
+
       const correctedFields: string[] = [
         ...changes.map((c) => c.field as string),
         ...(dobChanged ? ['dateOfBirth'] : []),
@@ -734,6 +997,7 @@ export class IntakeService {
         message: 'Profile corrected',
         data: this.serializeProfile(updated),
         correctedFields,
+        enrollmentReverted,
       }
     }, TX_OPTIONS)
   }
@@ -803,7 +1067,12 @@ export class IntakeService {
         await this.prisma.notification.create({
           data: {
             userId: med.userId,
-            channel: NotificationChannel.DASHBOARD,
+            // PUSH (not DASHBOARD) so it lands in the patient's Notifications
+            // tab — that tab renders only PUSH/null channels; DASHBOARD rows
+            // are treated as alert-linked and surface on the Alerts tab. This
+            // is a standalone care-team message (CLINICAL_SPEC §14.2), so it
+            // belongs with gap-alert / monthly-reask / care-team-update (all PUSH).
+            channel: NotificationChannel.PUSH,
             title: 'Medication on hold',
             body: systemMsgMedicationHold(med.drugName),
           },
@@ -834,6 +1103,19 @@ export class IntakeService {
       }),
     ])
     const dob = user?.dateOfBirth ? user.dateOfBirth.toISOString().slice(0, 10) : null
+    // Fields whose latest log is ADMIN_REJECT — surfaced so the patient profile
+    // can flag exactly what the care team asked them to re-check (pairs with the
+    // "please re-check" inbox notice). Empty when there's no profile.
+    let rejectedFields: string[] = []
+    if (profile) {
+      const latest = await this.latestLogTypeForFields(
+        userId,
+        VERIFIABLE_PROFILE_FIELDS,
+      )
+      rejectedFields = [...latest.entries()]
+        .filter(([, type]) => type === VerificationChangeType.ADMIN_REJECT)
+        .map(([path]) => path.replace(/^profile\./, ''))
+    }
     return {
       statusCode: 200,
       message: profile ? 'Profile retrieved' : 'No profile yet',
@@ -841,19 +1123,31 @@ export class IntakeService {
       // profile tab can show age alongside other demographics without a
       // second fetch. Read-only — patients edit it via /v2/auth/profile
       // or via clinical-intake A1.
-      data: profile ? { ...this.serializeProfile(profile), dateOfBirth: dob } : null,
+      data: profile
+        ? { ...this.serializeProfile(profile), dateOfBirth: dob, rejectedFields }
+        : null,
     }
   }
 
-  async listMedications(userId: string, includeDiscontinued = false) {
-    // Exclude REJECTED meds so a provider's "this isn't the patient's med" call
-    // doesn't get re-asked on the patient's daily check-in. UNVERIFIED stays
-    // visible — patient's word is still actionable pending provider review.
+  async listMedications(
+    userId: string,
+    includeDiscontinued = false,
+    includeRejected = false,
+  ) {
+    // Exclude REJECTED meds by default so a provider's "this isn't the patient's
+    // med" call doesn't get re-asked on the patient's daily check-in or
+    // re-prefilled into the intake/edit wizard. UNVERIFIED stays visible —
+    // patient's word is still actionable pending provider review.
+    //
+    // Callers that need the full picture *with* status (the admin
+    // reconciliation tab and the patient's read-only profile) pass
+    // includeRejected=true so the REJECTED rows surface with their badge
+    // (IVR-18). The daily-check-in and wizard-prefill paths keep the default.
     const meds = await this.prisma.patientMedication.findMany({
       where: {
         userId,
         ...(includeDiscontinued ? {} : { discontinuedAt: null }),
-        verificationStatus: { not: 'REJECTED' },
+        ...(includeRejected ? {} : { verificationStatus: { not: 'REJECTED' } }),
       },
       orderBy: { reportedAt: 'desc' },
     })
@@ -880,6 +1174,10 @@ export class IntakeService {
       data: logs.map((l) => ({
         ...l,
         changedByName: pickDisplayName(l.changedBy, names),
+        // The actor's real role (e.g. PROVIDER) resolved from their account —
+        // the stored changedByRole is the coarse ADMIN for every admin action.
+        // Falls back to the stored role when the user can't be resolved.
+        changedByRoleResolved: pickDisplayRole(l.changedBy, names, l.changedByRole),
       })),
     }
   }
@@ -905,6 +1203,179 @@ export class IntakeService {
         profileVerifiedBy: null,
       },
     })
+  }
+
+  /**
+   * IVR-04 — clinical-safety enrollment re-gate. After a profile write that may
+   * have added a threshold-mandatory condition (HFrEF / HCM / DCM), re-run the
+   * enrollment gate. If the patient is ENROLLED and the gate now fails *because*
+   * a mandatory condition lacks a configured threshold, revert enrollment to
+   * NOT_ENROLLED — otherwise the alert engine keeps running on standard
+   * thresholds for a patient who now needs a personalized one — and write a
+   * JCAHO audit row.
+   *
+   * Only the `threshold-required-for-condition` reason triggers a revert; other
+   * gate failures (missing assignment / business hours) are unrelated to a
+   * condition change. No-op when the patient is already NOT_ENROLLED or a
+   * threshold is on file. Runs in both the admin (correctProfile) and patient
+   * (upsertProfile) edit paths so the unsafe state can't be reached from either.
+   */
+  private async revertEnrollmentIfThresholdGap(
+    tx: PrismaTx,
+    userId: string,
+    actorId: string,
+    actorRole: VerifierRole,
+  ): Promise<boolean> {
+    const user = await tx.user.findUnique({
+      where: { id: userId },
+      select: { enrollmentStatus: true },
+    })
+    if (user?.enrollmentStatus !== EnrollmentStatus.ENROLLED) return false
+
+    const gate = await canCompleteEnrollment(tx, userId)
+    if (gate.ok || !gate.reasons.includes('threshold-required-for-condition')) {
+      return false
+    }
+
+    const changeType =
+      actorRole === VerifierRole.PATIENT
+        ? VerificationChangeType.PATIENT_REPORT
+        : VerificationChangeType.ADMIN_CORRECT
+
+    await tx.user.update({
+      where: { id: userId },
+      data: { enrollmentStatus: EnrollmentStatus.NOT_ENROLLED },
+    })
+    await tx.profileVerificationLog.create({
+      data: {
+        userId,
+        fieldPath: 'user.enrollmentStatus',
+        previousValue: EnrollmentStatus.ENROLLED,
+        newValue: EnrollmentStatus.NOT_ENROLLED,
+        changedBy: actorId,
+        changedByRole: actorRole,
+        changeType,
+        discrepancyFlag: true,
+        rationale:
+          'Enrollment auto-reverted — a threshold-mandatory condition (HFrEF / HCM / DCM) was added without a configured threshold.',
+      },
+    })
+    return true
+  }
+
+  /**
+   * IVR-04 (patient path) — when a patient's OWN profile edit auto-reverts
+   * their enrollment, nobody is on the admin screen to see it. Notify the care
+   * team (primary provider + medical director) so they reconfigure the
+   * threshold and re-enroll promptly. Best-effort + post-commit: a failure here
+   * must never undo the safety revert, hence the try/catch and the call site
+   * outside the transaction. The admin path doesn't call this — that actor is
+   * already looking at the EnrollmentCard.
+   */
+  // Shared care-team notice dispatch. Routes to the patient's primary provider
+  // + medical director (deduped) and stamps `patientUserId` so the admin bell /
+  // notifications page can deep-link to /patients/{patientUserId}. Throws on DB
+  // error — the public wrappers below are best-effort.
+  private async dispatchCareTeamNotice(
+    patientUserId: string,
+    title: string,
+    body: string,
+  ): Promise<void> {
+    const assignment = await this.prisma.patientProviderAssignment.findUnique({
+      where: { userId: patientUserId },
+      select: { primaryProviderId: true, medicalDirectorId: true },
+    })
+    // No care team on file → no one to route to.
+    if (!assignment) return
+    const recipients = [
+      ...new Set(
+        [assignment.primaryProviderId, assignment.medicalDirectorId].filter(
+          (id): id is string => !!id,
+        ),
+      ),
+    ]
+    if (!recipients.length) return
+    await this.prisma.notification.createMany({
+      data: recipients.map((userId) => ({
+        userId,
+        patientUserId,
+        channel: NotificationChannel.PUSH,
+        title,
+        body,
+      })),
+    })
+  }
+
+  private async notifyCareTeamEnrollmentPaused(patientUserId: string): Promise<void> {
+    try {
+      const [patient, profile] = await Promise.all([
+        this.prisma.user.findUnique({
+          where: { id: patientUserId },
+          select: { name: true },
+        }),
+        this.prisma.patientProfile.findUnique({
+          where: { userId: patientUserId },
+          select: { heartFailureType: true, hasHCM: true, hasDCM: true },
+        }),
+      ])
+      const conditions = [
+        profile?.heartFailureType === 'HFREF' ? 'HFrEF' : null,
+        profile?.hasHCM ? 'HCM' : null,
+        profile?.hasDCM ? 'DCM' : null,
+      ]
+        .filter(Boolean)
+        .join(' / ')
+      const patientName = patient?.name ?? 'A patient'
+      const body =
+        `${patientName} reported ${conditions || 'a condition'} that requires a personalized BP threshold. ` +
+        `Their enrollment has been paused — set a threshold and re-enroll to resume monitoring.`
+      await this.dispatchCareTeamNotice(
+        patientUserId,
+        'Enrollment paused — threshold needed',
+        body,
+      )
+    } catch (err) {
+      this.logger.error(
+        `Care-team enrollment-paused notification failed for ${patientUserId}`,
+        err instanceof Error ? err.stack : err,
+      )
+    }
+  }
+
+  /**
+   * Patient changed a threshold-mandatory condition (HFrEF / HCM / DCM) on an
+   * already-ENROLLED profile WITHOUT it tripping the enrollment revert — i.e.
+   * they removed one, or added one while a threshold already exists. The
+   * existing threshold may no longer fit and the self-report needs re-verifying,
+   * so nudge the care team. Best-effort + post-commit.
+   */
+  private async notifyCareTeamConditionReview(
+    patientUserId: string,
+    changedLabels: string[],
+  ): Promise<void> {
+    try {
+      const patient = await this.prisma.user.findUnique({
+        where: { id: patientUserId },
+        select: { name: true },
+      })
+      const patientName = patient?.name ?? 'A patient'
+      const list = changedLabels.length
+        ? changedLabels.join(', ')
+        : 'a monitored condition'
+      const body =
+        `${patientName} changed ${list} on their profile — it is now unverified. ` +
+        `Review the change and confirm their thresholds are still appropriate.`
+      await this.dispatchCareTeamNotice(
+        patientUserId,
+        'Condition change — review needed',
+        body,
+      )
+    } catch (err) {
+      this.logger.error(
+        `Care-team condition-review notification failed for ${patientUserId}`,
+        err instanceof Error ? err.stack : err,
+      )
+    }
   }
 
   private diffProfile(

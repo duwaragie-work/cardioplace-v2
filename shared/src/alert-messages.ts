@@ -767,3 +767,22 @@ function angioedemaPatientLead(ctx: AlertContext): string {
 export function systemMsgMedicationHold(drugName: string): string {
   return `Your care team has placed ${drugName} on hold while they review it. This means you should NOT take ${drugName} until they tell you it is safe to restart. If you have questions, call your care team. If you feel unwell after recently taking it — chest pain, severe weakness, fainting — call 911.`
 }
+
+/**
+ * Patient inbox message when a provider rejects a self-reported profile field
+ * during verification. Names the field so the patient knows exactly what to
+ * re-check — the value isn't erased, they confirm or update it.
+ * NEEDS CLINICAL SIGN-OFF (Dr. Singal) — wording is provisional.
+ */
+export function systemMsgProfileFieldRejected(fieldLabel: string): string {
+  return `Your care team needs you to re-check your ${fieldLabel}. Please open your profile to confirm or update it. If you have questions, contact your care team.`
+}
+
+/**
+ * Patient inbox message when a provider sets or changes the patient's
+ * personalized BP monitoring targets (THR-034 — transparency). Not required by
+ * the clinical doc; NEEDS CLINICAL SIGN-OFF (Dr. Singal) — wording provisional.
+ */
+export function systemMsgThresholdUpdated(): string {
+  return `Your care team updated your blood-pressure monitoring targets. Your future check-ins will use the new targets. If you have questions, contact your care team.`
+}

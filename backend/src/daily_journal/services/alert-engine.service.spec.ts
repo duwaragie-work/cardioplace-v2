@@ -122,6 +122,11 @@ describe('AlertEngineService (orchestrator)', () => {
         findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
       },
+      // HOLD-ADHERENCE — loadAdherenceWindow fetches HELD meds to exclude
+      // them from the miss count. Default: no held meds.
+      patientMedication: {
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+      },
       notification: {
         // alert-engine writes a patient-facing dashboard Notification per alert
         // (idempotent on @@unique([alertId, escalationEventId, userId, channel])).

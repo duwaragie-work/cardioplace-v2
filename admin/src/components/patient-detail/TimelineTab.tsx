@@ -126,6 +126,14 @@ const MEDICATION_FIELD_LABELS: Record<string, string> = {
   rawInputText: 'Raw input',
 };
 
+// User-scoped audit paths (e.g. user.enrollmentStatus from the IVR-04 re-gate,
+// user.dateOfBirth from an admin correction). Without these the raw path would
+// render as "User.enrollment Status".
+const USER_FIELD_LABELS: Record<string, string> = {
+  enrollmentStatus: 'Enrollment',
+  dateOfBirth: 'Date of birth',
+};
+
 interface ParsedPath {
   scope: 'profile' | 'medication';
   /** Friendly label for the field (or "Medication" if the whole row was added). */
@@ -158,6 +166,10 @@ function parseFieldPath(path: string): ParsedPath {
   if (path.startsWith('profile.')) {
     const f = path.slice('profile.'.length);
     return { scope: 'profile', field: PROFILE_FIELD_LABELS[f] ?? prettifyKey(f), fieldKey: f };
+  }
+  if (path.startsWith('user.')) {
+    const f = path.slice('user.'.length);
+    return { scope: 'profile', field: USER_FIELD_LABELS[f] ?? prettifyKey(f), fieldKey: f };
   }
   return { scope: 'profile', field: prettifyKey(path), fieldKey: path };
 }
@@ -199,8 +211,10 @@ function verificationStatusVerb(prev: unknown, next: unknown): string {
       return 'verified by admin';
     case 'REJECTED':
       return 'marked rejected by admin';
-    case 'AWAITING_PROVIDER':
+    case 'HOLD':
       return 'placed on hold by admin';
+    case 'AWAITING_PROVIDER':
+      return 'flagged for provider review';
     case 'UNVERIFIED':
       return prev === 'VERIFIED'
         ? 'returned to unverified by admin'
@@ -249,6 +263,10 @@ function formatMedicationObject(v: unknown): string | null {
   return parts.join(' · ');
 }
 
+// Units appended to a field's numeric value in the diff line (TL-071). Keyed by
+// the raw field key from parseFieldPath (e.g. profile.heightCm → "heightCm").
+const FIELD_UNITS: Record<string, string> = { heightCm: 'cm' };
+
 function prettifyEnumValue(v: string): string {
   // ALL_CAPS_WITH_UNDERSCORES → "All caps with underscores"
   if (/^[A-Z0-9_]+$/.test(v)) {
@@ -257,14 +275,18 @@ function prettifyEnumValue(v: string): string {
   return v;
 }
 
-function describeChange(prev: unknown, next: unknown): string | null {
+function describeChange(prev: unknown, next: unknown, unit?: string): string | null {
   const a = formatValue(prev);
   const b = formatValue(next);
   if (a == null && b == null) return null;
-  if (a == null) return `Set to ${b}`;
-  if (b == null) return `Was ${a}`;
+  // Append a unit (e.g. "cm") to real values so a height change reads
+  // "170 cm → 175 cm" instead of a bare number (TL-071). Skip the "—" placeholder.
+  const withUnit = (s: string | null) =>
+    unit && s != null && s !== '—' ? `${s} ${unit}` : (s ?? '');
+  if (a == null) return `Set to ${withUnit(b)}`;
+  if (b == null) return `Was ${withUnit(a)}`;
   if (a === b) return null;
-  return `${a} → ${b}`;
+  return `${withUnit(a)} → ${withUnit(b)}`;
 }
 
 function entriesFromLogs(
@@ -272,7 +294,7 @@ function entriesFromLogs(
   medById: Map<string, PatientMedication>,
 ): FeedEntry[] {
   return logs.map((l) => {
-    const chrome = VERIF_ICON[l.changeType] ?? { icon: <Edit3 className="w-3 h-3" />, color: 'var(--brand-text-muted)' };
+    let chrome = VERIF_ICON[l.changeType] ?? { icon: <Edit3 className="w-3 h-3" />, color: 'var(--brand-text-muted)' };
     const parsed = parseFieldPath(l.fieldPath);
     const med = parsed.medId ? medById.get(parsed.medId) : null;
     const drugName = med?.drugName ?? null;
@@ -280,10 +302,23 @@ function entriesFromLogs(
     let title: string;
     let body: string | undefined;
 
+    // ── Special case: enrollment re-gate (IVR-04). Read as "Enrollment
+    //    reverted" / "Patient enrolled" with the rationale below, rather than
+    //    "Enrollment corrected by admin". The flip is system-driven off a
+    //    condition change, so it gets its own alert/success chrome.
+    if (parsed.fieldKey === 'enrollmentStatus') {
+      const next = typeof l.newValue === 'string' ? l.newValue : '';
+      title = next === 'ENROLLED' ? 'Patient enrolled' : 'Enrollment reverted';
+      body = l.rationale ?? undefined;
+      chrome =
+        next === 'ENROLLED'
+          ? { icon: <ShieldCheck className="w-3 h-3" />, color: 'var(--brand-success-green)' }
+          : { icon: <ShieldAlert className="w-3 h-3" />, color: 'var(--brand-alert-red)' };
+    }
     // ── Special case: status changes — use the action as the headline so it
     //    reads "Lisinopril verified by admin" instead of "Verification
     //    status verified by admin".
-    if (parsed.fieldKey === 'verificationStatus') {
+    else if (parsed.fieldKey === 'verificationStatus') {
       const verb = verificationStatusVerb(l.previousValue, l.newValue);
       const subject =
         parsed.scope === 'medication'
@@ -319,7 +354,8 @@ function entriesFromLogs(
           ? `${drugName} · ${parsed.field}`
           : parsed.field;
       title = `${fieldLabel} ${verb}`;
-      body = describeChange(l.previousValue, l.newValue) ?? l.rationale ?? undefined;
+      const unit = parsed.fieldKey ? FIELD_UNITS[parsed.fieldKey] : undefined;
+      body = describeChange(l.previousValue, l.newValue, unit) ?? l.rationale ?? undefined;
     }
 
     // If we used the diff for body, surface the rationale on a third line
@@ -331,7 +367,9 @@ function entriesFromLogs(
     // when name is missing — e.g. self-served patient log without a name on
     // file). Suffix the drug name on medication-scoped events so the reader
     // can tell which med was changed without scanning IDs.
-    const roleLabel = l.changedByRole.toLowerCase();
+    const roleLabel = (l.changedByRoleResolved ?? l.changedByRole)
+      .replace(/_/g, ' ')
+      .toLowerCase();
     const who = l.changedByName
       ? `${l.changedByName} (${roleLabel})`
       : roleLabel;

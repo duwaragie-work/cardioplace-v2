@@ -24,11 +24,13 @@ import {
   ShieldAlert,
   AlertTriangle,
   Wand2,
+  Trash2,
 } from 'lucide-react';
 import {
   thresholdDefaultsFor,
   thresholdMandatory,
   upsertPatientThreshold,
+  deletePatientThreshold,
   type PatientProfile,
   type PatientThreshold,
   type UpsertThresholdPayload,
@@ -42,6 +44,12 @@ interface Props {
   threshold: PatientThreshold | null;
   loading: boolean;
   onChanged: () => void;
+  /** THR-REVIEW — a threshold-mandatory condition was added after these targets
+   *  were set, so they must be re-reviewed. Drives the review banner + the
+   *  "still correct" attest path; the shell locks the other tabs while true. */
+  reviewActive?: boolean;
+  /** Timestamp (ms) the triggering condition was added — shown in the banner. */
+  reviewConditionAt?: number | null;
 }
 
 interface FormState {
@@ -78,7 +86,10 @@ function thresholdToForm(t: PatientThreshold | null): FormState {
 }
 
 function formToPayload(f: FormState): UpsertThresholdPayload {
-  const num = (s: string) => (s.trim() === '' ? undefined : Number(s));
+  // THR-032 — an emptied field sends null (not undefined) so the backend
+  // actually clears that target. With undefined, Prisma's update ignored it and
+  // the old value stuck, so a cleared field never persisted.
+  const num = (s: string) => (s.trim() === '' ? null : Number(s));
   return {
     sbpUpperTarget: num(f.sbpUpperTarget),
     sbpLowerTarget: num(f.sbpLowerTarget),
@@ -90,17 +101,30 @@ function formToPayload(f: FormState): UpsertThresholdPayload {
   };
 }
 
-export default function ThresholdsTab({ patientId, profile, threshold, loading, onChanged }: Props) {
+export default function ThresholdsTab({
+  patientId,
+  profile,
+  threshold,
+  loading,
+  onChanged,
+  reviewActive = false,
+  reviewConditionAt = null,
+}: Props) {
   const { user } = useAuth();
-  // Editor (numeric inputs, defaults-apply, save button) only renders for
-  // SUPER_ADMIN + MEDICAL_DIRECTOR per CLINICAL_SPEC. Other admin roles
-  // get a clean read-only summary of the configured targets.
+  // Editor (numeric inputs, defaults-apply, save button) renders for the
+  // threshold-author roles (SUPER_ADMIN, MEDICAL_DIRECTOR, PROVIDER). Other
+  // admin roles get a clean read-only summary of the configured targets.
   const canEdit = canEditThresholds(user);
 
   const [form, setForm] = useState<FormState>(() => thresholdToForm(threshold));
   const [saving, setSaving] = useState(false);
+  const [attesting, setAttesting] = useState(false);
+  const [reviewNote, setReviewNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // THR-033 — two-step "Clear personalized targets" (delete) confirm.
+  const [clearing, setClearing] = useState(false);
+  const [confirmingClear, setConfirmingClear] = useState(false);
 
   // Sync the form when the underlying threshold (re)loads. Derived state
   // pattern is intentional here — the parent owns the canonical row and
@@ -114,6 +138,21 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
   const mandatory = useMemo(() => thresholdMandatory(profile), [profile]);
   const isMissingMandatory = mandatory && !threshold;
 
+  // Only surface a suggested default that isn't already entered — so the hint
+  // disappears once the clinician has applied it, instead of nagging forever.
+  const unappliedDefaults = useMemo(() => {
+    const out: { sbpLowerTarget?: number; dbpLowerTarget?: number } = {};
+    if (defaults.sbpLowerTarget != null && Number(form.sbpLowerTarget) !== defaults.sbpLowerTarget) {
+      out.sbpLowerTarget = defaults.sbpLowerTarget;
+    }
+    if (defaults.dbpLowerTarget != null && Number(form.dbpLowerTarget) !== defaults.dbpLowerTarget) {
+      out.dbpLowerTarget = defaults.dbpLowerTarget;
+    }
+    return out;
+  }, [defaults, form.sbpLowerTarget, form.dbpLowerTarget]);
+  const hasUnappliedDefaults =
+    unappliedDefaults.sbpLowerTarget != null || unappliedDefaults.dbpLowerTarget != null;
+
   const dirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(thresholdToForm(threshold)), [form, threshold]);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -124,8 +163,8 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
   function applyDefaults() {
     setForm((prev) => ({
       ...prev,
-      sbpLowerTarget: defaults.sbpLowerTarget != null ? String(defaults.sbpLowerTarget) : prev.sbpLowerTarget,
-      dbpLowerTarget: defaults.dbpLowerTarget != null ? String(defaults.dbpLowerTarget) : prev.dbpLowerTarget,
+      sbpLowerTarget: unappliedDefaults.sbpLowerTarget != null ? String(unappliedDefaults.sbpLowerTarget) : prev.sbpLowerTarget,
+      dbpLowerTarget: unappliedDefaults.dbpLowerTarget != null ? String(unappliedDefaults.dbpLowerTarget) : prev.dbpLowerTarget,
     }));
     setSuccess(null);
   }
@@ -149,6 +188,59 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
     }
   }
 
+  // THR-REVIEW attest path — clear the re-review gate without changing values
+  // when the existing targets are still clinically correct for the new
+  // condition. Re-saving the current values bumps setAt (so the gate's
+  // stale-check clears) and writes an ADMIN_THRESHOLD_UPDATE audit row; the
+  // review note is prepended to the clinical rationale so the audit captures
+  // why no change was made. Requires a note so the attestation is on record.
+  async function attestStillCorrect() {
+    setAttesting(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const existing = form.notes.trim();
+      const note = reviewNote.trim();
+      // Always stamp a dated attestation line so the audit captures that the
+      // targets were re-reviewed and kept — the custom note is optional.
+      const stamped = note
+        ? `[Re-reviewed ${new Date().toLocaleDateString()}] ${note}`
+        : `[Re-reviewed ${new Date().toLocaleDateString()}] Targets confirmed still correct.`;
+      await upsertPatientThreshold(
+        patientId,
+        { ...formToPayload(form), notes: existing ? `${stamped}\n${existing}` : stamped },
+        threshold ? 'update' : 'create',
+      );
+      setSuccess('Targets confirmed as still correct.');
+      setReviewNote('');
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not confirm targets.');
+    } finally {
+      setAttesting(false);
+    }
+  }
+
+  // THR-033 — clear the personalized threshold. The backend removes the row and
+  // (for a still-mandatory enrolled patient) reverts enrollment; onChanged()
+  // reloads so the editor empties and the mandatory banner / needs-threshold
+  // flag reappear when appropriate.
+  async function clearTargets() {
+    setClearing(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await deletePatientThreshold(patientId);
+      setConfirmingClear(false);
+      setSuccess('Personalized targets cleared.');
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not clear targets.');
+    } finally {
+      setClearing(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="bg-white rounded-2xl p-6 animate-pulse" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
@@ -164,6 +256,34 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
 
   return (
     <div className="space-y-4">
+      {/* THR-REVIEW — re-review gate banner (STALE case only: a threshold
+          exists but a mandatory condition was added OR removed after it was set).
+          The no-threshold case is covered by the red "Mandatory configuration
+          required" banner below. The shell locks the other tabs either way. */}
+      {reviewActive && threshold && (
+        <div
+          className="rounded-2xl p-4 flex items-start gap-3"
+          data-testid="admin-threshold-review-banner"
+          style={{
+            backgroundColor: 'var(--brand-alert-red-light)',
+            border: '1.5px solid var(--brand-alert-red)',
+          }}
+        >
+          <ShieldAlert className="w-5 h-5 shrink-0" style={{ color: 'var(--brand-alert-red-text)' }} />
+          <div>
+            <p className="text-[13px] font-bold" style={{ color: 'var(--brand-alert-red-text)' }}>
+              Threshold re-review required
+            </p>
+            <p className="text-[11.5px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+              A monitored condition (HFrEF / HCM / DCM) was added or removed
+              {reviewConditionAt ? ` on ${new Date(reviewConditionAt).toLocaleDateString()}` : ''}, after
+              these targets were set on {new Date(threshold.setAt).toLocaleDateString()}. Update the
+              targets, or confirm they&apos;re still correct below.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Mandatory red banner */}
       {isMissingMandatory && (
         <div
@@ -193,8 +313,10 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
         </div>
       )}
 
-      {/* Defaults hint — only shown for roles that can apply them. */}
-      {canEdit && (defaults.sbpLowerTarget != null || defaults.dbpLowerTarget != null) && (
+      {/* Defaults hint — only shown for roles that can apply them, and only
+          while a suggested value isn't already entered (so it stops nagging
+          once applied). */}
+      {canEdit && hasUnappliedDefaults && (
         <div
           className="rounded-2xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
           style={{
@@ -209,11 +331,12 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
                 Suggested defaults from clinical spec
               </p>
               <p className="text-[11.5px] mt-0.5" style={{ color: 'var(--brand-text-secondary)' }}>
-                {defaults.sbpLowerTarget != null && (
-                  <>SBP lower target {defaults.sbpLowerTarget} </>
+                {unappliedDefaults.sbpLowerTarget != null && (
+                  <>SBP lower target {unappliedDefaults.sbpLowerTarget} </>
                 )}
-                {defaults.dbpLowerTarget != null && (
-                  <>· DBP lower target {defaults.dbpLowerTarget}</>
+                {unappliedDefaults.sbpLowerTarget != null && unappliedDefaults.dbpLowerTarget != null && '· '}
+                {unappliedDefaults.dbpLowerTarget != null && (
+                  <>DBP lower target {unappliedDefaults.dbpLowerTarget}</>
                 )}
               </p>
             </div>
@@ -376,21 +499,53 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
         )}
 
         {/* Footer — text on the left can shrink/wrap in narrow widths while
-            the Save button stays a fixed size on the right with a real gap. */}
-        <div className="mt-5 flex items-center justify-between gap-3 sm:gap-4">
+            the action button stays a fixed size on the right with a real gap. */}
+        <div className="mt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           <p className="text-[11px] flex-1 min-w-0" style={{ color: 'var(--brand-text-muted)' }}>
-            All fields are optional except the mandatory configuration above.
+            {reviewActive && threshold
+              ? 'A condition changed — update the targets, or confirm they’re still correct below.'
+              : reviewActive
+                ? 'This patient needs personalized targets — set them below to continue.'
+                : 'All fields are optional except the mandatory configuration above.'}
           </p>
-          <button
-            type="button"
-            onClick={save}
-            disabled={saving || !dirty}
-            data-testid="admin-threshold-save"
-            className="btn-admin-primary shrink-0"
-          >
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-            {threshold ? 'Update targets' : 'Save targets'}
-          </button>
+          {/* THR-REVIEW: when the gate is active and nothing's been edited, the
+              clinician confirms the targets are still correct (with a required
+              note) — re-saving bumps setAt and clears the lock. Once they edit a
+              value the normal Update path takes over (enabled because dirty). */}
+          {reviewActive && threshold && !dirty ? (
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto shrink-0">
+              <input
+                type="text"
+                value={reviewNote}
+                onChange={(e) => setReviewNote(e.target.value)}
+                data-testid="admin-threshold-review-note"
+                placeholder="Review note (optional)"
+                className="px-3 h-9 rounded-lg text-[12.5px] outline-none"
+                style={{ border: '1px solid var(--brand-border)', minWidth: 220 }}
+              />
+              <button
+                type="button"
+                onClick={attestStillCorrect}
+                disabled={attesting}
+                data-testid="admin-threshold-attest"
+                className="btn-admin-secondary shrink-0"
+              >
+                {attesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldAlert className="w-3.5 h-3.5" />}
+                Targets still correct
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={save}
+              disabled={saving || !dirty}
+              data-testid="admin-threshold-save"
+              className="btn-admin-primary shrink-0"
+            >
+              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              {threshold ? 'Update targets' : 'Save targets'}
+            </button>
+          )}
         </div>
       </div>
       )}
@@ -424,6 +579,56 @@ export default function ThresholdsTab({ patientId, profile, threshold, loading, 
             <AlertTriangle className="w-2.5 h-2.5" />
             Full audit history of edits is in the Timeline tab.
           </p>
+
+          {/* THR-033 — clear the personalized threshold (two-step confirm).
+              Only for the threshold-author roles. Reverts the patient to the
+              standard table; a still-mandatory enrolled patient is dropped back
+              to NOT_ENROLLED by the backend cascade. */}
+          {canEdit && (
+            <div className="mt-4 pt-3" style={{ borderTop: '1px solid var(--brand-border)' }}>
+              {confirmingClear ? (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <span className="text-[12px] flex-1" style={{ color: 'var(--brand-alert-red-text)' }}>
+                    Clear these targets? The patient reverts to the standard
+                    table; if their condition still requires a threshold, their
+                    enrollment is paused.
+                  </span>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingClear(false)}
+                      disabled={clearing}
+                      className="btn-admin-secondary"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearTargets}
+                      disabled={clearing}
+                      data-testid="admin-threshold-clear-confirm"
+                      className="h-9 px-3 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-all hover:brightness-95 disabled:opacity-60"
+                      style={{ backgroundColor: 'var(--brand-alert-red)', color: 'white' }}
+                    >
+                      {clearing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                      Clear targets
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { setConfirmingClear(true); setSuccess(null); setError(null); }}
+                  data-testid="admin-threshold-clear"
+                  className="text-[12px] font-semibold inline-flex items-center gap-1.5 cursor-pointer hover:underline"
+                  style={{ color: 'var(--brand-alert-red-text)' }}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Clear personalized targets
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

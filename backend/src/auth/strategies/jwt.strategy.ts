@@ -4,6 +4,11 @@ import { PassportStrategy } from '@nestjs/passport'
 import type { Request } from 'express'
 import { ExtractJwt, Strategy } from 'passport-jwt'
 import { UserRole } from '../../generated/prisma/enums.js'
+import {
+  LEGACY_ACCESS_COOKIE,
+  cookieName,
+  deriveCookieScope,
+} from '../cookie-scope.js'
 
 export interface JwtPayload {
   sub: string
@@ -19,16 +24,22 @@ export interface JwtPayload {
 //
 // Cookies are app-scoped (`cp_patient_*` / `cp_admin_*`) to stop the patient
 // and admin apps polluting each other's session on a shared localhost host
-// (see auth/cookie-scope.ts). Auth is by JWT signature, not cookie name, so
-// accepting any of the candidate names — including the pre-fix unscoped
-// `access_token` — is safe and keeps legacy sessions working.
+// (see auth/cookie-scope.ts). Both cookies are sent on every request to the
+// shared backend, so we MUST pick the one scoped to the *requesting* app —
+// derived from the request Origin, exactly like the refresh/logout handlers.
+// A fixed precedence (e.g. patient-first) would mean an admin request with no
+// Bearer header (e.g. right after an admin reload, before the in-memory token
+// re-hydrates) reads the patient's cookie and authenticates as the patient →
+// "access denied" on admin-only routes. The pre-fix unscoped `access_token`
+// stays as a fallback so legacy sessions keep working. Bearer header still
+// takes precedence over this extractor.
 function fromAccessCookie(req: Request): string | null {
   const cookies = req?.cookies as Record<string, string> | undefined
   if (!cookies) return null
+  const scope = deriveCookieScope(req)
   return (
-    cookies['cp_patient_access_token'] ??
-    cookies['cp_admin_access_token'] ??
-    cookies['access_token'] ??
+    cookies[cookieName(scope, 'access')] ??
+    cookies[LEGACY_ACCESS_COOKIE] ??
     null
   )
 }

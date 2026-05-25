@@ -9,7 +9,11 @@ import {
   ActorUser,
   PatientAccessService,
 } from '../common/patient-access.service.js'
-import { EnrollmentStatus } from '../generated/prisma/client.js'
+import {
+  EnrollmentStatus,
+  VerifierRole,
+  VerificationChangeType,
+} from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
 import { canCompleteEnrollment } from './enrollment-gate.js'
@@ -64,14 +68,31 @@ export class EnrollmentService {
     // Cluster 8 — stamp enrolledAt on the first ENROLLED transition. The
     // idempotent early-return above means this only runs on the real flip;
     // drives the Q2 CAD-ramp "newly enrolled" check + Q3 first-month nudge.
-    const updated = await this.prisma.user.update({
-      where: { id: patientUserId },
-      data: {
-        enrollmentStatus: EnrollmentStatus.ENROLLED,
-        enrolledAt: new Date(),
-      },
-      select: { id: true, enrollmentStatus: true },
-    })
+    // Atomic with the audit row so the Timeline always reflects the activation
+    // (manual enroll previously wrote NO log, so it was absent from the
+    // Timeline while the IVR-04 auto revert/restore rows showed — inconsistent).
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: patientUserId },
+        data: {
+          enrollmentStatus: EnrollmentStatus.ENROLLED,
+          enrolledAt: new Date(),
+        },
+        select: { id: true, enrollmentStatus: true },
+      }),
+      this.prisma.profileVerificationLog.create({
+        data: {
+          userId: patientUserId,
+          fieldPath: 'user.enrollmentStatus',
+          previousValue: user.enrollmentStatus,
+          newValue: EnrollmentStatus.ENROLLED,
+          changedBy: actor.id,
+          changedByRole: VerifierRole.ADMIN,
+          changeType: VerificationChangeType.ADMIN_VERIFY,
+          rationale: 'Enrollment completed by admin.',
+        },
+      }),
+    ])
 
     // Catch-up: alerts that fired while this patient was un-enrolled were
     // deferred (DeviationAlert row written, no EscalationEvent). Now that
@@ -111,6 +132,133 @@ export class EnrollmentService {
       statusCode: 200,
       message: result.ok ? 'Ready to enroll' : 'Prerequisites missing',
       data: result,
+    }
+  }
+
+  /**
+   * IVR-04 completion — auto-restore enrollment for a patient who was
+   * previously enrolled and then AUTO-REVERTED (a serious condition added
+   * without a threshold), once the blocking prerequisite is resolved. Called
+   * after a threshold is saved.
+   *
+   * A re-enroll is distinguished from a first-time enroll by the most recent
+   * `user.enrollmentStatus` audit row being a revert to NOT_ENROLLED — the only
+   * way an enrolled patient lands in NOT_ENROLLED. A never-enrolled patient has
+   * no such log, so first-time enrollment stays a deliberate manual decision.
+   * (We do NOT key off `enrolledAt`: the seed marks patients ENROLLED without
+   * stamping it, so that signal misses every seeded patient.)
+   *
+   * Best-effort: never throws — on failure the patient stays NOT_ENROLLED and
+   * the admin can enroll manually. Returns true when it re-enrolled.
+   */
+  async autoReEnrollIfGateCleared(
+    actor: ActorUser,
+    patientUserId: string,
+  ): Promise<boolean> {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: patientUserId },
+        select: { enrollmentStatus: true },
+      })
+      if (!user || user.enrollmentStatus === EnrollmentStatus.ENROLLED) {
+        return false
+      }
+
+      // Was this NOT_ENROLLED reached via a revert (vs. never enrolled)?
+      const lastEnroll = await this.prisma.profileVerificationLog.findFirst({
+        where: { userId: patientUserId, fieldPath: 'user.enrollmentStatus' },
+        orderBy: { createdAt: 'desc' },
+        select: { newValue: true },
+      })
+      if (lastEnroll?.newValue !== EnrollmentStatus.NOT_ENROLLED) return false
+
+      const gate = await canCompleteEnrollment(this.prisma, patientUserId)
+      if (!gate.ok) return false
+
+      await this.prisma.user.update({
+        where: { id: patientUserId },
+        data: { enrollmentStatus: EnrollmentStatus.ENROLLED },
+      })
+      await this.prisma.profileVerificationLog.create({
+        data: {
+          userId: patientUserId,
+          fieldPath: 'user.enrollmentStatus',
+          previousValue: EnrollmentStatus.NOT_ENROLLED,
+          newValue: EnrollmentStatus.ENROLLED,
+          changedBy: actor.id,
+          changedByRole: VerifierRole.ADMIN,
+          changeType: VerificationChangeType.ADMIN_CORRECT,
+          rationale:
+            'Enrollment auto-restored — re-enrollment gate cleared after the blocking prerequisite was configured.',
+        },
+      })
+
+      // Re-fire T+0 for alerts deferred while the patient was un-enrolled.
+      try {
+        await this.escalation.dispatchDeferredForUser(patientUserId)
+      } catch (err) {
+        this.logger.error(
+          `Auto re-enroll catch-up dispatch failed for ${patientUserId}`,
+          err instanceof Error ? err.stack : err,
+        )
+      }
+      return true
+    } catch (err) {
+      this.logger.error(
+        `Auto re-enroll failed for ${patientUserId}`,
+        err instanceof Error ? err.stack : err,
+      )
+      return false
+    }
+  }
+
+  /**
+   * IVR-04 sibling for threshold DELETE — removing a personalized threshold from
+   * a patient whose condition REQUIRES one (HFrEF/HCM/DCM, CLINICAL_SPEC §4.2)
+   * must drop an ENROLLED patient back to NOT_ENROLLED. Only reverts when the
+   * gap is specifically the missing threshold, so unrelated prerequisites don't
+   * cause a surprise revert. Best-effort: never throws. Returns true on revert.
+   */
+  async revertIfThresholdGap(
+    actor: ActorUser,
+    patientUserId: string,
+  ): Promise<boolean> {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: patientUserId },
+        select: { enrollmentStatus: true },
+      })
+      if (!user || user.enrollmentStatus !== EnrollmentStatus.ENROLLED) {
+        return false
+      }
+      const gate = await canCompleteEnrollment(this.prisma, patientUserId)
+      if (gate.ok || !gate.reasons.includes('threshold-required-for-condition')) {
+        return false
+      }
+      await this.prisma.user.update({
+        where: { id: patientUserId },
+        data: { enrollmentStatus: EnrollmentStatus.NOT_ENROLLED },
+      })
+      await this.prisma.profileVerificationLog.create({
+        data: {
+          userId: patientUserId,
+          fieldPath: 'user.enrollmentStatus',
+          previousValue: EnrollmentStatus.ENROLLED,
+          newValue: EnrollmentStatus.NOT_ENROLLED,
+          changedBy: actor.id,
+          changedByRole: VerifierRole.ADMIN,
+          changeType: VerificationChangeType.ADMIN_CORRECT,
+          rationale:
+            'Enrollment reverted — personalized threshold removed for a condition that requires one.',
+        },
+      })
+      return true
+    } catch (err) {
+      this.logger.error(
+        `Threshold-gap enrollment revert failed for ${patientUserId}`,
+        err instanceof Error ? err.stack : err,
+      )
+      return false
     }
   }
 }

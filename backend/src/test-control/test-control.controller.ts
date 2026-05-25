@@ -276,6 +276,31 @@ export class TestControlController {
     return this.svc.clearUserMedications(body.userId)
   }
 
+  // THR-REVIEW / IVR-04 E2E setup — delete a user's threshold so the
+  // "no threshold" branches (enrollment revert + missing-threshold lock) are
+  // reachable deterministically across re-runs.
+  @Post('reset/user-threshold')
+  @HttpCode(200)
+  async clearPatientThreshold(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.clearPatientThreshold(body.userId)
+  }
+
+  // THR-REVIEW E2E setup — clear ProfileVerificationLog rows so the Timeline +
+  // the stale-condition lock detector start clean.
+  @Post('reset/user-profile-logs')
+  @HttpCode(200)
+  async clearProfileVerificationLogs(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.clearProfileVerificationLogs(body.userId)
+  }
+
   @Post('user/set-enrollment')
   @HttpCode(200)
   async setEnrollment(

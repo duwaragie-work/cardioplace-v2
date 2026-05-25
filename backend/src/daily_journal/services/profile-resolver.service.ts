@@ -97,13 +97,21 @@ export class ProfileResolverService {
   /**
    * Splits active meds into:
    *  - contextMeds: known drug class, not rejected — engine considers for alerts
-   *  - excludedMeds: OTHER_UNVERIFIED / voice / photo unverified / rejected —
+   *  - excludedMeds: OTHER_UNVERIFIED / unreviewed voice / photo / rejected —
    *    retained only for provider reconciliation (phase/12)
    *
    * Known-class UNVERIFIED meds stay in contextMeds so suppression logic
    * (beta-blocker HR 50–60) applies. Contraindications respect verification
    * status except the safety-critical ACE/ARB + pregnancy pair — the engine
    * checks `triggerPregnancyContraindicationCheck` for that case.
+   *
+   * Voice/photo-captured meds are held out of the engine until a provider
+   * VERIFIES them — the speech/OCR input itself may be misread, so they
+   * must not drive automated alerts on the strength of an unconfirmed
+   * capture (CLINICAL_SPEC §V2-A Step 3; intake.service.ts:247-253). They
+   * are created as AWAITING_PROVIDER but a later edit can leave them
+   * UNVERIFIED, so the gate is "voice/photo AND not VERIFIED" rather than a
+   * single status check (RESOLVER-AWAIT fix, 2026-05-21).
    */
   private splitMedications(
     meds: Array<{
@@ -137,11 +145,14 @@ export class ProfileResolverService {
 
       const isRejected = normalised.verificationStatus === 'REJECTED'
       const isOtherUnverified = normalised.drugClass === 'OTHER_UNVERIFIED'
-      const isUnverifiedVoiceOrPhoto =
-        normalised.verificationStatus === 'UNVERIFIED' &&
+      // Voice/photo meds are excluded until a provider VERIFIES them. They are
+      // persisted as AWAITING_PROVIDER (not UNVERIFIED), so keying off any
+      // single status would miss them — gate on "not VERIFIED" instead.
+      const isUnreviewedVoiceOrPhoto =
+        normalised.verificationStatus !== 'VERIFIED' &&
         (normalised.source === 'PATIENT_VOICE' || normalised.source === 'PATIENT_PHOTO')
 
-      if (isRejected || isOtherUnverified || isUnverifiedVoiceOrPhoto) {
+      if (isRejected || isOtherUnverified || isUnreviewedVoiceOrPhoto) {
         excludedMeds.push(normalised)
       } else {
         contextMeds.push(normalised)

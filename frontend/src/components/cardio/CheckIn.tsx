@@ -66,12 +66,13 @@ import {
   listMyMedications,
   type PatientMedication,
 } from '@/lib/services/patient-medications.service';
-import { getBMI, SESSION_WINDOW_MS, SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared';
+import { getBMI, JOURNAL_NOTE_MAX_LENGTH, SESSION_WINDOW_MS, SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared';
 import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
 import BpPhotoButton from '@/components/intake/BpPhotoButton';
 import ChoiceCard from '@/components/intake/ChoiceCard';
 import StepDots from '@/components/intake/StepDots';
+import SymptomTagInput from '@/components/intake/SymptomTagInput';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -148,7 +149,10 @@ interface FormData {
   // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
   faceSwelling: boolean;
   throatTightness: boolean;
-  otherSymptomsText: string;
+  // Patient-typed custom symptoms (chips) → JournalEntry.otherSymptoms.
+  otherSymptomsList: string[];
+  // Free-text note → JournalEntry.notes.
+  notes: string;
 }
 
 interface SessionReading {
@@ -213,7 +217,8 @@ function emptyForm(): FormData {
     dryCough: false,
     faceSwelling: false,
     throatTightness: false,
-    otherSymptomsText: '',
+    otherSymptomsList: [],
+    notes: '',
   };
 }
 
@@ -235,10 +240,11 @@ function weightBounds(unit: 'lbs' | 'kg'): { min: number; max: number } {
     : { min: WEIGHT_MIN_KG, max: WEIGHT_MAX_KG };
 }
 
-// Max length for the free-text "Anything else?" note (B3). The backend column
-// is unbounded text, so this is the only guard against an oversized note. Both
+// Max length for the free-text "Notes" field (B3). Mirrors the backend
+// @MaxLength(JOURNAL_NOTE_MAX_LENGTH) guard via the shared constant so the
+// client clamp/counter and the server validation can never drift apart. Both
 // input paths (typing + voice dictation) clamp to it.
-const OTHER_SYMPTOMS_MAX = 500;
+const NOTE_MAX = JOURNAL_NOTE_MAX_LENGTH;
 
 /** True when the patient has entered anything worth keeping as a draft, so a
  *  pristine first-paint form never creates a resume prompt. */
@@ -257,7 +263,7 @@ function hasCheckinProgress(form: FormData, step: StepKey): boolean {
     form.newOnsetHeadache || form.ruqPain || form.edema || form.dizziness ||
     form.syncope || form.palpitations || form.legSwelling || form.fatigue ||
     form.shortnessOfBreath || form.dryCough || form.faceSwelling || form.throatTightness ||
-    form.otherSymptomsText.trim() !== '';
+    form.otherSymptomsList.length > 0 || form.notes.trim() !== '';
   return Boolean(checklist || reading || weight || meds || symptoms);
 }
 
@@ -1278,20 +1284,34 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
         )}
       </AnimatePresence>
 
+      {/* Custom symptoms — patient types anything not covered by the buttons
+          above; Enter / Add makes a chip they can edit or remove. Stored in
+          JournalEntry.otherSymptoms. */}
+      <SymptomTagInput
+        value={form.otherSymptomsList}
+        onChange={(next) => setField('otherSymptomsList', next)}
+        inputId="checkin-other-symptoms-input"
+        label={t('checkin.b3.otherSymptomsLabel')}
+        placeholder={t('checkin.b3.otherPlaceholder')}
+        addLabel={t('checkin.b3.addSymptom')}
+        removeLabel={t('checkin.b3.removeSymptom')}
+        editLabel={t('common.edit')}
+        testIdPrefix="checkin-other-symptoms"
+      />
+
+      {/* Notes — free-text note → JournalEntry.notes. Optional, bounded, with
+          voice dictation + a live character counter. */}
       <div>
         <div className="flex items-center justify-between gap-2 mb-2">
           <label htmlFor="checkin-other-symptoms" className="block text-[13px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-            {t('checkin.b3.otherLabel')}
+            {t('checkin.b3.notesLabel')}
           </label>
           <MicButton
             inputId="checkin-other-symptoms"
             onTranscript={(text) =>
               setField(
-                'otherSymptomsText',
-                (form.otherSymptomsText
-                  ? `${form.otherSymptomsText} ${text}`.trim()
-                  : text
-                ).slice(0, OTHER_SYMPTOMS_MAX),
+                'notes',
+                (form.notes ? `${form.notes} ${text}`.trim() : text).slice(0, NOTE_MAX),
               )
             }
           />
@@ -1300,11 +1320,11 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
           id="checkin-other-symptoms"
           data-testid="checkin-other-symptoms"
           rows={3}
-          maxLength={OTHER_SYMPTOMS_MAX}
-          value={form.otherSymptomsText}
-          onChange={(e) => setField('otherSymptomsText', e.target.value.slice(0, OTHER_SYMPTOMS_MAX))}
-          placeholder={t('checkin.b3.otherPlaceholder')}
-          aria-describedby="checkin-other-symptoms-count"
+          maxLength={NOTE_MAX}
+          value={form.notes}
+          onChange={(e) => setField('notes', e.target.value.slice(0, NOTE_MAX))}
+          placeholder={t('readings.notesPlaceholder')}
+          aria-describedby="checkin-notes-count"
           className="w-full rounded-xl px-4 py-3 text-[13px] resize-none outline-none transition"
           style={{
             border: '2px solid var(--brand-border)',
@@ -1313,16 +1333,16 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
           }}
         />
         <p
-          id="checkin-other-symptoms-count"
+          id="checkin-notes-count"
           className="mt-1 text-[11px] text-right tabular-nums"
           style={{
             color:
-              form.otherSymptomsText.length >= OTHER_SYMPTOMS_MAX
+              form.notes.length >= NOTE_MAX
                 ? 'var(--brand-alert-red-text)'
                 : 'var(--brand-text-muted)',
           }}
         >
-          {form.otherSymptomsText.length}/{OTHER_SYMPTOMS_MAX}
+          {form.notes.length}/{NOTE_MAX}
         </p>
       </div>
     </div>
@@ -1905,6 +1925,21 @@ export default function CheckIn() {
         reason: e.state.reason as NonNullable<MedicationEntry['reason']>,
         missedDoses: e.state.missedDoses,
       }));
+    // Per-med status snapshot for EVERY answered med so the edit/detail views
+    // can reconstruct each med's exact answer (yes / no / not due yet) — the
+    // aggregate flags alone can't disambiguate a mixed answer set.
+    const medicationStatuses = medEntries
+      .filter((e) => e.state.taken !== null)
+      .map((e) => ({
+        medicationId: e.med.id,
+        drugName: e.med.drugName,
+        drugClass: e.med.drugClass,
+        taken: e.state.taken as 'yes' | 'no' | 'scheduledLater',
+        ...(e.state.taken === 'no' && e.state.reason
+          ? { reason: e.state.reason }
+          : {}),
+        ...(e.state.taken === 'no' ? { missedDoses: e.state.missedDoses } : {}),
+      }));
 
     setSubmitting(true);
     try {
@@ -1922,6 +1957,7 @@ export default function CheckIn() {
         medicationTaken,
         medicationScheduledLater: medicationScheduledLater ? true : undefined,
         missedMedications: missedMedications.length > 0 ? missedMedications : undefined,
+        medicationStatuses: medicationStatuses.length > 0 ? medicationStatuses : undefined,
         severeHeadache: form.severeHeadache,
         visualChanges: form.visualChanges,
         alteredMentalStatus: form.alteredMentalStatus,
@@ -1943,7 +1979,9 @@ export default function CheckIn() {
         // Cluster 8 — ACE-angioedema airway-emergency flags.
         faceSwelling: form.faceSwelling,
         throatTightness: form.throatTightness,
-        otherSymptoms: form.otherSymptomsText.trim() ? [form.otherSymptomsText.trim()] : undefined,
+        // Patient-typed custom symptom chips → otherSymptoms; free-text → notes.
+        otherSymptoms: form.otherSymptomsList.length ? form.otherSymptomsList : undefined,
+        notes: form.notes.trim() ? form.notes.trim() : undefined,
       });
 
       // Reading saved — drop the draft so the patient isn't prompted to resume

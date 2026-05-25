@@ -28,7 +28,9 @@ import {
 } from '@/lib/services/patient-detail.service';
 import { useAuth } from '@/lib/auth-context';
 import { canVerifyMedications } from '@/lib/roleGates';
+import { matchToCatalog } from '@cardioplace/shared';
 import MedicationRejectModal from './MedicationRejectModal';
+import MedicationHoldModal from './MedicationHoldModal';
 
 interface Props {
   medications: PatientMedication[];
@@ -60,29 +62,29 @@ function tier3DrugClassFor(ruleId: string | null | undefined): string | null {
   }
 }
 
-// PENDING_PROVIDER_ENTRY = patient self-reported a med but no provider
-// prescription record exists yet. Per CLINICAL_SPEC V2-F Priority 3 #25
-// the provider-side prescription entry workflow is deferred to post-MVP,
-// so during MVP this state is unactionable from the admin UI. We surface
-// it as informational instead of as an amber DISCREPANCY warning to
-// avoid showing "Action required" prompts the admin can't fulfill.
-//
-// DISCREPANCY = a true mismatch the admin CAN act on today (prescribed
-// but not patient-reported, or frequency mismatch between sides).
-type ReconStatus =
-  | 'MATCHED'
-  | 'DISCREPANCY'
-  | 'PENDING_PROVIDER_ENTRY'
-  | 'UNVERIFIED'
-  | 'DISCONTINUED'
-  | 'REJECTED';
-
-interface ReconRow {
+// MVP single-column reconciliation (MEDREC-COL decision b). The provider-entry
+// workflow (CLINICAL_SPEC V2-C Layer 2 / V2-F #25) is deferred post-MVP, so the
+// side-by-side "provider-verified" column was dropped — every med shown here is
+// patient-sourced. Each group lists ACTIVE meds prominently and collapses
+// rejected/discontinued rows into a "view history" disclosure (IVR-20). A drug
+// that was rejected and then re-reported by the patient is flagged on its
+// active card (IVR-19).
+interface MedGroupRow {
   drugClassKey: string;
   drugClassLabel: string;
-  patientReported: PatientMedication[];
-  providerEntered: PatientMedication[];
-  status: ReconStatus;
+  active: PatientMedication[];
+  history: PatientMedication[];
+  /** Canonical catalog keys that are active now AND were previously rejected.
+   *  Keyed by catalog id (brand+generic resolved) so "Coreg" matches a
+   *  rejected "Carvedilol" — see canonicalMedKey. */
+  reAddedKeys: Set<string>;
+}
+
+// Canonical identity for a med name — resolves brand↔generic to one catalog id
+// so the re-added indicator (IVR-19/20) recognizes "Coreg" and "Carvedilol" as
+// the same drug. Falls back to the normalized name for freeform meds.
+function canonicalMedKey(drugName: string): string {
+  return matchToCatalog(drugName)?.catalogId ?? drugName.trim().toLowerCase();
 }
 
 const DRUG_CLASS_LABELS: Record<string, string> = {
@@ -111,10 +113,6 @@ const FREQ_LABELS: Record<string, string> = {
   UNSURE: 'Unsure',
 };
 
-function isPatientSourced(m: PatientMedication): boolean {
-  return m.source !== 'PROVIDER_ENTERED';
-}
-
 export default function MedicationsTab({ medications, loading, onChanged, alerts }: Props) {
   const { user } = useAuth();
   // Verify / reject / hold buttons render only for the clinical-verifier
@@ -124,6 +122,7 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<PatientMedication | null>(null);
+  const [holding, setHolding] = useState<PatientMedication | null>(null);
 
   // Open Tier 3 alerts grouped by the drug class they relate to. Lets
   // each row pick up its informational notes in O(1).
@@ -142,8 +141,10 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
     return map;
   }, [alerts]);
 
-  // Group by drugClass and split patient-reported vs provider-entered.
-  const rows: ReconRow[] = useMemo(() => {
+  // Group by drugClass; within each group separate active meds from
+  // rejected/discontinued history, and flag re-added (previously rejected)
+  // drugs for the IVR-19 indicator.
+  const rows: MedGroupRow[] = useMemo(() => {
     const groups = new Map<string, PatientMedication[]>();
     for (const m of medications) {
       const arr = groups.get(m.drugClass) ?? [];
@@ -151,33 +152,27 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
       groups.set(m.drugClass, arr);
     }
     return Array.from(groups.entries()).map(([drugClass, meds]) => {
-      const patientReported = meds.filter(isPatientSourced);
-      const providerEntered = meds.filter((m) => !isPatientSourced(m));
-      const allDiscontinued = meds.every((m) => m.discontinuedAt != null);
-      const anyRejected = meds.some((m) => m.verificationStatus === 'REJECTED');
-      let status: ReconStatus;
-      if (allDiscontinued) status = 'DISCONTINUED';
-      else if (anyRejected) status = 'REJECTED';
-      else if (providerEntered.length > 0 && patientReported.length > 0) status = 'MATCHED';
-      // Prescribed but no patient self-report → real discrepancy (potential
-      // non-adherence). Admin can verify or reject the existing prescription.
-      else if (providerEntered.length > 0 && patientReported.length === 0) status = 'DISCREPANCY';
-      // Patient-reported but no prescription on file → unactionable until
-      // the provider-entry workflow ships (CLINICAL_SPEC V2-C Layer 2 /
-      // V2-F #25). Surface as informational, not as a warning.
-      else if (patientReported.length > 0 && providerEntered.length === 0) status = 'PENDING_PROVIDER_ENTRY';
-      else status = 'UNVERIFIED';
-      // Within MATCHED, downgrade to DISCREPANCY if frequencies don't align.
-      if (status === 'MATCHED') {
-        const freqs = new Set(meds.map((m) => m.frequency));
-        if (freqs.size > 1) status = 'DISCREPANCY';
-      }
+      const rejected = meds.filter((m) => m.verificationStatus === 'REJECTED');
+      const active = meds.filter(
+        (m) => m.verificationStatus !== 'REJECTED' && m.discontinuedAt == null,
+      );
+      const discontinued = meds.filter(
+        (m) => m.verificationStatus !== 'REJECTED' && m.discontinuedAt != null,
+      );
+      const rejectedKeys = new Set(rejected.map((m) => canonicalMedKey(m.drugName)));
+      const reAddedKeys = new Set(
+        active
+          .map((m) => canonicalMedKey(m.drugName))
+          .filter((key) => rejectedKeys.has(key)),
+      );
       return {
         drugClassKey: drugClass,
         drugClassLabel: DRUG_CLASS_LABELS[drugClass] ?? drugClass,
-        patientReported,
-        providerEntered,
-        status,
+        active,
+        // Rejected first (the IVR-20 "previously rejected" case), then plain
+        // discontinued history.
+        history: [...rejected, ...discontinued],
+        reAddedKeys,
       };
     });
   }, [medications]);
@@ -186,28 +181,19 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
     // No-op when the chosen status already matches — prevents accidental
     // duplicate timeline entries from a second click on the active button.
     if (med.verificationStatus === status) return;
-    // Reject requires a rationale (backend mandates it). Collect it via
-    // the modal first; the modal calls verifyMedication itself on submit.
+    // Reject + Hold both require a rationale (backend mandates it). Collect it
+    // via a modal first; the modal calls verifyMedication itself on submit.
+    // Hold additionally triggers the systemMsgMedicationHold patient
+    // notification server-side (CLINICAL_SPEC §14.2).
     if (status === 'REJECTED') {
       setError(null);
       setRejecting(med);
       return;
     }
-    // Cluster 7 A.7 — HOLD also requires a rationale; admin enters it via a
-    // prompt so the patient notification can carry context-free wording while
-    // the audit log captures the why.
-    let rationale: string | undefined;
     if (status === 'HOLD') {
-      const reason = typeof window !== 'undefined'
-        ? window.prompt(`Why is ${med.drugName} being placed on hold?`)
-        : null;
-      if (reason == null) return;
-      const trimmed = reason.trim();
-      if (trimmed.length === 0) {
-        setError('A reason is required to place a medication on hold.');
-        return;
-      }
-      rationale = trimmed;
+      setError(null);
+      setHolding(med);
+      return;
     }
     setSavingId(med.id);
     setError(null);
@@ -215,7 +201,6 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
       await verifyMedication(
         med.id,
         status as 'VERIFIED' | 'AWAITING_PROVIDER' | 'HOLD',
-        rationale,
       );
       onChanged();
     } catch (e) {
@@ -264,26 +249,25 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
       )}
 
       {rows.map((row) => {
-        const chrome = statusChrome(row.status);
         const tier3Notes = tier3ByDrugClass.get(row.drugClassKey) ?? [];
         return (
           <div key={row.drugClassKey} className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }} data-testid={`admin-med-group-${row.drugClassKey}`}>
-            {/* Row header */}
+            {/* Group header */}
             <div className="px-5 py-3 flex items-center justify-between gap-3 flex-wrap" style={{ borderBottom: '1px solid var(--brand-border)' }}>
               <div className="flex items-center gap-2.5 min-w-0">
                 <div
                   className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-white"
-                  style={{ backgroundColor: chrome.color }}
+                  style={{ backgroundColor: 'var(--brand-primary-purple)' }}
                   aria-hidden
                 >
-                  {chrome.icon}
+                  <Pill className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-[13px] font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>
                     {row.drugClassLabel}
                   </p>
                   <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
-                    {row.patientReported.length} patient-reported · {row.providerEntered.length} provider-verified
+                    {row.active.length} active{row.history.length > 0 ? ` · ${row.history.length} in history` : ''}
                   </p>
                 </div>
               </div>
@@ -306,111 +290,70 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
                     Note
                   </span>
                 ))}
-                <span
-                  className="inline-flex items-center gap-1 text-[10.5px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full"
-                  style={{ backgroundColor: chrome.bg, color: chrome.color }}
-                >
-                  {chrome.icon}
-                  {chrome.label}
-                </span>
               </div>
             </div>
 
-            {/* Side-by-side body */}
-            <div className="grid grid-cols-1 md:grid-cols-2">
-              {/* Left: patient-reported */}
-              <div
-                className="p-4 md:p-5"
-                style={{
-                  borderRight: '1px solid var(--brand-border)',
-                }}
-              >
-                <p className="text-[10px] font-bold uppercase tracking-wider mb-2.5" style={{ color: 'var(--brand-text-muted)' }}>
-                  Patient-reported
+            {/* Active meds — single column (MEDREC-COL b) */}
+            <div className="p-4 md:p-5 space-y-2">
+              {row.active.length === 0 ? (
+                <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
+                  No active medications in this class.
                 </p>
-                {row.patientReported.length === 0 ? (
-                  <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
-                    Patient did not report this medication.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {row.patientReported.map((m) => (
+              ) : (
+                row.active.map((m) => {
+                  const reAdded = row.reAddedKeys.has(canonicalMedKey(m.drugName));
+                  return (
+                    <div key={m.id} className="space-y-1.5">
                       <MedCard
-                        key={m.id}
                         med={m}
                         savingId={savingId}
                         onSetStatus={setMedicationStatus}
                         side="patient"
                         canVerify={canVerify}
                       />
-                    ))}
-                  </div>
-                )}
-              </div>
-              {/* Right: provider-verified */}
-              <div className="p-4 md:p-5">
-                <p className="text-[10px] font-bold uppercase tracking-wider mb-2.5" style={{ color: 'var(--brand-text-muted)' }}>
-                  Provider-verified
-                </p>
-                {row.providerEntered.length === 0 ? (
-                  <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
-                    No provider-entered prescription on file.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {row.providerEntered.map((m) => (
-                      <MedCard
-                        key={m.id}
-                        med={m}
-                        savingId={savingId}
-                        onSetStatus={setMedicationStatus}
-                        side="provider"
-                        canVerify={canVerify}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
+                      {/* IVR-19 — this drug was previously rejected, then the
+                          patient re-reported it. Flag it for re-review. */}
+                      {reAdded && (
+                        <div
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg"
+                          style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}
+                          data-testid={`admin-med-readded-${m.id}`}
+                        >
+                          <AlertTriangle className="w-3 h-3 shrink-0" style={{ color: 'var(--brand-warning-amber-text)' }} />
+                          <p className="text-[11px] font-semibold" style={{ color: 'var(--brand-warning-amber-text)' }}>
+                            Rejected by provider · patient re-added — please re-review.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
 
-            {/* True discrepancy — admin can act on this from the existing UI
-                (verify or reject the prescription / patient row). Keep the
-                amber warning + "Action required" prompt. */}
-            {row.status === 'DISCREPANCY' && (
-              <div
-                className="px-5 py-2.5 flex items-center gap-2"
-                style={{
-                  backgroundColor: 'var(--brand-warning-amber-light)',
-                  borderTop: '1px solid var(--brand-border)',
-                }}
-              >
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-warning-amber-text)' }} />
-                <p className="text-[11.5px] font-semibold" style={{ color: 'var(--brand-warning-amber-text)' }}>
-                  Action required — confirm or reject the entry to reconcile this medication.
-                </p>
-              </div>
-            )}
-
-            {/* Pending provider entry — the patient self-report side is
-                fully verifiable today, but the right-hand prescription
-                column needs the provider-entry workflow (CLINICAL_SPEC
-                V2-C Layer 2 / V2-F #25 — deferred to post-MVP). Shown as
-                a quiet info note so the admin knows the system knows; no
-                "Action required" because there's nothing the admin can
-                do about it from MVP UI. */}
-            {row.status === 'PENDING_PROVIDER_ENTRY' && (
-              <div
-                className="px-5 py-2.5 flex items-center gap-2"
-                style={{
-                  backgroundColor: 'var(--brand-background)',
-                  borderTop: '1px solid var(--brand-border)',
-                }}
-              >
-                <ClockIcon className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-text-muted)' }} />
-                <p className="text-[11.5px]" style={{ color: 'var(--brand-text-muted)' }}>
-                  Pending provider entry — the prescription record will be added once provider entry is enabled.
-                </p>
-              </div>
+            {/* Rejected / discontinued history, collapsed (IVR-20) */}
+            {row.history.length > 0 && (
+              <details style={{ borderTop: '1px solid var(--brand-border)' }}>
+                <summary
+                  className="px-5 py-2.5 text-[11.5px] font-semibold cursor-pointer select-none"
+                  style={{ color: 'var(--brand-text-muted)' }}
+                  data-testid={`admin-med-history-${row.drugClassKey}`}
+                >
+                  Previously rejected / discontinued — view history ({row.history.length})
+                </summary>
+                <div className="px-4 md:px-5 pb-4 space-y-2">
+                  {row.history.map((m) => (
+                    <MedCard
+                      key={m.id}
+                      med={m}
+                      savingId={savingId}
+                      onSetStatus={setMedicationStatus}
+                      side="patient"
+                      canVerify={false}
+                    />
+                  ))}
+                </div>
+              </details>
             )}
           </div>
         );
@@ -422,65 +365,14 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
         onClose={() => setRejecting(null)}
         onConfirmed={() => onChanged()}
       />
+      <MedicationHoldModal
+        med={holding}
+        open={holding != null}
+        onClose={() => setHolding(null)}
+        onConfirmed={() => onChanged()}
+      />
     </div>
   );
-}
-
-function statusChrome(status: ReconStatus): {
-  label: string;
-  bg: string;
-  color: string;
-  icon: React.ReactNode;
-} {
-  switch (status) {
-    case 'MATCHED':
-      return {
-        label: 'Matched',
-        bg: 'var(--brand-success-green-light)',
-        color: 'var(--brand-success-green)',
-        icon: <Check className="w-3 h-3" />,
-      };
-    case 'DISCREPANCY':
-      return {
-        label: 'Discrepancy',
-        bg: 'var(--brand-warning-amber-light)',
-        color: 'var(--brand-warning-amber-text)',
-        icon: <AlertTriangle className="w-3 h-3" />,
-      };
-    case 'PENDING_PROVIDER_ENTRY':
-      // Neutral / informational — provider-entry workflow ships post-MVP,
-      // so this is "waiting on a feature" rather than "waiting on the
-      // admin". Tinted in the brand-neutral palette so the row doesn't
-      // compete visually with rows that DO need attention.
-      return {
-        label: 'Patient-reported',
-        bg: 'var(--brand-background)',
-        color: 'var(--brand-text-secondary)',
-        icon: <ClockIcon className="w-3 h-3" />,
-      };
-    case 'REJECTED':
-      return {
-        label: 'Rejected',
-        bg: 'var(--brand-alert-red-light)',
-        color: 'var(--brand-alert-red-text)',
-        icon: <XIcon className="w-3 h-3" />,
-      };
-    case 'DISCONTINUED':
-      return {
-        label: 'Discontinued',
-        bg: 'var(--brand-background)',
-        color: 'var(--brand-text-muted)',
-        icon: <ClockIcon className="w-3 h-3" />,
-      };
-    case 'UNVERIFIED':
-    default:
-      return {
-        label: 'Unverified',
-        bg: 'var(--brand-primary-purple-light)',
-        color: 'var(--brand-primary-purple)',
-        icon: <ClockIcon className="w-3 h-3" />,
-      };
-  }
 }
 
 function verificationChrome(status: MedicationVerificationStatus): { label: string; color: string; bg: string } {

@@ -12,7 +12,7 @@ export interface PatientMedication {
   id: string
   drugName: string
   drugClass: string
-  verificationStatus: 'UNVERIFIED' | 'VERIFIED' | 'REJECTED'
+  verificationStatus: 'UNVERIFIED' | 'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER' | 'HOLD'
   source: string
   isCombination?: boolean
   frequency?: string | null
@@ -22,9 +22,15 @@ export interface PatientMedication {
 }
 
 /**
- * List the authenticated patient's active medications. Defaults to excluding
- * discontinued rows — we only want "what am I supposed to be taking right now"
- * in the check-in flow.
+ * List the authenticated patient's medications for the check-in flow — i.e.
+ * "what am I supposed to be taking right now". We keep VERIFIED, UNVERIFIED,
+ * and AWAITING_PROVIDER (the patient is taking these / they're pending review),
+ * but exclude:
+ *   • HOLD     — the care team told the patient NOT to take it, so asking
+ *               "did you take it today?" is wrong (also excluded from the
+ *               adherence miss count, CLINICAL_SPEC §14.2).
+ *   • REJECTED — not the patient's medication.
+ *   • discontinued — no longer current.
  */
 export async function listMyMedications(): Promise<PatientMedication[]> {
   const res = await fetchWithAuth(`${API}/api/me/medications`)
@@ -33,5 +39,10 @@ export async function listMyMedications(): Promise<PatientMedication[]> {
     throw new Error(err.message || `Request failed: ${res.status}`)
   }
   const body = (await res.json()) as { data?: PatientMedication[] }
-  return body.data ?? []
+  return (body.data ?? []).filter(
+    (m) =>
+      !m.discontinuedAt &&
+      m.verificationStatus !== 'HOLD' &&
+      m.verificationStatus !== 'REJECTED',
+  )
 }

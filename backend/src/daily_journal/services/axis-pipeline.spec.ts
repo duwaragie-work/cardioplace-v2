@@ -167,6 +167,10 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
         findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
       },
+      // Pass 2 (loadAdherenceWindow) reads held meds; default to none.
+      patientMedication: {
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+      },
       notification: {
         create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
       },

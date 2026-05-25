@@ -23,6 +23,20 @@ export interface MissedMedicationPayload {
   missedDoses: number
 }
 
+/** Per-medication status snapshot for every answered med (taken / missed /
+ * not-due-yet). Lets the readings edit modal + detail view reconstruct each
+ * med's exact answer on reopen — the aggregate medicationTaken +
+ * medicationScheduledLater flags can't tell "med A taken" from "med B not due
+ * yet". UI-reconstruction only; the rule engine ignores it. */
+export interface MedicationStatusPayload {
+  medicationId?: string
+  drugName: string
+  drugClass?: string
+  taken: 'yes' | 'no' | 'scheduledLater'
+  reason?: MissedMedicationReason
+  missedDoses?: number
+}
+
 export interface JournalEntryPayload {
   /** ISO 8601 UTC timestamp. Required by the backend. */
   measuredAt: string
@@ -44,6 +58,8 @@ export interface JournalEntryPayload {
   /** Per-medication miss detail. Submitted when the patient taps "Missed"
    * and checks off specific drugs in CheckIn.tsx. */
   missedMedications?: MissedMedicationPayload[]
+  /** Per-medication status snapshot for every answered med (UI reconstruction). */
+  medicationStatuses?: MedicationStatusPayload[]
   // Structured V2 Level-2 symptom triggers
   severeHeadache?: boolean
   visualChanges?: boolean
