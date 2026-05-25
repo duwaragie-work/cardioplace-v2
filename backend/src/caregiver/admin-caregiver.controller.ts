@@ -12,12 +12,13 @@ import {
 } from '@nestjs/common'
 import type { Request } from 'express'
 import { Roles } from '../auth/decorators/roles.decorator.js'
+import { PatientAccessService } from '../common/patient-access.service.js'
 import { UserRole } from '../generated/prisma/enums.js'
 import { CaregiverService } from './caregiver.service.js'
 import { CreateCaregiverDto } from './dto/create-caregiver.dto.js'
 import { UpdateCaregiverDto } from './dto/update-caregiver.dto.js'
 
-type AuthedReq = Request & { user: { id: string } }
+type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
 
 // Admin-scoped caregiver management for the patient-detail screen.
 //   • READ — all four admin roles (HEALPLACE_OPS can view PHI-sharing config).
@@ -31,42 +32,61 @@ type AuthedReq = Request & { user: { id: string } }
   UserRole.HEALPLACE_OPS,
 )
 export class AdminCaregiverController {
-  constructor(private readonly caregiver: CaregiverService) {}
+  constructor(
+    private readonly caregiver: CaregiverService,
+    private readonly access: PatientAccessService,
+  ) {}
 
   @Get()
-  list(@Param('patientId') patientId: string) {
+  async list(@Req() req: AuthedReq, @Param('patientId') patientId: string) {
+    await this.access.assertCanAccessPatient(
+      { id: req.user.id, roles: req.user.roles },
+      patientId,
+    )
     return this.caregiver.list(patientId)
   }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @Roles(UserRole.SUPER_ADMIN, UserRole.PROVIDER, UserRole.MEDICAL_DIRECTOR)
-  create(
+  async create(
     @Req() req: AuthedReq,
     @Param('patientId') patientId: string,
     @Body() dto: CreateCaregiverDto,
   ) {
+    await this.access.assertCanAccessPatient(
+      { id: req.user.id, roles: req.user.roles },
+      patientId,
+    )
     return this.caregiver.create(patientId, req.user.id, 'ADMIN', dto)
   }
 
   @Patch(':id')
   @Roles(UserRole.SUPER_ADMIN, UserRole.PROVIDER, UserRole.MEDICAL_DIRECTOR)
-  update(
+  async update(
     @Req() req: AuthedReq,
     @Param('patientId') patientId: string,
     @Param('id') id: string,
     @Body() dto: UpdateCaregiverDto,
   ) {
+    await this.access.assertCanAccessPatient(
+      { id: req.user.id, roles: req.user.roles },
+      patientId,
+    )
     return this.caregiver.update(patientId, id, req.user.id, 'ADMIN', dto)
   }
 
   @Delete(':id')
   @Roles(UserRole.SUPER_ADMIN, UserRole.PROVIDER, UserRole.MEDICAL_DIRECTOR)
-  remove(
+  async remove(
     @Req() req: AuthedReq,
     @Param('patientId') patientId: string,
     @Param('id') id: string,
   ) {
+    await this.access.assertCanAccessPatient(
+      { id: req.user.id, roles: req.user.roles },
+      patientId,
+    )
     return this.caregiver.remove(patientId, id, req.user.id, 'ADMIN')
   }
 }
