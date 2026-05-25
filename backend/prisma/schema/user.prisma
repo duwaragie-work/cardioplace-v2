@@ -46,6 +46,7 @@ model User {
   practiceProviderMemberships          PracticeProvider[]          @relation("PracticeProviderMemberships")
   profileVerificationLogs              ProfileVerificationLog[]
   caregivers                           PatientCaregiver[]          @relation("PatientCaregivers")
+  rejectedReadingLogs                  RejectedReadingLog[]
 }
 
 enum UserRole {

@@ -12,6 +12,12 @@ model PatientMedication {
   verifiedAt               DateTime?
   reportedAt               DateTime                     @default(now())
   discontinuedAt           DateTime?
+  // Manisha 5/24 Med §3 — structured HOLD reason (drives the two-path patient
+  // message: PROVIDER_DIRECTED_HOLD = "pause it" clinical instruction; the
+  // administrative reasons = "keep taking it" informational). holdSetAt anchors
+  // the 7/14/30/45-day reconciliation escalation ladder.
+  holdReason               MedicationHoldReason?
+  holdSetAt                DateTime?
   rawInputText             String?
   notes                    String?                      @db.Text
   pillImageUrl             String?
@@ -69,4 +75,15 @@ enum MedicationVerificationStatus {
   // Triggers SYSTEM_MSG_MEDICATION_HOLD to the patient's inbox + suppresses
   // adherence rule fires for this med until status returns to VERIFIED.
   HOLD
+}
+
+// Manisha 5/24 Med §3 — structured HOLD reason codes. Only PROVIDER_DIRECTED_HOLD
+// is a clinical "stop taking it" instruction; the rest are administrative
+// ("keep taking it, we're reviewing the paperwork"). OTHER requires free text.
+enum MedicationHoldReason {
+  AWAITING_RECORDS
+  UNCLEAR_NAME
+  UNCLEAR_DOSE
+  PROVIDER_DIRECTED_HOLD
+  OTHER
 }
