@@ -268,3 +268,101 @@ describe('IntakeService.verifyProfile reject hard-gate', () => {
     expect(res.message).toMatch(/profile verified/i)
   })
 })
+
+// Manual-test round 2 Group A4 — caregiver name resolution. Caregiver-scoped
+// logs use fieldPath `caregiver:${id}`; the listVerificationLogs endpoint
+// batch-fetches PatientCaregiver and injects caregiverName + relationship so
+// the admin TimelineTab renders "Caregiver Jane Doe (daughter)" instead of
+// "caregiver:9a0446d9-…".
+describe('IntakeService.listVerificationLogs caregiver resolution (Round 2 A4)', () => {
+  let service: IntakeService
+  let prisma: any
+
+  beforeEach(async () => {
+    prisma = {
+      profileVerificationLog: { findMany: jest.fn() },
+      patientCaregiver: { findMany: jest.fn() },
+      user: { findMany: (jest.fn() as any).mockResolvedValue([]) },
+    }
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        IntakeService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: DrugEnrichmentService, useValue: {} },
+        { provide: PatientAccessService, useValue: {} },
+      ],
+    }).compile()
+    service = module.get<IntakeService>(IntakeService)
+  })
+
+  it('resolves caregiverName + caregiverRelationship for caregiver:-scoped logs', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([
+      {
+        id: 'l1',
+        fieldPath: 'caregiver:cg-1',
+        changedBy: 'admin-1',
+        changedByRole: 'ADMIN',
+        changeType: 'ADMIN_CORRECT',
+        createdAt: new Date(),
+      },
+      {
+        id: 'l2',
+        fieldPath: 'profile.gender',
+        changedBy: 'admin-1',
+        changedByRole: 'ADMIN',
+        changeType: 'ADMIN_VERIFY',
+        createdAt: new Date(),
+      },
+    ])
+    prisma.patientCaregiver.findMany.mockResolvedValue([
+      { id: 'cg-1', name: 'Jane Doe', relationship: 'daughter' },
+    ])
+
+    const out = await service.listVerificationLogs('p1')
+    expect(prisma.patientCaregiver.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['cg-1'] } },
+      select: { id: true, name: true, relationship: true },
+    })
+    const rows = out.data as Array<any>
+    const caregiverRow = rows.find((r) => r.id === 'l1')
+    const profileRow = rows.find((r) => r.id === 'l2')
+    expect(caregiverRow.caregiverName).toBe('Jane Doe')
+    expect(caregiverRow.caregiverRelationship).toBe('daughter')
+    expect(profileRow.caregiverName).toBeNull()
+    expect(profileRow.caregiverRelationship).toBeNull()
+  })
+
+  it('handles a deleted caregiver — caregiverName falls back to null', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([
+      {
+        id: 'l1',
+        fieldPath: 'caregiver:cg-gone',
+        changedBy: 'admin-1',
+        changedByRole: 'ADMIN',
+        changeType: 'ADMIN_CORRECT',
+        createdAt: new Date(),
+      },
+    ])
+    prisma.patientCaregiver.findMany.mockResolvedValue([])
+
+    const out = await service.listVerificationLogs('p1')
+    const rows = out.data as Array<any>
+    expect(rows[0].caregiverName).toBeNull()
+    expect(rows[0].caregiverRelationship).toBeNull()
+  })
+
+  it('skips the caregiver batch fetch when no logs are caregiver-scoped', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([
+      {
+        id: 'l1',
+        fieldPath: 'profile.hasHCM',
+        changedBy: 'patient-1',
+        changedByRole: 'PATIENT',
+        changeType: 'PATIENT_REPORT',
+        createdAt: new Date(),
+      },
+    ])
+    await service.listVerificationLogs('p1')
+    expect(prisma.patientCaregiver.findMany).not.toHaveBeenCalled()
+  })
+})

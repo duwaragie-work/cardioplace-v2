@@ -109,6 +109,17 @@ const PROFILE_FIELD_LABELS: Record<VerifiableField, string> = {
   diagnosedHypertension: 'high blood pressure diagnosis',
 }
 
+/**
+ * Round 2 A4 — extract the caregiver id from a verification-log fieldPath.
+ * Mirrors the write site `caregiver.service.ts:writeAudit` which uses
+ * `fieldPath: caregiver:${id}`. Returns null for non-caregiver logs.
+ */
+function caregiverIdFromFieldPath(fieldPath: string | null | undefined): string | null {
+  if (!fieldPath || !fieldPath.startsWith('caregiver:')) return null
+  const id = fieldPath.slice('caregiver:'.length).trim()
+  return id.length > 0 ? id : null
+}
+
 @Injectable()
 export class IntakeService {
   private readonly logger = new Logger(IntakeService.name)
@@ -1191,17 +1202,48 @@ export class IntakeService {
       this.prisma,
       logs.map((l) => l.changedBy),
     )
+    // Manual-test round 2 Group A4 — humanize caregiver references in the
+    // timeline. Caregiver-scoped logs use fieldPath `caregiver:${id}` (see
+    // caregiver.service.ts:writeAudit). Without resolution the timeline
+    // renders raw UUIDs ("Caregiver:9a0446d9-…"). Batch-fetch every
+    // referenced caregiver in one query (same N+1-avoiding pattern as
+    // resolveUserDisplays) and stamp the name + relationship onto each log.
+    const caregiverIds = Array.from(
+      new Set(
+        logs
+          .map((l) => caregiverIdFromFieldPath(l.fieldPath))
+          .filter((id): id is string => id != null),
+      ),
+    )
+    const caregiversById = new Map<string, { name: string; relationship: string | null }>()
+    if (caregiverIds.length > 0) {
+      const caregivers = await this.prisma.patientCaregiver.findMany({
+        where: { id: { in: caregiverIds } },
+        select: { id: true, name: true, relationship: true },
+      })
+      for (const c of caregivers) {
+        caregiversById.set(c.id, { name: c.name, relationship: c.relationship })
+      }
+    }
     return {
       statusCode: 200,
       message: 'Verification logs retrieved',
-      data: logs.map((l) => ({
-        ...l,
-        changedByName: pickDisplayName(l.changedBy, names),
-        // The actor's real role (e.g. PROVIDER) resolved from their account —
-        // the stored changedByRole is the coarse ADMIN for every admin action.
-        // Falls back to the stored role when the user can't be resolved.
-        changedByRoleResolved: pickDisplayRole(l.changedBy, names, l.changedByRole),
-      })),
+      data: logs.map((l) => {
+        const caregiverId = caregiverIdFromFieldPath(l.fieldPath)
+        const caregiver = caregiverId ? caregiversById.get(caregiverId) ?? null : null
+        return {
+          ...l,
+          changedByName: pickDisplayName(l.changedBy, names),
+          // The actor's real role (e.g. PROVIDER) resolved from their account —
+          // the stored changedByRole is the coarse ADMIN for every admin action.
+          // Falls back to the stored role when the user can't be resolved.
+          changedByRoleResolved: pickDisplayRole(l.changedBy, names, l.changedByRole),
+          // Round 2 A4 — null when the log isn't caregiver-scoped, or when the
+          // caregiver row has been deleted. UI falls back to "Caregiver contact".
+          caregiverName: caregiver?.name ?? null,
+          caregiverRelationship: caregiver?.relationship ?? null,
+        }
+      }),
     }
   }
 

@@ -135,7 +135,7 @@ const USER_FIELD_LABELS: Record<string, string> = {
 };
 
 interface ParsedPath {
-  scope: 'profile' | 'medication';
+  scope: 'profile' | 'medication' | 'caregiver';
   /** Friendly label for the field (or "Medication" if the whole row was added). */
   field: string;
   /** Raw field key (after the prefix), useful for special-casing e.g. "verificationStatus". */
@@ -144,6 +144,9 @@ interface ParsedPath {
   medIdShort?: string;
   /** Full medication id for lookups. */
   medId?: string;
+  /** Caregiver id when scope === 'caregiver'. Frontend renders the resolved
+   *  name from log.caregiverName instead of the raw id. */
+  caregiverId?: string;
   /** True when the action was a wholesale add/remove of a medication row. */
   rowLevel?: boolean;
 }
@@ -161,6 +164,21 @@ function parseFieldPath(path: string): ParsedPath {
       medIdShort: medId.slice(0, 6),
       medId,
       rowLevel: !fieldName,
+    };
+  }
+  // Round 2 A4 — caregiver-scoped log (caregiver.service.ts writes
+  // `caregiver:${id}` as the fieldPath on add/edit/remove). Backend resolves
+  // log.caregiverName so the row reads "Caregiver Jane Doe (daughter)"
+  // instead of "Caregiver:9a0446d9-…".
+  if (path.startsWith('caregiver:')) {
+    const id = path.slice('caregiver:'.length).trim();
+    return {
+      scope: 'caregiver',
+      // Generic field label — the rendered subject uses the resolved name.
+      field: 'Caregiver contact',
+      fieldKey: null,
+      caregiverId: id.length > 0 ? id : undefined,
+      rowLevel: true,
     };
   }
   if (path.startsWith('profile.')) {
@@ -326,6 +344,19 @@ function entriesFromLogs(
           : 'Profile';
       title = `${subject} ${verb}`;
       // Skip the prev → new line — the verb already tells the story.
+      body = l.rationale ?? undefined;
+    }
+    // ── Round 2 A4 — caregiver-scoped log. Backend resolves caregiverName +
+    //    caregiverRelationship; we render "Caregiver Jane Doe (daughter)
+    //    contact updated by admin" instead of "caregiver:9a0446d9-… corrected
+    //    by admin". A deleted caregiver falls back to "Caregiver contact".
+    else if (parsed.scope === 'caregiver') {
+      const verb = actionVerb(l.changeType, 'profile', true);
+      const name = l.caregiverName?.trim();
+      const subject = name
+        ? `Caregiver ${name}${l.caregiverRelationship ? ` (${l.caregiverRelationship})` : ''}`
+        : 'Caregiver contact';
+      title = `${subject} ${verb}`;
       body = l.rationale ?? undefined;
     }
     // ── Whole-medication add: lead with the drug name.

@@ -155,6 +155,11 @@ export interface ProfileVerificationLog {
    *  changedByRole stores a coarse ADMIN for every admin action. Falls back to
    *  changedByRole. Used by the Timeline actor line. */
   changedByRoleResolved: string | null
+  /** Round 2 A4 — resolved caregiver display when fieldPath is `caregiver:${id}`.
+   *  Both null when the log isn't caregiver-scoped or the caregiver row has been
+   *  deleted; the TimelineTab UI then falls back to "Caregiver contact". */
+  caregiverName?: string | null
+  caregiverRelationship?: string | null
   changeType: VerificationChangeType
   discrepancyFlag: boolean
   rationale: string | null
