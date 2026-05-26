@@ -12,11 +12,12 @@ import {
   CartesianGrid,
   ResponsiveContainer,
 } from 'recharts';
-import { Flame, Clock, ArrowRight, Heart, Bell, Target, ShieldCheck, AlertTriangle, Pill, ArrowUp, ArrowDown } from 'lucide-react';
+import { Flame, Clock, ArrowRight, Heart, Bell, Target, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import { getJournalEntries, getNotifications, getAlerts, getJournalStats, type AlertTier } from '@/lib/services/journal.service';
+import { getAlertPresentation } from '@/components/alerts/alert-presentation';
 import { getMyPatientProfile, getMyMedications, type PatientProfileDto } from '@/lib/services/intake.service';
 import { getMyThreshold, type PatientThresholdDto } from '@/lib/services/threshold.service';
 import { loadDraft, hasDraft, stepProgress } from '@/lib/intake/draft';
@@ -322,91 +323,34 @@ export default function Dashboard() {
     ? [...openAlerts].sort((x, y) => alertPriority(y) - alertPriority(x))[0]
     : null;
 
-  // Visual variant for the D3 card — mirrors TierAlertView.
-  type AlertVariantKey = 'emergency' | 'tier1' | 'high' | 'low' | 'info';
-  function variantForTopAlert(a: typeof topAlert): {
-    key: AlertVariantKey;
-    accent: string;
-    accentText: string;
-    accentLight: string;
-    icon: React.ReactNode;
-    title: string;
-    body: string;
-  } | null {
+  // Visual variant for the D3 banner — consumes the shared helper so chrome +
+  // ruleId overrides (e.g. RULE_HF_DECOMPENSATION → amber/Heart, Round 2 A1)
+  // stay in lockstep with TierAlertView. The banner derives the body from
+  // patientMessage; the helper's defaultBody is the safe fallback.
+  function variantForTopAlert(a: typeof topAlert) {
     if (!a) return null;
     const sbp = a.journalEntry?.systolicBP ?? 0;
     const dbp = a.journalEntry?.diastolicBP ?? 0;
-    const tier = (a as { tier?: AlertTier | null; patientMessage?: string | null }).tier;
-    const patientMessage = (a as { patientMessage?: string | null }).patientMessage ?? '';
-    const isEmergency =
-      tier === 'BP_LEVEL_2' ||
-      tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE' ||
-      sbp >= 180 ||
-      dbp >= 120;
-    // D3 variant title/body are English clinical fallbacks — same policy as
-    // TierAlertView.variantFor (Flow C). They mirror shared/alert-messages.ts
-    // and stay English (rendered with lang="en") until Dr. Singal per-locale
-    // sign-off lands. `patientMessage` from the backend takes precedence.
-    if (isEmergency) {
-      return {
-        key: 'emergency',
-        accent: 'var(--brand-alert-red)',
-        accentText: 'var(--brand-alert-red-text)',
-        accentLight: 'var(--brand-alert-red-light)',
-        icon: <AlertTriangle className="w-5 h-5" />,
-        title: 'Critical blood pressure reading',
-        body: patientMessage || 'Tap to see what to do next.',
-      };
-    }
-    // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema gets the same red
-    // 'emergency' treatment as BP Level 2 so the dashboard top-card surfaces
-    // it with urgent visual priority. Body comes from the signed-off
-    // patientMessage (RULE_ACE_ANGIOEDEMA / RULE_GENERIC_ANGIOEDEMA); title
-    // stays neutral non-diagnostic — the clinical content is in the body.
-    // Tapping the card routes to /alerts/[id] → EmergencyAlertScreen (the
-    // signed-off full-screen surface).
-    if (tier === 'TIER_1_ANGIOEDEMA') {
-      return {
-        key: 'emergency',
-        accent: 'var(--brand-alert-red)',
-        accentText: 'var(--brand-alert-red-text)',
-        accentLight: 'var(--brand-alert-red-light)',
-        icon: <AlertTriangle className="w-5 h-5" />,
-        title: 'This needs urgent care',
-        body: patientMessage || 'Tap to see what to do next.',
-      };
-    }
-    if (tier === 'TIER_1_CONTRAINDICATION') {
-      return {
-        key: 'tier1',
-        accent: 'var(--brand-alert-red)',
-        accentText: 'var(--brand-alert-red-text)',
-        accentLight: 'var(--brand-alert-red-light)',
-        icon: <Pill className="w-5 h-5" />,
-        title: 'Important medication alert',
-        body: patientMessage || 'Your care team has flagged a medication concern.',
-      };
-    }
-    if (tier === 'BP_LEVEL_1_LOW' || (sbp > 0 && sbp < 90) || (dbp > 0 && dbp < 60)) {
-      return {
-        key: 'low',
-        accent: '#3B82F6',
-        accentText: '#1D4ED8',
-        accentLight: '#DBEAFE',
-        icon: <ArrowDown className="w-5 h-5" />,
-        title: 'Your blood pressure is low',
-        body: patientMessage || 'If you feel dizzy, sit or lie down right away.',
-      };
-    }
-    // Default to "high" — covers BP_LEVEL_1_HIGH, legacy HIGH severity BP, etc.
+    const raw = a as { tier?: AlertTier | null; ruleId?: string | null; patientMessage?: string | null };
+    // Same defensive emergency derivation as TierAlertView's deriveTier:
+    // when the engine hasn't classified yet but the reading is clearly
+    // critical, force BP_LEVEL_2 so the banner gets the red treatment.
+    const effectiveTier: AlertTier | null | undefined =
+      raw.tier ??
+      (sbp >= 180 || dbp >= 120 ? 'BP_LEVEL_2' : undefined);
+    const v = getAlertPresentation({
+      tier: effectiveTier,
+      ruleId: raw.ruleId,
+    });
+    const patientMessage = raw.patientMessage ?? '';
     return {
-      key: 'high',
-      accent: 'var(--brand-warning-amber)',
-      accentText: 'var(--brand-warning-amber-text)',
-      accentLight: 'var(--brand-warning-amber-light)',
-      icon: <ArrowUp className="w-5 h-5" />,
-      title: 'Your blood pressure is elevated',
-      body: patientMessage || 'Sit quietly for 5 minutes and check again.',
+      key: v.key,
+      accent: v.accent,
+      accentText: v.accentText,
+      accentLight: v.accentLight,
+      Icon: v.Icon,
+      title: v.title,
+      body: patientMessage || v.defaultBody,
     };
   }
   const topAlertVariant = variantForTopAlert(topAlert);
@@ -605,7 +549,7 @@ export default function Dashboard() {
               className="shrink-0 rounded-xl flex items-center justify-center text-white"
               style={{ width: 40, height: 40, backgroundColor: topAlertVariant.accent }}
             >
-              {topAlertVariant.icon}
+              <topAlertVariant.Icon className="w-5 h-5" />
             </div>
             <div className="flex-1 min-w-0">
               <p
