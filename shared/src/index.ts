@@ -8,3 +8,4 @@ export * from './rule-ids.js';
 export * from './journal-limits.js';
 export * from './alert-messages.js';
 export * from './resolution-action-labels.js';
+export * from './consent.js';

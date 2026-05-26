@@ -736,6 +736,7 @@ const es: Record<TranslationKey, string> = {
   'register.continue': 'Continuar',
   'register.verifying': 'Verificando...',
   'register.terms': 'Al crear una cuenta, aceptas nuestros',
+  'register.agreeToTerms': 'Acepto los',
   'register.termsOfService': 'Términos de Servicio',
   'register.and': 'y',
   'register.privacyPolicy': 'Política de Privacidad',
@@ -792,6 +793,16 @@ const es: Record<TranslationKey, string> = {
   'onboarding.benefit1': 'Monitoreo diario de PA y análisis de tendencias',
   'onboarding.benefit2': 'Seguimiento de adherencia a medicación',
   'onboarding.benefit3': 'Alertas al equipo de atención cuando las lecturas están elevadas',
+
+  // ─── Onboarding · Pantalla de privacidad / confianza (V2-E Gap 7) ─────────
+  'onboarding.privacy.title': 'Tu información es privada',
+  'onboarding.privacy.intro': 'Tu información de salud queda entre tú y tu equipo de atención. Esta es nuestra promesa:',
+  'onboarding.privacy.point1': 'No se comparte con el gobierno ni con inmigración',
+  'onboarding.privacy.point2': 'No se comparte con tu empleador ni con tu arrendador',
+  'onboarding.privacy.point3': 'Solo tu equipo de atención puede verla',
+  'onboarding.privacy.reassure': 'Tu información se almacena de forma segura y nunca se vende ni se comparte.',
+  'onboarding.privacy.continue': 'Entiendo — continuar',
+  'onboarding.privacy.audio': 'Tu información es privada. Tu información de salud queda entre tú y tu equipo de atención. No se comparte con el gobierno ni con inmigración. No se comparte con tu empleador ni con tu arrendador. Solo tu equipo de atención puede verla. Tu información se almacena de forma segura y nunca se vende ni se comparte.',
 
   // ─── Landing Header / Footer ────────────────────────────────────────────────
   'landing.home': 'Inicio',
