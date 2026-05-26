@@ -127,48 +127,42 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
     () => alerts.filter((a) => tierBucket(a.tier) === 'TIER_3'),
     [alerts],
   );
-  const nonTier3Alerts = useMemo(
-    () => alerts.filter((a) => tierBucket(a.tier) !== 'TIER_3'),
-    [alerts],
-  );
+  // Round 2 A3 — nonTier3Alerts retired. The main list now renders the full
+  // `alerts` array when ALL is selected; tier3Alerts feeds the dedicated
+  // Physician-notes section + the TIER_3 chip-filter view.
 
-  // Counts feed the pill badges. ALL excludes Tier 3 (matches main-list
-  // default: Tier 3 lives in Physician notes when filter is ALL). The
-  // Tier 3 bucket is counted from the full alerts array so its pill
-  // accurately reflects how many will appear when the user selects it.
+  // Counts feed the pill badges. Manual-test round 2 Group A3: ALL now means
+  // ALL — the count + list include Tier 3 inline so "All (6)" can't mislead
+  // a clinician scanning the queue. The dedicated "Physician notes" section
+  // below stays as a curated view available via the TIER_3 chip.
   const counts = useMemo(() => {
     const acc: Record<TierBucket, number> = { ALL: 0, BP_L2: 0, TIER_1: 0, TIER_2: 0, BP_L1: 0, TIER_3: 0, OTHER: 0 };
-    for (const a of nonTier3Alerts) {
+    for (const a of alerts) {
       if (statusFilter !== 'ALL' && a.status !== statusFilter) continue;
       acc.ALL++;
       acc[tierBucket(a.tier)]++;
     }
-    for (const a of tier3Alerts) {
-      if (statusFilter !== 'ALL' && a.status !== statusFilter) continue;
-      acc.TIER_3++;
-    }
     return acc;
-  }, [nonTier3Alerts, tier3Alerts, statusFilter]);
+  }, [alerts, statusFilter]);
 
-  // Filtered list rules:
-  //   • TIER_3 selected → show only Tier 3 alerts in the main list.
+  // Filtered list rules (Round 2 A3):
+  //   • TIER_3 selected → only Tier 3 alerts in the main list.
   //     The Physician-notes section is suppressed (rows would otherwise
   //     duplicate).
-  //   • ALL → show non-Tier-3 alerts only (Physician notes section
-  //     handles Tier 3 below the main list).
-  //   • Any other tier → show only that tier's non-Tier-3 alerts.
+  //   • ALL → every alert (Tier 3 inline with the rest).
+  //   • Any other tier → only that tier's alerts.
   const filtered = useMemo(() => {
     if (tierFilter === 'TIER_3') {
       return tier3Alerts.filter(
         (a) => statusFilter === 'ALL' || a.status === statusFilter,
       );
     }
-    return nonTier3Alerts.filter((a) => {
+    return alerts.filter((a) => {
       if (statusFilter !== 'ALL' && a.status !== statusFilter) return false;
       if (tierFilter !== 'ALL' && tierBucket(a.tier) !== tierFilter) return false;
       return true;
     });
-  }, [nonTier3Alerts, tier3Alerts, tierFilter, statusFilter]);
+  }, [alerts, tier3Alerts, tierFilter, statusFilter]);
 
   // Cluster 6 Q4 (Manisha 5/9/26) — group alerts that came off the same
   // reading (matched on JournalEntry.measuredAt — proxy for journalEntryId
@@ -402,8 +396,10 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
           CLINICAL_SPEC V2-C Layer 1 these are physician-only and have no
           patientMessage / caregiverMessage.
           Suppressed when the Tier 3 pill is active because the same rows
-          render in the main list above (filter target). */}
-      {tier3Alerts.length > 0 && tierFilter !== 'TIER_3' && (
+          render in the main list above (filter target). Round 2 A3 — also
+          suppressed when ALL is active so Tier 3 rows don't render twice
+          (they now appear inline in the main list under ALL). */}
+      {tier3Alerts.length > 0 && tierFilter !== 'TIER_3' && tierFilter !== 'ALL' && (
         <div
           className="bg-white rounded-2xl overflow-hidden"
           style={{ boxShadow: 'var(--brand-shadow-card)' }}

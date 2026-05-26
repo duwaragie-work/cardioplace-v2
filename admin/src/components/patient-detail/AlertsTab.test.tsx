@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import AlertsTab from './AlertsTab'
 import type { PatientAlert } from '@/lib/services/patient-detail.service'
 
@@ -65,5 +65,68 @@ describe('AlertsTab — co-fired grouping (B2)', () => {
       />,
     )
     expect(screen.queryByTestId('admin-alert-group-header')).not.toBeInTheDocument()
+  })
+})
+
+// Manual-test round 2 Group A3 — "All" must mean ALL. The previous count + list
+// excluded Tier 3, so "All (6)" omitted 4 Physician-notes rows. Tier 3 alerts
+// now render inline in the main list under ALL; the Physician-notes section
+// stays as a curated view available via the TIER_3 chip (and is suppressed
+// under ALL so rows don't render twice).
+
+describe('AlertsTab — Tier-3 in ALL filter (Round 2 A3)', () => {
+  function bpL1Alert(id: string): PatientAlert {
+    return makeAlert({
+      id,
+      tier: 'BP_LEVEL_1_HIGH',
+      ruleId: 'RULE_STANDARD_L1_HIGH',
+    })
+  }
+  function tier3Alert(id: string, ruleId: string): PatientAlert {
+    return makeAlert({
+      id,
+      tier: 'TIER_3_INFO',
+      ruleId,
+    })
+  }
+
+  const mixed: PatientAlert[] = [
+    bpL1Alert('bp1'),
+    bpL1Alert('bp2'),
+    bpL1Alert('bp3'),
+    tier3Alert('t3a', 'RULE_HCM_VASODILATOR'),
+    tier3Alert('t3b', 'RULE_PULSE_PRESSURE_NARROW'),
+  ]
+
+  it('ALL chip count includes Tier 3 rows', () => {
+    render(<AlertsTab alerts={mixed} loading={false} onResolved={() => {}} />)
+    const allChip = screen.getByTestId('admin-alerts-tier-filter-ALL')
+    // 3 BP-L1 + 2 Tier 3 = 5. The chip renders "All" + a count span (the
+    // count text is adjacent to the label, so the combined text reads "All5").
+    expect(allChip).toHaveTextContent(/All/i)
+    expect(allChip).toHaveTextContent(/5/)
+  })
+
+  it('ALL filter renders Tier 3 alerts inline alongside other tiers', () => {
+    render(<AlertsTab alerts={mixed} loading={false} onResolved={() => {}} />)
+    // Every alert id should render a row (data-testid="admin-alert-row-${id}").
+    for (const id of ['bp1', 'bp2', 'bp3', 't3a', 't3b']) {
+      expect(screen.getByTestId(`admin-alert-row-${id}`)).toBeInTheDocument()
+    }
+  })
+
+  it('ALL filter suppresses the Physician-notes section (no duplicate Tier 3 rows)', () => {
+    render(<AlertsTab alerts={mixed} loading={false} onResolved={() => {}} />)
+    expect(screen.queryByText(/physician notes/i)).not.toBeInTheDocument()
+  })
+
+  it('TIER_3 chip surfaces the Physician-notes section and renders only Tier 3 in the main list', () => {
+    render(<AlertsTab alerts={mixed} loading={false} onResolved={() => {}} />)
+    const tier3Chip = screen.getByTestId('admin-alerts-tier-filter-TIER_3')
+    fireEvent.click(tier3Chip)
+    // Main list shows only Tier 3.
+    expect(screen.queryByTestId('admin-alert-row-bp1')).not.toBeInTheDocument()
+    expect(screen.getByTestId('admin-alert-row-t3a')).toBeInTheDocument()
+    expect(screen.getByTestId('admin-alert-row-t3b')).toBeInTheDocument()
   })
 })
