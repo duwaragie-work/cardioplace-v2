@@ -50,10 +50,14 @@ import ReadingsTab from './ReadingsTab';
 import ThresholdsTab from './ThresholdsTab';
 import TimelineTab from './TimelineTab';
 import CareTeamTab from './CareTeamTab';
+import CaregiversPanel from './CaregiversPanel';
+import { listCaregivers } from '@/lib/services/caregiver.service';
 import EnrollmentCard from './EnrollmentCard';
 import ConditionPill from './ConditionPill';
 
-type TabKey = 'profile' | 'medications' | 'alerts' | 'readings' | 'thresholds' | 'careteam' | 'timeline';
+// Manual-test round 2 Group D2 — Caregivers is now its own first-class tab,
+// out of Care Team (where it was nested at the bottom of the assignment editor).
+type TabKey = 'profile' | 'medications' | 'alerts' | 'readings' | 'thresholds' | 'careteam' | 'caregivers' | 'timeline';
 
 // v2 condition tag — backend's derivePatientConditions returns these.
 // `severity` drives the pill color; `id` is stable for keys + future
@@ -114,6 +118,10 @@ export default function PatientDetailShell({ patientId }: Props) {
   const [alerts, setAlerts] = useState<PatientAlert[]>([]);
   const [threshold, setThreshold] = useState<PatientThreshold | null>(null);
   const [logs, setLogs] = useState<ProfileVerificationLog[]>([]);
+  // Round 2 D2 — caregivers count for the tab badge. Mirrors the
+  // medications.length pattern; the panel itself does the full fetch when the
+  // tab is opened, so this is just the count-for-badge fetch.
+  const [caregiversCount, setCaregiversCount] = useState<number>(0);
 
   const [profileLoading, setProfileLoading] = useState(false);
   const [medsLoading, setMedsLoading] = useState(false);
@@ -303,6 +311,21 @@ export default function PatientDetailShell({ patientId }: Props) {
     await Promise.all([loadMedications(), loadLogs()]);
   }, [loadMedications, loadLogs]);
 
+  // Round 2 D2 — caregivers count for the tab badge. Best-effort; a fetch
+  // failure leaves the badge at 0 (the tab still renders + the panel does its
+  // own loading/error treatment when opened).
+  const loadCaregiversCount = useCallback(async () => {
+    try {
+      const rows = await listCaregivers(patientId);
+      setCaregiversCount(rows.length);
+    } catch {
+      setCaregiversCount(0);
+    }
+  }, [patientId]);
+  useEffect(() => {
+    void loadCaregiversCount();
+  }, [loadCaregiversCount, headerRefreshTick]);
+
   const onAlertsResolved = useCallback(async () => {
     await Promise.all([loadAlerts(), loadLogs()]);
   }, [loadAlerts, loadLogs]);
@@ -460,6 +483,8 @@ export default function PatientDetailShell({ patientId }: Props) {
     { key: 'alerts', label: 'Alerts', icon: <Bell className="w-3.5 h-3.5" />, count: header?.activeAlertsCount },
     { key: 'readings', label: 'Readings', icon: <Activity className="w-3.5 h-3.5" /> },
     { key: 'careteam', label: 'Care team', icon: <UsersIcon className="w-3.5 h-3.5" /> },
+    // Round 2 D2 — Caregivers is its own tab now (was nested under Care team).
+    { key: 'caregivers', label: 'Caregivers', icon: <UsersIcon className="w-3.5 h-3.5" />, count: caregiversCount || undefined },
     { key: 'timeline', label: 'Timeline', icon: <Clock className="w-3.5 h-3.5" /> },
   ];
 
@@ -837,6 +862,9 @@ export default function PatientDetailShell({ patientId }: Props) {
             )}
             {tab === 'careteam' && (
               <CareTeamTab patientId={patientId} onChanged={onCareTeamChanged} />
+            )}
+            {tab === 'caregivers' && (
+              <CaregiversPanel patientId={patientId} />
             )}
             {tab === 'timeline' && (
               <>

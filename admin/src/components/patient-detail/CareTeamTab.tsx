@@ -40,7 +40,8 @@ import {
 } from '@/lib/services/practice.service';
 import { useAuth } from '@/lib/auth-context';
 import { canAssignCareTeam } from '@/lib/roleGates';
-import CaregiversPanel from './CaregiversPanel';
+// CaregiversPanel moved to its own dedicated tab in PatientDetailShell
+// (Round 2 D2) — Care Team no longer mounts it.
 
 interface Props {
   patientId: string;
@@ -495,8 +496,9 @@ export default function CareTeamTab({ patientId, onChanged }: Props) {
         </div>
       )}
 
-      {/* Gap 5 — caregiver contacts + consent live alongside the care team. */}
-      <CaregiversPanel patientId={patientId} />
+      {/* Round 2 D2 — CaregiversPanel promoted out of Care Team into its own
+          first-class tab (mounted by PatientDetailShell). Care Team now scopes
+          to the provider-assignment editor + the current-assignment summary. */}
     </div>
   );
 }
