@@ -207,6 +207,9 @@ export const T = {
     medicationNo: 'check-in-medication-no',
     pendingSecondReading: 'pending-second-reading',
     addSecondReading: 'add-second-reading',
+    // Silent-literacy TTS button (AudioButton). Shared testid; many render per
+    // screen, so target with .first() / scope to a step container.
+    audioButton: 'audio-button',
     // Cross-visit "add to this session or start new?" prompt.
     openSessionPrompt: 'checkin-open-session-prompt',
     openSessionNeedsMore: 'checkin-open-session-needs-more',

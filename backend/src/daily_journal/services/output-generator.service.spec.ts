@@ -200,4 +200,23 @@ describe('OutputGeneratorService', () => {
       expect(out.physicianMessage.toLowerCase()).toContain('loop diuretic')
     })
   })
+
+  // ─── Bug 2 — caregiver message names the patient (Gap 5) ────────────────
+  describe('caregiver message names the patient', () => {
+    const caregiverRule = baseResult({
+      ruleId: 'RULE_HF_CAREGIVER_EDEMA',
+      tier: 'TIER_3_INFO',
+    })
+
+    it('threads the patient name into the caregiver-routed message', () => {
+      const out = service.generate(caregiverRule, baseSession, false, 'Carol Miller')
+      expect(out.caregiverMessage).toContain('Carol Miller')
+      expect(out.caregiverMessage).not.toMatch(/^The patient/)
+    })
+
+    it('falls back to "The patient" when no name is provided', () => {
+      const out = service.generate(caregiverRule, baseSession, false)
+      expect(out.caregiverMessage).toMatch(/^The patient/)
+    })
+  })
 })

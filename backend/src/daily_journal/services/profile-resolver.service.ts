@@ -90,6 +90,8 @@ export class ProfileResolverService {
       enrolledAt: user.enrolledAt ?? null,
       practiceName:
         user.providerAssignmentAsPatient?.practice?.name ?? null,
+      // Gap 5 — name the patient in caregiver-facing messages.
+      patientName: user.name ?? null,
       resolvedAt: now,
     }
   }

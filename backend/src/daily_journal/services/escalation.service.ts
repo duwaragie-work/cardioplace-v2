@@ -624,6 +624,28 @@ export class EscalationService {
       )
     }
 
+    // Bug 1 — idempotent dispatch. A re-run of evaluate()/fireT0 for the same
+    // alert (an immediate-fire reading later re-evaluated by the single-reading
+    // finalize, or the frontend 5-min timer racing the finalize cron) must NOT
+    // create a second EscalationEvent for the same alert+step+recipients —
+    // that's the doubled-T0 audit/timeline bug. Retries go through the separate
+    // dispatchForExistingEvent path, so a NEW dispatchStep row for an
+    // (alert, step, recipientRoles) triple is always a duplicate.
+    const alreadyDispatched = await this.prisma.escalationEvent.findFirst({
+      where: {
+        alertId: alert.id,
+        ladderStep: step.step,
+        recipientRoles: { equals: resolved.recipientRoles },
+      },
+      select: { id: true },
+    })
+    if (alreadyDispatched) {
+      this.logger.debug(
+        `dispatchStep: ${step.step} for alert ${alert.id} → [${resolved.recipientRoles.join(',')}] already exists (${alreadyDispatched.id}); skipping duplicate`,
+      )
+      return
+    }
+
     if (shouldQueue && practice) {
       const scheduledFor = nextBusinessHoursStart(now, practice)
       // Cluster 6 bug #11 — wrap EscalationEvent.create in deadlock retry.
@@ -1002,6 +1024,10 @@ export class EscalationService {
     const alert = await this.loadAlert(payload.alertId)
     if (!alert?.caregiverMessage) return
     const message = alert.caregiverMessage
+    // Gap 5 (Bug 2) — name the patient in the email subject so the caregiver
+    // can tell who it's about. The message body already names them via the
+    // registry (ctx.patientName). Name only — Minimum Necessary.
+    const patientDisplayName = alert.user?.name?.trim() || 'someone you care for'
 
     for (const caregiver of caregivers) {
       try {
@@ -1022,7 +1048,7 @@ export class EscalationService {
             if (!caregiver.email) break
             await this.emailService.sendEmail(
               caregiver.email,
-              'Cardioplace — a health update about someone you care for',
+              `Cardioplace — a health update about ${patientDisplayName}`,
               caregiverEmailHtml(caregiver.name, message),
             )
             delivered = true

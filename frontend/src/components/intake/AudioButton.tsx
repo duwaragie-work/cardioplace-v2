@@ -31,6 +31,8 @@ interface Props {
   /** aria-label override; defaults to the translated "Listen". */
   label?: string;
   className?: string;
+  /** data-testid override; defaults to "audio-button". */
+  testId?: string;
 }
 
 export default function AudioButton({
@@ -39,6 +41,7 @@ export default function AudioButton({
   size = 'md',
   label,
   className,
+  testId = 'audio-button',
 }: Props) {
   const { locale, t } = useLanguage();
   const effectiveLang = lang ?? LOCALE_TO_BCP47[locale] ?? 'en-US';
@@ -78,7 +81,18 @@ export default function AudioButton({
       setSpeaking(false);
       return;
     }
+    // Nothing to read — don't arm a button that would play silence.
+    if (!text.trim()) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('[AudioButton] empty text — nothing to speak');
+      }
+      return;
+    }
     synth.cancel();
+    // Chrome can leave the engine in a paused state after a prior cancel (or
+    // its ~15s auto-pause), which silently drops the next speak(). resume() is
+    // a no-op when not paused, so it's safe to call defensively here.
+    synth.resume();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = effectiveLang;
     utterance.rate = 0.95;
@@ -88,6 +102,16 @@ export default function AudioButton({
     applyFriendlyVoice(utterance);
     utterance.onend = () => setSpeaking(false);
     utterance.onerror = () => setSpeaking(false);
+    // Fail loudly in dev when the OS has no usable voice so a silent no-op is
+    // visible instead of looking like a broken button.
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      synth.getVoices().length === 0
+    ) {
+      console.warn(
+        '[AudioButton] no SpeechSynthesis voices available — playback may be silent on this device',
+      );
+    }
     synth.speak(utterance);
     setSpeaking(true);
   };
@@ -103,6 +127,7 @@ export default function AudioButton({
   return (
     <motion.button
       type="button"
+      data-testid={testId}
       onClick={handleClick}
       aria-label={speaking ? stopLabel : effectiveLabel}
       aria-pressed={speaking}

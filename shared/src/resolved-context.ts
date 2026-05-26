@@ -158,6 +158,11 @@ export interface ResolvedContext {
    *  patient has no assignment yet. */
   practiceName: string | null
 
+  /** Gap 5 — patient display name (User.name). Threaded into AlertContext so
+   *  caregiver-facing message templates name the patient ("Carol Miller
+   *  reported…") instead of the generic "The patient". Null when unset. */
+  patientName: string | null
+
   /** Resolved at this instant (UTC). */
   resolvedAt: Date
 }

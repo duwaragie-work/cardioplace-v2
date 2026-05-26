@@ -61,6 +61,7 @@ function buildResolvedContext(
     triggerPregnancyContraindicationCheck: false,
     enrolledAt: null,
     practiceName: null,
+    patientName: null,
     resolvedAt: NOW,
     ...over,
   }

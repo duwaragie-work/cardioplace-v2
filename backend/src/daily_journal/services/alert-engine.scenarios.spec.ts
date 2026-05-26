@@ -101,6 +101,7 @@ function buildCtx(over: {
   // ctx.resolvedAt - ctx.enrolledAt ≤ 30 days.
   enrolledAt?: Date | null
   practiceName?: string | null
+  patientName?: string | null
 } = {}): ResolvedContext {
   const isPregnant = over.isPregnant ?? over.profile?.isPregnant ?? false
   const profile: ResolvedContext['profile'] = {
@@ -151,6 +152,7 @@ function buildCtx(over: {
       over.triggerPregnancyContraindicationCheck ?? isPregnant,
     enrolledAt: over.enrolledAt ?? null,
     practiceName: over.practiceName ?? null,
+    patientName: over.patientName ?? null,
     resolvedAt: FIXED_NOW,
   }
 }

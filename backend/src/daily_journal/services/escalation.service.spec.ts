@@ -115,6 +115,9 @@ describe('EscalationService', () => {
         update: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
         updateMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 0 }),
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+        // Bug 1 — dispatchStep's idempotency guard queries findFirst before
+        // creating. Stateful against createdEvents so a re-run sees prior rows.
+        findFirst: jest.fn() as jest.Mock<any>,
       },
       notification: {
         create: (jest.fn() as jest.Mock<any>).mockResolvedValue({ id: 'notif-1' }),
@@ -133,6 +136,28 @@ describe('EscalationService', () => {
         const id = `esc-${createdEvents.length + 1}`
         createdEvents.push({ id, data: args.data })
         return Promise.resolve({ id, ...args.data })
+      },
+    )
+
+    // findFirst matches a previously-created event by alertId + ladderStep +
+    // exact recipientRoles (Bug 1 dedup key). Returns null until one exists, so
+    // the first dispatch of each recipient group proceeds unchanged.
+    ;(prisma.escalationEvent.findFirst as jest.Mock<any>).mockImplementation(
+      (args: any) => {
+        const w = args?.where ?? {}
+        const want = w.recipientRoles?.equals as string[] | undefined
+        const match = createdEvents.find((e) => {
+          if (w.alertId != null && e.data.alertId !== w.alertId) return false
+          if (w.ladderStep != null && e.data.ladderStep !== w.ladderStep) return false
+          if (want != null) {
+            const got = (e.data.recipientRoles ?? []) as string[]
+            if (got.length !== want.length || !got.every((r, i) => r === want[i])) {
+              return false
+            }
+          }
+          return true
+        })
+        return Promise.resolve(match ? { id: match.id } : null)
       },
     )
 
@@ -207,6 +232,53 @@ describe('EscalationService', () => {
         buildAlertCreatedPayload({ tier: 'BP_LEVEL_1_LOW' }),
       )
       expect(prisma.escalationEvent.create).toHaveBeenCalled()
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Bug 1 — idempotent T+0 dispatch (duplicate-row regression)
+  //   A reading that fires immediately and is later re-evaluated by the
+  //   single-reading finalize (or the frontend 5-min timer racing the finalize
+  //   cron) re-emits ALERT_CREATED. fireT0 must NOT write a second T0 row.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('idempotent T+0 dispatch', () => {
+    it('re-firing the same alert creates no second T0 EscalationEvent row', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildAlert({ tier: 'BP_LEVEL_1_HIGH' }),
+      )
+      const payload = buildAlertCreatedPayload({ tier: 'BP_LEVEL_1_HIGH' })
+
+      await service.handleAlertCreated(payload)
+      const t0AfterFirst = createdEvents.filter(
+        (e) => e.data.ladderStep === 'T0',
+      ).length
+      expect(t0AfterFirst).toBeGreaterThan(0)
+
+      // Second emit for the SAME alert — the duplicate-T0 bug. Now a no-op.
+      await service.handleAlertCreated(payload)
+      const t0AfterSecond = createdEvents.filter(
+        (e) => e.data.ladderStep === 'T0',
+      ).length
+      expect(t0AfterSecond).toBe(t0AfterFirst)
+    })
+
+    it('exactly one T0 EscalationEvent per (alert, recipient set) across repeated evals', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildAlert({ tier: 'BP_LEVEL_1_HIGH' }),
+      )
+      const payload = buildAlertCreatedPayload({ tier: 'BP_LEVEL_1_HIGH' })
+
+      // post-fire + finalize cron + frontend timer = up to 3 evaluations.
+      await service.handleAlertCreated(payload)
+      await service.handleAlertCreated(payload)
+      await service.handleAlertCreated(payload)
+
+      const t0 = createdEvents.filter((e) => e.data.ladderStep === 'T0')
+      const keys = t0.map(
+        (e) => `${e.data.alertId}|${(e.data.recipientRoles ?? []).join(',')}`,
+      )
+      // every (alert, recipient) combination appears exactly once
+      expect(new Set(keys).size).toBe(keys.length)
     })
   })
 
