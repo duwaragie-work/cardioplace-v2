@@ -153,6 +153,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // cookie. If it succeeds we hydrate state with a fresh access token +
   // user profile; if it fails we treat the user as logged-out.
   useEffect(() => {
+    // Skip rehydrate when we're handling a fresh magic-link sign-in.
+    // MagicLinkHandler is about to call login() with the tokens from the
+    // URL params; running /refresh here would consume the just-issued
+    // refresh token and race with the destination page's own mount-time
+    // rehydrate. Refresh-token rotation is single-use, so whichever fetch
+    // reaches the backend second gets a 401 — and the loser's rehydrate
+    // clears user state, which bounces the destination page to /sign-in.
+    if (
+      typeof window !== 'undefined' &&
+      window.location.pathname === '/auth/magic-link' &&
+      new URLSearchParams(window.location.search).has('accessToken')
+    ) {
+      setIsLoading(false);
+      return;
+    }
+
     let cancelled = false;
     async function rehydrate() {
       const newAccess = await rehydrateFromCookie();
