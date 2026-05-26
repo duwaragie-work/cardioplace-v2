@@ -128,8 +128,10 @@ describe('AlertEngineService (orchestrator)', () => {
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
       },
       notification: {
-        // alert-engine writes a patient-facing dashboard Notification per alert
-        // (idempotent on @@unique([alertId, escalationEventId, userId, channel])).
+        // Round 2 Group B: alert-engine NO LONGER writes a patient-facing
+        // Notification mirror on alert fire. Mock retained so any future write
+        // would surface in test expectations (and so the no-mirror assertion
+        // below has a callable to inspect).
         create: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
       },
       // Cluster 6 bug #11 — persistAlert now wraps its writes in
@@ -416,6 +418,19 @@ describe('AlertEngineService (orchestrator)', () => {
       const call = prisma.deviationAlert.create.mock.calls[0][0]
       expect(call.data.tier).toBe('BP_LEVEL_1_HIGH')
       expect(call.data.dismissible).toBe(true)
+    })
+
+    // Round 2 Group B (Manisha sign-off pending) — regression-pinning. The
+    // alert-engine MUST NOT mirror clinical alerts into the patient in-app
+    // notification inbox. The alert surface alone carries the patient-facing
+    // message; the inbox is reserved for admin/care-team actions.
+    it('does NOT write a patient Notification row when a clinical alert fires (Round 2 Group B)', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 165, diastolicBP: 95 }),
+      )
+      await service.evaluate('entry-1')
+      expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(1)
+      expect(prisma.notification.create).not.toHaveBeenCalled()
     })
 
     it('no rule fires → no new alert AND no silent auto-resolve (JCAHO)', async () => {

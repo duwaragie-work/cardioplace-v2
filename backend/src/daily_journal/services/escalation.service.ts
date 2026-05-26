@@ -23,7 +23,8 @@ import {
   type NotificationChannel as LadderChannel,
   TIER_1_BACKUP_ON_T0,
   TIER_1_LADDER,
-  BP_LEVEL_1_PATIENT_T0,
+  // BP_LEVEL_1_PATIENT_T0 — still exported from ladder-defs for future re-instate;
+  // no longer dispatched (Round 2 Group B: patient inbox stops mirroring alerts).
   ANGIOEDEMA_PATIENT_T0,
 } from '../escalation/ladder-defs.js'
 import {
@@ -358,22 +359,15 @@ export class EscalationService {
       }
     }
 
-    // Phase/23 — BP Level 1 patient-side T+0. Spec mandates out-of-app
-    // notification so the patient doesn't have to open the app to learn
-    // their BP needs attention. Fires immediately regardless of business
-    // hours; channel=PUSH writes a Notification row that surfaces in-app
-    // and (once web-push transport ships) delivers as an OS-level push.
-    if (ladder.kind === 'BP_LEVEL_1') {
-      await this.dispatchStep({
-        alert,
-        step: BP_LEVEL_1_PATIENT_T0,
-        ladderKind: ladder.kind,
-        recipientRoles: BP_LEVEL_1_PATIENT_T0.recipientRoles,
-        practice,
-        assignment,
-        now,
-      })
-    }
+    // Manual-test round 2 — Group B (Manisha sign-off pending). The
+    // BP_LEVEL_1_PATIENT_T0 patient PUSH/DASHBOARD dispatch is RETIRED:
+    // clinical alerts no longer mirror into the patient in-app inbox. The
+    // patient still sees the alert via the /alerts list + the dashboard
+    // banner. The provider ladder dispatch above (PRIMARY/BACKUP/MD email +
+    // push) is unchanged. Angioedema patient T+0 below stays — airway
+    // emergencies MUST page the patient with the 911 CTA.
+    // (The BP_LEVEL_1_PATIENT_T0 import remains for ladder-defs symmetry +
+    // future re-instate if the spec flips back.)
 
     // Cluster 8 — angioedema patient T+0. Out-of-app push + in-app card so
     // the patient sees the full-screen red + 911 CTA without opening the app

@@ -833,31 +833,15 @@ export class AlertEngineService {
                   },
                 })
 
-            // Patient-facing in-app dashboard notification. Independent of
-            // the EscalationService ladder (which only pages PROVIDER/MD/OPS
-            // for most tiers per CLINICAL_SPEC §V2-D). Idempotent via the
-            // @@unique([alertId, escalationEventId, userId, channel]) index
-            // — re-evaluation of the same entry won't double-write.
-            if (messages.patientMessage) {
-              const patientTitle = patientNotificationTitle(result.tier)
-              try {
-                await tx.notification.create({
-                  data: {
-                    userId: session.userId,
-                    alertId: row.id,
-                    escalationEventId: null,
-                    channel: 'DASHBOARD',
-                    title: patientTitle,
-                    body: messages.patientMessage,
-                    tips: [],
-                  },
-                })
-              } catch (err: unknown) {
-                // P2002 = duplicate (re-evaluation of same entry). Safe to ignore.
-                const code = (err as { code?: string })?.code
-                if (code !== 'P2002') throw err
-              }
-            }
+            // Manual-test round 2 — Group B (Manisha sign-off pending). Reverses
+            // CLINICAL_SPEC Part 13.2's "immediate patient DASHBOARD/push" rule:
+            // clinical alerts NO LONGER mirror into the patient in-app
+            // Notification surface. The alert detail page (TierAlertView) and
+            // the dashboard banner already carry the patient-facing message;
+            // the inbox is reserved for admin/care-team action events
+            // (HOLD, profile reject, ack/resolve, threshold change, follow-up
+            // call, gap-alert + monthly-reask crons). Provider/MD escalation
+            // PUSH+EMAIL and the caregiver dispatch path remain unchanged.
 
             return row
           },
@@ -985,29 +969,6 @@ function isNonDismissableTier(tier: RuleResult['tier']): boolean {
   )
 }
 
-/**
- * Title shown on the patient's in-app notification card. Mirrors what the
- * patient sees in the dashboard banner — derived from the alert tier so the
- * notifications inbox can't drift away from the alert's actual severity.
- */
-function patientNotificationTitle(tier: RuleResult['tier']): string {
-  switch (tier) {
-    case 'BP_LEVEL_2':
-    case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
-      return 'Urgent Blood Pressure Alert'
-    case 'TIER_1_ANGIOEDEMA':
-      return 'Urgent — get medical help now'
-    case 'TIER_1_CONTRAINDICATION':
-      return 'Important medication alert'
-    case 'TIER_2_DISCREPANCY':
-      return 'Medication check-in needed'
-    case 'BP_LEVEL_1_HIGH':
-      return 'Elevated blood pressure'
-    case 'BP_LEVEL_1_LOW':
-      return 'Low blood pressure'
-    case 'TIER_3_INFO':
-      return 'Care team update'
-    default:
-      return 'Cardioplace Alert'
-  }
-}
+// patientNotificationTitle() removed in Round 2 Group B — the patient inbox
+// no longer mirrors alerts. The alert detail screen (TierAlertView) and the
+// dashboard banner carry the patient-facing title now.

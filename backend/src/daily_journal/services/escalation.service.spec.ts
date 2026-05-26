@@ -1131,7 +1131,12 @@ describe('EscalationService', () => {
       })
     }
 
-    it('BP_LEVEL_1_HIGH T+0 in business hours fires PRIMARY (email+dashboard) AND PATIENT (push+dashboard)', async () => {
+    // Round 2 Group B (Manisha sign-off pending) — BP Level 1 no longer mirrors
+    // into the patient in-app inbox. The provider ladder (PRIMARY email +
+    // dashboard) fires unchanged; the BP_LEVEL_1_PATIENT_T0 dispatch is retired.
+    // The patient sees the alert via the /alerts list + dashboard banner.
+
+    it('BP_LEVEL_1_HIGH T+0 in business hours fires PRIMARY (email+dashboard) and NO patient mirror (Round 2 Group B)', async () => {
       const now = new Date('2026-04-22T15:00:00Z') // 11:00 NY business hours
       prisma.deviationAlert.findUnique.mockResolvedValue(
         buildBpL1HighAlert({ createdAt: now }),
@@ -1139,26 +1144,29 @@ describe('EscalationService', () => {
 
       await service.handleAlertCreated(buildBpL1Payload(), now)
 
-      // Two EscalationEvent rows at T+0: one for the provider step, one for
-      // the patient courtesy fire.
-      expect(prisma.escalationEvent.create).toHaveBeenCalledTimes(2)
+      // One EscalationEvent row at T+0: the provider step only. The patient
+      // courtesy fire is retired (Round 2 Group B).
+      expect(prisma.escalationEvent.create).toHaveBeenCalledTimes(1)
       const recipientRoles = createdEvents.map(
         (e) => e.data.recipientRoles as string[],
       )
-      // Provider event has PRIMARY_PROVIDER, patient event has PATIENT.
       expect(recipientRoles.flat()).toEqual(
-        expect.arrayContaining(['PRIMARY_PROVIDER', 'PATIENT']),
+        expect.arrayContaining(['PRIMARY_PROVIDER']),
       )
+      expect(recipientRoles.flat()).not.toContain('PATIENT')
 
-      // Notification rows fan out per (recipient × channel).
-      const notifChannels = (
-        prisma.notification.create.mock.calls as Array<[{ data: any }]>
-      ).map((c) => c[0].data.channel)
+      // Provider notifications fan out (EMAIL + DASHBOARD). No PATIENT-recipient
+      // PUSH or DASHBOARD notification is written for this alert.
+      const notifCalls = prisma.notification.create.mock.calls as Array<[{ data: any }]>
+      const notifChannels = notifCalls.map((c) => c[0].data.channel)
       expect(notifChannels).toEqual(
-        expect.arrayContaining(['EMAIL', 'DASHBOARD', 'PUSH']),
+        expect.arrayContaining(['EMAIL', 'DASHBOARD']),
       )
+      const patientUserId = (buildBpL1HighAlert().user as any).id
+      const patientWrites = notifCalls.filter((c) => c[0].data.userId === patientUserId)
+      expect(patientWrites).toHaveLength(0)
 
-      // Provider email subject/body uses the new BP LEVEL 1 HIGH label.
+      // Provider email subject/body uses the BP LEVEL 1 HIGH label.
       const emailCalls = email.sendEmail.mock.calls as Array<
         [string, string, string]
       >
@@ -1171,7 +1179,7 @@ describe('EscalationService', () => {
       expect(html).toContain('148/94 mmHg')
     })
 
-    it('BP_LEVEL_1_LOW uses the same ladder shape with HIGH→LOW label swap', async () => {
+    it('BP_LEVEL_1_LOW uses the same provider ladder shape with HIGH→LOW label swap (no patient mirror)', async () => {
       const now = new Date('2026-04-22T15:00:00Z')
       prisma.deviationAlert.findUnique.mockResolvedValue(
         buildBpL1HighAlert({
@@ -1191,7 +1199,7 @@ describe('EscalationService', () => {
         now,
       )
 
-      expect(prisma.escalationEvent.create).toHaveBeenCalledTimes(2)
+      expect(prisma.escalationEvent.create).toHaveBeenCalledTimes(1)
       const emailCalls = email.sendEmail.mock.calls as Array<
         [string, string, string]
       >
@@ -1199,25 +1207,21 @@ describe('EscalationService', () => {
       expect(subject).toContain('BP LEVEL 1 LOW')
     })
 
-    it('after-hours: PRIMARY queued for next business window, PATIENT push fires immediately', async () => {
+    it('after-hours: PRIMARY queued for next business window; NO patient push fires (Round 2 Group B)', async () => {
       // Default fixture's createdAt is 06:00 NY = after-hours.
       const afterHoursNow = new Date('2026-04-22T10:00:00Z')
       prisma.deviationAlert.findUnique.mockResolvedValue(buildBpL1HighAlert())
 
       await service.handleAlertCreated(buildBpL1Payload(), afterHoursNow)
 
-      // Provider event is created but its scheduledFor is set to next
-      // business open; patient event has notificationSentAt set (immediate).
-      const events = createdEvents.map((e) => e.data)
-      const providerEvent = events.find((e) =>
-        (e.recipientRoles as string[]).includes('PRIMARY_PROVIDER'),
-      )!
-      const patientEvent = events.find((e) =>
-        (e.recipientRoles as string[]).includes('PATIENT'),
-      )!
+      // Only the provider event is created; it's queued (scheduledFor set,
+      // notificationSentAt null) for the next business window. No patient
+      // event exists — Group B retired BP_LEVEL_1_PATIENT_T0.
+      expect(createdEvents).toHaveLength(1)
+      const providerEvent = createdEvents[0].data
+      expect(providerEvent.recipientRoles).toContain('PRIMARY_PROVIDER')
       expect(providerEvent.scheduledFor).toBeTruthy()
       expect(providerEvent.notificationSentAt).toBeFalsy()
-      expect(patientEvent.notificationSentAt).toBeTruthy()
     })
 
     it('Layer B enrollment gate suppresses BP L1 dispatch for un-enrolled patients', async () => {
