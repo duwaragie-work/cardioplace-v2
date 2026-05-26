@@ -278,4 +278,52 @@ describe('DailyJournalService', () => {
       expect(mockPrisma.journalEntry.create.mock.calls[0][0].data.narrowPpArtifact).toBe(false)
     })
   })
+
+  // Manual-test round 2 — Group C: hide Tier-3 caregiver/physician-only alerts
+  // (empty patientMessage) from the patient surface entirely. Admin endpoint
+  // unchanged.
+  describe('getAlerts — Tier-3 caregiver-only suppression (Round 2 Group C)', () => {
+    function row(over: Partial<any> = {}): any {
+      return {
+        id: over.id ?? 'a1',
+        userId: 'u1',
+        tier: over.tier ?? 'BP_LEVEL_1_HIGH',
+        ruleId: over.ruleId ?? 'RULE_STANDARD_L1_HIGH',
+        patientMessage: over.patientMessage ?? 'BP is elevated.',
+        caregiverMessage: null,
+        physicianMessage: null,
+        magnitude: null,
+        baselineValue: null,
+        actualValue: null,
+        createdAt: new Date(),
+        journalEntry: null,
+        ...over,
+      }
+    }
+
+    it('hides Tier-3 alerts with empty/null patientMessage from the patient list', async () => {
+      mockPrisma.deviationAlert.findMany.mockResolvedValueOnce([
+        row({ id: 'bp', tier: 'BP_LEVEL_1_HIGH', patientMessage: 'BP elevated' }),
+        row({ id: 't3-empty', tier: 'TIER_3_INFO', patientMessage: null, ruleId: 'RULE_HF_CAREGIVER_EDEMA' }),
+        row({ id: 't3-blank', tier: 'TIER_3_INFO', patientMessage: '   ', ruleId: 'RULE_HCM_VASODILATOR' }),
+      ])
+      const out = await service.getAlerts('u1')
+      const ids = (out.data as Array<{ id: string }>).map((a) => a.id)
+      expect(ids).toEqual(['bp'])
+    })
+
+    it('keeps Tier-3 alerts that DO carry a patient message (e.g. first-month adherence nudge)', async () => {
+      mockPrisma.deviationAlert.findMany.mockResolvedValueOnce([
+        row({
+          id: 'nudge',
+          tier: 'TIER_3_INFO',
+          ruleId: 'RULE_FIRST_MONTH_ADHERENCE_NUDGE',
+          patientMessage: 'Just a gentle reminder…',
+        }),
+      ])
+      const out = await service.getAlerts('u1')
+      const ids = (out.data as Array<{ id: string }>).map((a) => a.id)
+      expect(ids).toEqual(['nudge'])
+    })
+  })
 });

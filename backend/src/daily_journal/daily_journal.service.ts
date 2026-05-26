@@ -459,10 +459,23 @@ export class DailyJournalService {
       },
     })
 
+    // Manual-test round 2 — Group C: hide Tier-3 caregiver/physician-only rules
+    // from the patient surfaces entirely. RULE_HF_CAREGIVER_EDEMA,
+    // RULE_HCM_VASODILATOR, RULE_PULSE_PRESSURE_NARROW, RULE_DHP_CCB_LEG_SWELLING,
+    // loop-diuretic et al. emit empty patientMessage by design — patient sees no
+    // card and no notification (caregiver still gets their dispatch in
+    // escalation.service.ts:dispatchCaregiverNotification). Tier-3 with a
+    // non-empty patientMessage (e.g. RULE_FIRST_MONTH_ADHERENCE_NUDGE) stays.
+    // The admin endpoint is unchanged — admin keeps seeing them in Physician Notes.
+    const patientVisible = alerts.filter((a) => {
+      if (a.tier !== 'TIER_3_INFO') return true
+      return typeof a.patientMessage === 'string' && a.patientMessage.trim().length > 0
+    })
+
     return {
       statusCode: 200,
       message: 'Alerts retrieved successfully',
-      data: alerts.map((alert) => ({
+      data: patientVisible.map((alert) => ({
         ...alert,
         magnitude: alert.magnitude != null ? Number(alert.magnitude) : null,
         baselineValue: alert.baselineValue
