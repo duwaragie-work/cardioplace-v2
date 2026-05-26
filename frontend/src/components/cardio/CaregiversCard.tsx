@@ -7,7 +7,7 @@
 // (no provider wired yet); EMAIL is the live pilot channel.
 
 import { useEffect, useState } from 'react';
-import { Users, Plus, Trash2, ShieldCheck, AlertCircle } from 'lucide-react';
+import { Users, Plus, Trash2, ShieldCheck, ShieldOff, AlertCircle, Loader2 } from 'lucide-react';
 import {
   getCaregivers,
   addCaregiver,
@@ -152,7 +152,11 @@ export default function CaregiversCard() {
         )}
 
         {loading ? (
-          <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>Loading…</p>
+          // Round 2 D1 — mirror admin CaregiversPanel's spinner loading state
+          // (was plain "Loading…" text) for visual parity across surfaces.
+          <div className="flex items-center gap-2 text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+          </div>
         ) : caregivers.length === 0 && !adding ? (
           <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
             No caregivers added yet.
@@ -181,9 +185,12 @@ export default function CaregiversCard() {
                     data-testid={`profile-caregiver-consent-${c.id}`}
                     onClick={() => handleToggleConsent(c)}
                     className="mt-1 inline-flex items-center gap-1 text-[11.5px] font-semibold cursor-pointer"
-                    style={{ color: c.consentGivenAt ? 'var(--brand-accent-teal)' : 'var(--brand-text-muted)' }}
+                    style={{ color: c.consentGivenAt ? 'var(--brand-accent-teal)' : 'var(--brand-warning-amber-text)' }}
                   >
-                    <ShieldCheck className="w-3.5 h-3.5" />
+                    {/* Round 2 D1 — admin CaregiversPanel signals no-consent
+                        with ShieldOff (amber); mirror that here while keeping
+                        the patient-friendly toggleable wording. */}
+                    {c.consentGivenAt ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldOff className="w-3.5 h-3.5" />}
                     {c.consentGivenAt ? 'Consent given — tap to revoke' : 'Consent not given — tap to allow alerts'}
                   </button>
                 </div>
