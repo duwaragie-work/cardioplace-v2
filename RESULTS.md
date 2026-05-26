@@ -6,12 +6,20 @@ Branch: `fix/caregiver-escalation-followups` (off `nivakaran-dev`). Don't merge 
 
 | Workspace | TSC | Jest |
 |---|---|---|
-| backend | ✅ clean | ✅ 55 suites / **1159 tests** (was 1155 baseline; +4 net new) |
-| admin | ✅ clean | ✅ 6 suites / **26 tests** (was 19 baseline; +7) |
-| frontend | ✅ clean | ✅ 5 suites / **24 tests** (was 15 baseline; +9) |
+| backend | ✅ clean | ✅ 55 suites / **1163 tests** (was 1155 baseline; +8 net new) |
+| admin | ✅ clean | ✅ 7 suites / **30 tests** (was 19 baseline; +11) |
+| frontend | ✅ clean | ✅ 5 suites / **27 tests** (was 15 baseline; +12) |
 | qa | ✅ clean | (no jest suites) |
 
-8 commits on `fix/caregiver-escalation-followups`, one per workstream (Group A5 was verify-only, no commit).
+8 commits on `fix/caregiver-escalation-followups`, one per workstream (Group A5 was verify-only, no commit), + a follow-up commit closing the three gap-test items.
+
+## Round 2 follow-up — three regression-pinning test gaps closed
+
+The first RESULTS pass deferred three test items as judgment calls. All three are now landed:
+
+- **Gap 1 — D2 admin smoke test (`CaregiversPanel.test.tsx`, 4 tests).** Asserts the panel mounts with header + Add button (the "tab smoke"), renders the empty-state copy, renders each caregiver row with name + relationship + consent state, and round-trips the add-flow via `createCaregiver(patientId, …)`. Combined with admin tsc-green on the shell tab wiring, this fully covers the new tab content.
+- **Gap 2 — Group C frontend safety-net (`journal.service.test.ts`, 3 new tests).** Mocks `fetchWithAuth` to return a payload mixing BP-L1 + Tier-3-empty + Tier-3-with-message + non-Tier-3 tiers; asserts the safety-net filter drops Tier-3-empty rows, keeps Tier-3 rows with non-empty patientMessage (e.g. `RULE_FIRST_MONTH_ADHERENCE_NUDGE`), and passes non-Tier-3 tiers through untouched.
+- **Gap 3 — Group B kept-path regression pin (`alert-resolution.service.spec.ts`, 4 new tests).** Pins the contract that survived the alert-fire mirror removal: Tier 1 + BP Level 2 admin-action **resolves** still write a patient PUSH `Notification` ("Care team update"); Tier 2 resolve does NOT (admin-only per §V2-C); the BP L2 retry path leaves the alert OPEN and writes no patient notification.
 
 ## Spec delta flagged for Dr. Singal (Group B)
 
@@ -86,9 +94,9 @@ Structural mirror with admin `CaregiversPanel` was already in place (rounded-2xl
 
 ## Verification gates
 
-- Backend: `cd backend && npx tsc --noEmit -p tsconfig.build.json && NODE_OPTIONS=--experimental-vm-modules npx jest --config jest.config.mjs` — **green** (55 suites / 1159 tests / 324 snapshots).
-- Admin: `cd admin && npx tsc --noEmit && npx jest` — **green** (6 suites / 26 tests).
-- Frontend: `cd frontend && npx tsc --noEmit && npx jest` — **green** (5 suites / 24 tests).
+- Backend: `cd backend && npx tsc --noEmit -p tsconfig.build.json && NODE_OPTIONS=--experimental-vm-modules npx jest --config jest.config.mjs` — **green** (55 suites / 1163 tests / 324 snapshots).
+- Admin: `cd admin && npx tsc --noEmit && npx jest` — **green** (7 suites / 30 tests).
+- Frontend: `cd frontend && npx tsc --noEmit && npx jest` — **green** (5 suites / 27 tests).
 - QA: `cd qa && npx tsc --noEmit` — **green**.
 
 ---

@@ -504,4 +504,76 @@ describe('AlertResolutionService', () => {
       })
     })
   })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // resolve — patient in-app notification kept-paths (Round 2 Group B)
+  // ────────────────────────────────────────────────────────────────────────
+  // Group B retired the patient in-app mirror on alert FIRE; admin-action
+  // resolves on Tier 1 / BP L2 STILL write a patient Notification ("Care team
+  // update"). These assertions pin that kept-path so a future refactor can't
+  // accidentally drop it. Tier 2 is admin-only (shouldNotifyPatient returns
+  // false) — we explicitly assert no patient notif fires there too.
+  describe('resolve — patient in-app notification kept-paths (Round 2 B)', () => {
+    it('Tier 1 contraindication resolve writes a patient PUSH Notification', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue({
+        ...baseAlert,
+        tier: 'TIER_1_CONTRAINDICATION',
+      })
+      await service.resolve(alertId, actor, {
+        resolutionAction: 'TIER1_DISCONTINUED',
+        resolutionRationale: 'Patient switched to labetalol',
+      })
+      expect(prisma.notification.create).toHaveBeenCalledTimes(1)
+      expect(prisma.notification.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          userId: baseAlert.userId,
+          alertId,
+          channel: 'PUSH',
+          title: 'Care team update',
+        }),
+      })
+    })
+
+    it('BP Level 2 resolve writes a patient PUSH Notification', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue({
+        ...baseAlert,
+        tier: 'BP_LEVEL_2',
+      })
+      await service.resolve(alertId, actor, {
+        resolutionAction: 'BP_L2_CONTACTED_MED_ADJUSTED',
+        resolutionRationale: 'Increased lisinopril dose',
+      })
+      expect(prisma.notification.create).toHaveBeenCalledTimes(1)
+      expect(prisma.notification.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          userId: baseAlert.userId,
+          channel: 'PUSH',
+          title: 'Care team update',
+        }),
+      })
+    })
+
+    it('Tier 2 resolve does NOT write a patient notification (admin-only per §V2-C)', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue({
+        ...baseAlert,
+        tier: 'TIER_2_DISCREPANCY',
+      })
+      await service.resolve(alertId, actor, {
+        resolutionAction: 'TIER2_WILL_CONTACT',
+      })
+      expect(prisma.notification.create).not.toHaveBeenCalled()
+    })
+
+    it('BP L2 retry (unable-to-reach) leaves alert OPEN + writes no patient notification', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue({
+        ...baseAlert,
+        tier: 'BP_LEVEL_2',
+      })
+      await service.resolve(alertId, actor, {
+        resolutionAction: 'BP_L2_UNABLE_TO_REACH_RETRY',
+        resolutionRationale: 'Voicemail full',
+      })
+      expect(prisma.notification.create).not.toHaveBeenCalled()
+    })
+  })
 })
