@@ -86,6 +86,12 @@ const en = {
   'dashboard.critical': 'Critical',
   'dashboard.low': 'Low',
   'dashboard.activeAlert': 'Active alert',
+  // Round 2 J — recent-alerts strip on the dashboard (label key 'dashboard.recentAlerts' already defined above).
+  'dashboard.recentAlerts.open': 'Open',
+  'dashboard.recentAlerts.all': 'All',
+  'dashboard.recentAlerts.noneOpen': 'No open alerts right now.',
+  'dashboard.recentAlerts.none': 'No alerts yet.',
+  'dashboard.recentAlerts.seeAll': 'See all alerts',
   'dashboard.viewDetails': 'View details',
   'dashboard.viewDetailsAria': '{title} — view details',
   'dashboard.awaitingVerification': 'Awaiting provider verification',

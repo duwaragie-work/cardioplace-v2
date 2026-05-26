@@ -26,6 +26,7 @@ import {
 import { consolidateAlertsByEntry } from '@/lib/alerts/consolidate';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
+import PatientAlertCard from '@/components/alerts/PatientAlertCard';
 
 type TFn = (key: TranslationKey) => string;
 
@@ -247,254 +248,6 @@ function NotifSkeleton({ delay = 0 }: { delay?: number }) {
         <Bone w="65%" h={11} />
       </div>
     </div>
-  );
-}
-
-// ─── Alert Card ───────────────────────────────────────────────────────────────
-function AlertCard({
-  alert,
-  onAcknowledge,
-  acknowledging,
-}: {
-  alert: Alert;
-  onAcknowledge: (id: string) => void;
-  acknowledging: string | null;
-}) {
-  const { t } = useLanguage();
-  // Tier-first label resolution: v2 alerts always carry a `tier`, and the
-  // tier is the only field that distinguishes a Tier 1 contraindication
-  // from a missed-dose Tier 2 (both carry the legacy MEDICATION_ADHERENCE
-  // type). Falls back to the legacy `type` lookup for any v1 row that
-  // never had `tier` populated.
-  const tierMeta = alert.tier ? TIER_META[alert.tier] : null;
-  const meta =
-    tierMeta ??
-    TYPE_META[alert.type as AlertType] ??
-    { label: alert.type ?? '—', icon: AlertTriangle };
-  // Tier severity wins over the legacy severity field so the badge color
-  // matches the actual clinical priority.
-  const effectiveSeverity = (tierMeta?.severity ?? alert.severity) as AlertSeverity | undefined;
-  const sevMeta = SEVERITY_META[effectiveSeverity as AlertSeverity] ?? SEVERITY_META.LOW;
-  const Icon = meta.icon;
-  const isOpen = alert.status === 'OPEN';
-  // CLINICAL_SPEC §V2-C — Tier 1 contraindications + BP Level 2 are
-  // non-dismissable: the escalation cron stops paging once acknowledgedAt is
-  // set, so a patient tap silently kills the provider ladder. Hide the
-  // Acknowledge button entirely for those alerts; only "View details" stays.
-  const canAck = isOpen && alert.dismissible !== false;
-  const isAcking = acknowledging === alert.id;
-
-  const alertTypeLabels: Record<string, string> = {
-    SYSTOLIC_BP: t('alert.systolicBP'),
-    DIASTOLIC_BP: t('alert.diastolicBP'),
-    BP_COMBINED: t('alert.bpCombined') || 'Elevated Blood Pressure',
-    WEIGHT: t('alert.weight'),
-    MEDICATION_ADHERENCE: t('alert.medication'),
-  };
-
-  const sevLabels: Record<string, string> = {
-    HIGH: t('alert.urgent'),
-    MEDIUM: t('alert.moderate'),
-    LOW: t('alert.low'),
-  };
-
-  return (
-    <motion.div
-      layout
-      data-testid={`notification-row-${alert.id}`}
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.97 }}
-      className="rounded-2xl overflow-hidden"
-      style={{
-        border: `1px solid ${sevMeta.border}`,
-        backgroundColor: 'white',
-        boxShadow: `0 2px 16px ${sevMeta.bg}`,
-      }}
-      // Known WCAG debt — card uses sevMeta.text (vibrant red/amber) on
-      // sevMeta.bg (tinted) for small-text chips ("Moderate" badge, BP
-      // reading, etc.) at 11-13px. Vibrant-on-tint fails AA Normal.
-      // Accepted tradeoff per commit 70f2ff4; future fix is font-size bumps.
-      data-axe-debt="avatar-orange-small-text"
-    >
-      {/* Top accent strip */}
-      <div
-        className="h-1 w-full"
-        style={{ backgroundColor: sevMeta.text, opacity: 0.7 }}
-      />
-
-      <div className="p-4">
-        <div className="flex items-start gap-3">
-          {/* Icon */}
-          <div
-            className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-            style={{ backgroundColor: sevMeta.bg }}
-          >
-            <Icon className="w-5 h-5" style={{ color: sevMeta.text }} />
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap mb-1">
-              <span
-                className="text-[14px] font-bold"
-                style={{ color: 'var(--brand-text-primary)' }}
-              >
-                {tierMeta
-                  ? tierMeta.label
-                  : alert.type
-                    ? (alertTypeLabels[alert.type] ?? alert.type)
-                    : '—'}
-              </span>
-              <span
-                className="px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0"
-                style={{ backgroundColor: sevMeta.bg, color: sevMeta.text }}
-              >
-                {effectiveSeverity ? (sevLabels[effectiveSeverity] ?? effectiveSeverity) : '—'}
-              </span>
-              {alert.escalated && (
-                <span
-                  className="px-2 py-0.5 rounded-full text-[11px] font-bold text-white shrink-0 flex items-center gap-1"
-                  style={{ backgroundColor: 'var(--brand-alert-red)' }}
-                >
-                  <Zap className="w-3 h-3" />
-                  {t('notifications.escalated')}
-                </span>
-              )}
-              {alert.resolvedBy && (
-                <span
-                  className="px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0 flex items-center gap-1"
-                  style={{
-                    backgroundColor: 'var(--brand-success-green-light)',
-                    color: 'var(--brand-success-green)',
-                  }}
-                >
-                  <CheckCircle2 className="w-3 h-3" />
-                  {t('alerts.reviewedByCareTeam')}
-                </span>
-              )}
-            </div>
-
-            {/* Tier-1/Tier-2/BP-Level-2 alerts carry a clinical patient
-                message from the alert engine. Surface it verbatim so the
-                instruction (e.g. "stop and call your provider before next
-                dose") reaches the patient on the notifications inbox, not
-                just on the dedicated alert detail screen. */}
-            {alert.patientMessage && (
-              <p
-                className="text-[12.5px] mb-1 leading-relaxed"
-                style={{ color: 'var(--brand-text-secondary)' }}
-              >
-                {alert.patientMessage}
-              </p>
-            )}
-
-            {/* BP reading for combined/BP alerts */}
-            {alert.journalEntry && (alert.type === 'BP_COMBINED' || (alert.type ?? '').includes('BP')) && (
-              <p className="text-[12px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>
-                {t('alert.recorded')}{' '}
-                <span className="font-semibold" style={{ color: sevMeta.text }}>
-                  {alert.journalEntry.systolicBP ?? '—'}/{alert.journalEntry.diastolicBP ?? '—'} mmHg
-                </span>
-                {alert.baselineValue != null && (
-                  <>
-                    {' '}{t('alert.vsBaseline')}{' '}
-                    <span className="font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
-                      {Number(alert.baselineValue).toFixed(0)} mmHg
-                    </span>
-                  </>
-                )}
-              </p>
-            )}
-
-            {/* Non-BP values (weight, medication) */}
-            {alert.actualValue != null && !(alert.type ?? '').includes('BP') && alert.type !== 'BP_COMBINED' && (
-              <p className="text-[12px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>
-                {t('alert.recorded')}{' '}
-                <span className="font-semibold" style={{ color: sevMeta.text }}>
-                  {Number(alert.actualValue).toFixed(0)}
-                </span>
-                {alert.type === 'WEIGHT' ? ' lbs' : ''}
-              </p>
-            )}
-
-            {/* Measured-at — date + time derived from the single timestamp. */}
-            {alert.journalEntry?.measuredAt && (() => {
-              const dt = new Date(alert.journalEntry.measuredAt);
-              const hh = String(dt.getHours()).padStart(2, '0');
-              const mi = String(dt.getMinutes()).padStart(2, '0');
-              return (
-                <p data-testid="notification-date" className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
-                  {formatAlertDate(alert.journalEntry.measuredAt)}
-                  {/* Literal space — `ml-1` is a CSS margin, which doesn't
-                      add a word boundary in innerText. Without this the
-                      copy/screen-reader output collapses to "Fri, May 811:22"
-                      (walkthrough finding §13.1 / Phase D regression). */}
-                  {' '}
-                  <span className="font-semibold">{`${hh}:${mi}`}</span>
-                </p>
-              );
-            })()}
-          </div>
-
-          {/* Status badge */}
-          {!isOpen && (
-            <div className="shrink-0 flex items-center gap-1" style={{ color: '#16A34A' }}>
-              <CheckCircle2 className="w-4 h-4" />
-              <span className="text-[11px] font-semibold">{t('notifications.done')}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Action row — Acknowledge + deep-link to the Flow C alert detail */}
-        <div className="mt-3 flex items-center gap-2">
-          {canAck && (
-            <motion.button
-              data-testid={`notification-dismiss-button-${alert.id}`}
-              onClick={() => onAcknowledge(alert.id)}
-              disabled={isAcking}
-              className="flex-1 h-10 rounded-xl text-[13px] font-bold flex items-center justify-center gap-2 text-white transition disabled:opacity-60 cursor-pointer"
-              // Vibrant CTA: severity color BG + white text. Matches the
-              // patient dashboard top-alert "View details" pattern so each
-              // alert card has a single focal action.
-              style={{ backgroundColor: sevMeta.cta }}
-              whileTap={{ scale: 0.98 }}
-              // Known WCAG debt — orange-500 bg + 13px bold white = 3.31:1
-              // (fails AA Normal; passes AA Large only at ≥14px bold). Same
-              // tracked debt as admin avatar; font-size bump is the planned
-              // future fix.
-              data-axe-debt="avatar-orange-small-text"
-            >
-              {isAcking ? (
-                <>{t('notifications.acknowledging')}</>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4" />
-                  {t('notifications.acknowledge')}
-                </>
-              )}
-            </motion.button>
-          )}
-          <Link
-            href={`/alerts/${alert.id}`}
-            data-testid={`notification-link-${alert.id}`}
-            className={
-              (canAck ? 'h-10 px-4' : 'flex-1 h-10') +
-              ' rounded-xl text-[13px] font-bold flex items-center justify-center gap-1 transition cursor-pointer'
-            }
-            style={{
-              backgroundColor: 'var(--brand-primary-purple-light)',
-              color: 'var(--brand-primary-purple)',
-              border: '1px solid var(--brand-primary-purple-light)',
-            }}
-            aria-label={t('notifications.viewDetailsAria')}
-          >
-            {t('notifications.viewDetails')}
-            <span aria-hidden>→</span>
-          </Link>
-        </div>
-      </div>
-    </motion.div>
   );
 }
 
@@ -848,6 +601,14 @@ export default function NotificationsPage() {
   const [topTab, setTopTab] = useState<TopTab>('alerts');
   const [acknowledging, setAcknowledging] = useState<string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
+  // Round 2 J — alerts list tier filter (admin parity). The buckets the alerts
+  // top-tab renders (emergency / tier1 / high / low / info) collapse to one
+  // when this filter narrows to a single tier. 'ALL' (default) keeps every
+  // patient-visible bucket. Tier 2 is admin-only per spec — the page already
+  // strips it upstream — so it's intentionally absent from the chip set.
+  const [alertTierFilter, setAlertTierFilter] = useState<
+    'ALL' | 'emergency' | 'tier1' | 'high' | 'low' | 'info'
+  >('ALL');
 
   // First load shows the skeleton; subsequent polls refresh state silently
   // so the user doesn't see a "page refresh" flash every 30s. The motion-list
@@ -1069,6 +830,52 @@ export default function NotificationsPage() {
           </>
         ) : topTab === 'alerts' ? (
           <>
+            {/* Round 2 J — tier filter chips (admin parity). Default ALL keeps
+                the existing bucket grouping; selecting a tier narrows the list
+                to that bucket. Tier 2 is admin-only per CLINICAL_SPEC §V2-C —
+                already stripped upstream — so no chip for it. */}
+            {(openAlerts.length > 0 || pastAlerts.length > 0) && (
+              <div
+                className="flex flex-wrap gap-1.5 mb-3"
+                data-testid="alerts-tier-filter"
+                role="tablist"
+                aria-label="Filter alerts by tier"
+              >
+                {(
+                  [
+                    ['ALL', 'All'],
+                    ['emergency', 'Emergency'],
+                    ['tier1', 'Tier 1'],
+                    ['high', 'High BP'],
+                    ['low', 'Low BP'],
+                    ['info', 'Info'],
+                  ] as const
+                ).map(([key, label]) => {
+                  const active = alertTierFilter === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      data-testid={`alerts-tier-filter-${key}`}
+                      onClick={() => setAlertTierFilter(key)}
+                      className="px-2.5 h-7 rounded-full text-[11.5px] font-semibold transition cursor-pointer"
+                      style={{
+                        backgroundColor: active
+                          ? 'var(--brand-primary-purple)'
+                          : 'var(--brand-primary-purple-light)',
+                        color: active ? 'white' : 'var(--brand-primary-purple)',
+                        border: '1px solid transparent',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {/* ── Alerts grouped by tier (E1) — emergency first, then Tier 1
                 contraindications, BP Level 1 high, BP Level 1 low, info, then
                 anything that the rule engine hasn't classified. Each section
@@ -1118,17 +925,21 @@ export default function NotificationsPage() {
               };
               return order
                 .filter((k) => buckets.has(k))
+                // Round 2 J — narrow to the selected tier chip ('ALL' = all
+                // patient-visible buckets; 'other' is bundled into 'ALL').
+                .filter((k) => alertTierFilter === 'ALL' || alertTierFilter === k)
                 .map((k) => (
                   <div key={k}>
                     <SectionLabel count={buckets.get(k)!.length} testId={sectionTestIds[k]}>{headings[k]}</SectionLabel>
                     <div className="space-y-3">
                       <AnimatePresence mode="popLayout">
                         {buckets.get(k)!.map((alert) => (
-                          <AlertCard
+                          <PatientAlertCard
                             key={alert.id}
                             alert={alert}
                             onAcknowledge={handleAcknowledge}
                             acknowledging={acknowledging}
+                            testIdPrefix="notification-row"
                           />
                         ))}
                       </AnimatePresence>
@@ -1203,11 +1014,12 @@ function PastAlerts({ alerts }: { alerts: Alert[] }) {
             className="overflow-hidden mt-3 space-y-2"
           >
             {alerts.map((alert) => (
-              <AlertCard
+              <PatientAlertCard
                 key={alert.id}
                 alert={alert}
                 onAcknowledge={() => {}}
                 acknowledging={null}
+                testIdPrefix="notification-row"
               />
             ))}
           </motion.div>

@@ -91,6 +91,12 @@ const fr: Record<TranslationKey, string> = {
   'dashboard.critical': 'Critique',
   'dashboard.low': 'Basse',
   'dashboard.activeAlert': 'Alerte active',
+  // Round 2 J — recent-alerts strip on the dashboard (parent label key already defined above).
+  'dashboard.recentAlerts.open': 'Ouvertes',
+  'dashboard.recentAlerts.all': 'Toutes',
+  'dashboard.recentAlerts.noneOpen': 'Aucune alerte ouverte pour le moment.',
+  'dashboard.recentAlerts.none': 'Aucune alerte pour le moment.',
+  'dashboard.recentAlerts.seeAll': 'Voir toutes les alertes',
   'dashboard.viewDetails': 'Voir les détails',
   'dashboard.viewDetailsAria': '{title} — voir les détails',
   'dashboard.awaitingVerification': 'En attente de validation par un professionnel de santé',

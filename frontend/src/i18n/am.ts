@@ -93,6 +93,12 @@ const am: Record<TranslationKey, string> = {
   'dashboard.critical': 'ከባድ',
   'dashboard.low': 'ዝቅተኛ',
   'dashboard.activeAlert': 'የነቃ ማንቂያ',
+  // Round 2 J — recent-alerts strip on the dashboard (parent label key already defined above).
+  'dashboard.recentAlerts.open': 'ክፍት',
+  'dashboard.recentAlerts.all': 'ሁሉም',
+  'dashboard.recentAlerts.noneOpen': 'አሁን ምንም ክፍት ማንቂያ የለም።',
+  'dashboard.recentAlerts.none': 'ገና ምንም ማንቂያ የለም።',
+  'dashboard.recentAlerts.seeAll': 'ሁሉንም ማንቂያዎች ይመልከቱ',
   'dashboard.viewDetails': 'ዝርዝር ይመልከቱ',
   'dashboard.viewDetailsAria': '{title} — ዝርዝር ይመልከቱ',
   'dashboard.awaitingVerification': 'የተንከባካቢ ቡድን ማረጋገጫ በመጠበቅ ላይ',
