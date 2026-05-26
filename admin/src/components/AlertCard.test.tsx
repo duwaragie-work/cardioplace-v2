@@ -54,6 +54,65 @@ function renderCard(alert: PatientAlert) {
   )
 }
 
+// Manual-test round 2 Group A2 — empty three-tier cards must not render the
+// "No message generated for this audience." placeholder. A Tier-3
+// caregiver/physician-only alert (empty patientMessage) shows only the
+// Caregiver + Physician cards in the expanded grid.
+function renderExpanded(alert: PatientAlert) {
+  // EscalationAuditTrail (rendered inside the expanded block) iterates
+  // alert.escalationEvents. The base fixture omits the field — add an empty
+  // array here so the audit-trail renders without throwing.
+  const withEvents: PatientAlert = {
+    ...alert,
+    escalationEvents: [],
+  } as unknown as PatientAlert
+  return render(
+    <AlertCard
+      alert={withEvents}
+      expanded={true}
+      onRowClick={noop}
+      onToggleExpand={noop}
+      onResolve={noop}
+      onAcknowledge={noop}
+    />,
+  )
+}
+
+describe('AlertCard — three-tier grid (Round 2 A2)', () => {
+  it('hides the Patient card when patientMessage is null', () => {
+    renderExpanded(
+      makeAlert({
+        tier: 'TIER_3_INFO',
+        ruleId: 'RULE_HF_CAREGIVER_EDEMA',
+        patientMessage: null,
+        caregiverMessage: 'Watch for fluid build-up.',
+        physicianMessage: 'HF decompensation surveillance.',
+      } as Partial<PatientAlert>),
+    )
+    expect(screen.queryByTestId('admin-alert-msg-patient-alert-1')).not.toBeInTheDocument()
+    expect(screen.getByTestId('admin-alert-msg-caregiver-alert-1')).toBeInTheDocument()
+    expect(screen.getByTestId('admin-alert-msg-physician-alert-1')).toBeInTheDocument()
+  })
+
+  it('hides the Patient card when patientMessage is whitespace-only', () => {
+    renderExpanded(
+      makeAlert({
+        patientMessage: '   ',
+        caregiverMessage: 'c',
+        physicianMessage: 'phys',
+      }),
+    )
+    expect(screen.queryByTestId('admin-alert-msg-patient-alert-1')).not.toBeInTheDocument()
+  })
+
+  it('renders all three cards when all messages are populated', () => {
+    renderExpanded(makeAlert())
+    expect(screen.getByTestId('admin-alert-msg-patient-alert-1')).toBeInTheDocument()
+    expect(screen.getByTestId('admin-alert-msg-caregiver-alert-1')).toBeInTheDocument()
+    expect(screen.getByTestId('admin-alert-msg-physician-alert-1')).toBeInTheDocument()
+  })
+})
+
 describe('AlertCard — mode badge (B3)', () => {
   it('renders a "Personalized" badge when mode is PERSONALIZED', () => {
     renderCard(makeAlert({ mode: 'PERSONALIZED' }))

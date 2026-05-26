@@ -134,6 +134,12 @@ interface Props {
   rowClickable?: boolean;
 }
 
+/** Round 2 A2 — null/empty/whitespace messages don't get a card (was rendering
+ *  the italic "No message generated for this audience." placeholder).  */
+function hasTierMessage(message: string | null | undefined): boolean {
+  return typeof message === 'string' && message.trim().length > 0;
+}
+
 export default function AlertCard({
   alert,
   expanded,
@@ -381,28 +387,38 @@ export default function AlertCard({
           className="px-4 md:px-5 pb-4 pt-1 space-y-3"
           style={{ backgroundColor: 'var(--brand-background)' }}
         >
+          {/* Manual-test round 2 Group A2 — short-circuit empty tier cards
+              instead of rendering the "No message generated for this audience."
+              placeholder. A Tier-3 caregiver/physician-only alert now shows
+              Caregiver + Physician cards only — no empty Patient panel. */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-3">
-            <ThreeTierMessageCard
-              title="Patient"
-              icon={<UserIcon className="w-3 h-3" />}
-              message={alert.patientMessage}
-              color="var(--brand-primary-purple)"
-              testId={`admin-alert-msg-patient-${alert.id}`}
-            />
-            <ThreeTierMessageCard
-              title="Caregiver"
-              icon={<Users className="w-3 h-3" />}
-              message={alert.caregiverMessage}
-              color="var(--brand-accent-teal)"
-              testId={`admin-alert-msg-caregiver-${alert.id}`}
-            />
-            <ThreeTierMessageCard
-              title="Physician"
-              icon={<Stethoscope className="w-3 h-3" />}
-              message={alert.physicianMessage}
-              color="var(--brand-text-secondary)"
-              testId={`admin-alert-msg-physician-${alert.id}`}
-            />
+            {hasTierMessage(alert.patientMessage) && (
+              <ThreeTierMessageCard
+                title="Patient"
+                icon={<UserIcon className="w-3 h-3" />}
+                message={alert.patientMessage}
+                color="var(--brand-primary-purple)"
+                testId={`admin-alert-msg-patient-${alert.id}`}
+              />
+            )}
+            {hasTierMessage(alert.caregiverMessage) && (
+              <ThreeTierMessageCard
+                title="Caregiver"
+                icon={<Users className="w-3 h-3" />}
+                message={alert.caregiverMessage}
+                color="var(--brand-accent-teal)"
+                testId={`admin-alert-msg-caregiver-${alert.id}`}
+              />
+            )}
+            {hasTierMessage(alert.physicianMessage) && (
+              <ThreeTierMessageCard
+                title="Physician"
+                icon={<Stethoscope className="w-3 h-3" />}
+                message={alert.physicianMessage}
+                color="var(--brand-text-secondary)"
+                testId={`admin-alert-msg-physician-${alert.id}`}
+              />
+            )}
           </div>
 
           {/* Manisha 5/24 Q3 — pre-personalization "X of 7" note. Standard
