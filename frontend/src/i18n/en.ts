@@ -740,6 +740,7 @@ const en = {
   'register.continue': 'Continue',
   'register.verifying': 'Verifying...',
   'register.terms': 'By creating an account, you agree to our',
+  'register.agreeToTerms': 'I agree to the',
   'register.termsOfService': 'Terms of Service',
   'register.and': 'and',
   'register.privacyPolicy': 'Privacy Policy',
@@ -796,6 +797,16 @@ const en = {
   'onboarding.benefit1': 'Daily BP monitoring and trend analysis',
   'onboarding.benefit2': 'Medication adherence tracking',
   'onboarding.benefit3': 'Care team alerts when readings are elevated',
+
+  // ─── Onboarding · Privacy / Trust screen (V2-E Gap 7) ─────────────────────
+  'onboarding.privacy.title': 'Your information is private',
+  'onboarding.privacy.intro': 'Your health information stays between you and your care team. Here is our promise to you:',
+  'onboarding.privacy.point1': 'Not shared with the government or immigration',
+  'onboarding.privacy.point2': 'Not shared with your employer or landlord',
+  'onboarding.privacy.point3': 'Only your care team can see it',
+  'onboarding.privacy.reassure': 'Your information is stored securely and is never sold or shared.',
+  'onboarding.privacy.continue': 'I understand — continue',
+  'onboarding.privacy.audio': 'Your information is private. Your health information stays between you and your care team. It is not shared with the government or immigration. It is not shared with your employer or landlord. Only your care team can see it. Your information is stored securely and is never sold or shared.',
 
   // ─── Landing Header / Footer ────────────────────────────────────────────────
   'landing.home': 'Home',

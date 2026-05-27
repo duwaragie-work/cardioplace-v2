@@ -739,6 +739,7 @@ const am: Record<TranslationKey, string> = {
   'register.continue': 'ቀጥል',
   'register.verifying': 'በማረጋገጥ ላይ...',
   'register.terms': 'መለያ በመፍጠር፣ እርስዎ ተስማምተዋል',
+  'register.agreeToTerms': 'የሚከተለውን እቀበላለሁ፦',
   'register.termsOfService': 'የአገልግሎት ውሎች',
   'register.and': 'እና',
   'register.privacyPolicy': 'የግላዊነት ፖሊሲ',
@@ -795,6 +796,16 @@ const am: Record<TranslationKey, string> = {
   'onboarding.benefit1': 'ዕለታዊ የደም ግፊት ክትትል እና አዝማሚያ ትንተና',
   'onboarding.benefit2': 'የመድሃኒት ተገዢነት ክትትል',
   'onboarding.benefit3': 'ንባቦች ከፍ ሲሉ የእንክብካቤ ቡድን ማንቂያዎች',
+
+  // ─── Onboarding · የግላዊነት / የመተማመኛ ማያ (V2-E Gap 7) ────────────────────────
+  'onboarding.privacy.title': 'መረጃዎ ሚስጥራዊ ነው',
+  'onboarding.privacy.intro': 'የጤና መረጃዎ በእርስዎና በእንክብካቤ ቡድንዎ መካከል ብቻ ይቆያል። ቃል የምንገባልዎ ይህ ነው፦',
+  'onboarding.privacy.point1': 'ለመንግሥት ወይም ለኢሚግሬሽን አይጋራም',
+  'onboarding.privacy.point2': 'ለቀጣሪዎ ወይም ለቤት አከራይዎ አይጋራም',
+  'onboarding.privacy.point3': 'የእንክብካቤ ቡድንዎ ብቻ ሊያየው ይችላል',
+  'onboarding.privacy.reassure': 'መረጃዎ በአስተማማኝ ሁኔታ ይቀመጣል፤ ፈጽሞ አይሸጥም ወይም አይጋራም።',
+  'onboarding.privacy.continue': 'ገብቶኛል — ይቀጥሉ',
+  'onboarding.privacy.audio': 'መረጃዎ ሚስጥራዊ ነው። የጤና መረጃዎ በእርስዎና በእንክብካቤ ቡድንዎ መካከል ብቻ ይቆያል። ለመንግሥት ወይም ለኢሚግሬሽን አይጋራም። ለቀጣሪዎ ወይም ለቤት አከራይዎ አይጋራም። የእንክብካቤ ቡድንዎ ብቻ ሊያየው ይችላል። መረጃዎ በአስተማማኝ ሁኔታ ይቀመጣል፤ ፈጽሞ አይሸጥም ወይም አይጋራም።',
 
   // ─── Landing Header / Footer ────────────────────────────────────────────────
   'landing.home': 'መነሻ',

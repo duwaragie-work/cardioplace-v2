@@ -10,6 +10,9 @@ import LanguageSelector from './LanguageSelector';
 
 interface LandingHeaderProps {
   activeLink?: string;
+  /** Hide the Dashboard / Get Started CTA — used on the onboarding gate so the
+   *  user can't skip onboarding (and its consent step) straight to the app. */
+  hideAuthCta?: boolean;
 }
 
 // Smooth-scroll to an in-page anchor AND update the URL hash so the
@@ -24,7 +27,7 @@ function jumpToAnchor(href: string) {
   }
 }
 
-export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProps) {
+export default function LandingHeader({ activeLink = 'Home', hideAuthCta = false }: LandingHeaderProps) {
   const { t } = useLanguage();
   const { isAuthenticated, isLoading } = useAuth();
   const [mounted, setMounted] = useState(false);
@@ -86,7 +89,7 @@ export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProp
           <div className="hidden md:block">
             <LanguageSelector />
           </div>
-          {mounted && !isLoading && (
+          {!hideAuthCta && mounted && !isLoading && (
             isAuthenticated ? (
               <Link
                 href="/dashboard"
@@ -141,7 +144,7 @@ export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProp
           <div className="flex items-center gap-3 py-2">
             <LanguageSelector />
           </div>
-          {mounted && !isLoading && (
+          {!hideAuthCta && mounted && !isLoading && (
             isAuthenticated ? (
               <Link
                 href="/dashboard"

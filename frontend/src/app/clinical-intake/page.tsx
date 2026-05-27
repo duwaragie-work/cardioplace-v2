@@ -21,15 +21,17 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Heart,
+  HeartPulse,
   Activity,
   Stethoscope,
-  Sparkles,
+  CirclePlus,
   Mars,
   Venus,
   Asterisk,
   Baby,
   Pill,
   Droplet,
+  TestTube,
   Shield,
   Mic,
   ArrowLeft,
@@ -89,6 +91,60 @@ import ChoiceCard from '@/components/intake/ChoiceCard';
 import MedicationCard from '@/components/intake/MedicationCard';
 import ReAddConfirmModal from '@/components/intake/ReAddConfirmModal';
 import SpinnerIndicator from '@/components/ui/SpinnerIndicator';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Condition icons — HCM vs DCM are drawn as visual opposites so a non-medical
+// patient grasps the difference without reading: HCM = a SMALL, thick-walled
+// heart with arrows pressing INWARD ("muscle too thick / tight"); DCM = a LARGE,
+// thin-walled heart with arrows stretching OUTWARD ("heart enlarged / stretched").
+// Both previously shared the Sparkles glyph, which read as the same condition.
+// NOTE: art still needs Dr. Singal clinical + design sign-off before pilot.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function HcmHeartIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* small heart with an extra-thick wall = thickened muscle */}
+      <path
+        strokeWidth={3}
+        d="M12 16.3C9.6 14.6 7.6 12.9 7.6 10.8 7.6 9.5 8.6 8.5 9.9 8.5 10.7 8.5 11.5 8.9 12 9.7 12.5 8.9 13.3 8.5 14.1 8.5 15.4 8.5 16.4 9.5 16.4 10.8 16.4 12.9 14.4 14.6 12 16.3Z"
+      />
+      {/* arrows pressing inward */}
+      <path d="M2.5 12H5M4 10.8 5 12 4 13.2" />
+      <path d="M21.5 12H19M20 10.8 19 12 20 13.2" />
+    </svg>
+  );
+}
+
+function DcmHeartIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* larger, thin-walled heart = stretched / enlarged chamber */}
+      <path d="M12 17.6C8.7 15.3 6 12.9 6 10 6 8.3 7.3 7 9 7 10.1 7 11.2 7.6 12 8.7 12.8 7.6 13.9 7 15 7 16.7 7 18 8.3 18 10 18 12.9 15.3 15.3 12 17.6Z" />
+      {/* arrows stretching outward */}
+      <path d="M5 12H2.5M3.5 10.8 2.5 12 3.5 13.2" />
+      <path d="M19 12H21.5M20.5 10.8 21.5 12 20.5 13.2" />
+    </svg>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -714,7 +770,7 @@ function A3Conditions({ state, setState }: StepProps) {
           testId="intake-condition-CAD"
         />
         <ChoiceCard
-          icon={<Sparkles className="w-6 h-6" />}
+          icon={<HcmHeartIcon className="w-6 h-6" />}
           title={t('intake.a3.hcmTitle')}
           description={t('intake.a3.hcmDesc')}
           selected={has('hasHCM')}
@@ -723,7 +779,7 @@ function A3Conditions({ state, setState }: StepProps) {
           testId="intake-condition-HCM"
         />
         <ChoiceCard
-          icon={<Sparkles className="w-6 h-6" />}
+          icon={<DcmHeartIcon className="w-6 h-6" />}
           title={t('intake.a3.dcmTitle')}
           description={t('intake.a3.dcmDesc')}
           selected={has('hasDCM')}
@@ -775,7 +831,7 @@ function A4HFType({ state, setState }: StepProps) {
       />
       <div className="grid grid-cols-1 gap-3">
         <ChoiceCard
-          icon={<Heart className="w-6 h-6" />}
+          icon={<HeartPulse className="w-6 h-6" />}
           title={t('intake.a4.hfrefTitle')}
           description={t('intake.a4.hfrefDesc')}
           selected={state.heartFailureType === 'HFREF'}
@@ -1364,11 +1420,11 @@ function A8Categories({ state, setState }: StepProps) {
 
   const categories: { key: string; label: string; icon: React.ReactNode; audio: string }[] = [
     { key: 'WATER_PILL', label: t('intake.a8.categoryWaterPill'), icon: <Droplet className="w-6 h-6" />, audio: t('intake.a8.categoryWaterPill') },
-    { key: 'BLOOD_THINNER', label: t('intake.a8.categoryBloodThinner'), icon: <Pill className="w-6 h-6" />, audio: t('intake.a8.categoryBloodThinner') },
-    { key: 'CHOLESTEROL', label: t('intake.a8.categoryCholesterol'), icon: <Pill className="w-6 h-6" />, audio: t('intake.a8.categoryCholesterol') },
+    { key: 'BLOOD_THINNER', label: t('intake.a8.categoryBloodThinner'), icon: <TestTube className="w-6 h-6" />, audio: t('intake.a8.categoryBloodThinner') },
+    { key: 'CHOLESTEROL', label: t('intake.a8.categoryCholesterol'), icon: <HeartPulse className="w-6 h-6" />, audio: t('intake.a8.categoryCholesterol') },
     { key: 'HEART_RHYTHM', label: t('intake.a8.categoryHeartRhythm'), icon: <Activity className="w-6 h-6" />, audio: t('intake.a8.categoryHeartRhythm') },
     { key: 'SGLT2', label: t('intake.a8.categorySGLT2'), icon: <Heart className="w-6 h-6" />, audio: t('intake.a8.audioSGLT2') },
-    { key: 'OTHER', label: t('intake.a8.categoryOther'), icon: <Sparkles className="w-6 h-6" />, audio: t('intake.a8.categoryOther') },
+    { key: 'OTHER', label: t('intake.a8.categoryOther'), icon: <CirclePlus className="w-6 h-6" />, audio: t('intake.a8.categoryOther') },
   ];
   const alsoKnown = t('intake.a5.audioAlsoKnown');
 

@@ -509,26 +509,22 @@ export default function RegisterPage() {
                 </div>
               )}
 
-              {/* Terms */}
-              <div className=" w-full max-w-105">
+              {/* Terms — passive notice below the buttons (consent itself is
+                  collected once on the onboarding privacy step for new users). */}
+              <div className="w-full max-w-105">
                 <p className="text-[#737373] text-[11px] lg:text-xs leading-relaxed text-center">
                   {t('register.terms')}{" "}
-                  <a
-                    href="/terms"
-                    className="font-medium text-[#7B00E0] hover:underline"
-                  >
+                  <a href="/terms" className="font-medium text-[#7B00E0] hover:underline">
                     {t('register.termsOfService')}
                   </a>{" "}
                   {t('register.and')}{" "}
-                  <a
-                    href="/privacy"
-                    className="font-medium text-[#7B00E0] hover:underline"
-                  >
+                  <a href="/privacy" className="font-medium text-[#7B00E0] hover:underline">
                     {t('register.privacyPolicy')}
                   </a>
                   .
                 </p>
               </div>
+
             </div>
           </div>
 
