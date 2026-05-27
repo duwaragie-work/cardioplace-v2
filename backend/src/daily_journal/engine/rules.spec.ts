@@ -252,6 +252,41 @@ describe('pregnancyAceArbRule (D.1)', () => {
     const r = pregnancyAceArbRule(session(), ctx({ contextMeds: [med()] }))
     expect(r).toBeNull()
   })
+
+  // Regression: duplicate PatientMedication rows for the same drug were
+  // surfacing as "review Lisinopril, Lisinopril, and Lisinopril". The dedup now
+  // collapses by normalized drugName in addition to row id.
+  it('three duplicate PatientMedication rows for Lisinopril → drugNames lists it ONCE', () => {
+    const r = pregnancyAceArbRule(
+      session(),
+      ctx({
+        profile: { isPregnant: true },
+        contextMeds: [
+          med({ id: 'a', drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR' }),
+          med({ id: 'b', drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR' }),
+          med({ id: 'c', drugName: 'lisinopril', drugClass: 'ACE_INHIBITOR' }),
+        ],
+        triggerPregnancyContraindicationCheck: true,
+      }),
+    )
+    expect(r?.tier).toBe('TIER_1_CONTRAINDICATION')
+    expect(r?.metadata?.drugNames).toEqual(['Lisinopril'])
+  })
+
+  it('genuinely-different ACE/ARB drugs → drugNames lists each (no over-dedup)', () => {
+    const r = pregnancyAceArbRule(
+      session(),
+      ctx({
+        profile: { isPregnant: true },
+        contextMeds: [
+          med({ id: 'a', drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR' }),
+          med({ id: 'b', drugName: 'Losartan', drugClass: 'ARB' }),
+        ],
+        triggerPregnancyContraindicationCheck: true,
+      }),
+    )
+    expect(r?.metadata?.drugNames).toEqual(['Lisinopril', 'Losartan'])
+  })
 })
 
 // ─── D.2 NDHP-CCB + HFrEF ───────────────────────────────────────────────────
