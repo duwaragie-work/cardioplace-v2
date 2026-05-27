@@ -38,7 +38,7 @@ interface NormalizedInvite {
   practiceId: string | null
 }
 
-interface BulkRowError {
+export interface BulkRowError {
   index: number
   email: string
   reason: string
@@ -54,6 +54,22 @@ const ROLES_REQUIRING_PRACTICE_FOR_OPS: UserRole[] = [
   UserRole.COORDINATOR,
   UserRole.PROVIDER,
 ]
+
+// Mirror of admin/src/lib/roleGates.ts isCoordinatorOnly — a caller whose
+// only admin-tier role is COORDINATOR is the "lock practice to their own
+// PracticeCoordinator membership" branch. Anyone who *also* holds a broader
+// admin role (OPS / SUPER / MD / PROVIDER) keeps the explicit picker.
+const COORDINATOR_BROADER_ROLES: UserRole[] = [
+  UserRole.SUPER_ADMIN,
+  UserRole.HEALPLACE_OPS,
+  UserRole.MEDICAL_DIRECTOR,
+  UserRole.PROVIDER,
+]
+
+function isCoordinatorCaller(caller: Actor): boolean {
+  if (!caller.roles.includes(UserRole.COORDINATOR)) return false
+  return !caller.roles.some((r) => COORDINATOR_BROADER_ROLES.includes(r))
+}
 
 const ROLES_REQUIRING_PRACTICE_FOR_SUPER: UserRole[] = [
   UserRole.PATIENT,
@@ -210,13 +226,28 @@ export class UsersService {
       if (!own) {
         throw new ForbiddenException('You are not assigned to a practice')
       }
-      const assignment = await this.prisma.patientProviderAssignment.findUnique(
-        {
+      // Two possible practice links for a patient:
+      //   1. PatientProviderAssignment (full clinical care team — populated
+      //      by Provider Verify, may not exist yet for a freshly-activated
+      //      invite).
+      //   2. UserInvite.practiceId via the createdUserId back-reference
+      //      (set the moment a patient accepts the invite — exists for
+      //      every invite-driven patient).
+      // Either one matching the coordinator's own practice is enough.
+      const [assignment, invite] = await Promise.all([
+        this.prisma.patientProviderAssignment.findUnique({
           where: { userId: targetUser.id },
           select: { practiceId: true },
-        },
-      )
-      if (!assignment || assignment.practiceId !== own.practiceId) {
+        }),
+        this.prisma.userInvite.findUnique({
+          where: { createdUserId: targetUser.id },
+          select: { practiceId: true },
+        }),
+      ])
+      const inPractice =
+        assignment?.practiceId === own.practiceId ||
+        invite?.practiceId === own.practiceId
+      if (!inPractice) {
         throw new ForbiddenException(
           'You can only deactivate patients in your own practice',
         )
@@ -235,10 +266,50 @@ export class UsersService {
     if (!row) throw new NotFoundException(`Practice ${practiceId} not found`)
   }
 
+  /**
+   * Look up the coordinator's own practiceId (one per coordinator, enforced
+   * by @unique on PracticeCoordinator.userId). Returns null for any caller
+   * who isn't an active coordinator. The result is intentionally lazy —
+   * the bulk path resolves it once and passes it to every row.
+   */
+  private async resolveCallerCoordinatorPracticeId(
+    callerId: string,
+  ): Promise<string | null> {
+    const row = await this.prisma.practiceCoordinator.findUnique({
+      where: { userId: callerId },
+      select: { practiceId: true },
+    })
+    return row?.practiceId ?? null
+  }
+
+  /**
+   * For COORDINATOR callers the practice is implicit — the UI does not show
+   * a picker and the frontend sends `practiceId: undefined`. We auto-fill
+   * server-side BEFORE `assertCanInvite` runs so the validation step sees
+   * a populated practiceId. Mutates the row in place.
+   *
+   * Pass `coordinatorPracticeId` when known (bulk path resolves once and
+   * reuses); leave undefined to resolve on demand (single-invite path).
+   */
+  private async applyImplicitCoordinatorPractice(
+    caller: Actor,
+    row: NormalizedInvite,
+    coordinatorPracticeId?: string | null,
+  ): Promise<void> {
+    if (row.practiceId) return
+    if (!isCoordinatorCaller(caller)) return
+    const resolved =
+      coordinatorPracticeId === undefined
+        ? await this.resolveCallerCoordinatorPracticeId(caller.id)
+        : coordinatorPracticeId
+    if (resolved) row.practiceId = resolved
+  }
+
   // ─── Invite — single ──────────────────────────────────────────────────────
 
   async invite(caller: Actor, dto: InviteUserDto, ctx?: InviteContext) {
     const normalized = this.normalizeInvite(dto)
+    await this.applyImplicitCoordinatorPractice(caller, normalized)
     await this.assertCanInvite(caller, normalized.role, normalized.practiceId)
     await this.assertEmailAvailable(normalized.email)
 
@@ -303,6 +374,21 @@ export class UsersService {
       this.normalizeInvite(entry),
     )
     const errors: BulkRowError[] = []
+
+    // Resolve the COORDINATOR caller's practiceId once and apply it to every
+    // row that came in without one. This mirrors the single-invite path —
+    // the frontend deliberately omits practiceId for coordinator callers
+    // because the picker is hidden in their UI.
+    const coordinatorPracticeId = isCoordinatorCaller(caller)
+      ? await this.resolveCallerCoordinatorPracticeId(caller.id)
+      : null
+    for (const row of normalizedRows) {
+      await this.applyImplicitCoordinatorPractice(
+        caller,
+        row,
+        coordinatorPracticeId,
+      )
+    }
 
     // 1. Authorization pass — every row must pass `assertCanInvite`
     //    before we touch the DB. A single failure aborts the whole batch.
@@ -659,12 +745,16 @@ export class UsersService {
     const skip = (page - 1) * limit
 
     // Practice scope — COORDINATOR is locked to their own practice
-    // server-side regardless of what they send.
+    // server-side regardless of what they send. Also pulled here so the
+    // response carries the practice name (the COORDINATOR caller can't
+    // list practices to resolve it client-side — that endpoint is
+    // gated to OPS/SUPER).
     let practiceIdFilter: string | null | undefined
+    let coordinatorScope: { id: string; name: string } | null = null
     if (caller.roles.includes(UserRole.COORDINATOR)) {
       const own = await this.prisma.practiceCoordinator.findUnique({
         where: { userId: caller.id },
-        select: { practiceId: true },
+        select: { practice: { select: { id: true, name: true } } },
       })
       if (!own) {
         return {
@@ -677,61 +767,98 @@ export class UsersService {
           invites: [],
         }
       }
-      practiceIdFilter = own.practiceId
+      practiceIdFilter = own.practice.id
+      coordinatorScope = { id: own.practice.id, name: own.practice.name }
     } else if (query.practiceId) {
       practiceIdFilter = query.practiceId
     }
 
-    // Build the User where-clause first. For COORDINATOR the only
-    // visible users are patients in own practice (joined via
-    // PatientProviderAssignment.practiceId).
+    // Build the User where-clause. The filters compose as AND of three
+    // independent groups so search and practice never bleed into the
+    // same OR (which used to make `?search=foo&practiceId=bar` match
+    // "name like foo OR email like foo OR has practice bar" — too loose).
+    //
+    //   role     → top-level `roles: { has: ... }`
+    //   search   → AND-group: OR of name+email match
+    //   practice → AND-group: OR of all valid practice memberships
     const userWhere: Prisma.UserWhereInput = {}
+    const andGroups: Prisma.UserWhereInput[] = []
 
     if (query.role) {
       userWhere.roles = { has: query.role }
     }
+
     if (query.search) {
       const term = query.search.trim()
       if (term.length > 0) {
-        userWhere.OR = [
-          { email: { contains: term, mode: 'insensitive' } },
-          { name: { contains: term, mode: 'insensitive' } },
-        ]
+        andGroups.push({
+          OR: [
+            { email: { contains: term, mode: 'insensitive' } },
+            { name: { contains: term, mode: 'insensitive' } },
+          ],
+        })
       }
     }
 
     if (caller.roles.includes(UserRole.COORDINATOR)) {
-      // COORDINATOR sees PATIENT users only — assignment.practiceId =
-      // own.practiceId. The status filter is honored but constrained.
+      // COORDINATOR sees PATIENT users only — own practice's patients.
+      // Match by EITHER the full clinical assignment OR the invite back-
+      // reference: patients invited by the coordinator don't get a
+      // PatientProviderAssignment row at accept-time (it needs primary
+      // provider / backup / MD ids the invite flow doesn't carry), so
+      // without the OR they'd be invisible to the very coordinator who
+      // invited them until Provider Verify creates the real assignment.
       userWhere.roles = { has: UserRole.PATIENT }
-      userWhere.providerAssignmentAsPatient = {
-        is: { practiceId: practiceIdFilter as string },
-      }
+      andGroups.push({
+        OR: [
+          {
+            providerAssignmentAsPatient: {
+              is: { practiceId: practiceIdFilter as string },
+            },
+          },
+          {
+            userInviteCreated: {
+              is: { practiceId: practiceIdFilter as string },
+            },
+          },
+        ],
+      })
     } else if (practiceIdFilter) {
-      // OPS / SUPER explicit practice filter — accept either a patient
-      // assigned to that practice OR a staff member of that practice
+      // OPS / SUPER explicit practice filter — accept any of: a patient
+      // assigned to that practice, a patient invited into that practice
+      // (assignment-pending), or a staff member of that practice
       // (provider, MD, coordinator memberships).
-      userWhere.OR = [
-        ...((userWhere.OR as Prisma.UserWhereInput[] | undefined) ?? []),
-        {
-          providerAssignmentAsPatient: {
-            is: { practiceId: practiceIdFilter },
+      andGroups.push({
+        OR: [
+          {
+            providerAssignmentAsPatient: {
+              is: { practiceId: practiceIdFilter },
+            },
           },
-        },
-        {
-          practiceProviderMemberships: {
-            some: { practiceId: practiceIdFilter },
+          {
+            userInviteCreated: {
+              is: { practiceId: practiceIdFilter },
+            },
           },
-        },
-        {
-          practiceMedicalDirectorMemberships: {
-            some: { practiceId: practiceIdFilter },
+          {
+            practiceProviderMemberships: {
+              some: { practiceId: practiceIdFilter },
+            },
           },
-        },
-        {
-          practiceCoordinator: { is: { practiceId: practiceIdFilter } },
-        },
-      ]
+          {
+            practiceMedicalDirectorMemberships: {
+              some: { practiceId: practiceIdFilter },
+            },
+          },
+          {
+            practiceCoordinator: { is: { practiceId: practiceIdFilter } },
+          },
+        ],
+      })
+    }
+
+    if (andGroups.length > 0) {
+      userWhere.AND = andGroups
     }
 
     // Status filter — ACTIVE/BLOCKED/SUSPENDED/DEACTIVATED map straight
@@ -774,18 +901,61 @@ export class UsersService {
           roles: true,
           accountStatus: true,
           createdAt: true,
+          // Practice associations — flattened to a single `practiceId`
+          // below so the admin /users list can show the practice column
+          // for activated users (not just pending invites). One relation
+          // per role; the first-matching wins in role priority order.
+          //
+          // PATIENT note — accept-invite doesn't create the full
+          // PatientProviderAssignment (it needs primary provider /
+          // backup / MD ids the inviter didn't supply). Until Provider
+          // Verify fills those in, the practice the patient was invited
+          // into only lives on UserInvite.practiceId, reachable through
+          // the back-reference `userInviteCreated` (User @unique on the
+          // join side). Falling back to it keeps the practice column
+          // honest for accepted patient invites.
+          providerAssignmentAsPatient: { select: { practiceId: true } },
+          practiceCoordinator: { select: { practiceId: true } },
+          practiceProviderMemberships: {
+            select: { practiceId: true },
+            take: 1,
+          },
+          practiceMedicalDirectorMemberships: {
+            select: { practiceId: true },
+            take: 1,
+          },
+          userInviteCreated: { select: { practiceId: true } },
         },
       }),
       this.prisma.user.count({ where: userWhere }),
     ])
 
+    const withPractice = users.map((u) => ({
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      roles: u.roles,
+      accountStatus: u.accountStatus,
+      createdAt: u.createdAt,
+      practiceId:
+        u.providerAssignmentAsPatient?.practiceId ??
+        u.practiceCoordinator?.practiceId ??
+        u.practiceProviderMemberships[0]?.practiceId ??
+        u.practiceMedicalDirectorMemberships[0]?.practiceId ??
+        u.userInviteCreated?.practiceId ??
+        null,
+    }))
+
     // For COORDINATOR — strip everything except id, name, email, status.
-    // No clinical data, no roles other than 'patient'.
+    // No clinical data, no roles other than 'patient'. `scopePractice`
+    // surfaces the coordinator's own practice (id + name) so the UI can
+    // show "Cedar Hill" in the header — the coordinator can't list
+    // practices to resolve the name client-side.
     if (caller.roles.includes(UserRole.COORDINATOR)) {
       return {
         statusCode: 200,
         message: 'Users retrieved',
-        data: users.map((u) => ({
+        data: withPractice.map((u) => ({
           id: u.id,
           name: u.name,
           email: u.email,
@@ -800,13 +970,14 @@ export class UsersService {
           role: UserRole.PATIENT,
           search: query.search,
         }),
+        scopePractice: coordinatorScope,
       }
     }
 
     return {
       statusCode: 200,
       message: 'Users retrieved',
-      data: users,
+      data: withPractice,
       page,
       limit,
       total,
@@ -978,12 +1149,22 @@ export class UsersService {
     inviterName: string
   }): Promise<void> {
     try {
-      const port = this.config.get<string>('PORT', '8080')
-      const backendUrl = this.config.get<string>(
-        'BACKEND_URL',
-        `http://localhost:${port}`,
+      // PATIENT activations land on the patient app; every other role is
+      // an admin-app user (mirrors admin/src/proxy.ts ADMIN_ROLES, which
+      // includes COORDINATOR). The link is the frontend route — the page
+      // itself calls GET /api/v2/auth/invite/:token to render details and
+      // POST /accept to claim, so this URL should never point at the API.
+      const baseUrlConfigKey =
+        params.invite.role === UserRole.PATIENT
+          ? 'PATIENT_BASE_URL'
+          : 'ADMIN_BASE_URL'
+      const baseUrl = this.config.get<string>(
+        baseUrlConfigKey,
+        params.invite.role === UserRole.PATIENT
+          ? 'http://localhost:3000'
+          : 'http://localhost:3001',
       )
-      const inviteUrl = `${backendUrl}/api/v2/auth/invite/${params.rawToken}`
+      const inviteUrl = `${baseUrl}/activate/${params.rawToken}`
 
       const subject = `You've been invited to Cardioplace — activate your account`
       const html = activationEmailHtml({

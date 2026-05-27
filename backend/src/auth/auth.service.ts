@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
 import { createHash, randomBytes, randomInt } from 'crypto'
 import type { Profile } from 'passport-google-oauth20'
+import { POLICY_VERSION } from '@cardioplace/shared'
 import { EmailService } from '../email/email.service.js'
 import { magicLinkEmailHtml, otpEmailHtml } from '../email/email-templates.js'
 import {
@@ -1397,6 +1398,12 @@ export class AuthService {
         where: { email: fresh.email },
       })
 
+      // Invite-driven activation skips the patient app's onboarding/
+      // privacy gate entirely — the inviter (coordinator / admin) has
+      // already collected the basics, and the patient should land on the
+      // dashboard on the first click. We mark `onboardingStatus = COMPLETED`
+      // here; the matching `policy_acknowledged` AuthLog event is written
+      // post-commit below.
       let userRow: typeof existing
       if (existing) {
         const merged = Array.from(new Set([...existing.roles, fresh.role]))
@@ -1406,6 +1413,7 @@ export class AuthService {
             isVerified: true,
             roles: merged,
             name: existing.name ?? fresh.name,
+            onboardingStatus: OnboardingStatus.COMPLETED,
           },
         })
       } else {
@@ -1415,6 +1423,7 @@ export class AuthService {
             name: fresh.name,
             isVerified: true,
             roles: [fresh.role],
+            onboardingStatus: OnboardingStatus.COMPLETED,
           },
         })
       }
@@ -1509,6 +1518,19 @@ export class AuthService {
         practiceId: result.invite.practiceId,
       },
       success: true,
+    })
+
+    // Auto-acknowledge the current Terms + Privacy version on the audit
+    // trail. The invitee never sees the privacy step (onboarding is
+    // pre-completed above), so we record consent here with via:
+    // 'invite_accept' to keep the audit log honest about how it landed.
+    await this.logConsent({
+      userId: result.user.id,
+      identifier: result.invite.email,
+      policyVersion: POLICY_VERSION,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      via: 'invite_accept',
     })
 
     const tokens = await this.issueTokenPair(result.user, context?.userAgent)
