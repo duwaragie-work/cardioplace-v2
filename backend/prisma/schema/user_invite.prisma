@@ -1,0 +1,35 @@
+// Pending email invite for both patients and admin/staff users. The invite
+// link itself acts as a passwordless one-time magic link — accepting it
+// creates the User row, marks `acceptedAt`, stamps `createdUserId`, and
+// issues an auth session in one transaction.
+//
+// `tokenHash` stores sha256(rawToken). The raw token only ever lives in
+// the activation URL — never persisted. TTL is gated by `expiresAt`
+// (default 48h, configurable via USER_INVITE_TTL_HOURS).
+//
+// An invite is "open" while acceptedAt IS NULL AND revokedAt IS NULL AND
+// expiresAt > now(). Open invites collide with new invites for the same
+// email; expired invites do not (they can be overwritten silently).
+model UserInvite {
+  id            String    @id @default(ulid())
+  email         String
+  name          String
+  role          UserRole
+  practiceId    String?
+  tokenHash     String    @unique
+  invitedById   String
+  invitedAt     DateTime  @default(now())
+  expiresAt     DateTime
+  acceptedAt    DateTime?
+  revokedAt     DateTime?
+  createdUserId String?   @unique
+
+  invitedBy   User      @relation("UserInviteInvitedBy", fields: [invitedById], references: [id], onDelete: Restrict)
+  practice    Practice? @relation(fields: [practiceId], references: [id], onDelete: SetNull)
+  createdUser User?     @relation("UserInviteCreatedUser", fields: [createdUserId], references: [id], onDelete: SetNull)
+
+  @@index([email])
+  @@index([expiresAt])
+  @@index([invitedById])
+  @@index([practiceId])
+}
