@@ -110,10 +110,13 @@ describe('PatientAlertCard — rule-aware chrome (Round 2 H)', () => {
     expect(onAcknowledge).toHaveBeenCalledWith('alert-1')
   })
 
-  it('footer includes the rule-id for support traceability', () => {
+  it('footer does NOT leak the internal rule-id to the patient', () => {
+    // Intentionally suppressed — RULE_* identifiers are admin-only support
+    // metadata. The admin AlertCard still surfaces them; the patient card
+    // must not, because they were confusing patients reading their alerts.
     renderCard(makeAlert({ ruleId: 'RULE_HFREF_LOW' }))
     const date = screen.getByTestId('patient-alert-card-date-alert-1')
-    expect(date).toHaveTextContent(/RULE_HFREF_LOW/)
+    expect(date).not.toHaveTextContent(/RULE_/)
   })
 
   it('compact variant drops the patient message body + the action buttons', () => {

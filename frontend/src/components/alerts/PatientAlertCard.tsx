@@ -260,9 +260,11 @@ export default function PatientAlertCard({
               </p>
             )}
 
-            {/* Measured-at + rule-id footer (admin parity). The rule id is
-                muted but visible — useful for support to triage exactly which
-                engine rule fired. */}
+            {/* Measured-at footer. The rule-id was intentionally removed from
+                the patient card — internal RULE_* identifiers (RULE_HFREF_LOW,
+                RULE_HF_DECOMPENSATION, etc.) are support-only metadata and
+                were confusing patients. Admin's AlertCard still shows them
+                because admin/support users need them for triage. */}
             {alert.journalEntry?.measuredAt && (
               <p
                 data-testid={`${testIdPrefix}-date-${alert.id}`}
@@ -272,9 +274,6 @@ export default function PatientAlertCard({
                 <Clock className="w-3 h-3" />
                 {formatAlertDate(alert.journalEntry.measuredAt)}{' '}
                 <span className="font-semibold">{formatTime(new Date(alert.journalEntry.measuredAt))}</span>
-                {alert.ruleId && (
-                  <span className="opacity-70"> · {alert.ruleId}</span>
-                )}
               </p>
             )}
 
@@ -286,7 +285,6 @@ export default function PatientAlertCard({
               >
                 <Clock className="w-3 h-3" />
                 {timeAgo(alert.createdAt, t)}
-                {alert.ruleId && <span className="opacity-70"> · {alert.ruleId}</span>}
               </p>
             )}
           </div>
