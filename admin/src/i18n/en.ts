@@ -604,6 +604,11 @@ const en = {
   'home.ctaTitle': 'This Is What Closing the Loop Looks Like.',
   'home.ctaDesc': "Developed with the DC Hospital Association. Deployed in Washington DC's highest-risk communities. Designed to reach the patients traditional health technology leaves behind.",
   'home.ctaButton': 'About the Program',
+  'home.demoEyebrow': 'See it in action',
+  'home.demoTitle': 'A five-minute walkthrough',
+  'home.demoDesc': 'The patient experience and the care-team closed loop — end to end, in real time. Watch how an alert is generated, escalated, and resolved with full clinical accountability.',
+  'home.demoPlayLabel': 'Play the Cardioplace 5-minute demo',
+  'home.demoCloseLabel': 'Close demo',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'OUR STORY',

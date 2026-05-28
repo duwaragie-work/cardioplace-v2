@@ -882,6 +882,12 @@ const fr: Record<TranslationKey, string> = {
   'home.ctaTitle': 'Voici à Quoi Ressemble la Boucle Fermée.',
   'home.ctaDesc': "Développé avec la DC Hospital Association. Déployé dans les communautés les plus à risque de Washington DC. Conçu pour atteindre les patients que la technologie de santé traditionnelle laisse de côté.",
   'home.ctaButton': 'À Propos du Programme',
+  // TODO i18n — placeholder English copy; translate when demo video is finalised.
+  'home.demoEyebrow': 'See it in action',
+  'home.demoTitle': 'A five-minute walkthrough',
+  'home.demoDesc': 'The patient experience and the care-team closed loop — end to end, in real time. Watch how an alert is generated, escalated, and resolved with full clinical accountability.',
+  'home.demoPlayLabel': 'Play the Cardioplace 5-minute demo',
+  'home.demoCloseLabel': 'Close demo',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'NOTRE HISTOIRE',
