@@ -149,7 +149,7 @@ export default function AdminHomepage() {
                   className="text-sm sm:text-base md:text-lg leading-relaxed max-w-[520px] mx-auto md:mx-0"
                   style={{ color: 'var(--brand-text-secondary)' }}
                 >
-                  The patient experience and the care-team closed loop — end to end, in real time.
+                  The patient experience and the care-team closed loop, end to end, in real time.
                   Watch how an alert is generated, escalated, and resolved with full clinical accountability.
                 </p>
               </div>
