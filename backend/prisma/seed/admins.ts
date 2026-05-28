@@ -46,11 +46,15 @@ export async function seedAdmins() {
   console.log(`  admin: support@healplace.com (OTP ${DEMO_OTP})`)
 
   // ─── Provider trio + HealPlace ops (assignment targets) ──────────────────
+  // DCHA demo seed (May 2026) — flipped from @cardioplace.test placeholders to
+  // real inboxes the recorder controls so escalation emails actually land. The
+  // perma-OTP trick still works for login — emails are only outbound dispatch.
+  // Names sit in `update:` so a re-seed corrects any drift in display strings.
   const primaryProvider = await prisma.user.upsert({
-    where: { email: 'primary-provider@cardioplace.test' },
-    update: {},
+    where: { email: 'duwaragie22@gmail.com' },
+    update: { name: 'Dr. Samuel Okonkwo', roles: ['PROVIDER'] },
     create: {
-      email: 'primary-provider@cardioplace.test',
+      email: 'duwaragie22@gmail.com',
       pwdhash,
       name: 'Dr. Samuel Okonkwo',
       roles: ['PROVIDER'],
@@ -59,13 +63,13 @@ export async function seedAdmins() {
       timezone: 'America/New_York',
     },
   })
-  await seedPermaOtp('primary-provider@cardioplace.test', otpHash)
+  await seedPermaOtp('duwaragie22@gmail.com', otpHash)
 
   const backupProvider = await prisma.user.upsert({
-    where: { email: 'backup-provider@cardioplace.test' },
-    update: {},
+    where: { email: 'itsm.zayan@gmail.com' },
+    update: { name: 'Dr. Elena Reyes', roles: ['PROVIDER'] },
     create: {
-      email: 'backup-provider@cardioplace.test',
+      email: 'itsm.zayan@gmail.com',
       pwdhash,
       name: 'Dr. Elena Reyes',
       roles: ['PROVIDER'],
@@ -74,13 +78,13 @@ export async function seedAdmins() {
       timezone: 'America/New_York',
     },
   })
-  await seedPermaOtp('backup-provider@cardioplace.test', otpHash)
+  await seedPermaOtp('itsm.zayan@gmail.com', otpHash)
 
   const medicalDirector = await prisma.user.upsert({
-    where: { email: 'medical-director@cardioplace.test' },
-    update: {},
+    where: { email: 'smartcampus.team@gmail.com' },
+    update: { name: 'Dr. Priya Raman', roles: ['MEDICAL_DIRECTOR'] },
     create: {
-      email: 'medical-director@cardioplace.test',
+      email: 'smartcampus.team@gmail.com',
       pwdhash,
       name: 'Dr. Priya Raman',
       roles: ['MEDICAL_DIRECTOR'],
@@ -89,7 +93,7 @@ export async function seedAdmins() {
       timezone: 'America/New_York',
     },
   })
-  await seedPermaOtp('medical-director@cardioplace.test', otpHash)
+  await seedPermaOtp('smartcampus.team@gmail.com', otpHash)
 
   const opsUser = await prisma.user.upsert({
     where: { email: 'ops@healplace.com' },

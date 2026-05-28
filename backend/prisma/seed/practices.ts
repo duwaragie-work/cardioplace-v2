@@ -8,10 +8,11 @@ import { prisma } from './helpers.js'
 export async function seedPractices() {
   const practiceA = await prisma.practice.upsert({
     where: { id: 'seed-cedar-hill' },
-    update: {},
+    // DCHA demo seed — force the rename onto existing prod rows on re-seed.
+    update: { name: 'Cedar Hill Regional Medical Center' },
     create: {
       id: 'seed-cedar-hill',
-      name: 'Cedar Hill Internal Medicine',
+      name: 'Cedar Hill Regional Medical Center',
       businessHoursStart: '08:00',
       businessHoursEnd: '18:00',
       businessHoursTimezone: 'America/New_York',
