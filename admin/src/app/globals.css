@@ -90,6 +90,11 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
+/* In-page anchor jumps (hero "Watch demo" → #demo) ease instead of snapping. */
+html {
+  scroll-behavior: smooth;
+}
+
 /* ── Thin brand scrollbar utility ─────────────────────────────────────────
    Apply via `className="thin-scrollbar"` on any element that owns its own
    overflow (sidebar nav, modal body, etc.). Uses brand primary purple to
