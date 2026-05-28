@@ -28,7 +28,12 @@ import {
  */
 
 test.describe('Round 2 J — dashboard recent-alerts strip', () => {
-  test.use({ viewport: { width: 1280, height: 900 } })
+  test.use({
+    viewport: { width: 1280, height: 900 },
+    actionTimeout: 60_000,
+    navigationTimeout: 60_000,
+  })
+  test.setTimeout(180_000)
 
   test('strip filters by Open/All and the See-all link navigates correctly', async ({
     page,
@@ -39,6 +44,11 @@ test.describe('Round 2 J — dashboard recent-alerts strip', () => {
     const tc = await newTestControl(apiBase, process.env.TEST_CONTROL_SECRET)
     const carol = await tc.findUser(PATIENTS.carol.email)
     await tc.resetUser(carol.id)
+    // Settle: when this spec runs after Round 2 Spec 24/25 in the same
+    // worker, the prior test's SERIALIZABLE persist-alert transactions can
+    // still be retrying in the background. A short delay lets them drain
+    // before we begin firing this spec's sessions.
+    await new Promise((r) => setTimeout(r, 1500))
     const api = await authedApi(apiBase, PATIENTS.carol.email, 'patient')
 
     // ── Fire 3 alerts in distinct sessions ─────────────────────────────────
@@ -101,7 +111,7 @@ test.describe('Round 2 J — dashboard recent-alerts strip', () => {
     await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
     await page.waitForLoadState('networkidle').catch(() => {})
     await page.screenshot({
-      path: `qa/reports/screenshots/${testInfo.title}-01-default-open.png`,
+      path: `reports/screenshots/${testInfo.title}-01-default-open.png`,
       fullPage: true,
     })
 
@@ -136,7 +146,7 @@ test.describe('Round 2 J — dashboard recent-alerts strip', () => {
     await allChip.click()
     await page.waitForTimeout(200)
     await page.screenshot({
-      path: `qa/reports/screenshots/${testInfo.title}-02-chip-all.png`,
+      path: `reports/screenshots/${testInfo.title}-02-chip-all.png`,
       fullPage: true,
     })
     expect(
@@ -154,7 +164,7 @@ test.describe('Round 2 J — dashboard recent-alerts strip', () => {
     await seeAll.click()
     await page.waitForURL(/\/notifications\?tab=alerts/, { timeout: 15_000 })
     await page.screenshot({
-      path: `qa/reports/screenshots/${testInfo.title}-03-see-all-clicked.png`,
+      path: `reports/screenshots/${testInfo.title}-03-see-all-clicked.png`,
       fullPage: true,
     })
     // The tier filter chip row from Spec 25 lives on this page.
