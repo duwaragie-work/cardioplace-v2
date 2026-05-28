@@ -327,7 +327,11 @@ const personas: DemoPatient[] = [
         tier: 'BP_LEVEL_1_HIGH',
         ruleId: 'RULE_STANDARD_L1_HIGH',
         mode: 'STANDARD',
-        status: 'ACKNOWLEDGED',
+        // Status OPEN (not ACKNOWLEDGED) so the provider-dashboard "Alert
+        // queue" surfaces Patricia as "in progress". acknowledgedAt +
+        // acknowledgedByUserId still carry Dr. Okonkwo so the patient detail
+        // + timeline read "Acknowledged 6h ago by Dr. Samuel Okonkwo".
+        status: 'OPEN',
         patientMessage:
           'Your blood pressure is higher than your target. Please re-check in the morning and reach out to your care team if it stays high.',
         physicianMessage:
