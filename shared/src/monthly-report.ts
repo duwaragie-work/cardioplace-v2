@@ -45,6 +45,11 @@ export interface MonthlyReportOverall {
   resolvedPct: number;
   meanAckSeconds: number | null;
   meanResolveSeconds: number | null;
+  /** Total patients currently assigned to this practice (count of
+   *  `PatientProviderAssignment` rows). Snapshotted at report-generation
+   *  time, not at window end — patient roster doesn't carry per-day
+   *  history in this model. */
+  totalPatients: number;
 }
 
 export interface MonthlyReport {

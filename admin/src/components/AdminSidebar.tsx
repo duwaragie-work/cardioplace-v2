@@ -16,9 +16,14 @@ import {
   X,
   Building2,
   UserPlus,
+  ClipboardList,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
-import { canManageUsers, isCoordinatorOnly } from '@/lib/roleGates';
+import {
+  canManageUsers,
+  canViewReports,
+  isCoordinatorOnly,
+} from '@/lib/roleGates';
 
 interface NavItem {
   href: string;
@@ -71,6 +76,16 @@ const PRIMARY_NAV: NavItem[] = [
     icon: UserPlus,
     matchPrefix: true,
     show: (roles) => canManageUsers(roles),
+  },
+  // phase/24 — monthly practice analytics. Oversight surface — visible
+  // to MEDICAL_DIRECTOR (scoped to own practice), HEALPLACE_OPS, and
+  // SUPER_ADMIN. PROVIDER + COORDINATOR don't see it.
+  {
+    href: '/reports',
+    label: 'Reports',
+    icon: ClipboardList,
+    matchPrefix: true,
+    show: (roles) => canViewReports(roles),
   },
 ];
 

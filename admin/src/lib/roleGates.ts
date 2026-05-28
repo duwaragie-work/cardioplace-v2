@@ -185,6 +185,19 @@ export function canManageUsers(input: RoleInput | UserInput): boolean {
   return has(input, ['COORDINATOR', 'HEALPLACE_OPS', 'SUPER_ADMIN'])
 }
 
+// ─── Monthly reports (phase/24) ─────────────────────────────────────────────
+/**
+ * Can read the Monthly Practice Analytics Report. Oversight document —
+ * clinicians (PROVIDER) + front-desk (COORDINATOR) are excluded; only
+ * MED_DIR / OPS / SUPER. MED_DIR is further scoped server-side to their
+ * own practice(s) via PracticeMedicalDirector.
+ *   @Roles(SUPER_ADMIN, HEALPLACE_OPS, MEDICAL_DIRECTOR)
+ *   backend/src/reports/reports.controller.ts
+ */
+export function canViewReports(input: RoleInput | UserInput): boolean {
+  return has(input, ['SUPER_ADMIN', 'HEALPLACE_OPS', 'MEDICAL_DIRECTOR'])
+}
+
 /**
  * Whether the caller can deactivate (or reactivate — same gate) a target
  * user with the given roles. Mirrors UsersService.assertCanDeactivate in
