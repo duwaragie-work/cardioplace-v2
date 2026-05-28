@@ -606,6 +606,12 @@ const es: Record<TranslationKey, string> = {
   'home.ctaTitle': 'Así Se Ve Cerrar el Ciclo.',
   'home.ctaDesc': "Desarrollado con la DC Hospital Association. Implementado en las comunidades de mayor riesgo de Washington DC. Diseñado para alcanzar a los pacientes que la tecnología de salud tradicional deja atrás.",
   'home.ctaButton': 'Sobre el Programa',
+  // TODO i18n — placeholder English copy; translate when demo video is finalised.
+  'home.demoEyebrow': 'See it in action',
+  'home.demoTitle': 'A five-minute walkthrough',
+  'home.demoDesc': 'The patient experience and the care-team closed loop — end to end, in real time. Watch how an alert is generated, escalated, and resolved with full clinical accountability.',
+  'home.demoPlayLabel': 'Play the Cardioplace 5-minute demo',
+  'home.demoCloseLabel': 'Close demo',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'NUESTRA HISTORIA',

@@ -885,6 +885,12 @@ const am: Record<TranslationKey, string> = {
   'home.ctaTitle': 'ምልልሱን መዝጋት ይህን ይመስላል።',
   'home.ctaDesc': "ከ DC Hospital Association ጋር የተገነባ። በዋሽንግተን ዲሲ ከፍተኛ-አደጋ ማህበረሰቦች ውስጥ ተሰማርቷል። ባህላዊ የጤና ቴክኖሎጂ ከኋላ የሚያስቀራቸውን ታካሚዎች ለመድረስ የተዘጋጀ።",
   'home.ctaButton': 'ስለ ፕሮግራሙ',
+  // TODO i18n — placeholder English copy; translate when demo video is finalised.
+  'home.demoEyebrow': 'See it in action',
+  'home.demoTitle': 'A five-minute walkthrough',
+  'home.demoDesc': 'The patient experience and the care-team closed loop — end to end, in real time. Watch how an alert is generated, escalated, and resolved with full clinical accountability.',
+  'home.demoPlayLabel': 'Play the Cardioplace 5-minute demo',
+  'home.demoCloseLabel': 'Close demo',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'ታሪካችን',
