@@ -34,22 +34,29 @@ export class ChatController {
       isNewSession = true
     }
 
+    // Kick title generation off in parallel with the response stream so we can
+    // push it back over SSE before [DONE] — no extra round-trip from the client.
+    const titlePromise: Promise<string | null> | null = isNewSession
+      ? this.chatService.generateSessionTitle(body.sessionId, body.prompt).catch(() => null)
+      : null
+
     res.write(`data: ${JSON.stringify({ sessionId: body.sessionId })}\n\n`)
 
     try {
       for await (const chunk of this.chatService.getStreamingResponse(body, userId)) {
         res.write(`data: ${JSON.stringify(chunk)}\n\n`)
       }
+      if (titlePromise) {
+        const title = await titlePromise
+        if (title) {
+          res.write(`data: ${JSON.stringify({ type: 'sessionTitle', sessionId: body.sessionId, title })}\n\n`)
+        }
+      }
       res.write('data: [DONE]\n\n')
       res.end()
     } catch (_err) {
       res.write(`data: ${JSON.stringify({ error: 'An error occurred' })}\n\n`)
       res.end()
-    }
-
-    // Generate title after streaming completes to avoid concurrent API calls
-    if (isNewSession) {
-      this.chatService.generateSessionTitle(body.sessionId, body.prompt).catch(console.error)
     }
   }
 
@@ -67,12 +74,15 @@ export class ChatController {
       await this.chatService.createSession(body.sessionId, userId)
       isNewSession = true
     }
-    const response = await this.chatService.getStructuredResponse(body, userId)
 
-    // Generate title after the main response to avoid concurrent API calls
-    if (isNewSession) {
-      this.chatService.generateSessionTitle(body.sessionId, body.prompt).catch(console.error)
-    }
+    // Run title generation alongside the main response so the title can be
+    // returned in this same JSON body — clients update their sidebar instantly.
+    const titlePromise: Promise<string | null> | null = isNewSession
+      ? this.chatService.generateSessionTitle(body.sessionId, body.prompt).catch(() => null)
+      : null
+
+    const response = await this.chatService.getStructuredResponse(body, userId)
+    const title = titlePromise ? await titlePromise : null
 
     return {
       sessionId: body.sessionId,
@@ -80,6 +90,7 @@ export class ChatController {
       isEmergency: response.isEmergency,
       emergencySituation: response.emergencySituation,
       toolResults: response.toolResults,
+      title,
     }
   }
 

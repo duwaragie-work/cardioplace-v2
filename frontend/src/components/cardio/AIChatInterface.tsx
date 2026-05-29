@@ -1448,6 +1448,9 @@ export default function AIChatInterface() {
               .catch(() => {});
           }
         },
+        onSessionTitle: (id, title) => {
+          setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)));
+        },
         onEmergency: () => {
           aiType = 'teachback';
           // If text already started streaming, upgrade the existing bubble's type.

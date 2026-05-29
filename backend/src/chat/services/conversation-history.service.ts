@@ -408,13 +408,7 @@ export class ConversationHistoryService {
 
   // ── Private helpers ─────────────────────────────────────────────────────────
 
-  /**
-   * Truncate a long text to a reasonable size for storage.
-   * No LLM call — just keeps the first ~300 chars to save API quota.
-   */
   private summariseText(text: string): string {
-    if (!text) return text
-    if (text.length <= 500) return text
-    return text.slice(0, 497) + '...'
+    return text ?? ''
   }
 }

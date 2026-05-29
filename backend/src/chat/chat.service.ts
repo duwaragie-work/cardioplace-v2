@@ -728,7 +728,7 @@ export class ChatService {
     }
   }
 
-  async generateSessionTitle(sessionId: string, prompt: string): Promise<void> {
+  async generateSessionTitle(sessionId: string, prompt: string): Promise<string | null> {
     try {
       const response = await this.geminiService.getChatCompletion([
         { role: 'system', content: 'You are a helpful assistant. Summarize the user prompt into a short 3-5 word chat title in English. Even if the prompt is in another language, the title MUST be in English. Return ONLY the title, without quotes.' },
@@ -742,8 +742,10 @@ export class ChatService {
         data: { title },
       })
       console.log(`Generated session title for ${sessionId}: ${title}`)
+      return title
     } catch (error) {
       console.error('Error generating session title:', error)
+      return null
     }
   }
 

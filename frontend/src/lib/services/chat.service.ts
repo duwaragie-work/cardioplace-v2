@@ -48,6 +48,11 @@ export interface StreamHandlers {
    * Blocked or failed tool calls are NOT emitted.
    */
   onToolResult?: (tool: string, result: Record<string, unknown>) => void
+  /**
+   * Fires once, just before [DONE], when the server has generated an LLM title
+   * for a brand-new session. Use this to update the sidebar in place — no refetch.
+   */
+  onSessionTitle?: (sessionId: string, title: string) => void
   /** Server-emitted error (controller catch path). `onError` does NOT fire for fetch failures — those throw. */
   onError?: (message: string) => void
   /** Fires once after the [DONE] sentinel (or when the reader naturally closes). */
@@ -60,12 +65,13 @@ export interface StreamHandlers {
  * callers should wrap in try/catch for UX fallback.
  *
  * Wire format (data: <payload>\n\n frames):
- *   - {"sessionId":"..."}                              → onSession
- *   - {"type":"emergency","emergencySituation":"..."}  → onEmergency
- *   - {"type":"toolResult","tool":"...","result":{...}} → onToolResult
- *   - "...some text..." (JSON-encoded string)          → onChunk
- *   - {"error":"..."}                                  → onError
- *   - [DONE] (not JSON)                                → loop exits
+ *   - {"sessionId":"..."}                                        → onSession
+ *   - {"type":"emergency","emergencySituation":"..."}            → onEmergency
+ *   - {"type":"toolResult","tool":"...","result":{...}}          → onToolResult
+ *   - {"type":"sessionTitle","sessionId":"...","title":"..."}    → onSessionTitle
+ *   - "...some text..." (JSON-encoded string)                    → onChunk
+ *   - {"error":"..."}                                            → onError
+ *   - [DONE] (not JSON)                                          → loop exits
  */
 export async function streamChatMessage(
   prompt: string,
@@ -119,15 +125,23 @@ export async function streamChatMessage(
           return
         }
         if (payload.startsWith('{')) {
-          // Object event — sessionId / emergency / toolResult / error.
+          // Object event — sessionId / emergency / toolResult / sessionTitle / error.
+          // Order matters: typed frames (`type` field) MUST be matched before the
+          // bare `sessionId` shape — sessionTitle also carries a sessionId.
           try {
             const obj = JSON.parse(payload) as Record<string, unknown>
-            if (typeof obj.sessionId === 'string') {
-              handlers.onSession?.(obj.sessionId)
-            } else if (obj.type === 'emergency' && typeof obj.emergencySituation === 'string') {
+            if (obj.type === 'emergency' && typeof obj.emergencySituation === 'string') {
               handlers.onEmergency?.(obj.emergencySituation)
             } else if (obj.type === 'toolResult' && typeof obj.tool === 'string') {
               handlers.onToolResult?.(obj.tool, (obj.result ?? {}) as Record<string, unknown>)
+            } else if (
+              obj.type === 'sessionTitle' &&
+              typeof obj.sessionId === 'string' &&
+              typeof obj.title === 'string'
+            ) {
+              handlers.onSessionTitle?.(obj.sessionId, obj.title)
+            } else if (typeof obj.sessionId === 'string') {
+              handlers.onSession?.(obj.sessionId)
             } else if (typeof obj.error === 'string') {
               handlers.onError?.(obj.error)
             }
