@@ -9,7 +9,30 @@ import { withDeadlockRetry } from '../../common/deadlock-retry.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import type { JournalEntryCreatedEvent, JournalEntryUpdatedEvent } from '../interfaces/events.interface.js'
-import type { RuleFunction, RuleResult, SessionAverage } from '../engine/types.js'
+import type { RuleFunction, RuleResult, SessionAverage, SessionSymptoms } from '../engine/types.js'
+
+const EMPTY_SESSION_SYMPTOMS: SessionSymptoms = {
+  severeHeadache: false,
+  visualChanges: false,
+  alteredMentalStatus: false,
+  chestPainOrDyspnea: false,
+  focalNeuroDeficit: false,
+  severeEpigastricPain: false,
+  newOnsetHeadache: false,
+  ruqPain: false,
+  edema: false,
+  dizziness: false,
+  syncope: false,
+  palpitations: false,
+  legSwelling: false,
+  fatigue: false,
+  shortnessOfBreath: false,
+  dryCough: false,
+  nsaidUse: false,
+  faceSwelling: false,
+  throatTightness: false,
+  otherSymptoms: [],
+}
 import { OutputGeneratorService } from './output-generator.service.js'
 import { ProfileResolverService } from './profile-resolver.service.js'
 import { SessionAveragerService } from './session-averager.service.js'
@@ -386,6 +409,114 @@ export class AlertEngineService {
     // Manisha — never a silent state mutation.
 
     return primary ?? adherenceResult
+  }
+
+  // ─── ad-hoc evaluation (chatbot tool) ──────────────────────────────────
+
+  /**
+   * Chatbot entry point: "what does this reading mean *for me*?" Runs the
+   * same pipeline as `evaluate()` against a synthetic, non-persisted
+   * `SessionAverage` so the LLM can quote the canonical patient-tier
+   * message from the alert registry instead of paraphrasing thresholds.
+   *
+   * Differences vs `evaluate()`:
+   *   - no DeviationAlert / Notification rows are written
+   *   - no events emitted (no escalation ladder, no caregiver dispatch)
+   *   - `runPipeline` is reused as-is; prior-elevation + prior-weight/SBP
+   *     are still queried so the verdict matches what would happen if the
+   *     patient actually logged this reading
+   *   - `readingCount=1`, single-reading sessions can fire AFib/single-
+   *     reading-gated rules only via the same fallback paths used by
+   *     `evaluate()`; trend rules that need history (e.g. brady-surveillance,
+   *     adherence-window) are deliberately skipped — they aren't single-
+   *     reading questions and including them would surprise the patient
+   *     with verdicts that depend on data they haven't logged yet
+   */
+  async evaluateAdHoc(input: {
+    userId: string
+    systolicBP: number
+    diastolicBP: number
+    pulse?: number | null
+    symptoms?: Partial<SessionSymptoms>
+    measuredAt?: Date
+  }): Promise<
+    | {
+        evaluated: true
+        ruleId: RuleResult['ruleId'] | null
+        tier: RuleResult['tier'] | null
+        mode: RuleResult['mode'] | null
+        preDay3: boolean
+        patientMessage: string | null
+      }
+    | { evaluated: false; reason: 'PROFILE_NOT_FOUND' }
+  > {
+    const measuredAt = input.measuredAt ?? new Date()
+
+    let ctx: ResolvedContext
+    try {
+      ctx = await this.profileResolver.resolve(input.userId, measuredAt)
+    } catch (err) {
+      if (err instanceof ProfileNotFoundException) {
+        return { evaluated: false, reason: 'PROFILE_NOT_FOUND' }
+      }
+      throw err
+    }
+
+    const session: SessionAverage = {
+      entryId: '',
+      userId: input.userId,
+      measuredAt,
+      systolicBP: input.systolicBP,
+      diastolicBP: input.diastolicBP,
+      pulse: input.pulse ?? null,
+      weight: null,
+      readingCount: 1,
+      // The patient is explicitly asking us to interpret ONE reading. That's
+      // semantically the same as the 5-min frontend-finalize flow that the
+      // engine's single-reading gate is designed for — flipping this flag
+      // lets Stage C non-emergency rules (pregnancyL1High, personalizedHigh,
+      // standardL1High, etc.) actually fire. Without this, the chatbot would
+      // get ruleId:null on borderline-elevated readings and have nothing to
+      // quote back to the patient.
+      singleReadingFinalized: true,
+      symptoms: { ...EMPTY_SESSION_SYMPTOMS, ...(input.symptoms ?? {}) },
+      suboptimalMeasurement: false,
+      sessionId: null,
+      medicationTaken: null,
+      missedMedications: [],
+    }
+
+    const priorElevated = await this.wasPriorReadingPulseElevated(session, ctx)
+    await this.attachPriorReading(session)
+
+    const results = await this.runPipeline(session, ctx, priorElevated)
+    const top = results[0] ?? null
+
+    const totalReadings = await this.prisma.journalEntry.count({
+      where: { userId: input.userId },
+    })
+    const preDay3 = totalReadings < 7
+
+    if (!top) {
+      return {
+        evaluated: true,
+        ruleId: null,
+        tier: null,
+        mode: null,
+        preDay3,
+        patientMessage: null,
+      }
+    }
+
+    const messages = this.outputGenerator.generate(top, session, preDay3, null)
+    return {
+      evaluated: true,
+      ruleId: top.ruleId,
+      tier: top.tier,
+      mode: top.mode,
+      preDay3,
+      patientMessage: messages.patientMessage,
+    }
   }
 
   // ─── pipeline ──────────────────────────────────────────────────────────

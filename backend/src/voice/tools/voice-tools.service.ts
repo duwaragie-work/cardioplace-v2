@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common'
 import { Type } from '@google/genai'
 import type { FunctionDeclaration } from '@google/genai'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
+import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
+import type { SessionSymptoms } from '../../daily_journal/engine/types.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
 
 // Voice-tool I/O — argument shapes are stable contract with the Gemini Live
@@ -65,6 +67,7 @@ export class VoiceToolsService {
   constructor(
     private readonly dailyJournal: DailyJournalService,
     private readonly gemini: GeminiService,
+    private readonly alertEngine: AlertEngineService,
   ) {}
 
   /**
@@ -198,6 +201,33 @@ export class VoiceToolsService {
           required: ['image_base64', 'mime_type'],
         },
       },
+      {
+        name: 'evaluate_reading',
+        description:
+          "Ask the patient's personalised rule engine what a BP / HR reading means FOR THIS PATIENT. " +
+          'Returns the canonical patient-tier alert message signed off by the clinical director ' +
+          '(or null if the reading is within their targets). ' +
+          "Call this whenever the patient asks 'what does X over Y mean for me', 'is N safe for me', " +
+          'or wants an interpretation of a specific reading. ' +
+          'Do NOT use this to log a check-in — use submit_checkin for that. ' +
+          'Nothing is persisted; the engine only computes the verdict.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            systolic_bp: { type: Type.NUMBER, description: 'Systolic BP in mmHg.' },
+            diastolic_bp: { type: Type.NUMBER, description: 'Diastolic BP in mmHg.' },
+            heart_rate: { type: Type.NUMBER, description: 'Pulse in bpm (optional, 0 = unspecified).' },
+            symptoms: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description:
+                'Optional symptoms the patient mentioned alongside the reading ' +
+                '(e.g. dizziness, chest pain, palpitations, severe headache, swelling).',
+            },
+          },
+          required: ['systolic_bp', 'diastolic_bp'],
+        },
+      },
     ]
   }
 
@@ -218,6 +248,8 @@ export class VoiceToolsService {
           return await this.deleteCheckin(args, ctx)
         case 'submit_bp_from_photo':
           return await this.submitBpFromPhoto(args, ctx)
+        case 'evaluate_reading':
+          return await this.evaluateReading(args, ctx)
         default:
           return {
             llmResponse: { ok: false, error: `Unknown tool: ${name}` },
@@ -735,6 +767,88 @@ export class VoiceToolsService {
       }
     }
   }
+
+  // ── Tool 6: evaluate_reading ───────────────────────────────────────────────
+  // Mirrors the text-chat tool: ask the rule engine what THIS reading means
+  // for THIS patient without persisting anything. The engine returns the
+  // canonical patient-tier alert wording from the signed-off registry.
+
+  private async evaluateReading(
+    args: Record<string, unknown>,
+    ctx: ToolContext,
+  ): Promise<DispatchResult> {
+    const sbp = toInt(args.systolic_bp, 0)
+    const dbp = toInt(args.diastolic_bp, 0)
+    if (sbp <= 0 || dbp <= 0) {
+      return {
+        llmResponse: {
+          evaluated: false,
+          message: 'systolic_bp and diastolic_bp must be positive numbers.',
+        },
+        events: [],
+      }
+    }
+    const pulseRaw = toInt(args.heart_rate, 0)
+    const pulse = pulseRaw > 0 ? pulseRaw : null
+    const symptoms = mapVoiceSymptomsToFlags(args.symptoms)
+    try {
+      const result = await this.alertEngine.evaluateAdHoc({
+        userId: ctx.userId,
+        systolicBP: sbp,
+        diastolicBP: dbp,
+        pulse,
+        symptoms,
+      })
+      return {
+        llmResponse: { ...result },
+        events: [],
+      }
+    } catch (err) {
+      this.logger.error('evaluate_reading failed', err)
+      return {
+        llmResponse: {
+          evaluated: false,
+          message: 'Reading evaluation failed.',
+        },
+        events: [],
+      }
+    }
+  }
+}
+
+/**
+ * Voice mirror of the text-chat symptom mapper — folds the loose
+ * `symptoms: string[]` the model passes (e.g. ["dizziness","chest pain"])
+ * into the structured-symptom booleans the rule engine consumes.
+ */
+function mapVoiceSymptomsToFlags(raw: unknown): Partial<SessionSymptoms> | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined
+  const flags: Partial<SessionSymptoms> = {}
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    const k = item.trim().toLowerCase()
+    if (!k) continue
+    if (k === 'severeheadache' || k.includes('severe headache')) flags.severeHeadache = true
+    else if (k === 'newonsetheadache' || k.includes('new headache') || k.includes('new-onset')) flags.newOnsetHeadache = true
+    else if (k === 'visualchanges' || k.includes('vision') || k.includes('blurr')) flags.visualChanges = true
+    else if (k === 'alteredmentalstatus' || k.includes('confus') || k.includes('mental status')) flags.alteredMentalStatus = true
+    else if (k === 'chestpainordyspnea' || k.includes('chest pain') || k.includes('chest tight') || k.includes('dyspnea')) flags.chestPainOrDyspnea = true
+    else if (k === 'focalneurodeficit' || k.includes('one side') || k.includes('weakness')) flags.focalNeuroDeficit = true
+    else if (k === 'severeepigastricpain' || k.includes('epigastric')) flags.severeEpigastricPain = true
+    else if (k === 'ruqpain' || k.includes('ruq') || k.includes('right upper')) flags.ruqPain = true
+    else if (k === 'edema' || k === 'swelling') flags.edema = true
+    else if (k === 'dizziness' || k.includes('dizzy') || k.includes('lighthead')) flags.dizziness = true
+    else if (k === 'syncope' || k.includes('faint') || k.includes('pass out')) flags.syncope = true
+    else if (k === 'palpitations' || k.includes('palpit') || k.includes('flutter')) flags.palpitations = true
+    else if (k === 'legswelling' || k.includes('leg swell') || k.includes('ankle swell')) flags.legSwelling = true
+    else if (k === 'fatigue' || k.includes('tired')) flags.fatigue = true
+    else if (k === 'shortnessofbreath' || k.includes('short of breath') || k.includes('breathless')) flags.shortnessOfBreath = true
+    else if (k === 'drycough' || k.includes('dry cough')) flags.dryCough = true
+    else if (k === 'nsaiduse' || k.includes('nsaid') || k.includes('ibuprofen')) flags.nsaidUse = true
+    else if (k === 'faceswelling' || k.includes('face swell')) flags.faceSwelling = true
+    else if (k === 'throattightness' || k.includes('throat')) flags.throatTightness = true
+  }
+  return Object.keys(flags).length > 0 ? flags : undefined
 }
 
 // ── Coercion helpers ─────────────────────────────────────────────────────────

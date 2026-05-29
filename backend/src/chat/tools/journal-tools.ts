@@ -6,6 +6,8 @@
 import { Type } from '@google/genai'
 import type { FunctionDeclaration } from '@google/genai'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
+import type { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
+import type { SessionSymptoms } from '../../daily_journal/engine/types.js'
 import type { OcrService } from '../../ocr/ocr.service.js'
 import { BpOcrFailure } from '../../ocr/ocr.service.js'
 import type {
@@ -30,6 +32,7 @@ export interface JournalToolContext {
   adherenceService?: MedicationAdherenceService
   symptomService?: SymptomQuickLogService
   ocrService?: OcrService
+  alertEngine?: AlertEngineService
 }
 
 const MISSED_MED_REASONS = new Set([
@@ -486,6 +489,34 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
         required: ['emergency_situation'],
       },
     },
+    {
+      name: 'evaluate_reading',
+      description:
+        "Ask the patient's personalised rule engine what a BP / HR reading means FOR THIS PATIENT. " +
+        'Returns the canonical patient-tier alert message signed off by the clinical director ' +
+        '(or null if the reading is within their targets). ' +
+        "Call this whenever the patient asks 'what does X over Y mean for me', 'is N safe for me', " +
+        "or wants an interpretation of a specific reading. " +
+        'Do NOT use this to log a check-in — use submit_checkin for that. ' +
+        'Nothing is persisted; the engine only computes the verdict.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          systolic_bp: { type: Type.NUMBER, description: 'Systolic BP in mmHg.' },
+          diastolic_bp: { type: Type.NUMBER, description: 'Diastolic BP in mmHg.' },
+          heart_rate: { type: Type.NUMBER, description: 'Pulse in bpm (optional).' },
+          symptoms: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description:
+              'Optional symptoms the patient mentioned alongside the reading. ' +
+              'Use the same structured-symptom keys as log_symptom_quick ' +
+              '(e.g. dizziness, chestPainOrDyspnea, palpitations, severeHeadache, edema, legSwelling).',
+          },
+        },
+        required: ['systolic_bp', 'diastolic_bp'],
+      },
+    },
   ]
 }
 
@@ -861,7 +892,84 @@ export async function executeJournalTool(
       })
     }
 
+    case 'evaluate_reading': {
+      if (!ctx.alertEngine) {
+        return JSON.stringify({
+          evaluated: false,
+          message: 'Reading-evaluation tool not available in this build.',
+        })
+      }
+      const sbp = typeof args.systolic_bp === 'number' ? args.systolic_bp : Number(args.systolic_bp)
+      const dbp = typeof args.diastolic_bp === 'number' ? args.diastolic_bp : Number(args.diastolic_bp)
+      if (!Number.isFinite(sbp) || !Number.isFinite(dbp)) {
+        return JSON.stringify({
+          evaluated: false,
+          message: 'systolic_bp and diastolic_bp must be numbers.',
+        })
+      }
+      const pulseRaw = args.heart_rate
+      const pulse = typeof pulseRaw === 'number' && Number.isFinite(pulseRaw)
+        ? pulseRaw
+        : typeof pulseRaw === 'string' && pulseRaw.trim() && Number.isFinite(Number(pulseRaw))
+          ? Number(pulseRaw)
+          : null
+      const symptoms = mapSymptomsArrayToFlags(args.symptoms)
+      try {
+        const result = await ctx.alertEngine.evaluateAdHoc({
+          userId,
+          systolicBP: sbp,
+          diastolicBP: dbp,
+          pulse,
+          symptoms,
+        })
+        return JSON.stringify(result)
+      } catch (err: any) {
+        return JSON.stringify({
+          evaluated: false,
+          message: err?.message ?? 'Reading evaluation failed.',
+        })
+      }
+    }
+
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` })
   }
+}
+
+/**
+ * Best-effort map from the loose `symptoms: string[]` the model passes (e.g.
+ * `["dizziness", "chest pain"]`) onto the structured-symptom booleans the
+ * rule engine consumes. Unknown / freeform strings are dropped — the engine
+ * ignores `otherSymptoms` for tier decisions anyway. Case-insensitive; both
+ * the structured keys (`chestPainOrDyspnea`) and common natural phrasings
+ * (`chest pain`, `shortness of breath`) are recognised.
+ */
+function mapSymptomsArrayToFlags(raw: unknown): Partial<SessionSymptoms> | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined
+  const flags: Partial<SessionSymptoms> = {}
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    const k = item.trim().toLowerCase()
+    if (!k) continue
+    if (k === 'severeheadache' || k.includes('severe headache')) flags.severeHeadache = true
+    else if (k === 'newonsetheadache' || k.includes('new headache') || k.includes('new-onset')) flags.newOnsetHeadache = true
+    else if (k === 'visualchanges' || k.includes('vision') || k.includes('blurr')) flags.visualChanges = true
+    else if (k === 'alteredmentalstatus' || k.includes('confus') || k.includes('mental status')) flags.alteredMentalStatus = true
+    else if (k === 'chestpainordyspnea' || k.includes('chest pain') || k.includes('chest tight') || k.includes('dyspnea')) flags.chestPainOrDyspnea = true
+    else if (k === 'focalneurodeficit' || k.includes('one side') || k.includes('weakness')) flags.focalNeuroDeficit = true
+    else if (k === 'severeepigastricpain' || k.includes('epigastric')) flags.severeEpigastricPain = true
+    else if (k === 'ruqpain' || k.includes('ruq') || k.includes('right upper')) flags.ruqPain = true
+    else if (k === 'edema' || k === 'swelling') flags.edema = true
+    else if (k === 'dizziness' || k.includes('dizzy') || k.includes('lighthead')) flags.dizziness = true
+    else if (k === 'syncope' || k.includes('faint') || k.includes('pass out')) flags.syncope = true
+    else if (k === 'palpitations' || k.includes('palpit') || k.includes('flutter')) flags.palpitations = true
+    else if (k === 'legswelling' || k.includes('leg swell') || k.includes('ankle swell')) flags.legSwelling = true
+    else if (k === 'fatigue' || k.includes('tired')) flags.fatigue = true
+    else if (k === 'shortnessofbreath' || k.includes('short of breath') || k.includes('breathless')) flags.shortnessOfBreath = true
+    else if (k === 'drycough' || k.includes('dry cough')) flags.dryCough = true
+    else if (k === 'nsaiduse' || k.includes('nsaid') || k.includes('ibuprofen')) flags.nsaidUse = true
+    else if (k === 'faceswelling' || k.includes('face swell')) flags.faceSwelling = true
+    else if (k === 'throattightness' || k.includes('throat')) flags.throatTightness = true
+  }
+  return Object.keys(flags).length > 0 ? flags : undefined
 }

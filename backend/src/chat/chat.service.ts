@@ -13,6 +13,7 @@ import { ConversationHistoryService } from './services/conversation-history.serv
 import type { EmergencyDetectionResult } from './services/emergency-detection.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { DailyJournalService } from '../daily_journal/daily_journal.service.js'
+import { AlertEngineService } from '../daily_journal/services/alert-engine.service.js'
 import { ProfileResolverService } from '../daily_journal/services/profile-resolver.service.js'
 import { GeminiService } from '../gemini/gemini.service.js'
 import { OcrService } from '../ocr/ocr.service.js'
@@ -35,6 +36,7 @@ export class ChatService {
     private readonly ocrService: OcrService,
     private readonly adherenceService: MedicationAdherenceService,
     private readonly symptomQuickLogService: SymptomQuickLogService,
+    private readonly alertEngineService: AlertEngineService,
   ) {}
 
   /** Phase/27 — bag of services the journal-tools executor needs for the
@@ -46,6 +48,7 @@ export class ChatService {
       adherenceService: this.adherenceService,
       symptomService: this.symptomQuickLogService,
       ocrService: this.ocrService,
+      alertEngine: this.alertEngineService,
     }
   }
 

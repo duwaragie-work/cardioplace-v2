@@ -22,6 +22,7 @@ import {
 } from './journal-tools.js'
 import { VoiceToolsService } from '../../voice/tools/voice-tools.service.js'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
+import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
 
 // ─── Text-chat tool catalog ───────────────────────────────────────────────────
@@ -35,6 +36,7 @@ const TEXT_TOOLS_EXPECTED = [
   'log_symptom_quick',
   'submit_bp_from_photo',
   'flag_emergency',
+  'evaluate_reading',
 ] as const
 
 const VOICE_TOOLS_EXPECTED = [
@@ -43,6 +45,7 @@ const VOICE_TOOLS_EXPECTED = [
   'update_checkin',
   'delete_checkin',
   'submit_bp_from_photo',
+  'evaluate_reading',
 ] as const
 
 // Symptoms declared on the text-chat `submit_checkin` schema.
@@ -82,18 +85,19 @@ function snakeOf(camel: string): string {
 // ─── 1. Catalog parity ────────────────────────────────────────────────────────
 
 describe('Chat ↔ Voice tool catalog parity', () => {
-  it('text-chat exposes the canonical 8-tool catalog', () => {
+  it('text-chat exposes the canonical 9-tool catalog', () => {
     const decls = getJournalToolDeclarations()
     const names = decls.map((d) => d.name).sort()
     expect(names).toEqual([...TEXT_TOOLS_EXPECTED].sort())
   })
 
-  it('voice-chat exposes the canonical 5-tool catalog', async () => {
+  it('voice-chat exposes the canonical 6-tool catalog', async () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         VoiceToolsService,
         { provide: DailyJournalService, useValue: {} },
         { provide: GeminiService, useValue: {} },
+        { provide: AlertEngineService, useValue: {} },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -212,6 +216,7 @@ describe('submit_checkin schema parity (text vs voice)', () => {
         VoiceToolsService,
         { provide: DailyJournalService, useValue: {} },
         { provide: GeminiService, useValue: {} },
+        { provide: AlertEngineService, useValue: {} },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -253,6 +258,7 @@ describe('submit_checkin schema parity (text vs voice)', () => {
         VoiceToolsService,
         { provide: DailyJournalService, useValue: {} },
         { provide: GeminiService, useValue: {} },
+        { provide: AlertEngineService, useValue: {} },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -277,6 +283,7 @@ describe('submit_checkin schema parity (text vs voice)', () => {
         VoiceToolsService,
         { provide: DailyJournalService, useValue: {} },
         { provide: GeminiService, useValue: {} },
+        { provide: AlertEngineService, useValue: {} },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -304,6 +311,7 @@ describe('submit_checkin schema parity (text vs voice)', () => {
         VoiceToolsService,
         { provide: DailyJournalService, useValue: dailyJournal },
         { provide: GeminiService, useValue: gemini },
+        { provide: AlertEngineService, useValue: {} },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -335,6 +343,7 @@ describe('submit_checkin schema parity (text vs voice)', () => {
         VoiceToolsService,
         { provide: DailyJournalService, useValue: {} },
         { provide: GeminiService, useValue: {} },
+        { provide: AlertEngineService, useValue: {} },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -428,6 +437,16 @@ describe('executeJournalTool routing', () => {
         confidence: 0.9,
       } as never),
     },
+    alertEngine: {
+      evaluateAdHoc: jest.fn().mockResolvedValue({
+        evaluated: true,
+        ruleId: null,
+        tier: null,
+        mode: null,
+        preDay3: false,
+        patientMessage: null,
+      } as never),
+    },
   }
 
   for (const name of TEXT_TOOLS_EXPECTED) {
@@ -481,6 +500,8 @@ function argsFor(name: string): Record<string, any> {
       return { image_base64: Buffer.from('test').toString('base64'), mime_type: 'image/jpeg' }
     case 'flag_emergency':
       return { emergency_situation: 'chest pain now' }
+    case 'evaluate_reading':
+      return { systolic_bp: 140, diastolic_bp: 90 }
     default:
       return {}
   }
