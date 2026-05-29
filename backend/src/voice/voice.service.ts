@@ -24,6 +24,28 @@ export interface VoiceSessionCallbacks {
   onReady: () => void
   onAudio: (audioBase64: string) => void
   onTranscript: (text: string, isFinal: boolean, speaker: 'user' | 'agent') => void
+  /**
+   * Fires when Gemini sets `serverContent.generationComplete = true` — the
+   * canonical "model is done producing audio for this response" signal per
+   * https://ai.google.dev/gemini-api/docs/live-api/best-practices. The
+   * frontend uses this as the deterministic end-of-agent-turn gate; without
+   * it the only fallback is a noisy silence-based drain timer that flaps
+   * mid-sentence on real-world inter-chunk jitter.
+   *
+   * NOTE: we deliberately do NOT forward `serverContent.turnComplete` — it
+   * fires prematurely mid-sentence on native-audio models (see
+   * https://github.com/googleapis/python-genai/issues/2117, ~40 reports,
+   * P2 unfixed). turnComplete still drives transcript-finalisation inline
+   * inside voice.service.ts; it just never reaches the client.
+   */
+  onGenerationComplete: () => void
+  /**
+   * Fires when Gemini sets `serverContent.interrupted = true` (user barge-in
+   * or model self-interrupt). Per Live API docs the client MUST immediately
+   * discard its audio buffer — the frontend closes the AudioContext on
+   * receipt so no queued chunks keep playing after the patient starts talking.
+   */
+  onInterrupted: () => void
   onAction: (type: string, detail: string) => void
   onActionComplete: (type: string, success: boolean, detail: string) => void
   onCheckinSaved: (summary: CheckinSummary) => void
@@ -75,6 +97,23 @@ interface SessionActivity {
 
 // Max audio buffer: ~10 minutes at 16kHz 16-bit mono = ~19.2MB
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024
+
+/**
+ * Validate that a string is a real IANA timezone identifier by feeding it to
+ * Intl.DateTimeFormat — which throws RangeError on unknown zones. Used to
+ * sanity-check the `clientTimezone` payload before trusting it to interpret
+ * patient measuredAt values. (We can't blindly use Prisma.user.update with
+ * arbitrary attacker-controlled strings.)
+ */
+function isValidIanaTz(tz: string | undefined): boolean {
+  if (!tz || typeof tz !== 'string') return false
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: tz })
+    return true
+  } catch {
+    return false
+  }
+}
 
 interface ActiveSession {
   liveSession: Session
@@ -171,6 +210,7 @@ export class VoiceService implements OnModuleDestroy {
     callbacks: VoiceSessionCallbacks,
     _authToken = '',
     chatSessionId?: string,
+    clientTimezone?: string,
   ): Promise<void> {
     // _authToken is preserved in the public signature for backwards-compat
     // with the gateway; unused now that voice tools call services directly
@@ -198,11 +238,44 @@ export class VoiceService implements OnModuleDestroy {
     }
 
     // Resolve patient timezone — used by voice tools to interpret "now".
+    // Priority order:
+    //   1. clientTimezone (IANA TZ from Intl.DateTimeFormat in the browser
+    //      that just opened this session) — captures travel + region drift
+    //      that the stored User row would miss.
+    //   2. User.timezone (stored on the row, set at signup or via admin).
+    //   3. America/New_York default.
+    // A patient who travels to PT but signed up in ET should get PT
+    // wall-clock on their voice check-ins; the browser-detected value is
+    // the only ground-truth source for that.
+    const browserTz =
+      typeof clientTimezone === 'string' && isValidIanaTz(clientTimezone)
+        ? clientTimezone
+        : null
     const userRow = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { timezone: true },
     })
-    const timezone = userRow?.timezone ?? 'America/New_York'
+    const timezone = browserTz ?? userRow?.timezone ?? 'America/New_York'
+    this.logger.log(
+      `[TIMEZONE] user=${userId} browser=${clientTimezone ?? 'null'} stored=${userRow?.timezone ?? 'null'} using=${timezone}`,
+    )
+
+    // Opportunistic backfill: if the browser told us a TZ that disagrees with
+    // the User row, persist it. Keeps non-voice surfaces (admin views,
+    // escalation cron, scheduled reports) consistent with the patient's
+    // current location. Fire-and-forget — a failure here MUST NOT block
+    // session creation. Also bust the patient-context cache so the next
+    // build picks up the corrected TZ (the cached prompt was rendered with
+    // the stale value, which would land the wrong "today is" in the LLM
+    // prompt for date-relative reasoning).
+    if (browserTz && browserTz !== userRow?.timezone) {
+      this.prisma.user
+        .update({ where: { id: userId }, data: { timezone: browserTz } })
+        .catch((err) =>
+          this.logger.warn(`[TIMEZONE] User.timezone backfill failed: ${(err as Error).message}`),
+        )
+      this.invalidateContextCache(userId)
+    }
 
     // ── Open Gemini Live session (Step 4 — replaces ADK gRPC stream) ──
     // Use the dedicated v1alpha client (see constructor). The shared
@@ -441,13 +514,22 @@ export class VoiceService implements OnModuleDestroy {
       }
       // Generation-complete is the closest analogue to ADK's "speaker turn
       // ended" signal. Mark the last transcript line as final so the UI can
-      // commit it.
+      // commit it. (turnComplete is unreliable on native-audio for *audio*
+      // end-of-turn — see VoiceSessionCallbacks docstring — but it remains
+      // a fine boundary for transcript finalisation here on the server.)
       if (c.turnComplete && session.transcriptBuffer.length > 0) {
         const last = session.transcriptBuffer[session.transcriptBuffer.length - 1]
         callbacks.onTranscript(last.text, true, last.speaker)
       }
+      // generationComplete is the canonical end-of-audio signal — forward to
+      // the client so it can flip out of agent_speaking without relying on
+      // the silence-based drain backstop.
+      if (c.generationComplete) {
+        callbacks.onGenerationComplete()
+      }
       if (c.interrupted) {
         this.logger.log(`[VOICE Live] interrupted [socket=${socketId}]`)
+        callbacks.onInterrupted()
       }
       return
     }
@@ -915,6 +997,10 @@ export class VoiceService implements OnModuleDestroy {
         dateOfBirth: user?.dateOfBirth ?? null,
         resolvedContext,
         toneMode: 'PATIENT',
+        // Voice-only: never inline per-reading BP numbers. Native-audio LLMs
+        // echo prompt-injected numbers as if the patient just said them. The
+        // LLM uses get_recent_readings to fetch historical values on demand.
+        omitReadingValues: true,
       })
 
       // Current date/time in patient timezone — voice-specific, kept here

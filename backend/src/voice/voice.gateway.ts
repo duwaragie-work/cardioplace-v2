@@ -15,6 +15,14 @@ import { VoiceService } from './voice.service.js'
 
 interface StartSessionPayload {
   sessionId?: string
+  /**
+   * IANA timezone string from `Intl.DateTimeFormat().resolvedOptions().timeZone`
+   * on the client. When present and valid, the backend uses this for "now"
+   * resolution in voice check-ins instead of the stored User.timezone — so
+   * a patient travelling away from their registered timezone still gets
+   * measuredAt that matches their browser's wall clock.
+   */
+  clientTimezone?: string
 }
 
 @WebSocketGateway({
@@ -85,6 +93,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const authToken = data?.token ?? ''
     const chatSessionId = payload?.sessionId
+    const clientTimezone = typeof payload?.clientTimezone === 'string' ? payload.clientTimezone : undefined
 
     const sessionStart = Date.now()
     this.logger.log(`[FLOW] Step 3 START — creating session [socket=${client.id}, chatSession=${chatSessionId ?? 'new'}]`)
@@ -103,6 +112,16 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
             this.logger.log(`[VOICE NestJS→WS] emit audio_response bytes=${audioBase64.length} [socket=${client.id}]`)
           }
           client.emit('audio_response', { audio: audioBase64 })
+        },
+        onGenerationComplete: () => {
+          if (process.env.VOICE_DEBUG_AUDIO === '1') {
+            this.logger.log(`[VOICE NestJS→WS] emit agent_generation_complete [socket=${client.id}]`)
+          }
+          client.emit('agent_generation_complete', {})
+        },
+        onInterrupted: () => {
+          this.logger.log(`[VOICE NestJS→WS] emit agent_interrupted [socket=${client.id}]`)
+          client.emit('agent_interrupted', {})
         },
         onTranscript: (text: string, isFinal: boolean, speaker: 'user' | 'agent') => {
           if (isFinal && text.trim()) {
@@ -144,6 +163,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       },
       authToken,
       chatSessionId,
+      clientTimezone,
     )
   }
 

@@ -52,6 +52,15 @@ export interface PatientContext {
   resolvedContext: ResolvedContext | null
   /** Phase/16 always sends 'PATIENT'. Scaffolding for future tones. */
   toneMode: ToneMode
+  /**
+   * Voice surface: render a single summary line ("32 readings, most recent on
+   * …") instead of dumping every BP value inline. Native-audio LLMs
+   * (Gemini 2.5 Flash) routinely confuse prompt-injected numbers with
+   * live-spoken ones — see python-genai#1894. When the patient asks about
+   * past readings the LLM calls `get_recent_readings` to fetch them fresh.
+   * Default false (text chat behaviour unchanged).
+   */
+  omitReadingValues?: boolean
 }
 
 @Injectable()
@@ -535,37 +544,61 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
     }
 
     // ── BP readings ───────────────────────────────────────────────────────
-    lines.push(`All BP readings (${data.recentEntries.length} total):`)
-    if (data.recentEntries.length === 0) {
-      lines.push('- No readings recorded yet')
+    if (data.omitReadingValues) {
+      // Voice surface — render history *shape* only, never the actual numbers.
+      // Native-audio LLMs hallucinate by echoing prompt-injected numbers as if
+      // just spoken (python-genai#1894). The LLM must call get_recent_readings
+      // when the patient asks about specific values; nothing inline to parrot.
+      if (data.recentEntries.length === 0) {
+        lines.push('BP readings: none recorded yet.')
+      } else {
+        const mostRecent = new Date(data.recentEntries[0].measuredAt)
+        const date = mostRecent.toLocaleDateString('en-US', {
+          month: 'short', day: 'numeric', year: 'numeric',
+        })
+        const time = mostRecent.toLocaleTimeString('en-US', {
+          hour: '2-digit', minute: '2-digit', hour12: false,
+        })
+        lines.push(
+          `BP readings: ${data.recentEntries.length} total, most recent on ${date} at ${time}.`,
+        )
+        lines.push(
+          '(Call get_recent_readings if the patient asks about specific past values.)',
+        )
+      }
     } else {
-      for (const entry of data.recentEntries) {
-        const measured = new Date(entry.measuredAt)
-        const date = measured.toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-        })
-        const time = measured.toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        })
-        const bp =
-          entry.systolicBP != null && entry.diastolicBP != null
-            ? `${entry.systolicBP}/${entry.diastolicBP} mmHg`
-            : 'not recorded'
-        const med =
-          entry.medicationTaken === true
-            ? 'taken'
-            : entry.medicationTaken === false
-              ? 'missed'
+      lines.push(`All BP readings (${data.recentEntries.length} total):`)
+      if (data.recentEntries.length === 0) {
+        lines.push('- No readings recorded yet')
+      } else {
+        for (const entry of data.recentEntries) {
+          const measured = new Date(entry.measuredAt)
+          const date = measured.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          })
+          const time = measured.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+          })
+          const bp =
+            entry.systolicBP != null && entry.diastolicBP != null
+              ? `${entry.systolicBP}/${entry.diastolicBP} mmHg`
               : 'not recorded'
-        const wt = entry.weight != null ? `, Weight: ${entry.weight} lbs` : ''
-        const sym = entry.otherSymptoms?.length
-          ? `, Symptoms: ${entry.otherSymptoms.join(', ')}`
-          : ''
-        lines.push(`- ${date} at ${time}: ${bp}, Medication: ${med}${wt}${sym}`)
+          const med =
+            entry.medicationTaken === true
+              ? 'taken'
+              : entry.medicationTaken === false
+                ? 'missed'
+                : 'not recorded'
+          const wt = entry.weight != null ? `, Weight: ${entry.weight} lbs` : ''
+          const sym = entry.otherSymptoms?.length
+            ? `, Symptoms: ${entry.otherSymptoms.join(', ')}`
+            : ''
+          lines.push(`- ${date} at ${time}: ${bp}, Medication: ${med}${wt}${sym}`)
+        }
       }
     }
 
@@ -575,9 +608,17 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
       data.baseline.baselineSystolic != null &&
       data.baseline.baselineDiastolic != null
     ) {
-      lines.push(
-        `Baseline: ${data.baseline.baselineSystolic}/${data.baseline.baselineDiastolic} mmHg`,
-      )
+      if (data.omitReadingValues) {
+        // Voice surface — same anti-leak rationale as the BP list above.
+        // The LLM only needs to know a baseline EXISTS (for clinical framing),
+        // not its specific value; calling get_recent_readings reveals it
+        // freshly if the patient asks.
+        lines.push('Baseline: established (call get_recent_readings to read the actual numbers).')
+      } else {
+        lines.push(
+          `Baseline: ${data.baseline.baselineSystolic}/${data.baseline.baselineDiastolic} mmHg`,
+        )
+      }
     } else {
       const count = data.recentEntries.filter(
         (e) => e.systolicBP != null && e.diastolicBP != null,

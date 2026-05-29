@@ -273,7 +273,28 @@ export class VoiceToolsService {
   ): Promise<DispatchResult> {
     const sbp = toInt(args.systolic_bp, 0)
     const dbp = toInt(args.diastolic_bp, 0)
-    const bpProvided = sbp > 0 || dbp > 0
+    // Anti-hallucination guard: a BP reading is two numbers — if the LLM
+    // supplies one without the other, it almost certainly hallucinated the
+    // value it has and never heard the value it doesn't. Refuse the save and
+    // make the model ask the patient. True sparse logging (no BP at all)
+    // still works because both will be 0 here.
+    const sbpProvided = sbp > 0
+    const dbpProvided = dbp > 0
+    if (sbpProvided !== dbpProvided) {
+      this.logger.warn(`Asymmetric BP rejected: sbp=${sbp} dbp=${dbp} — likely hallucination`)
+      return {
+        llmResponse: {
+          saved: false,
+          message:
+            `Got ${sbp || 'no'} over ${dbp || 'no'} — that's incomplete. ` +
+            'A blood pressure reading needs BOTH numbers. ' +
+            'Please ask the patient for the missing number and re-call submit_checkin, ' +
+            'OR leave both at 0 if the patient is only logging medication/symptoms.',
+        },
+        events: [],
+      }
+    }
+    const bpProvided = sbpProvided && dbpProvided
     if (bpProvided && (sbp < 60 || sbp > 250 || dbp < 40 || dbp > 150)) {
       this.logger.warn(`BP out of range: ${sbp}/${dbp} — rejecting`)
       return {
