@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { Mail, Send } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/lib/auth-context';
@@ -93,8 +94,8 @@ export default function LandingFooter() {
           </div>
           <div className="flex flex-col gap-3">
             <span className="font-bold text-white text-sm">{t('landing.legal')}</span>
-            <a href="/privacy" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.privacy')}</a>
-            <a href="/terms" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.terms')}</a>
+            <Link href="/privacy" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.privacy')}</Link>
+            <Link href="/terms" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.terms')}</Link>
           </div>
         </div>
 
