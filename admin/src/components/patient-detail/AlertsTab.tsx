@@ -83,6 +83,33 @@ function timeAgo(iso: string): string {
   return `${d}d ago`;
 }
 
+// F5 — alerts co-fired off one reading (sharing JournalEntry.measuredAt) are
+// grouped into a bordered container so the provider sees they're independent
+// findings on a single event, scoped apart from the standalone alerts below.
+type AlertGroup =
+  | { kind: 'cofire'; key: string; alerts: PatientAlert[] }
+  | { kind: 'single'; alert: PatientAlert };
+
+export function groupAlertsByReading(alerts: PatientAlert[]): AlertGroup[] {
+  const groups: AlertGroup[] = [];
+  let i = 0;
+  while (i < alerts.length) {
+    const key = alerts[i].journalEntry?.measuredAt ?? null;
+    if (key != null) {
+      let j = i + 1;
+      while (j < alerts.length && (alerts[j].journalEntry?.measuredAt ?? null) === key) j++;
+      if (j - i >= 2) {
+        groups.push({ kind: 'cofire', key, alerts: alerts.slice(i, j) });
+        i = j;
+        continue;
+      }
+    }
+    groups.push({ kind: 'single', alert: alerts[i] });
+    i++;
+  }
+  return groups;
+}
+
 export default function AlertsTab({ alerts, loading, onResolved, heightCm, patientName, patientPreEnrollment = false }: Props) {
   const [tierFilter, setTierFilter] = useState<TierBucket>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('OPEN');
@@ -171,18 +198,10 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
 
   // Cluster 6 Q4 (Manisha 5/9/26) — group alerts that came off the same
   // reading (matched on JournalEntry.measuredAt — proxy for journalEntryId
-  // since the API doesn't surface the id directly). The "2 active alerts"
-  // header makes it clear to the provider that the rows are independent
+  // since the API doesn't surface the id directly). F5 wraps each ≥2 group in
+  // a bordered container; the header makes it clear the rows are independent
   // findings on one event (e.g. pregnancy ACE + L2 BP + L1 high).
-  const groupCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const a of filtered) {
-      const key = a.journalEntry?.measuredAt;
-      if (!key) continue;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    return counts;
-  }, [filtered]);
+  const alertGroups = useMemo(() => groupAlertsByReading(filtered), [filtered]);
 
   // F4 — the pre-personalization "X of 7 baseline readings" note is patient-
   // state metadata, not alert-tier-specific. It previously lived inside each
@@ -246,6 +265,33 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
     },
     [onResolved],
   );
+
+  // Shared AlertCard renderer — reused by both the cofire group members and
+  // the standalone single cards so the expand + handler wiring stays in one
+  // place.
+  const renderAlertCard = (a: PatientAlert) => {
+    const expanded = expandedId === a.id;
+    const toggle = () => setExpandedId(expanded ? null : a.id);
+    return (
+      <AlertCard
+        alert={a}
+        expanded={expanded}
+        // On the per-patient tab the row IS the toggle — clicking anywhere in
+        // the row body expands/collapses. The chevron mirrors that handler.
+        onRowClick={toggle}
+        onToggleExpand={toggle}
+        onResolve={() => setResolving(a)}
+        onAcknowledge={() => void handleAcknowledge(a.id)}
+        ackInFlight={acking.has(a.id)}
+        heightCm={heightCm}
+        patientPreEnrollment={patientPreEnrollment}
+        // P3 — the pre-personalization note is shown once in the patient-header
+        // band above; suppress the per-card copy so a cofire group doesn't
+        // repeat it on each of its alerts.
+        hideDisclaimer
+      />
+    );
+  };
 
   if (loading && alerts.length === 0) {
     return (
@@ -378,59 +424,48 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
           </p>
         </div>
       ) : (
-        <div className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
-          {filtered.map((a, idx) => {
-            const expanded = expandedId === a.id;
-            const toggle = () => setExpandedId(expanded ? null : a.id);
-            // Cluster 6 Q4 — render a "Same reading" group header above
-            // the first alert of any reading that produced ≥2 rows.
-            const measuredAtKey = a.journalEntry?.measuredAt ?? null;
-            const groupCount = measuredAtKey ? (groupCounts.get(measuredAtKey) ?? 1) : 1;
-            const prevMeasuredAtKey =
-              idx > 0 ? (filtered[idx - 1].journalEntry?.measuredAt ?? null) : null;
-            const isGroupStart =
-              groupCount >= 2 && measuredAtKey != null && measuredAtKey !== prevMeasuredAtKey;
-            return (
+        <div className="space-y-2" data-testid="admin-alerts-list">
+          {alertGroups.map((g) =>
+            g.kind === 'cofire' ? (
               <div
-                key={a.id}
+                key={`cofire-${g.key}`}
+                data-testid="admin-alert-cofire-group"
+                className="bg-white rounded-2xl overflow-hidden"
                 style={{
-                  borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none',
+                  boxShadow: 'var(--brand-shadow-card)',
+                  border: '1.5px solid var(--brand-border)',
                 }}
               >
-                {isGroupStart && (
+                <div
+                  data-testid="admin-alert-group-header"
+                  className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider"
+                  style={{
+                    backgroundColor: 'var(--brand-background)',
+                    color: 'var(--brand-text-muted)',
+                    borderBottom: '1px solid var(--brand-border)',
+                  }}
+                >
+                  {g.alerts.length} alerts from the same reading — independently resolvable
+                </div>
+                {g.alerts.map((a, idx) => (
                   <div
-                    data-testid="admin-alert-group-header"
-                    className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider"
-                    style={{
-                      backgroundColor: 'var(--brand-background)',
-                      color: 'var(--brand-text-muted)',
-                      borderBottom: '1px solid var(--brand-border)',
-                    }}
+                    key={a.id}
+                    style={{ borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none' }}
                   >
-                    {groupCount} alerts from the same reading — independently resolvable
+                    {renderAlertCard(a)}
                   </div>
-                )}
-                <AlertCard
-                  alert={a}
-                  expanded={expanded}
-                  // On the per-patient tab the row IS the toggle — clicking
-                  // anywhere in the row body expands/collapses, matching the
-                  // pre-extract behavior. The chevron mirrors that handler.
-                  onRowClick={toggle}
-                  onToggleExpand={toggle}
-                  onResolve={() => setResolving(a)}
-                  onAcknowledge={() => void handleAcknowledge(a.id)}
-                  ackInFlight={acking.has(a.id)}
-                  heightCm={heightCm}
-                  patientPreEnrollment={patientPreEnrollment}
-                  // P3 — the pre-personalization note is shown once in the
-                  // patient-header band above; suppress the per-card copy so a
-                  // cofire group doesn't repeat it on each of its 3 alerts.
-                  hideDisclaimer
-                />
+                ))}
               </div>
-            );
-          })}
+            ) : (
+              <div
+                key={g.alert.id}
+                className="bg-white rounded-2xl overflow-hidden"
+                style={{ boxShadow: 'var(--brand-shadow-card)' }}
+              >
+                {renderAlertCard(g.alert)}
+              </div>
+            ),
+          )}
         </div>
       )}
 

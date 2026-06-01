@@ -74,6 +74,55 @@ describe('AlertsTab — co-fired grouping (B2)', () => {
 // stays as a curated view available via the TIER_3 chip (and is suppressed
 // under ALL so rows don't render twice).
 
+// F5 — co-fired alerts get a bordered container scoping the group apart from
+// the standalone alerts; singletons stay as their own cards.
+describe('AlertsTab — cofire group container (F5)', () => {
+  function readingAlert(id: string, measuredAt: string, tier = 'BP_LEVEL_1_HIGH'): PatientAlert {
+    const iso = new Date(measuredAt).toISOString()
+    return makeAlert({
+      id,
+      tier: tier as PatientAlert['tier'],
+      createdAt: iso,
+      journalEntry: {
+        id: `je-${id}`,
+        systolicBP: 165,
+        diastolicBP: 95,
+        pulse: 74,
+        weight: null,
+        measuredAt: iso,
+      },
+    } as Partial<PatientAlert>)
+  }
+
+  it('wraps a 3-alert cofire group in one container and leaves standalones uncontained', () => {
+    const shared = '2026-05-22T10:00:00Z'
+    const alerts = [
+      readingAlert('cf1', shared, 'BP_LEVEL_1_HIGH'),
+      readingAlert('cf2', shared, 'BP_LEVEL_1_LOW'),
+      readingAlert('cf3', shared, 'TIER_2_DISCREPANCY'),
+      readingAlert('solo1', '2026-05-21T08:00:00Z'),
+      readingAlert('solo2', '2026-05-20T08:00:00Z'),
+    ]
+    render(<AlertsTab alerts={alerts} loading={false} onResolved={() => {}} />)
+    // Exactly one cofire container + its header.
+    expect(screen.getAllByTestId('admin-alert-cofire-group')).toHaveLength(1)
+    expect(screen.getAllByTestId('admin-alert-group-header')).toHaveLength(1)
+    // All five alerts still render.
+    for (const id of ['cf1', 'cf2', 'cf3', 'solo1', 'solo2']) {
+      expect(screen.getByTestId(`admin-alert-row-${id}`)).toBeInTheDocument()
+    }
+  })
+
+  it('renders no cofire container when every alert is from a distinct reading', () => {
+    const alerts = [
+      readingAlert('a', '2026-05-22T10:00:00Z'),
+      readingAlert('b', '2026-05-21T10:00:00Z'),
+    ]
+    render(<AlertsTab alerts={alerts} loading={false} onResolved={() => {}} />)
+    expect(screen.queryByTestId('admin-alert-cofire-group')).not.toBeInTheDocument()
+  })
+})
+
 describe('AlertsTab — Tier-3 in ALL filter (Round 2 A3)', () => {
   function bpL1Alert(id: string): PatientAlert {
     return makeAlert({
