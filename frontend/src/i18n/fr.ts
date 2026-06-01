@@ -407,6 +407,7 @@ const fr: Record<TranslationKey, string> = {
   'notifications.bucket.emergency': 'Urgence — appelez le 911 en cas de symptômes',
   'notifications.bucket.tier1': 'Alertes médicamenteuses importantes',
   'notifications.bucket.high': 'Tension artérielle élevée',
+  'notifications.bucket.heartFailure': 'Insuffisance cardiaque',
   'notifications.bucket.low': 'Tension artérielle basse',
   'notifications.bucket.info': 'Pour votre information',
   'notifications.bucket.other': 'Autres alertes',

@@ -46,6 +46,11 @@ type Alert = {
    *  `type` enum can't represent Tier 1 contraindications, so cards drove
    *  off it would all read "Missed Medication"). */
   tier?: string | null;
+  /** Engine rule that fired. P1 — the bell's tier-based bucketing mislabels
+   *  rules whose engine tier doesn't match their patient meaning (e.g.
+   *  RULE_HF_DECOMPENSATION claims the sbp-low axis → tier BP_LEVEL_1_LOW, so
+   *  it bucketed as "Low blood pressure"). bucketize() consults ruleId first. */
+  ruleId?: string | null;
   /** Three-tier patient-facing message. Backend always populates this on
    *  v2 alerts; falling back to the legacy BP/value rendering when null. */
   patientMessage?: string | null;
@@ -77,6 +82,41 @@ type Alert = {
     weight?: number | null;
   } | null;
 };
+
+/** Patient-facing bell bucket. Tier-derived for most rules, with a rule-aware
+ *  override (P1) for rules whose engine tier doesn't match their patient
+ *  meaning. */
+export type TierBucketKey =
+  | 'emergency'
+  | 'tier1'
+  | 'high'
+  | 'heartFailure'
+  | 'low'
+  | 'info'
+  | 'other';
+
+export function bucketizeAlert(a: Alert): TierBucketKey {
+  const tier = a.tier ?? null;
+  const ruleId = a.ruleId ?? null;
+  const sbp = a.journalEntry?.systolicBP ?? 0;
+  const dbp = a.journalEntry?.diastolicBP ?? 0;
+  // P1 — rule-aware override. RULE_HF_DECOMPENSATION claims the sbp-low axis
+  // (engine tier BP_LEVEL_1_LOW) but is a fluid / heart-failure alert, not low
+  // blood pressure. Bucket it by rule before the tier branches so it stops
+  // reading "Low blood pressure". Other special-cased rules can join here.
+  if (ruleId === 'RULE_HF_DECOMPENSATION') return 'heartFailure';
+  if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'emergency';
+  if (sbp >= 180 || dbp >= 120) return 'emergency';
+  if (tier === 'TIER_1_CONTRAINDICATION') return 'tier1';
+  if (tier === 'BP_LEVEL_1_LOW' || (sbp > 0 && sbp < 90) || (dbp > 0 && dbp < 60)) return 'low';
+  if (tier === 'BP_LEVEL_1_HIGH') return 'high';
+  if (tier === 'TIER_3_INFO') return 'info';
+  // F32 — patient-visible Tier 2 medication-discrepancy alerts (those that
+  // survived the patientMessage filter) bucket under Info.
+  if (tier === 'TIER_2_DISCREPANCY') return 'info';
+  if (a.severity === 'HIGH' || (a.type ?? '').includes('BP')) return 'high';
+  return 'other';
+}
 
 type Notif = {
   id: string;
@@ -607,7 +647,7 @@ export default function NotificationsPage() {
   // patient-visible bucket. Tier 2 is admin-only per spec — the page already
   // strips it upstream — so it's intentionally absent from the chip set.
   const [alertTierFilter, setAlertTierFilter] = useState<
-    'ALL' | 'emergency' | 'tier1' | 'high' | 'low' | 'info'
+    'ALL' | 'emergency' | 'tier1' | 'high' | 'heartFailure' | 'low' | 'info'
   >('ALL');
 
   // First load shows the skeleton; subsequent polls refresh state silently
@@ -856,6 +896,7 @@ export default function NotificationsPage() {
                     ['emergency', 'Emergency'],
                     ['tier1', 'Tier 1'],
                     ['high', 'High BP'],
+                    ['heartFailure', 'Heart failure'],
                     ['low', 'Low BP'],
                     ['info', 'Info'],
                   ] as const
@@ -893,48 +934,26 @@ export default function NotificationsPage() {
               <EmptyState message={t('notifications.allCaughtUp')} />
             )}
             {openAlerts.length > 0 && (() => {
-              type TierBucketKey =
-                | 'emergency'
-                | 'tier1'
-                | 'high'
-                | 'low'
-                | 'info'
-                | 'other';
-              const order: TierBucketKey[] = ['emergency', 'tier1', 'high', 'low', 'info', 'other'];
+              const order: TierBucketKey[] = ['emergency', 'tier1', 'high', 'heartFailure', 'low', 'info', 'other'];
               const headings: Record<TierBucketKey, string> = {
                 emergency: t('notifications.bucket.emergency'),
                 tier1: t('notifications.bucket.tier1'),
                 high: t('notifications.bucket.high'),
+                heartFailure: t('notifications.bucket.heartFailure'),
                 low: t('notifications.bucket.low'),
                 info: t('notifications.bucket.info'),
                 other: t('notifications.bucket.other'),
               };
-              const bucketize = (a: typeof openAlerts[number]): TierBucketKey => {
-                const tier = (a as { tier?: string | null }).tier ?? null;
-                const sbp = a.journalEntry?.systolicBP ?? 0;
-                const dbp = a.journalEntry?.diastolicBP ?? 0;
-                if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'emergency';
-                if (sbp >= 180 || dbp >= 120) return 'emergency';
-                if (tier === 'TIER_1_CONTRAINDICATION') return 'tier1';
-                if (tier === 'BP_LEVEL_1_LOW' || (sbp > 0 && sbp < 90) || (dbp > 0 && dbp < 60)) return 'low';
-                if (tier === 'BP_LEVEL_1_HIGH') return 'high';
-                if (tier === 'TIER_3_INFO') return 'info';
-                // F32 — patient-visible Tier 2 medication-discrepancy alerts
-                // (those that survived the patientMessage filter above) bucket
-                // under Info so the existing "Info" chip surfaces them.
-                if (tier === 'TIER_2_DISCREPANCY') return 'info';
-                if (a.severity === 'HIGH' || (a.type ?? '').includes('BP')) return 'high';
-                return 'other';
-              };
               const buckets = new Map<TierBucketKey, typeof openAlerts>();
               for (const a of openAlerts) {
-                const k = bucketize(a);
+                const k = bucketizeAlert(a);
                 if (!buckets.has(k)) buckets.set(k, []);
                 buckets.get(k)!.push(a);
               }
               const sectionTestIds: Partial<Record<TierBucketKey, string>> = {
                 emergency: 'alerts-section-emergency',
                 high: 'alerts-section-elevated',
+                heartFailure: 'alerts-section-heart-failure',
               };
               return order
                 .filter((k) => buckets.has(k))

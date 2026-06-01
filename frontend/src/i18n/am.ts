@@ -410,6 +410,7 @@ const am: Record<TranslationKey, string> = {
   'notifications.bucket.emergency': 'የአደጋ ጊዜ — ምልክቶች ካሉ 911 ይደውሉ',
   'notifications.bucket.tier1': 'ጠቃሚ የመድሃኒት ማንቂያዎች',
   'notifications.bucket.high': 'ከፍ ያለ የደም ግፊት',
+  'notifications.bucket.heartFailure': 'የልብ ድካም',
   'notifications.bucket.low': 'ዝቅተኛ የደም ግፊት',
   'notifications.bucket.info': 'ለመረጃዎ',
   'notifications.bucket.other': 'ሌሎች ማንቂያዎች',

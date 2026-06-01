@@ -405,6 +405,7 @@ const en = {
   'notifications.bucket.emergency': 'Emergency — call 911 if symptoms',
   'notifications.bucket.tier1': 'Important medication alerts',
   'notifications.bucket.high': 'Elevated blood pressure',
+  'notifications.bucket.heartFailure': 'Heart failure',
   'notifications.bucket.low': 'Low blood pressure',
   'notifications.bucket.info': 'For your information',
   'notifications.bucket.other': 'Other alerts',
