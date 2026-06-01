@@ -514,7 +514,10 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(result?.ruleId).toBe('RULE_STANDARD_L1_HIGH')
     expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
     expect(createArgs.data.mode).toBe('STANDARD')
-    expect(createArgs.data.patientMessage).toMatch(
+    // F26 — the pre-personalization disclaimer is admin-only. It rides on the
+    // physician message, never the patient message.
+    expect(createArgs.data.patientMessage).not.toMatch(/personalization/i)
+    expect(createArgs.data.physicianMessage).toMatch(
       /personalization begins after 7 readings/i,
     )
   })

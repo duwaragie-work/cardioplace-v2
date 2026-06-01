@@ -410,20 +410,27 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
 
   // ── Standard mode ─────────────────────────────────────────────────────
   RULE_STANDARD_L1_HIGH: {
+    // F26 — the pre-personalization disclaimer is admin-only. It used to be
+    // appended to patientMessage (preDaySuffix) and leaked the
+    // "(Standard threshold — personalization begins after 7 readings.)"
+    // parenthetical into the patient alerts tab / banner / detail page. The
+    // patient gets only the clinical instruction; the disclaimer now rides on
+    // the physicianMessage (admin surface) instead.
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is high. Please contact your care team today.${preDaySuffix(ctx)}${suboptimalSuffix(ctx)}`,
+      `Your blood pressure reading is ${bp(ctx)}, which is high. Please contact your care team today.${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
       `The patient's BP is elevated at ${bp(ctx)}.`,
     physicianMessage: (ctx) =>
-      `BP Level 1 High — severe Stage 2 (≥160/100) at ${bp(ctx)}.${physSuffix(ctx)}`,
+      `BP Level 1 High — severe Stage 2 (≥160/100) at ${bp(ctx)}.${preDaySuffix(ctx)}${physSuffix(ctx)}`,
   },
   RULE_STANDARD_L1_LOW: {
+    // F26 — see RULE_STANDARD_L1_HIGH: disclaimer is admin-only, not patient.
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is low. Please contact your care team today.${preDaySuffix(ctx)}${suboptimalSuffix(ctx)}`,
+      `Your blood pressure reading is ${bp(ctx)}, which is low. Please contact your care team today.${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
       `The patient's BP is low at ${bp(ctx)}.`,
     physicianMessage: (ctx) =>
-      `BP Level 1 Low — SBP <90 at ${bp(ctx)}.${physSuffix(ctx)}`,
+      `BP Level 1 Low — SBP <90 at ${bp(ctx)}.${preDaySuffix(ctx)}${physSuffix(ctx)}`,
   },
 
   // ── Age 65+ override ─────────────────────────────────────────────────

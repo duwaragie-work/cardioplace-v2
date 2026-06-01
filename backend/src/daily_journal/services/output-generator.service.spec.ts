@@ -166,10 +166,13 @@ describe('OutputGeneratorService', () => {
       expect(out.physicianMessage).toMatch(/pulse pressure/i)
     })
 
-    it('preDay3 flag appends disclaimer on standard-mode alerts', () => {
+    it('F26 — preDay3 disclaimer is admin-only: physician message has it, patient message does NOT', () => {
       const r = baseResult()
       const out = service.generate(r, baseSession, true)
-      expect(out.patientMessage).toMatch(/personalization begins after 7 readings/i)
+      // The personalization disclaimer must never leak to the patient surface.
+      expect(out.patientMessage).not.toMatch(/personalization/i)
+      // It still rides on the physician/admin surface for context.
+      expect(out.physicianMessage).toMatch(/personalization begins after 7 readings/i)
     })
 
     it('suboptimalMeasurement flag appends retake suffix', () => {
