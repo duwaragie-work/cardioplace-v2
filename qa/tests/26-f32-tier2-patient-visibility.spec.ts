@@ -112,16 +112,14 @@ test.describe('F32 — Tier 2 medication-discrepancy is patient-visible', () => 
     ).toBe(true)
 
     // ── UI: sign in (lands on /dashboard), then SPA-navigate to the alerts
-    // top-tab via the "See all alerts →" link on the recent-alerts strip.
-    // page.goto would hard-navigate and lose the marker cookie under
-    // Playwright + Next-16-dev; a <Link> click preserves auth in memory.
-    // With F32 the med-missed alert populates the recent-alerts strip, so the
-    // see-all link is present. ──
+    // top-tab via the persistent navbar notification bell (P2 removed the
+    // dashboard recent-alerts strip + its "See all" link). page.goto would
+    // hard-navigate and lose the marker cookie under Playwright + Next-16-dev;
+    // a <Link> click preserves auth in memory. /notifications defaults to the
+    // Alerts top-tab. ──
     await signInPatient(page, PATIENTS.aisha.email)
     await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
-    await page
-      .locator('[data-testid="dashboard-recent-alerts-see-all"]')
-      .click()
+    await page.locator('[data-testid="notification-bell"]').click()
     await page.waitForURL(/\/notifications/, { timeout: 30_000 })
     await page.waitForLoadState('networkidle').catch(() => {})
 

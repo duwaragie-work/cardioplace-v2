@@ -19,7 +19,6 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import { getJournalEntries, getNotifications, getAlerts, getJournalStats, type AlertTier } from '@/lib/services/journal.service';
 import { getAlertPresentation } from '@/components/alerts/alert-presentation';
-import PatientAlertCard from '@/components/alerts/PatientAlertCard';
 import { getMyPatientProfile, getMyMedications, type PatientProfileDto } from '@/lib/services/intake.service';
 import { getMyThreshold, type PatientThresholdDto } from '@/lib/services/threshold.service';
 import { loadDraft, hasDraft, stepProgress } from '@/lib/intake/draft';
@@ -85,8 +84,7 @@ interface DeviationAlert {
   // V2 fields used by D3 prioritization + Flow C dispatch
   tier?: import('@/lib/services/journal.service').AlertTier | null;
   patientMessage?: string | null;
-  // Round 2 J — recent-alerts strip uses PatientAlertCard, which reads these
-  // additional fields for rule-aware chrome + admin-parity badges.
+  // Rule-aware chrome + admin-parity fields surfaced on the v2 alert DTO.
   ruleId?: string | null;
   mode?: string | null;
   escalated?: boolean;
@@ -115,11 +113,6 @@ export default function Dashboard() {
   const { t } = useLanguage();
 
   const [bpChartData, setBpChartData] = useState<{ day: string; systolic: number; diastolic: number; fullDate: string; time: string }[]>([]);
-  // Round 2 J — recent-alerts strip status filter. 'OPEN' = unresolved + un-
-  // acknowledged (the typical reason a patient cares); 'ALL' = include recently
-  // resolved + acknowledged. The strip stays compact (top 3 by recency) — deep
-  // filter UI lives on /notifications?tab=alerts (Round 2 A.2).
-  const [recentAlertsFilter, setRecentAlertsFilter] = useState<'OPEN' | 'ALL'>('OPEN');
   const [chartRange, setChartRange] = useState<7 | 90>(7);
   const [latestEntry, setLatestEntry] = useState<JournalEntry | null>(null);
   const [notifs, setNotifs] = useState<DashboardNotif[]>([]);
@@ -376,21 +369,6 @@ export default function Dashboard() {
   }
   const topAlertVariant = variantForTopAlert(topAlert);
 
-  // Round 2 J — recent-alerts strip. Top 3 by recency, filtered by the chip.
-  // Source: same `alerts` array as the banner — hides only silent (admin-only)
-  // Tier 2 rows; patient-visible medication-discrepancy alerts (F32) stay. The
-  // banner picks the highest-priority OPEN alert; the strip is a parallel
-  // surface for at-a-glance scan.
-  const recentAlerts: DeviationAlert[] = [...alerts]
-    .filter((a) => (recentAlertsFilter === 'OPEN' ? a.status === 'OPEN' : true))
-    .filter((a) => !tier2Hidden(a))
-    .sort((a, b) => {
-      const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return tb - ta;
-    })
-    .slice(0, 3);
-
   // D4 BP-vs-target color coding. Prefer the patient's PatientThreshold; fall
   // back to AHA defaults (140/90 high, 90/60 low) when no threshold is set.
   const sbpUpper = threshold?.sbpUpperTarget ?? 140;
@@ -630,93 +608,9 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Round 2 J — Recent alerts strip. Sits below the headline banner;
-            shows the top 3 most-recent alerts (status-filterable) in the
-            compact PatientAlertCard variant. The "See all alerts →" link
-            opens the full alerts surface with deep filter chips
-            (/notifications?tab=alerts). Hidden when there are no alerts at
-            all so a clean state doesn't render an empty section. */}
-        {alerts.length > 0 && (
-          <div
-            data-testid="dashboard-recent-alerts"
-            className="mb-3 md:mb-4"
-          >
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <h2
-                className="text-[13px] font-bold uppercase tracking-wider"
-                style={{ color: 'var(--brand-text-muted)' }}
-              >
-                {t('dashboard.recentAlerts')}
-              </h2>
-              <div
-                className="flex items-center gap-1.5"
-                role="tablist"
-                aria-label="Filter recent alerts"
-              >
-                {(
-                  [
-                    ['OPEN', t('dashboard.recentAlerts.open')],
-                    ['ALL', t('dashboard.recentAlerts.all')],
-                  ] as const
-                ).map(([key, label]) => {
-                  const active = recentAlertsFilter === key;
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      role="tab"
-                      aria-selected={active}
-                      data-testid={`dashboard-recent-alerts-filter-${key}`}
-                      onClick={() => setRecentAlertsFilter(key)}
-                      className="px-2.5 h-6 rounded-full text-[10.5px] font-semibold transition cursor-pointer"
-                      style={{
-                        backgroundColor: active
-                          ? 'var(--brand-primary-purple)'
-                          : 'var(--brand-primary-purple-light)',
-                        color: active ? 'white' : 'var(--brand-primary-purple)',
-                      }}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            {recentAlerts.length === 0 ? (
-              <p
-                data-testid="dashboard-recent-alerts-empty"
-                className="text-[12.5px] py-2"
-                style={{ color: 'var(--brand-text-muted)' }}
-              >
-                {recentAlertsFilter === 'OPEN'
-                  ? t('dashboard.recentAlerts.noneOpen')
-                  : t('dashboard.recentAlerts.none')}
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {recentAlerts.map((a) => (
-                  <PatientAlertCard
-                    key={a.id}
-                    alert={a}
-                    onAcknowledge={() => router.push(`/alerts/${a.id}`)}
-                    acknowledging={null}
-                    compact
-                    testIdPrefix="dashboard-recent-alert"
-                  />
-                ))}
-              </div>
-            )}
-            <Link
-              data-testid="dashboard-recent-alerts-see-all"
-              href="/notifications?tab=alerts"
-              className="inline-flex items-center gap-1 mt-2 text-[12.5px] font-semibold cursor-pointer"
-              style={{ color: 'var(--brand-primary-purple)' }}
-            >
-              {t('dashboard.recentAlerts.seeAll')}
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-        )}
+        {/* P2 — the "Recent Alerts" strip was removed (Duwaragie's call): the
+            headline banner + the notifications bell already surface alerts, so
+            a third dashboard surface was redundant noise. */}
 
         {/* D0 — Clinical Intake Action Required (above stats, below D3) */}
         {intakeUi.kind === 'fresh' && <ActionRequiredCard state={{ kind: 'fresh' }} />}
