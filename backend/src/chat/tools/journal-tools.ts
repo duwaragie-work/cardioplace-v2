@@ -3,6 +3,7 @@
  * These call DailyJournalService directly (in-process, no HTTP round-trip).
  */
 
+import { UnauthorizedException } from '@nestjs/common'
 import { Type } from '@google/genai'
 import type { FunctionDeclaration } from '@google/genai'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
@@ -535,6 +536,15 @@ export async function executeJournalTool(
   ctxOrJournal: JournalToolContext | DailyJournalService,
   userId: string,
 ): Promise<string> {
+  // Fail-loud multi-tenant guard: every tool call MUST run on behalf of an
+  // authenticated patient. If a future refactor ever drops JwtAuthGuard or
+  // forgets to thread userId from req.user.id, we want to abort here rather
+  // than silently issue unscoped Prisma queries.
+  if (typeof userId !== 'string' || userId.length === 0) {
+    throw new UnauthorizedException(
+      'Tool dispatch requires an authenticated patient (userId is empty).',
+    )
+  }
   const ctx: JournalToolContext =
     'journalService' in ctxOrJournal
       ? ctxOrJournal
@@ -640,6 +650,15 @@ export async function executeJournalTool(
           endDate.toISOString().slice(0, 10),
           15,
         )
+        // ── LLM privacy boundary ─────────────────────────────────────────
+        // This projection is the privacy boundary between the patient's
+        // JournalEntry row (which carries internal columns like userId,
+        // sessionId, source, sourceMetadata, createdAt, updatedAt) and the
+        // narrow JSON the LLM tool-call receives. NEVER widen this to
+        // forward internal fields — the LLM might quote them back to the
+        // patient, and a new column added to the Prisma schema must not
+        // auto-flow to the model. Mirror voice-tools.service.ts:495 if
+        // changing the shape.
         const entries = (result.data ?? []).map((e: any) => {
           const d = new Date(e.measuredAt)
           return {

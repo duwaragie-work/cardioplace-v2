@@ -1,10 +1,12 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
 import { EmbeddingService } from '../../common/embedding.service.js'
 
 @Injectable()
 export class ConversationHistoryService {
+  private readonly logger = new Logger(ConversationHistoryService.name)
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly geminiService: GeminiService,
@@ -16,24 +18,50 @@ export class ConversationHistoryService {
   /**
    * Retrieve the most relevant past messages for a session using vector
    * similarity. Works for both text and voice rows since all have embeddings.
+   *
+   * Multi-tenant safety: the raw SQL below joins on Session so the userId is
+   * enforced inside the query itself — even if a caller someday forgets to
+   * validate sessionId upstream, no cross-patient rows can leak. A foreign
+   * sessionId returns an empty result + a `[SECURITY] cross_tenant_attempt`
+   * log line for ops alerting.
    */
   async getConversationHistory(
+    userId: string,
     sessionId: string,
     query: string,
   ): Promise<[string, string][]> {
     try {
-      if (!sessionId) return []
+      if (!userId || !sessionId) return []
+
+      // Defense-in-depth: confirm the session actually belongs to this user
+      // BEFORE running the embedding similarity query (which is the expensive
+      // step). Mismatch → log + bail out, no DB rows returned.
+      const session = await this.prisma.session.findFirst({
+        where: { id: sessionId, userId },
+        select: { id: true },
+      })
+      if (!session) {
+        this.logger.warn(
+          `[SECURITY] cross_tenant_attempt service=conversation_history userId=${userId} sessionId=${sessionId}`,
+        )
+        return []
+      }
 
       type RawRow = { userMessage: string; aiSummary: string; timestamp: Date }
 
-      // 1. Always get the last 12 turns chronologically (ensures recent context)
+      // 1. Always get the last 12 turns chronologically (ensures recent context).
+      // The Session join keeps the userId predicate inside the SQL so any
+      // future schema migration (or accidental sessionId-only call site) can't
+      // bypass tenant isolation at the raw-SQL layer.
       const recentRows: RawRow[] = await (this.prisma as any).$queryRawUnsafe(
-        `SELECT "userMessage", "aiSummary", timestamp
-         FROM "Conversation"
-         WHERE "sessionId" = $1
-         ORDER BY timestamp DESC
+        `SELECT c."userMessage", c."aiSummary", c.timestamp
+         FROM "Conversation" c
+         JOIN "Session" s ON s.id = c."sessionId"
+         WHERE c."sessionId" = $1 AND s."userId" = $2
+         ORDER BY c.timestamp DESC
          LIMIT 12`,
         sessionId,
+        userId,
       )
 
       // 2. If query is provided, also get similar turns via vector search
@@ -45,12 +73,14 @@ export class ConversationHistoryService {
           if (queryEmbedding && queryEmbedding.length > 0) {
             const embeddingString = `[${queryEmbedding.join(',')}]`
             similarRows = await (this.prisma as any).$queryRawUnsafe(
-              `SELECT "userMessage", "aiSummary", timestamp
-               FROM "Conversation"
-               WHERE "sessionId" = $1 AND embedding IS NOT NULL
-               ORDER BY embedding <-> $2::vector
+              `SELECT c."userMessage", c."aiSummary", c.timestamp
+               FROM "Conversation" c
+               JOIN "Session" s ON s.id = c."sessionId"
+               WHERE c."sessionId" = $1 AND s."userId" = $2 AND c.embedding IS NOT NULL
+               ORDER BY c.embedding <-> $3::vector
                LIMIT 6`,
               sessionId,
+              userId,
               embeddingString,
             )
           }

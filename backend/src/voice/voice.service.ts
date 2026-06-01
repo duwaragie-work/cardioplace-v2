@@ -12,6 +12,10 @@ import {
   type ResolvedContext,
 } from '@cardioplace/shared'
 import { PrismaService } from '../prisma/prisma.service.js'
+import {
+  PATIENT_DEVIATION_ALERT_FIELDS_FOR_LLM_PROMPT,
+  PATIENT_JOURNAL_FIELDS_FOR_LLM_PROMPT,
+} from '../common/prisma-selects.js'
 import { ConversationHistoryService } from '../chat/services/conversation-history.service.js'
 import { SystemPromptService } from '../chat/services/system-prompt.service.js'
 import { ProfileResolverService } from '../daily_journal/services/profile-resolver.service.js'
@@ -931,28 +935,13 @@ export class VoiceService implements OnModuleDestroy {
           // voice agent sees the same history. Covers the 7-day baseline
           // window with room to spare, keeps prompt size bounded.
           take: 30,
-          select: {
-            measuredAt: true,
-            systolicBP: true,
-            diastolicBP: true,
-            weight: true,
-            medicationTaken: true,
-            otherSymptoms: true,
-          },
+          select: PATIENT_JOURNAL_FIELDS_FOR_LLM_PROMPT,
         }),
         this.prisma.deviationAlert.findMany({
           where: { userId, status: { in: ['OPEN', 'ACKNOWLEDGED'] } },
           orderBy: { createdAt: 'desc' },
           take: 5,
-          select: {
-            tier: true,
-            ruleId: true,
-            mode: true,
-            patientMessage: true,
-            physicianMessage: true,
-            dismissible: true,
-            createdAt: true,
-          },
+          select: PATIENT_DEVIATION_ALERT_FIELDS_FOR_LLM_PROMPT,
         }),
         sessionId
           ? this.prisma.session.findUnique({

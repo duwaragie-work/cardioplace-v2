@@ -15,6 +15,10 @@ import { PrismaService } from '../prisma/prisma.service.js'
 import { DailyJournalService } from '../daily_journal/daily_journal.service.js'
 import { AlertEngineService } from '../daily_journal/services/alert-engine.service.js'
 import { ProfileResolverService } from '../daily_journal/services/profile-resolver.service.js'
+import {
+  PATIENT_DEVIATION_ALERT_FIELDS_FOR_LLM_PROMPT,
+  PATIENT_JOURNAL_FIELDS_FOR_LLM_PROMPT,
+} from '../common/prisma-selects.js'
 import { GeminiService } from '../gemini/gemini.service.js'
 import { OcrService } from '../ocr/ocr.service.js'
 import { MedicationAdherenceService } from './services/medication-adherence.service.js'
@@ -94,25 +98,13 @@ export class ChatService {
         // Cap at 30 most-recent readings — more than covers the 7-day baseline
         // window while keeping prompt size bounded for long-enrolled patients.
         take: 30,
-        select: {
-          measuredAt: true, systolicBP: true, diastolicBP: true,
-          weight: true, medicationTaken: true,
-          otherSymptoms: true,
-        },
+        select: PATIENT_JOURNAL_FIELDS_FOR_LLM_PROMPT,
       }),
       this.prisma.deviationAlert.findMany({
         where: { userId, status: { in: ['OPEN', 'ACKNOWLEDGED'] } },
         orderBy: { createdAt: 'desc' },
         take: 5,
-        select: {
-          tier: true,
-          ruleId: true,
-          mode: true,
-          patientMessage: true,
-          physicianMessage: true,
-          dismissible: true,
-          createdAt: true,
-        },
+        select: PATIENT_DEVIATION_ALERT_FIELDS_FOR_LLM_PROMPT,
       }),
       this.prisma.user.findUnique({
         where: { id: userId },
@@ -396,7 +388,7 @@ export class ChatService {
         this.buildPatientSystemPrompt(userId),
         this.conversationHistoryService.getSessionSummary(sessionId),
         this.ragService.retrieveDocuments(prompt, 10),
-        this.conversationHistoryService.getConversationHistory(sessionId, prompt),
+        this.conversationHistoryService.getConversationHistory(userId, sessionId, prompt),
       ])
 
       console.log('Chat history turns:', chatHistory.length / 2)
@@ -592,7 +584,7 @@ export class ChatService {
         this.buildPatientSystemPrompt(userId),
         this.conversationHistoryService.getSessionSummary(sessionId),
         this.ragService.retrieveDocuments(prompt, 10),
-        this.conversationHistoryService.getConversationHistory(sessionId, prompt),
+        this.conversationHistoryService.getConversationHistory(userId, sessionId, prompt),
       ])
 
       console.log('Chat history turns:', chatHistory.length / 2)
@@ -660,6 +652,10 @@ export class ChatService {
     return this.prisma.session.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
+      // Sidebar renders the 100 most-recent — a heavy patient with hundreds
+      // of historical sessions doesn't need every row dumped at once. Older
+      // sessions still exist in the DB and can be fetched by id if needed.
+      take: 100,
       select: {
         id: true,
         title: true,
@@ -681,21 +677,32 @@ export class ChatService {
   }
 
   async getSessionHistory(sessionId: string, userId?: string) {
-    const session = await this.prisma.session.findUnique({
-      where: { id: sessionId },
+    // Tighten the ownership lookup to a composite WHERE so we never read a
+    // row we'd otherwise have to reject. Matches the get_recent_readings /
+    // update_checkin pattern — foreign sessionId → NotFoundException, no
+    // separate "unauthorized" branch needed.
+    const session = await this.prisma.session.findFirst({
+      where: { id: sessionId, ...(userId ? { userId } : {}) },
+      select: { id: true },
     })
 
     if (!session) {
       throw new NotFoundException('Session not found')
     }
 
-    if (session.userId && session.userId !== userId) {
-      throw new UnauthorizedException('Access denied to this session')
-    }
-
+    // Defense-in-depth note: the Conversation model exposes only `sessionId`
+    // (no relation field on the Prisma client), so we can't add a typed
+    // `session: { userId }` filter here. The composite session-ownership
+    // check above is the boundary — combined with the JOIN-on-Session raw
+    // SQL in ConversationHistoryService.getConversationHistory which scopes
+    // the LLM-context lookup path the same way.
     return this.prisma.conversation.findMany({
       where: { sessionId },
       orderBy: { timestamp: 'asc' },
+      // Cap at 500 turns — a single session has at most a few dozen
+      // exchanges in practice; 500 is well above any real ceiling but
+      // prevents unbounded pulls if a session ever grows pathologically.
+      take: 500,
       select: {
         id: true,
         userMessage: true,

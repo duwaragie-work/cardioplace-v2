@@ -236,6 +236,23 @@ export class VoiceToolsService {
     args: Record<string, unknown>,
     ctx: ToolContext,
   ): Promise<DispatchResult> {
+    // Fail-loud multi-tenant guard: every dispatch MUST carry an authenticated
+    // userId from the voice gateway's JWT handshake. If a future refactor ever
+    // drops the JWT verify in voice.gateway.ts or forgets to thread userId
+    // into ActiveSession, abort here rather than silently emit unscoped
+    // Prisma queries downstream.
+    if (typeof ctx.userId !== 'string' || ctx.userId.length === 0) {
+      this.logger.error(
+        `[SECURITY] dispatch_without_auth tool=${name} — refusing to execute`,
+      )
+      return {
+        llmResponse: {
+          ok: false,
+          error: 'Voice tool dispatch requires an authenticated patient.',
+        },
+        events: [],
+      }
+    }
     try {
       switch (name) {
         case 'submit_checkin':
@@ -474,6 +491,14 @@ export class VoiceToolsService {
       )
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const entries = (result?.data ?? []) as Array<any>
+      // ── LLM privacy boundary ───────────────────────────────────────────
+      // The narrow `entry_id="…" | <date> | BP <sbp>/<dbp> | meds … | symptoms …`
+      // line below is the privacy boundary between the JournalEntry row
+      // (which carries internal columns like userId, sessionId, source,
+      // sourceMetadata, createdAt, updatedAt) and what the LLM receives.
+      // NEVER widen this string to include internal fields — the model can
+      // quote them back to the patient. Mirror chat/tools/journal-tools.ts
+      // `get_recent_readings` if changing the shape.
       const lines: string[] = []
       for (const e of entries.slice(0, 5)) {
         const entryId = e.id ?? 'unknown'

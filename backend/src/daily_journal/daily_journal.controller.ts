@@ -15,14 +15,23 @@ import {
 } from '@nestjs/common'
 import type { Request } from 'express'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js'
+import { Roles } from '../auth/decorators/roles.decorator.js'
+import { UserRole } from '../generated/prisma/enums.js'
 import { DailyJournalService } from './daily_journal.service.js'
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto.js'
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto.js'
 import { UpdateNotificationStatusDto } from './dto/update-notification-status.dto.js'
 import { BulkUpdateNotificationStatusDto } from './dto/bulk-update-notification-status.dto.js'
 
+/**
+ * Patient-side journal endpoints — create / update / list / delete the
+ * logged-in patient's own readings. Role-gated via the global RolesGuard:
+ * only PATIENT may hit these routes (PROVIDER/admin views the same data via
+ * the separate admin app endpoints with different ownership semantics).
+ */
 @Controller('daily-journal')
 @UseGuards(JwtAuthGuard)
+@Roles(UserRole.PATIENT)
 export class DailyJournalController {
   constructor(private readonly dailyJournalService: DailyJournalService) {}
 

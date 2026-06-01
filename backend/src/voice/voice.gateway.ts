@@ -62,9 +62,23 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     try {
-      const payload = this.jwtService.verify<{ sub: string }>(token, {
+      const payload = this.jwtService.verify<{ sub: string; roles?: string[] }>(token, {
         secret: this.config.getOrThrow('JWT_ACCESS_SECRET'),
       })
+      // Role gate (least privilege): voice is a patient-only surface. A
+      // misissued PROVIDER / MEDICAL_DIRECTOR / SUPER_ADMIN token must not
+      // be able to open a voice session and burn LLM tokens against an
+      // account that has no PatientProfile. Mirrors @Roles(UserRole.PATIENT)
+      // on the HTTP controllers.
+      const roles = Array.isArray(payload.roles) ? payload.roles : []
+      if (!roles.includes('PATIENT')) {
+        this.logger.warn(
+          `[SECURITY] voice_role_denied user=${payload.sub} roles=${roles.join(',')} [socket=${client.id}]`,
+        )
+        client.emit('session_error', { message: 'Voice is a patient-only surface' })
+        client.disconnect()
+        return
+      }
       client.data = { userId: payload.sub, token }
       this.logger.log(`[FLOW] Step 2 — WS connected + JWT verified [socket=${client.id}, user=${payload.sub}] (${Date.now() - t0}ms)`)
     } catch {

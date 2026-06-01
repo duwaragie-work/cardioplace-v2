@@ -2,15 +2,24 @@ import { Body, Controller, Post, Res, Req, Get, Param, Delete, UseGuards } from 
 import type { Request, Response } from 'express'
 import { randomUUID } from 'crypto'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js'
+import { Roles } from '../auth/decorators/roles.decorator.js'
+import { UserRole } from '../generated/prisma/enums.js'
 import { ChatService } from './chat.service.js'
 import { ChatRequestDto } from './dto/chat-request.dto.js'
 
 /**
- * All chat endpoints require JWT authentication.
+ * All chat endpoints require JWT authentication AND PATIENT role.
  * The userId is extracted from the JWT token (req.user.id).
+ *
+ * Role gate (least privilege): only PATIENT may hit these routes. The global
+ * RolesGuard rejects PROVIDER / MEDICAL_DIRECTOR / HEALPLACE_OPS / SUPER_ADMIN
+ * with 403 — admin/care-team uses the separate admin app (different surface,
+ * different endpoints). This prevents a misissued admin token from being used
+ * to invoke the patient chatbot and burning tokens on a profile-less account.
  */
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
+@Roles(UserRole.PATIENT)
 export class ChatController {
   constructor(private readonly chatService: ChatService) { }
 

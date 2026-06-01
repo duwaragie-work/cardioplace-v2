@@ -214,6 +214,14 @@ export class DailyJournalService {
     })
 
     if (!existing) {
+      // Composite WHERE failed — either the entry doesn't exist OR it exists
+      // but belongs to a different patient. We don't distinguish: both surface
+      // the same NotFoundException so a probe can't confirm an id's existence.
+      // The log line lets ops detect cross-tenant probes + LLM-hallucinated
+      // UUIDs (Gemini native-audio hallucinates ids, python-genai#1894).
+      this.logger.warn(
+        `[SECURITY] cross_tenant_attempt service=journal action=update userId=${userId} requestedId=${entryId}`,
+      )
       throw new NotFoundException('Journal entry not found')
     }
 
@@ -431,6 +439,9 @@ export class DailyJournalService {
     })
 
     if (!entry) {
+      this.logger.warn(
+        `[SECURITY] cross_tenant_attempt service=journal action=findOne userId=${userId} requestedId=${id}`,
+      )
       throw new NotFoundException('Journal entry not found')
     }
 
@@ -445,6 +456,12 @@ export class DailyJournalService {
     const alerts = await this.prisma.deviationAlert.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
+      // Cap at 200 most-recent alerts — a heavy patient with years of
+      // history doesn't need every alert dumped at once. Older alerts can
+      // be fetched via paginated routes if/when needed. Defence-in-depth
+      // for OWASP LLM02 "minimum necessary" — even within a single
+      // patient's data, don't fetch more than the UI uses.
+      take: 200,
       include: {
         journalEntry: {
           select: {
@@ -572,6 +589,10 @@ export class DailyJournalService {
         this.prisma.notification.findMany({
           where,
           orderBy: { sentAt: 'desc' },
+          // Cap at 200 — bell shows the most-recent N; older notifications
+          // exist in the DB but don't need to flood the response. Same
+          // OWASP LLM02 "minimum necessary" rationale as getAlerts above.
+          take: 200,
           // Pull the patient userId via the linked alert so the bell can
           // deep-link clicks to /patients/{patientUserId}?alert={alertId}.
           // notification.userId is the *recipient* (admin/provider/ops), not
@@ -827,6 +848,9 @@ export class DailyJournalService {
     })
 
     if (!entry) {
+      this.logger.warn(
+        `[SECURITY] cross_tenant_attempt service=journal action=delete userId=${userId} requestedId=${id}`,
+      )
       throw new NotFoundException('Journal entry not found')
     }
 
@@ -927,12 +951,19 @@ export class DailyJournalService {
     const [totalEntries, recentEntries, allEntries] = await Promise.all([
       this.prisma.journalEntry.count({ where: { userId } }),
       this.prisma.journalEntry.findMany({
+        // 30-day window is the natural cap for recentEntries — already
+        // date-bounded so no `take` ceiling needed (worst-case: a patient
+        // who logs 50 entries/day for 30 days = 1500 narrow rows, fine).
         where: { userId, measuredAt: { gte: thirtyDaysAgo } },
         select: { systolicBP: true, diastolicBP: true },
       }),
       this.prisma.journalEntry.findMany({
         where: { userId },
         orderBy: { measuredAt: 'desc' },
+        // Cap full-history streak read at 1000 entries (~3 years of daily
+        // check-ins) — long enough to compute any plausible streak, short
+        // enough that a pathological row count can't blow the response.
+        take: 1000,
         select: { measuredAt: true, medicationTaken: true },
       }),
     ])
@@ -1003,6 +1034,10 @@ export class DailyJournalService {
     const escalations = await this.prisma.escalationEvent.findMany({
       where: { userId },
       orderBy: { triggeredAt: 'desc' },
+      // Cap at 200 most-recent escalations — patient escalation history
+      // can grow large over time; older events are still queryable via
+      // paginated routes if needed. Same OWASP "minimum necessary" rationale.
+      take: 200,
       include: {
         alert: {
           select: {
