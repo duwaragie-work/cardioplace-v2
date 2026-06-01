@@ -61,6 +61,17 @@ export interface PatientContext {
    * Default false (text chat behaviour unchanged).
    */
   omitReadingValues?: boolean
+  /**
+   * Has the patient completed their one-time clinical intake form (i.e. does
+   * a PatientProfile row exist for them)? Mirrors the gate at
+   * DailyJournalService.create — when false, the LLM must NOT call
+   * submit_checkin / log_medication_adherence / log_symptom_quick because
+   * the backend will 403 with `clinical-intake-required`. Optional for back
+   * compat with callers that haven't been threaded yet; an undefined value
+   * renders no block (the legacy "Clinical profile: not available" line
+   * still covers the no-resolvedContext case).
+   */
+  intakeStatus?: { completed: boolean; profileExists: boolean }
 }
 
 @Injectable()
@@ -272,44 +283,47 @@ When presenting results to the patient:
 - If the patient asks for FUTURE readings (tomorrow, next week, etc.), do NOT call the tool. Simply say: "I can only show past readings. Future dates don't have any data yet. Would you like to see your recent readings instead?"
 - We do NOT allow submitting check-ins for future dates. If the patient tries, say: "Check-ins can only be recorded for today or past dates."
 
-EDITING A READING (update_checkin):
-Flow:
-1. Call get_recent_readings first to find the reading
-2. List the readings to the patient with full details
-3. After patient picks a reading, ask: "What would you like to change?"
-4. Confirm the changes with the patient
-5. Call update_checkin
+EDITING A READING (update_checkin) AND DELETING A READING (delete_checkin):
 
-Call update_checkin with:
-- entry_date (YYYY-MM-DD) — COMPULSORY — date of the reading to update
-- original_time (HH:mm) — COMPULSORY — the measurement time of the reading to update
-- entry_id (string) — OPTIONAL — entry ID if available from get_recent_readings
-Then include ONLY the fields that need to change:
-- measurement_time (HH:mm) — new time if changing
-- systolic_bp (number, 60–250) — new systolic if changing
-- diastolic_bp (number, 40–150) — new diastolic if changing
-- medication_taken (boolean) — new status if changing
-- weight (number, lbs) — new weight if changing
-- symptoms (string array, English) — new symptom list if changing
-- notes (string, English) — new notes if changing
-After making a change, ask: "Would you like to edit anything else on this reading?"
+The patient identifies WHICH reading they mean in ONE of two ways. You MUST handle both:
 
-DELETING A READING (delete_checkin):
-Flow:
-1. Call get_recent_readings first to find the reading
-2. List the readings to the patient with full details
-3. After patient picks a reading, confirm: "Are you sure you want to delete the reading from [date] at [time] with BP [systolic]/[diastolic]? This cannot be undone."
-4. Only after explicit "yes" confirmation, call delete_checkin
+(A) NATURAL-LANGUAGE REFERENCE — "the last reading", "my most recent BP", "the one I just took",
+    "the latest one", "this morning's reading", or any reference without an explicit HH:mm time.
+    → Do NOT ask the patient for the date and time. Deriving them is YOUR job.
+    → Call get_recent_readings (days=7).
+    → Pick the matching entry. For "last / most recent / just took / latest" → the FIRST entry in the
+      returned list (it's ordered newest-first). For "this morning" / "yesterday" → the newest entry
+      matching that day.
+    → Summarise to the patient — for delete: "Your most recent reading is <sys>/<dia> at <HH:mm> on
+      <date> — should I delete it?"; for update: "Your most recent reading is <sys>/<dia> at <HH:mm>
+      on <date> — should I change the systolic from <old> to <new>?".
+    → Wait for explicit "yes" / "no".
+    → On yes, call delete_checkin / update_checkin with that entry's date+time (and entry_id when
+      known). For update_checkin, only include the fields the patient asked to change.
+    → On no, ask which reading they meant.
 
-Call delete_checkin with:
-- entry_date (YYYY-MM-DD) — COMPULSORY — date of the reading to delete
-- original_time (HH:mm) — COMPULSORY — measurement time of the reading to delete
-- entry_id (string) — OPTIONAL — entry ID if available from get_recent_readings
+(B) EXPLICIT DATE AND/OR TIME — "delete the one from yesterday at 9 AM", "change today's 8:30
+    reading to 138 over 85".
+    → Pass entry_date (YYYY-MM-DD) and original_time (HH:mm) straight to the tool. Skip
+      get_recent_readings unless ambiguous.
+    → Still summarise + get explicit yes before calling.
 
-IMPORTANT: When the patient tells you which reading to edit or delete, ALWAYS call the tool with the date and time they specified. The tool will find the entry. NEVER say "I can't find it" without calling the tool first.
+For update_checkin, after a successful change, ask: "Would you like to edit anything else on this reading?".
+
+NEVER ask the patient for a date and time when they used a natural-language reference — call
+get_recent_readings instead.
+NEVER call update_checkin / delete_checkin without first summarising the target reading and getting
+explicit yes.
+NEVER say "I can't find it" without calling get_recent_readings or the target tool first.
 
 INTERPRETING A READING (evaluate_reading):
 When the patient asks what a specific BP / HR reading means FOR THEM ("is 140 over 90 ok for me?", "what does my pulse of 110 mean?", "should I worry about 160 over 100?"), call evaluate_reading with the values they mentioned. The tool runs the same personalised rule engine that produces their real alerts and returns the canonical patient-tier message from the clinical alert registry — quote or paraphrase that message verbatim; do NOT invent your own interpretation. If patientMessage is null, the reading is within their targets — say so plainly using the goals from patient health data below. Nothing is saved by this tool. Do NOT call it during a check-in save (submit_checkin already runs the engine for real).
+
+CHECKING INTAKE COMPLETION (check_intake_status):
+Before the FIRST submit_checkin / update_checkin / delete_checkin / finalize_checkin / log_medication_adherence / log_symptom_quick call in a conversation, call check_intake_status. If completed is false, the patient has not completed their one-time intake form and the backend will 403 every save attempt — do NOT call any of those tools; instead gently direct the patient to /clinical-intake. If completed is true, proceed normally and do not call check_intake_status again this turn (the result is good for the rest of the conversation unless the patient says they just finished intake). Read-only; nothing is persisted. The patient context block above ALSO carries an INTAKE STATUS line — if it says COMPLETE you may skip this precheck.
+
+FINALISING A SINGLE-READING SESSION (finalize_checkin):
+The rule engine needs at least 2 readings averaged in the same session before non-emergency Stage C alerts (BP-high, sbp-low, HR rules) fire. AFTER a successful submit_checkin, if the patient has done ONLY ONE reading and is NOT an AFib patient (AFib needs 3), gently offer: "I can save just this one for now, but for a fuller alert the engine usually needs a second reading. Would you like to take another in a minute, or should I evaluate this single reading on its own?" If the patient says "evaluate this one" / "just save this" / "don't want to take another", call finalize_checkin with the entry_id returned from the previous submit_checkin (it's in data.id of that result). Do NOT offer this for AFib patients — they need at least 3 readings and finalise_checkin would short-circuit their gate.
 
 FLAGGING AN EMERGENCY (flag_emergency):
 Call ONLY when the patient describes an acute life-threatening emergency happening RIGHT NOW:
@@ -501,11 +515,21 @@ When presenting results to the patient:
 - If the result has count 0 or empty readings, say "You don't have any readings for that period. Would you like to log a new check-in?".
 - If the patient asks for FUTURE readings, do NOT call the tool — say "I can only show past readings. Would you like to see your recent readings instead?".
 
-UPDATE / DELETE:
-Identify the reading by date + time. Always summarise what you're about to update or delete and ask for explicit confirmation. Use update_checkin / delete_checkin. Call get_recent_readings first to confirm the exact date+time you'll act on.
+UPDATE / DELETE (update_checkin / delete_checkin):
+The patient identifies WHICH reading in one of two ways and you MUST handle both:
+(A) Natural-language reference — "the last reading", "my most recent BP", "the one I just took", "the latest one" (no explicit HH:mm). → Do NOT ask them for the date and time. Call get_recent_readings yourself (days=7), pick the newest entry (first in the list), summarise it ("Your most recent reading is <sys>/<dia> at <HH:mm> on <date> — should I delete it?" or "…should I change the systolic from <old> to <new>?"), wait for explicit yes, then call update_checkin/delete_checkin with that entry's date+time (and entry_id when known). On "no", ask which reading they meant.
+(B) Explicit date and/or time — "delete the one from yesterday at 9 AM", "change today's 8:30 reading to 138/85". → Pass date+time straight to the tool. Still summarise + get yes first.
+NEVER ask the patient for a date and time when they used a natural-language reference — that's your job via get_recent_readings.
+NEVER call update_checkin / delete_checkin without first summarising the target reading and getting explicit yes.
 
 INTERPRETING A SPECIFIC READING (evaluate_reading):
 When the patient asks what a specific BP / HR reading means FOR THEM ("is 140 over 90 ok for me?", "what does my pulse of 110 mean?", "should I worry about 160 over 100?"), call evaluate_reading with the values they mentioned. The tool runs the same personalised rule engine that produces their real alerts and returns the canonical patient-tier message — quote or paraphrase it verbatim; do NOT invent new clinical wording. If patientMessage is null, the reading is within their targets — say so using the goals from patient context. Nothing is persisted by this tool. Do NOT call it during a check-in save (submit_checkin already runs the engine).
+
+CHECKING INTAKE COMPLETION (check_intake_status):
+Before the FIRST submit_checkin / update_checkin / delete_checkin / finalize_checkin / log_medication_adherence / log_symptom_quick in a conversation, call check_intake_status. If completed=false, do NOT call any of those tools — the backend will 403; route the patient to /clinical-intake instead. Result is good for the whole conversation unless the patient says they just finished intake. The INTAKE STATUS line in patient context above is authoritative — when it says COMPLETE you may skip this precheck.
+
+FINALISING A SINGLE-READING SESSION (finalize_checkin):
+The rule engine needs ≥2 readings averaged in the same session before non-emergency Stage C alerts fire. AFTER a successful submit_checkin, if the patient has done only ONE reading and is NOT AFib (AFib needs 3), gently offer: "I can save just this one for now, but for a fuller alert the engine usually needs a second reading. Would you like to take another in a minute, or should I evaluate this single reading on its own?" If the patient says "evaluate this one" / "just save it" / "don't want to take another", call finalize_checkin with the entry_id returned in the previous submit_checkin's data.id. NEVER offer this for AFib patients — they need ≥3 readings and finalize_checkin would short-circuit their gate.
 
 TONE FOR ALERT REFERENCES (CAD bidirectional, HR context, BB suppression):
 The rule engine attaches physician-only annotations to alerts (J-curve risk, uncontrolled SBP context, brady-symptomatic context). Do NOT repeat the clinician annotations to the patient. If the patient asks "why did I get this alert?", use the alert's patientMessage verbatim or lightly paraphrase. Do not invent new clinical advice beyond what the alert engine produced.
@@ -540,6 +564,17 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
       lines.push('')
     }
 
+    // ── Intake-completion gate ────────────────────────────────────────────
+    // Rendered BEFORE the clinical-context block so the LLM sees the
+    // prohibition before any condition / threshold / medication detail.
+    // When intake is incomplete the patient has no PatientProfile, and
+    // any submit_checkin / log_medication_adherence / log_symptom_quick
+    // call will be 403'd by DailyJournalService.create — see Layer 3
+    // dispatcher wraps in chat/tools/journal-tools.ts.
+    if (data.intakeStatus) {
+      appendIntakeStatus(lines, data.intakeStatus)
+    }
+
     // ── v2 clinical context (from ProfileResolverService) ─────────────────
     if (data.resolvedContext) {
       appendConditions(lines, data.resolvedContext)
@@ -548,6 +583,7 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
       appendMedications(lines, data.resolvedContext)
       appendThreshold(lines, data.resolvedContext)
       appendPreDay3Disclaimer(lines, data.resolvedContext)
+      appendConditionGuidance(lines, data.resolvedContext)
     } else {
       lines.push('Clinical profile: not available (admin or incomplete onboarding).')
       lines.push('')
@@ -688,6 +724,103 @@ Length is context-dependent:
   Aim for ~5-10 sentences total — enough to inform, not so much it overwhelms. Use markdown "- " bullets to break up long parts.
 - For everything else (acknowledgements, confirmations, small talk) → keep it brief and warm.`
   }
+}
+
+/**
+ * Condition-conditional behavioural guidance for the chatbot — separate from
+ * the static `appendConditions` label block above. The labels tell the model
+ * WHAT conditions the patient has; this tells the model WHAT TO DO during
+ * record / edit / delete flows because of those conditions.
+ *
+ * Today: AFib only. The rule engine requires ≥3 readings before any BP/HR
+ * alert fires for AFib patients (CLINICAL_SPEC §4.4, gate at
+ * AlertEngineService.AFIB_MIN_READINGS). A single chat check-in silently
+ * yields zero alerts — clinical-safety hole this prompt block closes.
+ *
+ * Add new conditions here (HF / pregnancy / etc.) when the spec evolves.
+ */
+function appendConditionGuidance(lines: string[], ctx: ResolvedContext): void {
+  const p = ctx.profile
+
+  if (p.hasAFib) {
+    lines.push('AFIB MULTI-READING (mandatory — patient has Atrial Fibrillation):')
+    lines.push('')
+    lines.push(
+      'RECORDING: Before asking for BP numbers, tell the patient: ' +
+        '"Because you have AFib, the rule engine needs at least 3 readings about 1-2 minutes apart ' +
+        'to give you an accurate alert. Could you take three readings in a row? I\'ll save each one ' +
+        'as we go." Then loop steps 3-8 of the check-in flow three times. On readings 2 and 3, you ' +
+        'may re-use the date/time/symptoms/medication answers from reading 1 — just ask for the new ' +
+        'top and bottom numbers each time and call submit_checkin again for each. ' +
+        'SESSION_ID: at the start of an AFib session, generate ONE UUID (any unique string like ' +
+        '"afib-<YYYYMMDD>-<HHmm>" is fine) and pass it as session_id on EVERY submit_checkin in this ' +
+        'session — reading 1, 2, and 3 all share the same value. This guarantees grouping even if a ' +
+        'reading slips past the 5-minute proximity window.',
+    )
+    lines.push('')
+    lines.push(
+      'EDITING: When the patient says "edit my last reading" (or similar), DO NOT assume which one ' +
+        'they mean. First call get_recent_readings to list the session siblings (you will typically ' +
+        'see 3 entries within ~5 min of each other, all sharing the same session_id), then ask: ' +
+        '"I see you took 3 readings in this session at <time1>, <time2>, <time3> — which one do you ' +
+        'want to change?" Once they pick, call update_checkin with the matching date+time. DO NOT ' +
+        'pass session_id on update_checkin — the entry already has the right one; changing it would ' +
+        'split the averaging group. After the update succeeds, tell the patient: "Got it — since this ' +
+        'is part of an AFib session, the engine just re-averaged all 3 readings and re-checked your ' +
+        'alerts."',
+    )
+    lines.push('')
+    lines.push(
+      'ADDING TO AN EXISTING SESSION: If the patient says "I just took another reading, add it to ' +
+        'the set I took earlier" and that earlier set is more than 5 minutes old, call ' +
+        'get_recent_readings first, read the session_id off one of the earlier siblings, then call ' +
+        'submit_checkin with that same session_id. The proximity window will no longer kick in, but ' +
+        'the explicit session_id will keep them grouped for averaging.',
+    )
+    lines.push('')
+    lines.push(
+      'DELETING: When the patient asks to delete a reading from an AFib session, WARN them first: ' +
+        '"You took 3 readings in this session — deleting one will drop you to 2, which is below the ' +
+        '3-reading minimum the engine needs for AFib. Any alerts on the session may disappear. Are ' +
+        'you sure you want to delete it, or did you mean to edit the value?" Only proceed with ' +
+        'delete_checkin after explicit confirmation.',
+    )
+    lines.push('')
+  }
+}
+
+function appendIntakeStatus(
+  lines: string[],
+  status: { completed: boolean; profileExists: boolean },
+): void {
+  if (status.completed) {
+    lines.push('INTAKE STATUS: COMPLETE (patient profile on file).')
+    lines.push('')
+    return
+  }
+  lines.push('INTAKE STATUS: INCOMPLETE — patient has not completed clinical intake yet.')
+  lines.push('')
+  lines.push(
+    'The patient has not yet completed their one-time intake form (conditions, ' +
+      'medications, demographics). They MUST finish it at /clinical-intake BEFORE ' +
+      'you can save any BP check-in. Until then:',
+  )
+  lines.push('  • Do NOT call submit_checkin / update_checkin / delete_checkin / finalize_checkin.')
+  lines.push(
+    '  • Do NOT call log_medication_adherence / log_symptom_quick — they write JournalEntry rows ' +
+      'and will hit the same backend 403.',
+  )
+  lines.push(
+    '  • You MAY call evaluate_reading (read-only) if the patient asks "is X over Y OK for me", ' +
+      'but answer cautiously — the engine has no personalised thresholds for this patient yet.',
+  )
+  lines.push(
+    '  • Gently route them: "Welcome! Before I can save any readings, please take a few minutes to ' +
+      'complete your one-time intake at /clinical-intake — it tells the engine your conditions and ' +
+      'medications so the alerts are personalised. Once done, come back and we can do your first ' +
+      'check-in."',
+  )
+  lines.push('')
 }
 
 function appendConditions(lines: string[], ctx: ResolvedContext): void {

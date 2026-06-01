@@ -17,6 +17,7 @@ import { SystemPromptService } from '../chat/services/system-prompt.service.js'
 import { ProfileResolverService } from '../daily_journal/services/profile-resolver.service.js'
 import { GeminiService } from '../gemini/gemini.service.js'
 import { VoiceToolsService } from './tools/voice-tools.service.js'
+import { IntakeStatusService } from '../intake/intake-status.service.js'
 
 const NOW = new Date('2026-04-22T10:00:00Z')
 const DOB = new Date('1980-06-15T00:00:00Z')
@@ -113,6 +114,12 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
         { provide: ConversationHistoryService, useValue: {} },
         { provide: GeminiService, useValue: { clientInstance: {} } },
         { provide: VoiceToolsService, useValue: { getToolDeclarations: () => [] } },
+        {
+          provide: IntakeStatusService,
+          useValue: {
+            getStatus: jest.fn(async () => ({ completed: true, profileExists: true })),
+          },
+        },
       ],
     }).compile()
     service = module.get(VoiceService)

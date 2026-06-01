@@ -21,6 +21,7 @@ import {
   getJournalToolDeclarations,
 } from './journal-tools.js'
 import { VoiceToolsService } from '../../voice/tools/voice-tools.service.js'
+import { IntakeStatusService } from '../../intake/intake-status.service.js'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
 import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
@@ -37,6 +38,8 @@ const TEXT_TOOLS_EXPECTED = [
   'submit_bp_from_photo',
   'flag_emergency',
   'evaluate_reading',
+  'finalize_checkin',
+  'check_intake_status',
 ] as const
 
 const VOICE_TOOLS_EXPECTED = [
@@ -46,6 +49,8 @@ const VOICE_TOOLS_EXPECTED = [
   'delete_checkin',
   'submit_bp_from_photo',
   'evaluate_reading',
+  'finalize_checkin',
+  'check_intake_status',
 ] as const
 
 // Symptoms declared on the text-chat `submit_checkin` schema.
@@ -85,19 +90,20 @@ function snakeOf(camel: string): string {
 // ─── 1. Catalog parity ────────────────────────────────────────────────────────
 
 describe('Chat ↔ Voice tool catalog parity', () => {
-  it('text-chat exposes the canonical 9-tool catalog', () => {
+  it('text-chat exposes the canonical 11-tool catalog', () => {
     const decls = getJournalToolDeclarations()
     const names = decls.map((d) => d.name).sort()
     expect(names).toEqual([...TEXT_TOOLS_EXPECTED].sort())
   })
 
-  it('voice-chat exposes the canonical 6-tool catalog', async () => {
+  it('voice-chat exposes the canonical 8-tool catalog', async () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         VoiceToolsService,
         { provide: DailyJournalService, useValue: {} },
         { provide: GeminiService, useValue: {} },
         { provide: AlertEngineService, useValue: {} },
+        { provide: IntakeStatusService, useValue: { getStatus: async () => ({ completed: true, profileExists: true }) } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -217,6 +223,7 @@ describe('submit_checkin schema parity (text vs voice)', () => {
         { provide: DailyJournalService, useValue: {} },
         { provide: GeminiService, useValue: {} },
         { provide: AlertEngineService, useValue: {} },
+        { provide: IntakeStatusService, useValue: { getStatus: async () => ({ completed: true, profileExists: true }) } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -259,6 +266,7 @@ describe('submit_checkin schema parity (text vs voice)', () => {
         { provide: DailyJournalService, useValue: {} },
         { provide: GeminiService, useValue: {} },
         { provide: AlertEngineService, useValue: {} },
+        { provide: IntakeStatusService, useValue: { getStatus: async () => ({ completed: true, profileExists: true }) } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -284,6 +292,7 @@ describe('submit_checkin schema parity (text vs voice)', () => {
         { provide: DailyJournalService, useValue: {} },
         { provide: GeminiService, useValue: {} },
         { provide: AlertEngineService, useValue: {} },
+        { provide: IntakeStatusService, useValue: { getStatus: async () => ({ completed: true, profileExists: true }) } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -312,6 +321,7 @@ describe('submit_checkin schema parity (text vs voice)', () => {
         { provide: DailyJournalService, useValue: dailyJournal },
         { provide: GeminiService, useValue: gemini },
         { provide: AlertEngineService, useValue: {} },
+        { provide: IntakeStatusService, useValue: { getStatus: async () => ({ completed: true, profileExists: true }) } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -344,6 +354,7 @@ describe('submit_checkin schema parity (text vs voice)', () => {
         { provide: DailyJournalService, useValue: {} },
         { provide: GeminiService, useValue: {} },
         { provide: AlertEngineService, useValue: {} },
+        { provide: IntakeStatusService, useValue: { getStatus: async () => ({ completed: true, profileExists: true }) } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)

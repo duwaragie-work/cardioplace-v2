@@ -19,6 +19,7 @@ import type {
   StructuredSymptomKey,
   SymptomQuickLogService,
 } from '../services/symptom-quick-log.service.js'
+import type { IntakeStatusService } from '../../intake/intake-status.service.js'
 
 /**
  * Bag of services the executor needs. Phase/27 — added to support
@@ -34,6 +35,12 @@ export interface JournalToolContext {
   symptomService?: SymptomQuickLogService
   ocrService?: OcrService
   alertEngine?: AlertEngineService
+  /**
+   * Read-only intake-completion lookup, surfaced as the `check_intake_status`
+   * tool. Optional for legacy callers / tests; when omitted the tool reports
+   * a clear "unavailable" message rather than crashing.
+   */
+  intakeStatusService?: IntakeStatusService
   /**
    * Called after every successful patient-data mutation (submit/update/delete
    * check-in, log adherence, log symptom) so the chat service can drop its
@@ -266,6 +273,43 @@ export function normalisePosition(raw: unknown): 'SITTING' | 'STANDING' | 'LYING
   return undefined
 }
 
+// ── Intake-incomplete error detection ───────────────────────────────────────
+// DailyJournalService.create throws ForbiddenException({ message:
+// 'clinical-intake-required', reason: ... }) when the user has no
+// PatientProfile row. NestJS surfaces that as
+//   err.status === 403, err.response = { message, reason }, err.message ≈ 'Forbidden'
+// We catch it here so the LLM receives a structured INTAKE_INCOMPLETE
+// response (with the /clinical-intake URL) instead of an opaque
+// "Failed to save check-in" string. log_medication_adherence and
+// log_symptom_quick funnel through journal.create too — they hit the
+// same gate.
+export function isIntakeIncompleteError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const e = err as {
+    status?: number
+    name?: string
+    message?: string
+    response?: { message?: string }
+  }
+  const msg = e.response?.message ?? e.message ?? ''
+  return (
+    (e.status === 403 || e.name === 'ForbiddenException') &&
+    typeof msg === 'string' &&
+    msg.includes('clinical-intake-required')
+  )
+}
+
+function intakeIncompleteResponse(verb: 'saved' | 'logged'): string {
+  return JSON.stringify({
+    [verb]: false,
+    reason: 'INTAKE_INCOMPLETE',
+    intake_url: '/clinical-intake',
+    message:
+      "Before I can save a check-in I need you to complete your one-time intake form. " +
+      "It only takes a few minutes — please go to /clinical-intake and come back when you're done.",
+  })
+}
+
 // ── Gemini FunctionDeclaration definitions ──────────────────────────────────
 
 export function getJournalToolDeclarations(): FunctionDeclaration[] {
@@ -360,6 +404,17 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
             },
           },
           notes: { type: Type.STRING, description: 'Extra notes in English. Omit if none.' },
+          session_id: {
+            type: Type.STRING,
+            description:
+              'Optional session-grouping UUID. When recording MULTIPLE readings as one measurement session ' +
+              '(AFib patients always; or anyone you asked to take ≥2 readings), generate ONE UUID at the start ' +
+              'of the session and pass the SAME value on every submit_checkin call in that session. To ADD a ' +
+              'reading to an EXISTING session (e.g. AFib patient returns to add a 4th reading after the 5-min ' +
+              'proximity window expired), first call get_recent_readings, find an entry from that session and ' +
+              'reuse its sessionId on the new submit_checkin. Backend groups same-session readings for alert ' +
+              'averaging even when they span more than 5 minutes. Omit for one-off single-reading check-ins.',
+          },
         },
         required: ['entry_date', 'measurement_time', 'systolic_bp', 'diastolic_bp', 'medication_taken', 'symptoms'],
       },
@@ -381,7 +436,14 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
       name: 'update_checkin',
       description:
         'Update an existing blood pressure reading. ' +
-        'Identify the reading by its date and time. Only include fields that need to change.',
+        'TARGET RESOLUTION: If the patient uses a natural-language reference ' +
+        "(e.g. 'update the last reading', 'change my most recent BP', 'fix the one I just took'), " +
+        'DO NOT ask them for the date and time. Call get_recent_readings first, identify the newest ' +
+        'entry yourself, summarise the proposed change to the patient ' +
+        "(\"Your most recent reading is 138/85 at 8:30 AM on June 1 — should I change the systolic to 142?\"), " +
+        "and only on explicit 'yes' call this tool with that entry's date+time (and optionally entry_id). " +
+        'If the patient gave a specific date and/or time, pass those through instead. Either way, always ' +
+        'summarise and get explicit yes before calling. Only include fields that need to change.',
       parameters: {
         type: Type.OBJECT,
         properties: {
@@ -408,6 +470,14 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
           edema: { type: Type.BOOLEAN, description: 'New edema flag (pregnancy-only).' },
           other_symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'New "anything else" symptom list. English.' },
           notes: { type: Type.STRING, description: 'New notes. ALWAYS in English regardless of conversation language.' },
+          session_id: {
+            type: Type.STRING,
+            description:
+              'Optional. Move this reading into the given session-grouping UUID. Most edits should LEAVE THIS ' +
+              'OUT — the entry already has a session_id assigned at record time and changing it would split or ' +
+              'merge sessions for averaging. Only set when the patient explicitly asks to move a reading to a ' +
+              'different session.',
+          },
         },
         required: ['entry_date', 'original_time'],
       },
@@ -416,8 +486,14 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
       name: 'delete_checkin',
       description:
         'Delete a blood pressure reading. ' +
-        'Identify the reading by its date and time. ' +
-        'Confirm the values with the patient and get explicit confirmation before deleting.',
+        'TARGET RESOLUTION: If the patient uses a natural-language reference ' +
+        "(e.g. 'delete the last reading', 'remove my most recent BP', 'delete the one I just took'), " +
+        'DO NOT ask them for the date and time. Call get_recent_readings first, identify the newest ' +
+        'entry yourself, summarise it for the patient ' +
+        "(\"Your most recent reading is 138/85 at 8:30 AM on June 1 — should I delete it?\"), " +
+        "and only on explicit 'yes' call this tool with that entry's date+time (and optionally entry_id). " +
+        'If the patient gave a specific date and/or time, pass those through instead. Either way, always ' +
+        'summarise and get explicit yes before deleting.',
       parameters: {
         type: Type.OBJECT,
         properties: {
@@ -524,6 +600,46 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
           },
         },
         required: ['systolic_bp', 'diastolic_bp'],
+      },
+    },
+    {
+      name: 'finalize_checkin',
+      description:
+        'Finalise a SINGLE-reading session — tells the rule engine to evaluate the just-saved ' +
+        'entry NOW even though only one reading was taken. The engine normally requires ≥2 ' +
+        'readings averaged in the same session before non-emergency Stage C rules (BP-high, ' +
+        'sbp-low, HR rules) fire; this flips the singleReadingFinalized flag so the gate is ' +
+        'bypassed for that one entry. ' +
+        'WHEN TO CALL: only after a successful submit_checkin AND the patient has explicitly ' +
+        "confirmed they do not want to take a second reading (e.g. they said \"just save this one\" " +
+        'or "I don\'t want to take another"). Do NOT call for AFib patients — they need at ' +
+        'least 3 readings; call submit_checkin two more times instead. ' +
+        'Required arg: entry_id from the previous submit_checkin\'s data.id field.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          entry_id: {
+            type: Type.STRING,
+            description:
+              'Entry id returned in data.id from the most recent submit_checkin call this turn.',
+          },
+        },
+        required: ['entry_id'],
+      },
+    },
+    {
+      name: 'check_intake_status',
+      description:
+        "Check whether the patient has completed their one-time clinical intake form. " +
+        "Call this BEFORE the first submit_checkin / update_checkin / delete_checkin / " +
+        "finalize_checkin / log_medication_adherence / log_symptom_quick in a conversation. " +
+        "If completed=false, do NOT call any of those tools — the backend will 403 and the " +
+        "patient cannot save readings until intake is done. Route them to intake_url instead. " +
+        "Read-only; nothing is persisted.",
+      parameters: {
+        type: Type.OBJECT,
+        properties: {},
+        required: [],
       },
     },
   ]
@@ -666,10 +782,13 @@ export async function executeJournalTool(
           throatTightness: mappedFromFreeform.throatTightness === true,
           otherSymptoms: Array.isArray(args.other_symptoms) ? args.other_symptoms : undefined,
           notes: args.notes ?? '',
+          sessionId:
+            typeof args.session_id === 'string' && args.session_id.trim() ? args.session_id.trim() : undefined,
         } as any)
         ctx.onPatientDataMutated?.(userId)
         return JSON.stringify({ saved: true, message: 'Check-in saved successfully.', data: result.data })
       } catch (err: any) {
+        if (isIntakeIncompleteError(err)) return intakeIncompleteResponse('saved')
         return JSON.stringify({ saved: false, message: err.message ?? 'Failed to save check-in.' })
       }
     }
@@ -691,12 +810,17 @@ export async function executeJournalTool(
         // ── LLM privacy boundary ─────────────────────────────────────────
         // This projection is the privacy boundary between the patient's
         // JournalEntry row (which carries internal columns like userId,
-        // sessionId, source, sourceMetadata, createdAt, updatedAt) and the
-        // narrow JSON the LLM tool-call receives. NEVER widen this to
-        // forward internal fields — the LLM might quote them back to the
-        // patient, and a new column added to the Prisma schema must not
-        // auto-flow to the model. Mirror voice-tools.service.ts:495 if
-        // changing the shape.
+        // source, sourceMetadata, createdAt, updatedAt) and the narrow JSON
+        // the LLM tool-call receives. NEVER widen this to forward internal
+        // fields — the LLM might quote them back to the patient, and a new
+        // column added to the Prisma schema must not auto-flow to the model.
+        // Allow-list exception: `session_id` is intentionally exposed so the
+        // LLM can thread an existing session through a subsequent
+        // submit_checkin (multi-reading add-to-session flow for AFib and
+        // other clinically-grouped sessions). It is a grouping label, never
+        // a security boundary — composite { id, userId } scoping on every
+        // mutation still prevents cross-tenant leak. Mirror voice
+        // voice-tools.service.ts:getRecentReadings if changing the shape.
         const entries = (result.data ?? []).map((e: any) => {
           const d = new Date(e.measuredAt)
           return {
@@ -708,6 +832,7 @@ export async function executeJournalTool(
             weight: e.weight,
             medication_taken: e.medicationTaken,
             symptoms: e.otherSymptoms ?? [],
+            session_id: e.sessionId ?? null,
           }
         })
         return JSON.stringify({ readings: entries, count: entries.length })
@@ -747,6 +872,9 @@ export async function executeJournalTool(
         if (args.edema != null) dto.edema = args.edema === true
         if (Array.isArray(args.other_symptoms)) dto.otherSymptoms = args.other_symptoms
         if (args.notes != null) dto.notes = args.notes
+        if (typeof args.session_id === 'string' && args.session_id.trim()) {
+          dto.sessionId = args.session_id.trim()
+        }
 
         if (Object.keys(dto).length === 0) {
           return JSON.stringify({ updated: false, message: 'No fields to update.' })
@@ -868,6 +996,7 @@ export async function executeJournalTool(
         if (result.logged) ctx.onPatientDataMutated?.(userId)
         return JSON.stringify(result)
       } catch (err: any) {
+        if (isIntakeIncompleteError(err)) return intakeIncompleteResponse('logged')
         return JSON.stringify({
           logged: false,
           message: err?.message ?? 'Failed to log adherence.',
@@ -897,6 +1026,7 @@ export async function executeJournalTool(
         if (result.logged) ctx.onPatientDataMutated?.(userId)
         return JSON.stringify(result)
       } catch (err: any) {
+        if (isIntakeIncompleteError(err)) return intakeIncompleteResponse('logged')
         return JSON.stringify({
           logged: false,
           message: err?.message ?? 'Failed to log symptom.',
@@ -990,6 +1120,56 @@ export async function executeJournalTool(
           message: err?.message ?? 'Reading evaluation failed.',
         })
       }
+    }
+
+    case 'finalize_checkin': {
+      const entryId = typeof args.entry_id === 'string' ? args.entry_id.trim() : ''
+      if (!entryId) {
+        return JSON.stringify({
+          finalized: false,
+          message: 'entry_id is required — pass the id from the previous submit_checkin\'s data.id.',
+        })
+      }
+      try {
+        const result = await journalService.finalizeSingleReadingSession(userId, entryId)
+        // Single-reading entries that get finalised may now trigger Stage C
+        // alerts (BP-high, sbp-low, HR rules) on re-evaluation, which means
+        // the patient context's alerts list is about to change. Invalidate
+        // the chat-context cache so the NEXT turn shows the fresh alert tier.
+        ctx.onPatientDataMutated?.(userId)
+        return JSON.stringify({
+          finalized: true,
+          message: result.message ?? 'Check-in finalised; alerts re-evaluated.',
+        })
+      } catch (err: any) {
+        return JSON.stringify({
+          finalized: false,
+          message: err?.message ?? 'Failed to finalise check-in.',
+        })
+      }
+    }
+
+    case 'check_intake_status': {
+      // Read-only — never throws on backend gate. Just reports completeness so
+      // the LLM can decide whether to attempt subsequent BP / log_* tools.
+      if (!ctx.intakeStatusService) {
+        return JSON.stringify({
+          completed: false,
+          profile_exists: false,
+          intake_url: '/clinical-intake',
+          message:
+            'Intake-status check is unavailable in this build. Ask the patient if they have completed /clinical-intake before proceeding.',
+        })
+      }
+      const status = await ctx.intakeStatusService.getStatus(userId)
+      return JSON.stringify({
+        completed: status.completed,
+        profile_exists: status.profileExists,
+        intake_url: '/clinical-intake',
+        message: status.completed
+          ? 'Intake is complete — you may proceed with check-ins.'
+          : 'Intake is NOT complete. Do not call submit_checkin / log_medication_adherence / log_symptom_quick. Direct the patient to /clinical-intake first.',
+      })
     }
 
     default:

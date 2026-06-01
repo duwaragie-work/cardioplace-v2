@@ -11,8 +11,13 @@
 //   • getConversationHistory validates session ownership + emits
 //     `[SECURITY] cross_tenant_attempt` log line on mismatch
 //   • MedicationAdherenceService logs cross-tenant medication id probes
-//   • LLM tool projections never include internal fields (userId, sessionId,
-//     createdAt, etc.)
+//   • LLM tool projections never include internal fields (userId, createdAt,
+//     source, sourceMetadata, updatedAt). sessionId is the ONE intentional
+//     allow-list exception in the get_recent_readings projection, exposed as
+//     `session_id` so the LLM can thread an existing session through a
+//     subsequent submit_checkin (multi-reading add-to-session flow). It is a
+//     grouping label, never a security boundary — composite { id, userId }
+//     scoping on every mutation still prevents cross-tenant leak.
 //
 // If any of these tests regresses, the multi-tenant boundary has weakened
 // and the PR must NOT merge.
@@ -29,6 +34,7 @@ import { EmbeddingService } from '../../common/embedding.service.js'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
 import { VoiceToolsService } from '../../voice/tools/voice-tools.service.js'
 import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
+import { IntakeStatusService } from '../../intake/intake-status.service.js'
 import {
   executeJournalTool,
   getJournalToolDeclarations,
@@ -63,6 +69,7 @@ describe('Tool dispatcher userId guard', () => {
         { provide: DailyJournalService, useValue: { create: jest.fn(), findAll: jest.fn() } },
         { provide: GeminiService, useValue: { extractBpFromImage: jest.fn() } },
         { provide: AlertEngineService, useValue: { evaluateAdHoc: jest.fn() } },
+        { provide: IntakeStatusService, useValue: { getStatus: jest.fn() } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -105,6 +112,7 @@ describe('userId source — LLM args never override dispatch context', () => {
         { provide: DailyJournalService, useValue: { create: jest.fn() } },
         { provide: GeminiService, useValue: { extractBpFromImage: jest.fn() } },
         { provide: AlertEngineService, useValue: { evaluateAdHoc } },
+        { provide: IntakeStatusService, useValue: { getStatus: jest.fn() } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -264,7 +272,7 @@ describe('MedicationAdherenceService cross-tenant guard', () => {
 // ─── 6. LLM privacy boundary — projection contains no internal fields ──────
 
 describe('LLM privacy boundary (Part B.2)', () => {
-  it('text get_recent_readings projection — no userId/sessionId/createdAt/updatedAt fields', async () => {
+  it('text get_recent_readings projection — no userId/createdAt/updatedAt; session_id allowed (multi-reading flow)', async () => {
     // Simulate findAll returning a fully-populated entry (mimics serializeEntry
     // which DOES include the internal columns).
     const findAll = jest.fn().mockResolvedValue({
@@ -300,20 +308,28 @@ describe('LLM privacy boundary (Part B.2)', () => {
     // …and must NOT include internal fields.
     const keys = Object.keys(parsed.readings[0])
     expect(keys).not.toContain('userId')
-    expect(keys).not.toContain('sessionId')
     expect(keys).not.toContain('source')
     expect(keys).not.toContain('sourceMetadata')
     expect(keys).not.toContain('createdAt')
     expect(keys).not.toContain('updatedAt')
+    // session_id is the ONE intentional allow-list exception — exposed under
+    // its snake_case alias so the LLM can thread it back into a follow-up
+    // submit_checkin for the multi-reading add-to-session flow (AFib + any
+    // clinically-grouped session). Grouping label only, not a security
+    // boundary — composite { id, userId } scoping still prevents cross-tenant
+    // writes. The camelCase `sessionId` is still rejected.
+    expect(keys).not.toContain('sessionId')
+    expect(keys).toContain('session_id')
+    expect(parsed.readings[0].session_id).toBe('session-X')
   })
 })
 
 // ─── 7. Catalog assertion — guard didn't regress declarations ──────────────
 
 describe('Tool catalog still intact after security hardening', () => {
-  it('text catalog still exposes 9 tools (no accidental removals)', () => {
+  it('text catalog still exposes 11 tools (no accidental removals)', () => {
     const decls = getJournalToolDeclarations()
-    expect(decls).toHaveLength(9)
+    expect(decls).toHaveLength(11)
   })
 })
 

@@ -10,6 +10,7 @@ import { VoiceToolsService } from './voice-tools.service.js'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
 import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
+import { IntakeStatusService } from '../../intake/intake-status.service.js'
 
 const CTX = { userId: 'user-1', timezone: 'America/New_York' }
 
@@ -18,6 +19,7 @@ describe('VoiceToolsService.dispatch', () => {
   let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock }
   let gemini: { extractBpFromImage: jest.Mock }
   let alertEngine: { evaluateAdHoc: jest.Mock }
+  let intakeStatus: { getStatus: jest.Mock }
 
   beforeEach(async () => {
     dailyJournal = {
@@ -29,6 +31,9 @@ describe('VoiceToolsService.dispatch', () => {
     }
     gemini = { extractBpFromImage: jest.fn() }
     alertEngine = { evaluateAdHoc: jest.fn() }
+    intakeStatus = {
+      getStatus: jest.fn(async () => ({ completed: true, profileExists: true })) as jest.Mock,
+    }
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -36,6 +41,7 @@ describe('VoiceToolsService.dispatch', () => {
         { provide: DailyJournalService, useValue: dailyJournal },
         { provide: GeminiService, useValue: gemini },
         { provide: AlertEngineService, useValue: alertEngine },
+        { provide: IntakeStatusService, useValue: intakeStatus },
       ],
     }).compile()
 
@@ -44,17 +50,43 @@ describe('VoiceToolsService.dispatch', () => {
 
   // ── declarations ──────────────────────────────────────────────────────────
 
-  it('exposes 6 function declarations (5 Python-contract + evaluate_reading)', () => {
+  it('exposes 8 function declarations (5 Python-contract + evaluate_reading + finalize_checkin + check_intake_status)', () => {
     const decls = service.getToolDeclarations()
     const names = decls.map((d) => d.name).sort()
     expect(names).toEqual([
+      'check_intake_status',
       'delete_checkin',
       'evaluate_reading',
+      'finalize_checkin',
       'get_recent_readings',
       'submit_bp_from_photo',
       'submit_checkin',
       'update_checkin',
     ])
+  })
+
+  // Regression guard for the natural-language delete/update UX fix. Mirrors
+  // the same guard in chat/tools/journal-tools.spec.ts. Without this,
+  // someone could trim the voice tool descriptions and the bot would go back
+  // to asking the patient for date+time on "delete the last reading".
+  it('delete_checkin description spells out natural-language target resolution', () => {
+    const decls = service.getToolDeclarations()
+    const del = decls.find((d) => d.name === 'delete_checkin')
+    expect(del).toBeDefined()
+    const desc = (del?.description ?? '').toLowerCase()
+    expect(desc).toContain('get_recent_readings')
+    expect(desc).toContain('last reading')
+    expect(desc).toMatch(/do not ask.*date/i)
+  })
+
+  it('update_checkin description spells out natural-language target resolution', () => {
+    const decls = service.getToolDeclarations()
+    const update = decls.find((d) => d.name === 'update_checkin')
+    expect(update).toBeDefined()
+    const desc = (update?.description ?? '').toLowerCase()
+    expect(desc).toContain('get_recent_readings')
+    expect(desc).toContain('last reading')
+    expect(desc).toMatch(/do not ask.*date/i)
   })
 
   it('returns ok:false for an unknown tool name', async () => {

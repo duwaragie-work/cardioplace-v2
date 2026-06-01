@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals'
 import { Test, TestingModule } from '@nestjs/testing'
+import { EventEmitter2 } from '@nestjs/event-emitter'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { DrugEnrichmentService } from '../drug-enrichment/drug-enrichment.service.js'
 import { PatientAccessService } from '../common/patient-access.service.js'
@@ -24,6 +25,7 @@ describe('IntakeService.listMedications filter scoping', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: DrugEnrichmentService, useValue: {} },
         { provide: PatientAccessService, useValue: {} },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile()
 
@@ -97,6 +99,7 @@ async function makeService(prisma: unknown): Promise<IntakeService> {
       { provide: PrismaService, useValue: prisma },
       { provide: DrugEnrichmentService, useValue: {} },
       { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
+      { provide: EventEmitter2, useValue: { emit: jest.fn() } },
     ],
   }).compile()
   return module.get<IntakeService>(IntakeService)
@@ -290,6 +293,7 @@ describe('IntakeService.listVerificationLogs caregiver resolution (Round 2 A4)',
         { provide: PrismaService, useValue: prisma },
         { provide: DrugEnrichmentService, useValue: {} },
         { provide: PatientAccessService, useValue: {} },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile()
     service = module.get<IntakeService>(IntakeService)

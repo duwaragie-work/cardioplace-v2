@@ -37,12 +37,14 @@ describe('journal-tools', () => {
     // evaluate_reading (chatbot can ask the rule engine what a given
     // BP/HR reading means for this patient, returning the canonical
     // patient-tier message).
-    it('should return 9 tool declarations', () => {
+    it('should return 11 tool declarations', () => {
       const declarations = getJournalToolDeclarations()
-      expect(declarations).toHaveLength(9)
+      expect(declarations).toHaveLength(11)
       expect(declarations.map((d) => d.name).sort()).toEqual([
+        'check_intake_status',
         'delete_checkin',
         'evaluate_reading',
+        'finalize_checkin',
         'flag_emergency',
         'get_recent_readings',
         'log_medication_adherence',
@@ -73,6 +75,30 @@ describe('journal-tools', () => {
       const del = declarations.find((d) => d.name === 'delete_checkin')!
       expect(del.parameters?.required).toContain('entry_date')
       expect(del.parameters?.required).toContain('original_time')
+    })
+
+    // Regression guard for the "delete/update the last reading" UX. The LLM
+    // was previously asking the patient for date+time on natural-language
+    // references instead of deriving them via get_recent_readings. The tool
+    // descriptions now spell out the target-resolution rule inline so a
+    // future edit can't silently drop it. See plan: natural-language
+    // delete/update flow.
+    it('delete_checkin description spells out natural-language target resolution', () => {
+      const declarations = getJournalToolDeclarations()
+      const del = declarations.find((d) => d.name === 'delete_checkin')!
+      const desc = del.description ?? ''
+      expect(desc.toLowerCase()).toContain('get_recent_readings')
+      expect(desc.toLowerCase()).toContain('last reading')
+      expect(desc.toLowerCase()).toMatch(/do not ask.*date/i)
+    })
+
+    it('update_checkin description spells out natural-language target resolution', () => {
+      const declarations = getJournalToolDeclarations()
+      const update = declarations.find((d) => d.name === 'update_checkin')!
+      const desc = update.description ?? ''
+      expect(desc.toLowerCase()).toContain('get_recent_readings')
+      expect(desc.toLowerCase()).toContain('last reading')
+      expect(desc.toLowerCase()).toMatch(/do not ask.*date/i)
     })
   })
 
@@ -203,6 +229,81 @@ describe('journal-tools', () => {
 
       const parsed = JSON.parse(result)
       expect(parsed.error).toBe('Unknown tool: unknown_tool')
+    })
+
+    // ─── Layer 3 — intake-incomplete error translation ─────────────────────
+    // The backend gate at daily_journal.service.ts:37-58 throws a
+    // ForbiddenException with response.message='clinical-intake-required'
+    // when the patient has no PatientProfile. The dispatcher catches that
+    // exception specifically and returns a structured INTAKE_INCOMPLETE
+    // payload so the LLM can route the patient instead of saying
+    // "I couldn't save it."
+    it('translates ForbiddenException(clinical-intake-required) into INTAKE_INCOMPLETE on submit_checkin', async () => {
+      const intakeError: any = new Error('Forbidden')
+      intakeError.name = 'ForbiddenException'
+      intakeError.status = 403
+      intakeError.response = { message: 'clinical-intake-required' }
+      mockJournalService.create.mockRejectedValue(intakeError)
+
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: '2026-06-01',
+          measurement_time: '08:30',
+          systolic_bp: 120,
+          diastolic_bp: 80,
+          medication_taken: true,
+          symptoms: [],
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+
+      const parsed = JSON.parse(result)
+      expect(parsed).toEqual({
+        saved: false,
+        reason: 'INTAKE_INCOMPLETE',
+        intake_url: '/clinical-intake',
+        message: expect.stringContaining('/clinical-intake'),
+      })
+    })
+
+    it('check_intake_status returns completed=true when service reports profile exists', async () => {
+      const ctx = {
+        journalService: mockJournalService as any,
+        intakeStatusService: {
+          getStatus: jest.fn<any>().mockResolvedValue({ completed: true, profileExists: true }),
+        },
+      }
+      const result = await executeJournalTool('check_intake_status', {}, ctx as any, 'user-1')
+      const parsed = JSON.parse(result)
+      expect(parsed.completed).toBe(true)
+      expect(parsed.profile_exists).toBe(true)
+      expect(parsed.intake_url).toBe('/clinical-intake')
+      expect(ctx.intakeStatusService.getStatus).toHaveBeenCalledWith('user-1')
+    })
+
+    it('check_intake_status returns completed=false + nudges to /clinical-intake when profile missing', async () => {
+      const ctx = {
+        journalService: mockJournalService as any,
+        intakeStatusService: {
+          getStatus: jest.fn<any>().mockResolvedValue({ completed: false, profileExists: false }),
+        },
+      }
+      const result = await executeJournalTool('check_intake_status', {}, ctx as any, 'user-1')
+      const parsed = JSON.parse(result)
+      expect(parsed.completed).toBe(false)
+      expect(parsed.profile_exists).toBe(false)
+      expect(parsed.message).toMatch(/clinical-intake/i)
+    })
+
+    it('check_intake_status falls back gracefully when intakeStatusService is absent (legacy callers)', async () => {
+      const ctx = { journalService: mockJournalService as any }
+      const result = await executeJournalTool('check_intake_status', {}, ctx as any, 'user-1')
+      const parsed = JSON.parse(result)
+      expect(parsed.completed).toBe(false)
+      expect(parsed.intake_url).toBe('/clinical-intake')
+      expect(parsed.message).toMatch(/unavailable/i)
     })
   })
 

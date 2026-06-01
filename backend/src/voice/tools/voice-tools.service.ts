@@ -5,6 +5,8 @@ import { DailyJournalService } from '../../daily_journal/daily_journal.service.j
 import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import type { SessionSymptoms } from '../../daily_journal/engine/types.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
+import { isIntakeIncompleteError } from '../../chat/tools/journal-tools.js'
+import { IntakeStatusService } from '../../intake/intake-status.service.js'
 
 // Voice-tool I/O — argument shapes are stable contract with the Gemini Live
 // system prompt; field-name and sentinel-value changes ripple into the
@@ -68,6 +70,7 @@ export class VoiceToolsService {
     private readonly dailyJournal: DailyJournalService,
     private readonly gemini: GeminiService,
     private readonly alertEngine: AlertEngineService,
+    private readonly intakeStatusService: IntakeStatusService,
   ) {}
 
   /**
@@ -143,6 +146,16 @@ export class VoiceToolsService {
                 required: ['drug_name', 'reason'],
               },
             },
+            session_id: {
+              type: Type.STRING,
+              description:
+                'Optional session-grouping UUID. When recording MULTIPLE readings as one session ' +
+                '(AFib patients always; or anyone you asked to take ≥2), generate ONE UUID at session ' +
+                'start and pass the SAME value on every submit_checkin call in that session. To ADD a ' +
+                'reading to an EXISTING session beyond the 5-min proximity window, first call ' +
+                'get_recent_readings, read sessionId off an entry in that session, and reuse it on the ' +
+                'new submit_checkin. Omit for one-off check-ins. "" = omit.',
+            },
           },
           required: ['medication_taken'],
         },
@@ -160,7 +173,12 @@ export class VoiceToolsService {
       {
         name: 'update_checkin',
         description:
-          'Modify an existing reading. MUST first call get_recent_readings to get the entry_id. Sentinel defaults: 0/""/[] leave the field unchanged.',
+          'Modify an existing reading. MUST first call get_recent_readings to get the entry_id. ' +
+          'TARGET RESOLUTION: If the patient uses a natural-language reference ' +
+          "(e.g. 'change the last reading', 'update my most recent BP', 'fix the one I just took'), " +
+          'DO NOT ask them for the date and time — the newest entry returned by get_recent_readings ' +
+          'IS the target. Read it back to the patient with the proposed change and get explicit ' +
+          'verbal yes before calling. Sentinel defaults: 0/""/[] leave the field unchanged.',
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -172,6 +190,14 @@ export class VoiceToolsService {
             symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: '[] = leave unchanged' },
             notes: { type: Type.STRING, description: '"" = leave unchanged. ALWAYS English.' },
             measurement_time: { type: Type.STRING, description: 'HH:mm. "" = leave unchanged.' },
+            session_id: {
+              type: Type.STRING,
+              description:
+                'Optional. Move this reading into the given session-grouping UUID. Most edits should ' +
+                'LEAVE THIS OUT — the entry already has a session_id from record time and changing it ' +
+                'would split or merge averaging groups. Only set when the patient explicitly asks to move ' +
+                'a reading to a different session. "" = leave unchanged.',
+            },
           },
           required: ['entry_id'],
         },
@@ -179,7 +205,12 @@ export class VoiceToolsService {
       {
         name: 'delete_checkin',
         description:
-          "Remove one or more readings. MUST first call get_recent_readings, read back the rows to the patient, and get explicit confirmation.",
+          'Remove one or more readings. MUST first call get_recent_readings, read back the rows to the patient, and get explicit confirmation. ' +
+          'TARGET RESOLUTION: If the patient uses a natural-language reference ' +
+          "(e.g. 'delete the last reading', 'remove my most recent BP', 'delete the one I just took'), " +
+          'DO NOT ask them for the date and time — the newest entry returned by get_recent_readings ' +
+          'IS the target. Read it back ("Your most recent reading is one thirty eight over eighty ' +
+          "five at eight thirty AM on June first — should I delete it?\") and only on explicit yes call this tool.",
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -228,6 +259,38 @@ export class VoiceToolsService {
           required: ['systolic_bp', 'diastolic_bp'],
         },
       },
+      {
+        name: 'check_intake_status',
+        description:
+          "Check whether the patient has completed their one-time clinical intake form. " +
+          "Call this BEFORE the first submit_checkin / update_checkin / delete_checkin / " +
+          "finalize_checkin in a conversation. If completed=false, do NOT call any of those " +
+          "tools — the backend will 403 and the patient cannot save readings until intake is " +
+          "done. Route them to intake_url instead. Read-only; nothing is persisted.",
+        parameters: { type: Type.OBJECT, properties: {} },
+      },
+      {
+        name: 'finalize_checkin',
+        description:
+          'Finalise a SINGLE-reading session — tells the rule engine to evaluate the just-saved ' +
+          'entry NOW even though only one reading was taken. The engine normally requires ≥2 ' +
+          'readings averaged in the same session before non-emergency rules fire; this flips ' +
+          'singleReadingFinalized so the gate is bypassed for that one entry. ' +
+          'WHEN TO CALL: only after a successful submit_checkin AND the patient said they will ' +
+          'not take a second reading. Do NOT call for AFib patients — they need ≥3 readings; ' +
+          'walk them through more submit_checkin calls instead. ' +
+          "Required arg: entry_id from the previous submit_checkin's saved entry.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            entry_id: {
+              type: Type.STRING,
+              description: 'Entry id from the previous submit_checkin result.',
+            },
+          },
+          required: ['entry_id'],
+        },
+      },
     ]
   }
 
@@ -267,6 +330,10 @@ export class VoiceToolsService {
           return await this.submitBpFromPhoto(args, ctx)
         case 'evaluate_reading':
           return await this.evaluateReading(args, ctx)
+        case 'finalize_checkin':
+          return await this.finalizeCheckin(args, ctx)
+        case 'check_intake_status':
+          return await this.checkIntakeStatus(ctx)
         default:
           return {
             llmResponse: { ok: false, error: `Unknown tool: ${name}` },
@@ -398,6 +465,9 @@ export class VoiceToolsService {
     const otherSymptoms = toStringArray(args.other_symptoms)
     if (otherSymptoms.length) dto.otherSymptoms = otherSymptoms
 
+    const sessionId = asString(args.session_id, '').trim()
+    if (sessionId) dto.sessionId = sessionId
+
     if (args.measurement_conditions && typeof args.measurement_conditions === 'object') {
       const allowed = new Set([
         'noCaffeine', 'noSmoking', 'noExercise', 'bladderEmpty',
@@ -426,6 +496,7 @@ export class VoiceToolsService {
 
     let saved = false
     let savedMessage = 'There was a problem saving the check-in. Please try again later.'
+    let intakeIncomplete = false
     try {
       // Same DTO shape NestJS daily-journal controller expects (validated by
       // CreateJournalEntryDto). Calling the service directly skips network +
@@ -438,6 +509,12 @@ export class VoiceToolsService {
     } catch (err) {
       this.logger.error('submit_checkin: dailyJournal.create failed', err)
       saved = false
+      if (isIntakeIncompleteError(err)) {
+        intakeIncomplete = true
+        savedMessage =
+          "Before I can save a check-in I need you to complete your one-time intake form. " +
+          "Please go to /clinical-intake and come back when you're done."
+      }
     }
 
     const checkinSummary: CheckinSummary = {
@@ -459,6 +536,9 @@ export class VoiceToolsService {
     return {
       llmResponse: {
         saved,
+        ...(intakeIncomplete
+          ? { reason: 'INTAKE_INCOMPLETE', intake_url: '/clinical-intake' }
+          : {}),
         entry_date_used: resolvedDate,
         measurement_time_used: resolvedTime,
         message: savedMessage,
@@ -494,10 +574,16 @@ export class VoiceToolsService {
       // ── LLM privacy boundary ───────────────────────────────────────────
       // The narrow `entry_id="…" | <date> | BP <sbp>/<dbp> | meds … | symptoms …`
       // line below is the privacy boundary between the JournalEntry row
-      // (which carries internal columns like userId, sessionId, source,
-      // sourceMetadata, createdAt, updatedAt) and what the LLM receives.
-      // NEVER widen this string to include internal fields — the model can
-      // quote them back to the patient. Mirror chat/tools/journal-tools.ts
+      // (which carries internal columns like userId, source, sourceMetadata,
+      // createdAt, updatedAt) and what the LLM receives. NEVER widen this
+      // string to include internal fields — the model can quote them back
+      // to the patient. Allow-list exception: `session_id` is intentionally
+      // exposed (only when non-null) so the LLM can thread an existing
+      // session through a subsequent submit_checkin (multi-reading
+      // add-to-session flow for AFib and other clinically-grouped
+      // sessions). It is a grouping label, never a security boundary —
+      // composite { id, userId } scoping on every mutation still prevents
+      // cross-tenant leak. Mirror chat/tools/journal-tools.ts
       // `get_recent_readings` if changing the shape.
       const lines: string[] = []
       for (const e of entries.slice(0, 5)) {
@@ -514,7 +600,8 @@ export class VoiceToolsService {
           ? e.otherSymptoms.join(', ')
           : 'none'
         const timeStr = time ? ` at ${time}` : ''
-        lines.push(`entry_id="${entryId}" | ${date}${timeStr} | BP ${sbp}/${dbp} | meds ${med} | symptoms: ${sym}`)
+        const sessionStr = e.sessionId ? ` | session_id="${e.sessionId}"` : ''
+        lines.push(`entry_id="${entryId}" | ${date}${timeStr} | BP ${sbp}/${dbp} | meds ${med} | symptoms: ${sym}${sessionStr}`)
       }
       const summary = lines.length ? lines.join('\n') : 'No readings found.'
       events.push({
@@ -598,6 +685,8 @@ export class VoiceToolsService {
     if (symptoms.length) dto.symptoms = symptoms
     const notes = asString(args.notes, '')
     if (notes) dto.notes = notes
+    const newSessionId = asString(args.session_id, '').trim()
+    if (newSessionId) dto.sessionId = newSessionId
 
     if (Object.keys(dto).length === 0) {
       return {
@@ -858,6 +947,79 @@ export class VoiceToolsService {
         },
         events: [],
       }
+    }
+  }
+
+  /**
+   * Finalise a single-reading session — flips singleReadingFinalized: true on
+   * the entry so the engine's non-emergency gate is bypassed and Stage C
+   * rules (BP-high, sbp-low, HR) re-evaluate on this lone reading. Voice
+   * mirror of the text dispatcher's finalize_checkin case. Idempotent at
+   * the service layer via updateMany.
+   */
+  private async finalizeCheckin(
+    args: Record<string, unknown>,
+    ctx: ToolContext,
+  ): Promise<DispatchResult> {
+    const entryId = typeof args.entry_id === 'string' ? args.entry_id.trim() : ''
+    if (!entryId) {
+      return {
+        llmResponse: {
+          finalized: false,
+          message: "entry_id is required — pass the id from the previous submit_checkin's saved entry.",
+        },
+        events: [],
+      }
+    }
+    try {
+      const result = await this.dailyJournal.finalizeSingleReadingSession(ctx.userId, entryId)
+      return {
+        llmResponse: {
+          finalized: true,
+          message: result.message ?? 'Check-in finalised; alerts re-evaluated.',
+        },
+        events: [],
+      }
+    } catch (err) {
+      this.logger.error('finalize_checkin failed', err)
+      return {
+        llmResponse: {
+          finalized: false,
+          message: (err as Error)?.message ?? 'Failed to finalise check-in.',
+        },
+        events: [],
+      }
+    }
+  }
+
+  // ── Tool: check_intake_status ──────────────────────────────────────────────
+  // Read-only precheck. Lets the voice LLM detect an INTAKE STATUS gap before
+  // it tries submit_checkin (which would 403). Mirrors the text-chat tool of
+  // the same name in journal-tools.ts case 'check_intake_status'.
+  private async checkIntakeStatus(ctx: ToolContext): Promise<DispatchResult> {
+    const status = await this.intakeStatusService.getStatus(ctx.userId)
+    return {
+      llmResponse: {
+        completed: status.completed,
+        profile_exists: status.profileExists,
+        intake_url: '/clinical-intake',
+        message: status.completed
+          ? 'Intake is complete — you may proceed with check-ins.'
+          : 'Intake is NOT complete. Do not call submit_checkin. Direct the patient to /clinical-intake first.',
+      },
+      events: [
+        {
+          kind: 'action',
+          type: 'checking_intake_status',
+          detail: status.completed ? 'complete' : 'incomplete',
+        },
+        {
+          kind: 'action_complete',
+          type: 'checking_intake_status',
+          success: true,
+          detail: status.completed ? 'complete' : 'incomplete',
+        },
+      ],
     }
   }
 }

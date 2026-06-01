@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { OnEvent } from '@nestjs/event-emitter'
 import { GoogleGenAI, Modality } from '@google/genai'
 import type { Session, LiveServerMessage, FunctionResponse } from '@google/genai'
 import { trace, SpanStatusCode } from '@opentelemetry/api'
@@ -20,6 +21,8 @@ import { ConversationHistoryService } from '../chat/services/conversation-histor
 import { SystemPromptService } from '../chat/services/system-prompt.service.js'
 import { ProfileResolverService } from '../daily_journal/services/profile-resolver.service.js'
 import { GeminiService } from '../gemini/gemini.service.js'
+import { IntakeStatusService } from '../intake/intake-status.service.js'
+import { INTAKE_EVENTS, type IntakeUpdatedPayload } from '../intake/intake-events.js'
 import { VoiceToolsService } from './tools/voice-tools.service.js'
 import type { ToolEvent } from './tools/voice-tools.service.js'
 import { buildVoiceSystemInstruction } from './prompts/voice-system-instruction.js'
@@ -172,6 +175,7 @@ export class VoiceService implements OnModuleDestroy {
     private readonly systemPromptService: SystemPromptService,
     private readonly profileResolver: ProfileResolverService,
     private readonly voiceTools: VoiceToolsService,
+    private readonly intakeStatusService: IntakeStatusService,
   ) {
     // Default to a Live-capable model verified present via ListModels on
     // the Gemini Developer API. `gemini-2.5-flash-native-audio-preview-
@@ -732,6 +736,16 @@ export class VoiceService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Listener — IntakeService emits `intake.updated` after profile / medication
+   * mutation. Drops the voice context cache so a follow-up voice session sees
+   * the new INTAKE STATUS block + fresh resolved conditions / medications.
+   */
+  @OnEvent(INTAKE_EVENTS.UPDATED)
+  onIntakeUpdated(payload: IntakeUpdatedPayload): void {
+    this.invalidateContextCache(payload.userId)
+  }
+
   async endSession(socketId: string): Promise<void> {
     const session = this.sessions.get(socketId)
     if (!session) return
@@ -917,7 +931,7 @@ export class VoiceService implements OnModuleDestroy {
       // SystemPromptService.buildPatientContext() give voice the same
       // conditions / meds / threshold / active-alert block (including the
       // three-tier patientMessage bodies) that the text chatbot sees.
-      const [user, entries, activeAlerts, sessionData, resolvedContext] = await Promise.all([
+      const [user, entries, activeAlerts, sessionData, resolvedContext, intakeStatus] = await Promise.all([
         this.prisma.user.findUnique({
           where: { id: userId },
           select: {
@@ -953,6 +967,9 @@ export class VoiceService implements OnModuleDestroy {
           if (err instanceof ProfileNotFoundException) return null
           throw err
         }) as Promise<ResolvedContext | null>,
+        // Cheap PK-scoped findUnique; renders the INTAKE STATUS block in the
+        // patient-context. Mirrors chat.service.ts.
+        this.intakeStatusService.getStatus(userId),
       ])
 
       // Trailing 7-day mean — shared helper in @cardioplace/shared/derivatives
@@ -985,6 +1002,7 @@ export class VoiceService implements OnModuleDestroy {
         patientName: user?.name ?? null,
         dateOfBirth: user?.dateOfBirth ?? null,
         resolvedContext,
+        intakeStatus,
         toneMode: 'PATIENT',
         // Voice-only: never inline per-reading BP numbers. Native-audio LLMs
         // echo prompt-injected numbers as if the patient just said them. The

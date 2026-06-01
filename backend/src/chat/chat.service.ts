@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { OnEvent } from '@nestjs/event-emitter'
 import type { Content } from '@google/genai'
 import {
   getTrailing7DayBaseline,
@@ -25,6 +26,8 @@ import { MedicationAdherenceService } from './services/medication-adherence.serv
 import { SymptomQuickLogService } from './services/symptom-quick-log.service.js'
 import { getJournalToolDeclarations, executeJournalTool } from './tools/journal-tools.js'
 import type { JournalToolContext } from './tools/journal-tools.js'
+import { IntakeStatusService } from '../intake/intake-status.service.js'
+import { INTAKE_EVENTS, type IntakeUpdatedPayload } from '../intake/intake-events.js'
 
 @Injectable()
 export class ChatService {
@@ -69,6 +72,7 @@ export class ChatService {
     private readonly adherenceService: MedicationAdherenceService,
     private readonly symptomQuickLogService: SymptomQuickLogService,
     private readonly alertEngineService: AlertEngineService,
+    private readonly intakeStatusService: IntakeStatusService,
   ) {}
 
   /**
@@ -77,6 +81,17 @@ export class ChatService {
    * fresh — the newly-saved check-in / adherence log / quick symptom must
    * land in the next prompt's recent-readings block.
    */
+  /**
+   * Event listener — IntakeService emits `intake.updated` after a successful
+   * profile / medication / pregnancy mutation. Drops the cached patient
+   * context so the next chat turn sees the new INTAKE STATUS block + fresh
+   * resolved conditions / medications without waiting for the 60s TTL.
+   */
+  @OnEvent(INTAKE_EVENTS.UPDATED)
+  onIntakeUpdated(payload: IntakeUpdatedPayload): void {
+    this.invalidateContextCache(payload.userId)
+  }
+
   invalidateContextCache(userId: string): void {
     if (this.contextCache.delete(userId)) {
       console.log(`[CHAT cache] invalidated patient context for user=${userId}`)
@@ -93,6 +108,7 @@ export class ChatService {
       symptomService: this.symptomQuickLogService,
       ocrService: this.ocrService,
       alertEngine: this.alertEngineService,
+      intakeStatusService: this.intakeStatusService,
       // Mutating tools (submit/update/delete check-in, log adherence, log
       // symptom) call this after a successful write so the next chat turn
       // rebuilds patient context with the fresh row included. Mirrors the
@@ -172,7 +188,7 @@ export class ChatService {
     // Phase/16 — pull full ResolvedContext from ProfileResolverService (single
     // source of truth, shared with the alert engine) and v2-shape DeviationAlert
     // rows with tier/ruleId/patientMessage/physicianMessage for chat context.
-    const [recentEntries, activeAlerts, user, resolvedContext] = await Promise.all([
+    const [recentEntries, activeAlerts, user, resolvedContext, intakeStatus] = await Promise.all([
       this.prisma.journalEntry.findMany({
         where: { userId },
         orderBy: { measuredAt: 'desc' },
@@ -199,6 +215,10 @@ export class ChatService {
         if (err instanceof ProfileNotFoundException) return null
         throw err
       }) as Promise<ResolvedContext | null>,
+      // Cheap PK-scoped findUnique on PatientProfile — mirrors the gate at
+      // DailyJournalService.create. Sub-ms; runs in parallel with the four
+      // other prompt-context queries.
+      this.intakeStatusService.getStatus(userId),
     ])
 
     // Trailing 7-day mean — single source of truth lives in
@@ -228,6 +248,7 @@ export class ChatService {
       patientName: user?.name ?? null,
       dateOfBirth: user?.dateOfBirth ?? null,
       resolvedContext,
+      intakeStatus,
       toneMode: 'PATIENT',
     })
 
