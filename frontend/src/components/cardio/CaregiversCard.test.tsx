@@ -5,12 +5,12 @@ import {
   addCaregiver,
 } from '@/lib/services/caregiver.service'
 
-// Manual-test round 2 Group D1 — patient CaregiversCard restyle. The structural
-// mirror with admin CaregiversPanel was already in place; this commit lifted
-// the loading-state spinner and the no-consent ShieldOff icon for visual
-// parity. The patient-friendly intro paragraph + toggleable-consent badge UX
-// are intentionally preserved (clearer than admin's dual Revoke/Record-consent
-// buttons).
+// F14 — patient CaregiversCard now mirrors admin CaregiversPanel's row layout:
+// consent renders as a compact STATUS line on the left (no longer an oversized
+// full-width toggle button) plus a right-side action group (consent toggle +
+// remove). Per Duwaragie the patient-friendly wording is kept — the intro
+// paragraph stays and the consent CTA reads "Allow alerts"/"Revoke" rather than
+// admin's "Record consent".
 
 jest.mock('@/lib/services/caregiver.service', () => ({
   getCaregivers: jest.fn(),
@@ -37,7 +37,7 @@ describe('CaregiversCard — patient restyle (Round 2 D1)', () => {
     ).toBeInTheDocument()
   })
 
-  it('renders the toggleable consent badge (NOT the admin dual button pair)', async () => {
+  it('mirrors admin row layout: compact consent STATUS span + action toggle (patient wording)', async () => {
     mockGet.mockResolvedValue([
       {
         id: 'c1',
@@ -54,11 +54,36 @@ describe('CaregiversCard — patient restyle (Round 2 D1)', () => {
       },
     ])
     render(<CaregiversCard />)
-    const consent = await screen.findByTestId('profile-caregiver-consent-c1')
-    expect(consent).toHaveTextContent(/tap to allow alerts/i)
-    // Admin's "Revoke"/"Record consent" buttons must NOT appear on the patient side.
-    expect(screen.queryByText(/^Revoke$/)).not.toBeInTheDocument()
+    // Consent is now a compact status line (mirrors admin), not a full-width
+    // toggle button.
+    const status = await screen.findByTestId('profile-caregiver-consent-status-c1')
+    expect(status).toHaveTextContent(/no consent/i)
+    // The action toggle keeps patient-friendly wording — NOT admin's "Record consent".
+    const consentBtn = screen.getByTestId('profile-caregiver-consent-c1')
+    expect(consentBtn).toHaveTextContent(/allow alerts/i)
     expect(screen.queryByText(/^Record consent$/)).not.toBeInTheDocument()
+  })
+
+  it('shows "Revoke" wording once consent is on file', async () => {
+    mockGet.mockResolvedValue([
+      {
+        id: 'c2',
+        patientUserId: 'p1',
+        name: 'Sam Roe',
+        relationship: null,
+        phone: null,
+        email: 'sam@example.com',
+        notifyChannel: 'EMAIL',
+        consentGivenAt: new Date().toISOString(),
+        active: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ])
+    render(<CaregiversCard />)
+    const status = await screen.findByTestId('profile-caregiver-consent-status-c2')
+    expect(status).toHaveTextContent(/consent given/i)
+    expect(screen.getByTestId('profile-caregiver-consent-c2')).toHaveTextContent(/revoke/i)
   })
 
   it('shows the spinner loading state (parity with admin panel)', () => {

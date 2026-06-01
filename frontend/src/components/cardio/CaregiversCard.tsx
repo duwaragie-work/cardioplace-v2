@@ -170,6 +170,11 @@ export default function CaregiversCard() {
                 className="flex items-start justify-between gap-3 rounded-xl px-3 py-2.5"
                 style={{ border: '1px solid var(--brand-border)' }}
               >
+                {/* F14 — mirror admin CaregiversPanel's row layout: consent shows
+                    as a compact STATUS line on the left (no longer an oversized
+                    full-width toggle button) and the actions group on the right.
+                    Patient-friendly wording is kept (per Duwaragie) — short
+                    "Allow"/"Revoke" CTAs instead of admin's "Record consent". */}
                 <div className="min-w-0">
                   <p className="text-[13.5px] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
                     {c.name}
@@ -180,30 +185,36 @@ export default function CaregiversCard() {
                   <p className="text-[12px]" style={{ color: 'var(--brand-text-secondary)' }}>
                     {CHANNEL_LABELS[c.notifyChannel]}{c.email ? ` · ${c.email}` : ''}
                   </p>
+                  <span
+                    data-testid={`profile-caregiver-consent-status-${c.id}`}
+                    className="mt-1 inline-flex items-center gap-1 text-[11.5px] font-semibold"
+                    style={{ color: c.consentGivenAt ? 'var(--brand-accent-teal)' : 'var(--brand-warning-amber-text)' }}
+                  >
+                    {c.consentGivenAt ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldOff className="w-3.5 h-3.5" />}
+                    {c.consentGivenAt ? 'Consent given' : 'No consent — won’t be notified'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
                     data-testid={`profile-caregiver-consent-${c.id}`}
                     onClick={() => handleToggleConsent(c)}
-                    className="mt-1 inline-flex items-center gap-1 text-[11.5px] font-semibold cursor-pointer"
-                    style={{ color: c.consentGivenAt ? 'var(--brand-accent-teal)' : 'var(--brand-warning-amber-text)' }}
+                    className="text-[11.5px] font-semibold px-2 py-1 rounded-lg cursor-pointer"
+                    style={{ color: 'var(--brand-primary-purple)' }}
                   >
-                    {/* Round 2 D1 — admin CaregiversPanel signals no-consent
-                        with ShieldOff (amber); mirror that here while keeping
-                        the patient-friendly toggleable wording. */}
-                    {c.consentGivenAt ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldOff className="w-3.5 h-3.5" />}
-                    {c.consentGivenAt ? 'Consent given — tap to revoke' : 'Consent not given — tap to allow alerts'}
+                    {c.consentGivenAt ? 'Revoke' : 'Allow alerts'}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid={`profile-caregiver-remove-${c.id}`}
+                    onClick={() => handleRemove(c.id)}
+                    className="p-1.5 rounded-lg cursor-pointer"
+                    style={{ color: 'var(--brand-alert-red-text)' }}
+                    aria-label={`Remove ${c.name}`}
+                  >
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
-                <button
-                  type="button"
-                  data-testid={`profile-caregiver-remove-${c.id}`}
-                  onClick={() => handleRemove(c.id)}
-                  className="shrink-0 p-1.5 rounded-lg cursor-pointer"
-                  style={{ color: 'var(--brand-alert-red-text)' }}
-                  aria-label={`Remove ${c.name}`}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
               </li>
             ))}
           </ul>
