@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { GapAlertService } from '../crons/gap-alert.service.js'
+import { MedicationHoldEscalationService } from '../crons/medication-hold-escalation.service.js'
 import { MonthlyReaskService } from '../crons/monthly-reask.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
 import { ladderForTier } from '../daily_journal/escalation/ladder-defs.js'
@@ -19,6 +20,7 @@ export class TestControlService {
     private readonly gapAlerts: GapAlertService,
     private readonly monthlyReask: MonthlyReaskService,
     private readonly escalation: EscalationService,
+    private readonly medicationHoldEscalation: MedicationHoldEscalationService,
   ) {}
 
   // ─── Cron drivers ───────────────────────────────────────────────────────
@@ -37,6 +39,13 @@ export class TestControlService {
   async runMonthlyReaskScan(now: Date): Promise<{ scanned: number; reasked: number }> {
     const sent = await this.monthlyReask.runScan(now)
     return { scanned: 1, reasked: sent }
+  }
+
+  async runMedicationHoldEscalationScan(
+    now: Date,
+  ): Promise<{ scanned: number; rungsFired: number }> {
+    const fired = await this.medicationHoldEscalation.runScan(now)
+    return { scanned: 1, rungsFired: fired }
   }
 
   // ─── Time advancement ───────────────────────────────────────────────────

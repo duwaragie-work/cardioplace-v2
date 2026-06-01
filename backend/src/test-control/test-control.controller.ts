@@ -86,6 +86,21 @@ export class TestControlController {
     return this.svc.runMonthlyReaskScan(body?.now ? new Date(body.now) : new Date())
   }
 
+  // F33 — drive the medication-hold escalation ladder on demand instead of
+  // waiting for the daily 15:00 UTC cron. Lets the audit + Playwright suites
+  // backdate a hold then fire the scan synchronously.
+  @Post('cron/medication-hold-escalation/run')
+  @HttpCode(200)
+  async runMedicationHoldEscalation(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { now?: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.runMedicationHoldEscalationScan(
+      body?.now ? new Date(body.now) : new Date(),
+    )
+  }
+
   // ─── Time advancement ───────────────────────────────────────────────────
   @Post('anchor/backdate')
   @HttpCode(200)

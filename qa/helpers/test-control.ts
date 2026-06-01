@@ -82,6 +82,19 @@ export class TestControl {
     })
   }
 
+  /**
+   * F33 — run the medication-hold escalation scanner once. Pass `now` to
+   * simulate a future time so a backdated hold crosses a rung (day 7/14/30/45)
+   * without waiting for the daily 15:00 UTC cron.
+   */
+  async runMedicationHoldEscalationScan(
+    now?: Date,
+  ): Promise<{ scanned: number; rungsFired: number }> {
+    return this.post('test-control/cron/medication-hold-escalation/run', {
+      now: (now ?? new Date()).toISOString(),
+    })
+  }
+
   // ─── Time advancement ───────────────────────────────────────────────────
   /**
    * Backdate an alert's T+0 EscalationEvent.notificationSentAt. Equivalent to
