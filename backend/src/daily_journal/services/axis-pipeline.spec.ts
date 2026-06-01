@@ -347,11 +347,11 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
 
   // ────────────────────────────────────────────────────────────────────────
   // Idempotent re-evaluation — phase/7 dedup keyed on (journalEntryId, ruleId).
-  // Re-running the pipeline on the same entry should hit findFirst → update,
-  // not double-create.
+  // F9 (JCAHO immutability): re-running the pipeline on the same entry must
+  // neither re-create NOR mutate the existing fired-record rows.
   // ────────────────────────────────────────────────────────────────────────
 
-  it('Re-evaluation is idempotent — second pass updates, does not re-create', async () => {
+  it('F9 — Re-evaluation is idempotent: second pass neither re-creates nor updates', async () => {
     // First pass: create both rows.
     const session = buildSession({ systolicBP: 95, diastolicBP: 65, pulse: 70 })
     const ctx = buildCtx({ ageGroup: '65+', profile: { hasCAD: true } })
@@ -360,17 +360,17 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
     await service.evaluate(session.entryId)
 
     // Second pass: findFirst now returns existing rows (simulate DB state).
-    let createCount = prisma.deviationAlert.create.mock.calls.length
+    const createCount = prisma.deviationAlert.create.mock.calls.length
     expect(createCount).toBe(2)
     prisma.deviationAlert.findFirst = (jest.fn() as jest.Mock<any>)
-      .mockResolvedValueOnce({ id: 'existing-1' })
-      .mockResolvedValueOnce({ id: 'existing-2' })
+      .mockResolvedValueOnce({ id: 'existing-1', escalated: false })
+      .mockResolvedValueOnce({ id: 'existing-2', escalated: false })
 
     await service.evaluate(session.entryId)
 
-    // No new creates — both upserts went to update path.
+    // No new creates AND no in-place updates — the at-fire-time rows stand.
     expect(prisma.deviationAlert.create.mock.calls.length).toBe(createCount)
-    expect(prisma.deviationAlert.update.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
   })
 
   // ────────────────────────────────────────────────────────────────────────

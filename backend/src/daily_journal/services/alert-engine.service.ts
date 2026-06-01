@@ -930,26 +930,22 @@ export class AlertEngineService {
                 journalEntryId: session.entryId,
                 ruleId: result.ruleId,
               },
-              select: { id: true },
+              select: { id: true, escalated: true },
             })
 
+            // F9 (P0 — JCAHO immutability). A DeviationAlert is the
+            // at-fire-time clinical record. When the engine re-evaluates the
+            // same (journalEntryId, ruleId) — session-finalize, an entry edit,
+            // or a later personalized-mode pass — it must NEVER rewrite the
+            // fired-record fields (mode, severity, tier, ruleId, the three-tier
+            // messages, dismissible, actualValue). Doing so retroactively
+            // mutated e.g. a STANDARD-mode alert to PERSONALIZED once the
+            // patient crossed 7 readings, corrupting the audit trail.
+            // Acknowledge / resolve mutations are owned by
+            // AlertResolutionService, not this engine path — so once the row
+            // exists we return it untouched and skip the write entirely.
             const row = existing
-              ? await tx.deviationAlert.update({
-                  where: { id: existing.id },
-                  data: {
-                    severity: legacySeverity,
-                    tier: result.tier,
-                    ruleId: result.ruleId,
-                    mode: result.mode,
-                    pulsePressure: result.pulsePressure,
-                    suboptimalMeasurement: result.suboptimalMeasurement,
-                    dismissible,
-                    actualValue,
-                    patientMessage: messages.patientMessage,
-                    caregiverMessage: messages.caregiverMessage,
-                    physicianMessage: messages.physicianMessage,
-                  },
-                })
+              ? existing
               : await tx.deviationAlert.create({
                   data: {
                     userId: session.userId,

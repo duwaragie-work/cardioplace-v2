@@ -663,28 +663,62 @@ describe('AlertEngineService (orchestrator)', () => {
       expect(call![0].data.type).toBe('SYSTOLIC_BP')
     })
 
-    it('dedup idempotency: re-evaluating same entry finds existing row and updates (phase/7)', async () => {
+    it('F9 — dedup idempotency: re-eval finds existing row and does NOT rewrite it (JCAHO immutability)', async () => {
       sessionAverager.averageForEntry.mockResolvedValue(
         baseSession({ systolicBP: 165, diastolicBP: 95 }),
       )
       // First pass: findFirst → null, so create fires.
-      // Second pass: findFirst → existing row, so update fires instead.
+      // Second pass: findFirst → existing row. Per F9 the row is the
+      // at-fire-time clinical record — re-eval must NOT touch it.
       let call = 0
       prisma.deviationAlert.findFirst.mockImplementation(() => {
         call++
-        return Promise.resolve(call > 1 ? { id: 'alert-1' } : null)
+        return Promise.resolve(
+          call > 1 ? { id: 'alert-1', escalated: false } : null,
+        )
       })
       await service.evaluate('entry-1')
       await service.evaluate('entry-1')
       expect(prisma.deviationAlert.findFirst).toHaveBeenCalledWith({
         where: { journalEntryId: 'entry-1', ruleId: 'RULE_STANDARD_L1_HIGH' },
-        select: { id: true },
+        select: { id: true, escalated: true },
       })
       expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(1)
-      expect(prisma.deviationAlert.update).toHaveBeenCalledTimes(1)
-      expect(prisma.deviationAlert.update.mock.calls[0][0].where).toEqual({
+      // F9: the update branch is gone — re-eval is a no-op write.
+      expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
+    })
+
+    it('F9 — mode is NOT mutated when patient crosses into personalized eligibility (Carol case)', async () => {
+      // Reading fires STANDARD-mode L1 at fire time. A later re-eval pass runs
+      // once the patient is personalizedEligible — pre-fix this rewrote the
+      // original row to PERSONALIZED, corrupting the audit trail.
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 165, diastolicBP: 95 }),
+      )
+      // Pass 1: STANDARD mode (not yet eligible), row created.
+      profileResolver.resolve.mockResolvedValueOnce(
+        baseCtx({ personalizedEligible: false }),
+      )
+      await service.evaluate('entry-1')
+      const created = (
+        prisma.deviationAlert.create.mock.calls as Array<
+          [{ data: { ruleId: string; mode: string } }]
+        >
+      ).find((c) => c[0].data.ruleId === 'RULE_STANDARD_L1_HIGH')
+      expect(created![0].data.mode).toBe('STANDARD')
+
+      // Pass 2: row now exists; patient is personalizedEligible.
+      prisma.deviationAlert.findFirst.mockResolvedValue({
         id: 'alert-1',
+        escalated: false,
       })
+      profileResolver.resolve.mockResolvedValueOnce(
+        baseCtx({ personalizedEligible: true }),
+      )
+      await service.evaluate('entry-1')
+
+      // No update issued → the original STANDARD record stands.
+      expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
     })
 
     it('session-averaged emergency: readingCount=2 + mean SBP 180 → fires BP Level 2', async () => {
