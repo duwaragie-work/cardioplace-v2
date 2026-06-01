@@ -19,6 +19,7 @@ import { canCompleteEnrollment } from '../practice/enrollment-gate.js'
 import {
   systemMsgMedicationHold,
   systemMsgProfileFieldRejected,
+  isProviderDirectedHold,
 } from '@cardioplace/shared'
 import type {
   PatientMedication,
@@ -1150,25 +1151,50 @@ export class IntakeService {
     // to dispatch is logged but does not roll back the status change — the
     // medication is on hold regardless of whether the notification landed.
     if (nextStatus === MedicationVerificationStatus.HOLD) {
+      // Provider-directed = "pause it" (names the med); administrative =
+      // "keep taking as usual" (does NOT name the med) — Manisha 5/24 §3.
+      const providerDirected = isProviderDirectedHold(dto.holdReason!)
+      const title = providerDirected ? 'Please pause a medication' : 'Medicine list review'
+      const body = systemMsgMedicationHold(med.drugName, dto.holdReason!)
       try {
-        await this.prisma.notification.create({
-          data: {
-            userId: med.userId,
-            // PUSH (not DASHBOARD) so it lands in the patient's Notifications
-            // tab — that tab renders only PUSH/null channels; DASHBOARD rows
-            // are treated as alert-linked and surface on the Alerts tab. This
-            // is a standalone care-team message (CLINICAL_SPEC §14.2), so it
-            // belongs with gap-alert / monthly-reask / care-team-update (all PUSH).
-            channel: NotificationChannel.PUSH,
-            // Provider-directed = "pause it" (names the med); administrative =
-            // "keep taking as usual" (does NOT name the med) — Manisha 5/24 §3.
-            title:
-              dto.holdReason === 'PROVIDER_DIRECTED_HOLD'
-                ? 'Please pause a medication'
-                : 'Medicine list review',
-            body: systemMsgMedicationHold(med.drugName, dto.holdReason!),
-          },
-        })
+        // F16 — administrative holds consolidate to ONE bell row per Manisha A1
+        // "Display once": a patient with 4 administrative holds should see a
+        // single "Medicine list review" notice, not 4 identical rows. The
+        // administrative body is generic (doesn't name a med), so an unread
+        // notice already standing for one hold covers the rest — bump its
+        // timestamp instead of stacking a duplicate. Provider-directed holds
+        // name a specific medication, so each keeps its own row.
+        const existing = providerDirected
+          ? null
+          : await this.prisma.notification.findFirst({
+              where: {
+                userId: med.userId,
+                channel: NotificationChannel.PUSH,
+                title: 'Medicine list review',
+                readAt: null,
+              },
+              select: { id: true },
+            })
+        if (existing) {
+          await this.prisma.notification.update({
+            where: { id: existing.id },
+            data: { sentAt: new Date(), body },
+          })
+        } else {
+          await this.prisma.notification.create({
+            data: {
+              userId: med.userId,
+              // PUSH (not DASHBOARD) so it lands in the patient's Notifications
+              // tab — that tab renders only PUSH/null channels; DASHBOARD rows
+              // are treated as alert-linked and surface on the Alerts tab. This
+              // is a standalone care-team message (CLINICAL_SPEC §14.2), so it
+              // belongs with gap-alert / monthly-reask / care-team-update (all PUSH).
+              channel: NotificationChannel.PUSH,
+              title,
+              body,
+            },
+          })
+        }
       } catch (err) {
         this.logger.error(
           `HOLD notification failed for medication ${medicationId}`,

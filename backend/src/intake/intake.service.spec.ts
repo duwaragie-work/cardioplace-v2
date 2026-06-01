@@ -477,3 +477,113 @@ describe('IntakeService.createMedications — F13 ACE/ARB contraindication', () 
     expect((res.contraindicatedReadd ?? res.result?.contraindicatedReadd) ?? []).toHaveLength(0)
   })
 })
+
+// F16 — administrative medication holds consolidate to ONE patient bell row
+// per Manisha A1 "Display once". Provider-directed holds name a specific med,
+// so each keeps its own row.
+describe('IntakeService.verifyMedication — F16 administrative hold dedup', () => {
+  let service: IntakeService
+  let prisma: any
+  let notifications: any[]
+
+  function buildPrisma() {
+    notifications = []
+    let nid = 0
+    return {
+      patientMedication: {
+        findUnique: (jest.fn() as any).mockImplementation(({ where }: any) =>
+          Promise.resolve({
+            id: where.id,
+            userId: 'patient-1',
+            drugName: 'Lisinopril 10mg',
+            verificationStatus: 'UNVERIFIED',
+          }),
+        ),
+        update: (jest.fn() as any).mockImplementation((args: any) =>
+          Promise.resolve({
+            id: args.where.id,
+            reportedAt: new Date(),
+            verifiedAt: new Date(),
+            discontinuedAt: null,
+            ...args.data,
+          }),
+        ),
+      },
+      profileVerificationLog: { create: (jest.fn() as any).mockResolvedValue({}) },
+      notification: {
+        findFirst: (jest.fn() as any).mockImplementation(({ where }: any) =>
+          Promise.resolve(
+            notifications.find(
+              (n) =>
+                n.userId === where.userId &&
+                n.channel === where.channel &&
+                n.title === where.title &&
+                n.readAt === null,
+            ) ?? null,
+          ),
+        ),
+        create: (jest.fn() as any).mockImplementation((args: any) => {
+          const row = { id: `notif-${++nid}`, readAt: null, ...args.data }
+          notifications.push(row)
+          return Promise.resolve(row)
+        }),
+        update: (jest.fn() as any).mockImplementation((args: any) => {
+          const row = notifications.find((n) => n.id === args.where.id)
+          Object.assign(row, args.data)
+          return Promise.resolve(row)
+        }),
+      },
+      $transaction: (ops: any[]) => Promise.all(ops),
+    }
+  }
+
+  async function makeService(p: any) {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        IntakeService,
+        { provide: PrismaService, useValue: p },
+        { provide: DrugEnrichmentService, useValue: { enrich: jest.fn() } },
+        { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
+      ],
+    }).compile()
+    return module.get<IntakeService>(IntakeService)
+  }
+
+  const actor = { id: 'admin-1', roles: ['MEDICAL_DIRECTOR'] } as any
+
+  it('3 administrative holds → exactly 1 unread "Medicine list review" row', async () => {
+    prisma = buildPrisma()
+    service = await makeService(prisma)
+
+    for (const medId of ['med-1', 'med-2', 'med-3']) {
+      await service.verifyMedication(actor, medId, {
+        status: 'HOLD',
+        holdReason: 'AWAITING_RECORDS',
+      } as any)
+    }
+
+    const reviews = notifications.filter(
+      (n) => n.title === 'Medicine list review' && n.readAt === null,
+    )
+    expect(reviews).toHaveLength(1)
+    // Only the first created; the next two bumped its timestamp.
+    expect(prisma.notification.create).toHaveBeenCalledTimes(1)
+    expect(prisma.notification.update).toHaveBeenCalledTimes(2)
+  })
+
+  it('provider-directed holds are NOT consolidated — each names its own med', async () => {
+    prisma = buildPrisma()
+    service = await makeService(prisma)
+
+    for (const medId of ['med-1', 'med-2']) {
+      await service.verifyMedication(actor, medId, {
+        status: 'HOLD',
+        holdReason: 'PROVIDER_DIRECTED_HOLD',
+      } as any)
+    }
+
+    const pauses = notifications.filter((n) => n.title === 'Please pause a medication')
+    expect(pauses).toHaveLength(2)
+    expect(prisma.notification.findFirst).not.toHaveBeenCalled()
+  })
+})
