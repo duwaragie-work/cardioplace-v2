@@ -839,6 +839,18 @@ export class EscalationService {
       const { title, body } = content
 
       for (const channel of step.channels) {
+        // F12 — clinical alerts NEVER mirror into the patient's in-app bell.
+        // The patient still sees the alert via the /alerts list, the dashboard
+        // banner, and (for airway/emergency tiers) the out-of-app PUSH. The
+        // in-app DASHBOARD (bell) inbox is reserved for admin/care-team action
+        // events (ack / resolve / HOLD / threshold / follow-up / gap-alert).
+        // This single guard covers every clinical-alert ladder that lists
+        // PATIENT as a recipient — BP Level 2, BP-L2 symptom-override, Tier 1
+        // angioedema, and the retired BP Level 1 patient row — so no
+        // clinical Notification row leaks to the patient bell regardless of
+        // tier. Provider / MD / Ops DASHBOARD rows are unaffected.
+        if (role === 'PATIENT' && channel === 'DASHBOARD') continue
+
         // DASHBOARD notifications are implicit via DeviationAlert rows; we
         // still write a row so the admin UI can surface the escalation timeline.
         await this.prisma.notification

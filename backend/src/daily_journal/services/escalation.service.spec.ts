@@ -611,6 +611,39 @@ describe('EscalationService', () => {
       expect(t0[0].data.notificationSentAt).toEqual(expect.any(Date))
       expect(t0[0].data.scheduledFor).toBeUndefined()
     })
+
+    it('F12 — BP Level 2 T+0 writes NO patient DASHBOARD bell row, but patient PUSH + provider DASHBOARD survive', async () => {
+      const bpL2 = buildAlert({
+        tier: 'BP_LEVEL_2',
+        createdAt: new Date('2026-04-21T02:00:00Z'),
+      })
+      prisma.deviationAlert.findUnique.mockResolvedValue(bpL2)
+
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({ tier: 'BP_LEVEL_2' }),
+      )
+
+      const notifCalls = prisma.notification.create.mock.calls as Array<
+        [{ data: { userId: string; channel: string } }]
+      >
+      const patientNotifs = notifCalls.filter(
+        (c) => c[0].data.userId === 'patient-1',
+      )
+      // No clinical alert mirrors into the patient bell.
+      expect(
+        patientNotifs.filter((c) => c[0].data.channel === 'DASHBOARD'),
+      ).toHaveLength(0)
+      // The out-of-app PUSH to the patient is preserved (emergency wake).
+      expect(
+        patientNotifs.some((c) => c[0].data.channel === 'PUSH'),
+      ).toBe(true)
+      // Providers still get their DASHBOARD (admin bell) rows.
+      const providerDashboard = notifCalls.filter(
+        (c) =>
+          c[0].data.userId !== 'patient-1' && c[0].data.channel === 'DASHBOARD',
+      )
+      expect(providerDashboard.length).toBeGreaterThan(0)
+    })
   })
 
   // ────────────────────────────────────────────────────────────────────────
