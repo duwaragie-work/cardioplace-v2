@@ -855,6 +855,7 @@ export class AlertEngineService {
       const narrowNote = getNarrowPulsePressureAnnotation(
         session.systolicBP,
         session.diastolicBP,
+        ctx.profile,
       )
       if (narrowNote) annotations.push(narrowNote)
     }

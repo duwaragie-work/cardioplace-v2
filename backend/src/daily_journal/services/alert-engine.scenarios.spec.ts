@@ -1312,6 +1312,20 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.physicianMessage).toMatch(/reduced stroke volume/i)
   })
 
+  it('NARROW-PP F23 — HFrEF co-fire: higher-tier alert carries reduced-stroke-volume annotation', async () => {
+    // Carol CM-9: HFrEF, session-averaged 128/108 (PP=20). DBP≥100 fires a
+    // higher-tier BP alert; narrow PP rides as a physician annotation that must
+    // carry the HFrEF clinical-correlation wording, not the generic note.
+    const { createArgs } = await run(
+      buildSession({ systolicBP: 128, diastolicBP: 108 }),
+      buildCtx({ profile: { hasHeartFailure: true, heartFailureType: 'HFREF', resolvedHFType: 'HFREF' } }),
+    )
+    expect(createArgs.data.ruleId).not.toBe('RULE_PULSE_PRESSURE_NARROW')
+    expect(createArgs.data.physicianMessage).toMatch(
+      /In HFrEF, narrow PP may indicate reduced stroke volume/i,
+    )
+  })
+
   it('NARROW-PP — PP ≥ 25 does not fire', async () => {
     const { result } = await run(
       buildSession({ systolicBP: 120, diastolicBP: 80 }),
