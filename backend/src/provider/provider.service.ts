@@ -992,12 +992,17 @@ export class ProviderService {
   // ─── GET /provider/patients/:userId/bp-trend ────────────────────────────────
 
   async getPatientBpTrend(userId: string, startDate: string, endDate: string) {
+    // F1: endDate arrives as a calendar date (e.g. "2026-06-01"), which parses to
+    // UTC midnight and would exclude every reading taken during that day. Extend
+    // the upper bound to the end of the calendar day so the current day is included.
+    const endDateObj = new Date(endDate)
+    endDateObj.setUTCHours(23, 59, 59, 999)
     const entries = await this.prisma.journalEntry.findMany({
       where: {
         userId,
         measuredAt: {
           gte: new Date(startDate),
-          lte: new Date(endDate),
+          lte: endDateObj,
         },
         systolicBP: { not: null },
       },
