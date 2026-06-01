@@ -110,6 +110,30 @@ describe('OutputGeneratorService', () => {
       expect(out.patientMessage).toContain('150/92')
     })
 
+    it('F7 — patient message cites the submitted reading, physician keeps the session average', () => {
+      const r = baseResult({ actualValue: 135 })
+      // Session-averaged 135/86 (engine truth) but the patient submitted 145/92.
+      const session: SessionAverage = {
+        ...baseSession,
+        systolicBP: 135,
+        diastolicBP: 86,
+        submittedSystolicBP: 145,
+        submittedDiastolicBP: 92,
+      }
+      const out = service.generate(r, session, false)
+      expect(out.patientMessage).toContain('145/92')
+      expect(out.patientMessage).not.toContain('135/86')
+      // Physician/admin still sees the averaged evaluation value.
+      expect(out.physicianMessage).toContain('135/86')
+    })
+
+    it('F7 — falls back to the averaged value when no submitted reading is present', () => {
+      const r = baseResult()
+      const out = service.generate(r, baseSession, false)
+      // baseSession has no submitted* fields → patient body uses the average.
+      expect(out.patientMessage).toContain('150/92')
+    })
+
     it('pregnancy+ACE patient message uses warm language (no "teratogenic")', () => {
       const r = baseResult({
         ruleId: 'RULE_PREGNANCY_ACE_ARB',

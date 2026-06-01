@@ -153,6 +153,10 @@ export class SessionAveragerService {
     const latest = siblings.reduce((a, b) =>
       a.measuredAt > b.measuredAt ? a : b,
     )
+    // F7 — the anchor entry's RAW reading (the one the patient just submitted),
+    // for patient/caregiver message bodies. Falls back to `latest` if siblings
+    // somehow lack the anchor row.
+    const anchorEntry = siblings.find((s) => s.id === anchor.id) ?? latest
     const medicationTaken = orReduceMedicationTaken(siblings)
     const missedMedications = unionMissedMedications(siblings)
 
@@ -162,6 +166,8 @@ export class SessionAveragerService {
       measuredAt: latest.measuredAt,
       systolicBP: mean(sbpVals),
       diastolicBP: mean(dbpVals),
+      submittedSystolicBP: anchorEntry.systolicBP,
+      submittedDiastolicBP: anchorEntry.diastolicBP,
       weight: weightVals.length > 0 ? weightVals.reduce((a, b) => a + b, 0) / weightVals.length : null,
       pulse: mean(pulseVals),
       readingCount: siblings.length,

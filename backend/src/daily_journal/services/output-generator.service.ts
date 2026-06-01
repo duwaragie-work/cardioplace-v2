@@ -57,11 +57,20 @@ export class OutputGeneratorService implements OnModuleInit {
     physicianMessage: string
   } {
     const entry = alertMessageRegistry[result.ruleId]
-    const ctx = this.buildContext(result, session, preDay3, patientName)
+    // Physician message keeps the session-averaged BP (the engine's evaluation
+    // truth). F7 — patient/caregiver messages cite the just-submitted reading so
+    // the body matches the "Recorded" header the patient saw, instead of an
+    // averaged value they never entered.
+    const physicianCtx = this.buildContext(result, session, preDay3, patientName)
+    const patientCtx: AlertContext = {
+      ...physicianCtx,
+      systolicBP: session.submittedSystolicBP ?? physicianCtx.systolicBP,
+      diastolicBP: session.submittedDiastolicBP ?? physicianCtx.diastolicBP,
+    }
     return {
-      patientMessage: entry.patientMessage(ctx),
-      caregiverMessage: entry.caregiverMessage(ctx),
-      physicianMessage: entry.physicianMessage(ctx),
+      patientMessage: entry.patientMessage(patientCtx),
+      caregiverMessage: entry.caregiverMessage(patientCtx),
+      physicianMessage: entry.physicianMessage(physicianCtx),
     }
   }
 
