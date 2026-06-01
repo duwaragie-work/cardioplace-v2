@@ -993,25 +993,53 @@ function useRejectedDrugKeys(): Set<string> {
 // `requestAdd` runs `doAdd` immediately for a drug that wasn't previously
 // rejected, or defers it behind the modal when it was (option c: warn → allow).
 // Render the returned `modal` somewhere in the consuming step's JSX.
-function useReAddConfirm(): {
-  requestAdd: (canonicalKey: string, displayName: string, doAdd: () => void) => void;
+function useReAddConfirm(aceContraindicated = false): {
+  requestAdd: (
+    canonicalKey: string,
+    displayName: string,
+    doAdd: () => void,
+    drugClass?: string,
+  ) => void;
   modal: React.ReactNode;
 } {
   const rejectedKeys = useRejectedDrugKeys();
-  const [pending, setPending] = useState<{ name: string; onConfirm: () => void } | null>(null);
+  const [pending, setPending] = useState<{
+    name: string;
+    onConfirm: () => void;
+    variant: 'rejected' | 'contraindicated';
+    drugClass?: string;
+  } | null>(null);
 
-  const requestAdd = (canonicalKey: string, displayName: string, doAdd: () => void) => {
+  const requestAdd = (
+    canonicalKey: string,
+    displayName: string,
+    doAdd: () => void,
+    drugClass?: string,
+  ) => {
+    // F13 — ACE/ARB on a contraindicated patient: gate behind the
+    // contraindication warning (takes priority over the rejected re-add path).
+    // The backend independently holds the med for provider review + notifies
+    // the care team, so this modal is the patient-facing transparency layer.
+    if (
+      aceContraindicated &&
+      (drugClass === 'ACE_INHIBITOR' || drugClass === 'ARB')
+    ) {
+      setPending({ name: displayName, onConfirm: doAdd, variant: 'contraindicated', drugClass });
+      return;
+    }
     if (!rejectedKeys.has(canonicalKey)) {
       doAdd();
       return;
     }
-    setPending({ name: displayName, onConfirm: doAdd });
+    setPending({ name: displayName, onConfirm: doAdd, variant: 'rejected' });
   };
 
   const modal = (
     <ReAddConfirmModal
       open={pending != null}
       drugName={pending?.name ?? ''}
+      variant={pending?.variant ?? 'rejected'}
+      drugClass={pending?.drugClass}
       onConfirm={() => {
         const p = pending;
         setPending(null);
@@ -1025,7 +1053,7 @@ function useReAddConfirm(): {
 }
 
 function A5CoreMeds({ state, setState }: StepProps) {
-  const { requestAdd, modal: reAddModal } = useReAddConfirm();
+  const { requestAdd, modal: reAddModal } = useReAddConfirm(state.aceContraindicated);
   const selectedIds = useMemo(
     () => new Set(state.selectedMedications.filter((m) => !m.isCombination).map((m) => m.catalogId).filter(Boolean) as string[]),
     [state.selectedMedications],
@@ -1062,7 +1090,9 @@ function A5CoreMeds({ state, setState }: StepProps) {
       return;
     }
     // IVR-19 — re-adding a med the care team rejected: confirm via modal first.
-    requestAdd(med.id, med.brandName, () => addMed(med));
+    // F13 — pass drugClass so an ACE/ARB re-add on a contraindicated patient
+    // is gated behind the contraindication warning.
+    requestAdd(med.id, med.brandName, () => addMed(med), med.drugClass);
   };
 
   // Phase/28 — OTHER_UNVERIFIED meds list at the bottom of A5. The hook
@@ -1196,7 +1226,7 @@ function A5CoreMeds({ state, setState }: StepProps) {
 
 function A6Combos({ state, setState }: StepProps) {
   const { t } = useLanguage();
-  const { requestAdd, modal: reAddModal } = useReAddConfirm();
+  const { requestAdd, modal: reAddModal } = useReAddConfirm(state.aceContraindicated);
   const selectedIds = useMemo(
     () => new Set(state.selectedMedications.filter((m) => m.isCombination).map((m) => m.catalogId).filter(Boolean) as string[]),
     [state.selectedMedications],
@@ -1232,6 +1262,9 @@ function A6Combos({ state, setState }: StepProps) {
       return;
     }
     // IVR-19 — re-adding a combo the care team rejected: confirm via modal first.
+    // F13 — combo entries don't expose a single drugClass, so the modal-level
+    // ACE/ARB gate doesn't apply here; the backend still holds any ACE/ARB
+    // component for provider review on a contraindicated patient.
     requestAdd(combo.id, combo.brandName, () => addCombo(combo));
   };
   const contains = t('intake.a6.audioContains');
@@ -1305,7 +1338,7 @@ function A8Categories({ state, setState }: StepProps) {
   // dictation instead. Backend still accepts PATIENT_PHOTO source for
   // back-compat; we just don't surface that path in the UI any more.
 
-  const { requestAdd, modal: reAddModal } = useReAddConfirm();
+  const { requestAdd, modal: reAddModal } = useReAddConfirm(state.aceContraindicated);
   const selectedIds = useMemo(
     () => new Set(state.selectedMedications.map((m) => m.catalogId).filter(Boolean) as string[]),
     [state.selectedMedications],
@@ -1339,7 +1372,9 @@ function A8Categories({ state, setState }: StepProps) {
       return;
     }
     // IVR-19 — re-adding a med the care team rejected: confirm via modal first.
-    requestAdd(med.id, med.brandName, () => addCategoryMed(med));
+    // F13 — category meds carry drugClass; ARBs (e.g. Cozaar) live here and are
+    // gated when the patient is contraindicated.
+    requestAdd(med.id, med.brandName, () => addCategoryMed(med), med.drugClass);
   };
 
   const addOther = (source: 'PATIENT_VOICE' | 'PATIENT_PHOTO', rawText: string) => {
@@ -2224,6 +2259,9 @@ function ClinicalIntakeWizard() {
           // Branch 2 — populate form with existing data so the patient sees
           // their current answers and can edit just what changed.
           const seeded: IntakeFormState = {
+            // F13 — carry the ACE/ARB contraindication flag so the med-add
+            // step can gate re-adds behind the contraindication warning.
+            aceContraindicated: profile.aceContraindicatedAt != null,
             gender: profile.gender ?? undefined,
             heightCm: profile.heightCm ?? undefined,
             dateOfBirth: carriedDob,

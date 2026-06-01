@@ -27,6 +27,10 @@ export interface PatientProfileDto {
   hasAorticStenosis?: boolean;
   diagnosedHypertension?: boolean;
   profileVerificationStatus?: 'UNVERIFIED' | 'VERIFIED' | 'CORRECTED';
+  /** F13 — set by the provider when resolving a B4 angioedema event with
+   *  "ACE/ARB discontinued". When non-null, re-adding an ACE inhibitor / ARB
+   *  is gated behind a contraindication warning + held for provider review. */
+  aceContraindicatedAt?: string | null;
   profileVerifiedAt?: string | null;
   profileVerifiedBy?: string | null;
   profileLastEditedAt?: string;

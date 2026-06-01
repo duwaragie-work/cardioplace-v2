@@ -313,6 +313,18 @@ export class TestControlController {
     return { ok: true }
   }
 
+  // F13 — set/clear the ACE/ARB contraindication flag for med-re-add specs.
+  @Post('user/set-ace-contraindicated')
+  @HttpCode(200)
+  async setAceContraindicated(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; value: boolean },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.setAceContraindicated(body.userId, body.value)
+    return { ok: true }
+  }
+
   // Phase 4 §C — auth-onboarding spec (20a) onboarding-state control.
   @Post('user/set-onboarding-status')
   @HttpCode(200)

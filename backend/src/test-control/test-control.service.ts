@@ -320,6 +320,18 @@ export class TestControlService {
     return { rowsDeleted: 0 }
   }
 
+  /**
+   * F13 — set/clear PatientProfile.aceContraindicatedAt so specs can exercise
+   * the ACE/ARB re-add gate without walking the full B4 angioedema-resolution
+   * flow. Test-infra only.
+   */
+  async setAceContraindicated(userId: string, value: boolean): Promise<void> {
+    await this.prisma.patientProfile.update({
+      where: { userId },
+      data: { aceContraindicatedAt: value ? new Date() : null },
+    })
+  }
+
   async setEnrollment(userId: string, status: 'NOT_ENROLLED' | 'ENROLLED'): Promise<void> {
     // Cluster 8 — mirror production EnrollmentService: stamp enrolledAt on the
     // ENROLLED flip, clear it on NOT_ENROLLED, so the Q2 CAD-ramp + Q3

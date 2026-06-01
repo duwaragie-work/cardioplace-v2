@@ -366,3 +366,88 @@ describe('IntakeService.listVerificationLogs caregiver resolution (Round 2 A4)',
     expect(prisma.patientCaregiver.findMany).not.toHaveBeenCalled()
   })
 })
+
+// F13 — ACE/ARB contraindication is load-bearing on med re-add. When the
+// provider has set PatientProfile.aceContraindicatedAt (post-angioedema), a
+// re-added ACE inhibitor / ARB must be HELD for provider review and the care
+// team notified — never silently trusted.
+describe('IntakeService.createMedications — F13 ACE/ARB contraindication', () => {
+  let service: IntakeService
+  let prisma: any
+
+  function buildPrisma(aceContraindicatedAt: Date | null, primaryProviderId: string | null = 'prov-1') {
+    let createdId = 0
+    return {
+      patientProfile: {
+        findUnique: (jest.fn() as any).mockResolvedValue({
+          aceContraindicatedAt,
+          profileVerificationStatus: 'VERIFIED',
+        }),
+        update: (jest.fn() as any).mockResolvedValue({}),
+      },
+      patientMedication: {
+        findMany: (jest.fn() as any).mockResolvedValue([]),
+        create: (jest.fn() as any).mockImplementation((args: any) =>
+          Promise.resolve({ id: `med-${++createdId}`, reportedAt: new Date(), discontinuedAt: null, ...args.data }),
+        ),
+      },
+      profileVerificationLog: { createMany: (jest.fn() as any).mockResolvedValue({}) },
+      patientProviderAssignment: {
+        findUnique: (jest.fn() as any).mockResolvedValue(
+          primaryProviderId ? { primaryProviderId } : null,
+        ),
+      },
+      notification: { create: (jest.fn() as any).mockResolvedValue({}) },
+      $transaction: (fn: any) => Promise.resolve(fn(prismaRef())),
+    }
+  }
+  let _prisma: any
+  const prismaRef = () => _prisma
+
+  async function makeService(p: any) {
+    _prisma = p
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        IntakeService,
+        { provide: PrismaService, useValue: p },
+        { provide: DrugEnrichmentService, useValue: { enrich: jest.fn() } },
+        { provide: PatientAccessService, useValue: {} },
+      ],
+    }).compile()
+    return module.get<IntakeService>(IntakeService)
+  }
+
+  const aceDto = {
+    medications: [
+      { drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR', frequency: 'ONCE_DAILY', source: 'PATIENT_SELF_REPORT' },
+    ],
+  } as any
+
+  it('contraindicated patient re-adding an ACE inhibitor → held AWAITING_PROVIDER + provider notified', async () => {
+    prisma = buildPrisma(new Date('2026-05-01T00:00:00Z'))
+    service = await makeService(prisma)
+
+    const res: any = await service.createMedications('p1', aceDto)
+
+    const createArg = prisma.patientMedication.create.mock.calls[0][0]
+    expect(createArg.data.verificationStatus).toBe('AWAITING_PROVIDER')
+    expect(prisma.notification.create).toHaveBeenCalledTimes(1)
+    const notif = prisma.notification.create.mock.calls[0][0].data
+    expect(notif.userId).toBe('prov-1')
+    expect(notif.body).toContain('Lisinopril')
+    expect(res.data ?? res.result?.data).toBeDefined()
+    expect((res.contraindicatedReadd ?? res.result?.contraindicatedReadd)).toContain('Lisinopril')
+  })
+
+  it('NON-contraindicated patient re-adding an ACE inhibitor → UNVERIFIED, no provider notice', async () => {
+    prisma = buildPrisma(null)
+    service = await makeService(prisma)
+
+    const res: any = await service.createMedications('p1', aceDto)
+
+    const createArg = prisma.patientMedication.create.mock.calls[0][0]
+    expect(createArg.data.verificationStatus).toBe('UNVERIFIED')
+    expect(prisma.notification.create).not.toHaveBeenCalled()
+    expect((res.contraindicatedReadd ?? res.result?.contraindicatedReadd) ?? []).toHaveLength(0)
+  })
+})

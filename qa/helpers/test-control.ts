@@ -280,6 +280,12 @@ export class TestControl {
     await this.post('test-control/user/set-enrollment', { userId, status })
   }
 
+  /** F13 — set/clear PatientProfile.aceContraindicatedAt so the ACE/ARB
+   *  re-add gate (modal + provider-review hold) can be exercised directly. */
+  async setAceContraindicated(userId: string, value: boolean): Promise<void> {
+    await this.post('test-control/user/set-ace-contraindicated', { userId, value })
+  }
+
   /**
    * Phase 4 §C — flip a user's onboardingStatus. Seed personas are all
    * COMPLETED; spec 20a rolls one back to NOT_COMPLETED to exercise the

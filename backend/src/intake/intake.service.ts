@@ -291,6 +291,20 @@ export class IntakeService {
 
   async createMedications(userId: string, dto: IntakeMedicationsDto) {
     return this.prisma.$transaction(async (tx) => {
+      // F13 — load-bearing ACE/ARB contraindication. After a B4 angioedema
+      // resolution the provider sets PatientProfile.aceContraindicatedAt. From
+      // then on, an ACE inhibitor or ARB the patient re-adds must NOT be
+      // trusted-then-verified like a normal self-report: it is forced into
+      // AWAITING_PROVIDER (never auto-fires alerts) and the care team is
+      // notified so they can review before the drug goes live.
+      const profile = await tx.patientProfile.findUnique({
+        where: { userId },
+        select: { aceContraindicatedAt: true },
+      })
+      const aceContraindicated = profile?.aceContraindicatedAt != null
+      const isContraindicatedReadd = (drugClass: DrugClass): boolean =>
+        aceContraindicated &&
+        (drugClass === DrugClass.ACE_INHIBITOR || drugClass === DrugClass.ARB)
       // Dedup against the patient's currently-active medications using the
       // same canonical key as PUT /me/medications (see medicationKey). Any
       // incoming item whose key matches an active row is silently dropped —
@@ -349,14 +363,23 @@ export class IntakeService {
               notes: item.notes,
               // Patient self-report starts unverified; voice/photo cannot
               // fire automated alerts until a provider verifies (see
-              // BUILD_PLAN §3.4 safety-net table).
+              // BUILD_PLAN §3.4 safety-net table). F13 — a re-added ACE/ARB on
+              // a contraindicated patient is also held for provider review.
               verificationStatus:
-                item.source === 'PATIENT_VOICE' || item.source === 'PATIENT_PHOTO'
+                isContraindicatedReadd(item.drugClass) ||
+                item.source === 'PATIENT_VOICE' ||
+                item.source === 'PATIENT_PHOTO'
                   ? MedicationVerificationStatus.AWAITING_PROVIDER
                   : MedicationVerificationStatus.UNVERIFIED,
             },
           }),
         ),
+      )
+
+      // F13 — collect contraindicated ACE/ARB re-adds so we can alert the care
+      // team and tell the patient app the add needs provider review.
+      const contraindicatedReadd = created.filter((m) =>
+        isContraindicatedReadd(m.drugClass),
       )
 
       if (created.length) {
@@ -378,6 +401,37 @@ export class IntakeService {
         await this.flipProfileToUnverified(tx, userId)
       }
 
+      // F13 — fire a Tier-2-style admin notice to the patient's primary
+      // provider for each contraindicated ACE/ARB re-add, so the care team
+      // reviews before the held medication is ever trusted.
+      if (contraindicatedReadd.length) {
+        const assignment = await tx.patientProviderAssignment.findUnique({
+          where: { userId },
+          select: { primaryProviderId: true },
+        })
+        const providerId = assignment?.primaryProviderId
+        if (providerId) {
+          const drugList = contraindicatedReadd
+            .map((m) => m.drugName)
+            .join(', ')
+          await tx.notification.create({
+            data: {
+              userId: providerId,
+              channel: 'DASHBOARD',
+              title: 'Contraindicated medication re-added',
+              body: `Patient re-added a medication flagged as contraindicated (prior angioedema): ${drugList}. It is held for your review before it can be trusted.`,
+              tips: [],
+            },
+          })
+        } else {
+          this.logger.warn(
+            `F13 — contraindicated ACE/ARB re-add for user ${userId} but no primary provider to notify (${contraindicatedReadd
+              .map((m) => m.drugName)
+              .join(', ')})`,
+          )
+        }
+      }
+
       const responseRows = [...created, ...skippedExisting]
       const message = skippedExisting.length
         ? `${created.length} medication(s) recorded, ${skippedExisting.length} duplicate(s) skipped`
@@ -388,6 +442,10 @@ export class IntakeService {
           statusCode: 201,
           message,
           data: responseRows.map((m) => this.serializeMedication(m)),
+          // F13 — names of any ACE/ARB the patient re-added while
+          // contraindicated. The patient app uses this to confirm the
+          // "needs provider review" outcome after an acknowledged add.
+          contraindicatedReadd: contraindicatedReadd.map((m) => m.drugName),
         },
         created,
       }
