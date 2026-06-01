@@ -1,5 +1,5 @@
-import { render, screen, fireEvent } from '@testing-library/react'
-import AlertsTab from './AlertsTab'
+import { render, screen, fireEvent, within } from '@testing-library/react'
+import AlertsTab, { groupAlertsByReading } from './AlertsTab'
 import type { PatientAlert } from '@/lib/services/patient-detail.service'
 
 // B2 — co-fired alert rows (multiple DeviationAlert rows from ONE reading,
@@ -120,6 +120,76 @@ describe('AlertsTab — cofire group container (F5)', () => {
     ]
     render(<AlertsTab alerts={alerts} loading={false} onResolved={() => {}} />)
     expect(screen.queryByTestId('admin-alert-cofire-group')).not.toBeInTheDocument()
+  })
+})
+
+// F6 — within a cofire group the most urgent finding leads. Previously the
+// informational Tier 3 row could sort above BP Level 1.
+describe('AlertsTab — cofire group priority sort (F6)', () => {
+  const shared = '2026-05-22T10:00:00Z'
+  function readingAlert(id: string, tier: string): PatientAlert {
+    const iso = new Date(shared).toISOString()
+    return makeAlert({
+      id,
+      tier: tier as PatientAlert['tier'],
+      createdAt: iso,
+      journalEntry: {
+        id: `je-${id}`,
+        systolicBP: 185,
+        diastolicBP: 100,
+        pulse: 74,
+        weight: null,
+        measuredAt: iso,
+      },
+    } as Partial<PatientAlert>)
+  }
+
+  it('orders [Tier 3, BP L1, BP L2] as [BP L2, BP L1, Tier 3]', () => {
+    const groups = groupAlertsByReading([
+      readingAlert('t3', 'TIER_3_INFO'),
+      readingAlert('bp1', 'BP_LEVEL_1_HIGH'),
+      readingAlert('l2', 'BP_LEVEL_2'),
+    ])
+    expect(groups).toHaveLength(1)
+    const group = groups[0]
+    expect(group.kind).toBe('cofire')
+    if (group.kind === 'cofire') {
+      expect(group.alerts.map((a) => a.id)).toEqual(['l2', 'bp1', 't3'])
+    }
+  })
+
+  it('puts Tier 1 first when present', () => {
+    const groups = groupAlertsByReading([
+      readingAlert('bp1', 'BP_LEVEL_1_HIGH'),
+      readingAlert('t1', 'TIER_1_CONTRAINDICATION'),
+      readingAlert('t3', 'TIER_3_INFO'),
+    ])
+    const group = groups[0]
+    if (group.kind === 'cofire') {
+      expect(group.alerts[0].id).toBe('t1')
+      expect(group.alerts[group.alerts.length - 1].id).toBe('t3')
+    }
+  })
+
+  it('renders the cofire rows in priority order in the DOM', () => {
+    render(
+      <AlertsTab
+        alerts={[
+          readingAlert('t3', 'TIER_3_INFO'),
+          readingAlert('bp1', 'BP_LEVEL_1_HIGH'),
+          readingAlert('l2', 'BP_LEVEL_2'),
+        ]}
+        loading={false}
+        onResolved={() => {}}
+      />,
+    )
+    const group = screen.getByTestId('admin-alert-cofire-group')
+    const rows = within(group).getAllByTestId(/admin-alert-row-/)
+    expect(rows.map((r) => r.getAttribute('data-testid'))).toEqual([
+      'admin-alert-row-l2',
+      'admin-alert-row-bp1',
+      'admin-alert-row-t3',
+    ])
   })
 })
 

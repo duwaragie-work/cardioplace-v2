@@ -90,6 +90,20 @@ type AlertGroup =
   | { kind: 'cofire'; key: string; alerts: PatientAlert[] }
   | { kind: 'single'; alert: PatientAlert };
 
+// F6 — clinical priority within a cofire group, highest first:
+// Tier 1 > BP L2 > Tier 2 > BP L1 > Tier 3. Mirrors the dashboard banner
+// picker so the most urgent finding always leads the group (previously the
+// informational Tier 3 caregiver-edema row could sort above BP Level 1).
+const TIER_PRIORITY: Record<TierBucket, number> = {
+  TIER_1: 100,
+  BP_L2: 80,
+  TIER_2: 60,
+  BP_L1: 40,
+  TIER_3: 20,
+  OTHER: 10,
+  ALL: 0,
+};
+
 export function groupAlertsByReading(alerts: PatientAlert[]): AlertGroup[] {
   const groups: AlertGroup[] = [];
   let i = 0;
@@ -99,7 +113,14 @@ export function groupAlertsByReading(alerts: PatientAlert[]): AlertGroup[] {
       let j = i + 1;
       while (j < alerts.length && (alerts[j].journalEntry?.measuredAt ?? null) === key) j++;
       if (j - i >= 2) {
-        groups.push({ kind: 'cofire', key, alerts: alerts.slice(i, j) });
+        // F6 — order the cofire members by tier priority descending. Stable
+        // for equal tiers (slice preserves the source order before sorting).
+        const members = alerts
+          .slice(i, j)
+          .sort(
+            (a, b) => TIER_PRIORITY[tierBucket(b.tier)] - TIER_PRIORITY[tierBucket(a.tier)],
+          );
+        groups.push({ kind: 'cofire', key, alerts: members });
         i = j;
         continue;
       }
