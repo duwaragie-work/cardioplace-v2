@@ -103,7 +103,7 @@ const es: Record<TranslationKey, string> = {
   'dashboard.hearSummary': 'Escuchar resumen',
   'dashboard.yourGoal': 'Su objetivo',
   'dashboard.belowTarget': 'Por debajo de {target} mmHg',
-  'dashboard.goalTolerance': 'Las alertas altas comienzan en {value} — su objetivo más un pequeño margen.',
+  'dashboard.goalTolerance': 'Las alertas altas comienzan en {value}, su objetivo más un pequeño margen.',
   'dashboard.setByCareTeam': '· establecido por su equipo de atención',
   'dashboard.chartDateAxis': 'Fecha',
   'dashboard.chartAt': 'a las',
