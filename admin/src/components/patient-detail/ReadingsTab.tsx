@@ -118,6 +118,38 @@ function dateFilterCutoff(filter: DateFilter): Date | null {
   return d;
 }
 
+// F25 — a single BP check-in writes one JournalEntry per reading, all sharing
+// a sessionId. The flat list rendered them as N indistinguishable rows, so an
+// admin couldn't tell three rows were one sitting. Group consecutive entries
+// that share a non-null sessionId; a group of ≥2 becomes a bordered session
+// card, singletons stay plain rows.
+export type ReadingGroup =
+  | { kind: 'session'; sessionId: string; entries: PatientJournalEntry[] }
+  | { kind: 'single'; entry: PatientJournalEntry };
+
+export function groupReadingsBySession(entries: PatientJournalEntry[]): ReadingGroup[] {
+  const groups: ReadingGroup[] = [];
+  let i = 0;
+  while (i < entries.length) {
+    const sid = entries[i].sessionId;
+    if (sid != null) {
+      let j = i + 1;
+      while (j < entries.length && entries[j].sessionId === sid) j++;
+      const slice = entries.slice(i, j);
+      groups.push(
+        slice.length >= 2
+          ? { kind: 'session', sessionId: sid, entries: slice }
+          : { kind: 'single', entry: slice[0] },
+      );
+      i = j;
+    } else {
+      groups.push({ kind: 'single', entry: entries[i] });
+      i++;
+    }
+  }
+  return groups;
+}
+
 export default function ReadingsTab({ patientId }: Props) {
   const [entries, setEntries] = useState<PatientJournalEntry[]>([]);
   const [rejected, setRejected] = useState<RejectedReading[]>([]);
@@ -272,11 +304,51 @@ export default function ReadingsTab({ patientId }: Props) {
         <EmptyCard hasReadings={entries.length > 0} />
       ) : (
         <div className="space-y-2" data-testid="admin-readings-list">
-          {filtered.map((entry) => (
-            <ReadingCard key={entry.id} entry={entry} />
-          ))}
+          {groupReadingsBySession(filtered).map((g) =>
+            g.kind === 'session' ? (
+              <SessionGroupCard key={`session-${g.sessionId}`} group={g} />
+            ) : (
+              <ReadingCard key={g.entry.id} entry={g.entry} />
+            ),
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Session group ───────────────────────────────────────────────────────────
+
+function SessionGroupCard({
+  group,
+}: {
+  group: Extract<ReadingGroup, { kind: 'session' }>;
+}) {
+  const times = group.entries.map((e) => new Date(e.measuredAt).getTime());
+  const first = new Date(Math.min(...times)).toISOString();
+  const last = new Date(Math.max(...times)).toISOString();
+  return (
+    <div
+      data-testid={`admin-readings-session-${group.sessionId}`}
+      className="rounded-2xl overflow-hidden"
+      style={{
+        border: '1.5px solid var(--brand-border)',
+        backgroundColor: 'var(--brand-background)',
+      }}
+    >
+      <div
+        data-testid="admin-readings-session-header"
+        className="px-4 py-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider"
+        style={{ color: 'var(--brand-text-muted)' }}
+      >
+        <Clock className="w-3 h-3" />
+        Session: {group.entries.length} readings · {formatTime(first)} – {formatTime(last)}
+      </div>
+      <div className="px-2 pb-2 space-y-2">
+        {group.entries.map((e) => (
+          <ReadingCard key={e.id} entry={e} />
+        ))}
+      </div>
     </div>
   );
 }
