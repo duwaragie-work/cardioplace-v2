@@ -227,6 +227,27 @@ export class TestControl {
     return this.post('test-control/user/set-medication', { userId, med })
   }
 
+  /**
+   * F17 — place an existing medication (matched by drugName) on HOLD with a
+   * given reason (default PROVIDER_DIRECTED_HOLD), mirroring an admin hold.
+   */
+  async setMedicationHold(
+    userId: string,
+    drugName: string,
+    holdReason:
+      | 'AWAITING_RECORDS'
+      | 'UNCLEAR_NAME'
+      | 'UNCLEAR_DOSE'
+      | 'PROVIDER_DIRECTED_HOLD'
+      | 'OTHER' = 'PROVIDER_DIRECTED_HOLD',
+  ): Promise<{ id: string }> {
+    return this.post('test-control/user/set-medication-hold', {
+      userId,
+      drugName,
+      holdReason,
+    })
+  }
+
   // ─── State reset ────────────────────────────────────────────────────────
   /**
    * Wipe journal/alert/escalation/notification rows for ALL *.cardioplace.test

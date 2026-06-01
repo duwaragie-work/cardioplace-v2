@@ -233,6 +233,9 @@ const en = {
   'checkin.b4.subtitle': 'Tap each one to tell us if you took it.',
   'checkin.b4.audio': 'Medications today. Tap each one to tell us if you took it.',
   'checkin.b4.noMeds': "We don't have any medications on file for you yet. Add your medications in settings for better follow-up.",
+  'checkin.b4.onHoldBadge': 'On hold',
+  'checkin.b4.onHoldDoNotTake': 'ON HOLD — your care team has paused this medication. Do not take it unless they tell you to.',
+  'checkin.b4.onHoldUnderReview': 'Your care team is reviewing this medication. Keep taking it as usual unless they tell you otherwise.',
   // Drug-class labels — patient-facing descriptive terms shown under the
   // drug name. Clinical abbreviations (ARB, MRA, SGLT2, ARNI) stay as-is.
   'checkin.b4.classAceInhibitor': 'ace inhibitor',

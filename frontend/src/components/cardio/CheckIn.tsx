@@ -41,6 +41,7 @@ import {
   Stethoscope,
   Baby,
   Pill,
+  PauseCircle,
   Scale,
   Save,
   CalendarClock,
@@ -844,6 +845,13 @@ function StepWeight({ form, setField }: StepProps) {
 
 interface MedicationStepProps extends StepProps {
   medications: Array<{ id: string; drugName: string; drugClass: string }>;
+  // F17 — meds on HOLD, shown as non-actionable informational rows.
+  heldMeds: Array<{
+    id: string;
+    drugName: string;
+    drugClass: string;
+    holdReason?: string | null;
+  }>;
   medsLoading: boolean;
 }
 
@@ -877,7 +885,7 @@ const DRUG_CLASS_LABEL_KEYS: Record<string, TranslationKey> = {
   OTHER_UNVERIFIED: 'checkin.b4.classOtherUnverified',
 };
 
-function StepMedication({ form, setField, medications, medsLoading }: MedicationStepProps) {
+function StepMedication({ form, setField, medications, heldMeds, medsLoading }: MedicationStepProps) {
   const { t } = useLanguage();
   // Resolve a drug-class label, falling back to the prisma value humanised
   // (e.g. UNKNOWN_NEW_CLASS → "unknown new class") so a freshly-added enum
@@ -937,7 +945,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
         </div>
       )}
 
-      {!medsLoading && medications.length === 0 && (
+      {!medsLoading && medications.length === 0 && heldMeds.length === 0 && (
         // Defensive fallback — parent flow should have skipped this step when
         // the patient has no meds on file. Kept so a stale render doesn't
         // crash the wizard.
@@ -1129,6 +1137,53 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                   </fieldset>
                 </div>
               )}
+            </div>
+          );
+        })}
+
+      {/* F17 — meds the care team has placed on HOLD. Informational only: no
+          Took/Missed buttons, excluded from the adherence rollup. Copy branches
+          on holdReason — PROVIDER_DIRECTED_HOLD is a clinical "stop taking it";
+          the administrative reasons mean "keep taking it, we're reviewing". */}
+      {!medsLoading &&
+        heldMeds.map((med) => {
+          const isProviderDirected = med.holdReason === 'PROVIDER_DIRECTED_HOLD';
+          return (
+            <div
+              key={med.id}
+              data-testid="checkin-held-med"
+              data-hold-reason={med.holdReason ?? ''}
+              className="rounded-xl p-4 opacity-80"
+              style={{ backgroundColor: 'var(--brand-background)', border: '1.5px dashed var(--brand-border)' }}
+            >
+              <div className="flex items-start gap-3">
+                <PauseCircle
+                  className="w-5 h-5 mt-0.5 shrink-0"
+                  style={{ color: 'var(--brand-text-muted)' }}
+                  aria-hidden="true"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[15px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                      {med.drugName}
+                    </span>
+                    <span
+                      className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full"
+                      style={{ backgroundColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                    >
+                      {t('checkin.b4.onHoldBadge')}
+                    </span>
+                  </div>
+                  <p className="text-[12px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+                    {drugClassLabel(med.drugClass)}
+                  </p>
+                  <p className="text-[13px] mt-1.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+                    {isProviderDirected
+                      ? t('checkin.b4.onHoldDoNotTake')
+                      : t('checkin.b4.onHoldUnderReview')}
+                  </p>
+                </div>
+              </div>
             </div>
           );
         })}
@@ -1657,6 +1712,10 @@ export default function CheckIn() {
     setIntakeIncomplete(!!draft?.currentStep && draft.currentStep !== 'A11');
   }, [user?.id]);
   const [medications, setMedications] = useState<PatientMedication[]>([]);
+  // F17 — meds on PROVIDER/admin HOLD. Rendered in the MEDICATION step as
+  // informational, non-actionable rows so the patient knows the care team has
+  // paused them; excluded from the Took/Missed adherence rollup + validation.
+  const [heldMeds, setHeldMeds] = useState<PatientMedication[]>([]);
   const [medsLoading, setMedsLoading] = useState(true);
 
   const [form, setForm] = useState<FormData>(emptyForm);
@@ -1743,9 +1802,13 @@ export default function CheckIn() {
     if (isLoading || !isAuthenticated) return;
     let cancelled = false;
     (async () => {
-      const meds = await listMyMedications().catch(() => [] as PatientMedication[]);
+      const meds = await listMyMedications({ includeHeld: true }).catch(
+        () => [] as PatientMedication[],
+      );
       if (!cancelled) {
-        setMedications(meds.filter((m) => m.frequency !== 'AS_NEEDED'));
+        const scheduled = meds.filter((m) => m.frequency !== 'AS_NEEDED');
+        setMedications(scheduled.filter((m) => m.verificationStatus !== 'HOLD'));
+        setHeldMeds(scheduled.filter((m) => m.verificationStatus === 'HOLD'));
         setMedsLoading(false);
       }
     })();
@@ -1805,9 +1868,11 @@ export default function CheckIn() {
   // doesn't accidentally shortcut the flow.
   const flow = useMemo(() => {
     const base = readingNumber === 0 ? STEP_FLOW : SECOND_READING_FLOW;
-    if (medsLoading || medications.length > 0) return base;
+    // F17 — keep the MEDICATION step when the only meds on file are on HOLD, so
+    // the patient still sees the non-actionable "ON HOLD" notice.
+    if (medsLoading || medications.length > 0 || heldMeds.length > 0) return base;
     return base.filter((s) => s !== 'MEDICATION');
-  }, [readingNumber, medications.length, medsLoading]);
+  }, [readingNumber, medications.length, heldMeds.length, medsLoading]);
   const stepIndex = flow.indexOf(step);
   const visibleTotal = flow.length;
   const visibleIndex = stepIndex + 1;
@@ -2433,6 +2498,7 @@ export default function CheckIn() {
               <StepMedication
                 {...stepProps}
                 medications={medications}
+                heldMeds={heldMeds}
                 medsLoading={medsLoading}
               />
             )}

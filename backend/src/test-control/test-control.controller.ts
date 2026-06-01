@@ -246,6 +246,27 @@ export class TestControlController {
     return this.svc.setUserMedication(body.userId, body.med)
   }
 
+  // F17 — place an existing medication on HOLD (provider-directed by default)
+  // so the "held meds surface in daily check-in" spec can set up state.
+  @Post('user/set-medication-hold')
+  @HttpCode(200)
+  async setMedicationHold(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: {
+      userId: string
+      drugName: string
+      holdReason?:
+        | 'AWAITING_RECORDS'
+        | 'UNCLEAR_NAME'
+        | 'UNCLEAR_DOSE'
+        | 'PROVIDER_DIRECTED_HOLD'
+        | 'OTHER'
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.setMedicationHold(body.userId, body.drugName, body.holdReason)
+  }
+
   // ─── Reset ──────────────────────────────────────────────────────────────
   @Post('reset/test-patients')
   @HttpCode(200)

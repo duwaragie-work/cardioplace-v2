@@ -57,6 +57,32 @@ describe('IntakeService.listMedications filter scoping', () => {
     await service.listMedications('u1', true, true)
     expect(whereOf()).toEqual({ userId: 'u1' })
   })
+
+  it('F17: HOLD meds survive the default filter and keep holdReason for the check-in', async () => {
+    findMany.mockResolvedValueOnce([
+      {
+        id: 'm1',
+        userId: 'u1',
+        drugName: 'Cozaar',
+        drugClass: 'ARB',
+        verificationStatus: 'HOLD',
+        holdReason: 'PROVIDER_DIRECTED_HOLD',
+        frequency: 'ONCE_DAILY',
+        source: 'PATIENT_SELF_REPORT',
+        reportedAt: new Date('2026-05-01T00:00:00Z'),
+        verifiedAt: null,
+        discontinuedAt: null,
+      },
+    ])
+    const res = await service.listMedications('u1')
+    // The default filter only carves out REJECTED — HOLD is NOT excluded.
+    expect(whereOf().verificationStatus).toEqual({ not: 'REJECTED' })
+    expect(res.data).toHaveLength(1)
+    expect(res.data[0]).toMatchObject({
+      verificationStatus: 'HOLD',
+      holdReason: 'PROVIDER_DIRECTED_HOLD',
+    })
+  })
 })
 
 // Profile fixture with the Date fields serializeProfile() needs.

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { GapAlertService } from '../crons/gap-alert.service.js'
 import { MonthlyReaskService } from '../crons/monthly-reask.service.js'
@@ -505,6 +505,39 @@ export class TestControlService {
       select: { id: true },
     })
     return { id: created.id }
+  }
+
+  // F17 — place a user's medication (matched by drugName) on HOLD with a given
+  // reason, mirroring an admin provider-directed hold. Lets the daily-check-in
+  // "held meds surface as non-actionable" spec set up state deterministically.
+  async setMedicationHold(
+    userId: string,
+    drugName: string,
+    holdReason:
+      | 'AWAITING_RECORDS'
+      | 'UNCLEAR_NAME'
+      | 'UNCLEAR_DOSE'
+      | 'PROVIDER_DIRECTED_HOLD'
+      | 'OTHER' = 'PROVIDER_DIRECTED_HOLD',
+  ): Promise<{ id: string }> {
+    const existing = await this.prisma.patientMedication.findFirst({
+      where: { userId, drugName },
+      select: { id: true },
+    })
+    if (!existing) {
+      throw new NotFoundException(
+        `No medication "${drugName}" found for user ${userId}`,
+      )
+    }
+    await this.prisma.patientMedication.update({
+      where: { id: existing.id },
+      data: {
+        verificationStatus: 'HOLD',
+        holdReason,
+        holdSetAt: new Date(),
+      },
+    })
+    return { id: existing.id }
   }
 
   async setProfileVerificationStatus(
