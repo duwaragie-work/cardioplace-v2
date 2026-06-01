@@ -213,10 +213,15 @@ describe('AlertEngineService (orchestrator)', () => {
       // v2 addendum D.5: emergency-axis row co-fires with the Tier 1
       // contraindication so the patient gets the 911 message at T+0.
       // At 195/130 absoluteEmergency (≥180/120) wins the emergency axis
-      // ahead of pregnancyL2; pregnancyL1High also fires on bp-high.
+      // ahead of pregnancyL2.
+      // F20 — emergency is exclusive: once the 911 row claims the emergency
+      // axis the lower-tier bp-high ladder (pregnancyL1High) is suppressed,
+      // so a "contact your provider tomorrow" message never co-renders with
+      // the 911 takeover. The Tier 1 ACE/ARB contraindication (Stage A,
+      // different axis) still co-fires per D.5.
       expect(r?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
       expect(r?.tier).toBe('BP_LEVEL_2')
-      expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(3)
+      expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(2)
       const persistedRuleIds = (
         prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
       ).map((c) => c[0].data.ruleId)
@@ -224,9 +229,9 @@ describe('AlertEngineService (orchestrator)', () => {
         expect.arrayContaining([
           'RULE_ABSOLUTE_EMERGENCY',
           'RULE_PREGNANCY_ACE_ARB',
-          'RULE_PREGNANCY_L1_HIGH',
         ]),
       )
+      expect(persistedRuleIds).not.toContain('RULE_PREGNANCY_L1_HIGH')
     })
 
     it('both Tier 1 pairs present — pregnancy+ACE wins short-circuit', async () => {
@@ -732,6 +737,55 @@ describe('AlertEngineService (orchestrator)', () => {
       const r = await service.evaluate('entry-1')
       expect(r?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
       expect(r?.tier).toBe('BP_LEVEL_2')
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // F20 — emergency-exclusive short-circuit. Once a 911/BP-L2 rule claims the
+  // emergency axis, no lower-tier BP/HR row co-fires on the same reading, so
+  // the patient never gets a "contact tomorrow" message beside a 911 takeover.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('F20 — emergency-exclusive short-circuit', () => {
+    function persistedIds(): string[] {
+      return (
+        prisma.deviationAlert.create.mock.calls as Array<
+          [{ data: { ruleId: string } }]
+        >
+      ).map((c) => c[0].data.ruleId)
+    }
+
+    it('immediate path — multi-reading session 185/100 fires ONLY emergency, not L1-high', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ readingCount: 2, systolicBP: 185, diastolicBP: 100 }),
+      )
+      const r = await service.evaluate('entry-1')
+      expect(r?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+      expect(persistedIds()).toContain('RULE_ABSOLUTE_EMERGENCY')
+      expect(persistedIds()).not.toContain('RULE_STANDARD_L1_HIGH')
+    })
+
+    it('session-finalize path — single finalized reading 185/100 still fires ONLY emergency', async () => {
+      // The 5-min finalize cron re-runs evaluate() with singleReadingFinalized
+      // = true, which would otherwise let Stage C L1-high through the gate.
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({
+          readingCount: 1,
+          singleReadingFinalized: true,
+          systolicBP: 185,
+          diastolicBP: 100,
+        }),
+      )
+      const r = await service.evaluate('entry-1')
+      expect(r?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+      expect(persistedIds()).not.toContain('RULE_STANDARD_L1_HIGH')
+    })
+
+    it('non-emergency reading is unaffected — 165/95 still fires L1-high', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 165, diastolicBP: 95 }),
+      )
+      const r = await service.evaluate('entry-1')
+      expect(r?.ruleId).toBe('RULE_STANDARD_L1_HIGH')
     })
   })
 })

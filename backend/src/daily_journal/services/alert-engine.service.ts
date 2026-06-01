@@ -626,6 +626,23 @@ export class AlertEngineService {
       claimed.set(axis, r)
     }
 
+    // F20 — emergency is exclusive. Once a BP_LEVEL_2 / 911-warranting rule
+    // (absolute emergency, pregnancy L2, or a symptom-override emergency) has
+    // claimed the 'emergency' axis, no lower-tier BP/HR rule on the SAME
+    // reading is clinically meaningful — and a "contact your provider
+    // tomorrow / recheck before bed" L1 message rendered alongside a "call
+    // 911 now" message is a real harm path. Short-circuit before Stage C so
+    // only the top-tier axes already claimed in Stage A/B survive (airway
+    // angioedema + Tier 1 contraindication co-fire intentionally per D.5;
+    // each runs its own ladder). This also closes the session-finalize
+    // re-eval path: the existing emergency row triggers this early-return so
+    // no L1 row is appended on the second pass.
+    if (claimed.has('emergency')) {
+      return AXIS_PRIORITY
+        .map((axis) => claimed.get(axis))
+        .filter((r): r is RuleResult => r !== undefined)
+    }
+
     // Cluster 6 Q2 (Manisha 5/9/26) — non-emergency BP/HR alerts require
     // ≥2 readings averaged in the current session. Emergency rules from
     // Stage A (symptom override) + Stage B (absolute emergency, pregnancy

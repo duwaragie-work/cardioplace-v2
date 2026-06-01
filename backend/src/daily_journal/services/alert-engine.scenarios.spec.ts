@@ -1218,7 +1218,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(1)
   })
 
-  it('Scenario 51 — Pregnant + ACE + BP 195/130 → Tier 1 + emergency co-fire (v2 addendum D.5)', async () => {
+  it('Scenario 51 — Pregnant + ACE + BP 195/130 → Tier 1 + emergency co-fire; L1-high suppressed (D.5 + F20)', async () => {
     const { result } = await run(
       buildSession({ systolicBP: 195, diastolicBP: 130 }),
       buildCtx({
@@ -1233,11 +1233,11 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     // qualify on the emergency axis — absoluteEmergency runs first in
     // Stage B and claims the slot.
     expect(result?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
-    // Three distinct rule violations → three rows: contraindication
-    // (Tier 1), emergency (BP L2 absolute), and bp-high (pregnancyL1High
-    // — pregnant + SBP ≥140). Each ladder is independent per v2 addendum
-    // Part D.
-    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(3)
+    // F20 — emergency is exclusive: two rows, not three. The Tier 1 ACE/ARB
+    // contraindication (Stage A) co-fires with the BP L2 911 row, but the
+    // lower-tier pregnancyL1High (bp-high) ladder is suppressed so no
+    // "contact your provider" message renders beside the 911 takeover.
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(2)
     const persistedRuleIds = (
       prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
     ).map((c) => c[0].data.ruleId)
@@ -1245,9 +1245,9 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       expect.arrayContaining([
         'RULE_ABSOLUTE_EMERGENCY',
         'RULE_PREGNANCY_ACE_ARB',
-        'RULE_PREGNANCY_L1_HIGH',
       ]),
     )
+    expect(persistedRuleIds).not.toContain('RULE_PREGNANCY_L1_HIGH')
   })
 
   // ========================================================================
@@ -1645,12 +1645,16 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
   })
 
-  it('Scenario 67 (G2) — Pregnant + ACE + 175/115 → ACE_ARB + L2 + L1_HIGH (three ladders)', async () => {
+  it('Scenario 67 (G2) — Pregnant + ACE + 175/115 → ACE_ARB + L2; L1_HIGH suppressed (F20)', async () => {
     await run(
       buildSession({ systolicBP: 175, diastolicBP: 115, pulse: 80 }),
       buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
     )
-    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(3)
+    // F20 — emergency is exclusive. pregnancyL2 (≥160/110) claims the
+    // emergency axis, so the lower-tier pregnancyL1High (bp-high) ladder is
+    // suppressed. The Tier 1 ACE/ARB contraindication (Stage A) survives →
+    // two ladders, not three.
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(2)
     const persistedRuleIds = (
       prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
     ).map((c) => c[0].data.ruleId)
@@ -1658,9 +1662,9 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       expect.arrayContaining([
         'RULE_PREGNANCY_ACE_ARB',
         'RULE_PREGNANCY_L2',
-        'RULE_PREGNANCY_L1_HIGH',
       ]),
     )
+    expect(persistedRuleIds).not.toContain('RULE_PREGNANCY_L1_HIGH')
   })
 
   it('Scenario 68 (G3) — Pregnant + ACE + newOnsetHeadache + normal BP → ACE_ARB + SYMPTOM_OVERRIDE_PREGNANCY', async () => {
