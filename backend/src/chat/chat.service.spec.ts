@@ -18,6 +18,7 @@ import { GeminiService } from '../gemini/gemini.service.js'
 import { OcrService } from '../ocr/ocr.service.js'
 import { MedicationAdherenceService } from './services/medication-adherence.service.js'
 import { SymptomQuickLogService } from './services/symptom-quick-log.service.js'
+import { AlertEngineService } from '../daily_journal/services/alert-engine.service.js'
 
 const NOW = new Date('2026-04-22T10:00:00Z')
 const DOB = new Date('1980-06-15T00:00:00Z')
@@ -110,6 +111,10 @@ describe('ChatService.buildPatientSystemPrompt() — phase/16', () => {
         { provide: OcrService, useValue: {} },
         { provide: MedicationAdherenceService, useValue: {} },
         { provide: SymptomQuickLogService, useValue: {} },
+        // ChatService only packages this into its tool-dispatch deps bag
+        // (alertEngine: this.alertEngineService) — no method is invoked in the
+        // spec's paths, so a bare mock satisfies the constructor DI.
+        { provide: AlertEngineService, useValue: { evaluateAdHoc: jest.fn() } },
       ],
     }).compile()
     service = module.get(ChatService)
