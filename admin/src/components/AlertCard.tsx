@@ -238,8 +238,23 @@ export default function AlertCard({
             {alert.mode && (
               <span
                 data-testid={`admin-alert-mode-badge-${alert.id}`}
-                title="Thresholds this alert was evaluated against"
-                className="inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+                // F22 — "Personalized" reflects the patient's monitoring stage
+                // (graduated post-7 baseline readings), NOT which rule's
+                // threshold fired. A standard-axis rule can still fire while the
+                // patient is in personalized mode. Spell that out on hover so a
+                // clinician doesn't read the badge as "the personalized
+                // threshold triggered this".
+                title={
+                  alert.mode === 'PERSONALIZED'
+                    ? 'This patient has graduated to personalized monitoring (post-7 baseline readings). The badge reflects the patient’s monitoring stage, not necessarily which rule’s threshold fired — a standard-axis rule may have triggered this alert.'
+                    : 'This patient is on standard monitoring (fewer than 7 baseline readings). Alerts evaluate against standard AHA thresholds.'
+                }
+                aria-label={
+                  alert.mode === 'PERSONALIZED'
+                    ? 'Personalized monitoring: reflects the patient’s monitoring stage, not necessarily which rule’s threshold fired'
+                    : 'Standard monitoring: evaluated against standard AHA thresholds'
+                }
+                className="inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full cursor-help"
                 style={{ backgroundColor: 'var(--brand-surface-muted, #f1f5f9)', color: 'var(--brand-text-secondary)' }}
               >
                 {alert.mode === 'PERSONALIZED' ? 'Personalized' : 'Standard'}

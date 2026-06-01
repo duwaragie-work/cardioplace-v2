@@ -132,3 +132,22 @@ describe('AlertCard — mode badge (B3)', () => {
     expect(screen.queryByTestId('admin-alert-mode-badge-alert-1')).not.toBeInTheDocument()
   })
 })
+
+// F22 — the "Personalized" badge is semantically ambiguous: it reflects the
+// patient's monitoring stage, not which rule's threshold fired. A hover tooltip
+// disambiguates it so a clinician doesn't read it as "personalized threshold
+// fired".
+describe('AlertCard — PERSONALIZED badge tooltip (F22)', () => {
+  it('explains that the PERSONALIZED badge reflects monitoring stage, not the rule that fired', () => {
+    renderCard(makeAlert({ mode: 'PERSONALIZED' }))
+    const badge = screen.getByTestId('admin-alert-mode-badge-alert-1')
+    expect(badge).toHaveAttribute('title', expect.stringContaining('not necessarily which rule'))
+    expect(badge.getAttribute('aria-label')).toMatch(/monitoring stage/i)
+  })
+
+  it('explains that the STANDARD badge means standard AHA thresholds', () => {
+    renderCard(makeAlert({ mode: 'STANDARD' }))
+    const badge = screen.getByTestId('admin-alert-mode-badge-alert-1')
+    expect(badge).toHaveAttribute('title', expect.stringContaining('standard AHA thresholds'))
+  })
+})
