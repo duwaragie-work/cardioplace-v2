@@ -18,7 +18,17 @@ interface Props {
   alert: DeviationAlertDto;
   acknowledging: boolean;
   onAcknowledge: () => void;
+  /** F27 — true when the patient is not yet ENROLLED. The escalation pipeline
+   *  defers all dispatch until enrollment, so we must NOT tell the patient
+   *  their care team has been notified. */
+  isPreEnrollment?: boolean;
 }
+
+// F27 — shown in place of any "your care team has been notified" reassurance
+// while the patient is pre-enrollment. The dispatch pipeline has NOT contacted
+// anyone yet, so the only safe guidance is to self-escalate true emergencies.
+const PRE_ENROLLMENT_NOTICE =
+  'Your enrollment is pending. If you have any concerning symptoms — chest pain, severe headache, difficulty breathing, vision changes — call 911 or go to the ER directly.';
 
 /**
  * When the v2 rule engine hasn't classified this alert yet (`tier` is null —
@@ -69,7 +79,7 @@ function formatTime(iso: string): string {
   }
 }
 
-export default function TierAlertView({ alert, acknowledging, onAcknowledge }: Props) {
+export default function TierAlertView({ alert, acknowledging, onAcknowledge, isPreEnrollment = false }: Props) {
   const router = useRouter();
   const { t, locale } = useLanguage();
   // Use the rule engine's tier when present; otherwise derive one from the
@@ -97,7 +107,10 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
     ? formatTime(alert.journalEntry.measuredAt)
     : formatTime(alert.createdAt);
   const isResolved = alert.status === 'ACKNOWLEDGED' || alert.status === 'RESOLVED';
-  const audioText = `${v.title} ${body} ${v.footer}`;
+  // F27 — while pre-enrollment, the footer reassurance must not claim the care
+  // team was notified (dispatch is deferred). Swap in the self-escalation notice.
+  const effectiveFooter = isPreEnrollment ? PRE_ENROLLMENT_NOTICE : v.footer;
+  const audioText = `${v.title} ${body} ${effectiveFooter}`;
 
   return (
     <main id="main" className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
@@ -195,8 +208,9 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
               color: 'var(--brand-text-secondary)',
               borderTop: `1px solid ${v.accent}`,
             }}
+            data-testid="alert-footer"
           >
-            {v.footer}
+            {effectiveFooter}
           </div>
         </motion.div>
 
@@ -280,6 +294,41 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
                       {rationale}
                     </p>
                   )}
+                </div>
+              </div>
+            );
+          } else if (isPreEnrollment) {
+            // F27 — pre-enrollment: dispatch is deferred, so do NOT claim the
+            // care team was notified. Tell the patient the truth and how to
+            // self-escalate a true emergency.
+            statusPanel = (
+              <div
+                data-testid="alert-pre-enrollment-notice"
+                className="rounded-xl px-4 py-3 flex items-start gap-3"
+                style={{
+                  backgroundColor: 'var(--brand-warning-amber-light)',
+                  border: '1px solid rgba(217,119,6,0.25)',
+                }}
+              >
+                <ShieldAlert
+                  className="w-5 h-5 shrink-0 mt-0.5"
+                  style={{ color: 'var(--brand-warning-amber-text)' }}
+                />
+                <div>
+                  <p
+                    className="text-[13.5px] font-bold mb-1"
+                    style={{ color: 'var(--brand-warning-amber-text)' }}
+                  >
+                    Your enrollment is pending
+                  </p>
+                  <p
+                    className="text-[12.5px] leading-relaxed"
+                    style={{ color: 'var(--brand-text-secondary)' }}
+                  >
+                    If you have any concerning symptoms — chest pain, severe
+                    headache, difficulty breathing, vision changes — call 911 or
+                    go to the ER directly.
+                  </p>
                 </div>
               </div>
             );

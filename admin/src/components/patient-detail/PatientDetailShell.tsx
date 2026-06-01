@@ -842,6 +842,10 @@ export default function PatientDetailShell({ patientId }: Props) {
                   onResolved={onAlertsResolved}
                   heightCm={profile?.heightCm ?? null}
                   patientName={header?.name ?? null}
+                  patientPreEnrollment={
+                    header?.enrollmentStatus != null &&
+                    header.enrollmentStatus !== 'ENROLLED'
+                  }
                 />
               </>
             )}

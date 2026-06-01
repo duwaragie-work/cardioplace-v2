@@ -38,6 +38,11 @@ interface Props {
    *  resolve modal showed "Unknown patient". Thread it from the shell.
    *  (Phase 1 polish Finding 8.) */
   patientName?: string | null;
+  /** F27 — true when the patient is not yet ENROLLED. The escalation pipeline
+   *  defers all dispatch until enrollment, so OPEN alerts on this patient were
+   *  never sent. AlertCard surfaces a "No dispatch — awaiting enrollment"
+   *  badge so a provider can prioritize enrolling them. */
+  patientPreEnrollment?: boolean;
 }
 
 type TierBucket = 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'TIER_3' | 'OTHER';
@@ -78,7 +83,7 @@ function timeAgo(iso: string): string {
   return `${d}d ago`;
 }
 
-export default function AlertsTab({ alerts, loading, onResolved, heightCm, patientName }: Props) {
+export default function AlertsTab({ alerts, loading, onResolved, heightCm, patientName, patientPreEnrollment = false }: Props) {
   const [tierFilter, setTierFilter] = useState<TierBucket>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('OPEN');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -382,6 +387,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
                   onAcknowledge={() => void handleAcknowledge(a.id)}
                   ackInFlight={acking.has(a.id)}
                   heightCm={heightCm}
+                  patientPreEnrollment={patientPreEnrollment}
                 />
               </div>
             );

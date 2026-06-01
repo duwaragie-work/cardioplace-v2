@@ -132,6 +132,10 @@ interface Props {
   /** When true the row body uses cursor-pointer + button semantics. Both
    *  surfaces want this — tab uses it for expand, notifications for nav. */
   rowClickable?: boolean;
+  /** F27 — true when this alert's patient is not yet ENROLLED, so escalation
+   *  dispatch was deferred. Renders a "No dispatch — awaiting enrollment"
+   *  badge on OPEN alerts so a provider can prioritize enrollment. */
+  patientPreEnrollment?: boolean;
 }
 
 /** Round 2 A2 — null/empty/whitespace messages don't get a card (was rendering
@@ -152,6 +156,7 @@ export default function AlertCard({
   followUpScheduledAt,
   heightCm,
   rowClickable = true,
+  patientPreEnrollment = false,
 }: Props) {
   const { user } = useAuth();
   // May 2026 access-scope — HEALPLACE_OPS sees the alert row + audit trail
@@ -238,6 +243,22 @@ export default function AlertCard({
                 style={{ backgroundColor: 'var(--brand-surface-muted, #f1f5f9)', color: 'var(--brand-text-secondary)' }}
               >
                 {alert.mode === 'PERSONALIZED' ? 'Personalized' : 'Standard'}
+              </span>
+            )}
+            {/* F27 — pre-enrollment dispatch transparency. The escalation
+                pipeline defers ALL dispatch until the patient is ENROLLED, so
+                this OPEN alert was never sent to the care team. Flag it so a
+                provider can prioritize enrollment instead of assuming someone
+                was paged. */}
+            {patientPreEnrollment && alert.status === 'OPEN' && (
+              <span
+                data-testid={`admin-alert-no-dispatch-badge-${alert.id}`}
+                title="Escalation dispatch is deferred until this patient is enrolled"
+                className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+                style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
+              >
+                <ShieldAlert className="w-2.5 h-2.5" />
+                No dispatch — awaiting enrollment
               </span>
             )}
             {alert.status === 'RESOLVED' && (

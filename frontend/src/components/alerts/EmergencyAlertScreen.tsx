@@ -23,6 +23,9 @@ import { applyFriendlyVoice } from '@/lib/tts-voice';
 interface Props {
   alert: DeviationAlertDto;
   onAcknowledge: () => Promise<void> | void;
+  /** F27 — true when the patient is not yet ENROLLED, so dispatch is deferred
+   *  and the "care team has been notified" reassurance would be false. */
+  isPreEnrollment?: boolean;
 }
 
 // Clinical patient copy for BP Level 2 — intentionally NOT i18n'd. This
@@ -32,6 +35,10 @@ const MESSAGE_TITLE = 'Your blood pressure is very high.';
 const MESSAGE_BODY =
   'If you have chest pain, severe headache, difficulty breathing, or vision changes, call 911 now.';
 const REASSURANCE = 'Your care team has been notified.';
+// F27 — pre-enrollment: dispatch is deferred, so the care team has NOT been
+// notified. Replace the reassurance with truthful self-escalation guidance.
+const PRE_ENROLLMENT_REASSURANCE =
+  'Your enrollment is pending — your care team has not been notified yet. If symptoms continue, call 911 or go to the ER now.';
 const FULL_AUDIO = `${MESSAGE_TITLE} ${MESSAGE_BODY} ${REASSURANCE}`;
 const FOLLOWUP_AUDIO =
   "Have you called 911 yet? Tap Yes if you have, or Not yet if you haven't.";
@@ -93,9 +100,15 @@ function clearUnderstood(alertId: string) {
   }
 }
 
-export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
+export default function EmergencyAlertScreen({ alert, onAcknowledge, isPreEnrollment = false }: Props) {
   const router = useRouter();
   const { t, locale } = useLanguage();
+  // F27 — swap the "care team notified" reassurance for truthful pre-enrollment
+  // guidance. The 911 CTA above it is unchanged; only the false claim is fixed.
+  const effectiveReassurance = isPreEnrollment ? PRE_ENROLLMENT_REASSURANCE : REASSURANCE;
+  const effectiveAngioedemaReassurance = isPreEnrollment
+    ? PRE_ENROLLMENT_REASSURANCE
+    : ANGIOEDEMA_REASSURANCE;
   type Mode = 'urgent' | 'followup' | 'closed';
   const [mode, setMode] = useState<Mode>('urgent');
   const [audioBlocked, setAudioBlocked] = useState(false);
@@ -122,9 +135,10 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
   const angioedemaBodyLang = isAngioedema && angioedemaKey ? locale : 'en';
   // TTS reads the same signed-off body the patient sees — no invented copy.
   const ANGIOEDEMA_AUDIO = isAngioedema
-    ? `${ANGIOEDEMA_TITLE} ${angioedemaBody} ${ANGIOEDEMA_REASSURANCE}`
+    ? `${ANGIOEDEMA_TITLE} ${angioedemaBody} ${effectiveAngioedemaReassurance}`
     : '';
-  const urgentAudio = isAngioedema ? ANGIOEDEMA_AUDIO : FULL_AUDIO;
+  const bpUrgentAudio = `${MESSAGE_TITLE} ${MESSAGE_BODY} ${effectiveReassurance}`;
+  const urgentAudio = isAngioedema ? ANGIOEDEMA_AUDIO : bpUrgentAudio;
 
   // Decide initial mode on mount: if previously dismissed + T+2h elapsed
   // + alert still open → C2. Otherwise → C1. If the backend has marked
@@ -277,8 +291,8 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
               >
                 {angioedemaBody}
               </p>
-              <p lang="en" className="text-[13px] sm:text-[14px] opacity-90">
-                {ANGIOEDEMA_REASSURANCE}
+              <p lang="en" className="text-[13px] sm:text-[14px] opacity-90" data-testid="emergency-screen-reassurance">
+                {effectiveAngioedemaReassurance}
               </p>
             </>
           ) : (
@@ -295,7 +309,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
               <p data-testid="emergency-screen-message" lang="en" className="text-[16px] sm:text-[18px] leading-relaxed mb-3 opacity-95">
                 If you have <b>chest pain</b>, <b>severe headache</b>, <b>difficulty breathing</b>, or <b>vision changes</b>, call 911 now.
               </p>
-              <p lang="en" className="text-[13px] sm:text-[14px] opacity-90">{REASSURANCE}</p>
+              <p lang="en" className="text-[13px] sm:text-[14px] opacity-90" data-testid="emergency-screen-reassurance">{effectiveReassurance}</p>
             </>
           )
         ) : (
