@@ -1065,6 +1065,14 @@ export class AlertEngineService {
     if (result.ruleId === 'RULE_CAD_DBP_CRITICAL' && session.diastolicBP != null) {
       return 'DIASTOLIC_BP'
     }
+    // F18 — derive the legacy axis from the triggering value rather than
+    // defaulting every BP rule to SYSTOLIC_BP. A DBP-only L1 (e.g. 119/109)
+    // or a DBP-driven emergency carries actualValue == the diastolic reading;
+    // tagging it SYSTOLIC_BP mislabels the audited axis. Comes after the
+    // MEDICATION_ADHERENCE guard so med rules keep their type.
+    if (session.diastolicBP != null && result.actualValue === session.diastolicBP) {
+      return 'DIASTOLIC_BP'
+    }
     // Default: systolic-axis is the primary surface for BP rules.
     return 'SYSTOLIC_BP'
   }

@@ -631,6 +631,38 @@ describe('AlertEngineService (orchestrator)', () => {
       expect(call.data.severity).toBe('MEDIUM')
     })
 
+    it('F18 — DBP-driven L1 tags legacy type DIASTOLIC_BP, not SBP', async () => {
+      // 119/109 → SBP below the 160 L1 threshold, DBP ≥100 drives the rule.
+      // Pre-fix this mislabelled the axis as SYSTOLIC_BP even though the
+      // diastolic reading (actualValue=109) is what fired.
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 119, diastolicBP: 109 }),
+      )
+      await service.evaluate('entry-1')
+      const call = (
+        prisma.deviationAlert.create.mock.calls as Array<
+          [{ data: { ruleId: string; type: string; actualValue: unknown } }]
+        >
+      ).find((c) => c[0].data.ruleId === 'RULE_STANDARD_L1_HIGH')
+      expect(call).toBeDefined()
+      expect(call![0].data.type).toBe('DIASTOLIC_BP')
+      expect(String(call![0].data.actualValue)).toBe('109')
+    })
+
+    it('F18 — SBP-driven L1 still tags SYSTOLIC_BP', async () => {
+      // 165/95 — systolic drives, axis stays SYSTOLIC_BP (no regression).
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 165, diastolicBP: 95 }),
+      )
+      await service.evaluate('entry-1')
+      const call = (
+        prisma.deviationAlert.create.mock.calls as Array<
+          [{ data: { ruleId: string; type: string } }]
+        >
+      ).find((c) => c[0].data.ruleId === 'RULE_STANDARD_L1_HIGH')
+      expect(call![0].data.type).toBe('SYSTOLIC_BP')
+    })
+
     it('dedup idempotency: re-evaluating same entry finds existing row and updates (phase/7)', async () => {
       sessionAverager.averageForEntry.mockResolvedValue(
         baseSession({ systolicBP: 165, diastolicBP: 95 }),
