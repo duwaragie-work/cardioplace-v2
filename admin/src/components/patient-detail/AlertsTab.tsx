@@ -184,6 +184,24 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
     return counts;
   }, [filtered]);
 
+  // F4 — the pre-personalization "X of 7 baseline readings" note is patient-
+  // state metadata, not alert-tier-specific. It previously lived inside each
+  // expanded AlertCard, so it was invisible until a card was opened and read
+  // inconsistently across filter tabs. Hoist it to a single patient-header
+  // band (below) that renders once per page regardless of the active filter.
+  // Derive it from any alert carrying the flag — all of one patient's alerts
+  // share the same baseline count + threshold.
+  const personalizationNote = useMemo(() => {
+    const src = alerts.find(
+      (a) => a.preDay3 && a.personalizationThreshold != null,
+    );
+    if (!src) return null;
+    return {
+      threshold: src.personalizationThreshold as number,
+      completed: src.baselineReadingCount ?? 0,
+    };
+  }, [alerts]);
+
   const resolvable: ResolvableAlert | null = useMemo(() => {
     if (!resolving) return null;
     return {
@@ -244,6 +262,23 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
 
   return (
     <div className="space-y-4">
+      {/* F4 — patient-header personalization band. Standard thresholds apply
+          until the patient has the required baseline readings; surface that
+          once per page (all filters) so a provider reads every alert in
+          context without expanding each card. */}
+      {personalizationNote && (
+        <div
+          data-testid="admin-alerts-personalization-band"
+          className="bg-white rounded-2xl px-4 py-3 text-[11.5px] leading-relaxed"
+          style={{ boxShadow: 'var(--brand-shadow-card)', color: 'var(--brand-text-secondary)' }}
+        >
+          Standard threshold — personalization begins after{' '}
+          {personalizationNote.threshold} readings. This patient has completed{' '}
+          {personalizationNote.completed} of {personalizationNote.threshold}{' '}
+          baseline readings.
+        </div>
+      )}
+
       {/* Filters card */}
       <div className="bg-white rounded-2xl p-4 md:p-5 space-y-3" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
         {/* Status segmented control */}

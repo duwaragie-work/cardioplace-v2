@@ -130,3 +130,46 @@ describe('AlertsTab — Tier-3 in ALL filter (Round 2 A3)', () => {
     expect(screen.getByTestId('admin-alert-row-t3b')).toBeInTheDocument()
   })
 })
+
+// F4 — the pre-personalization note is patient-state metadata, hoisted to a
+// header band that renders once per page across every filter (it used to be
+// buried inside each expanded AlertCard).
+describe('AlertsTab — personalization header band (F4)', () => {
+  function preDayAlert(id: string, tier = 'BP_LEVEL_1_HIGH'): PatientAlert {
+    return makeAlert({
+      id,
+      tier: tier as PatientAlert['tier'],
+      preDay3: true,
+      personalizationThreshold: 7,
+      baselineReadingCount: 3,
+    } as Partial<PatientAlert>)
+  }
+
+  it('renders the band exactly once even with multiple pre-personalization alerts', () => {
+    render(
+      <AlertsTab
+        alerts={[preDayAlert('a1'), preDayAlert('a2'), preDayAlert('a3')]}
+        loading={false}
+        onResolved={() => {}}
+      />,
+    )
+    const bands = screen.getAllByTestId('admin-alerts-personalization-band')
+    expect(bands).toHaveLength(1)
+    expect(bands[0]).toHaveTextContent(/completed 3 of 7 baseline readings/i)
+  })
+
+  it('keeps the band visible after switching to the ALL filter', () => {
+    render(
+      <AlertsTab alerts={[preDayAlert('a1')]} loading={false} onResolved={() => {}} />,
+    )
+    fireEvent.click(screen.getByTestId('admin-alerts-tier-filter-ALL'))
+    expect(screen.getByTestId('admin-alerts-personalization-band')).toBeInTheDocument()
+  })
+
+  it('renders no band when no alert is pre-personalization', () => {
+    render(
+      <AlertsTab alerts={[makeAlert({ id: 'solo' })]} loading={false} onResolved={() => {}} />,
+    )
+    expect(screen.queryByTestId('admin-alerts-personalization-band')).not.toBeInTheDocument()
+  })
+})
