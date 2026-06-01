@@ -142,6 +142,8 @@ describe('AlertsTab — personalization header band (F4)', () => {
       preDay3: true,
       personalizationThreshold: 7,
       baselineReadingCount: 3,
+      // EscalationAuditTrail (rendered when a card is expanded) iterates this.
+      escalationEvents: [],
     } as Partial<PatientAlert>)
   }
 
@@ -171,5 +173,21 @@ describe('AlertsTab — personalization header band (F4)', () => {
       <AlertsTab alerts={[makeAlert({ id: 'solo' })]} loading={false} onResolved={() => {}} />,
     )
     expect(screen.queryByTestId('admin-alerts-personalization-band')).not.toBeInTheDocument()
+  })
+
+  // P3 — a cofire group (3 alerts, same reading, same baseline count) must show
+  // the disclaimer text exactly once, not once per grouped alert.
+  it('shows the disclaimer text exactly once for a 3-alert cofire group', () => {
+    const cofire = [
+      preDayAlert('c1', 'BP_LEVEL_1_HIGH'),
+      preDayAlert('c2', 'BP_LEVEL_1_LOW'),
+      preDayAlert('c3', 'TIER_2_DISCREPANCY'),
+    ]
+    render(<AlertsTab alerts={cofire} loading={false} onResolved={() => {}} />)
+    // Expand every member so each card's own disclaimer would render if present.
+    for (const id of ['c1', 'c2', 'c3']) {
+      fireEvent.click(screen.getByTestId(`admin-alert-row-${id}`))
+    }
+    expect(screen.getAllByText(/personalization begins after/i)).toHaveLength(1)
   })
 })

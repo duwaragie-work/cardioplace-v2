@@ -151,3 +151,44 @@ describe('AlertCard — PERSONALIZED badge tooltip (F22)', () => {
     expect(badge).toHaveAttribute('title', expect.stringContaining('standard AHA thresholds'))
   })
 })
+
+// P3 — the per-alert pre-personalization note is hoisted to a single
+// patient-header band by AlertsTab; AlertCard suppresses its own copy when
+// `hideDisclaimer` is set so a cofire group doesn't repeat it on every member.
+describe('AlertCard — pre-personalization disclaimer suppression (P3)', () => {
+  const preDay = {
+    preDay3: true,
+    personalizationThreshold: 7,
+    baselineReadingCount: 3,
+  } as Partial<PatientAlert>
+
+  function renderExpandedWith(over: Partial<PatientAlert>, hideDisclaimer: boolean) {
+    const alert = {
+      ...makeAlert(over),
+      escalationEvents: [],
+    } as unknown as PatientAlert
+    return render(
+      <AlertCard
+        alert={alert}
+        expanded={true}
+        onRowClick={noop}
+        onToggleExpand={noop}
+        onResolve={noop}
+        onAcknowledge={noop}
+        hideDisclaimer={hideDisclaimer}
+      />,
+    )
+  }
+
+  it('renders the note by default', () => {
+    renderExpandedWith(preDay, false)
+    expect(screen.getByTestId('admin-alert-prepersonalization-alert-1')).toBeInTheDocument()
+  })
+
+  it('suppresses the note when hideDisclaimer is true', () => {
+    renderExpandedWith(preDay, true)
+    expect(
+      screen.queryByTestId('admin-alert-prepersonalization-alert-1'),
+    ).not.toBeInTheDocument()
+  })
+})

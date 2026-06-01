@@ -423,6 +423,10 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
                   ackInFlight={acking.has(a.id)}
                   heightCm={heightCm}
                   patientPreEnrollment={patientPreEnrollment}
+                  // P3 — the pre-personalization note is shown once in the
+                  // patient-header band above; suppress the per-card copy so a
+                  // cofire group doesn't repeat it on each of its 3 alerts.
+                  hideDisclaimer
                 />
               </div>
             );

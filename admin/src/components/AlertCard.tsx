@@ -136,6 +136,11 @@ interface Props {
    *  dispatch was deferred. Renders a "No dispatch — awaiting enrollment"
    *  badge on OPEN alerts so a provider can prioritize enrollment. */
   patientPreEnrollment?: boolean;
+  /** P3 — suppress the per-alert pre-personalization "X of 7" note. AlertsTab
+   *  hoists it to a single patient-header band (F4), so repeating it on every
+   *  expanded card — three times inside one cofire group — is redundant noise.
+   *  NotificationsScreen has no patient band, so it leaves this false. */
+  hideDisclaimer?: boolean;
 }
 
 /** Round 2 A2 — null/empty/whitespace messages don't get a card (was rendering
@@ -157,6 +162,7 @@ export default function AlertCard({
   heightCm,
   rowClickable = true,
   patientPreEnrollment = false,
+  hideDisclaimer = false,
 }: Props) {
   const { user } = useAuth();
   // May 2026 access-scope — HEALPLACE_OPS sees the alert row + audit trail
@@ -460,7 +466,7 @@ export default function AlertCard({
           {/* Manisha 5/24 Q3 — pre-personalization "X of 7" note. Standard
               thresholds are used until the patient has 7 baseline readings;
               surface the progress so a provider reads the alert in context. */}
-          {alert.preDay3 && alert.personalizationThreshold != null && (
+          {!hideDisclaimer && alert.preDay3 && alert.personalizationThreshold != null && (
             <p
               data-testid={`admin-alert-prepersonalization-${alert.id}`}
               className="text-[11.5px] leading-relaxed px-3 py-2 rounded-lg"
