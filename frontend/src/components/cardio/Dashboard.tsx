@@ -298,13 +298,17 @@ export default function Dashboard() {
       : { backgroundColor: '#F1F5F9', color: 'var(--brand-text-muted)' };
 
 
-  // Patient-actionable open alerts. Excludes TIER_2_DISCREPANCY because
-  // those are admin-facing per the v2 clinical spec — patients can't action
-  // them, the detail page refuses to render them, and showing them as
-  // clickable cards on the dashboard sends the user into a dead-end "not
-  // found" screen.
+  // Patient-actionable open alerts. F32 — Tier 2 medication-discrepancy
+  // alerts are admin-facing per the v2 clinical spec EXCEPT when the rule
+  // engine populated a patient-facing message (e.g. the A5-3 beta-blocker
+  // carve-out: RULE_MEDICATION_MISSED). Those are patient-visible and the
+  // detail page now renders them; the silent ones stay hidden so a tap can't
+  // dead-end on a "care team only" screen.
+  const tier2Hidden = (a: typeof alerts[number]) =>
+    a.tier === 'TIER_2_DISCREPANCY' &&
+    !(typeof a.patientMessage === 'string' && a.patientMessage.trim().length > 0);
   const openAlerts = alerts.filter(
-    (a) => a.status === 'OPEN' && a.tier !== 'TIER_2_DISCREPANCY',
+    (a) => a.status === 'OPEN' && !tier2Hidden(a),
   );
 
   // ── Flow D helpers ────────────────────────────────────────────────────────
@@ -330,6 +334,9 @@ export default function Dashboard() {
     if (tier === 'BP_LEVEL_1_HIGH') return 60;
     if (tier === 'BP_LEVEL_1_LOW') return 60;
     if (a.severity === 'HIGH') return 60;
+    // F32 — patient-visible medication-discrepancy ranks below BP L1 but above
+    // pure info, so it surfaces on the banner only when nothing more urgent is open.
+    if (tier === 'TIER_2_DISCREPANCY') return 30;
     if (tier === 'TIER_3_INFO') return 20;
     return 40;
   }
@@ -370,12 +377,13 @@ export default function Dashboard() {
   const topAlertVariant = variantForTopAlert(topAlert);
 
   // Round 2 J — recent-alerts strip. Top 3 by recency, filtered by the chip.
-  // Source: same `alerts` array as the banner — already excludes Tier 2
-  // (admin-only) per the upstream filter. The banner picks the highest-
-  // priority OPEN alert; the strip is a parallel surface for at-a-glance scan.
+  // Source: same `alerts` array as the banner — hides only silent (admin-only)
+  // Tier 2 rows; patient-visible medication-discrepancy alerts (F32) stay. The
+  // banner picks the highest-priority OPEN alert; the strip is a parallel
+  // surface for at-a-glance scan.
   const recentAlerts: DeviationAlert[] = [...alerts]
     .filter((a) => (recentAlertsFilter === 'OPEN' ? a.status === 'OPEN' : true))
-    .filter((a) => a.tier !== 'TIER_2_DISCREPANCY')
+    .filter((a) => !tier2Hidden(a))
     .sort((a, b) => {
       const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;

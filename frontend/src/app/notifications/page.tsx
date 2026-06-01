@@ -622,9 +622,18 @@ export default function NotificationsPage() {
       ]);
       const alertArr: Alert[] = Array.isArray(alertData) ? alertData : [];
       const notifArr: Notif[] = Array.isArray(notifData) ? notifData : [];
-      // CLINICAL_SPEC §V2-C — Tier 2 medication discrepancy is admin-only;
-      // patients shouldn't see these. Same filter the patient dashboard uses.
-      const patientVisible = alertArr.filter((a) => a.tier !== 'TIER_2_DISCREPANCY');
+      // F32 — Tier 2 medication-discrepancy alerts are admin-only UNLESS the
+      // rule engine populated a patient-facing message (e.g. the A5-3
+      // beta-blocker carve-out: RULE_MEDICATION_MISSED fires TIER_2_DISCREPANCY
+      // WITH a patientMessage). Mirror the Tier-3 safety-net rule — a non-empty
+      // patientMessage means the alert is meant for the patient. Strip only the
+      // silent (admin-only) Tier-2 rows.
+      const patientVisible = alertArr.filter(
+        (a) =>
+          a.tier !== 'TIER_2_DISCREPANCY' ||
+          (typeof a.patientMessage === 'string' &&
+            a.patientMessage.trim().length > 0),
+      );
       setAlerts(patientVisible.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
       // Only show PUSH notifications in-app — EMAIL records are for tracking only
       const pushOnly = notifArr.filter((n) => !n.channel || n.channel === 'PUSH');
@@ -910,6 +919,10 @@ export default function NotificationsPage() {
                 if (tier === 'BP_LEVEL_1_LOW' || (sbp > 0 && sbp < 90) || (dbp > 0 && dbp < 60)) return 'low';
                 if (tier === 'BP_LEVEL_1_HIGH') return 'high';
                 if (tier === 'TIER_3_INFO') return 'info';
+                // F32 — patient-visible Tier 2 medication-discrepancy alerts
+                // (those that survived the patientMessage filter above) bucket
+                // under Info so the existing "Info" chip surfaces them.
+                if (tier === 'TIER_2_DISCREPANCY') return 'info';
                 if (a.severity === 'HIGH' || (a.type ?? '').includes('BP')) return 'high';
                 return 'other';
               };

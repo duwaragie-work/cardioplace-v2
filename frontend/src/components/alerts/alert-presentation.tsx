@@ -172,6 +172,24 @@ function variantForTier(tier: AlertTier | null | undefined): AlertPresentation {
         followUp:
           'Keep up your regular check-ins. Your care team is watching.',
       };
+    // F32 — patient-visible Tier 2 medication-discrepancy (e.g. the A5-3
+    // beta-blocker carve-out). The real patientMessage from the rule registry
+    // carries the approved wording; these strings are only the chrome + safe
+    // fallback. Pill icon + neutral info treatment ranks it below BP alerts.
+    case 'TIER_2_DISCREPANCY':
+      return {
+        key: 'info',
+        accent: 'var(--brand-primary-purple)',
+        accentLight: 'var(--brand-primary-purple-light)',
+        accentText: 'var(--brand-primary-purple)',
+        Icon: Pill,
+        title: 'Medication check-in.',
+        defaultBody:
+          'Your care team noticed something about your medications worth a quick check-in.',
+        footer: 'Please follow the guidance above and keep taking your medicines as prescribed.',
+        followUp:
+          'Keep up your regular check-ins. Your care team is watching.',
+      };
     default:
       return {
         key: 'info',
