@@ -39,6 +39,7 @@ import {
   type MedicationAdherenceSummary,
   type SymptomLogSummary,
   type BPPhotoSummary,
+  type StructuredSymptoms,
 } from '@/hooks/useVoiceSession';
 // Phase/27 chatbot v2 — rich result cards.
 import {
@@ -128,6 +129,31 @@ function getUserInitials(name: string | null | undefined): string {
 
 function nowTimeStr(): string {
   return new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+/**
+ * Extract the 9 Stage-A structured-symptom booleans from a submit_checkin /
+ * update_checkin tool-result `data` payload. The backend's serializeEntry
+ * always returns these fields (default `false`); we coerce strictly to
+ * `boolean` so a stray `true`/`false` string from a sloppy serialiser can't
+ * fool the card into showing a wrong badge. Returns `undefined` when none
+ * are true so the card's existing `summary.structuredSymptoms` check stays
+ * idiomatic (truthy iff there's something to show).
+ */
+function pickStructuredSymptoms(d: Record<string, unknown>): StructuredSymptoms | undefined {
+  const out: StructuredSymptoms = {
+    severeHeadache: d.severeHeadache === true,
+    visualChanges: d.visualChanges === true,
+    alteredMentalStatus: d.alteredMentalStatus === true,
+    chestPainOrDyspnea: d.chestPainOrDyspnea === true,
+    focalNeuroDeficit: d.focalNeuroDeficit === true,
+    severeEpigastricPain: d.severeEpigastricPain === true,
+    newOnsetHeadache: d.newOnsetHeadache === true,
+    ruqPain: d.ruqPain === true,
+    edema: d.edema === true,
+  };
+  const anyTrue = Object.values(out).some((v) => v === true);
+  return anyTrue ? out : undefined;
 }
 
 // Phase/27 — map BpOcrError codes to the existing patient-app i18n strings
@@ -1469,7 +1495,15 @@ export default function AIChatInterface() {
               diastolicBP: d.diastolicBP as number | undefined,
               weight: d.weight as number | undefined,
               medicationTaken: d.medicationTaken as boolean | undefined,
-              symptoms: (d.symptoms as string[] | undefined) ?? [],
+              // The legacy `symptoms: string[]` field on CheckinSummary is no
+              // longer authoritative — symptoms now flow through the two
+              // fields below (structured booleans → red badges, freeform
+              // strings → grey chips). Keep this empty to satisfy the type.
+              symptoms: [],
+              structuredSymptoms: pickStructuredSymptoms(d),
+              otherSymptoms: Array.isArray(d.otherSymptoms)
+                ? (d.otherSymptoms as string[])
+                : undefined,
               saved: true,
             });
           } else if (tool === 'update_checkin' && (result as { updated?: boolean }).updated) {
@@ -1481,7 +1515,11 @@ export default function AIChatInterface() {
               diastolicBP: d.diastolicBP as number | undefined,
               weight: d.weight as number | undefined,
               medicationTaken: d.medicationTaken as boolean | undefined,
-              symptoms: (d.symptoms as string[] | undefined) ?? [],
+              symptoms: [],
+              structuredSymptoms: pickStructuredSymptoms(d),
+              otherSymptoms: Array.isArray(d.otherSymptoms)
+                ? (d.otherSymptoms as string[])
+                : undefined,
               updated: true,
             });
           } else if (tool === 'delete_checkin') {

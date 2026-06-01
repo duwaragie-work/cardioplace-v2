@@ -3,6 +3,17 @@ import { PrismaService } from '../../prisma/prisma.service.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
 import { EmbeddingService } from '../../common/embedding.service.js'
 
+/**
+ * How many of the most-recent turns getConversationHistory pulls verbatim
+ * (the `LIMIT 12` chronological window). Shared with getSessionSummary so
+ * the rolling-summary slice excludes the same turns that are already going
+ * to Gemini raw — avoids the model seeing the same exchange twice (once in
+ * the system-prompt summary + once in the contents array).
+ *
+ * Bump in lock-step with the LIMIT 12 in the raw-history queries below.
+ */
+const RAW_RECENT_TURNS = 12
+
 @Injectable()
 export class ConversationHistoryService {
   private readonly logger = new Logger(ConversationHistoryService.name)
@@ -120,7 +131,21 @@ export class ConversationHistoryService {
   }
 
   /**
-   * Read the rolling session summary. One DB read, no LLM call.
+   * Read the rolling session summary for the LLM system prompt. One DB read,
+   * no LLM call.
+   *
+   * The stored `Session.summary` is a hybrid of LLM-compressed bullets (at
+   * the top, written by updateRollingSummary every 10 messages) plus a tail
+   * of per-turn append lines in the format `- [Text|Voice] Patient: … → AI: …`
+   * (one line per turn since the last compression).
+   *
+   * The most-recent RAW_RECENT_TURNS append lines correspond to the same
+   * turns getConversationHistory ships raw in the Gemini `contents` array.
+   * Returning the WHOLE summary here would duplicate those exchanges (once
+   * verbatim in contents + once as an append line in the prompt) — wasted
+   * tokens AND a known echo-bias trigger in long-context models. We strip
+   * those tail appends here so the prompt-side summary is genuinely the
+   * "older history" tier of the hybrid memory.
    */
   async getSessionSummary(sessionId: string): Promise<string> {
     if (!sessionId) return ''
@@ -129,7 +154,7 @@ export class ConversationHistoryService {
         where: { id: sessionId },
         select: { summary: true },
       })
-      return session?.summary ?? ''
+      return sliceSummaryForPrompt(session?.summary ?? '', RAW_RECENT_TURNS)
     } catch {
       return ''
     }
@@ -396,8 +421,19 @@ export class ConversationHistoryService {
 
       let updatedSummary: string
 
-      // Every 10 messages, use LLM to compress the summary
-      if (newCount % 10 === 0 && currentSummary.length > 500) {
+      // Compression triggers:
+      //   • count-based (every 10 messages once the summary is non-trivial)
+      //     — keeps long sessions periodically distilled even when turns are
+      //       short and never breach the byte budget.
+      //   • budget-based (whenever appending the new line would push the
+      //     summary past SUMMARY_SOFT_BUDGET chars) — fires BEFORE the simple-
+      //     append fallback below starts dropping the oldest lines, so
+      //     middle-of-session turns survive instead of being silently
+      //     truncated on a chatty patient.
+      const SUMMARY_SOFT_BUDGET = 1500
+      const shouldCompressByCount = newCount % 10 === 0 && currentSummary.length > 500
+      const shouldCompressByBudget = (currentSummary + '\n' + newLine).length > SUMMARY_SOFT_BUDGET
+      if (shouldCompressByCount || shouldCompressByBudget) {
         try {
           const result = await this.geminiService.getChatCompletion([
             {
@@ -441,4 +477,40 @@ export class ConversationHistoryService {
   private summariseText(text: string): string {
     return text ?? ''
   }
+}
+
+// ── Module-level helpers ─────────────────────────────────────────────────────
+
+/** Lines in `Session.summary` that correspond to a single un-compressed turn
+ *  use the literal `- [Text] Patient: …` / `- [Voice] Patient: …` template
+ *  written by updateRollingSummary. LLM-compressed bullets don't match this
+ *  pattern (the medical-scribe prompt returns "•" or "-" bullets WITHOUT
+ *  the `[Text]/[Voice]` tag). The boundary lets us cleanly separate the
+ *  compressed-old block from the appended-recent block.
+ */
+const APPEND_LINE_PATTERN = /^-\s*\[(?:Text|Voice)\]\s/
+
+/**
+ * Return the rolling summary with the most-recent `excludeRecent` append
+ * lines removed — those exchanges are about to be sent raw in Gemini's
+ * `contents` array, so duplicating them in the system prompt is pure waste.
+ *
+ * Compressed bullets (above the first append line) are always kept — they
+ * cover history older than the raw window and have no exchange-for-exchange
+ * overlap with what `getConversationHistory` returns.
+ *
+ * If there are no append lines at all (we're between compressions and the
+ * summary is pure bullets), this is a no-op — the full bullet summary
+ * ships, since none of it can possibly overlap with raw recent turns.
+ */
+export function sliceSummaryForPrompt(summary: string, excludeRecent: number): string {
+  if (!summary) return ''
+  if (excludeRecent <= 0) return summary
+  const lines = summary.split('\n')
+  const firstAppendIdx = lines.findIndex((l) => APPEND_LINE_PATTERN.test(l))
+  if (firstAppendIdx === -1) return summary
+  const compressed = lines.slice(0, firstAppendIdx)
+  const appends = lines.slice(firstAppendIdx)
+  const olderAppends = appends.slice(0, Math.max(0, appends.length - excludeRecent))
+  return [...compressed, ...olderAppends].join('\n').trim()
 }

@@ -34,6 +34,14 @@ export interface JournalToolContext {
   symptomService?: SymptomQuickLogService
   ocrService?: OcrService
   alertEngine?: AlertEngineService
+  /**
+   * Called after every successful patient-data mutation (submit/update/delete
+   * check-in, log adherence, log symptom) so the chat service can drop its
+   * cached patient-context block — the next chat turn must see the freshly
+   * saved reading / medication entry / symptom. Optional: when omitted (e.g.
+   * legacy callers, tests), the cache simply ages out via TTL.
+   */
+  onPatientDataMutated?: (userId: string) => void
 }
 
 const MISSED_MED_REASONS = new Set([
@@ -604,6 +612,17 @@ export async function executeJournalTool(
         // DailyJournalService does the Prisma resolution (drugName →
         // medicationId), filters AS_NEEDED, and drops unmatched drugs.
         const missedMedications = normaliseMissedMedications(args.missed_medications)
+        // Defence-in-depth symptom mapping: even when the LLM puts the
+        // patient's symptom only in the freeform `args.symptoms` array
+        // (e.g. ["chest pain"]) and forgets to set the matching structured
+        // boolean (e.g. `chest_pain_or_dyspnea: true`), the same keyword
+        // mapper used by `evaluate_reading` catches it here and flips the
+        // boolean ON. Without this, the rule engine's symptom-override
+        // Stage A never fires on chest pain spoken in chat — clinical-
+        // safety bug, not just a UI nit. The freeform array is still
+        // preserved (`symptoms` and `otherSymptoms` below) so the chart
+        // keeps the patient's exact words.
+        const mappedFromFreeform = mapSymptomsArrayToFlags(args.symptoms) ?? {}
         const result = await journalService.create(userId, {
           measuredAt,
           systolicBP: args.systolic_bp,
@@ -616,20 +635,39 @@ export async function executeJournalTool(
           missedMedications,
           weight: args.weight,
           symptoms: args.symptoms ?? [],
-          // 9 structured Level-2 symptom booleans — default false when omitted
-          // so the rule engine sees a clean, fully-populated entry.
-          severeHeadache: args.severe_headache === true,
-          visualChanges: args.visual_changes === true,
-          alteredMentalStatus: args.altered_mental_status === true,
-          chestPainOrDyspnea: args.chest_pain_or_dyspnea === true,
-          focalNeuroDeficit: args.focal_neuro_deficit === true,
-          severeEpigastricPain: args.severe_epigastric_pain === true,
-          newOnsetHeadache: args.new_onset_headache === true,
-          ruqPain: args.ruq_pain === true,
-          edema: args.edema === true,
+          // 9 structured Level-2 symptom booleans — explicit LLM arg wins;
+          // otherwise pick up what the keyword mapper extracted from the
+          // freeform array. Default `false` when neither source set it so
+          // the rule engine sees a clean fully-populated entry.
+          severeHeadache: args.severe_headache === true || mappedFromFreeform.severeHeadache === true,
+          visualChanges: args.visual_changes === true || mappedFromFreeform.visualChanges === true,
+          alteredMentalStatus: args.altered_mental_status === true || mappedFromFreeform.alteredMentalStatus === true,
+          chestPainOrDyspnea: args.chest_pain_or_dyspnea === true || mappedFromFreeform.chestPainOrDyspnea === true,
+          focalNeuroDeficit: args.focal_neuro_deficit === true || mappedFromFreeform.focalNeuroDeficit === true,
+          severeEpigastricPain: args.severe_epigastric_pain === true || mappedFromFreeform.severeEpigastricPain === true,
+          newOnsetHeadache: args.new_onset_headache === true || mappedFromFreeform.newOnsetHeadache === true,
+          ruqPain: args.ruq_pain === true || mappedFromFreeform.ruqPain === true,
+          edema: args.edema === true || mappedFromFreeform.edema === true,
+          // Cluster-6 / Cluster-7 / Cluster-8 keys aren't on the text tool's
+          // arg schema, but the rule engine consumes them and the keyword
+          // mapper recognises them in freeform text. Pass them through when
+          // the mapper detected one so the engine's downstream rules
+          // (brady-symptomatic, palpitations, HF-decomp, ACE-angioedema, etc.)
+          // can still fire.
+          dizziness: mappedFromFreeform.dizziness === true,
+          syncope: mappedFromFreeform.syncope === true,
+          palpitations: mappedFromFreeform.palpitations === true,
+          legSwelling: mappedFromFreeform.legSwelling === true,
+          fatigue: mappedFromFreeform.fatigue === true,
+          shortnessOfBreath: mappedFromFreeform.shortnessOfBreath === true,
+          dryCough: mappedFromFreeform.dryCough === true,
+          nsaidUse: mappedFromFreeform.nsaidUse === true,
+          faceSwelling: mappedFromFreeform.faceSwelling === true,
+          throatTightness: mappedFromFreeform.throatTightness === true,
           otherSymptoms: Array.isArray(args.other_symptoms) ? args.other_symptoms : undefined,
           notes: args.notes ?? '',
         } as any)
+        ctx.onPatientDataMutated?.(userId)
         return JSON.stringify({ saved: true, message: 'Check-in saved successfully.', data: result.data })
       } catch (err: any) {
         return JSON.stringify({ saved: false, message: err.message ?? 'Failed to save check-in.' })
@@ -746,6 +784,7 @@ export async function executeJournalTool(
         }
 
         const result = await journalService.update(userId, entryId, dto)
+        ctx.onPatientDataMutated?.(userId)
         return JSON.stringify({ updated: true, message: 'Reading updated successfully.', data: result.data })
       } catch (err: any) {
         return JSON.stringify({ updated: false, message: err.message ?? 'Failed to update.' })
@@ -797,6 +836,7 @@ export async function executeJournalTool(
         }
 
         await journalService.delete(userId, entryId)
+        ctx.onPatientDataMutated?.(userId)
         return JSON.stringify({ deleted: true, message: 'Reading deleted successfully.' })
       } catch (err: any) {
         return JSON.stringify({ deleted: false, message: err.message ?? 'Failed to delete.' })
@@ -825,6 +865,7 @@ export async function executeJournalTool(
           missedDoses: typeof args.missed_doses === 'number' ? args.missed_doses : undefined,
           reason: typeof args.reason === 'string' ? args.reason : undefined,
         })
+        if (result.logged) ctx.onPatientDataMutated?.(userId)
         return JSON.stringify(result)
       } catch (err: any) {
         return JSON.stringify({
@@ -853,6 +894,7 @@ export async function executeJournalTool(
           symptom: symptom as StructuredSymptomKey,
           notes: typeof args.notes === 'string' && args.notes.trim() ? args.notes.trim() : undefined,
         })
+        if (result.logged) ctx.onPatientDataMutated?.(userId)
         return JSON.stringify(result)
       } catch (err: any) {
         return JSON.stringify({
