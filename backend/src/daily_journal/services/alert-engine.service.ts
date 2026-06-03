@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter'
 import {
   ProfileNotFoundException,
+  RULE_IDS,
   type ResolvedContext,
 } from '@cardioplace/shared'
 import { Prisma } from '../../generated/prisma/client.js'
@@ -659,9 +660,27 @@ export class AlertEngineService {
       !ctx.preDay3Mode &&
       !ctx.profile.hasAFib
     if (isSingleReadingNonEmergency) {
+      // Manisha Q2 (2026-06-02 reply) — RULE_HFREF_HIGH reverts to
+      // single-reading firing. The HFrEF therapeutic window (≈120–130 mmHg)
+      // is narrow; holding a lone SBP≥target reading behind the ≥2-reading
+      // gate risks missing a clinically actionable HFrEF reading (a patient
+      // takes one reading at 145 and leaves → alert never fires). A
+      // false-positive at 132 is low-cost (clinician reviews, no action); a
+      // missed 145 in HFrEF is high-cost. So HFREF_HIGH — and ONLY the high
+      // branch — bypasses the gate, evaluating this reading's own value. The
+      // low branch (HFREF_LOW) and every other non-emergency rule stay gated,
+      // and RULE_STANDARD_L1_HIGH session-averaging is untouched (Manisha:
+      // averaging stays ONLY for standard L1). Same-session noise is managed
+      // via Q6 per-session dedup, not by re-suppressing the alert.
+      const hfref = hfrefRule(session, ctx)
+      if (hfref && hfref.ruleId === RULE_IDS.HFREF_HIGH) {
+        const axis = axisFor(hfref)
+        if (!claimed.has(axis)) claimed.set(axis, hfref)
+      }
       this.logger.log(
         `Single-reading session — gating non-emergency rules for entry ${session.entryId}. ` +
-          'Awaiting second reading or finalize call (Manisha 5/9 Q2).',
+          'Awaiting second reading or finalize call (Manisha 5/9 Q2). ' +
+          'RULE_HFREF_HIGH exempt per Manisha Q2 (2026-06-02).',
       )
       return AXIS_PRIORITY
         .map((axis) => claimed.get(axis))
