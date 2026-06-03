@@ -20,6 +20,7 @@ import { MedicationAdherenceService } from './services/medication-adherence.serv
 import { SymptomQuickLogService } from './services/symptom-quick-log.service.js'
 import { AlertEngineService } from '../daily_journal/services/alert-engine.service.js'
 import { IntakeStatusService } from '../intake/intake-status.service.js'
+import { EventEmitter2 } from '@nestjs/event-emitter'
 
 const NOW = new Date('2026-04-22T10:00:00Z')
 const DOB = new Date('1980-06-15T00:00:00Z')
@@ -121,6 +122,10 @@ describe('ChatService.buildPatientSystemPrompt() — phase/16', () => {
           useValue: {
             getStatus: jest.fn(async () => ({ completed: true, profileExists: true })),
           },
+        },
+        {
+          provide: EventEmitter2,
+          useValue: { emit: jest.fn(), on: jest.fn() },
         },
       ],
     }).compile()

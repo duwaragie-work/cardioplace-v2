@@ -1,5 +1,10 @@
 import { jest } from '@jest/globals'
-import { getJournalToolDeclarations, executeJournalTool, normaliseTime } from './journal-tools.js'
+import {
+  getJournalToolDeclarations,
+  executeJournalTool,
+  normaliseTime,
+  mapSymptomsArrayToFlags,
+} from './journal-tools.js'
 
 describe('journal-tools', () => {
   describe('normaliseTime', () => {
@@ -29,6 +34,53 @@ describe('journal-tools', () => {
       expect(normaliseTime(undefined)).toBeUndefined()
       expect(normaliseTime('')).toBeUndefined()
       expect(normaliseTime('not a time')).toBeUndefined()
+    })
+  })
+
+  // ─── Bug 2 + 3 regression guards for the symptom mapper ───────────────────
+  // Bug 2: naive substring matching used to flip flags on negation ("no chest
+  // pain" → chestPainOrDyspnea=true → false-positive Level-2 alert).
+  // Bug 3: the snake_case `face_swelling` (TIER_1_ANGIOEDEMA airway emergency)
+  // was missed because the matcher checked "faceswelling" (no underscore)
+  // and "face swell" (space) but not the schema key verbatim.
+  describe('mapSymptomsArrayToFlags', () => {
+    it('flips structured booleans on positive freeform phrases', () => {
+      expect(mapSymptomsArrayToFlags(['chest pain'])).toEqual({
+        chestPainOrDyspnea: true,
+      })
+      expect(mapSymptomsArrayToFlags(['dizziness', 'palpitations'])).toEqual({
+        dizziness: true,
+        palpitations: true,
+      })
+    })
+
+    it('Bug 2 regression — does NOT flip flags on negation phrases', () => {
+      expect(mapSymptomsArrayToFlags(['no chest pain'])).toBeUndefined()
+      expect(mapSymptomsArrayToFlags(['denies dizziness'])).toBeUndefined()
+      expect(mapSymptomsArrayToFlags(['without headache'])).toBeUndefined()
+      expect(mapSymptomsArrayToFlags(['none'])).toBeUndefined()
+      expect(mapSymptomsArrayToFlags(['negative for chest pain'])).toBeUndefined()
+      expect(mapSymptomsArrayToFlags(['no signs of swelling'])).toBeUndefined()
+    })
+
+    it('Bug 2 regression — mixed negated + positive list keeps only the positives', () => {
+      expect(
+        mapSymptomsArrayToFlags(['no chest pain', 'dizziness', 'denies headache']),
+      ).toEqual({ dizziness: true })
+    })
+
+    it('Bug 3 regression — face_swelling underscore variant flips faceSwelling', () => {
+      expect(mapSymptomsArrayToFlags(['face_swelling'])).toEqual({
+        faceSwelling: true,
+      })
+    })
+
+    it('Bug 3 regression — all snake_case schema keys round-trip', () => {
+      expect(mapSymptomsArrayToFlags(['severe_headache'])).toEqual({ severeHeadache: true })
+      expect(mapSymptomsArrayToFlags(['chest_pain_or_dyspnea'])).toEqual({ chestPainOrDyspnea: true })
+      expect(mapSymptomsArrayToFlags(['altered_mental_status'])).toEqual({ alteredMentalStatus: true })
+      expect(mapSymptomsArrayToFlags(['focal_neuro_deficit'])).toEqual({ focalNeuroDeficit: true })
+      expect(mapSymptomsArrayToFlags(['throat_tightness'])).toEqual({ throatTightness: true })
     })
   })
 
@@ -119,10 +171,14 @@ describe('journal-tools', () => {
         data: { id: '123', systolicBP: 120, diastolicBP: 80 },
       })
 
+      // Updated 2026-06 (Bug 14d) — submit_checkin now rejects readings >30
+      // days old. Use today's date so the happy path passes regardless of
+      // when the test runs.
+      const todayISO = new Date().toISOString().slice(0, 10)
       const result = await executeJournalTool(
         'submit_checkin',
         {
-          entry_date: '2026-04-06',
+          entry_date: todayISO,
           // Updated 2026-05 (Phase/27) — measurement_time is now a
           // required-field gate ahead of journal.create. Provide it so
           // the happy path reaches the executor.
@@ -304,6 +360,233 @@ describe('journal-tools', () => {
       expect(parsed.completed).toBe(false)
       expect(parsed.intake_url).toBe('/clinical-intake')
       expect(parsed.message).toMatch(/unavailable/i)
+    })
+
+    // ─── Bug 13 — OCR verbal-confirmation guard ─────────────────────────
+    // submit_bp_from_photo stamps ocrState.lastAt + clears userMessageSince.
+    // The chat streaming loop flips userMessageSince=true when a new patient
+    // message arrives. submit_checkin must REFUSE inside the 30s window
+    // until the patient has actually spoken again (read-back-and-confirm).
+    it('submit_checkin: rejects with OCR_UNCONFIRMED when called immediately after OCR (no user turn)', async () => {
+      const ocrState = { lastAt: Date.now(), userMessageSince: false }
+      const ctx = {
+        journalService: mockJournalService as any,
+        ocrState,
+      }
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: '2026-06-01',
+          measurement_time: '08:30',
+          systolic_bp: 138,
+          diastolic_bp: 84,
+          medication_taken: true,
+          symptoms: [],
+        },
+        ctx as any,
+        'user-1',
+      )
+      const parsed = JSON.parse(result)
+      expect(parsed).toEqual(
+        expect.objectContaining({
+          saved: false,
+          reason: 'OCR_UNCONFIRMED',
+        }),
+      )
+      expect(mockJournalService.create).not.toHaveBeenCalled()
+    })
+
+    it('submit_checkin: proceeds normally when the patient has spoken since OCR', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'ok', systolicBP: 138, diastolicBP: 84 },
+      })
+      const ocrState = { lastAt: Date.now(), userMessageSince: true }
+      const ctx = {
+        journalService: mockJournalService as any,
+        ocrState,
+      }
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: '2026-06-01',
+          measurement_time: '08:30',
+          systolic_bp: 138,
+          diastolic_bp: 84,
+          medication_taken: true,
+          symptoms: [],
+        },
+        ctx as any,
+        'user-1',
+      )
+      const parsed = JSON.parse(result)
+      expect(parsed.saved).toBe(true)
+      expect(mockJournalService.create).toHaveBeenCalledTimes(1)
+    })
+
+    it('submit_checkin: proceeds normally when the OCR is older than the 30s window', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'ok', systolicBP: 138, diastolicBP: 84 },
+      })
+      // userMessageSince=false but OCR is 31s old → window expired
+      const ocrState = { lastAt: Date.now() - 31_000, userMessageSince: false }
+      const ctx = {
+        journalService: mockJournalService as any,
+        ocrState,
+      }
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: '2026-06-01',
+          measurement_time: '08:30',
+          systolic_bp: 138,
+          diastolic_bp: 84,
+          medication_taken: true,
+          symptoms: [],
+        },
+        ctx as any,
+        'user-1',
+      )
+      const parsed = JSON.parse(result)
+      expect(parsed.saved).toBe(true)
+    })
+
+    it('submit_checkin: proceeds normally when no ocrState in context (no OCR happened)', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'ok', systolicBP: 138, diastolicBP: 84 },
+      })
+      const ctx = {
+        journalService: mockJournalService as any,
+        // ocrState omitted entirely
+      }
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: '2026-06-01',
+          measurement_time: '08:30',
+          systolic_bp: 138,
+          diastolic_bp: 84,
+          medication_taken: true,
+          symptoms: [],
+        },
+        ctx as any,
+        'user-1',
+      )
+      const parsed = JSON.parse(result)
+      expect(parsed.saved).toBe(true)
+    })
+
+    // ─── Bug 14d — 30-day stale-reading reject ────────────────────────
+    // The BP check-in form blocks readings older than 30 days. Mirror that
+    // limit on the chatbot so backfilling old readings doesn't skew the
+    // session-averaging windows + pre-day-3 personalization gate.
+    it('submit_checkin: rejects readings older than 30 days with STALE_READING', async () => {
+      const staleDate = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10)
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: staleDate,
+          measurement_time: '08:30',
+          systolic_bp: 138,
+          diastolic_bp: 84,
+          medication_taken: true,
+          symptoms: [],
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      const parsed = JSON.parse(result)
+      expect(parsed).toEqual(
+        expect.objectContaining({
+          saved: false,
+          reason: 'STALE_READING',
+        }),
+      )
+      expect(mockJournalService.create).not.toHaveBeenCalled()
+    })
+
+    it('submit_checkin: accepts a reading exactly 29 days old', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'ok', systolicBP: 138, diastolicBP: 84 },
+      })
+      const okDate = new Date(Date.now() - 29 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10)
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: okDate,
+          measurement_time: '08:30',
+          systolic_bp: 138,
+          diastolic_bp: 84,
+          medication_taken: true,
+          symptoms: [],
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      const parsed = JSON.parse(result)
+      expect(parsed.saved).toBe(true)
+    })
+
+    // ─── Bug 16A — medication_taken / missed_medications invariant ─────
+    // The LLM sometimes passes contradictory state: medication_taken=true
+    // alongside a non-empty missed_medications array. Backend normalises
+    // medication_taken to FALSE when the array is non-empty so the rule
+    // engine, audit log, and downstream UI never see "All taken" alongside
+    // a missed-med record.
+    it('submit_checkin: normalises medication_taken=false when missed_medications is non-empty', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'ok', medicationTaken: false, missedMedications: [] },
+      })
+      const todayISO = new Date().toISOString().slice(0, 10)
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '08:30',
+          systolic_bp: 130,
+          diastolic_bp: 90,
+          medication_taken: true, // ← LLM passed contradictory rollup
+          missed_medications: [
+            { drug_name: 'Norvasc', reason: 'FORGOT', missed_doses: 1 },
+          ],
+          symptoms: ['headache'],
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      const callArg = mockJournalService.create.mock.calls[0][1] as Record<string, unknown>
+      // Despite the LLM passing medication_taken=true, the dispatcher
+      // normalised to false because missed_medications is non-empty.
+      expect(callArg.medicationTaken).toBe(false)
+      // missed_medications still threaded through.
+      expect(Array.isArray(callArg.missedMedications)).toBe(true)
+      expect(((callArg.missedMedications as unknown[]) ?? []).length).toBe(1)
+    })
+
+    it('submit_checkin: leaves medication_taken=true alone when missed_medications is empty/missing', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'ok', medicationTaken: true },
+      })
+      const todayISO = new Date().toISOString().slice(0, 10)
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '08:30',
+          systolic_bp: 130,
+          diastolic_bp: 90,
+          medication_taken: true,
+          symptoms: [],
+          // missed_medications omitted
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      const callArg = mockJournalService.create.mock.calls[0][1] as Record<string, unknown>
+      expect(callArg.medicationTaken).toBe(true)
     })
   })
 

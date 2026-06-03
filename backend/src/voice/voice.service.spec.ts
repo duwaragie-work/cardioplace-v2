@@ -306,4 +306,85 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
       expect(context).toContain('⚠ unverified')
     })
   })
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Bug 1 regression — voice intake-updated live broadcast.
+  // The systemInstruction Gemini Live receives at connect is immutable for the
+  // life of the session, so an `intake.updated` event must broadcast a text
+  // turn to every active session for the affected user; otherwise the bot
+  // stays stuck refusing submit_checkin until the patient ends the call.
+  // ────────────────────────────────────────────────────────────────────────────
+  describe('onIntakeUpdated (Bug 1)', () => {
+    function makeMockSession(over: Partial<{ userId: string; streamClosed: boolean }> = {}) {
+      const sendRealtimeInput = jest.fn()
+      return {
+        sendRealtimeInput,
+        session: {
+          userId: over.userId ?? 'user-1',
+          streamClosed: over.streamClosed ?? false,
+          liveSession: { sendRealtimeInput },
+        },
+      }
+    }
+
+    it('broadcasts a [System update] text turn to every active session for the user', () => {
+      const sessions = (service as any).sessions as Map<string, any>
+      const a = makeMockSession({ userId: 'user-1' })
+      const b = makeMockSession({ userId: 'user-1' })
+      sessions.set('socket-A', a.session)
+      sessions.set('socket-B', b.session)
+
+      service.onIntakeUpdated({ userId: 'user-1' })
+
+      expect(a.sendRealtimeInput).toHaveBeenCalledWith(
+        expect.objectContaining({ text: expect.stringMatching(/intake/i) }),
+      )
+      expect(b.sendRealtimeInput).toHaveBeenCalledWith(
+        expect.objectContaining({ text: expect.stringMatching(/intake/i) }),
+      )
+    })
+
+    it('does NOT broadcast to sessions belonging to other users', () => {
+      const sessions = (service as any).sessions as Map<string, any>
+      const self = makeMockSession({ userId: 'user-1' })
+      const other = makeMockSession({ userId: 'user-2' })
+      sessions.set('socket-self', self.session)
+      sessions.set('socket-other', other.session)
+
+      service.onIntakeUpdated({ userId: 'user-1' })
+
+      expect(self.sendRealtimeInput).toHaveBeenCalledTimes(1)
+      expect(other.sendRealtimeInput).not.toHaveBeenCalled()
+    })
+
+    it('skips already-closed sessions', () => {
+      const sessions = (service as any).sessions as Map<string, any>
+      const closed = makeMockSession({ userId: 'user-1', streamClosed: true })
+      sessions.set('socket-closed', closed.session)
+
+      service.onIntakeUpdated({ userId: 'user-1' })
+
+      expect(closed.sendRealtimeInput).not.toHaveBeenCalled()
+    })
+
+    it('still invalidates the context cache even when no active session exists', () => {
+      const spy = jest.spyOn(service, 'invalidateContextCache')
+      service.onIntakeUpdated({ userId: 'user-with-no-active-session' })
+      expect(spy).toHaveBeenCalledWith('user-with-no-active-session')
+    })
+
+    it('does not throw when sendRealtimeInput fails for one of multiple sessions', () => {
+      const sessions = (service as any).sessions as Map<string, any>
+      const failing = makeMockSession({ userId: 'user-1' })
+      failing.sendRealtimeInput.mockImplementation(() => {
+        throw new Error('stream broken')
+      })
+      const ok = makeMockSession({ userId: 'user-1' })
+      sessions.set('socket-fail', failing.session)
+      sessions.set('socket-ok', ok.session)
+
+      expect(() => service.onIntakeUpdated({ userId: 'user-1' })).not.toThrow()
+      expect(ok.sendRealtimeInput).toHaveBeenCalledTimes(1)
+    })
+  })
 })

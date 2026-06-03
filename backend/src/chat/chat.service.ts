@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { OnEvent } from '@nestjs/event-emitter'
+import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter'
 import type { Content } from '@google/genai'
 import {
   getTrailing7DayBaseline,
@@ -28,6 +28,7 @@ import { getJournalToolDeclarations, executeJournalTool } from './tools/journal-
 import type { JournalToolContext } from './tools/journal-tools.js'
 import { IntakeStatusService } from '../intake/intake-status.service.js'
 import { INTAKE_EVENTS, type IntakeUpdatedPayload } from '../intake/intake-events.js'
+import { EMERGENCY_EVENTS, type EmergencyFlaggedPayload } from './emergency-events.js'
 
 @Injectable()
 export class ChatService {
@@ -73,6 +74,7 @@ export class ChatService {
     private readonly symptomQuickLogService: SymptomQuickLogService,
     private readonly alertEngineService: AlertEngineService,
     private readonly intakeStatusService: IntakeStatusService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -101,7 +103,9 @@ export class ChatService {
   /** Phase/27 — bag of services the journal-tools executor needs for the
    *  new adherence / quick-symptom / photo-OCR tools. Built lazily because
    *  the constructor wires the deps; this just packages them. */
-  private toolContext(): JournalToolContext {
+  private toolContext(
+    ocrState?: JournalToolContext['ocrState'],
+  ): JournalToolContext {
     return {
       journalService: this.dailyJournalService,
       adherenceService: this.adherenceService,
@@ -109,6 +113,12 @@ export class ChatService {
       ocrService: this.ocrService,
       alertEngine: this.alertEngineService,
       intakeStatusService: this.intakeStatusService,
+      // Bug 13 — caller passes a SHARED mutable ocrState so the same object
+      // survives across the multiple toolContext() calls within one
+      // streaming turn. submit_bp_from_photo mutates lastAt; the streaming
+      // loop flips userMessageSince when a new user turn arrives; the next
+      // submit_checkin reads the flag and refuses if unconfirmed.
+      ocrState,
       // Mutating tools (submit/update/delete check-in, log adherence, log
       // symptom) call this after a successful write so the next chat turn
       // rebuilds patient context with the fresh row included. Mirrors the
@@ -142,25 +152,61 @@ export class ChatService {
     )
   }
 
-  private recordEmergencyEvent(
+  /**
+   * Persist an EmergencyEvent row AND fan out an emergency.flagged event so
+   * EscalationService can page the care team.
+   *
+   * Bug 10 — was previously fire-and-forget (.then/.catch with void return).
+   * If Prisma was briefly down the row was silently lost — patient still got
+   * verbal "call 911" from the LLM but ops had no audit trail. Now awaited
+   * INSIDE the method; failure logged with the [SECURITY-CRITICAL] prefix
+   * ops alerting watches for. Callers still invoke as fire-and-forget so the
+   * streaming LLM response isn't blocked on the DB write.
+   *
+   * Bug 11 — after a successful row insert, emits EMERGENCY_EVENTS.FLAGGED so
+   * EscalationService can dispatch caregiver / provider notifications via
+   * the existing dispatchCaregiverNotification machinery. Without this the
+   * EmergencyEvent row sat in the DB unread; no SMS / email / push fired.
+   */
+  private async recordEmergencyEvent(
     sessionId: string | null,
     userId: string | null,
     prompt: string,
     emergencySituation: string,
-  ): void {
-    this.prisma.emergencyEvent.create({
-      data: {
-        userId,
-        sessionId,
-        prompt,
-        isEmergency: true,
-        emergency_situation: emergencySituation,
-      },
-    }).then(() => {
-      console.log(`Recorded emergency event for session ${sessionId}: ${emergencySituation}`)
-    }).catch((error) => {
-      console.error('Error recording emergency event:', error)
-    })
+    source: EmergencyFlaggedPayload['source'] = 'chat-tool',
+  ): Promise<void> {
+    try {
+      await this.prisma.emergencyEvent.create({
+        data: {
+          userId,
+          sessionId,
+          prompt,
+          isEmergency: true,
+          emergency_situation: emergencySituation,
+        },
+      })
+      console.log(
+        `Recorded emergency event for session ${sessionId}: ${emergencySituation}`,
+      )
+      // Bug 11 — fan out to EscalationService.onEmergencyFlagged. Only emit
+      // when we have a userId — anonymous emergencies (rare; admin sessions
+      // hitting chat by accident) have no care team to page.
+      if (userId) {
+        const payload: EmergencyFlaggedPayload = {
+          userId,
+          sessionId,
+          situation: emergencySituation,
+          source,
+        }
+        this.eventEmitter.emit(EMERGENCY_EVENTS.FLAGGED, payload)
+      }
+    } catch (error) {
+      console.error(
+        `[SECURITY-CRITICAL] emergency event persistence failed userId=${userId} sessionId=${sessionId} situation="${emergencySituation}" source=${source} error=${
+          (error as Error).message ?? 'unknown'
+        }`,
+      )
+    }
   }
 
   /**
@@ -514,7 +560,7 @@ export class ChatService {
       // ── Tier 1: Parallel — DB + local embeddings only, zero Gemini calls ──
       const [basePrompt, sessionSummary, ragDocs, chatHistory] = await Promise.all([
         this.buildPatientSystemPrompt(userId),
-        this.conversationHistoryService.getSessionSummary(sessionId),
+        this.conversationHistoryService.getSessionSummary(userId, sessionId),
         this.ragService.retrieveDocuments(prompt, 10),
         this.conversationHistoryService.getConversationHistory(userId, sessionId, prompt),
       ])
@@ -537,6 +583,14 @@ export class ChatService {
       // block, we stream the missing-field question ourselves so the patient
       // never sees silence on a "yes" confirmation).
       let blockedCheckinNextAction: string | null = null
+
+      // Bug 13 — per-turn OCR-confirmation state. Shared mutable object so
+      // both submit_bp_from_photo (sets lastAt + clears flag) and
+      // submit_checkin (reads flag) see the same instance. Reset on a new
+      // patient message — since this streaming call IS a new patient
+      // message, userMessageSince starts true (LLM may have called OCR in
+      // a PRIOR turn that's now stale-bypassed by the current message).
+      const ocrState = { lastAt: 0, userMessageSince: true }
 
       for (let iteration = 0; iteration < 5; iteration++) {
         const stream = this.geminiService.streamContentWithTools({
@@ -596,10 +650,10 @@ export class ChatService {
                 next_action: `Continue asking. Missing: ${gate.missing[0]}`,
               })
             } else {
-              resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(), userId)
+              resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(ocrState), userId)
             }
           } else {
-            resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(), userId)
+            resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(ocrState), userId)
           }
 
           console.log(`Tool result [${toolName}]:`, resultStr.slice(0, 200))
@@ -612,7 +666,11 @@ export class ChatService {
             if (!emergencyYielded) {
               emergencyYielded = true
               yield { type: 'emergency', emergencySituation: emergency.emergencySituation }
-              this.recordEmergencyEvent(sessionId, userId, prompt, emergency.emergencySituation!)
+              // Bug 10/11 — fire-and-forget at the call site so the LLM
+              // stream isn't blocked on the DB write, but the method is now
+              // async + awaited internally + emits the .FLAGGED event for
+              // care-team escalation.
+              void this.recordEmergencyEvent(sessionId, userId, prompt, emergency.emergencySituation!)
             }
           }
 
@@ -681,6 +739,23 @@ export class ChatService {
         yield fallback
       }
 
+      // Bug 15 — last-ditch silent-turn fallback. If the two more-specific
+      // fallbacks above didn't fire (no tool succeeded, no submit was
+      // blocked) but the LLM still produced zero user-facing text, the
+      // patient just sent a message and is staring at silence. The
+      // commonest trigger is the LLM treating a "yes correct" confirmation
+      // as merely acknowledging the summary and forgetting to call
+      // submit_checkin — toolResultsCollected stays empty,
+      // blockedCheckinNextAction stays null, neither fallback runs. Recover
+      // by asking the patient to clarify rather than going silent.
+      if (!fullResponse.trim()) {
+        const fallback =
+          "I want to make sure I got that right — did you mean to confirm and save the reading, " +
+          'or did you want to change something first?'
+        fullResponse = fallback
+        yield fallback
+      }
+
       // Strip any leaked internal guard messages from the persisted record
       // (the live stream may have shown them; the saved version is clean).
       const guardPatterns = [
@@ -734,7 +809,7 @@ export class ChatService {
       // ── Tier 1: Parallel — DB + local embeddings only, zero Gemini calls ──
       const [basePrompt, sessionSummary, ragDocs, chatHistory] = await Promise.all([
         this.buildPatientSystemPrompt(userId),
-        this.conversationHistoryService.getSessionSummary(sessionId),
+        this.conversationHistoryService.getSessionSummary(userId, sessionId),
         this.ragService.retrieveDocuments(prompt, 10),
         this.conversationHistoryService.getConversationHistory(userId, sessionId, prompt),
       ])
@@ -769,7 +844,18 @@ export class ChatService {
       }
 
       if (emergency.isEmergency) {
-        this.recordEmergencyEvent(sessionId, userId, prompt, emergency.emergencySituation!)
+        // Bug 10/11 — fire-and-forget at the call site; the method is now
+        // async + awaited internally + emits EMERGENCY_EVENTS.FLAGGED for
+        // care-team escalation. Source 'detector' covers the upstream
+        // EmergencyDetectionService classifier path that sets
+        // emergency.isEmergency before any LLM tool call.
+        void this.recordEmergencyEvent(
+          sessionId,
+          userId,
+          prompt,
+          emergency.emergencySituation!,
+          'detector',
+        )
       }
 
       // ── Tier 3: Save conversation before returning ─────────────────────

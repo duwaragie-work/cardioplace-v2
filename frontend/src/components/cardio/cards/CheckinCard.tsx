@@ -389,6 +389,14 @@ function bpStatus(
 }
 
 function medicationLabel(s: CheckinSummary): string {
+  // Bug 16C — when the patient explicitly missed one or more meds, surface
+  // the names ("Missed: Norvasc, Toprol") instead of the generic boolean
+  // rollup. Drives the same card whether the backend received
+  // medication_taken=true (Bug 16A normalises this to false) or false.
+  if (s.missedMedications && s.missedMedications.length > 0) {
+    const names = s.missedMedications.map((m) => m.drugName).join(', ');
+    return `Missed: ${names}`;
+  }
   if (s.medicationScheduledLater) return 'Scheduled for later — not due yet';
   if (s.medicationTaken === true) return 'All taken ✓';
   if (s.medicationTaken === false) return 'Missed — care team has been notified';
@@ -396,6 +404,12 @@ function medicationLabel(s: CheckinSummary): string {
 }
 
 function medicationColor(s: CheckinSummary): string {
+  // Bug 16C — non-empty missedMedications means at least one was missed,
+  // even if the boolean wasn't set. Show the alert-red color so the card
+  // visually matches its label.
+  if (s.missedMedications && s.missedMedications.length > 0) {
+    return 'var(--brand-alert-red)';
+  }
   if (s.medicationScheduledLater) return 'var(--brand-warning-amber)';
   if (s.medicationTaken === true) return 'var(--brand-success-green)';
   if (s.medicationTaken === false) return 'var(--brand-alert-red)';

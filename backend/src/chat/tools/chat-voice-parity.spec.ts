@@ -25,6 +25,8 @@ import { IntakeStatusService } from '../../intake/intake-status.service.js'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
 import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
+import { PrismaService } from '../../prisma/prisma.service.js'
+import { EventEmitter2 } from '@nestjs/event-emitter'
 
 // ─── Text-chat tool catalog ───────────────────────────────────────────────────
 
@@ -51,6 +53,7 @@ const VOICE_TOOLS_EXPECTED = [
   'evaluate_reading',
   'finalize_checkin',
   'check_intake_status',
+  'flag_emergency',
 ] as const
 
 // Symptoms declared on the text-chat `submit_checkin` schema.
@@ -96,7 +99,7 @@ describe('Chat ↔ Voice tool catalog parity', () => {
     expect(names).toEqual([...TEXT_TOOLS_EXPECTED].sort())
   })
 
-  it('voice-chat exposes the canonical 8-tool catalog', async () => {
+  it('voice-chat exposes the canonical 9-tool catalog', async () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         VoiceToolsService,
@@ -104,6 +107,8 @@ describe('Chat ↔ Voice tool catalog parity', () => {
         { provide: GeminiService, useValue: {} },
         { provide: AlertEngineService, useValue: {} },
         { provide: IntakeStatusService, useValue: { getStatus: async () => ({ completed: true, profileExists: true }) } },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: async () => ({}) } } },
+        { provide: EventEmitter2, useValue: { emit: () => {} } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -124,6 +129,9 @@ describe('Chat ↔ Voice tool catalog parity', () => {
   // voice analog at all — voice handles emergencies inline via speech
   // without persisting an EmergencyEvent row. Test documents the gap;
   // remove the `expected` array when voice gains the missing tools.
+  // Bug 12 (2026-06) — flag_emergency now exists on voice. Updated the
+  // expected text-only set to the remaining two (log_medication_adherence
+  // and log_symptom_quick).
   it('documents the text-only tools (voice gap)', () => {
     const textOnly: string[] = []
     const voiceNames = new Set<string>(VOICE_TOOLS_EXPECTED)
@@ -131,7 +139,7 @@ describe('Chat ↔ Voice tool catalog parity', () => {
       if (!voiceNames.has(t)) textOnly.push(t)
     }
     expect(textOnly.sort()).toEqual(
-      ['flag_emergency', 'log_medication_adherence', 'log_symptom_quick'].sort(),
+      ['log_medication_adherence', 'log_symptom_quick'].sort(),
     )
   })
 })
@@ -224,6 +232,8 @@ describe('submit_checkin schema parity (text vs voice)', () => {
         { provide: GeminiService, useValue: {} },
         { provide: AlertEngineService, useValue: {} },
         { provide: IntakeStatusService, useValue: { getStatus: async () => ({ completed: true, profileExists: true }) } },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: async () => ({}) } } },
+        { provide: EventEmitter2, useValue: { emit: () => {} } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -267,6 +277,8 @@ describe('submit_checkin schema parity (text vs voice)', () => {
         { provide: GeminiService, useValue: {} },
         { provide: AlertEngineService, useValue: {} },
         { provide: IntakeStatusService, useValue: { getStatus: async () => ({ completed: true, profileExists: true }) } },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: async () => ({}) } } },
+        { provide: EventEmitter2, useValue: { emit: () => {} } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -293,6 +305,8 @@ describe('submit_checkin schema parity (text vs voice)', () => {
         { provide: GeminiService, useValue: {} },
         { provide: AlertEngineService, useValue: {} },
         { provide: IntakeStatusService, useValue: { getStatus: async () => ({ completed: true, profileExists: true }) } },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: async () => ({}) } } },
+        { provide: EventEmitter2, useValue: { emit: () => {} } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -322,6 +336,8 @@ describe('submit_checkin schema parity (text vs voice)', () => {
         { provide: GeminiService, useValue: gemini },
         { provide: AlertEngineService, useValue: {} },
         { provide: IntakeStatusService, useValue: { getStatus: async () => ({ completed: true, profileExists: true }) } },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: async () => ({}) } } },
+        { provide: EventEmitter2, useValue: { emit: () => {} } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -355,6 +371,8 @@ describe('submit_checkin schema parity (text vs voice)', () => {
         { provide: GeminiService, useValue: {} },
         { provide: AlertEngineService, useValue: {} },
         { provide: IntakeStatusService, useValue: { getStatus: async () => ({ completed: true, profileExists: true }) } },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: async () => ({}) } } },
+        { provide: EventEmitter2, useValue: { emit: () => {} } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)

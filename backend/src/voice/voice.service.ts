@@ -738,12 +738,42 @@ export class VoiceService implements OnModuleDestroy {
 
   /**
    * Listener — IntakeService emits `intake.updated` after profile / medication
-   * mutation. Drops the voice context cache so a follow-up voice session sees
+   * mutation. Drops the voice context cache so a FOLLOW-UP voice session sees
    * the new INTAKE STATUS block + fresh resolved conditions / medications.
+   *
+   * Bug 1 fix — also broadcast a system-style text turn to any CURRENTLY-OPEN
+   * voice session(s) for this user. Gemini Live delivers the systemInstruction
+   * exactly once at connect; without this nudge a patient who completes intake
+   * in another tab during an active voice call stays stuck with the stale
+   * "INTAKE STATUS: INCOMPLETE" instruction and the bot keeps refusing
+   * submit_checkin until they end and restart the session.
    */
   @OnEvent(INTAKE_EVENTS.UPDATED)
   onIntakeUpdated(payload: IntakeUpdatedPayload): void {
     this.invalidateContextCache(payload.userId)
+    let broadcastCount = 0
+    for (const session of this.sessions.values()) {
+      if (session.userId !== payload.userId) continue
+      if (session.streamClosed) continue
+      try {
+        session.liveSession.sendRealtimeInput({
+          text:
+            '[System update: the patient has now completed their clinical intake. ' +
+            'You may proceed with check-ins normally. Call check_intake_status if you ' +
+            'need to confirm before the first save.]',
+        })
+        broadcastCount += 1
+      } catch (err) {
+        this.logger.warn(
+          `[VOICE intake-broadcast] failed for user=${payload.userId}: ${(err as Error).message}`,
+        )
+      }
+    }
+    if (broadcastCount > 0) {
+      this.logger.log(
+        `[VOICE intake-broadcast] notified ${broadcastCount} active session(s) for user=${payload.userId}`,
+      )
+    }
   }
 
   async endSession(socketId: string): Promise<void> {

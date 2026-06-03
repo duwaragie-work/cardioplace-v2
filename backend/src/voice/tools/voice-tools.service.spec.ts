@@ -6,11 +6,14 @@
 
 import { jest } from '@jest/globals'
 import { Test } from '@nestjs/testing'
-import { VoiceToolsService } from './voice-tools.service.js'
+import { EventEmitter2 } from '@nestjs/event-emitter'
+import { VoiceToolsService, mapVoiceSymptomsToFlags } from './voice-tools.service.js'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
 import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
 import { IntakeStatusService } from '../../intake/intake-status.service.js'
+import { PrismaService } from '../../prisma/prisma.service.js'
+import { EMERGENCY_EVENTS } from '../../chat/emergency-events.js'
 
 const CTX = { userId: 'user-1', timezone: 'America/New_York' }
 
@@ -20,6 +23,8 @@ describe('VoiceToolsService.dispatch', () => {
   let gemini: { extractBpFromImage: jest.Mock }
   let alertEngine: { evaluateAdHoc: jest.Mock }
   let intakeStatus: { getStatus: jest.Mock }
+  let prisma: { emergencyEvent: { create: jest.Mock } }
+  let eventEmitter: { emit: jest.Mock }
 
   beforeEach(async () => {
     dailyJournal = {
@@ -34,6 +39,8 @@ describe('VoiceToolsService.dispatch', () => {
     intakeStatus = {
       getStatus: jest.fn(async () => ({ completed: true, profileExists: true })) as jest.Mock,
     }
+    prisma = { emergencyEvent: { create: jest.fn() as jest.Mock } }
+    eventEmitter = { emit: jest.fn() as jest.Mock }
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -42,6 +49,8 @@ describe('VoiceToolsService.dispatch', () => {
         { provide: GeminiService, useValue: gemini },
         { provide: AlertEngineService, useValue: alertEngine },
         { provide: IntakeStatusService, useValue: intakeStatus },
+        { provide: PrismaService, useValue: prisma },
+        { provide: EventEmitter2, useValue: eventEmitter },
       ],
     }).compile()
 
@@ -50,7 +59,7 @@ describe('VoiceToolsService.dispatch', () => {
 
   // ── declarations ──────────────────────────────────────────────────────────
 
-  it('exposes 8 function declarations (5 Python-contract + evaluate_reading + finalize_checkin + check_intake_status)', () => {
+  it('exposes 9 function declarations (8 prior + flag_emergency)', () => {
     const decls = service.getToolDeclarations()
     const names = decls.map((d) => d.name).sort()
     expect(names).toEqual([
@@ -58,11 +67,67 @@ describe('VoiceToolsService.dispatch', () => {
       'delete_checkin',
       'evaluate_reading',
       'finalize_checkin',
+      'flag_emergency',
       'get_recent_readings',
       'submit_bp_from_photo',
       'submit_checkin',
       'update_checkin',
     ])
+  })
+
+  // ── Bug 12 regression — flag_emergency on voice ──────────────────────────
+  // Voice used to have no emergency surface at all; patients saying "I'm
+  // having a stroke" got verbal "call 911" but no audit row and no care-team
+  // page. The new tool persists EmergencyEvent + emits EMERGENCY_EVENTS.FLAGGED
+  // so EscalationService can dispatch caregivers / provider notifications.
+
+  it('flag_emergency: persists EmergencyEvent + emits EMERGENCY_EVENTS.FLAGGED + returns flagged:true', async () => {
+    ;(prisma.emergencyEvent.create as jest.Mock<any>).mockResolvedValue({} as never)
+    const r = await service.dispatch(
+      'flag_emergency',
+      { emergency_situation: 'patient says they cannot breathe' },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({
+        flagged: true,
+        emergency_situation: 'patient says they cannot breathe',
+      }),
+    )
+    expect(prisma.emergencyEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: 'user-1',
+          isEmergency: true,
+          emergency_situation: 'patient says they cannot breathe',
+        }),
+      }),
+    )
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      EMERGENCY_EVENTS.FLAGGED,
+      expect.objectContaining({
+        userId: 'user-1',
+        situation: 'patient says they cannot breathe',
+        source: 'voice-tool',
+      }),
+    )
+  })
+
+  it('flag_emergency: still returns flagged:true (and 911 guidance) even when DB write fails', async () => {
+    ;(prisma.emergencyEvent.create as jest.Mock<any>).mockRejectedValue(new Error('DB down'))
+    const r = await service.dispatch(
+      'flag_emergency',
+      { emergency_situation: 'chest pain right now' },
+      CTX,
+    )
+    // The patient's verbal "call 911" path must NEVER be blocked by an
+    // audit-write failure — that's the whole point of the [SECURITY-CRITICAL]
+    // log in the catch block.
+    expect(r.llmResponse).toEqual(expect.objectContaining({ flagged: true }))
+    // The event is NOT emitted when the persistence failed (we only emit on
+    // successful row insert so EscalationService doesn't dispatch for a row
+    // it can't audit-link to later).
+    expect(eventEmitter.emit).not.toHaveBeenCalled()
   })
 
   // Regression guard for the natural-language delete/update UX fix. Mirrors
@@ -174,6 +239,38 @@ describe('VoiceToolsService.dispatch', () => {
     expect(ac.success).toBe(false)
   })
 
+  // Bug 5 regression — without the guard, an LLM call without medication_taken
+  // would silently flag the patient as non-adherent (toBool default false).
+  // Stage-B medication-adherence alerts (Tier 2/3) would fire on a patient who
+  // actually took their meds — the bot just never asked.
+  it('submit_checkin: rejects with MISSING_FIELD when medication_taken is omitted', async () => {
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80 }, // medication_taken intentionally absent
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({
+        saved: false,
+        reason: 'MISSING_FIELD',
+      }),
+    )
+    expect((r.llmResponse as any).message).toMatch(/medication/i)
+    expect(dailyJournal.create).not.toHaveBeenCalled()
+  })
+
+  it('submit_checkin: rejects with MISSING_FIELD when medication_taken is null', async () => {
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80, medication_taken: null },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({ saved: false, reason: 'MISSING_FIELD' }),
+    )
+    expect(dailyJournal.create).not.toHaveBeenCalled()
+  })
+
   // ── get_recent_readings ───────────────────────────────────────────────────
 
   it('get_recent_readings: clamps days to [1,30] and returns line summary', async () => {
@@ -214,6 +311,37 @@ describe('VoiceToolsService.dispatch', () => {
     const r = await service.dispatch('update_checkin', { entry_id: 'abc' }, CTX)
     expect(dailyJournal.update).not.toHaveBeenCalled()
     expect(r.llmResponse).toEqual({ updated: false, message: 'No fields to update.' })
+  })
+
+  // Bug 6 regression — when patient asks to change the time and `findOne`
+  // throws (entry deleted, id hallucinated), do NOT silently apply OTHER
+  // field changes while dropping the requested time. Reject the whole update
+  // so the LLM tells the patient honestly instead of claiming success.
+  it('update_checkin: rejects with updated:false when measurement_time is given but findOne throws', async () => {
+    ;(dailyJournal.findOne as jest.Mock<any>).mockRejectedValue(new Error('Entry not found'))
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'stale-id', measurement_time: '09:00', systolic_bp: 140 },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({ updated: false }),
+    )
+    expect((r.llmResponse as any).message).toMatch(/get_recent_readings/i)
+    expect(dailyJournal.update).not.toHaveBeenCalled()
+  })
+
+  it('update_checkin: rejects with updated:false when findOne returns no measuredAt', async () => {
+    ;(dailyJournal.findOne as jest.Mock<any>).mockResolvedValue({ data: { measuredAt: null } })
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'weird-id', measurement_time: '09:00', systolic_bp: 140 },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({ updated: false }),
+    )
+    expect(dailyJournal.update).not.toHaveBeenCalled()
   })
 
   it('update_checkin: maps medication_taken="yes" → true and calls update', async () => {
@@ -463,5 +591,47 @@ describe('VoiceToolsService.dispatch', () => {
         }),
       )
     })
+  })
+})
+
+// ─── Bug 2 + 3 regression guards for the voice symptom mapper ───────────────
+// Mirrors the text-side guards in chat/tools/journal-tools.spec.ts. Both
+// mappers must stay in lockstep or the LLM gets surface-dependent behaviour.
+describe('mapVoiceSymptomsToFlags', () => {
+  it('flips structured booleans on positive freeform phrases', () => {
+    expect(mapVoiceSymptomsToFlags(['chest pain'])).toEqual({
+      chestPainOrDyspnea: true,
+    })
+    expect(mapVoiceSymptomsToFlags(['dizzy', 'palpitations'])).toEqual({
+      dizziness: true,
+      palpitations: true,
+    })
+  })
+
+  it('Bug 2 regression — does NOT flip flags on negation phrases', () => {
+    expect(mapVoiceSymptomsToFlags(['no chest pain'])).toBeUndefined()
+    expect(mapVoiceSymptomsToFlags(['denies dizziness'])).toBeUndefined()
+    expect(mapVoiceSymptomsToFlags(['without headache'])).toBeUndefined()
+    expect(mapVoiceSymptomsToFlags(['none'])).toBeUndefined()
+    expect(mapVoiceSymptomsToFlags(['negative for chest pain'])).toBeUndefined()
+  })
+
+  it('Bug 2 regression — mixed negated + positive list keeps only the positives', () => {
+    expect(
+      mapVoiceSymptomsToFlags(['no chest pain', 'dizzy', 'denies headache']),
+    ).toEqual({ dizziness: true })
+  })
+
+  it('Bug 3 regression — face_swelling underscore variant flips faceSwelling', () => {
+    expect(mapVoiceSymptomsToFlags(['face_swelling'])).toEqual({
+      faceSwelling: true,
+    })
+  })
+
+  it('Bug 3 regression — all snake_case schema keys round-trip', () => {
+    expect(mapVoiceSymptomsToFlags(['severe_headache'])).toEqual({ severeHeadache: true })
+    expect(mapVoiceSymptomsToFlags(['chest_pain_or_dyspnea'])).toEqual({ chestPainOrDyspnea: true })
+    expect(mapVoiceSymptomsToFlags(['altered_mental_status'])).toEqual({ alteredMentalStatus: true })
+    expect(mapVoiceSymptomsToFlags(['throat_tightness'])).toEqual({ throatTightness: true })
   })
 })

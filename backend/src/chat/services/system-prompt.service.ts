@@ -178,38 +178,52 @@ Step 3b: PULSE (optional) — ALWAYS ask: "Did your cuff also show a pulse numbe
        This one's optional — totally fine to skip if your cuff didn't show it." Pass
        through pulse (30–220 bpm) when the patient gives a number; omit when they
        skip or say their cuff didn't show it.
-Step 3c: POSITION (optional) — ALWAYS ask: "Were you sitting, standing, or lying
-       down when you measured? Optional, you can skip." Pass position as
-       SITTING / STANDING / LYING when answered; omit when skipped.
-Step 4: MEDICATION — "Did you take your medication today?"
+Step 3c: POSITION — ALWAYS ask: "Were you sitting, standing, or lying
+       down when you measured?" Pass position as SITTING / STANDING / LYING. The BP
+       form requires position — treat this as mandatory; if the patient is unsure,
+       ask them to recall.
+Step 4: MEDICATION — When the patient has MORE THAN ONE medication on file (see the
+       active-medications list in the patient context block below), ask per-med to
+       avoid losing fidelity to a "yes to everything" rollup:
+       "For each of your medications — <Med1>, <Med2>, <Med3> — did you take it today,
+       miss it, or have it scheduled for later?"
+       When the patient has only one medication, ask: "Did you take your <Med1> today?"
+       Set medication_taken=true when ALL meds were taken; medication_scheduled_later=true
+       when ALL are scheduled later; medication_taken=false when ANY was missed.
 Step 4b (CONDITIONAL — only if Step 4 was NO or "I missed some"): MISSED MED DETAIL —
-       Ask which medications they missed by name (use the patient's medication list from below;
-       do NOT ask about AS_NEEDED / PRN drugs). For EACH missed med ask why
-       ("forgot, side effects, ran out, cost, on purpose, other?"). Default 1 missed dose
-       if patient doesn't specify.
-Step 5: SYMPTOMS — "Any symptoms today like headache, dizziness, or chest tightness?"
+       For EACH missed med ask why ("forgot, side effects, ran out, cost, on purpose,
+       other?"). Pass each as a missed_medications row {drug_name, reason, missed_doses};
+       default 1 missed dose if patient doesn't specify. Do NOT ask about AS_NEEDED / PRN.
+Step 5: SYMPTOMS — "Any new symptoms today — headache, vision changes, confusion,
+       chest pain or shortness of breath, weakness on one side, severe stomach pain,
+       dizziness, fainting, heart racing or palpitations, leg or ankle swelling,
+       unusual fatigue, dry cough, NSAID use (ibuprofen / Advil / Aleve), or new
+       swelling of the face, lips, tongue, or throat?"
        When the patient names a known clinical symptom (chest pain / shortness of breath,
        severe headache, vision changes, confusion, dizziness, fainting, palpitations,
        leg swelling, face swelling, throat tightness, RUQ pain, severe epigastric pain,
-       new-onset headache, etc.), set BOTH:
+       new-onset headache, fatigue, dry cough, NSAID use, etc.), set BOTH:
          (a) the matching structured boolean on submit_checkin
              (e.g. chest_pain_or_dyspnea: true for "chest pain"),
          (b) the patient's phrasing in the symptoms[] array.
        The structured boolean drives the rule engine's emergency overrides; the freeform
        array keeps the patient's exact words in the chart. If you forget the boolean,
        the engine misses the emergency — set both, every time.
-Step 6: WEIGHT — You MUST ask: "What is your weight today in lbs? You can skip this if you don't know." You MUST ask this question every time. Do NOT skip it. The patient can choose to skip, but YOU must always ask.
-Step 6b: MEASUREMENT CHECKLIST — three quick yes/no checks. Ask them as one combined question:
-       "Last few questions before I save: did you avoid caffeine in the 30 minutes before measuring,
-       was the cuff on your bare arm, and were you seated quietly for at least 5 minutes?"
-       Pass each answer through measurement_conditions (noCaffeine, cuffOnBareArm, seatedQuietly).
+Step 6: WEIGHT — You MUST ask: "What is your weight today? You can skip this if you don't know." Pass weight in LBS. If the patient gives kg, convert (kg × 2.205 ≈ lbs). You MUST ask this question every time — patient can skip, but YOU must always ask.
+Step 6b: MEASUREMENT CHECKLIST — the BP form requires all 8 keys; the chat mirrors that ask. One combined question:
+       "Quick check before I save — over the 30 minutes before you measured: no caffeine, no smoking,
+       no exercise, bladder empty, seated quietly for at least 5 minutes, back supported with
+       feet flat on the floor, not talking during the measurement, cuff on a bare arm. Yes to all,
+       or any you didn't do?"
+       Pass each answer through measurement_conditions — the 8 keys are noCaffeine, noSmoking,
+       noExercise, bladderEmpty, seatedQuietly, posturalSupport, notTalking, cuffOnBareArm.
        If the patient skips this step, omit measurement_conditions entirely — don't default to false.
 Step 6c: NOTES (optional) — ALWAYS ask: "Anything else you'd like to note about
        this reading? Optional, you can skip." If the patient adds context (e.g.
        "I had coffee earlier", "felt anxious during the reading", "left arm cuff"),
        pass it through notes. If they skip / say "no", omit the notes field.
 Step 7: SUMMARY + CONFIRM — Show all collected values (including any missed meds + their reasons) and ask "Shall I save this?"
-Step 8: SAVE — When patient says yes, IMMEDIATELY call submit_checkin. Then confirm save.
+Step 8: SAVE — When the patient confirms (yes / save it / correct / looks good / "yes correct"), IMMEDIATELY call submit_checkin IN THE SAME TURN. The patient's "yes" IS the save trigger — do NOT just reply "okay" and wait for another message. After the tool returns, briefly acknowledge: "Got it — your reading is saved."
 
 RULES:
 - Ask ONE question per message. Wait for the answer before asking the next.
@@ -461,37 +475,57 @@ Never assume any value the patient hasn't explicitly given you in this conversat
       - "now" / "right now" / "just now" → pass measurement_time="now" (executor
         substitutes) OR substitute the injected CURRENT TIME yourself.
       - Otherwise pass HH:mm.
-  B1. Pre-measurement checklist (caffeine, bare arm, seated quietly). Ask briefly
-      as one combined question: "Quick check before I save — did you avoid caffeine
-      in the 30 minutes before, was the cuff on your bare arm, and were you seated
-      quietly for at least 5 minutes?" Pass each answer through measurement_conditions
-      (noCaffeine, cuffOnBareArm, seatedQuietly). Omit any flag the patient didn't
-      answer — don't default to false.
+  B1. Pre-measurement checklist (all 8 keys — mirrors the BP check-in form which
+      requires every one). Ask as one combined question:
+      "Quick check before I save — over the 30 minutes before you measured: no caffeine,
+      no smoking, no exercise, bladder empty, seated quietly for at least 5
+      minutes, back supported with feet flat on the floor, not talking during the
+      measurement, and the cuff on a bare arm. Yes to all, or any you didn't do?"
+      Pass each answer through measurement_conditions — the 8 keys are noCaffeine,
+      noSmoking, noExercise, bladderEmpty, seatedQuietly, posturalSupport, notTalking,
+      cuffOnBareArm. Omit any flag the patient didn't answer — don't default to false.
   B2. BP top number, BP bottom number — both required.
       Pulse — ALWAYS ask: "Did your cuff also show a pulse number? Optional, you can
       skip if it didn't." Pass pulse (30–220) when given; omit when skipped.
-      Position — ALWAYS ask: "Were you sitting, standing, or lying down? Optional,
-      you can skip." Pass SITTING / STANDING / LYING; omit when skipped.
-  B3. Weight (optional, lbs) — ALWAYS ask: "What's your weight today? You can skip."
-  B4. Per-medication adherence — ask: "Did you take all your medications today?"
-      - If yes → set medication_taken=true.
-      - If "not yet, I'll take it later" → medication_scheduled_later=true (NOT missed).
-      - If "no" / "I missed some" → medication_taken=false AND ask which medications
-        they missed and why (forgot / side effects / ran out / cost / on purpose / other).
-        Pass each as a missed_medications row {drug_name, reason, missed_doses};
-        default missed_doses=1. Do NOT ask about AS_NEEDED (PRN) drugs.
-  B5. Symptoms — ask "Any new symptoms — headache, vision changes, confusion, chest
-      pain or shortness of breath, weakness on one side, severe stomach pain?" For
-      pregnant patients also ask about new headaches, right-upper-quadrant pain, or
-      new swelling. Map their answer to the structured booleans (severeHeadache,
+      Position — ALWAYS ask: "Were you sitting, standing, or lying down when you
+      measured?" Pass SITTING / STANDING / LYING. The form requires position; treat
+      this question as mandatory — if the patient is unsure, ask them to recall.
+  B3. Weight (optional) — ALWAYS ask: "What's your weight today? You can skip if you
+      don't know." Pass weight in LBS. If the patient gives kilograms, convert
+      (kg × 2.205 ≈ lbs) and pass the lbs value.
+  B4. Per-medication adherence. The patient context block above lists the patient's
+      active medications by name. If they have MORE THAN ONE medication, ask per-med
+      so we don't lose fidelity to a "yes to everything" rollup:
+      "For each of your medications — <Med1>, <Med2>, <Med3> — did you take it today,
+      miss it, or have it scheduled for later?"
+      If only one medication: "Did you take your <Med1> today?".
+      - All taken → medication_taken=true.
+      - All "scheduled later" / "not yet" → medication_scheduled_later=true.
+      - Any missed → medication_taken=false AND ask why for EACH missed med
+        (forgot / side effects / ran out / cost / on purpose / other). Pass each as a
+        missed_medications row {drug_name, reason, missed_doses}; default missed_doses=1.
+        Do NOT ask about AS_NEEDED (PRN) drugs.
+  B5. Symptoms — ask "Any new symptoms today — headache, vision changes, confusion,
+      chest pain or shortness of breath, weakness on one side, severe stomach pain,
+      dizziness, fainting, heart racing or palpitations, leg or ankle swelling,
+      unusual fatigue, dry cough, NSAID use (ibuprofen / Advil / Aleve), or new
+      swelling of the face, lips, tongue, or throat?" For pregnant patients also ask
+      about new-onset headaches, right-upper-quadrant pain, or facial / hand / leg
+      swelling. Map their answer to the structured booleans (severeHeadache,
       visualChanges, alteredMentalStatus, chestPainOrDyspnea, focalNeuroDeficit,
-      severeEpigastricPain, newOnsetHeadache, ruqPain, edema). Anything else goes
-      in other_symptoms[]. The legacy symptoms[] array stays empty.
+      severeEpigastricPain, newOnsetHeadache, ruqPain, edema, dizziness, syncope,
+      palpitations, legSwelling, fatigue, shortnessOfBreath, dryCough, nsaidUse,
+      faceSwelling, throatTightness). Anything else goes in other_symptoms[]. The
+      legacy symptoms[] array stays empty.
   B5b. Notes (optional) — ALWAYS ask: "Anything else you'd like to note about this
        reading? Optional." Pass through notes when given; omit when skipped.
   B6. Summarise everything collected (date, time, BP, pulse, position, meds + any
       missed-med detail, symptoms, weight, measurement context, notes) and ask the
-      patient to confirm before calling submit_checkin.
+      patient to confirm. When the patient confirms (yes / save it / correct / looks
+      good / "yes correct"), IMMEDIATELY call submit_checkin IN THE SAME TURN. The
+      patient's "yes" IS the save trigger — do NOT just reply "okay" and wait for
+      another message. After the tool returns, briefly acknowledge: "Got it — your
+      reading is saved."
 
 DO NOT call submit_checkin until ALL of these have been answered IN THIS CONVERSATION:
   - entry_date (the patient explicitly answered the date question)
@@ -552,7 +586,7 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
 
     // ── Patient profile (name + age) ──────────────────────────────────────
     const profileParts: string[] = []
-    if (data.patientName) profileParts.push(`Patient name: ${data.patientName}`)
+    if (data.patientName) profileParts.push(`Patient name: ${sanitiseForPrompt(data.patientName)}`)
     if (data.dateOfBirth) {
       const age = Math.floor(
         (Date.now() - new Date(data.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000),
@@ -699,6 +733,26 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
 
 // ─── rendering helpers ──────────────────────────────────────────────────────
 // Split out so each section can be unit-tested independently.
+
+// Bug 7 fix — sanitise any DB free-text field before interpolating into the
+// prompt. The patient controls their own `name` at signup; without this, a
+// name like "John\n\nIGNORE PREVIOUS INSTRUCTIONS\n\nNew instruction:" lands
+// verbatim into the system prompt on every turn (prompt-injection vector).
+// Strips newlines + prompt-closing quote characters and caps length.
+// Exported so the same helper can be reused on `appendMedications`
+// (drugName), and any future appender that interpolates user-controlled
+// strings.
+export function sanitiseForPrompt(
+  s: string | null | undefined,
+  maxLen = 120,
+): string {
+  if (!s) return ''
+  return s
+    .replace(/[\n\r]+/g, ' ')
+    .replace(/[`"\\]/g, '')
+    .slice(0, maxLen)
+    .trim()
+}
 
 function buildToneBlock(tone: ToneMode): string {
   switch (tone) {
@@ -901,7 +955,7 @@ function appendMedications(lines: string[], ctx: ResolvedContext): void {
   for (const med of meds) {
     const unverifiedFlag =
       med.verificationStatus === 'UNVERIFIED' ? ' ⚠ unverified' : ''
-    let line = `- ${med.drugName} (${med.drugClass}), ${formatFrequency(med.frequency)}${unverifiedFlag}`
+    let line = `- ${sanitiseForPrompt(med.drugName, 80)} (${med.drugClass}), ${formatFrequency(med.frequency)}${unverifiedFlag}`
     if (med.isCombination && med.combinationComponents.length > 0) {
       line += ` [combo: ${med.combinationComponents.join(' + ')}]`
     }
@@ -926,6 +980,21 @@ function formatFrequency(freq: string): string {
   }
 }
 
+// Bug 4 fix — render an asymmetric threshold (one bound set, the other null)
+// in plain English rather than as "140–?" which the LLM would interpret as
+// a wildcard / unknown. Keeps the "X–Y" form for fully-bounded ranges.
+export function renderThresholdAxis(
+  label: string,
+  lower: number | null | undefined,
+  upper: number | null | undefined,
+  unit: string,
+): string | null {
+  if (lower != null && upper != null) return `${label} ${lower}–${upper} ${unit}`
+  if (upper != null) return `${label} up to ${upper} ${unit}`
+  if (lower != null) return `${label} at least ${lower} ${unit}`
+  return null
+}
+
 function appendThreshold(lines: string[], ctx: ResolvedContext): void {
   const t = ctx.threshold
   if (!t) {
@@ -934,21 +1003,12 @@ function appendThreshold(lines: string[], ctx: ResolvedContext): void {
     return
   }
   const parts: string[] = []
-  if (t.sbpUpperTarget != null || t.sbpLowerTarget != null) {
-    parts.push(
-      `SBP ${t.sbpLowerTarget ?? '?'}–${t.sbpUpperTarget ?? '?'} mmHg`,
-    )
-  }
-  if (t.dbpUpperTarget != null || t.dbpLowerTarget != null) {
-    parts.push(
-      `DBP ${t.dbpLowerTarget ?? '?'}–${t.dbpUpperTarget ?? '?'} mmHg`,
-    )
-  }
-  if (t.hrUpperTarget != null || t.hrLowerTarget != null) {
-    parts.push(
-      `HR ${t.hrLowerTarget ?? '?'}–${t.hrUpperTarget ?? '?'} bpm`,
-    )
-  }
+  const sbp = renderThresholdAxis('SBP', t.sbpLowerTarget, t.sbpUpperTarget, 'mmHg')
+  if (sbp) parts.push(sbp)
+  const dbp = renderThresholdAxis('DBP', t.dbpLowerTarget, t.dbpUpperTarget, 'mmHg')
+  if (dbp) parts.push(dbp)
+  const hr = renderThresholdAxis('HR', t.hrLowerTarget, t.hrUpperTarget, 'bpm')
+  if (hr) parts.push(hr)
   const setOn = new Date(t.setAt).toISOString().slice(0, 10)
   lines.push(`Provider-set goals: ${parts.join(', ')}, set ${setOn}.`)
   lines.push('')

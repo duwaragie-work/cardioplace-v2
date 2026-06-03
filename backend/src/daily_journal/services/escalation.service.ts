@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter'
+import {
+  EMERGENCY_EVENTS,
+  type EmergencyFlaggedPayload,
+} from '../../chat/emergency-events.js'
 import { Cron } from '@nestjs/schedule'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
@@ -112,6 +116,113 @@ export class EscalationService {
         err instanceof Error ? err.stack : err,
       )
     }
+  }
+
+  /**
+   * Bug 11 — chat/voice `flag_emergency` tool fires an emergency.flagged event
+   * after ChatService persists the EmergencyEvent row. This listener pages the
+   * patient's consenting caregivers AND their assigned provider so the care
+   * team learns about an acute emergency in real time, not via DB audit
+   * scrape. Reuses findCaregivers + the SMS/email/DASHBOARD plumbing the
+   * standard alert path uses.
+   */
+  @OnEvent(EMERGENCY_EVENTS.FLAGGED, { async: true })
+  async onEmergencyFlagged(payload: EmergencyFlaggedPayload): Promise<void> {
+    try {
+      await this.dispatchEmergencyToCareTeam(payload)
+    } catch (err) {
+      this.logger.error(
+        `[SECURITY-CRITICAL] Emergency dispatch failed userId=${payload.userId} situation="${payload.situation}"`,
+        err instanceof Error ? err.stack : err,
+      )
+    }
+  }
+
+  private async dispatchEmergencyToCareTeam(
+    payload: EmergencyFlaggedPayload,
+  ): Promise<void> {
+    const subject = `URGENT — Cardioplace patient emergency`
+    const body =
+      `A Cardioplace patient flagged an acute emergency during a ${
+        payload.source === 'voice-tool' ? 'voice' : 'chat'
+      } session.\n\n` +
+      `Situation reported by the patient: ${payload.situation}\n\n` +
+      `Please reach out to the patient immediately or escalate per your practice's emergency protocol. ` +
+      `An EmergencyEvent has been recorded in the audit log.`
+
+    // 1) Consenting caregivers — same dispatch pattern as L1 alerts.
+    const caregivers = await this.findCaregivers(payload.userId)
+    for (const caregiver of caregivers) {
+      try {
+        switch (caregiver.notifyChannel) {
+          case 'EMAIL':
+            if (caregiver.email) {
+              await this.emailService.sendEmail(caregiver.email, subject, body)
+            }
+            break
+          case 'SMS':
+            if (caregiver.phone) {
+              await this.smsService.sendSms(caregiver.phone, body)
+            }
+            break
+          case 'DASHBOARD':
+            if (caregiver.caregiverUserId) {
+              await this.prisma.notification.create({
+                data: {
+                  userId: caregiver.caregiverUserId,
+                  patientUserId: payload.userId,
+                  channel: 'DASHBOARD',
+                  title: subject,
+                  body,
+                },
+              })
+            }
+            break
+          default:
+            break
+        }
+      } catch (err) {
+        this.logger.error(
+          `Emergency dispatch to caregiver ${caregiver.id} failed`,
+          err instanceof Error ? err.stack : err,
+        )
+      }
+    }
+
+    // 2) Assigned providers — DASHBOARD notification to the primary AND
+    // backup so the emergency lands in someone's inbox without depending on
+    // SMS/email config. PatientProviderAssignment uses `userId` (the
+    // patient) as the unique key, and stores `primaryProviderId` +
+    // `backupProviderId`.
+    const assignment = await this.prisma.patientProviderAssignment.findUnique({
+      where: { userId: payload.userId },
+      select: { primaryProviderId: true, backupProviderId: true },
+    })
+    const providerIds = new Set<string>()
+    if (assignment?.primaryProviderId) providerIds.add(assignment.primaryProviderId)
+    if (assignment?.backupProviderId) providerIds.add(assignment.backupProviderId)
+    for (const providerId of providerIds) {
+      try {
+        await this.prisma.notification.create({
+          data: {
+            userId: providerId,
+            patientUserId: payload.userId,
+            channel: 'DASHBOARD',
+            title: subject,
+            body,
+          },
+        })
+      } catch (err) {
+        this.logger.error(
+          `Emergency notification to provider ${providerId} failed`,
+          err instanceof Error ? err.stack : err,
+        )
+      }
+    }
+
+    this.logger.log(
+      `Emergency dispatched userId=${payload.userId} caregivers=${caregivers.length} providers=${providerIds.size} source=${payload.source}`,
+    )
   }
 
   @Cron('*/15 * * * *')

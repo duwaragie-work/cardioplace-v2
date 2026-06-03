@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { EventEmitter2 } from '@nestjs/event-emitter'
 import { Type } from '@google/genai'
 import type { FunctionDeclaration } from '@google/genai'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
@@ -7,6 +8,11 @@ import type { SessionSymptoms } from '../../daily_journal/engine/types.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
 import { isIntakeIncompleteError } from '../../chat/tools/journal-tools.js'
 import { IntakeStatusService } from '../../intake/intake-status.service.js'
+import { PrismaService } from '../../prisma/prisma.service.js'
+import {
+  EMERGENCY_EVENTS,
+  type EmergencyFlaggedPayload,
+} from '../../chat/emergency-events.js'
 
 // Voice-tool I/O — argument shapes are stable contract with the Gemini Live
 // system prompt; field-name and sentinel-value changes ripple into the
@@ -71,6 +77,8 @@ export class VoiceToolsService {
     private readonly gemini: GeminiService,
     private readonly alertEngine: AlertEngineService,
     private readonly intakeStatusService: IntakeStatusService,
+    private readonly prisma: PrismaService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -291,6 +299,31 @@ export class VoiceToolsService {
           required: ['entry_id'],
         },
       },
+      {
+        // Bug 12 — voice parity with the text `flag_emergency` tool. Without
+        // this, a voice patient saying "I'm having a stroke" got only verbal
+        // "call 911" — no EmergencyEvent row, no care-team page. Now voice
+        // and text share the same emergency surface end-to-end.
+        name: 'flag_emergency',
+        description:
+          'Flag an acute life-threatening emergency the patient is describing RIGHT NOW. ' +
+          'Call ONLY for: crushing/severe chest pain, sudden inability to breathe, sudden numbness ' +
+          'or weakness on one side, sudden vision loss, heart-attack / stroke feeling NOW, or heart ' +
+          'racing combined with faintness. After calling, continue speaking to the patient with 911 ' +
+          'guidance — the tool records the event and pages the care team in parallel.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            emergency_situation: {
+              type: Type.STRING,
+              description:
+                'Short description of what the patient said happened (one sentence). Used in ' +
+                'the care-team page and the audit trail.',
+            },
+          },
+          required: ['emergency_situation'],
+        },
+      },
     ]
   }
 
@@ -334,6 +367,8 @@ export class VoiceToolsService {
           return await this.finalizeCheckin(args, ctx)
         case 'check_intake_status':
           return await this.checkIntakeStatus(ctx)
+        case 'flag_emergency':
+          return await this.flagEmergency(args, ctx)
         default:
           return {
             llmResponse: { ok: false, error: `Unknown tool: ${name}` },
@@ -391,6 +426,24 @@ export class VoiceToolsService {
     }
 
     const symptoms = toStringArray(args.symptoms)
+    // Bug 5 fix — `medication_taken` is required by the schema, but Gemini may
+    // still issue the call without it. Without this guard, the dispatcher
+    // would default to `false` and silently flag the patient as non-adherent
+    // (firing Stage-B medication-adherence alerts on someone who actually
+    // took their meds). Mirror the text-side missing-field rejection.
+    if (args.medication_taken === undefined || args.medication_taken === null) {
+      this.logger.warn('submit_checkin rejected: medication_taken missing — asking patient first')
+      return {
+        llmResponse: {
+          saved: false,
+          reason: 'MISSING_FIELD',
+          message:
+            'I need to ask the patient whether they took their medication today before saving. ' +
+            'Ask them now, then call submit_checkin again with medication_taken set.',
+        },
+        events: [],
+      }
+    }
     const medicationTaken = toBool(args.medication_taken, false)
     const weight = toNumber(args.weight, 0)
     const detail = `BP=${sbp}/${dbp} meds=${medicationTaken ? 'taken' : 'missed'} symptoms=${
@@ -664,9 +717,36 @@ export class VoiceToolsService {
               : null
         if (existingDate) {
           dto.measuredAt = isoFromTzWallclock(existingDate, measurementTime, ctx.timezone)
+        } else {
+          // Bug 6 fix — entry exists but has no measuredAt we can pivot on
+          // (extremely unlikely; defensive). Reject rather than apply other
+          // fields while silently dropping the requested time change.
+          return {
+            llmResponse: {
+              updated: false,
+              message:
+                "I couldn't load that reading's existing date to rebase the new time. " +
+                'Ask the patient to call get_recent_readings and confirm the entry id, then try again.',
+            },
+            events: [],
+          }
         }
       } catch (err) {
-        this.logger.warn(`update_checkin: could not resolve measuredAt for ${entryId}: ${(err as Error).message}`)
+        // Bug 6 fix — when the patient asked to change the time and
+        // `findOne` failed (entry deleted, id hallucinated, permission slip),
+        // do NOT silently proceed with the OTHER field changes while
+        // dropping the time. Reject the whole update so the LLM tells the
+        // patient honestly instead of claiming "Got it, I changed the time".
+        this.logger.warn(`update_checkin: findOne failed for ${entryId}: ${(err as Error).message}`)
+        return {
+          llmResponse: {
+            updated: false,
+            message:
+              "I couldn't load that reading to update its time. " +
+              'Ask the patient to call get_recent_readings and confirm the entry id, then try again.',
+          },
+          events: [],
+        }
       }
     }
 
@@ -1022,6 +1102,59 @@ export class VoiceToolsService {
       ],
     }
   }
+
+  /**
+   * Bug 12 — voice equivalent of the text `flag_emergency` tool. Persists an
+   * EmergencyEvent row and emits EMERGENCY_EVENTS.FLAGGED so EscalationService
+   * pages the care team. Mirrors the ChatService.recordEmergencyEvent flow
+   * (Bug 10 fix): awaited DB write, [SECURITY-CRITICAL] log on failure.
+   */
+  private async flagEmergency(
+    args: Record<string, unknown>,
+    ctx: ToolContext,
+  ): Promise<DispatchResult> {
+    const situation =
+      typeof args.emergency_situation === 'string' && args.emergency_situation.trim()
+        ? args.emergency_situation.trim()
+        : 'Emergency detected during voice session'
+    try {
+      await this.prisma.emergencyEvent.create({
+        data: {
+          userId: ctx.userId,
+          sessionId: null, // voice doesn't pass chatSessionId into ToolContext
+          prompt: '', // voice has no single "prompt" — situation captures it
+          isEmergency: true,
+          emergency_situation: situation,
+        },
+      })
+      const payload: EmergencyFlaggedPayload = {
+        userId: ctx.userId,
+        sessionId: null,
+        situation,
+        source: 'voice-tool',
+      }
+      this.eventEmitter.emit(EMERGENCY_EVENTS.FLAGGED, payload)
+    } catch (err) {
+      this.logger.error(
+        `[SECURITY-CRITICAL] voice emergency persistence failed userId=${ctx.userId} situation="${situation}" error=${
+          (err as Error).message ?? 'unknown'
+        }`,
+      )
+      // Do not throw — the LLM should still tell the patient "call 911"
+      // verbally even if our audit write failed.
+    }
+    return {
+      llmResponse: {
+        flagged: true,
+        emergency_situation: situation,
+        message: 'Emergency flagged. Continue speaking to the patient with 911 guidance.',
+      },
+      events: [
+        { kind: 'action', type: 'flag_emergency', detail: situation },
+        { kind: 'action_complete', type: 'flag_emergency', success: true, detail: situation },
+      ],
+    }
+  }
 }
 
 /**
@@ -1029,32 +1162,43 @@ export class VoiceToolsService {
  * `symptoms: string[]` the model passes (e.g. ["dizziness","chest pain"])
  * into the structured-symptom booleans the rule engine consumes.
  */
-function mapVoiceSymptomsToFlags(raw: unknown): Partial<SessionSymptoms> | undefined {
+// Negation prefixes that mean "patient denies this symptom" — must skip the
+// mapper, not flip the flag on. Bug 2 fix.
+const SYMPTOM_NEGATION_RE = /^(no|not|none|negative for|denies|denying|without|absent|no signs? of)\b/
+
+export function mapVoiceSymptomsToFlags(raw: unknown): Partial<SessionSymptoms> | undefined {
   if (!Array.isArray(raw) || raw.length === 0) return undefined
   const flags: Partial<SessionSymptoms> = {}
   for (const item of raw) {
     if (typeof item !== 'string') continue
     const k = item.trim().toLowerCase()
     if (!k) continue
-    if (k === 'severeheadache' || k.includes('severe headache')) flags.severeHeadache = true
-    else if (k === 'newonsetheadache' || k.includes('new headache') || k.includes('new-onset')) flags.newOnsetHeadache = true
-    else if (k === 'visualchanges' || k.includes('vision') || k.includes('blurr')) flags.visualChanges = true
-    else if (k === 'alteredmentalstatus' || k.includes('confus') || k.includes('mental status')) flags.alteredMentalStatus = true
-    else if (k === 'chestpainordyspnea' || k.includes('chest pain') || k.includes('chest tight') || k.includes('dyspnea')) flags.chestPainOrDyspnea = true
-    else if (k === 'focalneurodeficit' || k.includes('one side') || k.includes('weakness')) flags.focalNeuroDeficit = true
-    else if (k === 'severeepigastricpain' || k.includes('epigastric')) flags.severeEpigastricPain = true
-    else if (k === 'ruqpain' || k.includes('ruq') || k.includes('right upper')) flags.ruqPain = true
-    else if (k === 'edema' || k === 'swelling') flags.edema = true
-    else if (k === 'dizziness' || k.includes('dizzy') || k.includes('lighthead')) flags.dizziness = true
-    else if (k === 'syncope' || k.includes('faint') || k.includes('pass out')) flags.syncope = true
-    else if (k === 'palpitations' || k.includes('palpit') || k.includes('flutter')) flags.palpitations = true
-    else if (k === 'legswelling' || k.includes('leg swell') || k.includes('ankle swell')) flags.legSwelling = true
-    else if (k === 'fatigue' || k.includes('tired')) flags.fatigue = true
-    else if (k === 'shortnessofbreath' || k.includes('short of breath') || k.includes('breathless')) flags.shortnessOfBreath = true
-    else if (k === 'drycough' || k.includes('dry cough')) flags.dryCough = true
-    else if (k === 'nsaiduse' || k.includes('nsaid') || k.includes('ibuprofen')) flags.nsaidUse = true
-    else if (k === 'faceswelling' || k.includes('face swell')) flags.faceSwelling = true
-    else if (k === 'throattightness' || k.includes('throat')) flags.throatTightness = true
+    // Bug 2 fix — see mapSymptomsArrayToFlags in journal-tools.ts for full
+    // rationale. Without this, "no chest pain" flips chestPainOrDyspnea on
+    // and fires a Level-2 emergency alert.
+    if (SYMPTOM_NEGATION_RE.test(k)) continue
+    // Bug 3 fix — collapse snake_case (e.g. 'face_swelling') to no-underscore
+    // form so TIER_1_ANGIOEDEMA fires when the LLM echoes the schema key.
+    const kn = k.replace(/_/g, '')
+    if (kn === 'severeheadache' || kn.includes('severe headache')) flags.severeHeadache = true
+    else if (kn === 'newonsetheadache' || kn.includes('new headache') || kn.includes('new-onset')) flags.newOnsetHeadache = true
+    else if (kn === 'visualchanges' || kn.includes('vision') || kn.includes('blurr')) flags.visualChanges = true
+    else if (kn === 'alteredmentalstatus' || kn.includes('confus') || kn.includes('mental status')) flags.alteredMentalStatus = true
+    else if (kn === 'chestpainordyspnea' || kn.includes('chest pain') || kn.includes('chest tight') || kn.includes('dyspnea')) flags.chestPainOrDyspnea = true
+    else if (kn === 'focalneurodeficit' || kn.includes('one side') || kn.includes('weakness')) flags.focalNeuroDeficit = true
+    else if (kn === 'severeepigastricpain' || kn.includes('epigastric')) flags.severeEpigastricPain = true
+    else if (kn === 'ruqpain' || kn.includes('ruq') || kn.includes('right upper')) flags.ruqPain = true
+    else if (kn === 'edema' || kn === 'swelling') flags.edema = true
+    else if (kn === 'dizziness' || kn.includes('dizzy') || kn.includes('lighthead')) flags.dizziness = true
+    else if (kn === 'syncope' || kn.includes('faint') || kn.includes('pass out')) flags.syncope = true
+    else if (kn === 'palpitations' || kn.includes('palpit') || kn.includes('flutter')) flags.palpitations = true
+    else if (kn === 'legswelling' || kn.includes('leg swell') || kn.includes('ankle swell')) flags.legSwelling = true
+    else if (kn === 'fatigue' || kn.includes('tired')) flags.fatigue = true
+    else if (kn === 'shortnessofbreath' || kn.includes('short of breath') || kn.includes('breathless')) flags.shortnessOfBreath = true
+    else if (kn === 'drycough' || kn.includes('dry cough')) flags.dryCough = true
+    else if (kn === 'nsaiduse' || kn.includes('nsaid') || kn.includes('ibuprofen')) flags.nsaidUse = true
+    else if (kn === 'faceswelling' || kn.includes('face swell')) flags.faceSwelling = true
+    else if (kn === 'throattightness' || kn.includes('throat')) flags.throatTightness = true
   }
   return Object.keys(flags).length > 0 ? flags : undefined
 }

@@ -156,6 +156,35 @@ function pickStructuredSymptoms(d: Record<string, unknown>): StructuredSymptoms 
   return anyTrue ? out : undefined;
 }
 
+/**
+ * Bug 16B — extract the patient's missed medications from the submit_checkin
+ * tool response. Backend's `serializeEntry` returns each row as
+ * `{ drugName, reason, missedDoses, medicationId? }`. The card only needs
+ * the drugName + reason for display ("Missed: Norvasc"); drop the
+ * medicationId (internal). Returns undefined when the array is empty so
+ * downstream truthy checks ("if (summary.missedMedications?.length)") stay
+ * idiomatic.
+ */
+function pickMissedMedications(
+  d: Record<string, unknown>,
+): Array<{ drugName: string; reason?: string; missedDoses?: number }> | undefined {
+  const raw = d.missedMedications
+  if (!Array.isArray(raw) || raw.length === 0) return undefined
+  const out: Array<{ drugName: string; reason?: string; missedDoses?: number }> = []
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue
+    const r = row as Record<string, unknown>
+    const drugName = typeof r.drugName === 'string' ? r.drugName : ''
+    if (!drugName) continue
+    out.push({
+      drugName,
+      reason: typeof r.reason === 'string' ? r.reason : undefined,
+      missedDoses: typeof r.missedDoses === 'number' ? r.missedDoses : undefined,
+    })
+  }
+  return out.length > 0 ? out : undefined
+}
+
 // Phase/27 — map BpOcrError codes to the existing patient-app i18n strings
 // so the chat photo flow surfaces the same friendly fallback copy as the
 // CheckIn surface.
@@ -845,10 +874,31 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
                   <p className="text-[16px] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{pendingCheckin.systolicBP}/{pendingCheckin.diastolicBP}</p>
                 </div>
               )}
-              <div className="rounded-xl p-2.5 text-center" style={{ backgroundColor: pendingCheckin.medicationTaken ? 'var(--brand-success-green-light)' : 'var(--brand-alert-red-light)' }}>
-                <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Meds</p>
-                <p className="text-[13px] font-bold" style={{ color: pendingCheckin.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red-text)' }}>{pendingCheckin.medicationTaken ? 'Taken' : 'Missed'}</p>
-              </div>
+              {(() => {
+                // Bug 16C — treat the pendingCheckin pill the same way the
+                // CheckinCard's medicationLabel does. Non-empty
+                // missedMedications takes precedence over the boolean.
+                const hasMissed =
+                  Array.isArray(pendingCheckin.missedMedications)
+                    && pendingCheckin.missedMedications.length > 0;
+                const medsLabel = hasMissed
+                  ? `Missed: ${pendingCheckin.missedMedications!.map((m) => m.drugName).join(', ')}`
+                  : pendingCheckin.medicationTaken
+                    ? 'Taken'
+                    : 'Missed';
+                const medsBgColor = hasMissed || pendingCheckin.medicationTaken === false
+                  ? 'var(--brand-alert-red-light)'
+                  : 'var(--brand-success-green-light)';
+                const medsTextColor = hasMissed || pendingCheckin.medicationTaken === false
+                  ? 'var(--brand-alert-red-text)'
+                  : 'var(--brand-success-green)';
+                return (
+                  <div className="rounded-xl p-2.5 text-center" style={{ backgroundColor: medsBgColor }}>
+                    <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Meds</p>
+                    <p className="text-[13px] font-bold" style={{ color: medsTextColor }}>{medsLabel}</p>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Auto-dismiss countdown */}
@@ -1495,6 +1545,12 @@ export default function AIChatInterface() {
               diastolicBP: d.diastolicBP as number | undefined,
               weight: d.weight as number | undefined,
               medicationTaken: d.medicationTaken as boolean | undefined,
+              // Bug 16B fix — read missedMedications so the card surfaces
+              // WHICH meds were missed (was: rendered "All taken" even when
+              // missed array was non-empty). Bug 16A normalises
+              // medication_taken=false when the array is non-empty so the
+              // boolean + array stay consistent.
+              missedMedications: pickMissedMedications(d),
               // The legacy `symptoms: string[]` field on CheckinSummary is no
               // longer authoritative — symptoms now flow through the two
               // fields below (structured booleans → red badges, freeform
@@ -1515,6 +1571,7 @@ export default function AIChatInterface() {
               diastolicBP: d.diastolicBP as number | undefined,
               weight: d.weight as number | undefined,
               medicationTaken: d.medicationTaken as boolean | undefined,
+              missedMedications: pickMissedMedications(d),
               symptoms: [],
               structuredSymptoms: pickStructuredSymptoms(d),
               otherSymptoms: Array.isArray(d.otherSymptoms)

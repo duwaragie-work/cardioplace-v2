@@ -35,6 +35,7 @@ import { DailyJournalService } from '../../daily_journal/daily_journal.service.j
 import { VoiceToolsService } from '../../voice/tools/voice-tools.service.js'
 import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import { IntakeStatusService } from '../../intake/intake-status.service.js'
+import { EventEmitter2 } from '@nestjs/event-emitter'
 import {
   executeJournalTool,
   getJournalToolDeclarations,
@@ -70,6 +71,8 @@ describe('Tool dispatcher userId guard', () => {
         { provide: GeminiService, useValue: { extractBpFromImage: jest.fn() } },
         { provide: AlertEngineService, useValue: { evaluateAdHoc: jest.fn() } },
         { provide: IntakeStatusService, useValue: { getStatus: jest.fn() } },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: jest.fn() } } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -113,6 +116,8 @@ describe('userId source — LLM args never override dispatch context', () => {
         { provide: GeminiService, useValue: { extractBpFromImage: jest.fn() } },
         { provide: AlertEngineService, useValue: { evaluateAdHoc } },
         { provide: IntakeStatusService, useValue: { getStatus: jest.fn() } },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: jest.fn() } } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -208,6 +213,36 @@ describe('ConversationHistoryService.getConversationHistory ownership guard', ()
     expect(prisma.$queryRawUnsafe).not.toHaveBeenCalled()
     expect(loggerWarn).toHaveBeenCalledWith(
       expect.stringMatching(/\[SECURITY\] cross_tenant_attempt.*conversation_history/),
+    )
+  })
+
+  // Bug 9 regression — getSessionSummary must mirror the userId guard.
+  // Without it, user-B could pass user-A's sessionId and read user-A's
+  // compressed clinical summary in their LLM prompt while getConversationHistory
+  // correctly returned []. Same defence as the sibling above.
+  it('getSessionSummary: returns "" + logs [SECURITY] when sessionId belongs to a different user', async () => {
+    prisma.session.findFirst.mockResolvedValue(null as never)
+    const r = await svc.getSessionSummary('user-B', 'session-of-A')
+    expect(r).toBe('')
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringMatching(/\[SECURITY\] cross_tenant_attempt service=conversation_history\.summary/),
+    )
+  })
+
+  it('getSessionSummary: returns the sliced summary when sessionId belongs to the user', async () => {
+    prisma.session.findFirst.mockResolvedValue({ summary: 'older bullets' } as never)
+    const r = await svc.getSessionSummary('user-A', 'session-A')
+    expect(r).toBe('older bullets')
+    expect(loggerWarn).not.toHaveBeenCalled()
+  })
+
+  it('getSessionSummary: scopes the Prisma query by BOTH id AND userId', async () => {
+    prisma.session.findFirst.mockResolvedValue({ summary: '' } as never)
+    await svc.getSessionSummary('user-A', 'session-A')
+    expect(prisma.session.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'session-A', userId: 'user-A' },
+      }),
     )
   })
 

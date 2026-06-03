@@ -147,14 +147,25 @@ export class ConversationHistoryService {
    * those tail appends here so the prompt-side summary is genuinely the
    * "older history" tier of the hybrid memory.
    */
-  async getSessionSummary(sessionId: string): Promise<string> {
-    if (!sessionId) return ''
+  async getSessionSummary(userId: string, sessionId: string): Promise<string> {
+    if (!userId || !sessionId) return ''
     try {
-      const session = await this.prisma.session.findUnique({
-        where: { id: sessionId },
+      // Bug 9 fix — match the userId-scope guard on the sibling
+      // getConversationHistory call. Without it, a user passing another
+      // user's sessionId would receive the foreign session's rolling
+      // summary in their system prompt while getConversationHistory
+      // correctly returned []. Cross-tenant leak via the LLM context.
+      const session = await this.prisma.session.findFirst({
+        where: { id: sessionId, userId },
         select: { summary: true },
       })
-      return sliceSummaryForPrompt(session?.summary ?? '', RAW_RECENT_TURNS)
+      if (!session) {
+        this.logger.warn(
+          `[SECURITY] cross_tenant_attempt service=conversation_history.summary userId=${userId} sessionId=${sessionId}`,
+        )
+        return ''
+      }
+      return sliceSummaryForPrompt(session.summary ?? '', RAW_RECENT_TURNS)
     } catch {
       return ''
     }

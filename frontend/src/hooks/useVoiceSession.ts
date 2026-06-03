@@ -86,6 +86,20 @@ export interface CheckinSummary {
   bmi?: number;
   medicationTaken?: boolean;
   medicationScheduledLater?: boolean;
+  /**
+   * Bug 16B — missed-med detail surfaced on the check-in card. Backend
+   * `serializeEntry` returns the array under `missedMedications` after
+   * resolving `drugName` from the patient's medication list. Card-side
+   * `medicationLabel` shows "Missed: <drug1>, <drug2>" when this is
+   * non-empty, regardless of the `medicationTaken` boolean. Backend Bug 16A
+   * normalises `medicationTaken=false` when this array is non-empty so the
+   * two are consistent.
+   */
+  missedMedications?: Array<{
+    drugName: string;
+    reason?: string;
+    missedDoses?: number;
+  }>;
   /** structured Level-2 booleans set on the entry */
   structuredSymptoms?: StructuredSymptoms;
   /** legacy + "anything else" symptoms — both shown in the card */
@@ -111,6 +125,15 @@ export interface UpdateSummary {
   bmi?: number;
   medicationTaken?: boolean;
   medicationScheduledLater?: boolean;
+  /**
+   * Bug 16B — same as CheckinSummary.missedMedications, surfaced on the
+   * post-update card so editing a check-in retains the per-med detail.
+   */
+  missedMedications?: Array<{
+    drugName: string;
+    reason?: string;
+    missedDoses?: number;
+  }>;
   structuredSymptoms?: StructuredSymptoms;
   symptoms: string[];
   otherSymptoms?: string[];

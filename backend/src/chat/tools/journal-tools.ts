@@ -49,7 +49,20 @@ export interface JournalToolContext {
    * legacy callers, tests), the cache simply ages out via TTL.
    */
   onPatientDataMutated?: (userId: string) => void
+  /**
+   * Bug 13 — session-scoped state used to enforce OCR verbal-confirmation.
+   * `submit_bp_from_photo` sets `lastAt = Date.now(); userMessageSince = false`
+   * on a successful parse. The chat streaming loop flips `userMessageSince`
+   * to true on every new user turn. `submit_checkin` rejects when a recent
+   * OCR result hasn't yet been re-confirmed by the patient (within
+   * OCR_CONFIRMATION_WINDOW_MS). Mutable object so call sites can update in
+   * place without re-threading the context.
+   */
+  ocrState?: { lastAt: number; userMessageSince: boolean }
 }
+
+/** Bug 13 — how long a fresh OCR result blocks unconfirmed submit_checkin. */
+export const OCR_CONFIRMATION_WINDOW_MS = 30_000
 
 const MISSED_MED_REASONS = new Set([
   'FORGOT',
@@ -676,6 +689,25 @@ export async function executeJournalTool(
   const journalService = ctx.journalService
   switch (name) {
     case 'submit_checkin': {
+      // Bug 13 — OCR verbal-confirmation guard. submit_bp_from_photo stamps
+      // ctx.ocrState.lastAt + clears userMessageSince. The streaming loop
+      // flips userMessageSince=true on every new user turn. If we reach
+      // submit_checkin within OCR_CONFIRMATION_WINDOW_MS and there's been
+      // no user message since the OCR, the LLM is trying to save OCR
+      // values without re-reading them back — refuse to write to the DB.
+      if (
+        ctx.ocrState
+        && !ctx.ocrState.userMessageSince
+        && Date.now() - ctx.ocrState.lastAt < OCR_CONFIRMATION_WINDOW_MS
+      ) {
+        return JSON.stringify({
+          saved: false,
+          reason: 'OCR_UNCONFIRMED',
+          message:
+            'Please read the OCR-parsed BP back to the patient and get their explicit verbal confirmation before saving.',
+        })
+      }
+
       // Guard: reject if required fields are missing or have placeholder values.
       // This prevents the model from saving before asking all required questions.
       const missing: string[] = []
@@ -716,6 +748,20 @@ export async function executeJournalTool(
           message: `Cannot save a check-in for a future date (${entryDate}). Check-ins can only be recorded for today or past dates. Please use today's date.`,
         })
       }
+      // Bug 14d — mirror the BP check-in form's 30-day stale-reading limit so
+      // backfilling old readings doesn't skew session-averaging windows + the
+      // pre-day-3 personalization gate. Without this, a patient could ask
+      // the chatbot to log a reading from 6 weeks ago (form would reject)
+      // and land it in the rule-engine trend.
+      const STALE_READING_MS = 30 * 24 * 60 * 60 * 1000
+      const entryAgeMs = Date.now() - new Date(`${entryDate}T12:00:00.000Z`).getTime()
+      if (entryAgeMs > STALE_READING_MS) {
+        return JSON.stringify({
+          saved: false,
+          reason: 'STALE_READING',
+          message: `Cannot save a reading older than 30 days (${entryDate}). The BP check-in form has the same 30-day limit. Ask the patient if they meant a more recent date.`,
+        })
+      }
       try {
         const time = normaliseTime(args.measurement_time) ?? new Date().toISOString().slice(11, 16)
         const measuredAt = new Date(`${entryDate}T${time}:00.000Z`).toISOString()
@@ -728,6 +774,16 @@ export async function executeJournalTool(
         // DailyJournalService does the Prisma resolution (drugName →
         // medicationId), filters AS_NEEDED, and drops unmatched drugs.
         const missedMedications = normaliseMissedMedications(args.missed_medications)
+        // Bug 16A — defence-in-depth invariant. The LLM occasionally passes
+        // contradictory state: medication_taken=true alongside a non-empty
+        // missed_medications array. Normalise here so the DB, rule engine,
+        // and downstream UI all see consistent values. Without this, the
+        // patient's check-in CARD shows "All taken" while the missed-med
+        // list silently exists in another column.
+        const effectiveMedicationTaken =
+          missedMedications && missedMedications.length > 0
+            ? false
+            : args.medication_taken
         // Defence-in-depth symptom mapping: even when the LLM puts the
         // patient's symptom only in the freeform `args.symptoms` array
         // (e.g. ["chest pain"]) and forgets to set the matching structured
@@ -746,7 +802,7 @@ export async function executeJournalTool(
           pulse: args.pulse ?? null,
           position: position ?? undefined,
           measurementConditions,
-          medicationTaken: args.medication_taken,
+          medicationTaken: effectiveMedicationTaken,
           medicationScheduledLater: args.medication_scheduled_later === true,
           missedMedications,
           weight: args.weight,
@@ -1052,6 +1108,14 @@ export async function executeJournalTool(
       try {
         const buffer = Buffer.from(b64, 'base64')
         const result = await ctx.ocrService.extractBp(userId, buffer, mime)
+        // Bug 13 — stamp the OCR moment so submit_checkin can refuse to save
+        // until the patient verbally confirms (i.e. there's a user turn
+        // between OCR and submit_checkin). The streaming loop in
+        // chat.service flips userMessageSince=true on the next user message.
+        if (ctx.ocrState) {
+          ctx.ocrState.lastAt = Date.now()
+          ctx.ocrState.userMessageSince = false
+        }
         return JSON.stringify({
           parsed: true,
           sbp: result.sbp,
@@ -1185,32 +1249,45 @@ export async function executeJournalTool(
  * the structured keys (`chestPainOrDyspnea`) and common natural phrasings
  * (`chest pain`, `shortness of breath`) are recognised.
  */
-function mapSymptomsArrayToFlags(raw: unknown): Partial<SessionSymptoms> | undefined {
+// Negation prefixes that mean "patient denies this symptom" — must skip the
+// mapper, not flip the flag on. Bug 2 fix.
+const SYMPTOM_NEGATION_RE = /^(no|not|none|negative for|denies|denying|without|absent|no signs? of)\b/
+
+export function mapSymptomsArrayToFlags(raw: unknown): Partial<SessionSymptoms> | undefined {
   if (!Array.isArray(raw) || raw.length === 0) return undefined
   const flags: Partial<SessionSymptoms> = {}
   for (const item of raw) {
     if (typeof item !== 'string') continue
     const k = item.trim().toLowerCase()
     if (!k) continue
-    if (k === 'severeheadache' || k.includes('severe headache')) flags.severeHeadache = true
-    else if (k === 'newonsetheadache' || k.includes('new headache') || k.includes('new-onset')) flags.newOnsetHeadache = true
-    else if (k === 'visualchanges' || k.includes('vision') || k.includes('blurr')) flags.visualChanges = true
-    else if (k === 'alteredmentalstatus' || k.includes('confus') || k.includes('mental status')) flags.alteredMentalStatus = true
-    else if (k === 'chestpainordyspnea' || k.includes('chest pain') || k.includes('chest tight') || k.includes('dyspnea')) flags.chestPainOrDyspnea = true
-    else if (k === 'focalneurodeficit' || k.includes('one side') || k.includes('weakness')) flags.focalNeuroDeficit = true
-    else if (k === 'severeepigastricpain' || k.includes('epigastric')) flags.severeEpigastricPain = true
-    else if (k === 'ruqpain' || k.includes('ruq') || k.includes('right upper')) flags.ruqPain = true
-    else if (k === 'edema' || k === 'swelling') flags.edema = true
-    else if (k === 'dizziness' || k.includes('dizzy') || k.includes('lighthead')) flags.dizziness = true
-    else if (k === 'syncope' || k.includes('faint') || k.includes('pass out')) flags.syncope = true
-    else if (k === 'palpitations' || k.includes('palpit') || k.includes('flutter')) flags.palpitations = true
-    else if (k === 'legswelling' || k.includes('leg swell') || k.includes('ankle swell')) flags.legSwelling = true
-    else if (k === 'fatigue' || k.includes('tired')) flags.fatigue = true
-    else if (k === 'shortnessofbreath' || k.includes('short of breath') || k.includes('breathless')) flags.shortnessOfBreath = true
-    else if (k === 'drycough' || k.includes('dry cough')) flags.dryCough = true
-    else if (k === 'nsaiduse' || k.includes('nsaid') || k.includes('ibuprofen')) flags.nsaidUse = true
-    else if (k === 'faceswelling' || k.includes('face swell')) flags.faceSwelling = true
-    else if (k === 'throattightness' || k.includes('throat')) flags.throatTightness = true
+    // Bug 2 fix — naive substring matching would flip
+    // `chestPainOrDyspnea = true` on "no chest pain" / "denies chest pain"
+    // and fire a Level-2 emergency alert from a denied symptom.
+    if (SYMPTOM_NEGATION_RE.test(k)) continue
+    // Bug 3 fix — collapse snake_case to the no-underscore form so the
+    // schema's `face_swelling` (TIER_1_ANGIOEDEMA airway emergency) matches.
+    // Doing this once before the matching block covers every key without
+    // per-line edits.
+    const kn = k.replace(/_/g, '')
+    if (kn === 'severeheadache' || kn.includes('severe headache')) flags.severeHeadache = true
+    else if (kn === 'newonsetheadache' || kn.includes('new headache') || kn.includes('new-onset')) flags.newOnsetHeadache = true
+    else if (kn === 'visualchanges' || kn.includes('vision') || kn.includes('blurr')) flags.visualChanges = true
+    else if (kn === 'alteredmentalstatus' || kn.includes('confus') || kn.includes('mental status')) flags.alteredMentalStatus = true
+    else if (kn === 'chestpainordyspnea' || kn.includes('chest pain') || kn.includes('chest tight') || kn.includes('dyspnea')) flags.chestPainOrDyspnea = true
+    else if (kn === 'focalneurodeficit' || kn.includes('one side') || kn.includes('weakness')) flags.focalNeuroDeficit = true
+    else if (kn === 'severeepigastricpain' || kn.includes('epigastric')) flags.severeEpigastricPain = true
+    else if (kn === 'ruqpain' || kn.includes('ruq') || kn.includes('right upper')) flags.ruqPain = true
+    else if (kn === 'edema' || kn === 'swelling') flags.edema = true
+    else if (kn === 'dizziness' || kn.includes('dizzy') || kn.includes('lighthead')) flags.dizziness = true
+    else if (kn === 'syncope' || kn.includes('faint') || kn.includes('pass out')) flags.syncope = true
+    else if (kn === 'palpitations' || kn.includes('palpit') || kn.includes('flutter')) flags.palpitations = true
+    else if (kn === 'legswelling' || kn.includes('leg swell') || kn.includes('ankle swell')) flags.legSwelling = true
+    else if (kn === 'fatigue' || kn.includes('tired')) flags.fatigue = true
+    else if (kn === 'shortnessofbreath' || kn.includes('short of breath') || kn.includes('breathless')) flags.shortnessOfBreath = true
+    else if (kn === 'drycough' || kn.includes('dry cough')) flags.dryCough = true
+    else if (kn === 'nsaiduse' || kn.includes('nsaid') || kn.includes('ibuprofen')) flags.nsaidUse = true
+    else if (kn === 'faceswelling' || kn.includes('face swell')) flags.faceSwelling = true
+    else if (kn === 'throattightness' || kn.includes('throat')) flags.throatTightness = true
   }
   return Object.keys(flags).length > 0 ? flags : undefined
 }
