@@ -5,6 +5,8 @@ import { MedicationHoldEscalationService } from '../crons/medication-hold-escala
 import { MonthlyReaskService } from '../crons/monthly-reask.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
 import { ladderForTier } from '../daily_journal/escalation/ladder-defs.js'
+import { retroUpgradeAceArbHoldsForContraindication } from '../intake/ace-contraindication.js'
+import { VerifierRole } from '../generated/prisma/client.js'
 import type { LadderStep as LadderStepEnum } from '../generated/prisma/client.js'
 
 /**
@@ -333,11 +335,28 @@ export class TestControlService {
    * F13 — set/clear PatientProfile.aceContraindicatedAt so specs can exercise
    * the ACE/ARB re-add gate without walking the full B4 angioedema-resolution
    * flow. Test-infra only.
+   *
+   * #84 — setting the flag also retro-upgrades existing live ACE/ARB holds to
+   * PROVIDER_DIRECTED_HOLD ("do not take"), matching the production guarantee
+   * (the angioedema-resolution path already discontinues active ACE/ARB). Done
+   * atomically with the flag write so the two never diverge.
    */
   async setAceContraindicated(userId: string, value: boolean): Promise<void> {
-    await this.prisma.patientProfile.update({
-      where: { userId },
-      data: { aceContraindicatedAt: value ? new Date() : null },
+    const now = new Date()
+    await this.prisma.$transaction(async (tx) => {
+      await tx.patientProfile.update({
+        where: { userId },
+        data: { aceContraindicatedAt: value ? now : null },
+      })
+      if (value) {
+        await retroUpgradeAceArbHoldsForContraindication(tx, {
+          userId,
+          changedBy: 'SYSTEM',
+          changedByRole: VerifierRole.ADMIN,
+          reason: 'Angioedema ACE/ARB contraindication flag set (#84 retro-upgrade)',
+          now,
+        })
+      }
     })
   }
 
