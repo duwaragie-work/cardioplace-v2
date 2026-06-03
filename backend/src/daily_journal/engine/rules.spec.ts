@@ -130,7 +130,7 @@ function ctx(over: {
     heightCm: 165,
     isPregnant: false,
     pregnancyDueDate: null,
-    historyPreeclampsia: false,
+    historyHDP: false,
     hasHeartFailure: false,
     heartFailureType: 'NOT_APPLICABLE',
     resolvedHFType: 'NOT_APPLICABLE',
@@ -1440,6 +1440,12 @@ describe('medicationMissedRule — Phase/26 scheduledLater regression', () => {
     )
     expect(r?.ruleId).toBe('RULE_MEDICATION_MISSED')
     expect(r?.metadata.adherenceBetaBlockerCarveOut).toBe(true)
+    // #93 (2026-06-03) — the physician annotation is clinical prose, not the
+    // old "beta-blocker-carve-out" debug tag.
+    expect(r?.metadata.physicianAnnotations).toContain(
+      'Tier 2 dispatched on single missed dose per HFrEF / HCM / AFib β-blocker safety policy.',
+    )
+    expect(r?.metadata.physicianAnnotations).not.toContain('beta-blocker-carve-out')
   })
 
   it('windowed rule: single beta-blocker miss in patient WITHOUT HF/HCM/AFib → null', () => {

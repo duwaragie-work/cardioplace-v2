@@ -56,7 +56,12 @@ export function medicationMissedRuleWithWindow(
       annotations.push('escalate-3-of-7')
     }
     if (isBetaBlockerCarveOut) {
-      annotations.push('beta-blocker-carve-out')
+      // #93 (2026-06-03) — clinical prose, not an internal path tag. Explains
+      // to the provider WHY a single missed dose escalated to Tier 2 (the
+      // HFrEF/HCM/AFib β-blocker safety carve-out). Rendered via physSuffix.
+      annotations.push(
+        'Tier 2 dispatched on single missed dose per HFrEF / HCM / AFib β-blocker safety policy.',
+      )
     }
 
     return {
