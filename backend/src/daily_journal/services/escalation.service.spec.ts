@@ -109,6 +109,11 @@ describe('EscalationService', () => {
       deviationAlert: {
         findUnique: jest.fn() as jest.Mock<any>,
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+        // F9/#82 — present so a regression that starts mutating the alert at
+        // T+0 dispatch (e.g. rewriting physicianMessage / bumping updatedAt)
+        // is detectable. The escalation path must NEVER write the alert row.
+        update: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
+        updateMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 0 }),
       },
       escalationEvent: {
         create: jest.fn() as jest.Mock<any>,
@@ -279,6 +284,44 @@ describe('EscalationService', () => {
       )
       // every (alert, recipient) combination appears exactly once
       expect(new Set(keys).size).toBe(keys.length)
+    })
+
+    // F9/#82 — the escalation T+0 dispatch reads the alert (findUnique) and
+    // writes EscalationEvent + Notification rows, but must never write back to
+    // the DeviationAlert itself. A write there would bump updatedAt and could
+    // rewrite the immutable at-fire-time three-tier messages.
+    it('T+0 dispatch does NOT write the DeviationAlert row (emergency)', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildAlert({ tier: 'BP_LEVEL_2', ruleId: 'RULE_ABSOLUTE_EMERGENCY' }),
+      )
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({
+          tier: 'BP_LEVEL_2',
+          ruleId: 'RULE_ABSOLUTE_EMERGENCY',
+        }),
+      )
+      // It fired the ladder (proof the path ran)…
+      expect(prisma.escalationEvent.create).toHaveBeenCalled()
+      // …but never touched the alert record.
+      expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
+      expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
+    })
+
+    it('T+0 dispatch does NOT write the DeviationAlert row (adherence Tier 2)', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildAlert({
+          tier: 'TIER_2_DISCREPANCY',
+          ruleId: 'RULE_MEDICATION_MISSED',
+        }),
+      )
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({
+          tier: 'TIER_2_DISCREPANCY',
+          ruleId: 'RULE_MEDICATION_MISSED',
+        }),
+      )
+      expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
+      expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
     })
   })
 
