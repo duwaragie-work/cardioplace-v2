@@ -17,7 +17,7 @@ export interface PatientProfileDto {
   heightCm?: number | null;
   isPregnant?: boolean;
   pregnancyDueDate?: string | null;
-  historyPreeclampsia?: boolean;
+  historyHDP?: boolean;
   hasHeartFailure?: boolean;
   heartFailureType?: 'HFREF' | 'HFPEF' | 'UNKNOWN' | 'NOT_APPLICABLE';
   hasAFib?: boolean;

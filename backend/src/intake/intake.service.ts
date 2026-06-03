@@ -64,7 +64,7 @@ const VERIFIABLE_PROFILE_FIELDS = [
   'heightCm',
   'isPregnant',
   'pregnancyDueDate',
-  'historyPreeclampsia',
+  'historyHDP',
   'hasHeartFailure',
   'heartFailureType',
   'hasAFib',
@@ -97,7 +97,7 @@ const PROFILE_FIELD_LABELS: Record<VerifiableField, string> = {
   heightCm: 'height',
   isPregnant: 'pregnancy status',
   pregnancyDueDate: 'pregnancy due date',
-  historyPreeclampsia: 'history of preeclampsia',
+  historyHDP: 'history of hypertensive disorder of pregnancy (HDP)',
   hasHeartFailure: 'heart failure history',
   heartFailureType: 'heart failure type',
   hasAFib: 'atrial fibrillation history',
@@ -278,8 +278,8 @@ export class IntakeService {
       isPregnant: dto.isPregnant,
       pregnancyDueDate: dto.pregnancyDueDate ?? null,
     }
-    if (dto.historyPreeclampsia !== undefined) {
-      patch.historyPreeclampsia = dto.historyPreeclampsia
+    if (dto.historyHDP !== undefined) {
+      patch.historyHDP = dto.historyHDP
     }
     // Clearing pregnancy also clears the due date by contract.
     if (!dto.isPregnant) {

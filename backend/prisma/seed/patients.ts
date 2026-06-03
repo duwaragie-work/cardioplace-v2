@@ -25,7 +25,7 @@ const patients: PatientSeed[] = [
     profile: {
       isPregnant: true,
       pregnancyDueDate: new Date(Date.now() + 90 * 24 * 3600 * 1000),
-      historyPreeclampsia: true,
+      historyHDP: true,
     },
     // Lisinopril on a pregnant patient — Tier 1 teratogenic contraindication.
     medications: [

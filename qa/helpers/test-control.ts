@@ -203,7 +203,7 @@ export class TestControl {
     userId: string,
     flag:
       | 'isPregnant'
-      | 'historyPreeclampsia'
+      | 'historyHDP'
       | 'hasHeartFailure'
       | 'hasAFib'
       | 'hasCAD'

@@ -446,7 +446,7 @@ export class TestControlService {
     userId: string,
     flag:
       | 'isPregnant'
-      | 'historyPreeclampsia'
+      | 'historyHDP'
       | 'hasHeartFailure'
       | 'hasAFib'
       | 'hasCAD'

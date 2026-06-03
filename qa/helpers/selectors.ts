@@ -100,8 +100,8 @@ export const T = {
     // A2: pregnancy / preeclampsia
     isPregnantYes: 'intake-pregnant-yes',
     isPregnantNo: 'intake-pregnant-no',
-    historyPreeclampsiaYes: 'intake-preeclampsia-yes',
-    historyPreeclampsiaNo: 'intake-preeclampsia-no',
+    historyHDPYes: 'intake-preeclampsia-yes',
+    historyHDPNo: 'intake-preeclampsia-no',
     // A3: cardiac conditions
     conditionCheckbox: (
       key:

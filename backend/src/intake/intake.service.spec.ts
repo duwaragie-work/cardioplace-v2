@@ -94,7 +94,7 @@ function makeProfile(overrides: Record<string, unknown> = {}) {
     heightCm: 165,
     isPregnant: false,
     pregnancyDueDate: null,
-    historyPreeclampsia: false,
+    historyHDP: false,
     hasHeartFailure: false,
     heartFailureType: 'NOT_APPLICABLE',
     hasAFib: false,

@@ -99,7 +99,7 @@ function buildCtx(over: {
     gender: 'FEMALE',
     heightCm: 165,
     pregnancyDueDate: null,
-    historyPreeclampsia: false,
+    historyHDP: false,
     hasHeartFailure: false,
     heartFailureType: 'NOT_APPLICABLE',
     resolvedHFType: 'NOT_APPLICABLE',

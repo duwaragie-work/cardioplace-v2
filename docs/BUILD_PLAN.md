@@ -116,7 +116,7 @@ heightCm                       Int?                    // one-time entry (adults
 // Pregnancy
 isPregnant                     Boolean  default(false)
 pregnancyDueDate               DateTime?
-historyPreeclampsia            Boolean  default(false)
+historyHDP            Boolean  default(false)
 
 // Cardiac conditions
 hasHeartFailure                Boolean  default(false)

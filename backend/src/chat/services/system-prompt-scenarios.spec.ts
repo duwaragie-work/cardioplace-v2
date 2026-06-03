@@ -23,7 +23,7 @@ function profile(
     heightCm: 165,
     isPregnant: false,
     pregnancyDueDate: null,
-    historyPreeclampsia: false,
+    historyHDP: false,
     hasHeartFailure: false,
     heartFailureType: 'NOT_APPLICABLE',
     resolvedHFType: 'NOT_APPLICABLE',
@@ -142,7 +142,7 @@ describe('SystemPromptService — end-to-end rendering scenarios', () => {
       patientContext({
         patientName: 'Priya Menon',
         resolvedContext: ctx({
-          profile: { isPregnant: true, historyPreeclampsia: true },
+          profile: { isPregnant: true, historyHDP: true },
           contextMeds: [med({ drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR' })],
         }),
         activeAlerts: [

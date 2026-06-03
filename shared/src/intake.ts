@@ -78,7 +78,7 @@ export interface IntakeProfilePayload {
 
   isPregnant?: boolean
   pregnancyDueDate?: string | null
-  historyPreeclampsia?: boolean
+  historyHDP?: boolean
 
   hasHeartFailure?: boolean
   heartFailureType?: HeartFailureTypeInput
@@ -129,7 +129,7 @@ export interface UpdateMedicationPayload {
 export interface PregnancyPayload {
   isPregnant: boolean
   pregnancyDueDate?: string | null
-  historyPreeclampsia?: boolean
+  historyHDP?: boolean
 }
 
 // ── POST /admin/users/:id/verify-profile ───────────────────────────────────

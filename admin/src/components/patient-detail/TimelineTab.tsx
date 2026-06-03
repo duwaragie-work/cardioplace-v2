@@ -100,7 +100,7 @@ const PROFILE_FIELD_LABELS: Record<string, string> = {
   heightCm: 'Height',
   isPregnant: 'Pregnancy status',
   pregnancyDueDate: 'Pregnancy due date',
-  historyPreeclampsia: 'History of preeclampsia',
+  historyHDP: 'History of hypertensive disorder of pregnancy (HDP)',
   diagnosedHypertension: 'Diagnosed hypertension',
   hasHeartFailure: 'Heart failure',
   heartFailureType: 'Heart failure type',

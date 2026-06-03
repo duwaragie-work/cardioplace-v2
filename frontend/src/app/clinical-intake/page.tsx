@@ -236,8 +236,8 @@ function buildProfilePayload(s: IntakeFormState): IntakeProfilePayload {
       s.gender === 'FEMALE' && s.isPregnant === true
         ? (s.pregnancyDueDate || null)
         : null,
-    historyPreeclampsia:
-      s.gender === 'FEMALE' ? (s.historyPreeclampsia ?? false) : false,
+    historyHDP:
+      s.gender === 'FEMALE' ? (s.historyHDP ?? false) : false,
     hasHeartFailure: s.hasHeartFailure ?? false,
     heartFailureType: s.hasHeartFailure
       ? (s.heartFailureType ?? 'UNKNOWN')
@@ -611,7 +611,7 @@ function A2Pregnancy({ state, setState }: StepProps) {
                 ...p,
                 isPregnant: false,
                 // Due date is gated behind the Yes panel so it's safe to
-                // wipe here. historyPreeclampsia is its own independent
+                // wipe here. historyHDP is its own independent
                 // question now and is left untouched.
                 pregnancyDueDate: undefined,
               }))
@@ -650,16 +650,16 @@ function A2Pregnancy({ state, setState }: StepProps) {
             icon={<Shield className="w-6 h-6" />}
             title={t('intake.a2.yesTitle')}
             description={t('intake.a2.preeclampsiaYesDesc')}
-            selected={state.historyPreeclampsia === true}
-            onClick={() => setState((p) => ({ ...p, historyPreeclampsia: true }))}
+            selected={state.historyHDP === true}
+            onClick={() => setState((p) => ({ ...p, historyHDP: true }))}
             audioText={t('intake.a2.preeclampsiaYesAudio')}
           />
           <ChoiceCard
             icon={<Heart className="w-6 h-6" />}
             title={t('intake.a2.noTitle')}
             description={t('intake.a2.preeclampsiaNoDesc')}
-            selected={state.historyPreeclampsia === false}
-            onClick={() => setState((p) => ({ ...p, historyPreeclampsia: false }))}
+            selected={state.historyHDP === false}
+            onClick={() => setState((p) => ({ ...p, historyHDP: false }))}
             audioText={t('intake.a2.preeclampsiaNoAudio')}
           />
         </div>
@@ -2267,7 +2267,7 @@ function ClinicalIntakeWizard() {
             dateOfBirth: carriedDob,
             isPregnant: profile.isPregnant ?? undefined,
             pregnancyDueDate: toDateInput(profile.pregnancyDueDate),
-            historyPreeclampsia: profile.historyPreeclampsia ?? false,
+            historyHDP: profile.historyHDP ?? false,
             hasHeartFailure: profile.hasHeartFailure ?? false,
             hasAFib: profile.hasAFib ?? false,
             hasCAD: profile.hasCAD ?? false,
@@ -2462,7 +2462,7 @@ function ClinicalIntakeWizard() {
       if (state.isPregnant !== true && state.isPregnant !== false) {
         return { kind: 'key', key: 'intake.nav.errorPregnancy' };
       }
-      if (state.historyPreeclampsia !== true && state.historyPreeclampsia !== false) {
+      if (state.historyHDP !== true && state.historyHDP !== false) {
         return { kind: 'key', key: 'intake.nav.errorPreeclampsia' };
       }
     }

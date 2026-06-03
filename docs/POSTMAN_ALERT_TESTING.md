@@ -214,7 +214,7 @@ Tier 1 is non-dismissable, fires regardless of BP, takes precedence over BP-leve
 | Field | Value |
 |---|---|
 | Patient | `priya.menon@cardioplace.test` |
-| Pre-conditions | Profile: `isPregnant=true`, `historyPreeclampsia=true`. Meds: Lisinopril ACE_INHIBITOR VERIFIED. (All seeded — no setup needed.) |
+| Pre-conditions | Profile: `isPregnant=true`, `historyHDP=true`. Meds: Lisinopril ACE_INHIBITOR VERIFIED. (All seeded — no setup needed.) |
 | Endpoint | `POST {{baseUrl}}/api/daily-journal` |
 
 Payload:

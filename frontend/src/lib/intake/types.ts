@@ -64,7 +64,7 @@ export interface IntakeFormState {
   // A2 pregnancy (only relevant if gender === FEMALE)
   isPregnant?: boolean;
   pregnancyDueDate?: string; // YYYY-MM-DD
-  historyPreeclampsia?: boolean;
+  historyHDP?: boolean;
 
   // A3 cardiac conditions
   hasHeartFailure?: boolean;

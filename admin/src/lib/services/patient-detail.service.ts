@@ -23,7 +23,7 @@ export interface PatientProfile {
   dateOfBirth: string | null
   isPregnant: boolean
   pregnancyDueDate: string | null
-  historyPreeclampsia: boolean
+  historyHDP: boolean
   hasHeartFailure: boolean
   heartFailureType: HeartFailureType
   hasAFib: boolean

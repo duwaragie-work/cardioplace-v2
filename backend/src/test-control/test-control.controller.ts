@@ -219,7 +219,7 @@ export class TestControlController {
       userId: string
       flag:
         | 'isPregnant'
-        | 'historyPreeclampsia'
+        | 'historyHDP'
         | 'hasHeartFailure'
         | 'hasAFib'
         | 'hasCAD'

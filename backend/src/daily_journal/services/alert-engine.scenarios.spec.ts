@@ -108,7 +108,7 @@ function buildCtx(over: {
     gender: 'FEMALE',
     heightCm: 165,
     pregnancyDueDate: null,
-    historyPreeclampsia: false,
+    historyHDP: false,
     hasHeartFailure: false,
     heartFailureType: 'NOT_APPLICABLE',
     resolvedHFType: 'NOT_APPLICABLE',
@@ -250,7 +250,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       buildSession({ systolicBP: 130, diastolicBP: 82, pulse: 78 }),
       buildCtx({
         isPregnant: true,
-        profile: { historyPreeclampsia: true },
+        profile: { historyHDP: true },
         contextMeds: [buildMed()],
       }),
     )

@@ -1033,21 +1033,29 @@ const en = {
   'intake.a2.naAudio': 'Not applicable',
   'intake.a2.dueDateLabel': 'When is the baby due? (optional)',
   'intake.a2.dueDateAudio': 'When is the baby due? This is optional.',
-  'intake.a2.preeclampsiaTitle': 'History of preeclampsia',
+  // Q7 (Manisha 2026-06-02) — the field is now the combined "history of
+  // hypertensive disorder of pregnancy (HDP)" (preeclampsia + gestational HTN
+  // + HELLP). Patient-facing copy uses plain "high blood pressure during a
+  // pregnancy" with the clinical terms named parenthetically, so a patient who
+  // had gestational HTN (not preeclampsia) still answers correctly.
+  // i18n: English updated here; es/fr/de/am still carry the narrow
+  // preeclampsia-only wording — flagged in I18N_TRANSLATION_FLAGS for Niva's
+  // 5-language pass.
+  'intake.a2.preeclampsiaTitle': 'High blood pressure during pregnancy',
   'intake.a2.preeclampsiaDesc': 'In a previous pregnancy',
-  'intake.a2.preeclampsiaAudio': 'History of preeclampsia in a previous pregnancy',
+  'intake.a2.preeclampsiaAudio': 'History of high blood pressure during a previous pregnancy',
   // Phase/26 — split A2 into two independent questions. The pregnancy
-  // question gates current-pregnancy alert rules; the preeclampsia
-  // question is a long-term marker per CLINICAL_SPEC §3 that applies
-  // even outside an active pregnancy.
+  // question gates current-pregnancy alert rules; the HDP-history question
+  // is a long-term marker per CLINICAL_SPEC §3 that applies even outside an
+  // active pregnancy.
   'intake.a2.currentlyPregnantQuestion': 'Are you currently pregnant?',
   'intake.a2.currentlyPregnantAudio': 'Are you currently pregnant?',
-  'intake.a2.preeclampsiaQuestion': 'Have you ever had preeclampsia?',
-  'intake.a2.preeclampsiaQuestionAudio': 'Have you ever had preeclampsia in a past pregnancy?',
+  'intake.a2.preeclampsiaQuestion': 'Have you ever had high blood pressure during a pregnancy? This includes preeclampsia, gestational hypertension, or HELLP syndrome.',
+  'intake.a2.preeclampsiaQuestionAudio': 'Have you ever had high blood pressure during a pregnancy? This includes preeclampsia, gestational hypertension, or HELLP syndrome.',
   'intake.a2.preeclampsiaYesDesc': 'Yes, in a past pregnancy',
-  'intake.a2.preeclampsiaYesAudio': 'Yes, I had preeclampsia in a past pregnancy.',
-  'intake.a2.preeclampsiaNoDesc': "I've never had preeclampsia",
-  'intake.a2.preeclampsiaNoAudio': "No, I've never had preeclampsia.",
+  'intake.a2.preeclampsiaYesAudio': 'Yes, in a past pregnancy.',
+  'intake.a2.preeclampsiaNoDesc': 'No, never',
+  'intake.a2.preeclampsiaNoAudio': 'No, never.',
 
   // A3 — heart conditions
   'intake.a3.title': 'Heart conditions',
@@ -1233,7 +1241,7 @@ const en = {
   'intake.nav.errorDob': 'Please enter your date of birth.',
   'intake.nav.errorHeight': 'Please enter a realistic height (about 3 ft 4 in to 8 ft 2 in).',
   'intake.nav.errorPregnancy': 'Please pick Yes or No.',
-  'intake.nav.errorPreeclampsia': 'Please pick Yes or No for preeclampsia history.',
+  'intake.nav.errorPreeclampsia': 'Please pick Yes or No for high blood pressure during pregnancy.',
   'intake.nav.errorHfType': 'Please pick one — Not sure is OK.',
   'intake.nav.errorFreq': 'Pick how often you take {name}.',
   'intake.nav.errorSubmit': 'Something went wrong submitting your profile.',
