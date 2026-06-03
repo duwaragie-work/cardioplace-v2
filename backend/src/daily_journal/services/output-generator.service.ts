@@ -91,6 +91,8 @@ export class OutputGeneratorService implements OnModuleInit {
           : []
 
     return {
+      // #83 — scopes the single-reading caveat to BP/HR rules in physSuffix.
+      ruleId: result.ruleId,
       systolicBP: session.systolicBP,
       diastolicBP: session.diastolicBP,
       pulse: session.pulse,

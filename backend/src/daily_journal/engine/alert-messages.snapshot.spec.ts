@@ -16,7 +16,7 @@ import {
   alertMessageRegistry,
   RULE_IDS,
 } from '@cardioplace/shared'
-import type { AlertContext, RuleMessages } from '@cardioplace/shared'
+import type { AlertContext, RuleId, RuleMessages } from '@cardioplace/shared'
 
 /**
  * Stable context "filled stub" — every optional field populated with a
@@ -107,14 +107,16 @@ describe('Cluster 8 §F.2 — message-registry snapshot gate', () => {
       ]
 
       it('STANDARD context — patient/caregiver/physician messages match snapshot', () => {
-        const ctx = baseCtx()
+        // #83 — thread the rule's own id so physSuffix scopes the single-
+        // reading caveat per-rule (profile-axis rules drop it).
+        const ctx = { ...baseCtx(), ruleId: ruleId as RuleId }
         expect(entry.patientMessage(ctx)).toMatchSnapshot('patient')
         expect(entry.caregiverMessage(ctx)).toMatchSnapshot('caregiver')
         expect(entry.physicianMessage(ctx)).toMatchSnapshot('physician')
       })
 
       it('ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot', () => {
-        const ctx = annotatedCtx()
+        const ctx = { ...annotatedCtx(), ruleId: ruleId as RuleId }
         expect(entry.patientMessage(ctx)).toMatchSnapshot('patient-annotated')
         expect(entry.caregiverMessage(ctx)).toMatchSnapshot('caregiver-annotated')
         expect(entry.physicianMessage(ctx)).toMatchSnapshot('physician-annotated')
@@ -161,5 +163,64 @@ describe('Cluster 8 §F.2 — message-registry snapshot gate', () => {
     const msg = alertMessageRegistry.RULE_ACE_ANGIOEDEMA.physicianMessage(ctx)
     expect(msg).toMatch(/ARB-associated angioedema is less common/i)
     expect(msg).not.toMatch(/bradykinin-mediated/i)
+  })
+
+  // ── Manisha Q5 — Stage 2 axis-specific physician wording ────────────────
+  describe('Manisha Q5 — Stage 2 axis-specific wording', () => {
+    const phys = (sbp: number, dbp: number) =>
+      alertMessageRegistry.RULE_STANDARD_L1_HIGH.physicianMessage({
+        ...baseCtx(),
+        ruleId: RULE_IDS.STANDARD_L1_HIGH,
+        systolicBP: sbp,
+        diastolicBP: dbp,
+      })
+
+    it('SBP ≥160, DBP <100 → SBP-axis variant', () => {
+      const msg = phys(165, 85)
+      expect(msg).toContain('severe Stage 2 SBP (SBP ≥160)')
+      expect(msg).not.toContain('≥160/100')
+    })
+
+    it('DBP ≥100, SBP <160 → DBP-axis variant (no self-contradiction)', () => {
+      const msg = phys(119, 109)
+      expect(msg).toContain('severe Stage 2 DBP (DBP ≥100)')
+      expect(msg).not.toContain('≥160/100')
+    })
+
+    it('both axes ≥ → combined variant', () => {
+      const msg = phys(170, 105)
+      expect(msg).toContain('severe Stage 2 (≥160/100)')
+    })
+  })
+
+  // ── #83 — single-reading suffix scoped to BP/HR rules only ──────────────
+  describe('#83 — single-reading suffix BP/HR-rules only', () => {
+    it('does NOT append the suffix to RULE_MEDICATION_MISSED (profile axis)', () => {
+      const msg = alertMessageRegistry.RULE_MEDICATION_MISSED.physicianMessage({
+        ...annotatedCtx(),
+        ruleId: RULE_IDS.MEDICATION_MISSED,
+      })
+      expect(msg).not.toContain('Single-reading session')
+    })
+
+    it('DOES append the suffix to RULE_STANDARD_L1_HIGH (systolic axis) single-reading', () => {
+      const msg = alertMessageRegistry.RULE_STANDARD_L1_HIGH.physicianMessage({
+        ...annotatedCtx(),
+        ruleId: RULE_IDS.STANDARD_L1_HIGH,
+      })
+      expect(msg).toContain('Single-reading session — confirm with next reading')
+    })
+
+    it('still appends NON-single-reading physicianAnnotations on profile rules', () => {
+      // The carve-out clinical sentence (a physicianAnnotation) must survive
+      // even though the single-reading caveat is suppressed.
+      const msg = alertMessageRegistry.RULE_MEDICATION_MISSED.physicianMessage({
+        ...annotatedCtx(),
+        ruleId: RULE_IDS.MEDICATION_MISSED,
+        physicianAnnotations: ['escalate-3-of-7'],
+      })
+      expect(msg).toContain('escalate-3-of-7')
+      expect(msg).not.toContain('Single-reading session')
+    })
   })
 })

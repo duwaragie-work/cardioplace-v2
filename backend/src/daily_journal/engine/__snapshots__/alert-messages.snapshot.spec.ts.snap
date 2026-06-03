@@ -16,7 +16,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ACE_ANGIOEDEMA 
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ACE_ANGIOEDEMA ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You reported swelling of your face, lips, or tongue. This needs urgent medical attention. If you also have trouble breathing or feel tightness in your throat, call 911 now. If not, go to the nearest emergency room now. Do not take any more of your blood pressure medicine until your doctor tells you it is safe."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ACE_ANGIOEDEMA ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 1 — RULE_ACE_ANGIOEDEMA: Patient on Lisinopril (ACE_INHIBITOR) self-reported facial/lip/tongue swelling. Throat tightness reported — potential airway compromise. ACE-inhibitor angioedema — airway obstruction risk ~10%. Standard antihistamines/corticosteroids/epinephrine are NOT reliably effective (bradykinin-mediated). Discontinue ACE inhibitor immediately. Do not rechallenge with any ACE inhibitor (class effect). Consider ARB with caution (cross-reactivity reported but uncommon). | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ACE_ANGIOEDEMA ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 1 — RULE_ACE_ANGIOEDEMA: Patient on Lisinopril (ACE_INHIBITOR) self-reported facial/lip/tongue swelling. Throat tightness reported — potential airway compromise. ACE-inhibitor angioedema — airway obstruction risk ~10%. Standard antihistamines/corticosteroids/epinephrine are NOT reliably effective (bradykinin-mediated). Discontinue ACE inhibitor immediately. Do not rechallenge with any ACE inhibitor (class effect). Consider ARB with caution (cross-reactivity reported but uncommon). | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ACE_ANGIOEDEMA STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"Aisha reported swelling of their face, lips, or tongue. This can be a dangerous reaction to one of their blood pressure medicines. If they have trouble breathing or throat tightness, call 911 now. If not, take them to the nearest emergency room now. Do not let them take another dose of that medicine."`;
 
@@ -28,7 +28,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ACE_COUGH ANNOT
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ACE_COUGH ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You reported a dry, tickly cough. This is a common side effect of one of your blood-pressure medicines — it usually starts within the first few weeks of starting it. It is not dangerous, but if the cough is bothering you, please let your care team know. There is a related medicine that often does not cause this cough that they can switch you to."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ACE_COUGH ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — ACE inhibitor cough reported. Bradykinin-mediated; consider ARB switch if persistent or limiting. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ACE_COUGH ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — ACE inhibitor cough reported. Bradykinin-mediated; consider ARB switch if persistent or limiting. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ACE_COUGH STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
 
@@ -64,7 +64,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AFIB_PALPITATIO
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AFIB_PALPITATIONS ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You reported your heart feeling like it's racing or fluttering. With your AFib history, your care team should know about this. Please contact them today."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AFIB_PALPITATIONS ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — AFib patient reports palpitations. Consider paroxysmal AFib recurrence. Review rate control. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AFIB_PALPITATIONS ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — AFib patient reports palpitations. Consider paroxysmal AFib recurrence. Review rate control. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_AFIB_PALPITATIONS STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"Aisha reported palpitations. With their AFib history, please help them contact their care team today."`;
 
@@ -112,7 +112,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_DI
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_DIZZINESS ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You reported feeling dizzy, and your blood pressure looks lower than usual. Please sit or lie down until it passes, and let your care team know — they may want to review your medicine."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_DIZZINESS ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — Possible β-blocker-induced hypotension. 145/85 mmHg with dizziness reported. Consider dose review or timing change. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_DIZZINESS ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — Possible β-blocker-induced hypotension. 145/85 mmHg with dizziness reported. Consider dose review or timing change. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_DIZZINESS STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
 
@@ -124,7 +124,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_FA
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_FATIGUE ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You reported feeling more tired than usual. This can happen with your blood-pressure medicine, especially when you first start it or after a dose change. It usually gets better over a few weeks. If it's making your day harder, let your care team know — they may adjust the timing or dose."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_FATIGUE ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — Patient on β-blocker reports fatigue. Common dose-dependent side effect; consider dose review, evening dosing, or β1-selective alternative if persistent or limiting. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_FATIGUE ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — Patient on β-blocker reports fatigue. Common dose-dependent side effect; consider dose review, evening dosing, or β1-selective alternative if persistent or limiting. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_FATIGUE STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
 
@@ -136,7 +136,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_SO
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_SOB_HF ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You reported shortness of breath. Because of your heart condition, this is something your care team needs to know about today. Please contact them — and call 911 if you can't catch your breath at rest or it's getting worse quickly."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_SOB_HF ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — HF patient on β-blocker reports new shortness of breath. Decompensation risk — assess volume status, BNP/NT-proBNP, and consider in-person visit. Do NOT abruptly stop β-blocker. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_SOB_HF ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — HF patient on β-blocker reports new shortness of breath. Decompensation risk — assess volume status, BNP/NT-proBNP, and consider in-person visit. Do NOT abruptly stop β-blocker. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_SOB_HF STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"Aisha reported new shortness of breath and is on a β-blocker for heart failure. Please help them contact their care team today; watch for worsening breathing at rest or sudden weight gain."`;
 
@@ -148,7 +148,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_SO
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_SOB_NON_HF ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You reported shortness of breath. This can sometimes happen with your blood-pressure medicine. Let your care team know at your next visit so they can check whether the medicine needs adjusting."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_SOB_NON_HF ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — Patient on β-blocker (non-HF) reports shortness of breath. Possible bronchospasm or exercise intolerance; consider β1-selective switch and pulmonary review. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_SOB_NON_HF ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — Patient on β-blocker (non-HF) reports shortness of breath. Possible bronchospasm or exercise intolerance; consider β1-selective switch and pulmonary review. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BETA_BLOCKER_SOB_NON_HF STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
 
@@ -268,7 +268,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_DHP_CCB_LEG_SWE
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_DHP_CCB_LEG_SWELLING ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You reported swelling in your ankles or legs. This can sometimes happen with your blood-pressure medicine. It is usually not dangerous, but your care team should know — they may want to adjust your medicine."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_DHP_CCB_LEG_SWELLING ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — Possible DHP-CCB peripheral edema. Patient on dihydropyridine CCB reports leg swelling without HF flag. Consider dose reduction or non-DHP alternative. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_DHP_CCB_LEG_SWELLING ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — Possible DHP-CCB peripheral edema. Patient on dihydropyridine CCB reports leg swelling without HF flag. Consider dose reduction or non-DHP alternative. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_DHP_CCB_LEG_SWELLING STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
 
@@ -278,13 +278,13 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_DHP_CCB_LEG_SWE
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_FIRST_MONTH_ADHERENCE_NUDGE ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `""`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_FIRST_MONTH_ADHERENCE_NUDGE ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"Starting a new medicine can take some getting used to. If you missed a dose, try to take your next one on time. Taking your medicine every day helps keep your blood pressure steady. Your care team is here to help if anything makes it hard to stay on schedule."`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_FIRST_MONTH_ADHERENCE_NUDGE ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"Starting a new medicine can take some getting used to. If you missed a dose, that's okay — just try to take your next one on time. Taking your medicine every day helps keep your blood pressure steady. Your care team is here to help if anything makes it hard to stay on schedule."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_FIRST_MONTH_ADHERENCE_NUDGE ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `""`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_FIRST_MONTH_ADHERENCE_NUDGE STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_FIRST_MONTH_ADHERENCE_NUDGE STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `"Starting a new medicine can take some getting used to. If you missed a dose, try to take your next one on time. Taking your medicine every day helps keep your blood pressure steady. Your care team is here to help if anything makes it hard to stay on schedule."`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_FIRST_MONTH_ADHERENCE_NUDGE STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `"Starting a new medicine can take some getting used to. If you missed a dose, that's okay — just try to take your next one on time. Taking your medicine every day helps keep your blood pressure steady. Your care team is here to help if anything makes it hard to stay on schedule."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_FIRST_MONTH_ADHERENCE_NUDGE STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `""`;
 
@@ -292,7 +292,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_GENERIC_ANGIOED
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_GENERIC_ANGIOEDEMA ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You reported swelling of your face, lips, or tongue. This needs urgent medical attention. If you also have trouble breathing or feel tightness in your throat, call 911 now. If not, go to the nearest emergency room now."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_GENERIC_ANGIOEDEMA ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 1 — RULE_GENERIC_ANGIOEDEMA: Patient self-reported facial/lip/tongue swelling. Throat tightness reported — potential airway compromise. No ACE inhibitor or ARB on verified med list. Differential: allergic angioedema, hereditary angioedema, idiopathic, or unverified ACE/ARB exposure. Standard anaphylaxis protocol appropriate if allergic etiology suspected. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_GENERIC_ANGIOEDEMA ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 1 — RULE_GENERIC_ANGIOEDEMA: Patient self-reported facial/lip/tongue swelling. Throat tightness reported — potential airway compromise. No ACE inhibitor or ARB on verified med list. Differential: allergic angioedema, hereditary angioedema, idiopathic, or unverified ACE/ARB exposure. Standard anaphylaxis protocol appropriate if allergic etiology suspected. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_GENERIC_ANGIOEDEMA STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"Aisha reported swelling of their face, lips, or tongue. This can be dangerous and needs urgent medical attention. If they have trouble breathing or throat tightness, call 911 now. If not, take them to the nearest emergency room now."`;
 
@@ -328,7 +328,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_HCM_VASODILATOR
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_HCM_VASODILATOR ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `""`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_HCM_VASODILATOR ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — HCM + ACE_INHIBITOR (Lisinopril): may worsen LVOT obstruction. Review per 2024 AHA/ACC HCM guideline. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_HCM_VASODILATOR ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — HCM + ACE_INHIBITOR (Lisinopril): may worsen LVOT obstruction. Review per 2024 AHA/ACC HCM guideline. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_HCM_VASODILATOR STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
 
@@ -340,7 +340,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_HF_CAREGIVER_ED
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_HF_CAREGIVER_EDEMA ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `""`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_HF_CAREGIVER_EDEMA ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — HF patient + new ankle edema, routed to caregiver for monitoring. Sibling row of HF_DECOMPENSATION (Tier 2 physician escalation). | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_HF_CAREGIVER_EDEMA ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — HF patient + new ankle edema, routed to caregiver for monitoring. Sibling row of HF_DECOMPENSATION (Tier 2 physician escalation). | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_HF_CAREGIVER_EDEMA STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"Aisha reported new swelling in their ankles or legs. With heart failure, this can be an early sign of fluid build-up. Please weigh them today and tomorrow morning — if they gain more than 2 pounds, or if breathing gets harder, contact their care team. Keep an eye on swelling, breathing, and weight over the next few days."`;
 
@@ -352,7 +352,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_HF_DECOMPENSATI
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_HF_DECOMPENSATION ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You reported swelling in your ankles or legs (or a quick weight gain). Because of your heart condition, your care team needs to know about this right away. Please also let them know if you have gained weight, feel more short of breath, or are having trouble lying flat."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_HF_DECOMPENSATION ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — Possible HF decompensation. Patient reported leg swelling and/or >2 lb weight gain in 24h. Review volume status, diuretic regimen, and consider in-person visit. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_HF_DECOMPENSATION ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — Possible HF decompensation. Patient reported leg swelling and/or >2 lb weight gain in 24h. Review volume status, diuretic regimen, and consider in-person visit. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_HF_DECOMPENSATION STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"Aisha reported leg swelling or rapid weight gain. With their heart condition this can indicate fluid overload — please contact their care team today."`;
 
@@ -424,7 +424,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_MEDICATION_MISS
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_MEDICATION_MISSED ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"It looks like you may have missed Lisinopril a couple of times recently. These medicines help protect your heart and keep your blood pressure steady. If anything is making it hard to take them, your care team can help."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_MEDICATION_MISSED ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — Non-adherence pattern: Lisinopril (ACE_INHIBITOR) — missed 1/3 days — reason: FORGOT. Consider barrier assessment; if persistent, evaluate regimen simplification or longer-acting agent. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_MEDICATION_MISSED ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — Non-adherence pattern: Lisinopril (ACE_INHIBITOR) — missed 1/3 days — reason: FORGOT. Consider barrier assessment; if persistent, evaluate regimen simplification or longer-acting agent. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_MEDICATION_MISSED STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"Aisha has reported missing medication doses on 0 of the last 3 days. A gentle check-in may help identify any barriers."`;
 
@@ -436,7 +436,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NDHP_HFREF ANNO
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NDHP_HFREF ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"Your care team needs to review one of your heart medicines with you. Please call your provider today before taking your next dose."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NDHP_HFREF ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 1 — Nondihydropyridine CCB (Lisinopril) in HFrEF. Negative inotropic; discontinue per 2025 AHA/ACC. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NDHP_HFREF ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 1 — Nondihydropyridine CCB (Lisinopril) in HFrEF. Negative inotropic; discontinue per 2025 AHA/ACC. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NDHP_HFREF STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"The patient has a heart-failure diagnosis and is taking a medication that needs urgent provider review. Please help them contact their care team today."`;
 
@@ -448,7 +448,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NSAID_ANTIHTN_I
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NSAID_ANTIHTN_INTERACTION ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You told us you've taken a pain reliever like ibuprofen, Advil, Aleve, or naproxen. These can raise your blood pressure and make your blood-pressure medicine work less well, especially if you take them often. If your pain needs a few days of relief, acetaminophen (Tylenol) is usually a safer choice — please check with your care team."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NSAID_ANTIHTN_INTERACTION ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — NSAID use reported alongside antihypertensive therapy. Blunts ACE/ARB/diuretic efficacy + drives sodium retention. Counsel patient on acetaminophen alternative; reassess BP trend. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NSAID_ANTIHTN_INTERACTION ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — NSAID use reported alongside antihypertensive therapy. Blunts ACE/ARB/diuretic efficacy + drives sodium retention. Counsel patient on acetaminophen alternative; reassess BP trend. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NSAID_ANTIHTN_INTERACTION STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
 
@@ -460,7 +460,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ORTHOSTATIC_HYP
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ORTHOSTATIC_HYPOTENSION ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You reported feeling dizzy, and your blood pressure dropped compared to your last reading. Try standing up slowly and drinking water. If it happens again, please let your care team know."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ORTHOSTATIC_HYPOTENSION ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — Orthostatic hypotension pattern: SBP drop ≥15 mmHg from prior session with dizziness. Review antihypertensive regimen + hydration status. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ORTHOSTATIC_HYPOTENSION ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — Orthostatic hypotension pattern: SBP drop ≥15 mmHg from prior session with dizziness. Review antihypertensive regimen + hydration status. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ORTHOSTATIC_HYPOTENSION STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"Aisha reported dizziness with a drop in blood pressure from the prior reading. Watch for unsteadiness when they stand up and let their care team know if it continues."`;
 
@@ -472,7 +472,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PALPITATIONS_GE
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PALPITATIONS_GENERAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You reported your heart feeling like it's racing or fluttering. Your pulse looks normal right now, but please mention this at your next visit — your care team may want to take a closer look."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PALPITATIONS_GENERAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — Patient reports palpitations with normal resting HR. Consider Holter/event monitor at next visit. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PALPITATIONS_GENERAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — Patient reports palpitations with normal resting HR. Consider Holter/event monitor at next visit. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PALPITATIONS_GENERAL STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
 
@@ -508,7 +508,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_ACE_A
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_ACE_ARB ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"Your care team needs to review Lisinopril because you are pregnant. Please call your provider today before taking your next dose."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_ACE_ARB ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 1 — ACE/ARB (Lisinopril, ACE_INHIBITOR) in pregnant patient. Teratogenic; discontinue and switch to CHAP-protocol alternative (labetalol or long-acting nifedipine). | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_ACE_ARB ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 1 — ACE/ARB (Lisinopril, ACE_INHIBITOR) in pregnant patient. Teratogenic; discontinue and switch to CHAP-protocol alternative (labetalol or long-acting nifedipine). | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_ACE_ARB STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"The patient is pregnant and is taking Lisinopril, which need urgent provider review. Please help them contact their care team today."`;
 
@@ -616,7 +616,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_SYNCOPE_GENERAL
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_SYNCOPE_GENERAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You reported feeling faint or passing out recently. This always needs a doctor to look at. Please contact your care team today — and call 911 if you feel faint again with chest pain, weakness, or trouble breathing."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_SYNCOPE_GENERAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — Syncope/near-syncope reported. Consider cardiac vs. vasovagal etiology. ECG recommended. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_SYNCOPE_GENERAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — Syncope/near-syncope reported. Consider cardiac vs. vasovagal etiology. ECG recommended. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_SYNCOPE_GENERAL STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"Aisha reported a recent fainting or near-fainting episode. Please help them contact their care team today."`;
 
@@ -640,7 +640,7 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_TACHY_WITH_PALP
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_TACHY_WITH_PALPITATIONS ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You reported your heart racing, and your pulse is higher than usual. Please rest, drink water, and let your care team know if it doesn't settle in the next hour."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_TACHY_WITH_PALPITATIONS ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — Symptomatic tachycardia: HR 72 bpm with palpitations reported. Rule out causes; consider Holter / event monitor. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_TACHY_WITH_PALPITATIONS ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — Symptomatic tachycardia: HR 72 bpm with palpitations reported. Rule out causes; consider Holter / event monitor. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_TACHY_WITH_PALPITATIONS STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
 

@@ -16,6 +16,7 @@
 //  - physician: clinical shorthand. Includes drug name, threshold, and any
 //    Tier 3 physician annotations (wide PP, loop-diuretic sensitivity).
 
+import { RULE_AXIS } from './rule-ids.js'
 import type { RuleId } from './rule-ids.js'
 
 // ─── public types ────────────────────────────────────────────────────────────
@@ -98,6 +99,11 @@ export interface AlertContext {
   /** Cluster 8 Q1 — consecutive ≤45 bpm sessions, rendered in the
    *  brady-surveillance physician message. */
   bradySustainedSessions?: number
+
+  /** #83 — the firing rule's id, used to scope the single-reading caveat to
+   *  BP/HR threshold rules only (see physSuffix). Optional so direct test
+   *  callers can omit it; OutputGenerator always populates it in production. */
+  ruleId?: RuleId
 }
 
 export type MessageBuilder = (ctx: AlertContext) => string
@@ -137,7 +143,16 @@ function physSuffix(ctx: AlertContext): string {
   const parts: string[] = []
   if (ctx.physicianAnnotations.length) parts.push(...ctx.physicianAnnotations)
   // Cluster 6 Q2 (Manisha 5/9/26) — single-reading-session caveat.
-  if (ctx.singleReadingSession) {
+  // #83 (2026-06-03) — "confirm with next reading" is BP-averaging language:
+  // a second reading could change a threshold-band call. It is clinically
+  // irrelevant on the medication / contraindication / symptom-driven rules
+  // (RULE_AXIS 'profile' — adherence, angioedema, ACE cough, palpitations,
+  // etc.), where the finding doesn't depend on a repeat BP/HR measurement.
+  // Gate the caveat to non-'profile' (systolic / diastolic / hr) rules. When
+  // ruleId is absent (direct test callers) we keep the legacy behavior.
+  const suffixApplies =
+    ctx.ruleId == null || RULE_AXIS[ctx.ruleId] !== 'profile'
+  if (ctx.singleReadingSession && suffixApplies) {
     parts.push('Single-reading session — confirm with next reading')
   }
   return parts.length ? ` | ${parts.join(' | ')}` : ''
@@ -145,6 +160,23 @@ function physSuffix(ctx: AlertContext): string {
 
 function preDaySuffix(ctx: AlertContext): string {
   return ctx.preDay3 ? PRE_DAY_3_DISCLAIMER : ''
+}
+
+/**
+ * Manisha Q5 (2026-06-02) — severe-Stage-2 band label for RULE_STANDARD_L1_HIGH,
+ * naming the axis that crossed so the physician message can't self-contradict:
+ *   • SBP ≥160, DBP <100  → "severe Stage 2 SBP (SBP ≥160)"
+ *   • DBP ≥100, SBP <160  → "severe Stage 2 DBP (DBP ≥100)"
+ *   • both                → "severe Stage 2 (≥160/100)"
+ * The rule fires when EITHER axis crosses, so these three cases are exhaustive;
+ * a missing-value edge falls through to the combined label.
+ */
+function stage2Band(ctx: AlertContext): string {
+  const sbpHigh = ctx.systolicBP != null && ctx.systolicBP >= 160
+  const dbpHigh = ctx.diastolicBP != null && ctx.diastolicBP >= 100
+  if (sbpHigh && !dbpHigh) return 'severe Stage 2 SBP (SBP ≥160)'
+  if (dbpHigh && !sbpHigh) return 'severe Stage 2 DBP (DBP ≥100)'
+  return 'severe Stage 2 (≥160/100)'
 }
 
 function suboptimalSuffix(ctx: AlertContext): string {
@@ -420,8 +452,13 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       `Your blood pressure reading is ${bp(ctx)}, which is high. Please contact your care team today.${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
       `The patient's BP is elevated at ${bp(ctx)}.`,
+    // Manisha Q5 (2026-06-02) — axis-specific severe-Stage-2 wording. The old
+    // flat "≥160/100" label self-contradicted when only one axis crossed
+    // (e.g. 119/109 read "≥160/100" though SBP 119 is well under 160). Name
+    // the axis that actually triggered. Evaluated on the session-averaged
+    // values (physicianCtx), which is the engine's evaluation truth.
     physicianMessage: (ctx) =>
-      `BP Level 1 High — severe Stage 2 (≥160/100) at ${bp(ctx)}.${preDaySuffix(ctx)}${physSuffix(ctx)}`,
+      `BP Level 1 High — ${stage2Band(ctx)} at ${bp(ctx)}.${preDaySuffix(ctx)}${physSuffix(ctx)}`,
   },
   RULE_STANDARD_L1_LOW: {
     // F26 — see RULE_STANDARD_L1_HIGH: disclaimer is admin-only, not patient.
@@ -786,11 +823,17 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   },
 
   // ── Cluster 8 Q3 — first-month educational adherence nudge ─────────────
-  // Patient-only, Tier 3, one-time. Verbatim from the sign-off (doc p.7).
-  // No provider/caregiver message — educational, not clinical.
+  // Patient-only, Tier 3, one-time. Hybrid of sign-off doc p.7 + educational
+  // sentence (approved 2026-06-02 by Dr. Singal, Q1). The "that's okay — just"
+  // softening clause is clinically load-bearing (AHA Medication Adherence
+  // statement — non-judgmental tone); the third sentence is the evidence-based
+  // educational reinforcement. No provider/caregiver message — educational.
+  // i18n: patient-facing string rendered backend-side; English-only for the US
+  // pilot per CROSS_HANDOFF_ADDENDUM_2026_06_03 (backend alert-template i18n is
+  // a Phase-2 retrofit). Translation flag logged in I18N_TRANSLATION_FLAGS.
   RULE_FIRST_MONTH_ADHERENCE_NUDGE: {
     patientMessage: () =>
-      'Starting a new medicine can take some getting used to. If you missed a dose, try to take your next one on time. Taking your medicine every day helps keep your blood pressure steady. Your care team is here to help if anything makes it hard to stay on schedule.',
+      "Starting a new medicine can take some getting used to. If you missed a dose, that's okay — just try to take your next one on time. Taking your medicine every day helps keep your blood pressure steady. Your care team is here to help if anything makes it hard to stay on schedule.",
     caregiverMessage: () => '',
     physicianMessage: () => '',
   },
