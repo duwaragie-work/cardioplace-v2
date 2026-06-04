@@ -38,7 +38,10 @@ import {
   Brain,
   Wind,
   Zap,
-  Stethoscope,
+  CircleHelp,
+  HeartPulse,
+  Footprints,
+  BatteryLow,
   Baby,
   Pill,
   Scale,
@@ -1148,7 +1151,7 @@ function FaceSwellingIcon({ className }: { className?: string }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.8}
+      strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -1172,18 +1175,196 @@ function ThroatTightnessIcon({ className }: { className?: string }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.8}
+      strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      {/* head + neck */}
-      <circle cx="12" cy="5.5" r="3" />
-      <path d="M9 9c0 2 0 3 0 4M15 9c0 2 0 3 0 4" />
-      {/* throat constriction (inward pinch) */}
-      <path d="M9 14.5c1.2-1.4 4.8-1.4 6 0" />
-      <path d="M9 18c1.2 1.4 4.8 1.4 6 0" />
-      <path d="M7.5 16.25h2M14.5 16.25h2" />
+      {/* head */}
+      <circle cx="12" cy="3.8" r="2.2" />
+      {/* neck */}
+      <path d="M10 5.9v5M14 5.9v5" />
+      {/* warning mark on the throat */}
+      <path d="M12 7v2.4M12 11h0.01" />
+      {/* shoulders */}
+      <path d="M6.5 19.5c1.4-2.7 3.2-3.7 5.5-3.7s4.1 1 5.5 3.7" />
+    </svg>
+  );
+}
+
+// Gap 4 icon-pairing (V2-E silent literacy) — bespoke glyphs for symptoms that
+// lucide can't convey clearly. Each replaces a previously-duplicated stock icon
+// so a non-reader can tell every symptom apart by its picture alone. Stroke-based
+// + currentColor so they inherit the checklist-row color like the lucide icons.
+// NOTE: art still needs design + Dr. Singal clinical sign-off before pilot.
+
+// Belly outline + *centred* pain burst — "severe stomach / epigastric pain".
+// The pregnancy "right-upper-quadrant pain" row uses RuqPainIcon instead, whose
+// burst sits in the upper-right so the two abdominal symptoms read differently
+// (every symptom gets its own unique glyph).
+function AbdomenPainIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* belly / torso */}
+      <rect x="5" y="4" width="14" height="16" rx="6" />
+      {/* pain burst */}
+      <path d="M12 8.5v7M8.5 12h7M9.9 9.9l4.2 4.2M14.1 9.9l-4.2 4.2" />
+    </svg>
+  );
+}
+
+// Same belly outline as AbdomenPainIcon but the pain burst sits in the
+// upper-RIGHT quadrant — "right-upper-quadrant pain" (pregnancy / preeclampsia
+// liver sign). Showing *where* it hurts is what makes it distinct + readable.
+function RuqPainIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* belly / torso */}
+      <rect x="5" y="4" width="14" height="16" rx="6" />
+      {/* pain burst, upper-right */}
+      <path d="M15 7v3.4M13.3 8.7h3.4M13.8 7.5l2.4 2.4M16.2 7.5l-2.4 2.4" />
+    </svg>
+  );
+}
+
+// Head with pain rays around the crown — "severe headache". Distinct from Brain
+// (the brain-organ glyph), which now marks the pregnancy "new headache" row, so
+// the two headache symptoms read as different pictures.
+function HeadachePainIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* head */}
+      <circle cx="12" cy="13" r="6" />
+      {/* throbbing pain rays */}
+      <path d="M12 4v2.5M5.5 6l1.6 1.8M18.5 6l-1.6 1.8M3.5 12.5l2.4.3M20.5 12.5l-2.4.3" />
+    </svg>
+  );
+}
+
+// Side-profile head with an open mouth and air bursts — "dry cough". Distinct
+// from Wind (shortness of breath) which is the lucide flowing-air glyph.
+function CoughIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* head */}
+      <circle cx="8.5" cy="9.5" r="5.5" />
+      {/* open mouth, mid-cough */}
+      <ellipse cx="11.5" cy="11.5" rx="1.5" ry="1.2" />
+      {/* forceful cough spray, fanning out from the mouth */}
+      <path d="M15 8l3.2-1.2M15 11.3h3.4M15 14.6l3.2 1.2" />
+    </svg>
+  );
+}
+
+// Collapsed figure on a ground line — "fainting / passing out" (syncope).
+// Distinct from DizzyIcon (dizziness) which conveys spinning, not collapse.
+function FaintingIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* ground */}
+      <path d="M3 19.5h18" />
+      {/* head */}
+      <circle cx="5.5" cy="14.3" r="2.5" />
+      {/* body lying flat */}
+      <path d="M8 14.8h6.5" />
+      {/* legs */}
+      <path d="M14.5 14.8l4 1.4M14.5 14.8l4-.4" />
+    </svg>
+  );
+}
+
+// Lungs (two lobes + windpipe) — "chest pain / trouble breathing". A concrete
+// respiratory/chest organ that reads instantly at small size. Distinct from Wind
+// (short-of-breath air lines) and HeartPulse (palpitations).
+function ChestPainIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* windpipe */}
+      <path d="M12 4.5V9" />
+      {/* left lung */}
+      <path d="M12 9C9.5 9.2 6.2 10.5 6.2 14.2C6.2 17.6 7.8 19.2 10 19.2C11.5 19.2 12 17 12 14.5Z" />
+      {/* right lung */}
+      <path d="M12 9C14.5 9.2 17.8 10.5 17.8 14.2C17.8 17.6 16.2 19.2 14 19.2C12.5 19.2 12 17 12 14.5Z" />
+    </svg>
+  );
+}
+
+// Woozy face — spiral eyes + wavy mouth — "feeling dizzy or lightheaded". The
+// universal dizzy-face pictogram; more concrete than a bare swirl. Distinct from
+// FaintingIcon (collapse) which is syncope.
+function DizzyIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* face */}
+      <circle cx="12" cy="12" r="9" />
+      {/* spiral / woozy eyes */}
+      <path d="M9.9 10.1a1.3 1.3 0 1 1-1.3-1.3" />
+      <path d="M15.4 10.1a1.3 1.3 0 1 1-1.3-1.3" />
+      {/* woozy wavy mouth */}
+      <path d="M9 16c1-1.2 2 1.2 3 0s2-1.2 3 0" />
     </svg>
   );
 }
@@ -1195,23 +1376,23 @@ interface SymptomsStepProps extends StepProps {
 function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
   const { t } = useLanguage();
   const core: { key: keyof FormData; icon: React.ReactNode; text: string; testId?: string }[] = [
-    { key: 'severeHeadache', icon: <Brain className="w-5 h-5" />, text: t('checkin.b3.symptomSevereHeadache') },
+    { key: 'severeHeadache', icon: <HeadachePainIcon className="w-5 h-5" />, text: t('checkin.b3.symptomSevereHeadache') },
     { key: 'visualChanges', icon: <Eye className="w-5 h-5" />, text: t('checkin.b3.symptomVision') },
-    { key: 'alteredMentalStatus', icon: <Brain className="w-5 h-5" />, text: t('checkin.b3.symptomConfusion') },
-    { key: 'chestPainOrDyspnea', icon: <Wind className="w-5 h-5" />, text: t('checkin.b3.symptomChestPain'), testId: 'check-in-symptom-CHEST_PAIN' },
+    { key: 'alteredMentalStatus', icon: <CircleHelp className="w-5 h-5" />, text: t('checkin.b3.symptomConfusion') },
+    { key: 'chestPainOrDyspnea', icon: <ChestPainIcon className="w-5 h-5" />, text: t('checkin.b3.symptomChestPain'), testId: 'check-in-symptom-CHEST_PAIN' },
     { key: 'focalNeuroDeficit', icon: <Zap className="w-5 h-5" />, text: t('checkin.b3.symptomNeuro') },
-    { key: 'severeEpigastricPain', icon: <Stethoscope className="w-5 h-5" />, text: t('checkin.b3.symptomStomach') },
+    { key: 'severeEpigastricPain', icon: <AbdomenPainIcon className="w-5 h-5" />, text: t('checkin.b3.symptomStomach') },
     // Cluster 6 (Manisha 5/10/26) — feed brady-symptomatic, palpitations,
     // orthostatic, and HF-decomp engine rules.
-    { key: 'dizziness', icon: <Activity className="w-5 h-5" />, text: t('checkin.b3.symptomDizziness'), testId: 'check-in-symptom-DIZZINESS' },
-    { key: 'syncope', icon: <Activity className="w-5 h-5" />, text: t('checkin.b3.symptomSyncope'), testId: 'check-in-symptom-SYNCOPE' },
-    { key: 'palpitations', icon: <Heart className="w-5 h-5" />, text: t('checkin.b3.symptomPalpitations'), testId: 'check-in-symptom-PALPITATIONS' },
-    { key: 'legSwelling', icon: <Droplets className="w-5 h-5" />, text: t('checkin.b3.symptomLegSwelling'), testId: 'check-in-symptom-LEG_SWELLING' },
+    { key: 'dizziness', icon: <DizzyIcon className="w-5 h-5" />, text: t('checkin.b3.symptomDizziness'), testId: 'check-in-symptom-DIZZINESS' },
+    { key: 'syncope', icon: <FaintingIcon className="w-5 h-5" />, text: t('checkin.b3.symptomSyncope'), testId: 'check-in-symptom-SYNCOPE' },
+    { key: 'palpitations', icon: <HeartPulse className="w-5 h-5" />, text: t('checkin.b3.symptomPalpitations'), testId: 'check-in-symptom-PALPITATIONS' },
+    { key: 'legSwelling', icon: <Footprints className="w-5 h-5" />, text: t('checkin.b3.symptomLegSwelling'), testId: 'check-in-symptom-LEG_SWELLING' },
     // Cluster 7 (Manisha 5/11/26) — Appendix A side-effect inputs feeding
     // β-blocker fatigue/SOB (HF + non-HF) and ACE dry-cough rules.
-    { key: 'fatigue', icon: <Bed className="w-5 h-5" />, text: t('checkin.b3.symptomFatigue'), testId: 'check-in-symptom-FATIGUE' },
+    { key: 'fatigue', icon: <BatteryLow className="w-5 h-5" />, text: t('checkin.b3.symptomFatigue'), testId: 'check-in-symptom-FATIGUE' },
     { key: 'shortnessOfBreath', icon: <Wind className="w-5 h-5" />, text: t('checkin.b3.symptomShortnessOfBreath'), testId: 'check-in-symptom-SHORTNESS_OF_BREATH' },
-    { key: 'dryCough', icon: <Stethoscope className="w-5 h-5" />, text: t('checkin.b3.symptomDryCough'), testId: 'check-in-symptom-DRY_COUGH' },
+    { key: 'dryCough', icon: <CoughIcon className="w-5 h-5" />, text: t('checkin.b3.symptomDryCough'), testId: 'check-in-symptom-DRY_COUGH' },
     // Cluster 8 (Manisha 5/18/26, P0) — Button 12 + 13. ACE-angioedema
     // airway emergency. Either fires RULE_(ACE|GENERIC)_ANGIOEDEMA Tier 1
     // for ALL patients regardless of medication profile.
@@ -1220,7 +1401,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
   ];
   const pregnancy: { key: keyof FormData; icon: React.ReactNode; text: string }[] = [
     { key: 'newOnsetHeadache', icon: <Brain className="w-5 h-5" />, text: t('checkin.b3.symptomNewHeadache') },
-    { key: 'ruqPain', icon: <Stethoscope className="w-5 h-5" />, text: t('checkin.b3.symptomRuq') },
+    { key: 'ruqPain', icon: <RuqPainIcon className="w-5 h-5" />, text: t('checkin.b3.symptomRuq') },
     { key: 'edema', icon: <Droplets className="w-5 h-5" />, text: t('checkin.b3.symptomEdema') },
   ];
 

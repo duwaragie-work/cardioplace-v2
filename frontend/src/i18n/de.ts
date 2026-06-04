@@ -750,6 +750,7 @@ const de: Record<TranslationKey, string> = {
   'register.continue': 'Weiter',
   'register.verifying': 'Wird überprüft...',
   'register.terms': 'Mit der Erstellung eines Kontos akzeptieren Sie unsere',
+  'register.agreeToTerms': 'Ich akzeptiere die',
   'register.termsOfService': 'Nutzungsbedingungen',
   'register.and': 'und',
   'register.privacyPolicy': 'Datenschutzrichtlinie',
@@ -806,6 +807,16 @@ const de: Record<TranslationKey, string> = {
   'onboarding.benefit1': 'Tägliche BD-Überwachung und Trendanalyse',
   'onboarding.benefit2': 'Medikamenten-Einhaltungsverfolgung',
   'onboarding.benefit3': 'Pflegeteam-Warnungen bei erhöhten Messwerten',
+
+  // ─── Onboarding · Datenschutz- / Vertrauensbildschirm (V2-E Gap 7) ────────
+  'onboarding.privacy.title': 'Ihre Daten sind privat',
+  'onboarding.privacy.intro': 'Ihre Gesundheitsdaten bleiben zwischen Ihnen und Ihrem Behandlungsteam. Das ist unser Versprechen:',
+  'onboarding.privacy.point1': 'Nicht an die Regierung oder Einwanderungsbehörde weitergegeben',
+  'onboarding.privacy.point2': 'Nicht an Ihren Arbeitgeber oder Vermieter weitergegeben',
+  'onboarding.privacy.point3': 'Nur Ihr Behandlungsteam kann sie sehen',
+  'onboarding.privacy.reassure': 'Ihre Daten werden sicher gespeichert und niemals verkauft oder weitergegeben.',
+  'onboarding.privacy.continue': 'Ich verstehe — weiter',
+  'onboarding.privacy.audio': 'Ihre Daten sind privat. Ihre Gesundheitsdaten bleiben zwischen Ihnen und Ihrem Behandlungsteam. Sie werden nicht an die Regierung oder Einwanderungsbehörde weitergegeben. Sie werden nicht an Ihren Arbeitgeber oder Vermieter weitergegeben. Nur Ihr Behandlungsteam kann sie sehen. Ihre Daten werden sicher gespeichert und niemals verkauft oder weitergegeben.',
 
   // ─── Landing Header / Footer ────────────────────────────────────────────────
   'landing.home': 'Startseite',
@@ -885,6 +896,12 @@ const de: Record<TranslationKey, string> = {
   'home.ctaTitle': 'So sieht es aus, die Versorgungslücke zu schließen.',
   'home.ctaDesc': 'Entwickelt mit der DC Hospital Association. Eingesetzt in den am stärksten gefährdeten Gemeinschaften Washingtons. Konzipiert, um die Patienten zu erreichen, die herkömmliche Gesundheitstechnologie zurücklässt.',
   'home.ctaButton': 'Über das Programm',
+  // TODO i18n — placeholder English copy; translate when demo video is finalised.
+  'home.demoEyebrow': 'See it in action',
+  'home.demoTitle': 'A five-minute walkthrough',
+  'home.demoDesc': 'The patient experience and the care-team closed loop — end to end, in real time. Watch how an alert is generated, escalated, and resolved with full clinical accountability.',
+  'home.demoPlayLabel': 'Play the Cardioplace 5-minute demo',
+  'home.demoCloseLabel': 'Close demo',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'UNSERE GESCHICHTE',

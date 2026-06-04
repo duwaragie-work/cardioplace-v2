@@ -750,6 +750,7 @@ const fr: Record<TranslationKey, string> = {
   'register.continue': 'Continuer',
   'register.verifying': 'Vérification...',
   'register.terms': 'En créant un compte, vous acceptez nos',
+  'register.agreeToTerms': 'J\'accepte les',
   'register.termsOfService': 'Conditions d\'Utilisation',
   'register.and': 'et',
   'register.privacyPolicy': 'Politique de Confidentialité',
@@ -806,6 +807,16 @@ const fr: Record<TranslationKey, string> = {
   'onboarding.benefit1': 'Suivi quotidien de la TA et analyse des tendances',
   'onboarding.benefit2': 'Suivi de l\'observance médicamenteuse',
   'onboarding.benefit3': 'Alertes à l\'équipe soignante quand les lectures sont élevées',
+
+  // ─── Onboarding · Écran de confidentialité / confiance (V2-E Gap 7) ───────
+  'onboarding.privacy.title': 'Vos informations sont privées',
+  'onboarding.privacy.intro': 'Vos informations de santé restent entre vous et votre équipe soignante. Voici notre promesse :',
+  'onboarding.privacy.point1': 'Non partagées avec le gouvernement ni l\'immigration',
+  'onboarding.privacy.point2': 'Non partagées avec votre employeur ni votre propriétaire',
+  'onboarding.privacy.point3': 'Seule votre équipe soignante peut les voir',
+  'onboarding.privacy.reassure': 'Vos informations sont stockées en toute sécurité et ne sont jamais vendues ni partagées.',
+  'onboarding.privacy.continue': 'Je comprends — continuer',
+  'onboarding.privacy.audio': 'Vos informations sont privées. Vos informations de santé restent entre vous et votre équipe soignante. Elles ne sont pas partagées avec le gouvernement ni l\'immigration. Elles ne sont pas partagées avec votre employeur ni votre propriétaire. Seule votre équipe soignante peut les voir. Vos informations sont stockées en toute sécurité et ne sont jamais vendues ni partagées.',
 
   // ─── Landing Header / Footer ────────────────────────────────────────────────
   'landing.home': 'Accueil',
@@ -885,6 +896,12 @@ const fr: Record<TranslationKey, string> = {
   'home.ctaTitle': 'Voici à Quoi Ressemble la Boucle Fermée.',
   'home.ctaDesc': "Développé avec la DC Hospital Association. Déployé dans les communautés les plus à risque de Washington DC. Conçu pour atteindre les patients que la technologie de santé traditionnelle laisse de côté.",
   'home.ctaButton': 'À Propos du Programme',
+  // TODO i18n — placeholder English copy; translate when demo video is finalised.
+  'home.demoEyebrow': 'See it in action',
+  'home.demoTitle': 'A five-minute walkthrough',
+  'home.demoDesc': 'The patient experience and the care-team closed loop — end to end, in real time. Watch how an alert is generated, escalated, and resolved with full clinical accountability.',
+  'home.demoPlayLabel': 'Play the Cardioplace 5-minute demo',
+  'home.demoCloseLabel': 'Close demo',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'NOTRE HISTOIRE',

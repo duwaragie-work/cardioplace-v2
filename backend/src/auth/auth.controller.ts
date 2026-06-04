@@ -24,6 +24,7 @@ import {
   scopeForRoles,
 } from './cookie-scope.js'
 import { Public } from './decorators/public.decorator.js'
+import { ConsentDto } from './dto/consent.dto.js'
 import { ProfileDto } from './dto/profile.dto.js'
 import { RefreshDto } from './dto/refresh.dto.js'
 import { SendOtpDto } from './dto/send-otp.dto.js'
@@ -273,6 +274,24 @@ export class AuthController {
   patchProfile(@Req() req: Request, @Body() dto: ProfileDto) {
     const { id } = req.user as { id: string }
     return this.authService.patchProfile(id, dto)
+  }
+
+  // ─── Consent (Terms + Privacy acknowledgment) ─────────────────────────────────
+  //
+  // POST /v2/auth/consent — record that the signed-in patient agreed to the
+  // current Terms + Privacy version. Called once by the post-login consent gate
+  // on the onboarding privacy step (returning users who already agreed never
+  // reach it). Writes a `policy_acknowledged` event to the AuthLog audit trail.
+
+  @UseGuards(JwtAuthGuard)
+  @Post('consent')
+  recordConsent(@Req() req: Request, @Body() dto: ConsentDto) {
+    const { id } = req.user as { id: string }
+    const ctx = this.buildAuthContext(req)
+    return this.authService.recordConsent(id, dto.policyVersion, {
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent,
+    })
   }
 
   // ─── Cookie Helpers ───────────────────────────────────────────────────────────
