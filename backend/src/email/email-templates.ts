@@ -168,6 +168,153 @@ export function magicLinkEmailHtml(url: string): string {
   `)
 }
 
+/**
+ * Human-readable label for a UserRole, used in invite/activation emails.
+ *
+ * Kept loose-typed (string input) so the template stays self-contained
+ * — the value-set is small enough that drift between the Prisma enum
+ * and this map will get caught at code-review time.
+ */
+export function roleLabel(role: string): string {
+  const map: Record<string, string> = {
+    PATIENT: 'Patient',
+    PROVIDER: 'Provider',
+    MEDICAL_DIRECTOR: 'Medical Director',
+    COORDINATOR: 'Practice Coordinator',
+    HEALPLACE_OPS: 'Healplace Operations',
+    SUPER_ADMIN: 'Super Admin',
+  }
+  return map[role] ?? role
+}
+
+/**
+ * Account activation email — sent on user invite. The link in the CTA is
+ * a one-time passwordless magic link that creates the User on first click
+ * and signs them in.
+ *
+ * Brand chrome matches magicLinkEmailHtml (same wrap()/header/footer).
+ * Wording is v1; Manisha will revise.
+ */
+export function activationEmailHtml(params: {
+  name: string
+  role: string
+  inviteUrl: string
+  expiresAt: Date
+  invitedBy: string
+}): string {
+  const { name, role, inviteUrl, expiresAt, invitedBy } = params
+  const label = roleLabel(role)
+  const expiresLine =
+    `This link expires in 48 hours. If it expires, ask ${invitedBy} ` +
+    `to send a new one.`
+
+  return wrap(`
+    <div style="text-align: center;">
+      <div style="margin-bottom: 16px;">
+        <span style="display: inline-block; width: 56px; height: 56px; line-height: 56px;
+                     border-radius: 50%; background: #f3f0ff; font-size: 28px;">
+          &#9993;
+        </span>
+      </div>
+      <h2 style="margin: 0 0 8px; color: #1a1a2e; font-size: 20px;">You've been invited to Cardioplace</h2>
+      <p style="color: #374151; margin: 16px 0 8px; font-size: 15px; line-height: 1.6;">
+        Hi ${name},
+      </p>
+      <p style="color: #374151; margin: 0 0 24px; font-size: 15px; line-height: 1.6;">
+        ${invitedBy} has invited you to Cardioplace as a <strong>${label}</strong>.
+        Click the button below to set up your account.
+      </p>
+      <a href="${inviteUrl}"
+         style="display: inline-block; background: #7B00E0; color: #ffffff; font-size: 16px;
+                font-weight: 600; padding: 14px 40px; border-radius: 30px;
+                text-decoration: none; letter-spacing: 0.5px;">
+        Activate my account
+      </a>
+      <p style="color: #374151; margin: 24px 0 8px; font-size: 14px; line-height: 1.6;">
+        ${expiresLine}
+      </p>
+      <p style="color: #9ca3af; font-size: 12px; margin: 8px 0 0;">
+        Expires: ${expiresAt.toUTCString()}
+      </p>
+      <p style="color: #9ca3af; font-size: 12px; margin: 16px 0 0;">
+        If you weren't expecting this invitation, you can safely ignore this email.
+      </p>
+    </div>
+  `)
+}
+
+export function monthlyReportEmailHtml(params: {
+  recipientName: string
+  practiceName: string
+  monthLabel: string
+  totalAlerts: number
+  ackInWindowPct: number
+  escalatedPct: number
+  meanResolveSeconds: number | null
+  reportUrl: string
+}): string {
+  const {
+    recipientName,
+    practiceName,
+    monthLabel,
+    totalAlerts,
+    ackInWindowPct,
+    escalatedPct,
+    meanResolveSeconds,
+    reportUrl,
+  } = params
+  const meanResolveLabel =
+    meanResolveSeconds === null
+      ? '—'
+      : `${Math.round(meanResolveSeconds / 60)} min`
+
+  return wrap(`
+    <h2 style="margin: 0 0 8px; color: #1a1a2e; font-size: 20px;">
+      ${practiceName} — ${monthLabel} report
+    </h2>
+    <p style="color: #374151; margin: 16px 0; font-size: 15px; line-height: 1.6;">
+      Hi ${recipientName},
+    </p>
+    <p style="color: #374151; margin: 0 0 20px; font-size: 14px; line-height: 1.6;">
+      Here's your practice's monthly alert summary. The full report is
+      available in the admin app.
+    </p>
+    <table style="width: 100%; border-collapse: collapse; margin: 0 0 24px;">
+      <tr>
+        <td style="padding: 12px; background: #f3f0ff; border-radius: 8px; width: 50%; vertical-align: top;">
+          <p style="color: #7B00E0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px;">Total alerts</p>
+          <p style="color: #1f2937; font-size: 22px; font-weight: 700; margin: 0;">${totalAlerts}</p>
+        </td>
+        <td style="width: 12px;"></td>
+        <td style="padding: 12px; background: #f3f0ff; border-radius: 8px; width: 50%; vertical-align: top;">
+          <p style="color: #7B00E0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px;">Acked in SLA</p>
+          <p style="color: #1f2937; font-size: 22px; font-weight: 700; margin: 0;">${ackInWindowPct}%</p>
+        </td>
+      </tr>
+      <tr><td colspan="3" style="height: 12px;"></td></tr>
+      <tr>
+        <td style="padding: 12px; background: #f3f0ff; border-radius: 8px; vertical-align: top;">
+          <p style="color: #7B00E0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px;">Escalated</p>
+          <p style="color: #1f2937; font-size: 22px; font-weight: 700; margin: 0;">${escalatedPct}%</p>
+        </td>
+        <td></td>
+        <td style="padding: 12px; background: #f3f0ff; border-radius: 8px; vertical-align: top;">
+          <p style="color: #7B00E0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px;">Mean resolve</p>
+          <p style="color: #1f2937; font-size: 22px; font-weight: 700; margin: 0;">${meanResolveLabel}</p>
+        </td>
+      </tr>
+    </table>
+    <div style="text-align: center;">
+      <a href="${reportUrl}"
+         style="display: inline-block; background: #7B00E0; color: #ffffff; font-size: 15px;
+                font-weight: 600; padding: 12px 32px; border-radius: 30px;
+                text-decoration: none;">
+        Open full report
+      </a>
+    </div>
+  `)
+}
+
 export function contactFormEmailHtml(
   senderEmail: string,
   message: string,

@@ -1,15 +1,22 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { Mic, Send, Activity, Heart, MessageCircle, CheckCircle, AlertTriangle, Brain, Building2 } from 'lucide-react';
+import { Mic, Send, Activity, Heart, MessageCircle, CheckCircle, AlertTriangle, Brain, Building2, Play, X } from 'lucide-react';
 import { BsSoundwave } from "react-icons/bs";
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/lib/auth-context';
 import LandingHeader from './LandingHeader';
 import LandingFooter from './LandingFooter';
+
+// Demo walkthrough — YouTube unlisted upload.
+// Source: https://www.youtube.com/watch?v=IcFdT3Kz-40
+// To swap providers (e.g. back to the Drive preview at
+// https://drive.google.com/file/d/155WXpSh3daRqoKoIlGgR7lO61mkzVCxI/preview),
+// change this constant AND the iframe src in the modal below.
+const YOUTUBE_VIDEO_ID = 'IcFdT3Kz-40';
 
 export default function Homepage() {
   const { t } = useLanguage();
@@ -21,6 +28,34 @@ export default function Homepage() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true); }, []);
   const loggedIn = mounted && isAuthenticated;
+
+  // Demo video modal state. iframe is unmounted on close so playback
+  // stops; we lock body scroll, wire Esc/backdrop dismissal, and return
+  // focus to the play button after close.
+  const [showDemo, setShowDemo] = useState(false);
+  // Cleared every time the modal opens so the spinner shows on first frame
+  // and is hidden by the iframe's onLoad once YouTube finishes streaming in.
+  const [videoLoaded, setVideoLoaded] = useState(false);
+  const playButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!showDemo) return;
+    setVideoLoaded(false);
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowDemo(false);
+    };
+    window.addEventListener('keydown', handleKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', handleKey);
+      document.body.style.overflow = '';
+      // The play button lives in the page, not the modal — it is always
+      // mounted while this effect can fire, so .current is stable across
+      // the effect lifecycle.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      playButtonRef.current?.focus();
+    };
+  }, [showDemo]);
 
   const handleChatClick = () => {
     if (!isAuthenticated) return router.push('/sign-in');
@@ -142,7 +177,7 @@ export default function Homepage() {
                   <Link href={loggedIn ? '/dashboard' : '/sign-in'} className="bg-[#7b00e0] text-white font-bold text-xs sm:text-sm md:text-lg px-5 sm:px-7 md:px-10 py-2.5 sm:py-3 md:py-3.5 rounded-full hover:bg-[#6600bc] transition-colors whitespace-nowrap shrink-0">
                     {loggedIn ? t('home.goToDashboard') : t('home.startCheckin')}
                   </Link>
-                  <Link href="#features" className="backdrop-blur-sm bg-white/80 border border-[#cfc2d8] text-gray-600 font-semibold text-xs sm:text-sm md:text-lg px-5 sm:px-7 md:px-10 py-2.5 sm:py-3 md:py-3.5 rounded-full hover:bg-white transition-colors whitespace-nowrap shrink-0">
+                  <Link href="#demo" className="backdrop-blur-sm bg-white/80 border border-[#cfc2d8] text-gray-600 font-semibold text-xs sm:text-sm md:text-lg px-5 sm:px-7 md:px-10 py-2.5 sm:py-3 md:py-3.5 rounded-full hover:bg-white transition-colors whitespace-nowrap shrink-0">
                     {t('home.howItWorks')}
                   </Link>
                 </div>
@@ -171,6 +206,56 @@ export default function Homepage() {
             <p className="text-[#4c4355] text-sm sm:text-base md:text-lg leading-relaxed text-left">
               {t('home.partnershipBanner')}
             </p>
+          </div>
+        </section>
+
+        {/* ============ DEMO VIDEO SECTION ============ */}
+        {/* White background to make the thumbnail the visual anchor against
+            the adjacent #f5eafa partnership banner. scroll-mt-20 keeps the
+            heading clear of the fixed 64px top nav when the hero CTA scrolls
+            here. */}
+        <section id="demo" className="w-full bg-white py-16 md:py-24 scroll-mt-20">
+          <div className="max-w-[1200px] mx-auto px-4 sm:px-6 md:px-8">
+            <div className="flex flex-col md:flex-row items-center gap-8 md:gap-12 lg:gap-16">
+              {/* LEFT — title + description */}
+              <div className="flex-1 flex flex-col gap-4 md:gap-5 text-center md:text-left">
+                <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[42px] leading-tight tracking-tight">
+                  {t('home.demoTitle')}
+                </h2>
+                <p className="text-[#4c4355] text-sm sm:text-base md:text-lg leading-relaxed max-w-[520px] mx-auto md:mx-0">
+                  {t('home.demoDesc')}
+                </p>
+              </div>
+
+              {/* RIGHT — clickable thumbnail */}
+              <button
+                ref={playButtonRef}
+                onClick={() => setShowDemo(true)}
+                aria-label={t('home.demoPlayLabel')}
+                className="flex-1 relative aspect-video w-full max-w-[560px] rounded-2xl overflow-hidden shadow-xl border border-[#eedbff] group cursor-pointer focus:outline-none focus:ring-4 focus:ring-[#7b00e0]/40"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`https://img.youtube.com/vi/${YOUTUBE_VIDEO_ID}/maxresdefault.jpg`}
+                  // YouTube returns a 120×90 placeholder for maxresdefault on
+                  // videos that never had a HD frame generated yet. Swap to
+                  // hqdefault on error so we still get a real thumbnail.
+                  onError={(e) => {
+                    const img = e.currentTarget;
+                    if (!img.src.endsWith('/hqdefault.jpg')) {
+                      img.src = `https://img.youtube.com/vi/${YOUTUBE_VIDEO_ID}/hqdefault.jpg`;
+                    }
+                  }}
+                  alt=""
+                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                />
+                <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                  <div className="bg-[#7b00e0] rounded-full w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                    <Play className="w-7 h-7 sm:w-8 sm:h-8 text-white fill-white ml-1" />
+                  </div>
+                </div>
+              </button>
+            </div>
           </div>
         </section>
 
@@ -414,6 +499,52 @@ export default function Homepage() {
 
         <LandingFooter />
       </main>
+
+      {/* ============ DEMO VIDEO MODAL ============ */}
+      {/* Conditionally mounted so the iframe is destroyed on close — that's
+          how playback is stopped (no postMessage handshake needed). */}
+      {showDemo && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('home.demoTitle')}
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowDemo(false); }}
+        >
+          <div className="relative w-full max-w-5xl aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl">
+            <button
+              onClick={() => setShowDemo(false)}
+              aria-label={t('home.demoCloseLabel')}
+              autoFocus
+              className="absolute -top-12 right-0 sm:top-3 sm:right-3 z-10 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white rounded-full p-2 flex items-center justify-center transition-colors focus:outline-none focus:ring-2 focus:ring-white/60"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            {/* Centered spinner while the YouTube iframe streams in. Hidden
+                once `onLoad` fires (YT player UI then covers the parent's
+                black background). pointer-events-none so it never eats the
+                close button's click. */}
+            {!videoLoaded && (
+              <div
+                aria-hidden="true"
+                className="absolute inset-0 flex items-center justify-center pointer-events-none"
+              >
+                <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+              </div>
+            )}
+            <iframe
+              src={`https://www.youtube.com/embed/${YOUTUBE_VIDEO_ID}?autoplay=1&rel=0&modestbranding=1`}
+              title="Cardioplace — 5-minute platform walkthrough"
+              width="100%"
+              height="100%"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              onLoad={() => setVideoLoaded(true)}
+              className="w-full h-full"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

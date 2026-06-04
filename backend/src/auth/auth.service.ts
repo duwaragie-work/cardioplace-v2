@@ -8,8 +8,10 @@ import {
 import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
 import { createHash, randomBytes, randomInt } from 'crypto'
-import { EmailService } from '../email/email.service.js'
 import type { Profile } from 'passport-google-oauth20'
+import { POLICY_VERSION } from '@cardioplace/shared'
+import { EmailService } from '../email/email.service.js'
+import { magicLinkEmailHtml, otpEmailHtml } from '../email/email-templates.js'
 import {
   AccountStatus,
   OnboardingStatus,
@@ -17,7 +19,6 @@ import {
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { BcryptService } from './bcrypt.service.js'
-import { otpEmailHtml, magicLinkEmailHtml } from '../email/email-templates.js'
 import type { ProfileDto } from './dto/profile.dto.js'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -265,6 +266,56 @@ export class AuthService {
       // Never let logging failures break the auth flow
       console.error('Failed to log auth event:', error)
     }
+  }
+
+  // ─── Policy / Consent Acknowledgment ─────────────────────────────────────────
+  // Records that a patient agreed to the Terms + Privacy Policy as a dedicated
+  // event on the existing AuthLog audit trail — no separate table. Captures who
+  // (userId / identifier), when (createdAt), which version + channel (metadata),
+  // and IP / userAgent. logAuthEvent already swallows its own errors, so a
+  // failed audit write never breaks the login flow.
+  private async logConsent(params: {
+    userId?: string
+    identifier?: string
+    policyVersion?: string | null
+    ipAddress?: string
+    userAgent?: string
+    via: string
+  }): Promise<void> {
+    if (!params.policyVersion?.trim()) return
+    await this.logAuthEvent({
+      event: 'policy_acknowledged',
+      identifier: params.identifier,
+      userId: params.userId,
+      method: 'otp',
+      ipAddress: params.ipAddress,
+      userAgent: params.userAgent,
+      metadata: {
+        policyType: 'TERMS_AND_PRIVACY',
+        policyVersion: params.policyVersion,
+        via: params.via,
+      },
+      success: true,
+    })
+  }
+
+  // Public entry point used by the post-login consent gate (onboarding privacy
+  // step). Records the patient's Terms + Privacy agreement once, on the AuthLog
+  // audit trail (no new table). Idempotent in spirit — a returning user who
+  // already consented never reaches the gate, so it isn't called again.
+  async recordConsent(
+    userId: string,
+    policyVersion: string,
+    context?: { ipAddress?: string; userAgent?: string },
+  ): Promise<{ recorded: boolean }> {
+    await this.logConsent({
+      userId,
+      policyVersion,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      via: 'onboarding',
+    })
+    return { recorded: true }
   }
 
   // ─── Timezone Auto-Update ───────────────────────────────────────────────────
@@ -644,7 +695,10 @@ export class AuthService {
 
     // Demo accounts use pre-seeded, non-expiring OTPs — skip generation and email
     const preSeeded = await this.prisma.otpCode.findFirst({
-      where: { email: normalizedEmail, expiresAt: { gt: new Date('2098-01-01') } },
+      where: {
+        email: normalizedEmail,
+        expiresAt: { gt: new Date('2098-01-01') },
+      },
     })
     if (preSeeded) {
       return { message: 'OTP sent successfully' }
@@ -693,7 +747,7 @@ export class AuthService {
       data: { email: normalizedEmail, codeHash, expiresAt },
     })
 
-    this.sendOtpEmail(normalizedEmail, otp)  // fire-and-forget — don't block response
+    this.sendOtpEmail(normalizedEmail, otp) // fire-and-forget — don't block response
 
     // Log the OTP request event
     await this.logAuthEvent({
@@ -972,8 +1026,10 @@ export class AuthService {
       patch.dateOfBirth = dto.dateOfBirth ? new Date(dto.dateOfBirth) : null
     }
     if (dto.timezone !== undefined) patch.timezone = dto.timezone
-    if (dto.preferredLanguage !== undefined) patch.preferredLanguage = dto.preferredLanguage
-    if (dto.communicationPreference !== undefined) patch.communicationPreference = dto.communicationPreference
+    if (dto.preferredLanguage !== undefined)
+      patch.preferredLanguage = dto.preferredLanguage
+    if (dto.communicationPreference !== undefined)
+      patch.communicationPreference = dto.communicationPreference
 
     return patch
   }
@@ -1087,7 +1143,10 @@ export class AuthService {
     })
 
     const port = this.config.get<string>('PORT', '8080')
-    const backendUrl = this.config.get<string>('BACKEND_URL', `http://localhost:${port}`)
+    const backendUrl = this.config.get<string>(
+      'BACKEND_URL',
+      `http://localhost:${port}`,
+    )
     const magicUrl = `${backendUrl}/api/v2/auth/magic-link/verify?token=${rawToken}`
 
     this.sendMagicLinkEmail(normalizedEmail, magicUrl) // fire-and-forget
@@ -1210,11 +1269,14 @@ export class AuthService {
   private static readonly ADMIN_ALLOWED_ROLES: UserRole[] = [
     UserRole.PROVIDER,
     UserRole.MEDICAL_DIRECTOR,
+    UserRole.COORDINATOR,
     UserRole.HEALPLACE_OPS,
     UserRole.SUPER_ADMIN,
   ]
 
-  private async assertAdminAccessAllowed(normalizedEmail: string): Promise<void> {
+  private async assertAdminAccessAllowed(
+    normalizedEmail: string,
+  ): Promise<void> {
     const user = await this.prisma.user.findUnique({
       where: { email: normalizedEmail },
       select: { roles: true, accountStatus: true },
@@ -1232,6 +1294,253 @@ export class AuthService {
         'This account is not authorized to access the admin app.',
       )
     }
+  }
+
+  // ─── User Invites — Lookup ──────────────────────────────────────────────────
+  //
+  // The activation flow is a thin wrapper around magic-link verify — the
+  // raw token in the URL is a one-time secret that creates the User row
+  // (if absent), creates the practice-membership row appropriate to the
+  // invite's role, marks the invite accepted, and issues a session.
+  //
+  // `lookupInvite` is the GET-side probe used by the activation page to
+  // render "Activate as <name>, <role> at <practice>" before the user
+  // clicks the confirm button.
+
+  async lookupInvite(rawToken: string): Promise<{
+    email: string
+    name: string
+    role: UserRole
+    practiceName: string | null
+    expiresAt: Date
+  }> {
+    if (!rawToken?.trim()) {
+      throw new BadRequestException('Token is required')
+    }
+    const tokenHash = sha256(rawToken.trim())
+    const invite = await this.prisma.userInvite.findUnique({
+      where: { tokenHash },
+      include: { practice: { select: { name: true } } },
+    })
+    if (
+      !invite ||
+      invite.acceptedAt ||
+      invite.revokedAt ||
+      invite.expiresAt <= new Date()
+    ) {
+      throw new BadRequestException('Invite is invalid or expired')
+    }
+    return {
+      email: invite.email,
+      name: invite.name,
+      role: invite.role,
+      practiceName: invite.practice?.name ?? null,
+      expiresAt: invite.expiresAt,
+    }
+  }
+
+  // ─── User Invites — Accept ──────────────────────────────────────────────────
+
+  async acceptInvite(
+    rawToken: string,
+    context?: {
+      deviceId?: string
+      ipAddress?: string
+      userAgent?: string
+      timezone?: string
+    },
+  ): Promise<AuthResponse> {
+    if (!rawToken?.trim()) {
+      throw new BadRequestException('Token is required')
+    }
+    const tokenHash = sha256(rawToken.trim())
+
+    // Single-step validation + claim so two concurrent clicks can't both
+    // create a user. We re-check `acceptedAt`/`revokedAt`/`expiresAt`
+    // inside the transaction below.
+    const invite = await this.prisma.userInvite.findUnique({
+      where: { tokenHash },
+    })
+    if (
+      !invite ||
+      invite.acceptedAt ||
+      invite.revokedAt ||
+      invite.expiresAt <= new Date()
+    ) {
+      await this.logAuthEvent({
+        event: 'invite_accept_failed',
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        success: false,
+        errorCode: 'invalid_or_expired_token',
+      })
+      throw new BadRequestException('Invite is invalid or expired')
+    }
+
+    // Run the user-create + invite-claim + membership-create in one
+    // transaction so a duplicate accept races cleanly.
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Re-read invite for SELECT FOR UPDATE-style guard (Prisma doesn't
+      // expose row locks portably — the unique constraint on createdUserId
+      // is the final safety net).
+      const fresh = await tx.userInvite.findUnique({
+        where: { id: invite.id },
+      })
+      if (
+        !fresh ||
+        fresh.acceptedAt ||
+        fresh.revokedAt ||
+        fresh.expiresAt <= new Date()
+      ) {
+        throw new BadRequestException('Invite is invalid or expired')
+      }
+
+      // Find-or-create the User. If a User already exists with this
+      // email (e.g. invite went to a known patient who used OTP first),
+      // we add the invite's role to the existing user rather than
+      // duplicating accounts.
+      const existing = await tx.user.findUnique({
+        where: { email: fresh.email },
+      })
+
+      // Invite-driven activation skips the patient app's onboarding/
+      // privacy gate entirely — the inviter (coordinator / admin) has
+      // already collected the basics, and the patient should land on the
+      // dashboard on the first click. We mark `onboardingStatus = COMPLETED`
+      // here; the matching `policy_acknowledged` AuthLog event is written
+      // post-commit below.
+      let userRow: typeof existing
+      if (existing) {
+        const merged = Array.from(new Set([...existing.roles, fresh.role]))
+        userRow = await tx.user.update({
+          where: { id: existing.id },
+          data: {
+            isVerified: true,
+            roles: merged,
+            name: existing.name ?? fresh.name,
+            onboardingStatus: OnboardingStatus.COMPLETED,
+          },
+        })
+      } else {
+        userRow = await tx.user.create({
+          data: {
+            email: fresh.email,
+            name: fresh.name,
+            isVerified: true,
+            roles: [fresh.role],
+            onboardingStatus: OnboardingStatus.COMPLETED,
+          },
+        })
+      }
+
+      if (userRow.accountStatus !== AccountStatus.ACTIVE) {
+        throw new ForbiddenException(
+          `Account is ${userRow.accountStatus.toLowerCase()}`,
+        )
+      }
+
+      // Practice-membership row for staff roles. PATIENT is skipped
+      // here — the full PatientProviderAssignment row requires primary
+      // provider / backup provider / MD ids that the inviter didn't
+      // supply. That assignment lands in a follow-up step (Provider
+      // Verify / Admin onboarding) post-activation.
+      if (fresh.practiceId) {
+        switch (fresh.role) {
+          case UserRole.PROVIDER:
+            await tx.practiceProvider.upsert({
+              where: {
+                practiceId_userId: {
+                  practiceId: fresh.practiceId,
+                  userId: userRow.id,
+                },
+              },
+              create: {
+                practiceId: fresh.practiceId,
+                userId: userRow.id,
+              },
+              update: {},
+            })
+            break
+          case UserRole.MEDICAL_DIRECTOR:
+            await tx.practiceMedicalDirector.upsert({
+              where: {
+                practiceId_userId: {
+                  practiceId: fresh.practiceId,
+                  userId: userRow.id,
+                },
+              },
+              create: {
+                practiceId: fresh.practiceId,
+                userId: userRow.id,
+              },
+              update: {},
+            })
+            break
+          case UserRole.COORDINATOR:
+            // One practice per coordinator — enforced by @unique on
+            // userId. If a row exists we update it (re-invite into a
+            // different practice).
+            await tx.practiceCoordinator.upsert({
+              where: { userId: userRow.id },
+              create: {
+                practiceId: fresh.practiceId,
+                userId: userRow.id,
+              },
+              update: { practiceId: fresh.practiceId },
+            })
+            break
+          // PATIENT, HEALPLACE_OPS, SUPER_ADMIN — no membership row.
+          default:
+            break
+        }
+      }
+
+      // Claim the invite (fails on the @unique constraint if a race lost).
+      const claimedInvite = await tx.userInvite.update({
+        where: { id: fresh.id },
+        data: {
+          acceptedAt: new Date(),
+          createdUserId: userRow.id,
+        },
+      })
+
+      return { user: userRow, invite: claimedInvite }
+    })
+
+    await this.silentlyUpdateTimezone(result.user.id, context?.timezone)
+
+    await this.logAuthEvent({
+      event: 'invite_accepted',
+      identifier: result.invite.email,
+      userId: result.user.id,
+      method: 'otp',
+      deviceId: context?.deviceId,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      metadata: {
+        inviteId: result.invite.id,
+        role: result.invite.role,
+        practiceId: result.invite.practiceId,
+      },
+      success: true,
+    })
+
+    // Auto-acknowledge the current Terms + Privacy version on the audit
+    // trail. The invitee never sees the privacy step (onboarding is
+    // pre-completed above), so we record consent here with via:
+    // 'invite_accept' to keep the audit log honest about how it landed.
+    await this.logConsent({
+      userId: result.user.id,
+      identifier: result.invite.email,
+      policyVersion: POLICY_VERSION,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      via: 'invite_accept',
+    })
+
+    const tokens = await this.issueTokenPair(result.user, context?.userAgent)
+    return this.buildAuthResponse(tokens, result.user, 'magic_link')
   }
 
   // ─── Email Helpers ──────────────────────────────────────────────────────────

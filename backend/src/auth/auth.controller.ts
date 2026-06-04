@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Patch,
   Post,
   Query,
@@ -17,13 +18,14 @@ import { UserRole } from '../generated/prisma/enums.js'
 import { AuthService } from './auth.service.js'
 import {
   type CookieScope,
-  LEGACY_ACCESS_COOKIE,
-  LEGACY_REFRESH_COOKIE,
   cookieName,
   deriveCookieScope,
+  LEGACY_ACCESS_COOKIE,
+  LEGACY_REFRESH_COOKIE,
   scopeForRoles,
 } from './cookie-scope.js'
 import { Public } from './decorators/public.decorator.js'
+import { ConsentDto } from './dto/consent.dto.js'
 import { ProfileDto } from './dto/profile.dto.js'
 import { RefreshDto } from './dto/refresh.dto.js'
 import { SendOtpDto } from './dto/send-otp.dto.js'
@@ -78,7 +80,10 @@ export class AuthController {
   @Public()
   @Post('otp/send')
   sendOtp(@Body() dto: SendOtpDto, @Req() req: Request) {
-    const context = { ...this.buildAuthContext(req), appContext: dto.appContext }
+    const context = {
+      ...this.buildAuthContext(req),
+      appContext: dto.appContext,
+    }
     return this.authService.sendOtp(dto.email, context)
   }
 
@@ -90,19 +95,14 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const baseContext = this.buildAuthContext(req)
-    const deviceId =
-      (baseContext.deviceId ?? dto?.deviceId)?.trim() || null
+    const deviceId = (baseContext.deviceId ?? dto?.deviceId)?.trim() || null
     if (!deviceId) {
       throw new BadRequestException(
         'Device ID is required. Send via header x-device-id or body deviceId.',
       )
     }
     const context = { ...baseContext, deviceId, appContext: dto.appContext }
-    const result = await this.authService.verifyOtp(
-      dto.email,
-      dto.otp,
-      context,
-    )
+    const result = await this.authService.verifyOtp(dto.email, dto.otp, context)
     // Scope cookies to the destination app (admin-role users land on the
     // admin app — including via the patient→admin sign-in bridge, where
     // this POST's Origin is the patient origin but the session is admin's).
@@ -171,6 +171,48 @@ export class AuthController {
     } catch {
       res.redirect(`${patientAppUrl}/auth/magic-link?error=expired`)
     }
+  }
+
+  // ─── User Invite Activation ─────────────────────────────────────────────────
+  //
+  // Two endpoints power the invite activation flow:
+  //   GET  /v2/auth/invite/:token         — probe: render details + check validity
+  //   POST /v2/auth/invite/:token/accept  — claim: create user + issue session
+  //
+  // Both are @Public() because the invitee doesn't have a session yet —
+  // the raw token in the URL is the one-time secret that authenticates them.
+
+  @Public()
+  @Get('invite/:token')
+  lookupInvite(@Param('token') token: string) {
+    return this.authService.lookupInvite(token)
+  }
+
+  @Public()
+  @Post('invite/:token/accept')
+  async acceptInvite(
+    @Param('token') token: string,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const context = this.buildAuthContext(req)
+    const result = await this.authService.acceptInvite(token, context)
+    // Scope cookies to the destination app — same logic as
+    // verifyMagicLink / verifyOtp: admin-role users land on admin.
+    const scope = scopeForRoles(result.roles)
+    this.setAccessCookie(res, result.accessToken, scope)
+    this.setRefreshCookie(res, result.refreshToken, scope)
+    if (context.deviceId) {
+      await this.authService.upsertOrTrackDevice({
+        deviceId: context.deviceId,
+        userId: result.userId,
+        platform: req.headers['x-device-platform'] as string | undefined,
+        deviceType: req.headers['x-device-type'] as string | undefined,
+        deviceName: req.headers['x-device-name'] as string | undefined,
+        userAgent: context.userAgent,
+      })
+    }
+    return result
   }
 
   // ─── Refresh ─────────────────────────────────────────────────────────────────
@@ -273,6 +315,24 @@ export class AuthController {
   patchProfile(@Req() req: Request, @Body() dto: ProfileDto) {
     const { id } = req.user as { id: string }
     return this.authService.patchProfile(id, dto)
+  }
+
+  // ─── Consent (Terms + Privacy acknowledgment) ─────────────────────────────────
+  //
+  // POST /v2/auth/consent — record that the signed-in patient agreed to the
+  // current Terms + Privacy version. Called once by the post-login consent gate
+  // on the onboarding privacy step (returning users who already agreed never
+  // reach it). Writes a `policy_acknowledged` event to the AuthLog audit trail.
+
+  @UseGuards(JwtAuthGuard)
+  @Post('consent')
+  recordConsent(@Req() req: Request, @Body() dto: ConsentDto) {
+    const { id } = req.user as { id: string }
+    const ctx = this.buildAuthContext(req)
+    return this.authService.recordConsent(id, dto.policyVersion, {
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent,
+    })
   }
 
   // ─── Cookie Helpers ───────────────────────────────────────────────────────────

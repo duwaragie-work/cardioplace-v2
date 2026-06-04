@@ -44,6 +44,9 @@ model User {
   providerAssignmentsAsMedicalDirector PatientProviderAssignment[] @relation("MedicalDirector")
   practiceMedicalDirectorMemberships   PracticeMedicalDirector[]   @relation("PracticeMedicalDirectorMemberships")
   practiceProviderMemberships          PracticeProvider[]          @relation("PracticeProviderMemberships")
+  practiceCoordinator                  PracticeCoordinator?
+  userInvitesSent                      UserInvite[]                @relation("UserInviteInvitedBy")
+  userInviteCreated                    UserInvite?                 @relation("UserInviteCreatedUser")
   profileVerificationLogs              ProfileVerificationLog[]
   caregivers                           PatientCaregiver[]          @relation("PatientCaregivers")
   rejectedReadingLogs                  RejectedReadingLog[]
@@ -53,6 +56,7 @@ enum UserRole {
   PATIENT
   PROVIDER
   MEDICAL_DIRECTOR
+  COORDINATOR
   HEALPLACE_OPS
   SUPER_ADMIN
 }
@@ -71,4 +75,5 @@ enum AccountStatus {
   ACTIVE
   BLOCKED
   SUSPENDED
+  DEACTIVATED
 }

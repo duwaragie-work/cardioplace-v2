@@ -9,6 +9,7 @@ import { DailyJournalModule } from './daily_journal/daily_journal.module.js'
 import { CronsModule } from './crons/crons.module.js'
 import { IntakeModule } from './intake/intake.module.js'
 import { PracticeModule } from './practice/practice.module.js'
+import { ReportsModule } from './reports/reports.module.js'
 import { KnowledgebaseModule } from './knowledgebase/knowledgebase.module.js'
 import { GeminiModule } from './gemini/gemini.module.js'
 import { PrismaModule } from './prisma/prisma.module.js'
@@ -72,6 +73,7 @@ const TEST_CONTROL_MODULES = [TestControlModule]
     DailyJournalModule,
     IntakeModule,
     PracticeModule,
+    ReportsModule,
     CronsModule,
     ContentModule,
     ProviderModule,

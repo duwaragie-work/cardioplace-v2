@@ -7,6 +7,11 @@
   --foreground: #171717;
 }
 
+/* In-page anchor jumps (hero "How It Works" → #demo) ease instead of snapping. */
+html {
+  scroll-behavior: smooth;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
