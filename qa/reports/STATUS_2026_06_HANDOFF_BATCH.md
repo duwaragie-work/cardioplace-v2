@@ -146,3 +146,13 @@ Root cause via DB query: Olive's profile had **`hasAFib=true` + `hasCAD=true`** 
 **Seed-hygiene note for Duwaragie:** the reseed left Olive's profile flags drifted (hasAFib/hasCAD true, diagnosedHypertension false vs seed). Worth checking whether the seed upsert overwrites existing PatientProfile condition flags, or whether a prior test mutates Olive without reset — otherwise other personas may carry similar drift. (Not blocking H5; surfaced.)
 
 All 7 previously-failing Step-3 specs now green. Proceeding to Phase-3 Steps 4 (admin) + 5 (full suite).
+
+## Phase 3 — full suite (Step 5) + triage (Step 7 STOP)
+Full single-worker run: **392 passed / 31 failed / 20 skipped / 5 did not run / 28.8 min** (prior cross-clone run was 377/46). Log: `qa/h5-prepush-phase3.log`.
+
+**The 7 authorized Category-1 fixes (F20 ×4 + Olive ×3) all PASS** in the full run. The 31 remaining failures triage as:
+- **Cross-test pollution (single-worker / shared DB): `17` Q2 (3).** Passed in isolation (Step 3), fail in the full run → state collision. CI runs **4 shards × per-shard Postgres** (e2e.yml, Wave-E-verified) precisely to avoid this; a single-worker-shared-DB local run is NOT the CI gate and inflates failures.
+- **Real, reproduce in isolation — ADMIN cluster (~17): `11`, `13`, `14e`, `16`-admin, `30b`, `30k`, `30o`, `30u`, `31`.** Errors are `toBeVisible` element-not-found (e.g. `admin-notification-bell-count`). That testId **exists in cardioplace-v2's admin source** → NOT spec-debt. Root cause is environmental: **`:3001` admin still runs from the `_niva_audit` clone** (process confirmed) — its `.next` build and/or admin notification dispatch state isn't a verified-clean cardioplace-v2 admin. H5 did not touch admin notification UI or the check-in spine, so these are not H5 code regressions.
+- **Patient (~11): `05` check-in, `08` profile, `25`/`26`/`27`/`28`/`29`, `14c`/`14e`.** Unverified mix (pollution + possibly real) — `27` ran 2.2m (timeout), classic shared-DB contention.
+
+**Recommendation (pre-push gate):** the authoritative gate is the **CI sharded e2e run** (4 shards / per-shard DB), or a **clean single-clone cardioplace-v2 stack** for all 3 apps (`:3001` is currently `_niva_audit`). The admin + remaining patient failures should be validated there before merge — they are not in the H5 change scope. H5's own deliverables (regression-net rebuild + G.4 + the 7 Category-1 fixes) are green.
