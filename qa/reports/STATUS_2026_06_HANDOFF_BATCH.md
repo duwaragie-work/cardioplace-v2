@@ -123,3 +123,15 @@ Targeted re-run (`05a` + `06` + `19`): **22 passed, 1 failed** — the 1 is `19 
 
 ### Wave C — `19 A.7` HOLD-contract fix (authorized follow-up)
 H3 #92 (`d897040`) tightened the verify-medication HOLD endpoint to require a structured `holdReason` (Manisha §3 codes) AND renamed the patient notice: a `PROVIDER_DIRECTED_HOLD` now dispatches title **"Please pause a medication"** with a drug-naming "…pause {drug}…" body (no longer "Medication on hold"/"hold"). Spec updated to pass `holdReason: 'PROVIDER_DIRECTED_HOLD'` and match the new title/body. **`19` now fully green (9/9).** Commit: `19 A.7`.
+
+## Phase 3 validation (clean-ish stack: _niva_audit@29f59b4 + reseed)
+- **Step 1 health:** backend/frontend/admin all 200.
+- **Step 2 — Category-1 fixes still green post-reseed:** ✅ 23/23 (05a 7/7, 06 incl 20h.1/2/3, 19 9/9 incl A.5 + A.7).
+- **Step 3 — re-seed hypothesis PARTIALLY confirmed:**
+  - ✅ **FIXED by reseed:** `17` Q2 single-reading (3) + `05` check-in (2) — were seed/state pollution.
+  - ❌ **Still failing (7) — investigated, NOT patched, NOT regressions:**
+    - **F20 emergency-exclusive (4):** `09:1029` (Mike HFpEF+headache), `09:1053` (James HFrEF+chestPain), `09:1104` (Kate HCM+visualChanges), `17:592` (brady+AMS). Root cause = **`bf838ff` "fix(engine): emergency-exclusive short-circuit prevents cofire with lower-tier (F20)"** — an INTENTIONAL window change making an emergency/symptom-override exclusive (no lower-tier co-fire). These specs assert the *pre-F20* co-fire. **Test-debt from a deliberate behavior change, not a regression.** Fix = update the specs to expect emergency-exclusive (only the override fires). Held for decision.
+    - **Olive persona/seed drift (3):** `09:563/585/602` — `r.fired = []` (nothing fires) for Olive at SBP 88/91/95. `09:957` "Jane (65+) SBP 95 → AGE_65_LOW" **passes** on an identical single reading → **Olive-persona-specific**, not engine. Candidate: Olive's reseeded DOB no longer resolves to 65+, or her loop/profile differs. Needs persona inspection (seed), not an engine fix.
+- **Steps 4 (admin) + 5 (full):** NOT run — halted at Step 3 per the "if Step 3 still fails, STOP" directive. Held for Duwaragie.
+
+**No real engine regression found.** The 7 remaining Step-3 failures are (a) stale specs from the intentional F20 emergency-exclusive change and (b) Olive seed drift.
