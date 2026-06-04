@@ -406,7 +406,7 @@ interface BuiltLog {
    *  into a single expandable group. */
   groupKey: string;
   changeType: string;
-  scope: 'profile' | 'medication';
+  scope: 'profile' | 'medication' | 'caregiver';
   drugName: string | null;
   actorWord: string;
   actor: string;
@@ -460,7 +460,9 @@ function entriesFromLogs(
     //    contact updated by admin" instead of "caregiver:9a0446d9-… corrected
     //    by admin". A deleted caregiver falls back to "Caregiver contact".
     else if (parsed.scope === 'caregiver') {
-      const verb = actionVerb(l.changeType, 'profile', true);
+      // dev-merge: actionVerb now takes (changeType, rowLevel, actor) — align
+      // the caregiver branch (Round 2 A4) with its sibling calls.
+      const verb = actionVerb(l.changeType, parsed.rowLevel, actorWord);
       const name = l.caregiverName?.trim();
       const subject = name
         ? `Caregiver ${name}${l.caregiverRelationship ? ` (${l.caregiverRelationship})` : ''}`
