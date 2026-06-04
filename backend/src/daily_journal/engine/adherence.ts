@@ -49,11 +49,16 @@ export function medicationMissedRuleWithWindow(
       return null
     }
 
-    // Escalate to provider push when the pattern persists over 7 days.
-    // EscalationService's standard Tier 2 ladder honours this annotation.
+    // #escalate-3-of-7 (2026-06-03, mirror of #93) — clinical prose, not an
+    // internal path tag. Surfaces to the physician WHY the adherence alert
+    // escalated: a 3-of-7-day missed-dose trend. Display-only — rendered via
+    // physSuffix into physicianMessage; escalation routing keys off the
+    // daysWithMissOver7d count, not this string (pre-flight verified).
     const annotations: string[] = []
     if (daysWithMissOver7d >= EXTENDED_MISS_THRESHOLD) {
-      annotations.push('escalate-3-of-7')
+      annotations.push(
+        'Tier 2 dispatched on 3-of-7 missed-dose pattern per adherence-trending escalation policy.',
+      )
     }
     if (isBetaBlockerCarveOut) {
       // #93 (2026-06-03) — clinical prose, not an internal path tag. Explains

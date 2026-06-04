@@ -568,15 +568,29 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
           'Please try to take your next dose on time, and let your care team know if anything is making it hard to stay on schedule.'
         )
       }
+      // #86 (2026-06-03) — RULE_MEDICATION_MISSED fires on a rolling 3-day
+      // pattern (≥2 of last 3 days). Anchor the wording to "the last few days",
+      // never to "today", so a patient who just logged a clean check-in isn't
+      // told they missed today. i18n: backend-rendered patient string,
+      // English-only for the US pilot per CROSS_HANDOFF_ADDENDUM (backend
+      // alert-template i18n is a Phase-2 retrofit); flagged in
+      // I18N_TRANSLATION_FLAGS.
       if (list) {
+        // Today's session also reported missed meds — acknowledge "today".
         return (
-          `It looks like you may have missed ${list} a couple of times recently. These medicines help protect your heart and keep your blood pressure steady. ` +
-          'If anything is making it hard to take them, your care team can help.'
+          `It looks like some medication doses have been missed in the last few days, including ${list} today. ` +
+          'Taking your medicine every day helps keep your blood pressure steady. ' +
+          'Your care team is here to help if anything makes it hard to stay on schedule.'
         )
       }
+      // No per-medication detail for this session — we can't tell whether
+      // today was clean or missed-without-specifying. Use neutral, history-
+      // anchored wording (handoff Option B) that's accurate either way and
+      // still never claims "today".
       return (
-        'It looks like you may have missed your medicine a couple of times recently. Taking your medicine regularly helps keep your blood pressure steady. ' +
-        'If something is making it hard to stay on schedule, your care team can help.'
+        'In the last few days, some medication doses may have been missed. ' +
+        'Taking your medicine every day helps keep your blood pressure steady. ' +
+        'Your care team is here to help if anything makes it hard to stay on schedule.'
       )
     },
     caregiverMessage: (ctx) => {

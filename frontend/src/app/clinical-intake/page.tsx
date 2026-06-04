@@ -653,6 +653,10 @@ function A2Pregnancy({ state, setState }: StepProps) {
             selected={state.historyHDP === true}
             onClick={() => setState((p) => ({ ...p, historyHDP: true }))}
             audioText={t('intake.a2.preeclampsiaYesAudio')}
+            // #16 — testId the qa intake helper already targets. Was missing,
+            // so the HDP step's click silently no-op'd (helper .catch()).
+            // Stable id kept as `preeclampsia` to match the i18n key naming.
+            testId="intake-preeclampsia-yes"
           />
           <ChoiceCard
             icon={<Heart className="w-6 h-6" />}
@@ -661,6 +665,7 @@ function A2Pregnancy({ state, setState }: StepProps) {
             selected={state.historyHDP === false}
             onClick={() => setState((p) => ({ ...p, historyHDP: false }))}
             audioText={t('intake.a2.preeclampsiaNoAudio')}
+            testId="intake-preeclampsia-no"
           />
         </div>
       </div>

@@ -64,7 +64,17 @@ const VERIF_ICON: Record<string, { icon: React.ReactNode; color: string }> = {
 };
 
 function dayKey(iso: string): string {
-  return iso.slice(0, 10);
+  // #87 — group by the VIEWER's local calendar day, not the UTC date.
+  // `iso.slice(0, 10)` took the UTC Y-M-D, but dayLabel() below compares in
+  // local time (getFullYear/Month/Date). At a tz boundary (e.g. a 17:08 UTC
+  // event = 22:38 IST) the two disagreed, so an event from the viewer's
+  // current day landed under "Yesterday". Computing the key in local time
+  // keeps the group key and its Today/Yesterday label consistent.
+  const d = new Date(iso);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function timeOf(iso: string): string {

@@ -105,6 +105,8 @@ const am: Record<TranslationKey, string> = {
   'dashboard.hearSummary': 'ማጠቃለያውን ያዳምጡ',
   'dashboard.yourGoal': 'ግብዎ',
   'dashboard.belowTarget': 'ከ{target} mmHg በታች',
+  // #89 — English placeholder; flagged for Niva translation pass.
+  'dashboard.belowDiastolic': 'Below {target} mmHg (diastolic)',
   'dashboard.goalTolerance': 'ከፍተኛ ማንቂያዎች የሚጀምሩት በ{value} ነው፣ ግብዎ ላይ ትንሽ ተጨማሪ ገደብ።',
   'dashboard.setByCareTeam': '· በተንከባካቢ ቡድንዎ የተዘጋጀ',
   'dashboard.chartDateAxis': 'ቀን',
@@ -260,6 +262,9 @@ const am: Record<TranslationKey, string> = {
   'checkin.confirm.title': 'ንባብ ተልኳል',
   'checkin.confirm.titleMulti': 'ንባብ {n} ተልኳል',
   'checkin.confirm.subtitle': 'የተንከባካቢ ቡድንዎ ወዲያውኑ ይቀበላል።',
+  // #88 — English placeholder; flagged for Niva translation pass.
+  'checkin.confirm.subtitleUnenrolled': 'We’re setting up your care team. They’ll start reviewing your readings once your enrollment is complete.',
+  'checkin.confirm.nonAfibUnenrolled': 'Thanks for getting started.',
   'checkin.confirm.thisReading': 'ይህ ንባብ',
   'checkin.confirm.readingAudio': 'ንባብ {sys} በ {dia}',
   'checkin.confirm.readingAudioPulse': 'ንባብ {sys} በ {dia}፣ የልብ ምት {pulse}',
@@ -269,6 +274,17 @@ const am: Record<TranslationKey, string> = {
   'checkin.confirm.nonAfib': 'የተንከባካቢ ቡድንዎ ይገመግማል እና የሆነ ችግር ካለ ብቻ ይደውላል።',
   'checkin.confirm.addAnother': 'ሌላ ንባብ ጨምር',
   'checkin.confirm.backToDashboard': 'ወደ ዳሽቦርድ ተመለስ',
+  // #90 — English placeholder; flagged for Niva translation pass.
+  'checkin.afib.state1.heading': 'Two more readings',
+  'checkin.afib.state1.body': 'Take another reading in about a minute, while you’re still seated. Three readings in a row helps us understand your blood pressure with an irregular heartbeat.',
+  'checkin.afib.state2.heading': 'One more reading',
+  'checkin.afib.state2.body': 'One more and you’re done. Take it now, while you’re still seated.',
+  'checkin.afib.state3.heading': 'All three readings done',
+  'checkin.afib.state3.body': 'Your care team has what they need. Great job taking the time to get an accurate read.',
+  'checkin.afib.modal.heading': 'Take your other readings?',
+  'checkin.afib.modal.body': 'You’ve taken {n} of 3 readings. For an accurate read with your heart rhythm, your care team needs three readings taken close together. Going to the dashboard ends this session — you can come back later for a fresh set of three.',
+  'checkin.afib.modal.stay': 'Stay and add another',
+  'checkin.afib.modal.leave': 'End this session',
 
   // Wizard chrome + session banner
   'checkin.nav.back': 'ተመለስ',
@@ -1278,7 +1294,9 @@ const am: Record<TranslationKey, string> = {
   'alerts.emergency.callAria': 'አሁን 911 ይደውሉ',
   'alerts.emergency.understand': 'ገባኝ',
   'alerts.emergency.followupTitle': '911 ደውለዋል?',
-  'alerts.emergency.followupBody': 'ሁለት ሰዓት አልፏል። ደህና መሆንዎን ማረጋገጥ እንፈልጋለን።',
+  // #13 — English placeholder; flagged for Niva translation pass.
+  'alerts.emergency.followupBody': 'We want to make sure you’re safe.',
+  'alerts.emergency.followupBodyElapsed': 'It has been about {elapsed} since this alert. We want to make sure you’re safe.',
   'alerts.emergency.followupYes': 'አዎ',
   'alerts.emergency.followupNotYet': 'ገና',
   'alerts.tier.back': 'ተመለስ',

@@ -27,11 +27,24 @@ model PatientMedication {
   notes                    String?                      @db.Text
   pillImageUrl             String?
   plainLanguageDescription String?                      @db.Text
+  // #85 — canonical drug identity (shared catalog `id`, e.g. "losartan" for
+  // BOTH Cozaar and Losartan), resolved via matchToCatalog(drugName). Enables
+  // brand/generic dedup. Null for off-catalog / free-text meds — dedup skipped.
+  canonicalDrugId          String?
+  // #92 — admin-add provenance. source distinguishes patient self-report from
+  // an admin-entered med; the added*/lastEdited* fields record who/when.
+  addedByUserId            String?
+  addedByRole              VerifierRole?
+  addedAt                  DateTime?
+  lastEditedByUserId       String?
+  lastEditedByRole         VerifierRole?
+  lastEditedAt             DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, discontinuedAt])
   @@index([userId, verificationStatus])
+  @@index([userId, canonicalDrugId])
 }
 
 enum DrugClass {

@@ -254,8 +254,11 @@ export default function CaregiversCard() {
               className="w-full rounded-lg px-3 py-2 text-[13.5px] bg-white"
               style={{ border: '1px solid var(--brand-border)' }}
             >
+              {/* Cross-Handoff Addendum Decision 2 — caregivers are EMAIL-ONLY
+                  for MVP (no SMS dispatch). The "Notify by text (coming soon)"
+                  option over-promised a channel that isn't implemented, so it's
+                  removed rather than left as a dead/teaser choice. */}
               <option value="EMAIL">Notify by email</option>
-              <option value="SMS">Notify by text (coming soon)</option>
               <option value="NONE">Don’t notify yet</option>
             </select>
             <label className="flex items-start gap-2 text-[12.5px] cursor-pointer" style={{ color: 'var(--brand-text-secondary)' }}>
@@ -264,7 +267,11 @@ export default function CaregiversCard() {
                 type="checkbox"
                 checked={consent}
                 onChange={(e) => setConsent(e.target.checked)}
-                className="mt-0.5"
+                // #79 — was an unstyled browser default (oversized + bright
+                // accent, ate horizontal space so the label wrapped oddly on
+                // mobile). Constrain to a 16px square that doesn't shrink, with
+                // the brand purple accent to match the rest of the form.
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--brand-primary-purple)] cursor-pointer"
               />
               I agree Cardioplace may share my health alerts with this person.
             </label>

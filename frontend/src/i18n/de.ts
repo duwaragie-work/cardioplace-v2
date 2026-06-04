@@ -103,6 +103,8 @@ const de: Record<TranslationKey, string> = {
   'dashboard.hearSummary': 'Zusammenfassung anhören',
   'dashboard.yourGoal': 'Ihr Ziel',
   'dashboard.belowTarget': 'Unter {target} mmHg',
+  // #89 — English placeholder; flagged for Niva translation pass.
+  'dashboard.belowDiastolic': 'Below {target} mmHg (diastolic)',
   'dashboard.goalTolerance': 'Hohe Warnungen beginnen bei {value}, Ihr Ziel plus eine kleine Toleranz.',
   'dashboard.setByCareTeam': '· festgelegt von Ihrem Behandlungsteam',
   'dashboard.chartDateAxis': 'Datum',
@@ -258,6 +260,9 @@ const de: Record<TranslationKey, string> = {
   'checkin.confirm.title': 'Messung gesendet',
   'checkin.confirm.titleMulti': 'Messung {n} gesendet',
   'checkin.confirm.subtitle': 'Ihr Behandlungsteam erhält sie sofort.',
+  // #88 — English placeholder; flagged for Niva translation pass.
+  'checkin.confirm.subtitleUnenrolled': 'We’re setting up your care team. They’ll start reviewing your readings once your enrollment is complete.',
+  'checkin.confirm.nonAfibUnenrolled': 'Thanks for getting started.',
   'checkin.confirm.thisReading': 'Diese Messung',
   'checkin.confirm.readingAudio': 'Messung {sys} zu {dia}',
   'checkin.confirm.readingAudioPulse': 'Messung {sys} zu {dia}, Puls {pulse}',
@@ -267,6 +272,17 @@ const de: Record<TranslationKey, string> = {
   'checkin.confirm.nonAfib': 'Ihr Behandlungsteam prüft und meldet sich nur, wenn etwas ungewöhnlich erscheint.',
   'checkin.confirm.addAnother': 'Weitere Messung hinzufügen',
   'checkin.confirm.backToDashboard': 'Zurück zum Dashboard',
+  // #90 — English placeholder; flagged for Niva translation pass.
+  'checkin.afib.state1.heading': 'Two more readings',
+  'checkin.afib.state1.body': 'Take another reading in about a minute, while you’re still seated. Three readings in a row helps us understand your blood pressure with an irregular heartbeat.',
+  'checkin.afib.state2.heading': 'One more reading',
+  'checkin.afib.state2.body': 'One more and you’re done. Take it now, while you’re still seated.',
+  'checkin.afib.state3.heading': 'All three readings done',
+  'checkin.afib.state3.body': 'Your care team has what they need. Great job taking the time to get an accurate read.',
+  'checkin.afib.modal.heading': 'Take your other readings?',
+  'checkin.afib.modal.body': 'You’ve taken {n} of 3 readings. For an accurate read with your heart rhythm, your care team needs three readings taken close together. Going to the dashboard ends this session — you can come back later for a fresh set of three.',
+  'checkin.afib.modal.stay': 'Stay and add another',
+  'checkin.afib.modal.leave': 'End this session',
 
   // Wizard chrome + session banner
   'checkin.nav.back': 'Zurück',
@@ -1274,7 +1290,9 @@ const de: Record<TranslationKey, string> = {
   'alerts.emergency.callAria': 'Jetzt 911 anrufen',
   'alerts.emergency.understand': 'Verstanden',
   'alerts.emergency.followupTitle': 'Haben Sie 911 angerufen?',
-  'alerts.emergency.followupBody': 'Zwei Stunden sind vergangen. Wir wollen sicherstellen, dass es Ihnen gut geht.',
+  // #13 — English placeholder; flagged for Niva translation pass.
+  'alerts.emergency.followupBody': 'We want to make sure you’re safe.',
+  'alerts.emergency.followupBodyElapsed': 'It has been about {elapsed} since this alert. We want to make sure you’re safe.',
   'alerts.emergency.followupYes': 'Ja',
   'alerts.emergency.followupNotYet': 'Noch nicht',
   'alerts.tier.back': 'Zurück',

@@ -98,6 +98,8 @@ const en = {
   'dashboard.hearSummary': 'Hear summary',
   'dashboard.yourGoal': 'Your goal',
   'dashboard.belowTarget': 'Below {target} mmHg',
+  // #89 — diastolic-only goal: clarify the axis so the number isn't read as systolic.
+  'dashboard.belowDiastolic': 'Below {target} mmHg (diastolic)',
   'dashboard.goalTolerance': 'High alerts begin at {value}, your goal plus a small tolerance.',
   'dashboard.setByCareTeam': '· set by your care team',
   'dashboard.chartDateAxis': 'Date',
@@ -258,6 +260,9 @@ const en = {
   'checkin.confirm.title': 'Reading sent',
   'checkin.confirm.titleMulti': 'Reading {n} sent',
   'checkin.confirm.subtitle': 'Your care team gets it right away.',
+  // #88 — un-enrolled patients: no care team yet, engine didn't run.
+  'checkin.confirm.subtitleUnenrolled': "We're setting up your care team. They'll start reviewing your readings once your enrollment is complete.",
+  'checkin.confirm.nonAfibUnenrolled': 'Thanks for getting started.',
   'checkin.confirm.thisReading': 'This reading',
   'checkin.confirm.readingAudio': 'Reading {sys} over {dia}',
   'checkin.confirm.readingAudioPulse': 'Reading {sys} over {dia}, pulse {pulse}',
@@ -267,6 +272,18 @@ const en = {
   'checkin.confirm.nonAfib': 'Your care team will review and reach out only if something looks off.',
   'checkin.confirm.addAnother': 'Add another reading',
   'checkin.confirm.backToDashboard': 'Back to dashboard',
+  // #90 — AFib check-in state machine (plain language, no "AFib"/"averaging"
+  // jargon; "irregular heartbeat" is the lay translation).
+  'checkin.afib.state1.heading': 'Two more readings',
+  'checkin.afib.state1.body': "Take another reading in about a minute, while you're still seated. Three readings in a row helps us understand your blood pressure with an irregular heartbeat.",
+  'checkin.afib.state2.heading': 'One more reading',
+  'checkin.afib.state2.body': "One more and you're done. Take it now, while you're still seated.",
+  'checkin.afib.state3.heading': 'All three readings done',
+  'checkin.afib.state3.body': 'Your care team has what they need. Great job taking the time to get an accurate read.',
+  'checkin.afib.modal.heading': 'Take your other readings?',
+  'checkin.afib.modal.body': "You've taken {n} of 3 readings. For an accurate read with your heart rhythm, your care team needs three readings taken close together. Going to the dashboard ends this session — you can come back later for a fresh set of three.",
+  'checkin.afib.modal.stay': 'Stay and add another',
+  'checkin.afib.modal.leave': 'End this session',
 
   // Wizard chrome + session banner
   'checkin.nav.back': 'Back',
@@ -1295,7 +1312,10 @@ const en = {
   'alerts.emergency.callAria': 'Call 911 now',
   'alerts.emergency.understand': 'I understand',
   'alerts.emergency.followupTitle': 'Have you called 911?',
-  'alerts.emergency.followupBody': "Two hours have passed. We want to make sure you're safe.",
+  // #13 — dynamic elapsed time. followupBody is the <30-min short form;
+  // followupBodyElapsed carries the {elapsed} interpolation for older alerts.
+  'alerts.emergency.followupBody': "We want to make sure you're safe.",
+  'alerts.emergency.followupBodyElapsed': "It has been about {elapsed} since this alert. We want to make sure you're safe.",
   'alerts.emergency.followupYes': 'Yes',
   'alerts.emergency.followupNotYet': 'Not yet',
   'alerts.tier.back': 'Back',

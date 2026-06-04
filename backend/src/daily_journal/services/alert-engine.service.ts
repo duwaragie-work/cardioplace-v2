@@ -579,7 +579,7 @@ export class AlertEngineService {
           session.symptoms.ruqPain
         ) {
           this.logger.log(
-            `Symptom-override suppressed (Manisha 5/9 Q3): pregnancy override ` +
+            `Symptom-override suppressed: pregnancy override ` +
               `fired on ruqPain — RULE_SYMPTOM_OVERRIDE_GENERAL skipped. ` +
               `user=${session.userId} entry=${session.entryId}`,
           )
@@ -678,9 +678,8 @@ export class AlertEngineService {
         if (!claimed.has(axis)) claimed.set(axis, hfref)
       }
       this.logger.log(
-        `Single-reading session — gating non-emergency rules for entry ${session.entryId}. ` +
-          'Awaiting second reading or finalize call (Manisha 5/9 Q2). ' +
-          'RULE_HFREF_HIGH exempt per Manisha Q2 (2026-06-02).',
+        `Single-reading session — gating non-emergency rules for entry ${session.entryId}; ` +
+          'RULE_HFREF_HIGH exempt',
       )
       return AXIS_PRIORITY
         .map((axis) => claimed.get(axis))

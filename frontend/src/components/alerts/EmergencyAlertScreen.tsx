@@ -43,6 +43,22 @@ const FULL_AUDIO = `${MESSAGE_TITLE} ${MESSAGE_BODY} ${REASSURANCE}`;
 const FOLLOWUP_AUDIO =
   "Have you called 911 yet? Tap Yes if you have, or Not yet if you haven't.";
 
+// #13 — the follow-up prompt used to hardcode "Two hours have passed", which
+// is wrong when a patient opens an alert created hours or days earlier.
+// Compute the elapsed time from the alert's createdAt at render time (dynamic,
+// never cached). Under 30 min we omit the elapsed clause entirely so the copy
+// doesn't read "Less than a minute has passed". English elapsed units for the
+// US pilot — flagged for translation. No date-fns dep (not installed).
+function followUpElapsed(createdAtIso: string): { show: boolean; text: string } {
+  const ms = Date.now() - new Date(createdAtIso).getTime();
+  const minutes = Math.floor(ms / 60_000);
+  if (!Number.isFinite(minutes) || minutes < 30) return { show: false, text: '' };
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return { show: true, text: `${hours} hour${hours === 1 ? '' : 's'}` };
+  const days = Math.round(hours / 24);
+  return { show: true, text: `${days} day${days === 1 ? '' : 's'}` };
+}
+
 // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema. NEUTRAL non-diagnostic
 // title; the clinical content lives in the SIGNED-OFF registry body
 // (RULE_ACE_ANGIOEDEMA / RULE_GENERIC_ANGIOEDEMA — "do not take medicine"
@@ -321,7 +337,12 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge, isPreEnroll
               {t('alerts.emergency.followupTitle')}
             </h1>
             <p className="text-[14px] sm:text-[15px] opacity-95">
-              {t('alerts.emergency.followupBody')}
+              {(() => {
+                const e = followUpElapsed(alert.createdAt);
+                return e.show
+                  ? t('alerts.emergency.followupBodyElapsed').replace('{elapsed}', e.text)
+                  : t('alerts.emergency.followupBody');
+              })()}
             </p>
           </>
         )}

@@ -587,3 +587,102 @@ describe('IntakeService.verifyMedication — F16 administrative hold dedup', () 
     expect(prisma.notification.findFirst).not.toHaveBeenCalled()
   })
 })
+
+// #92 — admin add medication: ACE/ARB safety gate, provenance, canonical 409.
+describe('IntakeService.adminAddMedication (#92)', () => {
+  let _prisma: any
+  const prismaRef = () => _prisma
+
+  function buildPrisma(opts: {
+    aceContraindicatedAt?: Date | null
+    activeDup?: any
+  }) {
+    return {
+      patientProfile: {
+        findUnique: (jest.fn() as any).mockResolvedValue({
+          aceContraindicatedAt: opts.aceContraindicatedAt ?? null,
+        }),
+      },
+      patientMedication: {
+        findFirst: (jest.fn() as any).mockResolvedValue(opts.activeDup ?? null),
+        create: (jest.fn() as any).mockImplementation((args: any) =>
+          Promise.resolve({
+            id: 'med-new',
+            reportedAt: new Date(),
+            discontinuedAt: null,
+            verifiedAt: null,
+            holdSetAt: null,
+            holdEscalationLevel: 0,
+            combinationComponents: [],
+            ...args.data,
+          }),
+        ),
+      },
+      profileVerificationLog: { create: (jest.fn() as any).mockResolvedValue({}) },
+      $transaction: (fn: any) => Promise.resolve(fn(prismaRef())),
+    }
+  }
+
+  async function makeService(p: any) {
+    _prisma = p
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        IntakeService,
+        { provide: PrismaService, useValue: p },
+        { provide: DrugEnrichmentService, useValue: { enrich: jest.fn() } },
+        { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
+      ],
+    }).compile()
+    return module.get<IntakeService>(IntakeService)
+  }
+
+  const actor = { id: 'admin-1', roles: ['SUPER_ADMIN'] as any }
+
+  it('non-contraindicated add → VERIFIED with admin provenance', async () => {
+    const prisma = buildPrisma({})
+    const service = await makeService(prisma)
+    const res: any = await service.adminAddMedication(actor, 'p1', {
+      drugName: 'Amlodipine', drugClass: 'DHP_CCB', frequency: 'ONCE_DAILY',
+    } as any)
+
+    const data = prisma.patientMedication.create.mock.calls[0][0].data
+    expect(data.verificationStatus).toBe('VERIFIED')
+    expect(data.verifiedByAdminId).toBe('admin-1')
+    expect(data.source).toBe('PROVIDER_ENTERED')
+    expect(data.addedByUserId).toBe('admin-1')
+    expect(data.addedByRole).toBe('ADMIN')
+    expect(data.canonicalDrugId).toBe('amlodipine')
+    expect(res.requiresAcknowledgement).toBe(false)
+  })
+
+  it('ACE/ARB on angioedema patient → auto PROVIDER_DIRECTED_HOLD + requiresAcknowledgement', async () => {
+    const prisma = buildPrisma({ aceContraindicatedAt: new Date('2026-05-01') })
+    const service = await makeService(prisma)
+    const res: any = await service.adminAddMedication(actor, 'p1', {
+      drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR', frequency: 'ONCE_DAILY',
+    } as any)
+
+    const data = prisma.patientMedication.create.mock.calls[0][0].data
+    expect(data.verificationStatus).toBe('HOLD')
+    expect(data.holdReason).toBe('PROVIDER_DIRECTED_HOLD')
+    expect(data.verifiedByAdminId).toBeNull()
+    expect(res.requiresAcknowledgement).toBe(true)
+    // Audit row flags the discrepancy.
+    expect(prisma.profileVerificationLog.create.mock.calls[0][0].data.discrepancyFlag).toBe(true)
+  })
+
+  it('canonical duplicate (Losartan when Cozaar active) → 409 with existing record', async () => {
+    const prisma = buildPrisma({
+      activeDup: { id: 'existing-cozaar', drugName: 'Cozaar', verificationStatus: 'HOLD', holdReason: 'PROVIDER_DIRECTED_HOLD' },
+    })
+    const service = await makeService(prisma)
+    await expect(
+      service.adminAddMedication(actor, 'p1', {
+        drugName: 'Losartan', drugClass: 'ARB', frequency: 'ONCE_DAILY',
+      } as any),
+    ).rejects.toMatchObject({
+      response: { error: 'DUPLICATE_CANONICAL_DRUG', existing: { id: 'existing-cozaar' } },
+    })
+    expect(prisma.patientMedication.create).not.toHaveBeenCalled()
+  })
+})

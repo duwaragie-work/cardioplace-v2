@@ -176,15 +176,18 @@ describe('DailyJournalService', () => {
       }
     }
 
-    it('drops a stale sessionId (newest member older than the window) to null', async () => {
+    it('#91 — stale sessionId (newest member older than window) → fresh session, never null', async () => {
       const measuredAt = '2026-05-22T10:00:00Z'
       // gate
       mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ userId: 'u1' })
-      // resolveCreateSessionId → newest member is way older than the window
+      // resolveCreateSessionId → newest member of the supplied session is way
+      // older than the window (stale).
       mockPrisma.journalEntry.findFirst.mockResolvedValueOnce({
         measuredAt: new Date('2026-05-22T09:00:00Z'), // 60 min earlier > 30 min window
       })
-      mockPrisma.journalEntry.create.mockResolvedValueOnce(builtEntry(null))
+      // …then the open-in-window lookup finds no open session → mint a UUID.
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null)
+      mockPrisma.journalEntry.create.mockResolvedValueOnce(builtEntry('s-new'))
       // shouldFinalizeAsSingleReading
       mockPrisma.journalEntry.count.mockResolvedValueOnce(0) // siblings
       mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ hasAFib: false })
@@ -193,7 +196,43 @@ describe('DailyJournalService', () => {
       await service.create('u1', { measuredAt, systolicBP: 130, diastolicBP: 80, sessionId: 's-stale' } as any)
 
       const createArg = mockPrisma.journalEntry.create.mock.calls[0][0]
-      expect(createArg.data.sessionId).toBeNull()
+      // #91 — never null; and never the stale id.
+      expect(createArg.data.sessionId).toEqual(expect.any(String))
+      expect(createArg.data.sessionId).not.toBeNull()
+      expect(createArg.data.sessionId).not.toBe('s-stale')
+    })
+
+    it('#91 — no sessionId but an open in-window session exists → joins it (averaging preserved)', async () => {
+      const measuredAt = '2026-05-22T10:00:00Z'
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ userId: 'u1' })
+      // No supplied id → skips the stale-check branch; open-in-window lookup
+      // finds a live session → reuse it so the readings average together.
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce({ sessionId: 's-open' })
+      mockPrisma.journalEntry.create.mockResolvedValueOnce(builtEntry('s-open'))
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(1)
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ hasAFib: false })
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(20)
+
+      await service.create('u1', { measuredAt, systolicBP: 130, diastolicBP: 80 } as any)
+
+      const createArg = mockPrisma.journalEntry.create.mock.calls[0][0]
+      expect(createArg.data.sessionId).toBe('s-open')
+    })
+
+    it('#91 — no sessionId and no open session → mints a fresh UUID, never null', async () => {
+      const measuredAt = '2026-05-22T10:00:00Z'
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ userId: 'u1' })
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // no open session
+      mockPrisma.journalEntry.create.mockResolvedValueOnce(builtEntry('s-minted'))
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(0)
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ hasAFib: false })
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(20)
+
+      await service.create('u1', { measuredAt, systolicBP: 130, diastolicBP: 80 } as any)
+
+      const createArg = mockPrisma.journalEntry.create.mock.calls[0][0]
+      expect(createArg.data.sessionId).toEqual(expect.any(String))
+      expect(createArg.data.sessionId).not.toBeNull()
     })
 
     it('keeps a fresh sessionId (no existing members) so the reading establishes the session', async () => {

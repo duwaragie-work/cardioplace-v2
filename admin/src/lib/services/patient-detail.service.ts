@@ -100,6 +100,9 @@ export interface PatientMedication {
   discontinuedAt: string | null
   rawInputText: string | null
   notes: string | null
+  // #92 — admin-add provenance (null for patient-reported meds).
+  addedByRole?: 'PATIENT' | 'ADMIN' | 'PROVIDER' | null
+  addedAt?: string | null
 }
 
 export interface PatientThreshold {
@@ -378,6 +381,46 @@ export async function verifyMedication(
     body: JSON.stringify({ status, rationale, holdReason }),
   })
   return jsonOrThrow<PatientMedication>(res, 'Could not verify medication')
+}
+
+// #92 — admin add / edit medication on a patient's behalf.
+export interface AdminMedicationInput {
+  drugName: string
+  drugClass: string
+  frequency: string
+  dose?: string
+  notes?: string
+}
+
+export interface AdminMedicationResult {
+  statusCode: number
+  message: string
+  requiresAcknowledgement: boolean
+  data: PatientMedication
+}
+
+export async function adminAddMedication(
+  userId: string,
+  input: AdminMedicationInput,
+): Promise<AdminMedicationResult> {
+  const res = await fetchWithAuth(`${API}/api/admin/users/${userId}/medications`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  return jsonOrThrow<AdminMedicationResult>(res, 'Could not add medication')
+}
+
+export async function adminEditMedication(
+  medicationId: string,
+  input: Partial<AdminMedicationInput>,
+): Promise<AdminMedicationResult> {
+  const res = await fetchWithAuth(`${API}/api/admin/medications/${medicationId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  return jsonOrThrow<AdminMedicationResult>(res, 'Could not update medication')
 }
 
 // ─── Alerts (H3) ─────────────────────────────────────────────────────────────

@@ -826,6 +826,7 @@ export default function PatientDetailShell({ patientId }: Props) {
               <>
                 {medsError && <LoadErrorBanner message={medsError} onRetry={loadMedications} />}
                 <MedicationsTab
+                  patientUserId={patientId}
                   medications={medications}
                   loading={medsLoading}
                   onChanged={onMedicationsChanged}

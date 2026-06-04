@@ -422,13 +422,13 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_LOOP_DIURETIC_H
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_MEDICATION_MISSED ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `"Aisha has reported missing Lisinopril on 2 of the last 3 days. A gentle check-in may help — common reasons include side effects, cost, or forgetting."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_MEDICATION_MISSED ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"It looks like you may have missed Lisinopril a couple of times recently. These medicines help protect your heart and keep your blood pressure steady. If anything is making it hard to take them, your care team can help."`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_MEDICATION_MISSED ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"It looks like some medication doses have been missed in the last few days, including Lisinopril today. Taking your medicine every day helps keep your blood pressure steady. Your care team is here to help if anything makes it hard to stay on schedule."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_MEDICATION_MISSED ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — Non-adherence pattern: Lisinopril (ACE_INHIBITOR) — missed 1/3 days — reason: FORGOT. Consider barrier assessment; if persistent, evaluate regimen simplification or longer-acting agent. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_MEDICATION_MISSED STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"Aisha has reported missing medication doses on 0 of the last 3 days. A gentle check-in may help identify any barriers."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_MEDICATION_MISSED STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `"It looks like you may have missed your medicine a couple of times recently. Taking your medicine regularly helps keep your blood pressure steady. If something is making it hard to stay on schedule, your care team can help."`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_MEDICATION_MISSED STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `"In the last few days, some medication doses may have been missed. Taking your medicine every day helps keep your blood pressure steady. Your care team is here to help if anything makes it hard to stay on schedule."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_MEDICATION_MISSED STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"Tier 2 — Non-adherence pattern: patient self-reported missed doses on 0/3 days (no medication specified). Consider barrier assessment and reconciliation."`;
 

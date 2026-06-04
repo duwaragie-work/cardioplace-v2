@@ -1431,10 +1431,10 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.type).toBe('MEDICATION_ADHERENCE')
     expect(createArgs.data.dismissible).toBe(true)
     expect(createArgs.data.severity).toBe('MEDIUM')
-    // Cluster 6 wording — patient message references the missed pattern,
-    // not single-dose phrasing.
+    // #86 wording — patient message anchors to the multi-day pattern
+    // ("the last few days"), never claiming a miss happened "today".
     expect(createArgs.data.patientMessage.toLowerCase()).toContain(
-      'a couple of times',
+      'last few days',
     )
     expect(createArgs.data.physicianMessage).toContain('Tier 2')
     expect(createArgs.data.physicianMessage.toLowerCase()).toContain(

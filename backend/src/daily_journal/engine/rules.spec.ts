@@ -1489,7 +1489,10 @@ describe('medicationMissedRule — Phase/26 scheduledLater regression', () => {
       session({ medicationTaken: false, missedMedications: [] }),
       ctx({ profile: { hasHeartFailure: false } }),
     )
-    expect(r?.metadata.physicianAnnotations).toContain('escalate-3-of-7')
+    expect(r?.metadata.physicianAnnotations).toContain(
+      'Tier 2 dispatched on 3-of-7 missed-dose pattern per adherence-trending escalation policy.',
+    )
+    expect(r?.metadata.physicianAnnotations).not.toContain('escalate-3-of-7')
   })
 })
 

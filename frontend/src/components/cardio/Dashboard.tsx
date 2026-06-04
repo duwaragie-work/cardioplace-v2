@@ -415,9 +415,20 @@ export default function Dashboard() {
 
   // D2 threshold display helpers
   const hasBpThreshold = !!(threshold && (threshold.sbpUpperTarget || threshold.dbpUpperTarget));
-  const thresholdTargetText = threshold
-    ? `${threshold.sbpUpperTarget ?? '—'}/${threshold.dbpUpperTarget ?? '—'}`
-    : null;
+  // #89 — graceful partial-threshold display. The old `${sbp ?? '—'}/${dbp ?? '—'}`
+  // surfaced a bare em-dash ("Below 140/— mmHg") a patient can't parse. Show
+  // only the axis that's set; flag diastolic-only so it isn't read as systolic.
+  const sbpUpperT = threshold?.sbpUpperTarget ?? null;
+  const dbpUpperT = threshold?.dbpUpperTarget ?? null;
+  const thresholdIsDiastolicOnly = sbpUpperT == null && dbpUpperT != null;
+  const thresholdTargetText =
+    sbpUpperT != null && dbpUpperT != null
+      ? `${sbpUpperT}/${dbpUpperT}`
+      : sbpUpperT != null
+        ? `${sbpUpperT}`
+        : dbpUpperT != null
+          ? `${dbpUpperT}`
+          : null;
   const thresholdSetAt = threshold?.setAt
     ? new Date(threshold.setAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     : null;
@@ -771,7 +782,10 @@ export default function Dashboard() {
                 className="text-[13px] font-semibold leading-tight"
                 style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
               >
-                {t('dashboard.belowTarget').replace('{target}', thresholdTargetText ?? '—/—')}
+                {(thresholdIsDiastolicOnly
+                  ? t('dashboard.belowDiastolic')
+                  : t('dashboard.belowTarget')
+                ).replace('{target}', thresholdTargetText ?? '')}
                 <span className="ml-2 font-medium" style={{ color: 'var(--brand-text-muted)' }}>
                   {` ${t('dashboard.setByCareTeam')}`}
                   {thresholdSetAt ? ` · ${thresholdSetAt}` : ''}

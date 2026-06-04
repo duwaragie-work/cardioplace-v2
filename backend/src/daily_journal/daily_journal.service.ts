@@ -9,6 +9,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
+import { randomUUID } from 'node:crypto'
 import { SESSION_WINDOW_MS } from '@cardioplace/shared'
 import { Prisma, EntrySource, EscalationLevel } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
@@ -576,7 +577,19 @@ export class DailyJournalService {
     userId: string,
     status: 'all' | 'unread' | 'read' = 'all',
   ) {
-    const where: Prisma.NotificationWhereInput = { userId }
+    // #80 — the bell LIST must exclude EMAIL the same way the unread-COUNT
+    // already does (getNotificationsUnreadCount: `channel: { not: 'EMAIL' }`).
+    // EMAIL rows are outbound deliveries, not in-app bell state, and a patient
+    // who has both a PUSH and an EMAIL row for the same event (e.g. gap-alert)
+    // was seeing the event twice while the badge counted it once.
+    // NOTE: deliberately NOT a DASHBOARD-only filter (the handoff's first
+    // suggestion) — legitimate patient notices (med-hold, threshold change,
+    // profile reject) are dispatched on PUSH, so DASHBOARD-only would hide
+    // them. See CLAUDE_CODE_SPRINT_4_3_5_RESULTS Handoff 3 #80 finding.
+    const where: Prisma.NotificationWhereInput = {
+      userId,
+      channel: { not: 'EMAIL' },
+    }
 
     if (status === 'unread') {
       where.readAt = null
@@ -1290,25 +1303,47 @@ export class DailyJournalService {
     userId: string,
     sessionId: string | undefined,
     measuredAt: Date,
-  ): Promise<string | null> {
-    if (!sessionId) return null
-    const newest = await this.prisma.journalEntry.findFirst({
-      where: { userId, sessionId },
-      orderBy: { measuredAt: 'desc' },
-      select: { measuredAt: true },
-    })
-    // Fresh session — this reading establishes it; keep the id.
-    if (!newest) return sessionId
-    // Existing members but the window has elapsed → stale reuse; drop the id.
-    const gapMs = Math.abs(measuredAt.getTime() - newest.measuredAt.getTime())
-    if (gapMs > SESSION_WINDOW_MS) {
+  ): Promise<string> {
+    // #91 — a JournalEntry MUST always carry a sessionId. This previously
+    // returned null when no id was supplied OR when the supplied id was stale
+    // (window elapsed), leaving orphaned null-session readings that the
+    // SessionAverager / AFib ≥3-reading gate couldn't group reliably. Now it
+    // resolves to a usable session in every case (never null):
+    //   • valid client id still inside the window → keep it (join the session)
+    //   • no id / stale id → JOIN the patient's open in-window session if one
+    //     exists (preserves proximity averaging for clients that don't pass an
+    //     id), else MINT a fresh UUID so the reading anchors its own session.
+    if (sessionId) {
+      const newest = await this.prisma.journalEntry.findFirst({
+        where: { userId, sessionId },
+        orderBy: { measuredAt: 'desc' },
+        select: { measuredAt: true },
+      })
+      // Fresh session — this reading establishes it; keep the id.
+      if (!newest) return sessionId
+      const gapMs = Math.abs(measuredAt.getTime() - newest.measuredAt.getTime())
+      if (gapMs <= SESSION_WINDOW_MS) return sessionId
+      // Window elapsed → don't smuggle this reading into the stale session.
       this.logger.warn(
-        `create: dropping stale sessionId ${sessionId} for user ${userId} ` +
-          `(gap ${Math.round(gapMs / 60000)}min exceeds session window)`,
+        `create: supplied sessionId ${sessionId} is stale for user ${userId} ` +
+          `(gap ${Math.round(gapMs / 60000)}min exceeds session window); starting a new session`,
       )
-      return null
     }
-    return sessionId
+    // No usable client id — join an open, non-finalized session within the
+    // window if the patient has one, else mint a fresh UUID. Never null.
+    const windowStart = new Date(measuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(measuredAt.getTime() + SESSION_WINDOW_MS)
+    const openInWindow = await this.prisma.journalEntry.findFirst({
+      where: {
+        userId,
+        sessionId: { not: null },
+        singleReadingFinalized: false,
+        measuredAt: { gte: windowStart, lte: windowEnd },
+      },
+      orderBy: { measuredAt: 'desc' },
+      select: { sessionId: true },
+    })
+    return openInWindow?.sessionId ?? randomUUID()
   }
 
   /**
