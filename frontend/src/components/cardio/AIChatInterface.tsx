@@ -48,6 +48,7 @@ import {
   type BpOcrSuccess,
 } from '@/lib/services/ocr.service';
 import BpPhotoConfirmModal from '@/components/intake/BpPhotoConfirmModal';
+import { transcribeAudio } from '@/lib/services/chat.service';
 import CheckinCard from '@/components/cardio/cards/CheckinCard';
 import UpdateCard from '@/components/cardio/cards/UpdateCard';
 import DeleteCard from '@/components/cardio/cards/DeleteCard';
@@ -1140,9 +1141,20 @@ function mapSessions(arr: Array<{ id: string; title: string; summary?: string | 
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
+// BCP-47 locale map for the Web Speech API dictation. Mirrors the same
+// table MicButton uses so dictation respects the patient's preferredLanguage
+// (Ward 7/8 DC patients with Spanish / Amharic preferences get their locale).
+const DICTATION_LOCALE_TO_BCP47: Record<string, string> = {
+  en: 'en-US',
+  es: 'es-ES',
+  fr: 'fr-FR',
+  de: 'de-DE',
+  am: 'am-ET',
+};
+
 export default function AIChatInterface() {
   const { user, token } = useAuth();
-  const { t } = useLanguage();
+  const { t, locale } = useLanguage();
   const searchParams = useSearchParams();
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -1176,6 +1188,140 @@ export default function AIChatInterface() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const justCreatedSessionRef = useRef(false);
+
+  // ─── Dictation (speech-to-text into the chat input box) ──────────────────
+  // Distinct from the voice-call mic — this is one-shot dictation that fills
+  // the text input so the patient can review and click Send. Records audio
+  // with MediaRecorder, POSTs to /chat/transcribe, and gets the transcript
+  // back from Gemini. Same model the voice chat + OCR use, so quality + cost
+  // stay consistent. Works on Firefox + iOS Safari where the browser's
+  // SpeechRecognition API is unavailable.
+  const [dictationState, setDictationState] = useState<
+    'idle' | 'recording' | 'uploading' | 'unsupported'
+  >('idle');
+  const [dictationError, setDictationError] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  // Detect MediaRecorder + getUserMedia support on mount. Both must be
+  // present; otherwise the button is hidden.
+  useEffect(() => {
+    if (
+      typeof window === 'undefined'
+      || typeof MediaRecorder === 'undefined'
+      || !navigator.mediaDevices?.getUserMedia
+    ) {
+      setDictationState('unsupported');
+    }
+    return () => {
+      // Best-effort cleanup if the component unmounts mid-recording.
+      try { mediaRecorderRef.current?.stop(); } catch { /* swallow */ }
+      mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+  // Auto-clear the error pill so the patient gets a clean slate after a few
+  // seconds — matches the MicButton intake pattern.
+  useEffect(() => {
+    if (!dictationError) return;
+    const id = setTimeout(() => setDictationError(null), 3500);
+    return () => clearTimeout(id);
+  }, [dictationError]);
+  const handleDictate = useCallback(async () => {
+    // Stop path — finalises the recording, kicks off upload + transcribe.
+    if (dictationState === 'recording') {
+      try { mediaRecorderRef.current?.stop(); } catch { /* swallow */ }
+      return;
+    }
+    // Already uploading or unsupported — taps are no-ops.
+    if (dictationState !== 'idle') return;
+    setDictationError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      // Prefer opus in webm/ogg — well-compressed, supported by Gemini.
+      // Browser will pick a reasonable default if neither is supported.
+      const mimeType =
+        MediaRecorder.isTypeSupported?.('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : MediaRecorder.isTypeSupported?.('audio/webm')
+            ? 'audio/webm'
+            : MediaRecorder.isTypeSupported?.('audio/mp4')
+              ? 'audio/mp4'
+              : '';
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      recordedChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        // Stop all mic tracks — releases the browser's recording indicator.
+        mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+        mediaStreamRef.current = null;
+        const blob = new Blob(recordedChunksRef.current, {
+          type: recorder.mimeType || 'audio/webm',
+        });
+        recordedChunksRef.current = [];
+        if (blob.size === 0) {
+          setDictationState('idle');
+          setDictationError("I didn't catch any audio — please try again.");
+          return;
+        }
+        setDictationState('uploading');
+        try {
+          const transcript = await transcribeAudio(
+            blob,
+            DICTATION_LOCALE_TO_BCP47[locale] ?? 'en-US',
+          );
+          if (transcript.trim()) {
+            setInputValue((prev) =>
+              prev ? `${prev} ${transcript.trim()}`.trim() : transcript.trim(),
+            );
+            // Re-focus the textarea so the patient can review + Send.
+            requestAnimationFrame(() => inputRef.current?.focus());
+          } else {
+            setDictationError("I couldn't hear that clearly — please try again.");
+          }
+        } catch (err) {
+          setDictationError(
+            err instanceof Error
+              ? err.message
+              : 'Transcription failed — please try again.',
+          );
+        } finally {
+          setDictationState('idle');
+        }
+      };
+      recorder.onerror = () => {
+        setDictationError('Recording failed — please try again.');
+        setDictationState('idle');
+        mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+        mediaStreamRef.current = null;
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setDictationState('recording');
+    } catch (err) {
+      // getUserMedia rejection — most commonly NotAllowedError (denied) or
+      // NotFoundError (no mic). Distinguish so we can give actionable copy.
+      const name = err instanceof Error ? err.name : '';
+      if (name === 'NotAllowedError' || name === 'SecurityError') {
+        setDictationError(
+          'Microphone access blocked. Enable it in your browser settings to dictate.',
+        );
+      } else if (name === 'NotFoundError') {
+        setDictationError('No microphone detected on this device.');
+      } else {
+        setDictationError(
+          err instanceof Error ? err.message : 'Could not start dictation.',
+        );
+      }
+    }
+  }, [dictationState, locale]);
+  const isDictating = dictationState === 'recording';
+  const isTranscribing = dictationState === 'uploading';
+  const dictationSupported = dictationState !== 'unsupported';
 
   const userInitials = getUserInitials(user?.name);
   const userName = user?.name ?? 'Patient';
@@ -1966,6 +2112,7 @@ export default function AIChatInterface() {
             }}
           >
             <textarea
+              id="chat-input"
               data-testid="chat-input"
               ref={inputRef}
               rows={1}
@@ -2026,6 +2173,72 @@ export default function AIChatInterface() {
                   onChange={handlePhotoFile}
                 />
               </>
+            )}
+
+            {/* Dictation button — speech-to-text into the input box, powered
+                by Gemini via /chat/transcribe. Three visual states:
+                  • idle      → teal tint, Mic icon
+                  • recording → red gradient + pulsing shadow, MicOff icon
+                  • uploading → teal tint, spinner (await Gemini response)
+                Distinct from the purple voice-call mic to the right which
+                starts a live bidirectional voice call. Hidden when the
+                browser lacks MediaRecorder / getUserMedia. */}
+            {dictationSupported && (
+              <motion.button
+                data-testid="chat-dictate-button"
+                type="button"
+                onClick={() => void handleDictate()}
+                disabled={
+                  isSending || isVoiceActive || isVoiceConnecting || isTranscribing
+                }
+                aria-label={
+                  isDictating
+                    ? 'Stop dictation'
+                    : isTranscribing
+                      ? 'Transcribing audio'
+                      : 'Dictate your message'
+                }
+                aria-pressed={isDictating}
+                aria-controls="chat-input"
+                aria-busy={isTranscribing}
+                className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition disabled:opacity-40"
+                style={{
+                  background: isDictating
+                    ? 'linear-gradient(135deg, #ef4444, #dc2626)'
+                    : '#CCFBF1', // teal-100, distinct from purple voice-call mic
+                }}
+                animate={
+                  isDictating
+                    ? { boxShadow: ['0 0 0 0 rgba(220,38,38,0.55)', '0 0 0 6px rgba(220,38,38,0)'] }
+                    : undefined
+                }
+                transition={isDictating ? { duration: 1.2, repeat: Infinity } : undefined}
+                whileHover={!isTranscribing ? { scale: 1.08 } : {}}
+                whileTap={!isTranscribing ? { scale: 0.92 } : {}}
+                title={
+                  isDictating
+                    ? 'Stop dictation and transcribe'
+                    : isTranscribing
+                      ? 'Transcribing…'
+                      : 'Dictate your message into the text box'
+                }
+              >
+                {isTranscribing ? (
+                  <Loader2
+                    className="w-3.5 h-3.5 animate-spin"
+                    style={{ color: '#0F766E' }}
+                    aria-hidden="true"
+                  />
+                ) : isDictating ? (
+                  <MicOff className="w-3.5 h-3.5 text-white" aria-hidden="true" />
+                ) : (
+                  <Mic
+                    className="w-3.5 h-3.5"
+                    style={{ color: '#0F766E' }}
+                    aria-hidden="true"
+                  /> /* teal-700 */
+                )}
+              </motion.button>
             )}
 
             {/* Mic button — disabled while text is sending. Color encodes:
@@ -2091,6 +2304,29 @@ export default function AIChatInterface() {
               <Send className="w-3.5 h-3.5 text-white" />
             </motion.button>
           </div>
+
+          {/* Dictation status / error pill — sits BELOW the input bar so it
+              doesn't disturb the row layout. role="status" / role="alert"
+              announce to screen readers (WCAG 2.2 AA Task 8 — status not
+              colour-only). Auto-clears after ~3.5s for errors. */}
+          {(isDictating || isTranscribing) && (
+            <p
+              role="status"
+              className="text-[11px] mt-2 text-center font-medium"
+              style={{ color: isDictating ? 'var(--brand-alert-red-text)' : '#0F766E' }}
+            >
+              {isDictating ? 'Listening… tap mic again to stop and transcribe.' : 'Transcribing…'}
+            </p>
+          )}
+          {dictationError && !isDictating && !isTranscribing && (
+            <p
+              role="alert"
+              className="text-[11px] mt-2 text-center font-medium"
+              style={{ color: 'var(--brand-alert-red-text)' }}
+            >
+              {dictationError}
+            </p>
+          )}
 
           <p className="text-center text-[10px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
             {t('chat.footer')}
