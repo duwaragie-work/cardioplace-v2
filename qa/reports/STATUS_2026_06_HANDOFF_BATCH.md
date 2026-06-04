@@ -135,3 +135,14 @@ H3 #92 (`d897040`) tightened the verify-medication HOLD endpoint to require a st
 - **Steps 4 (admin) + 5 (full):** NOT run — halted at Step 3 per the "if Step 3 still fails, STOP" directive. Held for Duwaragie.
 
 **No real engine regression found.** The 7 remaining Step-3 failures are (a) stale specs from the intentional F20 emergency-exclusive change and (b) Olive seed drift.
+
+## Phase 3 — investigate-and-fix the 7 remaining Step-3 failures (authorized)
+
+### Part 1 — F20 emergency-exclusive (4 specs) → FIXED (Path A)
+`bf838ff` "fix(engine): emergency-exclusive short-circuit (F20)" (Duwaragie, 2026-06-01, shipped WITH spec updates, cites v2 addendum D.5) is INTENTIONAL and clinically sound: once an emergency/symptom-override claims the 'emergency' axis, lower-tier Stage-C BP/HR rules are suppressed (a "see provider tomorrow" L1 alongside a "call 911" emergency is the harm path). **Safety verified:** Stage A/B survive the short-circuit — Tier 1 contraindication (NDHP_HFREF co-fired in James's case), angioedema, and the emergency itself. HFREF_HIGH fires normally absent an emergency (`09:292` green) and is only subsumed when a co-occurring emergency already conveys the BP — not a Q2 violation. No engine carve-out needed. Updated 4 specs (09 Mike/James/Kate + 17:592) to expect emergency-exclusive (`exclusive: true`). Commit: `test(qa): update F20-affected specs`.
+
+### Part 2 — Olive (3 specs) → FIXED (Path B, seed/DB drift hygiene)
+Root cause via DB query: Olive's profile had **`hasAFib=true` + `hasCAD=true`** (and `diagnosedHypertension=false`) — but her seed persona sets NONE of those (only `diagnosedHypertension: true`). The spurious `hasAFib=true` tripped the **AFib `<3-reading` gate** (alert-engine.service.ts:597), suppressing EVERY single-reading BP/HR rule incl. AGE_65_LOW → `r.fired=[]`. Jane (65+, clean flags) fires AGE_65_LOW on an identical reading — confirming it's Olive-DB-specific, not engine/spec. Seed persona is correct; the reseed didn't reset the drifted flags (create-only upsert and/or prior-test pollution). Fixed in-spec: a `beforeAll` resets Olive's AFib/CAD/htn to her seed baseline (a condition-specific test must own its preconditions). Commit: `test(qa): 09 Olive — reset AFib/CAD baseline`.
+**Seed-hygiene note for Duwaragie:** the reseed left Olive's profile flags drifted (hasAFib/hasCAD true, diagnosedHypertension false vs seed). Worth checking whether the seed upsert overwrites existing PatientProfile condition flags, or whether a prior test mutates Olive without reset — otherwise other personas may carry similar drift. (Not blocking H5; surfaced.)
+
+All 7 previously-failing Step-3 specs now green. Proceeding to Phase-3 Steps 4 (admin) + 5 (full suite).
