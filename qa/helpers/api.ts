@@ -185,7 +185,13 @@ export async function adminAcknowledgeAlert(
 export async function adminResolveAlert(
   api: APIRequestContext,
   alertId: string,
-  body: { resolutionAction: string; resolutionRationale?: string },
+  body: {
+    resolutionAction: string
+    resolutionRationale?: string
+    // Bespoke angioedema (and other sub-field) actions persist conditional
+    // details (e.g. { actualCause }, { willGo }) into resolutionDetails.
+    resolutionDetails?: Record<string, unknown>
+  },
 ): Promise<void> {
   const res = await api.post(`admin/alerts/${alertId}/resolve`, { data: body })
   expect(res.ok(), `admin resolve: ${await res.text()}`).toBeTruthy()
@@ -670,7 +676,15 @@ async function gotoPatientAlertsTab(adminPage: Page, patientId: string): Promise
 export async function resolveAlertViaModal(
   adminPage: Page,
   alertId: string,
-  body: { resolutionAction: string; rationale: string },
+  body: {
+    resolutionAction: string
+    rationale: string
+    // Conditional sub-fields for actions that require them (e.g. angioedema
+    // ANGIO_FALSE_ALARM → { actualCause: '...' }). Strings fill the text
+    // input; booleans click the matching YES/NO toggle. Required sub-fields
+    // gate the Confirm button, so they must be set before confirm enables.
+    subFields?: Record<string, string | boolean>
+  },
 ): Promise<void> {
   await adminPage.locator(byTestId(T.admin.alertResolveBtnFor(alertId))).click()
   await adminPage
@@ -679,6 +693,21 @@ export async function resolveAlertViaModal(
   await adminPage
     .locator(byTestId(T.admin.resolveAction(body.resolutionAction)))
     .click()
+  // Conditional sub-fields render right after the action is picked. Fill them
+  // before touching the rationale so the Confirm gate (subFieldsComplete) opens.
+  for (const [key, val] of Object.entries(body.subFields ?? {})) {
+    if (typeof val === 'boolean') {
+      await adminPage
+        .locator(byTestId(`admin-resolve-subfield-${key}-${val ? 'yes' : 'no'}`))
+        .click()
+        .catch(() => {})
+    } else {
+      await adminPage
+        .locator(byTestId(`admin-resolve-subfield-${key}`))
+        .fill(val)
+        .catch(() => {})
+    }
+  }
   // The rationale textarea renders only AFTER an action is selected (React
   // state update) — and it renders for EVERY tier/action (required for
   // Tier 1, optional for some Tier 2). Wait for it (this also confirms the
