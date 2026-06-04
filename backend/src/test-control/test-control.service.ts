@@ -687,6 +687,9 @@ export class TestControlService {
       resolvedBy?: string
       resolutionAction?: string
       resolutionRationale?: string
+      patientMessage?: string
+      caregiverMessage?: string
+      physicianMessage?: string
     }>,
   ): Promise<{ created: number; alertIds: string[] }> {
     const alertIds: string[] = []
@@ -720,6 +723,17 @@ export class TestControlService {
           resolvedBy: a.resolvedBy ?? null,
           resolutionAction: a.resolutionAction ?? null,
           resolutionRationale: a.resolutionRationale ?? null,
+          // Three-tier messages: real alerts always carry these (the admin
+          // AlertCard only renders a tier card when its message is non-empty),
+          // so seeded fixtures must too or the expanded-card 3-tier assertions
+          // (spec 13 §G) find nothing. Override-able per spec; default to a
+          // descriptive non-empty string per tier.
+          patientMessage:
+            a.patientMessage ?? 'Seeded alert — patient-facing message.',
+          caregiverMessage:
+            a.caregiverMessage ?? 'Seeded alert — caregiver-facing message.',
+          physicianMessage:
+            a.physicianMessage ?? 'Seeded alert — physician-facing message.',
         },
         select: { id: true },
       })

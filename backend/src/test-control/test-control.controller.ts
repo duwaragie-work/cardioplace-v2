@@ -444,6 +444,9 @@ export class TestControlController {
         resolvedBy?: string
         resolutionAction?: string
         resolutionRationale?: string
+        patientMessage?: string
+        caregiverMessage?: string
+        physicianMessage?: string
       }>
     },
   ) {
