@@ -12,8 +12,24 @@ export const ADMIN_ROLES = [
   'MEDICAL_DIRECTOR',
   'PROVIDER',
   'HEALPLACE_OPS',
+  'COORDINATOR',
 ] as const
 export type AdminRole = (typeof ADMIN_ROLES)[number]
+
+/** All user roles the app knows about — single source of truth for the
+ *  user-management UI dropdowns and filter chips. The backend's UserRole
+ *  enum (`backend/src/generated/prisma/enums.ts`) is the canonical list;
+ *  this mirror exists so frontend code doesn't have to import generated
+ *  Prisma types. */
+export const ALL_USER_ROLES = [
+  'PATIENT',
+  'PROVIDER',
+  'MEDICAL_DIRECTOR',
+  'COORDINATOR',
+  'HEALPLACE_OPS',
+  'SUPER_ADMIN',
+] as const
+export type UserRole = (typeof ALL_USER_ROLES)[number]
 
 type RoleInput = string[] | null | undefined
 type UserInput = { roles?: string[] | null } | null | undefined
@@ -156,6 +172,114 @@ export function isHealplaceOpsOnly(input: RoleInput | UserInput): boolean {
   const roles = rolesOf(input)
   if (!roles.includes('HEALPLACE_OPS')) return false
   const broader = ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER']
+  return !roles.some((r) => broader.includes(r))
+}
+
+// ─── User management (phase/23) ─────────────────────────────────────────────
+/**
+ * Can access the /users page at all. Controller-level @Roles on the backend:
+ *   @Roles(COORDINATOR, HEALPLACE_OPS, SUPER_ADMIN)
+ *   backend/src/users/users.controller.ts
+ */
+export function canManageUsers(input: RoleInput | UserInput): boolean {
+  return has(input, ['COORDINATOR', 'HEALPLACE_OPS', 'SUPER_ADMIN'])
+}
+
+/**
+ * Whether the caller can deactivate (or reactivate — same gate) a target
+ * user with the given roles. Mirrors UsersService.assertCanDeactivate in
+ * backend/src/users/users.service.ts.
+ *
+ *   SUPER_ADMIN    → any target (incl. SUPER_ADMIN, except self).
+ *   HEALPLACE_OPS  → admin-role targets only (no PATIENT, no SUPER_ADMIN).
+ *   COORDINATOR    → PATIENT targets only (backend further scopes to own
+ *                    practice; UI just shows the button).
+ *   MEDICAL_DIRECTOR / PROVIDER → cannot deactivate anyone via /users.
+ *
+ * Self-deactivation is blocked separately at the call site.
+ */
+export function canDeactivateUser(
+  caller: RoleInput | UserInput,
+  targetRoles: readonly string[] | null | undefined,
+): boolean {
+  const callerRoles = rolesOf(caller)
+  if (callerRoles.includes('SUPER_ADMIN')) return true
+  const target = targetRoles ?? []
+  const isPatientOnly = target.length === 0 || target.every((r) => r === 'PATIENT')
+  if (callerRoles.includes('HEALPLACE_OPS')) {
+    if (isPatientOnly) return false
+    if (target.includes('SUPER_ADMIN')) return false
+    return true
+  }
+  if (callerRoles.includes('COORDINATOR')) {
+    return isPatientOnly
+  }
+  return false
+}
+
+/**
+ * Per-caller list of target roles that can be invited from the UI. Mirrors
+ * UsersService.assertCanInvite in backend/src/users/users.service.ts.
+ *
+ *   COORDINATOR     → PATIENT only
+ *   HEALPLACE_OPS   → PROVIDER, MEDICAL_DIRECTOR, HEALPLACE_OPS, COORDINATOR
+ *   SUPER_ADMIN     → all six roles
+ *
+ * The empty array is returned for any other role so the UI hides the invite
+ * affordance entirely (defense-in-depth — the controller would also 403).
+ */
+export function invitableRoles(input: RoleInput | UserInput): UserRole[] {
+  const roles = rolesOf(input)
+  if (roles.includes('SUPER_ADMIN')) {
+    return [...ALL_USER_ROLES]
+  }
+  if (roles.includes('HEALPLACE_OPS')) {
+    return ['PROVIDER', 'MEDICAL_DIRECTOR', 'HEALPLACE_OPS', 'COORDINATOR']
+  }
+  if (roles.includes('COORDINATOR')) {
+    return ['PATIENT']
+  }
+  return []
+}
+
+/**
+ * Returns true when an invite for the given target role requires the
+ * caller to pick a practice. Mirrors the two constants in
+ * users.service.ts:
+ *   ROLES_REQUIRING_PRACTICE_FOR_OPS = [COORDINATOR, PROVIDER]
+ *   ROLES_REQUIRING_PRACTICE_FOR_SUPER = [PATIENT, COORDINATOR, PROVIDER]
+ *
+ * For COORDINATOR callers the practice is locked to their own and never
+ * shown in the UI, so this helper is moot for them.
+ */
+export function inviteRequiresPractice(
+  caller: RoleInput | UserInput,
+  targetRole: UserRole,
+): boolean {
+  const roles = rolesOf(caller)
+  if (roles.includes('SUPER_ADMIN')) {
+    return ['PATIENT', 'COORDINATOR', 'PROVIDER'].includes(targetRole)
+  }
+  if (roles.includes('HEALPLACE_OPS')) {
+    return ['COORDINATOR', 'PROVIDER'].includes(targetRole)
+  }
+  if (roles.includes('COORDINATOR')) {
+    // Practice always implicit (auto-filled server-side from
+    // PracticeCoordinator.practiceId). UI doesn't surface a picker.
+    return false
+  }
+  return false
+}
+
+/**
+ * Whether the caller is the COORDINATOR-only scope (i.e. their UI variant
+ * collapses to "patient list of own practice" with no role filter / no
+ * cross-practice picker).
+ */
+export function isCoordinatorOnly(input: RoleInput | UserInput): boolean {
+  const roles = rolesOf(input)
+  if (!roles.includes('COORDINATOR')) return false
+  const broader = ['SUPER_ADMIN', 'HEALPLACE_OPS', 'MEDICAL_DIRECTOR', 'PROVIDER']
   return !roles.some((r) => broader.includes(r))
 }
 

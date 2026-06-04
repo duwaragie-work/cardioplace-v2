@@ -1,10 +1,17 @@
 import { Module } from '@nestjs/common'
-import { PrismaService } from '../prisma/prisma.service.js'
+import { ConfigModule } from '@nestjs/config'
+import { EmailModule } from '../email/email.module.js'
+import { PrismaModule } from '../prisma/prisma.module.js'
 import { UsersController } from './users.controller.js'
 import { UsersService } from './users.service.js'
 
 @Module({
-  providers: [UsersService, PrismaService],
+  // PrismaModule is @Global() — listing it for clarity. EmailModule is
+  // @Global() too but kept explicit so the dependency surface is
+  // self-documenting. ConfigModule for USER_INVITE_TTL_HOURS + BACKEND_URL.
+  imports: [PrismaModule, EmailModule, ConfigModule],
   controllers: [UsersController],
+  providers: [UsersService],
+  exports: [UsersService],
 })
 export class UsersModule {}
