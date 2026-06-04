@@ -606,6 +606,12 @@ const de: Record<TranslationKey, string> = {
   'home.ctaTitle': 'So sieht es aus, die Versorgungslücke zu schließen.',
   'home.ctaDesc': 'Entwickelt mit der DC Hospital Association. Eingesetzt in den am stärksten gefährdeten Gemeinschaften Washingtons. Konzipiert, um die Patienten zu erreichen, die herkömmliche Gesundheitstechnologie zurücklässt.',
   'home.ctaButton': 'Über das Programm',
+  // TODO i18n — placeholder English copy; translate when demo video is finalised.
+  'home.demoEyebrow': 'See it in action',
+  'home.demoTitle': 'A five-minute walkthrough',
+  'home.demoDesc': 'The patient experience and the care-team closed loop — end to end, in real time. Watch how an alert is generated, escalated, and resolved with full clinical accountability.',
+  'home.demoPlayLabel': 'Play the Cardioplace 5-minute demo',
+  'home.demoCloseLabel': 'Close demo',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'UNSERE GESCHICHTE',
