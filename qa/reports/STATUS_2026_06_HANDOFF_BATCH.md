@@ -104,3 +104,19 @@ Recommend **Option A** (read-side, reversible, preserves the future-push hook, m
 
 ### Playwright run — stack note (surfaced)
 The running localhost stack is **mixed across two clones** (confirmed via OS process inspection): frontend `:3000` = `cardioplace-v2` (this branch), **backend `:4000` + admin `:3001` = a separate `_niva_audit` clone**. So the live backend does **not** contain G.4. Smoke run (`--reporter=list`, 11 tests): **10 passed**; the 1 "failure" is the new `22-notifications-no-alert-mirror` spec **correctly detecting the un-patched mirror** on the `_niva_audit` backend (the alert-linked PUSH row was returned) — i.e. the guard works. Not a fix defect (the unit tests prove the predicate). NOT restarted the user's separate-clone backend (cross-tree + unapplied-migration drift vs the shared cloud DB). The e2e goes green once a `cardioplace-v2` backend with G.4 serves `:4000`. Full suite deferred per the "smoke green → full suite" gate (smoke blocked by the cross-clone backend, not by the change).
+
+## Wave C — completed (Category 1 test-debt, authorized 2026-06-04)
+
+| Cluster | Spec(s) | Root cause | Fix | Commit |
+|---|---|---|---|---|
+| G.4 — alerts not in bell | `06` 20h.2 + 20h.3 | NOT G.4-mirror (those use seedAlerts→Alerts tab). Stale testIds: `PatientAlertCard` exposes `notification-row-ack-{id}` / `notification-row-detail-{id}`, specs used old `notification-dismiss-button-`/`notification-link-`. | Rename testIds + add defensive "not in Notifications sub-tab" assertion. | `06` commit |
+| W10 TZ casing | `06` group-header | Readings restyle made the weekday header UPPERCASE; assertion was case-sensitive. | Case-insensitive weekday compare. | `06` commit |
+| H4 wording | `19` A.5 | Manisha Doc 2 superseded the Cluster-7 HCM_LOW "under-perfusion" wording. | Assert the Doc-2 hydration/slow-stand phrase. | `19` commit |
+| #91 sessionId | `05a` | #91 made an expired sessionId mint a fresh UUID (never null); spec asserted null. | Assert non-null fresh UUID ≠ expired id. | `05a` commit |
+
+Targeted re-run (`05a` + `06` + `19`): **22 passed, 1 failed** — the 1 is `19 A.7` (below, intentionally not touched).
+
+### NOT fixed — surfaced (NOT Category-1 wording; out of authorized scope)
+- **`19` A.7 — HOLD endpoint contract change:** `400 "A hold reason is required to place a medication on hold"`. The verify-medication HOLD endpoint now requires a `reason` (likely W3 med-hold work). Fix = pass a hold reason in the request; it's a contract change, not wording — left for confirmation.
+- **`09` (6) + `17` (4) — engine rule-firing BEHAVIOR, not copy:** specs assert co-fire / single-reading outcomes that no longer match (e.g. `17 Q2`: single reading fired `BP_LEVEL_1_HIGH` instead of being HELD; `17 brady`: brady HR rule didn't co-fire; `09 Mike/James/Kate`: symptom-override fired without the expected BP-axis co-fire; `09 Olive`: AGE_65_LOW + loop-diuretic preemption). These assert WHICH RULES fire — editing them blind could mask a regression. Ambiguous root cause (cross-clone `_niva_audit` engine vs real change). **Defer to the Phase-3 clean-stack re-run to disambiguate; do not edit literals.**
+- **`05` (2) check-in step-1 testId timeout:** 12s timeout finding the pre-measurement-checklist step; likely W10 CheckIn restructure or flake (passed/failed inconsistently). Not wording. Defer to clean re-run.
