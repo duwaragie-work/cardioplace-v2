@@ -32,6 +32,9 @@ export const T = {
     timezoneSelect: 'onboarding-timezone-select',
     submitBtn: 'onboarding-submit-btn',
     skipBtn: 'onboarding-skip-btn',
+    // Privacy/trust step (V2-E Gap 7) — shown FIRST, before the profile form.
+    agreeTerms: 'onboarding-agree-terms',
+    privacyContinueBtn: 'onboarding-privacy-continue-btn',
   },
 
   // ─── Patient: clinical intake (A1–A9) ───────────────────────────────────
