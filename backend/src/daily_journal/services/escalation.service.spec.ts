@@ -687,6 +687,32 @@ describe('EscalationService', () => {
       )
       expect(providerDashboard.length).toBeGreaterThan(0)
     })
+
+    it('G.4 — read-side filter does NOT touch the write/email path: patient PUSH + EMAIL rows still written + patient email still SENT', async () => {
+      const bpL2 = buildAlert({
+        tier: 'BP_LEVEL_2',
+        createdAt: new Date('2026-04-21T02:00:00Z'),
+      })
+      prisma.deviationAlert.findUnique.mockResolvedValue(bpL2)
+
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({ tier: 'BP_LEVEL_2' }),
+      )
+
+      const notifCalls = prisma.notification.create.mock.calls as Array<
+        [{ data: { userId: string; channel: string } }]
+      >
+      const patientNotifs = notifCalls.filter(
+        (c) => c[0].data.userId === 'patient-1',
+      )
+      // G.4 is READ-SIDE ONLY — the write path is unchanged. The PUSH row is
+      // still WRITTEN (the bell query hides it); the EMAIL row is still WRITTEN.
+      expect(patientNotifs.some((c) => c[0].data.channel === 'PUSH')).toBe(true)
+      expect(patientNotifs.some((c) => c[0].data.channel === 'EMAIL')).toBe(true)
+      // And the real Resend email STILL dispatches (the regression lock — the
+      // read filter must never suppress the actual patient email send).
+      expect(email.sendEmail).toHaveBeenCalled()
+    })
   })
 
   // ────────────────────────────────────────────────────────────────────────

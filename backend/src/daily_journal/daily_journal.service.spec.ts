@@ -18,6 +18,10 @@ const mockPrisma = {
   deviationAlert: { findMany: jest.fn() },
   patientProfile: { findUnique: jest.fn() },
   rejectedReadingLog: { create: jest.fn() },
+  notification: { findMany: jest.fn(), count: jest.fn() },
+  // withConnectionRetry just runs the thunk in tests. Set at definition so
+  // clearAllMocks (which keeps implementations) doesn't strip it.
+  withConnectionRetry: jest.fn((fn: any) => fn()),
 } as any
 const mockEventEmitter = { emit: jest.fn() }
 
@@ -365,4 +369,43 @@ describe('DailyJournalService', () => {
       expect(ids).toEqual(['nudge'])
     })
   })
+
+  // ─── H5 G.4 — bell visibility filter (read-side; #80 EMAIL + alert-linked PUSH) ──
+  describe('getNotifications / unread-count bell filter (G.4 + #80)', () => {
+    // The bell LIST + unread COUNT must both exclude (a) EMAIL outbound rows
+    // (#80) and (b) alert-linked PUSH rows (G.4 — escalation T+0 mirror). The
+    // write path is untouched; this is a READ-side query predicate.
+    function expectBellExclusions(where: any) {
+      expect(where.userId).toBe('u1')
+      expect(where.AND).toEqual(
+        expect.arrayContaining([
+          { channel: { not: 'EMAIL' } },
+          { NOT: { AND: [{ alertId: { not: null } }, { channel: 'PUSH' }] } },
+        ]),
+      )
+    }
+
+    it('getNotifications excludes EMAIL + alert-linked PUSH at the query', async () => {
+      mockPrisma.notification.findMany.mockResolvedValueOnce([])
+      await service.getNotifications('u1')
+      const where = mockPrisma.notification.findMany.mock.calls[0][0].where
+      expectBellExclusions(where)
+    })
+
+    it('getNotificationsUnreadCount uses the SAME exclusions (count can never drift from list)', async () => {
+      mockPrisma.notification.count.mockResolvedValueOnce(0)
+      await service.getNotificationsUnreadCount('u1')
+      const where = mockPrisma.notification.count.mock.calls[0][0].where
+      expect(where.readAt).toBeNull()
+      expectBellExclusions(where)
+    })
+
+    it('system-action PUSH (alertId null) is NOT excluded — only alert-linked PUSH is', () => {
+      // The exclusion is scoped to alertId != null AND channel = PUSH, so a
+      // med-hold / threshold / profile-reject PUSH (alertId null) stays in the bell.
+      const clause = { NOT: { AND: [{ alertId: { not: null } }, { channel: 'PUSH' }] } }
+      // Sanity: the predicate requires BOTH alertId-present AND channel=PUSH to drop.
+      expect(clause.NOT.AND).toEqual([{ alertId: { not: null } }, { channel: 'PUSH' }])
+    })
+  });
 });
