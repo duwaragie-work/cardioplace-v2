@@ -560,6 +560,22 @@ test.describe('Benign reading auto-resolves open BP_LEVEL_1', () => {
 test.describe('Bucket B G1: Loop diuretic — orthostatic hypotension band', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
+  // Olive's seed persona is loop-diuretic + 65+ with NO AFib / NO CAD. Reset
+  // those flags to her seed baseline before the band tests: a drifted DB (or a
+  // prior test) can leave Olive with hasAFib=true, which trips the AFib
+  // <3-reading gate and suppresses EVERY single-reading BP/HR rule (incl.
+  // AGE_65_LOW) — making the band tests fire nothing. A condition-specific
+  // test must establish its own preconditions rather than trust seed state.
+  test.beforeAll(async () => {
+    if (!process.env.RUN_WRITE_TESTS) return
+    const tcOlive = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const olive = await tcOlive.findUser(PATIENTS.olive.email)
+    await tcOlive.setUserCondition(olive.id, 'hasAFib', false)
+    await tcOlive.setUserCondition(olive.id, 'hasCAD', false)
+    await tcOlive.setUserCondition(olive.id, 'diagnosedHypertension', true)
+    await tcOlive.dispose()
+  })
+
   test('Olive (loop + age 70, no HF) SBP 88 → AGE_65_LOW + loop-diuretic annotation', async () => {
     // Below the 90–92 band, the loop-diuretic rule defers to the lower-bound
     // rules. For Olive (DOB 1955, 70+) AGE_65_LOW claims the bp-low axis,
