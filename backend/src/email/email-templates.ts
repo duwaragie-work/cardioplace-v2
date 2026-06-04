@@ -222,6 +222,78 @@ export function activationEmailHtml(params: {
   `)
 }
 
+export function monthlyReportEmailHtml(params: {
+  recipientName: string
+  practiceName: string
+  monthLabel: string
+  totalAlerts: number
+  ackInWindowPct: number
+  escalatedPct: number
+  meanResolveSeconds: number | null
+  reportUrl: string
+}): string {
+  const {
+    recipientName,
+    practiceName,
+    monthLabel,
+    totalAlerts,
+    ackInWindowPct,
+    escalatedPct,
+    meanResolveSeconds,
+    reportUrl,
+  } = params
+  const meanResolveLabel =
+    meanResolveSeconds === null
+      ? '—'
+      : `${Math.round(meanResolveSeconds / 60)} min`
+
+  return wrap(`
+    <h2 style="margin: 0 0 8px; color: #1a1a2e; font-size: 20px;">
+      ${practiceName} — ${monthLabel} report
+    </h2>
+    <p style="color: #374151; margin: 16px 0; font-size: 15px; line-height: 1.6;">
+      Hi ${recipientName},
+    </p>
+    <p style="color: #374151; margin: 0 0 20px; font-size: 14px; line-height: 1.6;">
+      Here's your practice's monthly alert summary. The full report is
+      available in the admin app.
+    </p>
+    <table style="width: 100%; border-collapse: collapse; margin: 0 0 24px;">
+      <tr>
+        <td style="padding: 12px; background: #f3f0ff; border-radius: 8px; width: 50%; vertical-align: top;">
+          <p style="color: #7B00E0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px;">Total alerts</p>
+          <p style="color: #1f2937; font-size: 22px; font-weight: 700; margin: 0;">${totalAlerts}</p>
+        </td>
+        <td style="width: 12px;"></td>
+        <td style="padding: 12px; background: #f3f0ff; border-radius: 8px; width: 50%; vertical-align: top;">
+          <p style="color: #7B00E0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px;">Acked in SLA</p>
+          <p style="color: #1f2937; font-size: 22px; font-weight: 700; margin: 0;">${ackInWindowPct}%</p>
+        </td>
+      </tr>
+      <tr><td colspan="3" style="height: 12px;"></td></tr>
+      <tr>
+        <td style="padding: 12px; background: #f3f0ff; border-radius: 8px; vertical-align: top;">
+          <p style="color: #7B00E0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px;">Escalated</p>
+          <p style="color: #1f2937; font-size: 22px; font-weight: 700; margin: 0;">${escalatedPct}%</p>
+        </td>
+        <td></td>
+        <td style="padding: 12px; background: #f3f0ff; border-radius: 8px; vertical-align: top;">
+          <p style="color: #7B00E0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px;">Mean resolve</p>
+          <p style="color: #1f2937; font-size: 22px; font-weight: 700; margin: 0;">${meanResolveLabel}</p>
+        </td>
+      </tr>
+    </table>
+    <div style="text-align: center;">
+      <a href="${reportUrl}"
+         style="display: inline-block; background: #7B00E0; color: #ffffff; font-size: 15px;
+                font-weight: 600; padding: 12px 32px; border-radius: 30px;
+                text-decoration: none;">
+        Open full report
+      </a>
+    </div>
+  `)
+}
+
 export function contactFormEmailHtml(
   senderEmail: string,
   message: string,

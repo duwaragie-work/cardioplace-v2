@@ -9,3 +9,5 @@ export * from './journal-limits.js';
 export * from './alert-messages.js';
 export * from './resolution-action-labels.js';
 export * from './consent.js';
+export * from './report-sla.js';
+export * from './monthly-report.js';
