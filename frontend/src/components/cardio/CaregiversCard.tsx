@@ -262,6 +262,7 @@ export default function CaregiversCard() {
             <label className="flex items-start gap-2 text-[12.5px] cursor-pointer" style={{ color: 'var(--brand-text-secondary)' }}>
               <input
                 data-testid="profile-caregiver-consent-checkbox"
+                data-no-min-target
                 type="checkbox"
                 checked={consent}
                 onChange={(e) => setConsent(e.target.checked)}
@@ -269,6 +270,10 @@ export default function CaregiversCard() {
                 // accent, ate horizontal space so the label wrapped oddly on
                 // mobile). Constrain to a 16px square that doesn't shrink, with
                 // the brand purple accent to match the rest of the form.
+                // data-no-min-target opts out of the globals.css 44x44 WCAG
+                // touch-target floor — the label is the touch target (clicking
+                // anywhere on the label toggles it), so the checkbox itself can
+                // stay 16px.
                 className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--brand-primary-purple)] cursor-pointer"
               />
               {t('caregiver.consentLabel')}
