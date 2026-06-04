@@ -223,16 +223,32 @@ describe('EscalationService — caregiver dispatch (Gap 5)', () => {
     expect(email.sendEmail).not.toHaveBeenCalled()
   })
 
-  it('routes SMS to SmsService and survives the noop throw without crashing', async () => {
+  it('SUPPRESSES caregiver SMS by default (Addendum Decision 2 — email-only MVP)', async () => {
     process.env.CAREGIVER_DISPATCH_ENABLED = 'true'
+    delete process.env.ENABLE_CAREGIVER_SMS // default-off
     prisma.patientCaregiver.findMany.mockResolvedValue([
       emailCaregiver({ notifyChannel: 'SMS', email: null, phone: '+12025550100' }),
     ])
 
-    // Should not throw even though sendSms rejects.
     await expect(service.handleAlertCreated(caregiverPayload())).resolves.toBeUndefined()
-    expect(sms.sendSms).toHaveBeenCalledTimes(1)
-    expect(sms.sendSms.mock.calls[0][0]).toBe('+12025550100')
+    expect(sms.sendSms).not.toHaveBeenCalled()
+  })
+
+  it('routes SMS to SmsService ONLY when ENABLE_CAREGIVER_SMS=true (post-MVP), surviving the noop throw', async () => {
+    process.env.CAREGIVER_DISPATCH_ENABLED = 'true'
+    process.env.ENABLE_CAREGIVER_SMS = 'true'
+    try {
+      prisma.patientCaregiver.findMany.mockResolvedValue([
+        emailCaregiver({ notifyChannel: 'SMS', email: null, phone: '+12025550100' }),
+      ])
+
+      // Should not throw even though sendSms rejects.
+      await expect(service.handleAlertCreated(caregiverPayload())).resolves.toBeUndefined()
+      expect(sms.sendSms).toHaveBeenCalledTimes(1)
+      expect(sms.sendSms.mock.calls[0][0]).toBe('+12025550100')
+    } finally {
+      delete process.env.ENABLE_CAREGIVER_SMS
+    }
   })
 
   it('dispatches independently per caregiver (one EMAIL + one DASHBOARD)', async () => {

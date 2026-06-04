@@ -328,6 +328,7 @@ const am: Record<TranslationKey, string> = {
   // ─── Chat ──────────────────────────────────────────────────────────────────
   'chat.title': 'የጤና ረዳት',
   'chat.placeholder': 'መልዕክት ይጻፉ...',
+  'chat.voiceEndToType': 'End voice call to type…', // i18n-todo (Niva)
   'chat.newConversation': 'አዲስ ውይይት',
   'chat.conversations': 'ውይይቶች',
   'chat.noConversations': 'እስካሁን ውይይት የለም',
@@ -810,6 +811,9 @@ const am: Record<TranslationKey, string> = {
   'register.magicLinkInfo': 'ደህንነቱ የተጠበቀ ሊንክ በኢሜል እንልካለን። ከኢሜልዎ ይጫኑት እና ይገባሉ፣ ኮድ መጻፍ አያስፈልግም።',
   'register.otpTitle': 'OTP ኮድ',
   'register.otpInfo': '6-አሃዝ ኮድ በኢሜል እንልካለን። ለመግባት እዚህ ይጻፉት።',
+  // i18n-todo (Niva): translate. English placeholder. 911 stays per US pilot.
+  'register.medicalDisclaimer': 'Cardioplace helps you track your health and stay connected to your care team. It is not a substitute for medical advice, diagnosis, or treatment. In an emergency, call 911.',
+  'register.privacyAssurance': 'Your information is private and secure. Only your care team can see your health data.',
 
   // ─── Onboarding Page ──────────────────────────────────────────────────────
   'onboarding.title': 'ስለ ጤናዎ ይንገሩን',
@@ -1223,6 +1227,35 @@ const am: Record<TranslationKey, string> = {
   'intake.exitSave.saving': 'በማስቀመጥ ላይ…',
   'intake.exitSave.errorFallback': 'ለውጦችዎን ማስቀመጥ አልተቻለም። እባክዎ እንደገና ይሞክሩ።',
   'intake.edit.reverifyBanner': 'ይህን መረጃ ማረም ለማረጋገጥ የእንክብካቤ ቡድንዎ እንደገና ማረጋገጥ ይጠይቃል። የተረጋገጠ ሁኔታዎ እስከሚያረጋግጡ ድረስ ይዳግማል።',
+
+  // i18n-todo (Niva): translate the caregiver.* namespace. English placeholders.
+  'caregiver.title': 'Caregivers',
+  'caregiver.add': 'Add',
+  'caregiver.description': 'A caregiver is someone you trust — a family member or friend — who can be emailed if a serious health alert comes up. They’re only contacted for the alerts your care team has approved, and only after you give consent.',
+  'caregiver.loading': 'Loading…',
+  'caregiver.empty': 'No caregivers added yet.',
+  'caregiver.channelEmail': 'Email',
+  'caregiver.channelNone': 'Do not notify',
+  'caregiver.consentGiven': 'Consent given',
+  'caregiver.consentNone': 'No consent — won’t be notified',
+  'caregiver.revoke': 'Revoke',
+  'caregiver.allow': 'Allow alerts',
+  'caregiver.namePlaceholder': 'Caregiver’s name',
+  'caregiver.relationshipPlaceholder': 'Relationship (e.g. daughter) — optional',
+  'caregiver.emailPlaceholder': 'Email address',
+  'caregiver.optionEmail': 'Notify by email',
+  'caregiver.optionNone': 'Don’t notify yet',
+  'caregiver.consentLabel': 'I agree Cardioplace may share my health alerts with this person.',
+  'caregiver.save': 'Save caregiver',
+  'caregiver.saving': 'Saving…',
+  'caregiver.cancel': 'Cancel',
+  'caregiver.removeAria': 'Remove {name}',
+  'caregiver.errNameRequired': 'Please enter the caregiver’s name.',
+  'caregiver.errEmailRequired': 'Email is required to notify by email.',
+  'caregiver.errLoad': 'Could not load caregivers',
+  'caregiver.errAdd': 'Could not add caregiver.',
+  'caregiver.errConsent': 'Could not update consent.',
+  'caregiver.errRemove': 'Could not remove caregiver.',
 
   // "Already on file" page
   'intake.profileExists.title': 'ሁሉም ተዘጋጅቷል',

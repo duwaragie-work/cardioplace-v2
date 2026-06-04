@@ -528,6 +528,16 @@ export default function RegisterPage() {
                   </a>
                   .
                 </p>
+                {/* A2 — privacy assurance. i18n key: register.privacyAssurance */}
+                <p className="text-[#737373] text-[11px] lg:text-xs leading-relaxed text-center mt-2">
+                  {t('register.privacyAssurance')}
+                </p>
+                {/* A1 — medical disclaimer (Manisha Doc 1). i18n key: register.medicalDisclaimer.
+                    MVP US-only: 911 is hardcoded inside the i18n string per
+                    CROSS_HANDOFF_ADDENDUM_2026_06_03.md. Post-MVP: re-template by locale. */}
+                <p className="text-[#737373] text-[11px] lg:text-xs leading-relaxed text-center mt-3 border-t border-[#ececec] pt-3">
+                  {t('register.medicalDisclaimer')}
+                </p>
               </div>
             </div>
           </div>

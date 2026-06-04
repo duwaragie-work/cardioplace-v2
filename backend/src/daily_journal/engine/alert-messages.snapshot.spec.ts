@@ -15,6 +15,9 @@
 import {
   alertMessageRegistry,
   RULE_IDS,
+  EMERGENCY_CTA,
+  CARE_TEAM_NOTIFIED,
+  DO_NOT_STOP_MED,
 } from '@cardioplace/shared'
 import type { AlertContext, RuleId, RuleMessages } from '@cardioplace/shared'
 
@@ -221,6 +224,92 @@ describe('Cluster 8 §F.2 — message-registry snapshot gate', () => {
       })
       expect(msg).toContain('escalate-3-of-7')
       expect(msg).not.toContain('Single-reading session')
+    })
+  })
+
+  // ── Handoff 4 / Document 2 — Manisha-verbatim wording locks ─────────────
+  // Lock the highest-stakes alert wording to Manisha's 6/2 copy review so a
+  // future --updateSnapshot can't silently soften it. Patient tier carries NO
+  // raw BP number (Manisha: raw numbers are anxiety-provoking); caregiver +
+  // clinician do.
+  describe('Handoff 4 / Doc 2 — verbatim wording locks', () => {
+    it('exported fragments match Manisha Doc 2 verbatim', () => {
+      expect(EMERGENCY_CTA).toBe(
+        ' If you are having chest pain, trouble breathing, or feel like you might faint, call 911 right away.',
+      )
+      expect(CARE_TEAM_NOTIFIED).toBe('Your care team has been notified.')
+      expect(DO_NOT_STOP_MED).toBe(
+        'Please do not stop taking any medication on your own without talking to your care team.',
+      )
+    })
+
+    it('B2 — ABSOLUTE_EMERGENCY patient is directive, 911, do-not-wait, no raw number', () => {
+      const msg = alertMessageRegistry.RULE_ABSOLUTE_EMERGENCY.patientMessage(baseCtx())
+      expect(msg).toContain('dangerously high')
+      expect(msg).toContain('Call 911')
+      expect(msg).toContain('Do not wait')
+      expect(msg).not.toMatch(/mmHg/) // patient tier never shows the reading
+    })
+
+    it('B2 — ABSOLUTE_EMERGENCY caregiver leads with the name + reading + 911', () => {
+      const msg = alertMessageRegistry.RULE_ABSOLUTE_EMERGENCY.caregiverMessage(baseCtx())
+      expect(msg).toContain('Aisha')
+      expect(msg).toContain('145/85 mmHg')
+      expect(msg).toContain('911')
+    })
+
+    it('B3 — PREGNANCY_ACE_ARB patient does NOT tell the patient to self-discontinue', () => {
+      const msg = alertMessageRegistry.RULE_PREGNANCY_ACE_ARB.patientMessage(baseCtx())
+      expect(msg).toContain('not recommended during pregnancy')
+      expect(msg).toContain('do not stop taking it on your own')
+      // The only "stop" instruction must be the negative one above — never an
+      // imperative to stop. (The handoff's example test asserted both
+      // .not.toMatch(/stop taking/) AND .toContain('do not stop taking it on
+      // your own'), which is self-contradictory; this is the corrected lock.)
+      expect(msg).not.toMatch(/\bplease stop taking\b/i)
+    })
+
+    it('B4 — NDHP_HFREF patient names no class jargon and says do-not-stop', () => {
+      const msg = alertMessageRegistry.RULE_NDHP_HFREF.patientMessage(baseCtx())
+      expect(msg).toContain('heart condition')
+      expect(msg).toContain('do not stop taking it on your own')
+    })
+
+    it('B5 — PREGNANCY_L2 patient: urgent, hospital-or-doctor, 911 fallback, no raw number', () => {
+      const msg = alertMessageRegistry.RULE_PREGNANCY_L2.patientMessage(baseCtx())
+      expect(msg).toContain('very high')
+      expect(msg).toContain('go to the hospital')
+      expect(msg).toContain('call 911')
+      expect(msg).not.toMatch(/mmHg/)
+    })
+
+    it('patient tier carries no raw reading across the BP rules (sample)', () => {
+      const rules: RuleId[] = [
+        RULE_IDS.HFREF_HIGH,
+        RULE_IDS.HFPEF_HIGH,
+        RULE_IDS.CAD_HIGH,
+        RULE_IDS.STANDARD_L1_HIGH,
+        RULE_IDS.STANDARD_L1_LOW,
+        RULE_IDS.AGE_65_LOW,
+      ]
+      for (const id of rules) {
+        const msg = alertMessageRegistry[id].patientMessage(baseCtx())
+        expect(msg).not.toMatch(/mmHg/)
+      }
+    })
+
+    it('caregiver tier leads with the patient name across the BP rules (sample)', () => {
+      const rules: RuleId[] = [
+        RULE_IDS.HFREF_LOW,
+        RULE_IDS.HFPEF_HIGH,
+        RULE_IDS.DCM_LOW,
+        RULE_IDS.PERSONALIZED_HIGH,
+        RULE_IDS.STANDARD_L1_HIGH,
+      ]
+      for (const id of rules) {
+        const msg = alertMessageRegistry[id].caregiverMessage(baseCtx())
+        expect(msg).toContain('Aisha')
+      }
     })
   })
 })

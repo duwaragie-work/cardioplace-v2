@@ -104,13 +104,18 @@ describe('OutputGeneratorService', () => {
 
   // ─── T.2–T.5 Substitution + tone ───────────────────────────────────────
   describe('substitution + tone (T.2–T.5)', () => {
-    it('standard L1 High substitutes SBP/DBP into patient message', () => {
+    // Handoff 4 / Doc 2 (Manisha 6/2): the patient tier no longer carries the
+    // raw BP number (anxiety-provoking). The reading now rides on the caregiver
+    // tier; the physician tier keeps the session average. F7's "show the reading
+    // the patient saw" intent therefore lives on the caregiver message.
+    it('standard L1 High — patient tier carries no number; caregiver carries the reading', () => {
       const r = baseResult()
       const out = service.generate(r, baseSession, false)
-      expect(out.patientMessage).toContain('150/92')
+      expect(out.patientMessage).not.toContain('150/92')
+      expect(out.caregiverMessage).toContain('150/92')
     })
 
-    it('F7 — patient message cites the submitted reading, physician keeps the session average', () => {
+    it('F7 — caregiver cites the submitted reading, physician keeps the session average', () => {
       const r = baseResult({ actualValue: 135 })
       // Session-averaged 135/86 (engine truth) but the patient submitted 145/92.
       const session: SessionAverage = {
@@ -121,17 +126,20 @@ describe('OutputGeneratorService', () => {
         submittedDiastolicBP: 92,
       }
       const out = service.generate(r, session, false)
-      expect(out.patientMessage).toContain('145/92')
-      expect(out.patientMessage).not.toContain('135/86')
+      expect(out.caregiverMessage).toContain('145/92')
+      expect(out.caregiverMessage).not.toContain('135/86')
       // Physician/admin still sees the averaged evaluation value.
       expect(out.physicianMessage).toContain('135/86')
+      // Patient tier carries no raw reading at all (Doc 2).
+      expect(out.patientMessage).not.toContain('145/92')
+      expect(out.patientMessage).not.toContain('135/86')
     })
 
-    it('F7 — falls back to the averaged value when no submitted reading is present', () => {
+    it('F7 — caregiver falls back to the averaged value when no submitted reading is present', () => {
       const r = baseResult()
       const out = service.generate(r, baseSession, false)
-      // baseSession has no submitted* fields → patient body uses the average.
-      expect(out.patientMessage).toContain('150/92')
+      // baseSession has no submitted* fields → caregiver body uses the average.
+      expect(out.caregiverMessage).toContain('150/92')
     })
 
     it('pregnancy+ACE patient message uses warm language (no "teratogenic")', () => {
@@ -141,12 +149,12 @@ describe('OutputGeneratorService', () => {
         metadata: { drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR', conditionLabel: 'Pregnancy' },
       })
       const out = service.generate(r, baseSession, false)
-      // Reconciled 2026-05-20 (B.2): the registry copy now names the specific
-      // drug + a clear next action ("call your provider today before your next
-      // dose") instead of the generic "blood pressure medicine" phrase. Intent
-      // is unchanged — warm, plain language, no clinical jargon.
+      // Doc 2 (Manisha 6/2): names the drug, says "not recommended during
+      // pregnancy", and explicitly tells the patient NOT to self-discontinue
+      // (rebound-HTN safety). Warm, plain, no clinical jargon.
       expect(out.patientMessage.toLowerCase()).not.toContain('teratogenic')
-      expect(out.patientMessage).toMatch(/call your provider/i)
+      expect(out.patientMessage).toMatch(/not recommended during pregnancy/i)
+      expect(out.patientMessage).toMatch(/do not stop taking it on your own/i)
       expect(out.patientMessage).toContain('Lisinopril')
     })
 
@@ -157,7 +165,7 @@ describe('OutputGeneratorService', () => {
         metadata: { drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR' },
       })
       const out = service.generate(r, baseSession, false)
-      expect(out.physicianMessage.toLowerCase()).toContain('teratogenic')
+      expect(out.physicianMessage.toLowerCase()).toContain('contraindicated in pregnancy')
       expect(out.physicianMessage).toContain('Lisinopril')
     })
 

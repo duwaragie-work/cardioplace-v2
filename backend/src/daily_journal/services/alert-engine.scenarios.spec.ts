@@ -262,8 +262,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.type).toBe('MEDICATION_ADHERENCE')
     expect(createArgs.data.pulsePressure).toBeNull()
     expect(createArgs.data.patientMessage).toContain('Lisinopril')
-    expect(createArgs.data.patientMessage).toContain('pregnant')
-    expect(createArgs.data.physicianMessage).toContain('Teratogenic')
+    expect(createArgs.data.patientMessage).toContain('pregnancy')
+    expect(createArgs.data.physicianMessage).toContain('contraindicated in pregnancy')
     expect(createArgs.data.physicianMessage).toContain('Lisinopril')
     expect(eventArgs[0]).toBe(JOURNAL_EVENTS.ALERT_CREATED)
     expect(eventArgs[1]).toMatchObject({ alertId: 'alert-fixture-id' })
@@ -299,8 +299,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(result?.ruleId).toBe('RULE_NDHP_HFREF')
     expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
     expect(createArgs.data.dismissible).toBe(false)
-    expect(createArgs.data.patientMessage).toContain('heart medicines')
-    expect(createArgs.data.physicianMessage).toContain('Nondihydropyridine CCB')
+    expect(createArgs.data.patientMessage).toContain('heart condition')
+    expect(createArgs.data.physicianMessage).toContain('non-dihydropyridine CCB')
     expect(createArgs.data.physicianMessage).toContain('Diltiazem')
     expect(createArgs.data.physicianMessage).toContain('HFrEF')
   })
@@ -333,8 +333,10 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.tier).toBe('BP_LEVEL_2')
     expect(createArgs.data.dismissible).toBe(false)
     expect(createArgs.data.pulsePressure).toBe(85)
-    expect(createArgs.data.patientMessage).toContain('190/105')
+    // Doc 2: patient tier is directive with no raw number; caregiver carries it.
+    expect(createArgs.data.patientMessage).toContain('dangerously high')
     expect(createArgs.data.patientMessage).toMatch(/911/)
+    expect(createArgs.data.caregiverMessage).toContain('190/105')
     // Wide PP annotation rides on physician msg (>60)
     expect(createArgs.data.physicianMessage.toLowerCase()).toContain(
       'pulse pressure',
@@ -355,8 +357,9 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
     expect(createArgs.data.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
     expect(createArgs.data.dismissible).toBe(false)
-    expect(createArgs.data.patientMessage).toContain('122/76')
+    // Doc 2: symptom-override patient tier carries no number; physician does.
     expect(createArgs.data.patientMessage).toMatch(/911/)
+    expect(createArgs.data.physicianMessage).toContain('122/76')
     expect(createArgs.data.physicianMessage).toContain('severe headache')
   })
 
@@ -368,8 +371,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
 
     expect(result?.ruleId).toBe('RULE_PREGNANCY_L2')
     expect(createArgs.data.tier).toBe('BP_LEVEL_2')
-    expect(createArgs.data.patientMessage).toContain('165/112')
     expect(createArgs.data.patientMessage).toContain('pregnancy')
+    expect(createArgs.data.caregiverMessage).toContain('165/112')
     expect(createArgs.data.physicianMessage).toContain('ACOG')
   })
 
@@ -386,7 +389,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(result?.ruleId).toBe('RULE_PREGNANCY_L1_HIGH')
     expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
     expect(createArgs.data.dismissible).toBe(true)
-    expect(createArgs.data.patientMessage).toContain('144/88')
+    expect(createArgs.data.caregiverMessage).toContain('144/88')
     expect(createArgs.data.physicianMessage).toContain('preeclampsia')
   })
 
@@ -404,8 +407,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(result?.ruleId).toBe('RULE_CAD_DBP_CRITICAL')
     expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
     expect(createArgs.data.type).toBe('DIASTOLIC_BP')
-    expect(createArgs.data.patientMessage).toContain('132/68')
-    expect(createArgs.data.patientMessage).toContain('lower number')
+    expect(createArgs.data.patientMessage).toContain('bottom blood pressure number')
+    expect(createArgs.data.physicianMessage).toContain('132/68')
     expect(createArgs.data.physicianMessage).toContain('J-curve')
   })
 
@@ -427,7 +430,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
 
     expect(result?.ruleId).toBe('RULE_AFIB_HR_HIGH')
     expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
-    expect(createArgs.data.patientMessage).toContain('HR 115 bpm')
+    expect(createArgs.data.caregiverMessage).toContain('115 bpm')
     expect(createArgs.data.physicianMessage).toContain('AFib')
   })
 
@@ -459,9 +462,10 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
 
     expect(result?.ruleId).toBe('RULE_AGE_65_LOW')
     expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
-    expect(createArgs.data.patientMessage).toContain('dizziness')
-    expect(createArgs.data.patientMessage).toContain('fall risk')
-    expect(createArgs.data.physicianMessage).toContain('age 65+')
+    expect(createArgs.data.patientMessage).toContain('dizzy')
+    expect(createArgs.data.patientMessage).toContain('careful when standing')
+    expect(createArgs.data.physicianMessage).toContain('AGE 65+')
+    expect(createArgs.data.physicianMessage).toContain('fall risk')
   })
 
   it('Scenario 12 — Personalized mode + 152/88 → BP L1 High mode=PERSONALIZED', async () => {
@@ -488,7 +492,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
     expect(createArgs.data.mode).toBe('PERSONALIZED')
     expect(createArgs.data.patientMessage).toContain('target')
-    expect(createArgs.data.physicianMessage).toContain('target + 20')
+    expect(createArgs.data.physicianMessage).toContain('patient-specific threshold')
   })
 
   it('Scenario 13 — Pre-Day-3 (readingCount=3) + 165/94 → STANDARD L1 High + disclaimer', async () => {
@@ -680,8 +684,9 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
 
     expect(result?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
     expect(createArgs.data.tier).toBe('BP_LEVEL_2')
-    expect(createArgs.data.patientMessage).toContain('180/95')
+    expect(createArgs.data.patientMessage).toContain('dangerously high')
     expect(createArgs.data.patientMessage).toMatch(/911/)
+    expect(createArgs.data.caregiverMessage).toContain('180/95')
   })
 
   // ========================================================================

@@ -37,7 +37,7 @@ const en = {
   'dashboard.careTeamMonitoring': 'Your care team is monitoring your progress',
   'dashboard.cedarHillConnected': 'Cedar Hill Connected',
   'dashboard.todaysBp': "Today's BP",
-  'dashboard.latestBp': 'Latest BP',
+  'dashboard.latestBp': 'Your last reading', // A5 (Doc 1) — was 'Latest BP'
   'dashboard.withinTarget': 'Within Target',
   'dashboard.elevated': 'Elevated',
   'dashboard.noData': 'No Data',
@@ -327,6 +327,7 @@ const en = {
   // ─── Chat ──────────────────────────────────────────────────────────────────
   'chat.title': 'Health Assistant',
   'chat.placeholder': 'Type a message...',
+  'chat.voiceEndToType': 'End voice call to type…',
   'chat.newConversation': 'New Conversation',
   'chat.conversations': 'Conversations',
   'chat.noConversations': 'No conversations yet',
@@ -812,6 +813,11 @@ const en = {
   'register.magicLinkInfo': 'We email you a secure link. Tap it from your email and you are signed in, no codes to type.',
   'register.otpTitle': 'OTP Code',
   'register.otpInfo': 'We email you a 6-digit code. Type it here to sign in.',
+  // Handoff 4 A1 — medical disclaimer (Manisha Doc 1). MVP US-only: 911 stays
+  // hardcoded per CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
+  'register.medicalDisclaimer': 'Cardioplace helps you track your health and stay connected to your care team. It is not a substitute for medical advice, diagnosis, or treatment. In an emergency, call 911.',
+  // Handoff 4 A2 — privacy assurance panel (Manisha Doc 1).
+  'register.privacyAssurance': 'Your information is private and secure. Only your care team can see your health data.',
 
   // ─── Onboarding Page ──────────────────────────────────────────────────────
   'onboarding.title': 'Tell Us About Your Health',
@@ -1234,12 +1240,43 @@ const en = {
   'intake.exitSave.cta': 'Back to dashboard',
   'intake.exitSave.keepGoing': 'Keep going',
   'intake.exitSave.leaveWithoutSaving': 'Leave without saving',
-  'intake.exitSave.editTitle': 'Save your changes?',
-  'intake.exitSave.editBody': "We'll update your profile and medications with the changes on this page, then take you back to the dashboard.",
+  // A7 (Doc 1, edit mode) — Manisha verbatim "unsaved changes" prompt.
+  'intake.exitSave.editTitle': 'You have unsaved changes',
+  'intake.exitSave.editBody': 'Would you like to save before leaving?',
   'intake.exitSave.editCta': 'Save and exit',
   'intake.exitSave.saving': 'Saving…',
   'intake.exitSave.errorFallback': "We couldn't save your changes. Please try again.",
   'intake.edit.reverifyBanner': 'Editing this information will require your care team to re-verify. Your verified status will reset until they confirm the changes.',
+
+  // ─── Caregivers card (Handoff 4 / Doc 1 + Addendum Decision 2: email-only,
+  //     no SMS, no caregiver app access) ──────────────────────────────────────
+  'caregiver.title': 'Caregivers',
+  'caregiver.add': 'Add',
+  'caregiver.description': 'A caregiver is someone you trust — a family member or friend — who can be emailed if a serious health alert comes up. They’re only contacted for the alerts your care team has approved, and only after you give consent.',
+  'caregiver.loading': 'Loading…',
+  'caregiver.empty': 'No caregivers added yet.',
+  'caregiver.channelEmail': 'Email',
+  'caregiver.channelNone': 'Do not notify',
+  'caregiver.consentGiven': 'Consent given',
+  'caregiver.consentNone': 'No consent — won’t be notified',
+  'caregiver.revoke': 'Revoke',
+  'caregiver.allow': 'Allow alerts',
+  'caregiver.namePlaceholder': 'Caregiver’s name',
+  'caregiver.relationshipPlaceholder': 'Relationship (e.g. daughter) — optional',
+  'caregiver.emailPlaceholder': 'Email address',
+  'caregiver.optionEmail': 'Notify by email',
+  'caregiver.optionNone': 'Don’t notify yet',
+  'caregiver.consentLabel': 'I agree Cardioplace may share my health alerts with this person.',
+  'caregiver.save': 'Save caregiver',
+  'caregiver.saving': 'Saving…',
+  'caregiver.cancel': 'Cancel',
+  'caregiver.removeAria': 'Remove {name}',
+  'caregiver.errNameRequired': 'Please enter the caregiver’s name.',
+  'caregiver.errEmailRequired': 'Email is required to notify by email.',
+  'caregiver.errLoad': 'Could not load caregivers',
+  'caregiver.errAdd': 'Could not add caregiver.',
+  'caregiver.errConsent': 'Could not update consent.',
+  'caregiver.errRemove': 'Could not remove caregiver.',
 
   // "Already on file" page
   'intake.profileExists.title': "You're all set",

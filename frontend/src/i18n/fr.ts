@@ -326,6 +326,7 @@ const fr: Record<TranslationKey, string> = {
   // ─── Chat ──────────────────────────────────────────────────────────────────
   'chat.title': 'Assistant Santé',
   'chat.placeholder': 'Tapez un message...',
+  'chat.voiceEndToType': 'End voice call to type…', // i18n-todo (Niva)
   'chat.newConversation': 'Nouvelle Conversation',
   'chat.conversations': 'Conversations',
   'chat.noConversations': 'Aucune conversation pour le moment',
@@ -807,6 +808,9 @@ const fr: Record<TranslationKey, string> = {
   'register.magicLinkInfo': 'Nous vous envoyons un lien securise par email. Appuyez dessus et vous etes connecte, aucun code a saisir.',
   'register.otpTitle': 'Code OTP',
   'register.otpInfo': 'Nous vous envoyons un code a 6 chiffres par email. Saisissez-le ici pour vous connecter.',
+  // i18n-todo (Niva): translate. English placeholder. 911 stays per US pilot.
+  'register.medicalDisclaimer': 'Cardioplace helps you track your health and stay connected to your care team. It is not a substitute for medical advice, diagnosis, or treatment. In an emergency, call 911.',
+  'register.privacyAssurance': 'Your information is private and secure. Only your care team can see your health data.',
 
   // ─── Onboarding Page ──────────────────────────────────────────────────────
   'onboarding.title': 'Parlez-nous de Votre Santé',
@@ -1220,6 +1224,35 @@ const fr: Record<TranslationKey, string> = {
   'intake.exitSave.saving': 'Enregistrement…',
   'intake.exitSave.errorFallback': "Nous n'avons pas pu enregistrer vos modifications. Veuillez réessayer.",
   'intake.edit.reverifyBanner': "Modifier ces informations nécessitera que votre équipe de soins les vérifie à nouveau. Votre statut vérifié sera réinitialisé jusqu'à ce qu'elle confirme les changements.",
+
+  // i18n-todo (Niva): translate the caregiver.* namespace. English placeholders.
+  'caregiver.title': 'Caregivers',
+  'caregiver.add': 'Add',
+  'caregiver.description': 'A caregiver is someone you trust — a family member or friend — who can be emailed if a serious health alert comes up. They’re only contacted for the alerts your care team has approved, and only after you give consent.',
+  'caregiver.loading': 'Loading…',
+  'caregiver.empty': 'No caregivers added yet.',
+  'caregiver.channelEmail': 'Email',
+  'caregiver.channelNone': 'Do not notify',
+  'caregiver.consentGiven': 'Consent given',
+  'caregiver.consentNone': 'No consent — won’t be notified',
+  'caregiver.revoke': 'Revoke',
+  'caregiver.allow': 'Allow alerts',
+  'caregiver.namePlaceholder': 'Caregiver’s name',
+  'caregiver.relationshipPlaceholder': 'Relationship (e.g. daughter) — optional',
+  'caregiver.emailPlaceholder': 'Email address',
+  'caregiver.optionEmail': 'Notify by email',
+  'caregiver.optionNone': 'Don’t notify yet',
+  'caregiver.consentLabel': 'I agree Cardioplace may share my health alerts with this person.',
+  'caregiver.save': 'Save caregiver',
+  'caregiver.saving': 'Saving…',
+  'caregiver.cancel': 'Cancel',
+  'caregiver.removeAria': 'Remove {name}',
+  'caregiver.errNameRequired': 'Please enter the caregiver’s name.',
+  'caregiver.errEmailRequired': 'Email is required to notify by email.',
+  'caregiver.errLoad': 'Could not load caregivers',
+  'caregiver.errAdd': 'Could not add caregiver.',
+  'caregiver.errConsent': 'Could not update consent.',
+  'caregiver.errRemove': 'Could not remove caregiver.',
 
   // "Already on file" page
   'intake.profileExists.title': 'Tout est prêt',
