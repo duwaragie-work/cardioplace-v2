@@ -86,3 +86,21 @@
 - **Option B — suppress the write:** extend line 852 guard to skip `PATIENT + ('DASHBOARD'|'PUSH')`. Drops the row entirely (no loss today since no push service exists). Closer to F12.
 
 Recommend **Option A** (read-side, reversible, preserves the future-push hook, mirrors the #80 pattern Duwaragie cited). **HELD** for Duwaragie to confirm the corrected matrix + pick Option A vs B before G.4/G.5.
+
+## Wave G.4 / G.5 — patch + tests (Option A, read-side filter)
+
+| Item | Code commit | Test | Test commit | Status |
+|---|---|---|---|---|
+| G.4 — exclude alert-linked PATIENT PUSH rows from bell list + unread count (read-side; #80 pattern) | `35ade09` | unit (query-construction lock) + unit (email-path-intact) + e2e | `35ade09` / G.5 | ✅ unit / 🟡 e2e (see stack note) |
+
+- **G.4** (`35ade09`): shared `BELL_VISIBLE_NOTIFICATION_FILTER` predicate used by BOTH `getNotifications` + `getNotificationsUnreadCount`. Excludes EMAIL (#80) **and** `{alertId != null AND channel='PUSH'}` (H5 G.4). **Read-side only** — `Notification.create` (escalation.service.ts:856-867) and `emailService.sendEmail` (:892) untouched; no schema migration. System-action PUSH rows (`alertId` null) stay visible.
+- **G.5 units** (backend, +4 tests): `daily_journal.service.spec` — getNotifications + unread-count both apply the exclusion predicate (query-construction lock) + scoping note (alertId-null PUSH stays); `escalation.service.spec` — **email-path regression lock**: BP_LEVEL_2 T+0 still WRITES the patient PUSH + EMAIL Notification rows and still calls `emailService.sendEmail` (proves the read filter never suppresses the actual send).
+- **G.5 e2e** (`22-notifications-no-alert-mirror.spec.ts`): fires real 185/125 → BP_LEVEL_2, confirms the alert-linked patient PUSH row exists in DB (write intact), asserts the patient notifications API + Notifications tab exclude it while the Alerts tab shows the alert.
+
+### Verification battery (this turn)
+- backend `tsc --noEmit -p tsconfig.build.json` — clean
+- backend `jest` — **1290 passed / 62 suites** (was 1278 at H4; +8 W9 + 4 G.5)
+- admin `tsc --noEmit` — clean · frontend `tsc --noEmit` — clean
+
+### Playwright run — stack note (surfaced)
+The running localhost stack is **mixed across two clones** (confirmed via OS process inspection): frontend `:3000` = `cardioplace-v2` (this branch), **backend `:4000` + admin `:3001` = a separate `_niva_audit` clone**. So the live backend does **not** contain G.4. Smoke run (`--reporter=list`, 11 tests): **10 passed**; the 1 "failure" is the new `22-notifications-no-alert-mirror` spec **correctly detecting the un-patched mirror** on the `_niva_audit` backend (the alert-linked PUSH row was returned) — i.e. the guard works. Not a fix defect (the unit tests prove the predicate). NOT restarted the user's separate-clone backend (cross-tree + unapplied-migration drift vs the shared cloud DB). The e2e goes green once a `cardioplace-v2` backend with G.4 serves `:4000`. Full suite deferred per the "smoke green → full suite" gate (smoke blocked by the cross-clone backend, not by the change).
