@@ -325,6 +325,10 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
       const res = await adminApi.post(`admin/medications/${med.id}/verify`, {
         data: {
           status: 'HOLD',
+          // H3 #92 (d897040) tightened the contract — HOLD now requires a
+          // structured holdReason (Manisha §3 codes). PROVIDER_DIRECTED_HOLD is
+          // the clinical "pause it" path, whose patient message names the drug.
+          holdReason: 'PROVIDER_DIRECTED_HOLD',
           rationale: 'Patient reports new GI bleed; hold pending in-person eval',
         },
       })
@@ -336,14 +340,16 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
       let holdNotification: Awaited<ReturnType<TestControl['listNotifications']>>[number] | undefined
       while (Date.now() < deadline) {
         const notifications = await tc.listNotifications(u.id)
+        // H3 #92 / Manisha §3: a PROVIDER_DIRECTED_HOLD notice is titled
+        // "Please pause a medication" and names the drug ("…pause Lisinopril…").
         holdNotification = notifications.find(
-          (n) => n.title === 'Medication on hold' && n.body.includes('Lisinopril'),
+          (n) => n.title === 'Please pause a medication' && n.body.includes('Lisinopril'),
         )
         if (holdNotification) break
         await new Promise((r) => setTimeout(r, 200))
       }
       expect(holdNotification, 'expected SYSTEM_MSG_MEDICATION_HOLD notification in patient inbox').toBeDefined()
-      expect(holdNotification?.body).toMatch(/hold/i)
+      expect(holdNotification?.body).toMatch(/pause/i)
     } finally {
       await adminApi.dispose()
       await tc.dispose()
