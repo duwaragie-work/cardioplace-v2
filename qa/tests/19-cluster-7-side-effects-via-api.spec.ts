@@ -207,7 +207,7 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
     }
   })
 
-  test('A.5 — HCM + SBP <100 → RULE_HCM_LOW carries under-perfusion patient wording', async () => {
+  test('A.5 — HCM + SBP <100 → RULE_HCM_LOW carries Doc-2 hydration / slow-stand wording', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
@@ -226,7 +226,9 @@ test.describe('Cluster 7 — side-effect + interaction rules via API (Manisha 5/
         xs.some((a) => a.ruleId === 'RULE_HCM_LOW'),
       )
       const hcmLow = alerts.find((a) => a.ruleId === 'RULE_HCM_LOW')
-      expect(hcmLow?.patientMessage ?? '').toMatch(/low blood pressure can reduce blood flow/i)
+      // H4: Manisha Doc 2 superseded the Cluster-7 "under-perfusion" wording with
+      // direct hydration + slow-stand guidance (shared/src/alert-messages.ts RULE_HCM_LOW).
+      expect(hcmLow?.patientMessage ?? '').toMatch(/drink some water and sit or lie down/i)
     } finally {
       await tc.setUserCondition(u.id, 'hasHCM', false)
       await api.dispose()
