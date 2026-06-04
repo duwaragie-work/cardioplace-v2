@@ -461,7 +461,7 @@ const en = {
   'welcome.confirmed': 'Confirmed',
 
   // ─── Register Page ─────────────────────────────────────────────────────────
-  'register.signIn': 'Sign in to Cardioplace',
+  'register.signIn': 'Sign in to admin',
   'register.enterEmail': 'Enter your email address to receive a secure one-time login code',
   'register.emailAddress': 'Email Address',
   'register.emailPlaceholder': 'user@example.com',
