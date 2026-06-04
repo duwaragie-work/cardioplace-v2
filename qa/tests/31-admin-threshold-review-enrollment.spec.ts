@@ -512,7 +512,9 @@ test.describe('Timeline audit trail (UI E2E)', () => {
     await expect(tl).toContainText(/enrollment reverted/i, { timeout: 20_000 })
     await expect(tl).toContainText(/patient enrolled/i)
     await expect(tl).toContainText(/hypertrophic cardiomyopathy/i)
-    await expect(tl).toContainText(/corrected by admin/i)
+    // Timeline now surfaces the real actor ROLE (provider / medical director)
+    // instead of a flat "by admin" — accept any of them.
+    await expect(tl).toContainText(/corrected by (admin|medical director|provider)/i)
     // The fix: no raw "User.enrollment Status" / "user." path leaks through.
     await expect(tl).not.toContainText(/user\.enrollment/i)
     await tc.dispose()
@@ -549,11 +551,13 @@ test.describe('Timeline audit trail (UI E2E)', () => {
     await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
     await page.locator(byTestId(T.admin.detailTab('timeline'))).click()
     const tl = page.locator(byTestId(T.admin.timelineList))
-    await expect(tl).toContainText(/coronary artery disease.*verified by admin|verified by admin/i, {
+    // Timeline surfaces the real actor ROLE (provider / medical director) now,
+    // not a flat "by admin".
+    await expect(tl).toContainText(/verified by (admin|medical director|provider)/i, {
       timeout: 20_000,
     })
     await expect(tl).toContainText(/atrial fibrillation/i)
-    await expect(tl).toContainText(/rejected by admin/i)
+    await expect(tl).toContainText(/rejected by (admin|medical director|provider)/i)
     await expect(tl).toContainText(/heart failure/i)
     await expect(tl).toContainText(/corrected by admin/i)
     await tc.dispose()
