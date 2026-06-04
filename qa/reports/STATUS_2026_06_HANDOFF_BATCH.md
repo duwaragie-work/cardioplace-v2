@@ -156,3 +156,23 @@ Full single-worker run: **392 passed / 31 failed / 20 skipped / 5 did not run / 
 - **Patient (~11): `05` check-in, `08` profile, `25`/`26`/`27`/`28`/`29`, `14c`/`14e`.** Unverified mix (pollution + possibly real) — `27` ran 2.2m (timeout), classic shared-DB contention.
 
 **Recommendation (pre-push gate):** the authoritative gate is the **CI sharded e2e run** (4 shards / per-shard DB), or a **clean single-clone cardioplace-v2 stack** for all 3 apps (`:3001` is currently `_niva_audit`). The admin + remaining patient failures should be validated there before merge — they are not in the H5 change scope. H5's own deliverables (regression-net rebuild + G.4 + the 7 Category-1 fixes) are green.
+
+## Phase 3 — clean-stack takeover + remaining blockers (SURFACE, genuinely blocked)
+
+**Stack takeover DONE:** killed all `_niva_audit` listeners; built + started a clean single-clone **cardioplace-v2** stack — backend `:4000` (PID-verified `cardioplace-v2/backend/dist/main`), admin `:3001`, frontend `:3000` all from cardioplace-v2. Snapshot at `/tmp/h5-stack-snapshot.txt`.
+
+**Step 1 — skips/did-not-run:** all 20 skips are intentional (LLM-paid `!RUN_LLM_TESTS`, markup-conditional `count===0`, or documented `TODO(next-pass)` infra hard-skips needing unbuilt test-control endpoints). 0 stale/accidental. The 5 did-not-run are `30x-LOCAL-negative-scope` — a self-flagged **"DO NOT COMMIT, LOCAL-ONLY"** spec whose `beforeAll` needs local-only cross-practice fixtures → recommend excluding it from the suite.
+
+**Admin batch on clean stack:** 124 passed / 16 failed / 2 skipped. The 16 are REAL (reproduce in isolation), but trace to environment blockers, not H5 code:
+
+**BLOCKER 1 — Resend email quota exhausted (real key).** `EmailService: "You have reached your daily email sending quota"` (session's many runs drained it). `sendEmail` try/catches → non-fatal, but floods logs + fails email-assertion tests. CI uses a dummy key (`re_dummy_ci_key`); I restarted the backend with it.
+
+**BLOCKER 2 — `Notification_alertId_fkey` violation on escalation T+0 (persists with dummy key, 6×).** The dispatch's `notification.create(alertId)` references an alert not visible in the **5434** DB → fails 13:104/376/985 (ack/retry → EscalationEvent), 14e angioedema escalation, 31.11. The cardioplace-v2 backend hits this on the **`_niva_audit`-seeded 5434** DB; the SAME tests passed against the `_niva_audit` backend on 5434 → points to either a backend alert-create/escalation transaction-visibility issue or 5434-vs-cardioplace-v2 DB drift.
+
+**BLOCKER 3 — cardioplace-v2's own DB (localhost:5433) is NOT running** (connection refused). So I cannot stand up a *faithful* cardioplace-v2 DB to isolate BLOCKER 2; forced onto the `_niva_audit` 5434 DB.
+
+3 distinct attempts on the escalation cluster: (1) clean cardioplace-v2 backend on 5434 → FK appeared; (2) dummy Resend key restart (rule out email race) → FK persisted; (3) repoint to faithful v2 DB (5433) → **5433 down**. Genuinely blocked on infra.
+
+**The authoritative green gate is CI's sharded e2e** (e2e.yml): each of 4 shards spins a **fresh `pgvector` Postgres it migrates+seeds cleanly** + uses a **dummy Resend key** — avoiding ALL three local blockers (no quota, no stale-DB FK drift, no single-worker pollution). My local env (exhausted Resend + 5433-down → forced onto stale 5434 + single shared DB) structurally cannot reproduce CI's clean per-shard conditions. H5's code deliverables (regression-net + G.4 + the 7 Category-1 fixes) are sound and their specs pass on a clean DB.
+
+**Needs Duwaragie (infra, not code):** start the `:5433` cardioplace-v2 Postgres + `migrate deploy` + `SEED_TEST_FIXTURES=true db seed`, and a fresh/dummy Resend key — OR push to a feature branch and let CI's sharded e2e be the green gate. The remaining admin/patient failures should be validated there.
