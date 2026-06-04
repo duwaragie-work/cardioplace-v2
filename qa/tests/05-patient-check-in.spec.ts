@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { signInPatient, authedApi } from '../helpers/auth.js'
 import { PATIENTS } from '../helpers/accounts.js'
 import { byTestId, T } from '../helpers/selectors.js'
@@ -21,8 +21,26 @@ test.describe('Check-in wizard — UI spine', () => {
     await signInPatient(page, PATIENTS.aisha.email)
   })
 
+  // Before step 1 renders, /check-in may show a gate prompt when the patient
+  // has an unfinished draft (resume) or a non-expired server session
+  // (open-session #91). Either prompt replaces the wizard, so the spine
+  // assertions never see step 1. Start fresh past whichever prompt is shown.
+  async function dismissCheckinGatePrompts(page: Page): Promise<void> {
+    // Resume prompt (unfinished local draft) → "start new".
+    const startNew = page.locator(byTestId('checkin-startnew-btn'))
+    if (await startNew.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await startNew.click().catch(() => {})
+    }
+    // Open-session prompt (#91, non-expired server session) → "new session".
+    const newSession = page.locator(byTestId('checkin-new-session-btn'))
+    if (await newSession.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await newSession.click().catch(() => {})
+    }
+  }
+
   test('step 1 renders the pre-measurement checklist', async ({ page }) => {
     await page.goto('/check-in')
+    await dismissCheckinGatePrompts(page)
     // CLINICAL_SPEC §6 — exactly 8 pre-measurement checklist rows. Each row
     // carries data-testid="checkin-checklist-<formKey>"; count those instead
     // of regex-matching translated copy (en/es/etc strings differ).
@@ -32,6 +50,7 @@ test.describe('Check-in wizard — UI spine', () => {
 
   test('Continue advances from step 1 to BP entry', async ({ page }) => {
     await page.goto('/check-in')
+    await dismissCheckinGatePrompts(page)
     // Wait for step 1 to actually mount + hydrate before clicking Next.
     // Next 16 ships interactive DOM ahead of the React onClick attachment;
     // a straight-to-click race occasionally swallows the goNext() call,
