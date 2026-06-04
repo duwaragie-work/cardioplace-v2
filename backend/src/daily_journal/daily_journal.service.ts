@@ -26,6 +26,30 @@ const SOURCE_MAP: Record<string, EntrySource> = {
 
 const POSITION_VALUES = ['SITTING', 'STANDING', 'LYING'] as const
 
+/**
+ * Channel-aware predicate for the in-app bell LIST + unread COUNT. Both
+ * exclusions are READ-SIDE ONLY — the escalation write path
+ * (`Notification.create`) and the Resend email send are untouched.
+ *  • EMAIL rows — outbound deliveries, not in-app bell state. A patient with
+ *    both a PUSH and an EMAIL row for one event was seeing it twice while the
+ *    badge counted it once (H3 #80).
+ *  • alert-linked PUSH rows — escalation T+0 dispatch writes a PUSH
+ *    Notification row to the PATIENT for emergency-class alerts (BP_LEVEL_2,
+ *    symptom-override, angioedema). The alert is already shown in the Alerts
+ *    tab, so this must not ALSO render in the Notifications tab (H5 G.4). The
+ *    row STAYS in the DB as the hook for a future real-push service — there is
+ *    no out-of-app push delivery today. System-action PUSH rows (alertId null
+ *    — med-hold, threshold, profile-reject, gap-alert) remain visible.
+ * Memory: project_notification_tab_split_2026_06_04,
+ *         project_no_push_service_pilot_gap_2026_06_04.
+ */
+const BELL_VISIBLE_NOTIFICATION_FILTER: Prisma.NotificationWhereInput = {
+  AND: [
+    { channel: { not: 'EMAIL' } },
+    { NOT: { AND: [{ alertId: { not: null } }, { channel: 'PUSH' }] } },
+  ],
+}
+
 @Injectable()
 export class DailyJournalService {
   private readonly logger = new Logger(DailyJournalService.name)
@@ -577,18 +601,11 @@ export class DailyJournalService {
     userId: string,
     status: 'all' | 'unread' | 'read' = 'all',
   ) {
-    // #80 — the bell LIST must exclude EMAIL the same way the unread-COUNT
-    // already does (getNotificationsUnreadCount: `channel: { not: 'EMAIL' }`).
-    // EMAIL rows are outbound deliveries, not in-app bell state, and a patient
-    // who has both a PUSH and an EMAIL row for the same event (e.g. gap-alert)
-    // was seeing the event twice while the badge counted it once.
-    // NOTE: deliberately NOT a DASHBOARD-only filter (the handoff's first
-    // suggestion) — legitimate patient notices (med-hold, threshold change,
-    // profile reject) are dispatched on PUSH, so DASHBOARD-only would hide
-    // them. See CLAUDE_CODE_SPRINT_4_3_5_RESULTS Handoff 3 #80 finding.
+    // Bell LIST uses the shared BELL_VISIBLE_NOTIFICATION_FILTER (H3 #80 EMAIL
+    // exclusion + H5 G.4 alert-linked-PUSH exclusion). READ-SIDE only.
     const where: Prisma.NotificationWhereInput = {
       userId,
-      channel: { not: 'EMAIL' },
+      ...BELL_VISIBLE_NOTIFICATION_FILTER,
     }
 
     if (status === 'unread') {
@@ -631,10 +648,10 @@ export class DailyJournalService {
   }
 
   /**
-   * Count of in-app unread notifications for the bell badge. EMAIL rows
-   * are excluded — they represent outbound deliveries, not in-app state
-   * the user can clear by clicking the bell. Cheap (indexed on
-   * [userId, readAt]).
+   * Count of in-app unread notifications for the bell badge. Uses the SAME
+   * BELL_VISIBLE_NOTIFICATION_FILTER as getNotifications so the badge count and
+   * the list contents can never drift (EMAIL + alert-linked PUSH excluded).
+   * Cheap (indexed on [userId, readAt]).
    */
   async getNotificationsUnreadCount(userId: string) {
     const count = await this.prisma.withConnectionRetry(
@@ -643,7 +660,7 @@ export class DailyJournalService {
           where: {
             userId,
             readAt: null,
-            channel: { not: 'EMAIL' },
+            ...BELL_VISIBLE_NOTIFICATION_FILTER,
           },
         }),
       'getNotificationsUnreadCount',
