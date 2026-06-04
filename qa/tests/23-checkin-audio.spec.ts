@@ -44,6 +44,16 @@ test.describe('Check-in audio button', () => {
     await signInPatient(page, PATIENTS.carol.email)
     await page.goto('/check-in')
 
+    // /check-in may open on a resume/open-session gate (a non-expired server
+    // session) instead of step 1 — and the AudioButtons live on step 1. Start
+    // fresh past whichever gate is shown (no-op if neither is present).
+    for (const id of ['checkin-startnew-btn', 'checkin-new-session-btn']) {
+      const b = page.locator(byTestId(id))
+      if (await b.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await b.click().catch(() => {})
+      }
+    }
+
     const audio = page.locator(byTestId(T.checkin.audioButton)).first()
     await expect(audio).toBeVisible({ timeout: 15_000 })
     await audio.click()
