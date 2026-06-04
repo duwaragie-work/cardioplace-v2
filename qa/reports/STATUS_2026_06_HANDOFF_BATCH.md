@@ -55,20 +55,34 @@
 
 ## Wave G — notification-tab investigation (G.1 / G.2 / G.3) — HELD before patch
 
-**G.1 — `Notification.create` call sites (non-spec):** alert-engine `:1076` (CAD threshold-ramp → **provider** DASHBOARD notice, `userId=providerId`, idempotent, CAD-only — NOT a patient mirror); escalation `:1072` (caregiver DASHBOARD inbox); crons gap-alert / med-hold-escalation / monthly-reask (patient **system actions**); intake ×4 (profile correction / med-hold / condition-review — patient **system actions**); threshold `:214` (threshold-update notice — system action); provider ×2 (provider actions); test-control (seeding). **No patient-facing alert-fire mirror remains.**
+**Corrected scope (Duwaragie 2026-06-04):** the mirror is on the **escalation T+0 dispatch** path, not the alert-fire path. Dispatch TO PROVIDERS stays; dispatch TO PATIENT on a bell-visible channel must not land in the Notifications tab. Patient still sees the alert in the Alerts tab + dashboard banner.
 
-**G.3 — prior work:** the mirror was **already stripped** — `de7b543` ("strip patient bell mirror across all clinical-alert paths", F12) and `d9e52dd` ("patient inbox carries care-team actions only; clinical alerts no longer mirror", Round 2 Group B, removed 63 lines from alert-engine + 28 from escalation), plus `e6eaa4d` (F16 hold dedupe), `1f7effe` (rule-aware bucket label), H3 #80 (EMAIL-channel bell filter). Frontend `/notifications` is a **two-top-tab split (Alerts | Notifications)**: clinical alerts render in the **Alerts** sub-tab (`PatientAlertCard`), `Notification` rows in the **Notifications** sub-tab.
+**G.1 — fire path (confirmed clean):** `persistAlert` writes a DeviationAlert only — no patient Notification. alert-engine `:1076` is a **provider** CAD-ramp notice. So the FIRE path does not mirror.
 
-**G.2 — AlertTier × notification-on-fire matrix (current state):**
-| AlertTier | Sample rule | Creates patient Notification on FIRE? | What we want |
-|---|---|---|---|
-| TIER_1_ANGIOEDEMA | RULE_ACE_ANGIOEDEMA | **No** (stripped d9e52dd; `persistAlert` makes DeviationAlert only) | No ✓ already |
-| BP_LEVEL_2 | RULE_ABSOLUTE_EMERGENCY | **No** | No ✓ |
-| BP_LEVEL_2_SYMPTOM_OVERRIDE | RULE_SYMPTOM_OVERRIDE_GENERAL | **No** | No ✓ |
-| TIER_1_CONTRAINDICATION | RULE_PREGNANCY_ACE_ARB | **No** | No ✓ |
-| BP_LEVEL_1_HIGH | RULE_STANDARD_L1_HIGH | **No** | No ✓ |
-| BP_LEVEL_1_LOW | RULE_STANDARD_L1_LOW | **No** | No ✓ |
-| TIER_3_INFO | RULE_PULSE_PRESSURE_WIDE | **No** (physician-only; patient/caregiver msgs empty) | not patient-facing ✓ |
-| TIER_2_DISCREPANCY | RULE_MEDICATION_MISSED | **No** | No ✓ |
+**G.1 — escalation T+0 path (the real mirror):** `writeNotificationsAndEmit` (escalation.service.ts ~815) fans out one `Notification` row per (recipient × channel) for the step's `channels`. The patient is a **T+0 recipient** for the emergency-class ladders (per the F12 comment + ladder-defs.spec): `BP_LEVEL_2`, `BP_LEVEL_2_SYMPTOM_OVERRIDE`, `TIER_1_ANGIOEDEMA` (and the retired BP_LEVEL_1 patient row). T+0 `channels` include `PUSH`, `EMAIL`, `DASHBOARD`.
+- **Line 852 already skips `PATIENT + DASHBOARD`** (F12) → so DASHBOARD is NOT the leak (Duwaragie's proposed G.4 target is already a no-op).
+- **`PUSH` and `EMAIL` rows ARE written** for the patient (line 856).
+- `getNotifications` (daily_journal.service.ts:591) filters **`channel != 'EMAIL'`** → EMAIL is hidden from the tab (#80), but **`PUSH` is NOT** → **the patient's T+0 PUSH Notification row is what appears in the Notifications tab.** This is the mirror (Aisha 185/125 → BP_LEVEL_2 → patient PUSH row).
+- **There is NO real push service** (no web-push/FCM/APNs/PushService in the codebase) — `channel:'PUSH'` is *only* a Notification row that the in-app bell renders. So "PUSH still reaches the patient out-of-app" is not currently true; the PUSH row **is** the in-app tab entry.
 
-**G.2 conclusion:** the alert-FIRE path already matches the desired end-state — **no tier mirrors a clinical alert into a patient Notification row.** The residual "still mirroring" perception is most likely (a) the **Alerts** sub-tab on the same `/notifications` route (correct — clinical alerts SHOULD be patient-visible there), (b) escalation-event notifications (anti-scope: STAY), or (c) stale seeded notification rows (`13234dc` seeded 27). **HELD** pending Duwaragie's confirmation of the matrix + clarification of which surface the residual was observed on, before any G.4/G.5 work (which may be a no-op strip, or the optional G.4-path-2 system-action emissions — e.g. wiring the H4 `systemMsgProfileFieldCorrected` emission left as backlog).
+**G.3 — prior work:** `de7b543` (F12 — strip fire-path bell mirror), `d9e52dd` (Round 2 Group B — inbox = care-team actions only; −63 alert-engine/−28 escalation), `e6eaa4d` (F16 hold dedupe), `1f7effe` (rule-aware bucket), H3 `#80` (EMAIL-channel tab/bell filter). Frontend `/notifications` = two-top-tab split (Alerts | Notifications). **F12/#80 covered fire-path + DASHBOARD + EMAIL, but not the patient T+0 PUSH row.**
+
+**G.2 — AlertTier × T+0 patient dispatch matrix (corrected):**
+| AlertTier | Sample rule | Patient a T+0 recipient? | Channels patient gets | Patient PUSH row in Notifications tab today? | What we want |
+|---|---|---|---|---|---|
+| TIER_1_ANGIOEDEMA | RULE_ACE_ANGIOEDEMA | **Yes** (ANGIOEDEMA_PATIENT_T0) | PUSH (+EMAIL) | **YES — mirror** | Alerts tab only |
+| BP_LEVEL_2 | RULE_ABSOLUTE_EMERGENCY | **Yes** | PUSH, EMAIL, DASHBOARD | **YES — mirror** | Alerts tab only |
+| BP_LEVEL_2_SYMPTOM_OVERRIDE | RULE_SYMPTOM_OVERRIDE_GENERAL | **Yes** (T+0 and T+2H) | PUSH, EMAIL, DASHBOARD | **YES — mirror** | Alerts tab only |
+| TIER_1_CONTRAINDICATION | RULE_PREGNANCY_ACE_ARB | No | — | No | No |
+| BP_LEVEL_1_HIGH | RULE_STANDARD_L1_HIGH | No (patient row retired) | — | No | No |
+| BP_LEVEL_1_LOW | RULE_STANDARD_L1_LOW | No | — | No | No |
+| TIER_3_INFO | RULE_PULSE_PRESSURE_WIDE | No (physician-only) | — | No | No |
+| TIER_2_DISCREPANCY | RULE_MEDICATION_MISSED | No | — | No | No |
+
+**G.2 conclusion:** exactly the 3 emergency-class tiers where the patient is a T+0 PUSH recipient mirror into the Notifications tab — matching the "higher-tier mirrors, lower-tier doesn't" observation. The EscalationEvent audit row ("T+0 · Primary + backup + PATIENT · Push+Email+Dashboard") is separate and unaffected by any Notification-row change.
+
+**G.4 decision needed (the implementation surface differs from the original instruction — surfacing, NOT patching):** suppressing only DASHBOARD = no-op (already done). To actually stop the tab mirror, two channel-aware options (both keep the EscalationEvent audit + Alerts tab + provider rows):
+- **Option A — query filter (best match to Duwaragie's "mirror #80 / keep PUSH" intent):** extend `getNotifications` + unread-count to also exclude **alert-linked PATIENT PUSH rows** (`alertId != null AND channel = 'PUSH'`). Keeps the row in the DB as the hook for a future real push service; hides it from the in-app tab. Pure read-side, mirrors #80.
+- **Option B — suppress the write:** extend line 852 guard to skip `PATIENT + ('DASHBOARD'|'PUSH')`. Drops the row entirely (no loss today since no push service exists). Closer to F12.
+
+Recommend **Option A** (read-side, reversible, preserves the future-push hook, mirrors the #80 pattern Duwaragie cited). **HELD** for Duwaragie to confirm the corrected matrix + pick Option A vs B before G.4/G.5.
