@@ -125,7 +125,8 @@ function ctx(over: {
   dateOfBirth?: Date | null
   preDay3Mode?: boolean
 } = {}): ResolvedContext {
-  const profile: ResolvedContext['profile'] = {
+  // Cast at the literal — see notes in system-prompt-scenarios.spec.ts.
+  const profile = {
     gender: 'FEMALE',
     heightCm: 165,
     isPregnant: false,
@@ -140,12 +141,13 @@ function ctx(over: {
     hasDCM: false,
     hasTachycardia: false,
     hasBradycardia: false,
+    hasAorticStenosis: false,
     diagnosedHypertension: false,
     verificationStatus: 'VERIFIED',
     verifiedAt: FIXED_NOW,
     lastEditedAt: FIXED_NOW,
     ...over.profile,
-  }
+  } as ResolvedContext['profile']
   const readingCount = over.readingCount ?? 10
   const threshold = over.threshold ?? null
   const personalizedEligible =

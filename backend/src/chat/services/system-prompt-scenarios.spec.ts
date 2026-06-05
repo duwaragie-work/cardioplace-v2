@@ -18,6 +18,9 @@ const DOB = new Date('1980-06-15T00:00:00Z')
 function profile(
   over: Partial<ResolvedContext['profile']> = {},
 ): ResolvedContext['profile'] {
+  // Cast at the end — spreading `over` (Partial) makes every overridable
+  // field appear as `T | undefined` to TS even when an explicit default
+  // precedes the spread. Defaults above guarantee the runtime shape.
   return {
     gender: 'FEMALE',
     heightCm: 165,
@@ -33,12 +36,13 @@ function profile(
     hasDCM: false,
     hasTachycardia: false,
     hasBradycardia: false,
+    hasAorticStenosis: false,
     diagnosedHypertension: false,
     verificationStatus: 'VERIFIED',
     verifiedAt: NOW,
     lastEditedAt: NOW,
     ...over,
-  }
+  } as ResolvedContext['profile']
 }
 
 function med(over: Partial<ContextMedication> = {}): ContextMedication {

@@ -73,6 +73,7 @@ function baseCtx(over: Partial<ResolvedContext> = {}): ResolvedContext {
       hasDCM: false,
       hasTachycardia: false,
       hasBradycardia: false,
+      hasAorticStenosis: false,
       diagnosedHypertension: false,
       verificationStatus: 'VERIFIED',
       verifiedAt: new Date('2026-01-01'),
@@ -99,8 +100,8 @@ describe('AlertEngineService (orchestrator)', () => {
   let service: AlertEngineService
   let prisma: Record<string, any>
   let eventEmitter: { emit: jest.Mock }
-  let profileResolver: { resolve: jest.Mock }
-  let sessionAverager: { averageForEntry: jest.Mock }
+  let profileResolver: { resolve: jest.Mock<any> }
+  let sessionAverager: { averageForEntry: jest.Mock<any> }
   let outputGenerator: { generate: jest.Mock }
 
   beforeEach(async () => {

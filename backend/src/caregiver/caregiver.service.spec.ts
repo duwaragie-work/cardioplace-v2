@@ -67,7 +67,7 @@ describe('CaregiverService', () => {
       consentGiven: true,
     })
 
-    const data = tx.patientCaregiver.create.mock.calls[0][0].data
+    const data = (tx.patientCaregiver.create.mock.calls[0][0] as { data: any }).data
     expect(data.consentGivenAt).toBeInstanceOf(Date)
     expect(data.consentGivenBy).toBe('patient-1')
     expect(tx.profileVerificationLog.create).toHaveBeenCalledTimes(1)
@@ -85,7 +85,7 @@ describe('CaregiverService', () => {
       notifyChannel: 'EMAIL',
     })
 
-    const data = tx.patientCaregiver.create.mock.calls[0][0].data
+    const data = (tx.patientCaregiver.create.mock.calls[0][0] as { data: any }).data
     expect(data.consentGivenAt).toBeNull()
     expect(data.consentGivenBy).toBeNull()
   })
@@ -122,7 +122,7 @@ describe('CaregiverService', () => {
 
     await svc.update('patient-1', 'cg-1', 'admin-1', 'ADMIN', { consentGiven: true })
 
-    const data = tx.patientCaregiver.update.mock.calls[0][0].data
+    const data = (tx.patientCaregiver.update.mock.calls[0][0] as { data: any }).data
     expect(data.consentGivenAt).toBeInstanceOf(Date)
     expect(data.consentGivenBy).toBe('admin-1')
   })
@@ -137,7 +137,7 @@ describe('CaregiverService', () => {
 
     await svc.update('patient-1', 'cg-1', 'patient-1', 'PATIENT', { consentGiven: false })
 
-    const data = tx.patientCaregiver.update.mock.calls[0][0].data
+    const data = (tx.patientCaregiver.update.mock.calls[0][0] as { data: any }).data
     expect(data.consentGivenAt).toBeNull()
     expect(data.consentGivenBy).toBeNull()
   })
@@ -150,7 +150,7 @@ describe('CaregiverService', () => {
 
     const out = await svc.remove('patient-1', 'cg-1', 'patient-1', 'PATIENT')
 
-    expect(tx.patientCaregiver.update.mock.calls[0][0].data).toEqual({ active: false })
+    expect((tx.patientCaregiver.update.mock.calls[0][0] as { data: any }).data).toEqual({ active: false })
     expect(out.data.active).toBe(false)
     expect(tx.profileVerificationLog.create).toHaveBeenCalledTimes(1)
   })

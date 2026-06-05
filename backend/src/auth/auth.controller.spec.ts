@@ -76,6 +76,7 @@ describe('AuthController - OTP device ID enforcement', () => {
         roles: [],
         login_method: 'otp',
         name: null,
+        email: null,
       })
 
       await controller.verifyOtp(

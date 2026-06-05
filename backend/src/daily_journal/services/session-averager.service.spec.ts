@@ -169,8 +169,8 @@ describe('SessionAveragerService.loadSessionSiblings (window bound)', () => {
   const anchorAt = new Date('2026-05-22T10:00:00Z')
 
   function makeService() {
-    const findUnique = jest.fn()
-    const findMany = jest.fn()
+    const findUnique = jest.fn() as jest.Mock<any>
+    const findMany = jest.fn() as jest.Mock<any>
     const prisma = { journalEntry: { findUnique, findMany } } as any
     return { service: new SessionAveragerService(prisma), findUnique, findMany }
   }

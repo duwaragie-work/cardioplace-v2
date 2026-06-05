@@ -33,7 +33,7 @@ describe('IntakeService.listMedications filter scoping', () => {
   })
 
   function whereOf(callIndex = 0) {
-    return findMany.mock.calls[callIndex][0].where
+    return (findMany.mock.calls[callIndex][0] as { where: unknown }).where
   }
 
   it('default: excludes both discontinued and REJECTED', async () => {
@@ -78,7 +78,7 @@ describe('IntakeService.listMedications filter scoping', () => {
     ])
     const res = await service.listMedications('u1')
     // The default filter only carves out REJECTED — HOLD is NOT excluded.
-    expect(whereOf().verificationStatus).toEqual({ not: 'REJECTED' })
+    expect((whereOf() as { verificationStatus: unknown }).verificationStatus).toEqual({ not: 'REJECTED' })
     expect(res.data).toHaveLength(1)
     expect(res.data[0]).toMatchObject({
       verificationStatus: 'HOLD',

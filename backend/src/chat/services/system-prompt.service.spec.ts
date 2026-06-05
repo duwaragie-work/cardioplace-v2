@@ -14,6 +14,7 @@ const DOB = new Date('1980-06-15T00:00:00Z')
 function buildProfile(
   over: Partial<ResolvedContext['profile']> = {},
 ): ResolvedContext['profile'] {
+  // Cast at the end — see notes in system-prompt-scenarios.spec.ts.
   return {
     gender: 'FEMALE',
     heightCm: 165,
@@ -29,12 +30,13 @@ function buildProfile(
     hasDCM: false,
     hasTachycardia: false,
     hasBradycardia: false,
+    hasAorticStenosis: false,
     diagnosedHypertension: false,
     verificationStatus: 'VERIFIED',
     verifiedAt: NOW,
     lastEditedAt: NOW,
     ...over,
-  }
+  } as ResolvedContext['profile']
 }
 
 function buildMed(over: Partial<ContextMedication> = {}): ContextMedication {

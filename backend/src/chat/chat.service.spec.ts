@@ -48,6 +48,7 @@ function buildResolvedContext(
       hasDCM: false,
       hasTachycardia: false,
       hasBradycardia: false,
+      hasAorticStenosis: false,
       diagnosedHypertension: true,
       verificationStatus: 'VERIFIED',
       verifiedAt: NOW,
@@ -73,7 +74,7 @@ function buildResolvedContext(
 describe('ChatService.buildPatientSystemPrompt() — phase/16', () => {
   let service: ChatService
   let prisma: Record<string, any>
-  let profileResolver: { resolve: jest.Mock }
+  let profileResolver: { resolve: jest.Mock<any> }
 
   beforeEach(async () => {
     prisma = {

@@ -25,7 +25,7 @@ describe('AdminCaregiverController — per-patient access scope', () => {
     update: jest.Mock
     remove: jest.Mock
   }
-  let access: { assertCanAccessPatient: jest.Mock }
+  let access: { assertCanAccessPatient: jest.Mock<any> }
 
   beforeEach(() => {
     caregiver = {

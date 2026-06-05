@@ -45,6 +45,7 @@ function buildResolvedContext(
       hasDCM: false,
       hasTachycardia: false,
       hasBradycardia: false,
+      hasAorticStenosis: false,
       diagnosedHypertension: true,
       verificationStatus: 'VERIFIED',
       verifiedAt: NOW,
@@ -70,7 +71,7 @@ function buildResolvedContext(
 describe('VoiceService.buildPatientContext() — phase/16', () => {
   let service: VoiceService
   let prisma: Record<string, any>
-  let profileResolver: { resolve: jest.Mock }
+  let profileResolver: { resolve: jest.Mock<any> }
   let configService: { get: jest.Mock; getOrThrow: jest.Mock }
   let conversationHistory: { getSessionSummaryForVoice: jest.Mock<any> }
 

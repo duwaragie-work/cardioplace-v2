@@ -95,7 +95,11 @@ function buildCtx(over: {
   dateOfBirth?: Date | null
 } = {}): ResolvedContext {
   const isPregnant = over.isPregnant ?? over.profile?.isPregnant ?? false
-  const profile: ResolvedContext['profile'] = {
+  // Cast at the literal — `over.profile` is Partial<...> so spreading it
+  // makes every overridable field appear as `boolean | undefined` to TS,
+  // even when an explicit default precedes the spread. The cast is safe
+  // because every required key has a concrete default above the spread.
+  const profile = {
     gender: 'FEMALE',
     heightCm: 165,
     pregnancyDueDate: null,
@@ -109,13 +113,14 @@ function buildCtx(over: {
     hasDCM: false,
     hasTachycardia: false,
     hasBradycardia: false,
+    hasAorticStenosis: false,
     diagnosedHypertension: false,
     verificationStatus: 'VERIFIED',
     verifiedAt: TEN_YEARS_AGO,
     lastEditedAt: TEN_YEARS_AGO,
     ...over.profile,
     isPregnant,
-  }
+  } as ResolvedContext['profile']
   const readingCount = over.readingCount ?? 10
   const threshold = over.threshold ?? null
   const personalizedEligible =
@@ -149,8 +154,8 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
   let service: AlertEngineService
   let prisma: Record<string, any>
   let eventEmitter: { emit: jest.Mock }
-  let profileResolver: { resolve: jest.Mock }
-  let sessionAverager: { averageForEntry: jest.Mock }
+  let profileResolver: { resolve: jest.Mock<any> }
+  let sessionAverager: { averageForEntry: jest.Mock<any> }
 
   beforeEach(async () => {
     prisma = {
