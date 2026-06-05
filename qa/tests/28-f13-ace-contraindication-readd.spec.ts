@@ -46,15 +46,28 @@ test.describe('F13 — contraindicated ACE/ARB re-add is gated + held', () => {
 
     await signInPatient(page, PATIENTS.aisha.email)
     await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
-    // Open the medication-edit intake step.
-    await page.goto(`${page.url().replace(/\/dashboard.*$/, '')}/clinical-intake?step=A5`)
+    // Open the medication-edit intake step. The contraindication modal only
+    // fires when state.aceContraindicated is true, which the page hydrates from
+    // the GET /intake/profile response. Clicking the tile before that response
+    // lands races the hydration → the click adds the med with no modal. Arm the
+    // response wait BEFORE navigating so we catch the fetch the page kicks off,
+    // then let cascading fetches settle, THEN interact.
+    const intakeBase = page.url().replace(/\/dashboard.*$/, '')
+    const profileResp = page
+      .waitForResponse(
+        (r) => r.url().includes('/intake/profile') && r.ok(),
+        { timeout: 30_000 },
+      )
+      .catch(() => null)
+    await page.goto(`${intakeBase}/clinical-intake?step=A5`)
+    await profileResp
     await page.waitForLoadState('networkidle').catch(() => {})
 
     // Select an ACE inhibitor (Lisinopril / Prinivil is a CORE ACE med).
     const aceTile = page
       .locator('[data-testid^="intake-med-tile-"]', { hasText: /Lisinopril|Prinivil/i })
       .first()
-    await aceTile.click({ timeout: 15_000 }).catch(() => {})
+    await aceTile.click({ timeout: 15_000 })
 
     // The contraindication modal must appear.
     const modal = page.locator('[data-testid="readd-contraindicated-modal"]')
