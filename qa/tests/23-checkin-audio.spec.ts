@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { signInPatient } from '../helpers/auth.js'
+import { dismissCheckinGate } from '../helpers/api.js'
 import { PATIENTS } from '../helpers/accounts.js'
 import { byTestId, T } from '../helpers/selectors.js'
 
@@ -44,15 +45,9 @@ test.describe('Check-in audio button', () => {
     await signInPatient(page, PATIENTS.carol.email)
     await page.goto('/check-in')
 
-    // /check-in may open on a resume/open-session gate (a non-expired server
-    // session) instead of step 1 — and the AudioButtons live on step 1. Start
-    // fresh past whichever gate is shown (no-op if neither is present).
-    for (const id of ['checkin-startnew-btn', 'checkin-new-session-btn']) {
-      const b = page.locator(byTestId(id))
-      if (await b.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        await b.click().catch(() => {})
-      }
-    }
+    // /check-in may open on a resume/open-session gate instead of step 1 (the
+    // AudioButtons live on step 1). Poll past whichever gate is shown.
+    await dismissCheckinGate(page)
 
     const audio = page.locator(byTestId(T.checkin.audioButton)).first()
     await expect(audio).toBeVisible({ timeout: 15_000 })

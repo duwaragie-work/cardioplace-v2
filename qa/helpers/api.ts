@@ -339,6 +339,28 @@ export async function acknowledgeAlertViaUI(
 // `resolveAlertViaUI` alias — both defined in the "Phase 3 §B.3" section
 // at the end of this file.
 
+/**
+ * Drive `/check-in` past the pre-step-1 gate. The wizard may open on a resume
+ * prompt (unfinished local draft) or an open-session prompt (#91, a non-expired
+ * server session) INSTEAD of step 1 — and that prompt appears only AFTER an
+ * async active-session fetch resolves, so a one-shot isVisible() check races it.
+ * Poll: if step 1 is already up, done; otherwise dismiss whichever gate button
+ * is present and re-check. Returns once step 1 is reachable (or polling ends).
+ */
+export async function dismissCheckinGate(page: Page): Promise<void> {
+  const step1 = page.locator(byTestId(T.checkin.step(1)))
+  const gate = page.locator(
+    '[data-testid="checkin-new-session-btn"], [data-testid="checkin-startnew-btn"]',
+  )
+  for (let i = 0; i < 16; i++) {
+    if (await step1.isVisible().catch(() => false)) return
+    if (await gate.first().isVisible().catch(() => false)) {
+      await gate.first().click().catch(() => {})
+    }
+    await page.waitForTimeout(500)
+  }
+}
+
 /** Wait for the patient app to land on the full-screen Absolute Emergency screen. */
 export async function waitForEmergencyScreen(page: Page): Promise<void> {
   await page

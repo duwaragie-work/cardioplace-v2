@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { signInPatient } from '../helpers/auth.js'
+import { dismissCheckinGate } from '../helpers/api.js'
 import { PATIENTS } from '../helpers/accounts.js'
 import { byTestId, T } from '../helpers/selectors.js'
 import { newTestControl } from '../helpers/test-control.js'
@@ -49,13 +50,8 @@ test.describe('F17 — held meds appear as ON HOLD in daily check-in', () => {
     await page.goto('/check-in')
 
     // /check-in may open on a resume/open-session gate instead of step 1.
-    // Start fresh past whichever gate is shown (no-op if neither is present).
-    for (const id of ['checkin-startnew-btn', 'checkin-new-session-btn']) {
-      const b = page.locator(byTestId(id))
-      if (await b.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        await b.click().catch(() => {})
-      }
-    }
+    // Poll past whichever gate is shown.
+    await dismissCheckinGate(page)
 
     // B1 checklist → Continue.
     await expect(page.locator(byTestId(T.checkin.step(1)))).toBeVisible({ timeout: 15_000 })
