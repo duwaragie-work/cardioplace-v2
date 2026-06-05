@@ -60,13 +60,13 @@ test.describe('F27 — pre-enrollment patient sees truthful messaging', () => {
     const emergency = alerts.find((a) => a.tier === 'BP_LEVEL_2')!
     expect(emergency, 'BP Level 2 alert exists').toBeDefined()
 
-    // Open the alert detail page directly.
+    // Open the alert detail page directly. (The dashboard's "Recent Alerts"
+    // strip + the old `dashboard-active-alert` banner testid were removed in
+    // 25e3296; the active-alert surface is now a button, not an <a href>. This
+    // test asserts the ALERT-DETAIL page content, so navigate straight there.)
     await signInPatient(page, PATIENTS.aisha.email)
     await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
-    await page.locator(`a[href="/alerts/${emergency.id}"]`).first().click().catch(async () => {
-      // Fall back to a SPA nav via the dashboard banner if no direct link.
-      await page.locator('[data-testid="dashboard-active-alert"]').click()
-    })
+    await page.goto(`/alerts/${emergency.id}`)
     await page.waitForURL(new RegExp(`/alerts/${emergency.id}`), { timeout: 30_000 }).catch(() => {})
     await page.waitForLoadState('networkidle').catch(() => {})
 
