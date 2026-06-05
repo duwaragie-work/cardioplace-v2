@@ -34,6 +34,13 @@ test.describe('F13 — contraindicated ACE/ARB re-add is gated + held', () => {
     const tc = await newTestControl(apiBase, process.env.TEST_CONTROL_SECRET)
     const patient = await tc.findUser(PATIENTS.aisha.email)
 
+    // Start from a clean med roster. Aisha is a shared persona and the A5 step
+    // hydrates her existing meds as pre-SELECTED tiles; clicking a selected
+    // tile DESELECTS it (no re-add modal). Clearing first guarantees the
+    // Lisinopril tile is in the "add" state so the click triggers the
+    // contraindication gate. (Profile/flag below live on PatientProfile, which
+    // clearUserMedications does not touch.)
+    await tc.clearUserMedications(patient.id)
     // Set the ACE/ARB contraindication flag (as a B4 angioedema resolution would).
     await tc.setAceContraindicated(patient.id, true)
 
