@@ -97,6 +97,16 @@ test.describe('B3 — STANDARD / PERSONALIZED mode badge on the admin AlertCard'
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const aisha = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(aisha.id)
+    // resetUser wipes readings/alerts but NOT PatientProfile condition flags.
+    // Condition rules (CAD/HF/HCM/DCM/AS/pregnancy) claim the sbp-high axis
+    // BEFORE personalizedHighRule (alert-engine axisRules order), firing a
+    // STANDARD-mode alert that suppresses PERSONALIZED. Aisha's seed baseline
+    // is a clean hypertensive (no condition flags), so clearing any left by a
+    // prior spec just restores baseline and lets the personalized rule be the
+    // sole sbp-high claimant.
+    for (const c of ['hasCAD', 'hasHeartFailure', 'hasHCM', 'hasDCM', 'hasAorticStenosis', 'isPregnant'] as const) {
+      await tc.setUserCondition(aisha.id, c, false)
+    }
     await seedEstablishedHistory(tc, aisha.id) // ≥7 readings → personalized-eligible
     await tc.setUserCondition(aisha.id, 'diagnosedHypertension', true)
     await tc.setPatientThreshold(aisha.id, { sbpUpperTarget: 130 })
@@ -132,6 +142,13 @@ test.describe('B2 — co-fired alert rows grouped by reading', () => {
   async function fireCadCoFire(tc: any) {
     const aisha = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(aisha.id) // pre-Day-3 → single reading fires
+    // Clear competing condition flags left on the shared persona by earlier
+    // specs (resetUser doesn't touch PatientProfile). Otherwise HF/HCM/DCM/AS
+    // rules also co-fire on 165/65 and the raw patient list balloons. Keep
+    // hasCAD — this is the CAD co-fire under test.
+    for (const c of ['hasHeartFailure', 'hasHCM', 'hasDCM', 'hasAorticStenosis', 'isPregnant'] as const) {
+      await tc.setUserCondition(aisha.id, c, false)
+    }
     await tc.setUserCondition(aisha.id, 'hasCAD', true)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     await api.post('daily-journal', {
@@ -168,8 +185,11 @@ test.describe('B2 — co-fired alert rows grouped by reading', () => {
       await page.setViewportSize(MOBILE)
       await signInPatient(page, PATIENTS.aisha.email)
       await page.goto('/notifications?tab=alerts')
-      // The 2 co-fired rows merge into ONE consolidated card (same journalEntry).
-      const rows = page.locator('[data-testid^="notification-row-"]')
+      // The 2 co-fired rows merge into ONE consolidated card (same
+      // journalEntry). Count only VISIBLE cards: the page also renders a
+      // collapsed, un-consolidated raw list with the same testid prefix, so
+      // scope with :visible (matching the sibling tier-chip spec 25).
+      const rows = page.locator('[data-testid^="notification-row-"]:visible')
       await expect(rows).toHaveCount(1, { timeout: 20_000 })
     } finally {
       const aisha = await tc.findUser(PATIENTS.aisha.email)
