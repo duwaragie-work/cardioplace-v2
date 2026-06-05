@@ -824,9 +824,22 @@ export async function setMedActionViaUI(
     return
   }
   if (action === 'HOLD') {
-    // HOLD rationale is a window.prompt — accept it with the rationale.
-    adminPage.once('dialog', (d) => void d.accept(rationale))
+    // The card's Hold button opens the structured MedicationHoldModal
+    // (Manisha 5/24 Med §3 reason codes) — NOT a window.prompt anymore. Pick
+    // the clinical PROVIDER_DIRECTED_HOLD reason (the patient is told to PAUSE
+    // the med), add the rationale, and confirm. Without driving the modal the
+    // hold is never submitted, so no patient notification dispatches.
     await card.locator('[data-testid^="admin-med-hold-"]').first().click()
+    await adminPage
+      .locator(byTestId('admin-med-hold-modal'))
+      .waitFor({ state: 'visible', timeout: 15_000 })
+    await adminPage.locator(byTestId('admin-med-hold-pick-PROVIDER_DIRECTED_HOLD')).click()
+    await adminPage.locator(byTestId('admin-med-hold-rationale')).fill(rationale)
+    await adminPage.locator(byTestId('admin-med-hold-confirm')).click()
+    await adminPage
+      .locator(byTestId('admin-med-hold-modal'))
+      .waitFor({ state: 'hidden', timeout: 15_000 })
+      .catch(() => {})
     return
   }
   // REJECT → MedicationRejectModal (quick-pick "other" + free-text).
