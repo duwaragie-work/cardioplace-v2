@@ -55,7 +55,13 @@ test.describe('Phase 4a — patient auth + onboarding', () => {
   async function advancePastPrivacyStep(page: Page): Promise<void> {
     const cont = page.locator(byTestId(T.onboarding.privacyContinueBtn))
     if (await cont.isVisible({ timeout: 10_000 }).catch(() => false)) {
-      await page.locator(byTestId(T.onboarding.agreeTerms)).check().catch(() => {})
+      // The consent checkbox (16px) sits under an absolutely-positioned 44px
+      // tap-target <span> overlay, which intercepts a normal check()'s click at
+      // the input's center → the box never toggles and Continue stays disabled.
+      // Force the check so the click lands on the real <input> and fires its
+      // onChange (agreedToTerms=true), then wait for Continue to enable.
+      await page.locator(byTestId(T.onboarding.agreeTerms)).check({ force: true })
+      await expect(cont).toBeEnabled({ timeout: 10_000 })
       await cont.click()
     }
   }
