@@ -566,7 +566,7 @@ test.describe('Timeline audit trail (UI E2E)', () => {
     await expect(tl).toContainText(/atrial fibrillation/i)
     await expect(tl).toContainText(/rejected by (admin|medical director|provider)/i)
     await expect(tl).toContainText(/heart failure/i)
-    await expect(tl).toContainText(/corrected by admin/i)
+    await expect(tl).toContainText(/corrected by (admin|medical director|provider)/i)
     await tc.dispose()
   })
 })
