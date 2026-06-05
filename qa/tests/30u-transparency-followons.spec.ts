@@ -192,9 +192,14 @@ test.describe('B2 — co-fired alert rows grouped by reading', () => {
       await signInPatient(page, PATIENTS.aisha.email)
       await page.goto('/notifications?tab=alerts')
       // The 2 co-fired rows merge into ONE consolidated card (same
-      // journalEntry). Count only VISIBLE cards: the page also renders a
-      // collapsed, un-consolidated raw list with the same testid prefix, so
-      // scope with :visible (matching the sibling tier-chip spec 25).
+      // journalEntry). The page ALSO renders a separate, default-OPEN
+      // "Past alerts" section (PastAlerts) of raw, un-consolidated rows sharing
+      // the notification-row- prefix — collapse it so we count only the OPEN
+      // consolidated cards. Then scope with :visible (matching spec 25).
+      await page
+        .locator('[data-testid="alerts-section-past"]')
+        .click()
+        .catch(() => {})
       const rows = page.locator('[data-testid^="notification-row-"]:visible')
       await expect(rows).toHaveCount(1, { timeout: 20_000 })
     } finally {
