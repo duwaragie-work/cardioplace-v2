@@ -13,6 +13,7 @@ import {
   EMERGENCY_EVENTS,
   type EmergencyFlaggedPayload,
 } from '../../chat/emergency-events.js'
+import { isoFromTzWallclock } from '../../common/datetime.js'
 
 // Voice-tool I/O — argument shapes are stable contract with the Gemini Live
 // system prompt; field-name and sentinel-value changes ripple into the
@@ -1268,42 +1269,7 @@ function formatInTz(date: Date, tz: string): TzParts {
   return { y: get('year'), mo: get('month'), d: get('day'), h: get('hour'), mi: get('minute') }
 }
 
-/**
- * Build an ISO 8601 timestamp from a wall-clock date+time interpreted in
- * `tz`. Computes the UTC offset by formatting `Date.UTC(...)` in `tz` and
- * comparing back — matches Python's zoneinfo behaviour incl. DST.
- */
-function isoFromTzWallclock(dateStr: string, timeStr: string, tz: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr)
-  const t = /^(\d{1,2}):(\d{2})$/.exec(timeStr)
-  if (!m || !t) {
-    return new Date().toISOString()
-  }
-  const y = parseInt(m[1], 10)
-  const mo = parseInt(m[2], 10)
-  const d = parseInt(m[3], 10)
-  const h = parseInt(t[1], 10)
-  const mi = parseInt(t[2], 10)
-
-  // First guess at UTC, then correct by the local offset of that guess.
-  const utcGuess = Date.UTC(y, mo - 1, d, h, mi, 0)
-  const offsetMs = tzOffsetMs(utcGuess, tz)
-  return new Date(utcGuess - offsetMs).toISOString()
-}
-
-function tzOffsetMs(utcMs: number, tz: string): number {
-  const date = new Date(utcMs)
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hour12: false,
-  })
-  const parts = formatter.formatToParts(date)
-  const get = (t: string) => parseInt(parts.find((p) => p.type === t)?.value ?? '0', 10)
-  const localMs = Date.UTC(
-    get('year'), get('month') - 1, get('day'),
-    get('hour'), get('minute'), get('second'),
-  )
-  return localMs - utcMs
-}
+// isoFromTzWallclock + tzOffsetMs moved to backend/src/common/datetime.ts so
+// text chat's journal-tools dispatcher can share the same implementation.
+// See Bug 18 — text chat was writing wallclock-as-UTC while voice used this
+// helper correctly, causing My Readings to drift by the patient's UTC offset.

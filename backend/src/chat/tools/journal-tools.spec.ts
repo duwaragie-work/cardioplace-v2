@@ -450,6 +450,96 @@ describe('journal-tools', () => {
       expect(parsed.saved).toBe(true)
     })
 
+    // ─── Bug 18 — wallclock-to-UTC conversion uses ctx.timezone ──────────
+    // Pre-fix: dispatcher did `new Date(\`${date}T${time}:00.000Z\`)` which
+    // treated the patient's wallclock as UTC. A patient in IST saying
+    // "3:32 PM" was stored as 15:32Z, then My Readings rendered that UTC
+    // instant in client-local (+5:30) → "9:02 PM". Voice already used the
+    // shared helper; text chat now does too.
+    it('submit_checkin: converts IST wallclock to correct UTC instant via ctx.timezone', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'ok', systolicBP: 130, diastolicBP: 90 },
+      })
+      const today = new Date().toISOString().slice(0, 10)
+      const ctx = {
+        journalService: mockJournalService as any,
+        timezone: 'Asia/Kolkata', // IST = UTC+5:30
+      }
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: today,
+          measurement_time: '15:32', // 3:32 PM IST
+          systolic_bp: 130,
+          diastolic_bp: 90,
+          medication_taken: true,
+          symptoms: [],
+        },
+        ctx as any,
+        'user-1',
+      )
+      expect(mockJournalService.create).toHaveBeenCalledTimes(1)
+      const dto = mockJournalService.create.mock.calls[0][1] as { measuredAt: string }
+      // 15:32 IST → 10:02 UTC. Pre-fix this was 15:32:00.000Z (wrong).
+      expect(dto.measuredAt).toBe(`${today}T10:02:00.000Z`)
+    })
+
+    it('submit_checkin: falls back gracefully when ctx.timezone is unset (NOT wallclock-as-UTC)', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'ok', systolicBP: 130, diastolicBP: 90 },
+      })
+      const today = new Date().toISOString().slice(0, 10)
+      const ctx = {
+        journalService: mockJournalService as any,
+        // timezone omitted — exercises the back-compat fallback path
+      }
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: today,
+          measurement_time: '15:32',
+          systolic_bp: 120,
+          diastolic_bp: 80,
+          medication_taken: true,
+          symptoms: [],
+        },
+        ctx as any,
+        'user-1',
+      )
+      expect(mockJournalService.create).toHaveBeenCalledTimes(1)
+      const dto = mockJournalService.create.mock.calls[0][1] as { measuredAt: string }
+      // The pre-fix bug produced exactly this string. After the fix, the
+      // helper applies America/New_York's offset (4 or 5h depending on DST)
+      // so the wallclock no longer leaks through verbatim. Asserting "not
+      // equal" sidesteps the DST edge while still proving the fix is live.
+      expect(dto.measuredAt).not.toBe(`${today}T15:32:00.000Z`)
+      // And the result is still a well-formed ISO UTC instant.
+      expect(dto.measuredAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/)
+    })
+
+    it('update_checkin: applies ctx.timezone when only measurement_time changes', async () => {
+      mockJournalService.update.mockResolvedValue({
+        data: { id: 'entry-1', systolicBP: 130, diastolicBP: 90 },
+      })
+      const ctx = {
+        journalService: mockJournalService as any,
+        timezone: 'Asia/Kolkata',
+      }
+      await executeJournalTool(
+        'update_checkin',
+        {
+          entry_id: 'entry-1',
+          entry_date: '2026-06-05',
+          measurement_time: '15:32',
+        },
+        ctx as any,
+        'user-1',
+      )
+      expect(mockJournalService.update).toHaveBeenCalledTimes(1)
+      const dto = mockJournalService.update.mock.calls[0][2] as { measuredAt: string }
+      expect(dto.measuredAt).toBe('2026-06-05T10:02:00.000Z')
+    })
+
     it('submit_checkin: proceeds normally when no ocrState in context (no OCR happened)', async () => {
       mockJournalService.create.mockResolvedValue({
         data: { id: 'ok', systolicBP: 138, diastolicBP: 84 },

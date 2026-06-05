@@ -7,6 +7,7 @@ import { UnauthorizedException } from '@nestjs/common'
 import { Type } from '@google/genai'
 import type { FunctionDeclaration } from '@google/genai'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
+import { isoFromTzWallclock } from '../../common/datetime.js'
 import type { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import type { SessionSymptoms } from '../../daily_journal/engine/types.js'
 import type { OcrService } from '../../ocr/ocr.service.js'
@@ -59,6 +60,14 @@ export interface JournalToolContext {
    * place without re-threading the context.
    */
   ocrState?: { lastAt: number; userMessageSince: boolean }
+  /**
+   * Bug 18 — patient's IANA timezone, used by submit_checkin / update_checkin
+   * to convert a wallclock `measurement_time` into a correct UTC instant for
+   * `JournalEntry.measuredAt`. Optional for back-compat with legacy
+   * call sites / tests; when omitted, the dispatcher falls back to
+   * 'America/New_York' (mirrors the chat-service default).
+   */
+  timezone?: string
 }
 
 /** Bug 13 — how long a fresh OCR result blocks unconfirmed submit_checkin. */
@@ -764,7 +773,17 @@ export async function executeJournalTool(
       }
       try {
         const time = normaliseTime(args.measurement_time) ?? new Date().toISOString().slice(11, 16)
-        const measuredAt = new Date(`${entryDate}T${time}:00.000Z`).toISOString()
+        // Bug 18 — was `new Date(\`${entryDate}T${time}:00.000Z\`).toISOString()`
+        // which treated the patient's wallclock as UTC. A patient in IST saying
+        // "3:32 PM" got stored as 15:32Z, then My Readings rendered the UTC
+        // instant in client-local (+5:30) → "9:02 PM". Voice already used
+        // this helper; text chat now matches. Falls back to 'America/New_York'
+        // only when ctx.timezone is unset (legacy callers / older tests).
+        const measuredAt = isoFromTzWallclock(
+          entryDate,
+          time,
+          ctx.timezone ?? 'America/New_York',
+        )
         // Position whitelist — Gemini may return lowercase or unexpected values.
         const position = normalisePosition(args.position)
         // B1 pre-measurement checklist — pass through only the booleans the
@@ -905,7 +924,12 @@ export async function executeJournalTool(
           const t =
             normaliseTime(args.measurement_time) ??
             new Date().toISOString().slice(11, 16)
-          dto.measuredAt = new Date(`${d}T${t}:00.000Z`).toISOString()
+          // Bug 18 — same wallclock-as-UTC fix as submit_checkin above.
+          dto.measuredAt = isoFromTzWallclock(
+            d,
+            t,
+            ctx.timezone ?? 'America/New_York',
+          )
         }
         if (args.systolic_bp != null) dto.systolicBP = args.systolic_bp
         if (args.diastolic_bp != null) dto.diastolicBP = args.diastolic_bp

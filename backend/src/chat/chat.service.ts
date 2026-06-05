@@ -104,8 +104,16 @@ export class ChatService {
    *  new adherence / quick-symptom / photo-OCR tools. Built lazily because
    *  the constructor wires the deps; this just packages them. */
   private toolContext(
+    userId: string,
     ocrState?: JournalToolContext['ocrState'],
   ): JournalToolContext {
+    // Bug 18 — pull the patient's IANA timezone from the per-user context
+    // cache populated by buildPatientSystemPrompt at the start of every
+    // streaming turn. The cache is guaranteed warm by the time tool
+    // dispatch runs (system prompt is built first, then the LLM call, then
+    // tools), and the timezone is what submit_checkin / update_checkin use
+    // to convert wallclock measurement_time → UTC measuredAt correctly.
+    const timezone = this.contextCache.get(userId)?.timezone ?? 'America/New_York'
     return {
       journalService: this.dailyJournalService,
       adherenceService: this.adherenceService,
@@ -113,6 +121,7 @@ export class ChatService {
       ocrService: this.ocrService,
       alertEngine: this.alertEngineService,
       intakeStatusService: this.intakeStatusService,
+      timezone,
       // Bug 13 — caller passes a SHARED mutable ocrState so the same object
       // survives across the multiple toolContext() calls within one
       // streaming turn. submit_bp_from_photo mutates lastAt; the streaming
@@ -449,10 +458,10 @@ export class ChatService {
               next_action: `Continue asking. Missing: ${gate.missing[0]}`,
             })
           } else {
-            resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(), userId)
+            resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(userId), userId)
           }
         } else {
-          resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(), userId)
+          resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(userId), userId)
         }
 
         console.log(`Tool result [${toolName}]:`, resultStr.slice(0, 200))
@@ -650,10 +659,10 @@ export class ChatService {
                 next_action: `Continue asking. Missing: ${gate.missing[0]}`,
               })
             } else {
-              resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(ocrState), userId)
+              resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(userId, ocrState), userId)
             }
           } else {
-            resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(ocrState), userId)
+            resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(userId, ocrState), userId)
           }
 
           console.log(`Tool result [${toolName}]:`, resultStr.slice(0, 200))
