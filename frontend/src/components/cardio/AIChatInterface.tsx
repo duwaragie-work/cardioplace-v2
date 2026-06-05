@@ -2198,7 +2198,7 @@ export default function AIChatInterface() {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={isVoiceActive ? 'End voice call to type…' : 'Type a message…'}
+              placeholder={isVoiceActive ? t('chat.voiceEndToType') : t('chat.placeholder')}
               aria-label={t('chat.title') ? `${t('chat.title')} message input` : 'Chat message'}
               className="flex-1 bg-transparent text-[14px] outline-none min-w-0 py-2 resize-none leading-[1.4] thin-scrollbar"
               style={{

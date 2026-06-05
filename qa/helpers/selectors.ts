@@ -32,6 +32,9 @@ export const T = {
     timezoneSelect: 'onboarding-timezone-select',
     submitBtn: 'onboarding-submit-btn',
     skipBtn: 'onboarding-skip-btn',
+    // Privacy/trust step (V2-E Gap 7) — shown FIRST, before the profile form.
+    agreeTerms: 'onboarding-agree-terms',
+    privacyContinueBtn: 'onboarding-privacy-continue-btn',
   },
 
   // ─── Patient: clinical intake (A1–A9) ───────────────────────────────────
@@ -100,8 +103,8 @@ export const T = {
     // A2: pregnancy / preeclampsia
     isPregnantYes: 'intake-pregnant-yes',
     isPregnantNo: 'intake-pregnant-no',
-    historyPreeclampsiaYes: 'intake-preeclampsia-yes',
-    historyPreeclampsiaNo: 'intake-preeclampsia-no',
+    historyHDPYes: 'intake-preeclampsia-yes',
+    historyHDPNo: 'intake-preeclampsia-no',
     // A3: cardiac conditions
     conditionCheckbox: (
       key:

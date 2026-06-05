@@ -144,7 +144,7 @@ test.describe('active-session API + add-to-session contract', () => {
     await api.dispose()
   })
 
-  test('a reading attached to an EXPIRED sessionId is dropped to null', async () => {
+  test('a reading attached to an EXPIRED sessionId mints a fresh session (not null, not the expired id)', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
@@ -160,7 +160,13 @@ test.describe('active-session API + add-to-session contract', () => {
     })
     expect(postRes.status()).toBe(202)
     const created = (await postRes.json()).data
-    expect(created.sessionId).toBeNull()
+    // #91 (H3) — resolveCreateSessionId joins an open session within the window
+    // or MINTS a fresh UUID; it never returns null. An expired sessionId →
+    // a brand-new session id, distinct from the expired one.
+    expect(created.sessionId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    )
+    expect(created.sessionId).not.toBe(SEED_SESSION)
     await api.dispose()
   })
 })

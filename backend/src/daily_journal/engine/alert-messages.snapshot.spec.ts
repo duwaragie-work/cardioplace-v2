@@ -15,8 +15,11 @@
 import {
   alertMessageRegistry,
   RULE_IDS,
+  EMERGENCY_CTA,
+  CARE_TEAM_NOTIFIED,
+  DO_NOT_STOP_MED,
 } from '@cardioplace/shared'
-import type { AlertContext, RuleMessages } from '@cardioplace/shared'
+import type { AlertContext, RuleId, RuleMessages } from '@cardioplace/shared'
 
 /**
  * Stable context "filled stub" — every optional field populated with a
@@ -107,14 +110,16 @@ describe('Cluster 8 §F.2 — message-registry snapshot gate', () => {
       ]
 
       it('STANDARD context — patient/caregiver/physician messages match snapshot', () => {
-        const ctx = baseCtx()
+        // #83 — thread the rule's own id so physSuffix scopes the single-
+        // reading caveat per-rule (profile-axis rules drop it).
+        const ctx = { ...baseCtx(), ruleId: ruleId as RuleId }
         expect(entry.patientMessage(ctx)).toMatchSnapshot('patient')
         expect(entry.caregiverMessage(ctx)).toMatchSnapshot('caregiver')
         expect(entry.physicianMessage(ctx)).toMatchSnapshot('physician')
       })
 
       it('ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot', () => {
-        const ctx = annotatedCtx()
+        const ctx = { ...annotatedCtx(), ruleId: ruleId as RuleId }
         expect(entry.patientMessage(ctx)).toMatchSnapshot('patient-annotated')
         expect(entry.caregiverMessage(ctx)).toMatchSnapshot('caregiver-annotated')
         expect(entry.physicianMessage(ctx)).toMatchSnapshot('physician-annotated')
@@ -161,5 +166,150 @@ describe('Cluster 8 §F.2 — message-registry snapshot gate', () => {
     const msg = alertMessageRegistry.RULE_ACE_ANGIOEDEMA.physicianMessage(ctx)
     expect(msg).toMatch(/ARB-associated angioedema is less common/i)
     expect(msg).not.toMatch(/bradykinin-mediated/i)
+  })
+
+  // ── Manisha Q5 — Stage 2 axis-specific physician wording ────────────────
+  describe('Manisha Q5 — Stage 2 axis-specific wording', () => {
+    const phys = (sbp: number, dbp: number) =>
+      alertMessageRegistry.RULE_STANDARD_L1_HIGH.physicianMessage({
+        ...baseCtx(),
+        ruleId: RULE_IDS.STANDARD_L1_HIGH,
+        systolicBP: sbp,
+        diastolicBP: dbp,
+      })
+
+    it('SBP ≥160, DBP <100 → SBP-axis variant', () => {
+      const msg = phys(165, 85)
+      expect(msg).toContain('severe Stage 2 SBP (SBP ≥160)')
+      expect(msg).not.toContain('≥160/100')
+    })
+
+    it('DBP ≥100, SBP <160 → DBP-axis variant (no self-contradiction)', () => {
+      const msg = phys(119, 109)
+      expect(msg).toContain('severe Stage 2 DBP (DBP ≥100)')
+      expect(msg).not.toContain('≥160/100')
+    })
+
+    it('both axes ≥ → combined variant', () => {
+      const msg = phys(170, 105)
+      expect(msg).toContain('severe Stage 2 (≥160/100)')
+    })
+  })
+
+  // ── #83 — single-reading suffix scoped to BP/HR rules only ──────────────
+  describe('#83 — single-reading suffix BP/HR-rules only', () => {
+    it('does NOT append the suffix to RULE_MEDICATION_MISSED (profile axis)', () => {
+      const msg = alertMessageRegistry.RULE_MEDICATION_MISSED.physicianMessage({
+        ...annotatedCtx(),
+        ruleId: RULE_IDS.MEDICATION_MISSED,
+      })
+      expect(msg).not.toContain('Single-reading session')
+    })
+
+    it('DOES append the suffix to RULE_STANDARD_L1_HIGH (systolic axis) single-reading', () => {
+      const msg = alertMessageRegistry.RULE_STANDARD_L1_HIGH.physicianMessage({
+        ...annotatedCtx(),
+        ruleId: RULE_IDS.STANDARD_L1_HIGH,
+      })
+      expect(msg).toContain('Single-reading session — confirm with next reading')
+    })
+
+    it('still appends NON-single-reading physicianAnnotations on profile rules', () => {
+      // The carve-out clinical sentence (a physicianAnnotation) must survive
+      // even though the single-reading caveat is suppressed.
+      const msg = alertMessageRegistry.RULE_MEDICATION_MISSED.physicianMessage({
+        ...annotatedCtx(),
+        ruleId: RULE_IDS.MEDICATION_MISSED,
+        physicianAnnotations: ['escalate-3-of-7'],
+      })
+      expect(msg).toContain('escalate-3-of-7')
+      expect(msg).not.toContain('Single-reading session')
+    })
+  })
+
+  // ── Handoff 4 / Document 2 — Manisha-verbatim wording locks ─────────────
+  // Lock the highest-stakes alert wording to Manisha's 6/2 copy review so a
+  // future --updateSnapshot can't silently soften it. Patient tier carries NO
+  // raw BP number (Manisha: raw numbers are anxiety-provoking); caregiver +
+  // clinician do.
+  describe('Handoff 4 / Doc 2 — verbatim wording locks', () => {
+    it('exported fragments match Manisha Doc 2 verbatim', () => {
+      expect(EMERGENCY_CTA).toBe(
+        ' If you are having chest pain, trouble breathing, or feel like you might faint, call 911 right away.',
+      )
+      expect(CARE_TEAM_NOTIFIED).toBe('Your care team has been notified.')
+      expect(DO_NOT_STOP_MED).toBe(
+        'Please do not stop taking any medication on your own without talking to your care team.',
+      )
+    })
+
+    it('B2 — ABSOLUTE_EMERGENCY patient is directive, 911, do-not-wait, no raw number', () => {
+      const msg = alertMessageRegistry.RULE_ABSOLUTE_EMERGENCY.patientMessage(baseCtx())
+      expect(msg).toContain('dangerously high')
+      expect(msg).toContain('Call 911')
+      expect(msg).toContain('Do not wait')
+      expect(msg).not.toMatch(/mmHg/) // patient tier never shows the reading
+    })
+
+    it('B2 — ABSOLUTE_EMERGENCY caregiver leads with the name + reading + 911', () => {
+      const msg = alertMessageRegistry.RULE_ABSOLUTE_EMERGENCY.caregiverMessage(baseCtx())
+      expect(msg).toContain('Aisha')
+      expect(msg).toContain('145/85 mmHg')
+      expect(msg).toContain('911')
+    })
+
+    it('B3 — PREGNANCY_ACE_ARB patient does NOT tell the patient to self-discontinue', () => {
+      const msg = alertMessageRegistry.RULE_PREGNANCY_ACE_ARB.patientMessage(baseCtx())
+      expect(msg).toContain('not recommended during pregnancy')
+      expect(msg).toContain('do not stop taking it on your own')
+      // The only "stop" instruction must be the negative one above — never an
+      // imperative to stop. (The handoff's example test asserted both
+      // .not.toMatch(/stop taking/) AND .toContain('do not stop taking it on
+      // your own'), which is self-contradictory; this is the corrected lock.)
+      expect(msg).not.toMatch(/\bplease stop taking\b/i)
+    })
+
+    it('B4 — NDHP_HFREF patient names no class jargon and says do-not-stop', () => {
+      const msg = alertMessageRegistry.RULE_NDHP_HFREF.patientMessage(baseCtx())
+      expect(msg).toContain('heart condition')
+      expect(msg).toContain('do not stop taking it on your own')
+    })
+
+    it('B5 — PREGNANCY_L2 patient: urgent, hospital-or-doctor, 911 fallback, no raw number', () => {
+      const msg = alertMessageRegistry.RULE_PREGNANCY_L2.patientMessage(baseCtx())
+      expect(msg).toContain('very high')
+      expect(msg).toContain('go to the hospital')
+      expect(msg).toContain('call 911')
+      expect(msg).not.toMatch(/mmHg/)
+    })
+
+    it('patient tier carries no raw reading across the BP rules (sample)', () => {
+      const rules: RuleId[] = [
+        RULE_IDS.HFREF_HIGH,
+        RULE_IDS.HFPEF_HIGH,
+        RULE_IDS.CAD_HIGH,
+        RULE_IDS.STANDARD_L1_HIGH,
+        RULE_IDS.STANDARD_L1_LOW,
+        RULE_IDS.AGE_65_LOW,
+      ]
+      for (const id of rules) {
+        const msg = alertMessageRegistry[id].patientMessage(baseCtx())
+        expect(msg).not.toMatch(/mmHg/)
+      }
+    })
+
+    it('caregiver tier leads with the patient name across the BP rules (sample)', () => {
+      const rules: RuleId[] = [
+        RULE_IDS.HFREF_LOW,
+        RULE_IDS.HFPEF_HIGH,
+        RULE_IDS.DCM_LOW,
+        RULE_IDS.PERSONALIZED_HIGH,
+        RULE_IDS.STANDARD_L1_HIGH,
+      ]
+      for (const id of rules) {
+        const msg = alertMessageRegistry[id].caregiverMessage(baseCtx())
+        expect(msg).toContain('Aisha')
+      }
+    })
   })
 })

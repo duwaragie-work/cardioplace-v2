@@ -86,6 +86,21 @@ export class TestControlController {
     return this.svc.runMonthlyReaskScan(body?.now ? new Date(body.now) : new Date())
   }
 
+  // F33 — drive the medication-hold escalation ladder on demand instead of
+  // waiting for the daily 15:00 UTC cron. Lets the audit + Playwright suites
+  // backdate a hold then fire the scan synchronously.
+  @Post('cron/medication-hold-escalation/run')
+  @HttpCode(200)
+  async runMedicationHoldEscalation(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { now?: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.runMedicationHoldEscalationScan(
+      body?.now ? new Date(body.now) : new Date(),
+    )
+  }
+
   // ─── Time advancement ───────────────────────────────────────────────────
   @Post('anchor/backdate')
   @HttpCode(200)
@@ -204,7 +219,7 @@ export class TestControlController {
       userId: string
       flag:
         | 'isPregnant'
-        | 'historyPreeclampsia'
+        | 'historyHDP'
         | 'hasHeartFailure'
         | 'hasAFib'
         | 'hasCAD'
@@ -246,6 +261,27 @@ export class TestControlController {
     return this.svc.setUserMedication(body.userId, body.med)
   }
 
+  // F17 — place an existing medication on HOLD (provider-directed by default)
+  // so the "held meds surface in daily check-in" spec can set up state.
+  @Post('user/set-medication-hold')
+  @HttpCode(200)
+  async setMedicationHold(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: {
+      userId: string
+      drugName: string
+      holdReason?:
+        | 'AWAITING_RECORDS'
+        | 'UNCLEAR_NAME'
+        | 'UNCLEAR_DOSE'
+        | 'PROVIDER_DIRECTED_HOLD'
+        | 'OTHER'
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.setMedicationHold(body.userId, body.drugName, body.holdReason)
+  }
+
   // ─── Reset ──────────────────────────────────────────────────────────────
   @Post('reset/test-patients')
   @HttpCode(200)
@@ -275,6 +311,19 @@ export class TestControlController {
   ) {
     this.assertAuthorized(secret)
     return this.svc.clearUserMedications(body.userId)
+  }
+
+  // Delete a user's DeviationAlert rows (+ child escalations + alert-linked
+  // notifications) WITHOUT wiping their reading history — for tests that need an
+  // established history but a clean alert slate before triggering (30u B2).
+  @Post('reset/user-alerts')
+  @HttpCode(200)
+  async deleteAlertsForUser(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.deleteAlertsForUser(body.userId)
   }
 
   // THR-REVIEW / IVR-04 E2E setup — delete a user's threshold so the
@@ -310,6 +359,18 @@ export class TestControlController {
   ) {
     this.assertAuthorized(secret)
     await this.svc.setEnrollment(body.userId, body.status)
+    return { ok: true }
+  }
+
+  // F13 — set/clear the ACE/ARB contraindication flag for med-re-add specs.
+  @Post('user/set-ace-contraindicated')
+  @HttpCode(200)
+  async setAceContraindicated(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; value: boolean },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.setAceContraindicated(body.userId, body.value)
     return { ok: true }
   }
 
@@ -396,6 +457,9 @@ export class TestControlController {
         resolvedBy?: string
         resolutionAction?: string
         resolutionRationale?: string
+        patientMessage?: string
+        caregiverMessage?: string
+        physicianMessage?: string
       }>
     },
   ) {

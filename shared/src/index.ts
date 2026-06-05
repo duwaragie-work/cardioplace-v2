@@ -12,3 +12,5 @@ export * from './caregiver.js';
 export * from './escalation-ladders.js';
 export * from './session.js';
 export * from './consent.js';
+export * from './report-sla.js';
+export * from './monthly-report.js';

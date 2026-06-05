@@ -63,7 +63,7 @@ function baseCtx(over: Partial<ResolvedContext> = {}): ResolvedContext {
       heightCm: 165,
       isPregnant: false,
       pregnancyDueDate: null,
-      historyPreeclampsia: false,
+      historyHDP: false,
       hasHeartFailure: false,
       heartFailureType: 'NOT_APPLICABLE',
       resolvedHFType: 'NOT_APPLICABLE',
@@ -213,10 +213,15 @@ describe('AlertEngineService (orchestrator)', () => {
       // v2 addendum D.5: emergency-axis row co-fires with the Tier 1
       // contraindication so the patient gets the 911 message at T+0.
       // At 195/130 absoluteEmergency (≥180/120) wins the emergency axis
-      // ahead of pregnancyL2; pregnancyL1High also fires on bp-high.
+      // ahead of pregnancyL2.
+      // F20 — emergency is exclusive: once the 911 row claims the emergency
+      // axis the lower-tier bp-high ladder (pregnancyL1High) is suppressed,
+      // so a "contact your provider tomorrow" message never co-renders with
+      // the 911 takeover. The Tier 1 ACE/ARB contraindication (Stage A,
+      // different axis) still co-fires per D.5.
       expect(r?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
       expect(r?.tier).toBe('BP_LEVEL_2')
-      expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(3)
+      expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(2)
       const persistedRuleIds = (
         prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
       ).map((c) => c[0].data.ruleId)
@@ -224,9 +229,9 @@ describe('AlertEngineService (orchestrator)', () => {
         expect.arrayContaining([
           'RULE_ABSOLUTE_EMERGENCY',
           'RULE_PREGNANCY_ACE_ARB',
-          'RULE_PREGNANCY_L1_HIGH',
         ]),
       )
+      expect(persistedRuleIds).not.toContain('RULE_PREGNANCY_L1_HIGH')
     })
 
     it('both Tier 1 pairs present — pregnancy+ACE wins short-circuit', async () => {
@@ -631,28 +636,94 @@ describe('AlertEngineService (orchestrator)', () => {
       expect(call.data.severity).toBe('MEDIUM')
     })
 
-    it('dedup idempotency: re-evaluating same entry finds existing row and updates (phase/7)', async () => {
+    it('F18 — DBP-driven L1 tags legacy type DIASTOLIC_BP, not SBP', async () => {
+      // 119/109 → SBP below the 160 L1 threshold, DBP ≥100 drives the rule.
+      // Pre-fix this mislabelled the axis as SYSTOLIC_BP even though the
+      // diastolic reading (actualValue=109) is what fired.
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 119, diastolicBP: 109 }),
+      )
+      await service.evaluate('entry-1')
+      const call = (
+        prisma.deviationAlert.create.mock.calls as Array<
+          [{ data: { ruleId: string; type: string; actualValue: unknown } }]
+        >
+      ).find((c) => c[0].data.ruleId === 'RULE_STANDARD_L1_HIGH')
+      expect(call).toBeDefined()
+      expect(call![0].data.type).toBe('DIASTOLIC_BP')
+      expect(String(call![0].data.actualValue)).toBe('109')
+    })
+
+    it('F18 — SBP-driven L1 still tags SYSTOLIC_BP', async () => {
+      // 165/95 — systolic drives, axis stays SYSTOLIC_BP (no regression).
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 165, diastolicBP: 95 }),
+      )
+      await service.evaluate('entry-1')
+      const call = (
+        prisma.deviationAlert.create.mock.calls as Array<
+          [{ data: { ruleId: string; type: string } }]
+        >
+      ).find((c) => c[0].data.ruleId === 'RULE_STANDARD_L1_HIGH')
+      expect(call![0].data.type).toBe('SYSTOLIC_BP')
+    })
+
+    it('F9 — dedup idempotency: re-eval finds existing row and does NOT rewrite it (JCAHO immutability)', async () => {
       sessionAverager.averageForEntry.mockResolvedValue(
         baseSession({ systolicBP: 165, diastolicBP: 95 }),
       )
       // First pass: findFirst → null, so create fires.
-      // Second pass: findFirst → existing row, so update fires instead.
+      // Second pass: findFirst → existing row. Per F9 the row is the
+      // at-fire-time clinical record — re-eval must NOT touch it.
       let call = 0
       prisma.deviationAlert.findFirst.mockImplementation(() => {
         call++
-        return Promise.resolve(call > 1 ? { id: 'alert-1' } : null)
+        return Promise.resolve(
+          call > 1 ? { id: 'alert-1', escalated: false } : null,
+        )
       })
       await service.evaluate('entry-1')
       await service.evaluate('entry-1')
       expect(prisma.deviationAlert.findFirst).toHaveBeenCalledWith({
         where: { journalEntryId: 'entry-1', ruleId: 'RULE_STANDARD_L1_HIGH' },
-        select: { id: true },
+        select: { id: true, escalated: true },
       })
       expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(1)
-      expect(prisma.deviationAlert.update).toHaveBeenCalledTimes(1)
-      expect(prisma.deviationAlert.update.mock.calls[0][0].where).toEqual({
+      // F9: the update branch is gone — re-eval is a no-op write.
+      expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
+    })
+
+    it('F9 — mode is NOT mutated when patient crosses into personalized eligibility (Carol case)', async () => {
+      // Reading fires STANDARD-mode L1 at fire time. A later re-eval pass runs
+      // once the patient is personalizedEligible — pre-fix this rewrote the
+      // original row to PERSONALIZED, corrupting the audit trail.
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 165, diastolicBP: 95 }),
+      )
+      // Pass 1: STANDARD mode (not yet eligible), row created.
+      profileResolver.resolve.mockResolvedValueOnce(
+        baseCtx({ personalizedEligible: false }),
+      )
+      await service.evaluate('entry-1')
+      const created = (
+        prisma.deviationAlert.create.mock.calls as Array<
+          [{ data: { ruleId: string; mode: string } }]
+        >
+      ).find((c) => c[0].data.ruleId === 'RULE_STANDARD_L1_HIGH')
+      expect(created![0].data.mode).toBe('STANDARD')
+
+      // Pass 2: row now exists; patient is personalizedEligible.
+      prisma.deviationAlert.findFirst.mockResolvedValue({
         id: 'alert-1',
+        escalated: false,
       })
+      profileResolver.resolve.mockResolvedValueOnce(
+        baseCtx({ personalizedEligible: true }),
+      )
+      await service.evaluate('entry-1')
+
+      // No update issued → the original STANDARD record stands.
+      expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
     })
 
     it('session-averaged emergency: readingCount=2 + mean SBP 180 → fires BP Level 2', async () => {
@@ -666,6 +737,328 @@ describe('AlertEngineService (orchestrator)', () => {
       const r = await service.evaluate('entry-1')
       expect(r?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
       expect(r?.tier).toBe('BP_LEVEL_2')
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // F20 — emergency-exclusive short-circuit. Once a 911/BP-L2 rule claims the
+  // emergency axis, no lower-tier BP/HR row co-fires on the same reading, so
+  // the patient never gets a "contact tomorrow" message beside a 911 takeover.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('F20 — emergency-exclusive short-circuit', () => {
+    function persistedIds(): string[] {
+      return (
+        prisma.deviationAlert.create.mock.calls as Array<
+          [{ data: { ruleId: string } }]
+        >
+      ).map((c) => c[0].data.ruleId)
+    }
+
+    it('immediate path — multi-reading session 185/100 fires ONLY emergency, not L1-high', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ readingCount: 2, systolicBP: 185, diastolicBP: 100 }),
+      )
+      const r = await service.evaluate('entry-1')
+      expect(r?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+      expect(persistedIds()).toContain('RULE_ABSOLUTE_EMERGENCY')
+      expect(persistedIds()).not.toContain('RULE_STANDARD_L1_HIGH')
+    })
+
+    it('session-finalize path — single finalized reading 185/100 still fires ONLY emergency', async () => {
+      // The 5-min finalize cron re-runs evaluate() with singleReadingFinalized
+      // = true, which would otherwise let Stage C L1-high through the gate.
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({
+          readingCount: 1,
+          singleReadingFinalized: true,
+          systolicBP: 185,
+          diastolicBP: 100,
+        }),
+      )
+      const r = await service.evaluate('entry-1')
+      expect(r?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+      expect(persistedIds()).not.toContain('RULE_STANDARD_L1_HIGH')
+    })
+
+    it('non-emergency reading is unaffected — 165/95 still fires L1-high', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 165, diastolicBP: 95 }),
+      )
+      const r = await service.evaluate('entry-1')
+      expect(r?.ruleId).toBe('RULE_STANDARD_L1_HIGH')
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // RULE_HFREF_HIGH single-reading firing (Manisha Q2, 2026-06-02 reply).
+  // The ≥2-reading single-reading gate previously suppressed a lone HFrEF
+  // SBP≥target reading until a 2nd reading or the 5-min finalize. Manisha
+  // reverted this: the narrow HFrEF therapeutic window (≈120–130) makes a
+  // missed lone 145 high-cost, a false-positive at 132 low-cost. HFREF_HIGH
+  // (only the high branch) now bypasses the gate. HFREF_LOW and standard L1
+  // averaging are untouched.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('RULE_HFREF_HIGH single-reading firing (Manisha Q2)', () => {
+    // Carol — HFrEF, provider-set sbpUpperTarget 130, post-7-readings.
+    function carolCtx(over: Partial<ResolvedContext> = {}): ResolvedContext {
+      return baseCtx({
+        profile: {
+          ...baseCtx().profile,
+          hasHeartFailure: true,
+          heartFailureType: 'HFREF',
+          resolvedHFType: 'HFREF',
+        },
+        threshold: {
+          sbpUpperTarget: 130,
+          sbpLowerTarget: 85,
+          dbpUpperTarget: null,
+          dbpLowerTarget: null,
+          hrUpperTarget: null,
+          hrLowerTarget: null,
+          setByProviderId: 'prov-1',
+          setAt: new Date('2026-01-01'),
+          notes: null,
+        },
+        personalizedEligible: true,
+        ...over,
+      })
+    }
+
+    function persistedIds(): string[] {
+      return (
+        prisma.deviationAlert.create.mock.calls as Array<
+          [{ data: { ruleId: string } }]
+        >
+      ).map((c) => c[0].data.ruleId)
+    }
+
+    it('fires on a single reading SBP ≥target with no session average', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({
+          systolicBP: 135,
+          diastolicBP: 85,
+          readingCount: 1,
+          singleReadingFinalized: false,
+        }),
+      )
+      profileResolver.resolve.mockResolvedValue(carolCtx())
+
+      await service.evaluate('entry-1')
+
+      const call = (
+        prisma.deviationAlert.create.mock.calls as Array<
+          [{ data: { ruleId: string; tier: string; actualValue: unknown } }]
+        >
+      ).find((c) => c[0].data.ruleId === 'RULE_HFREF_HIGH')
+      expect(call).toBeDefined()
+      expect(call![0].data.tier).toBe('BP_LEVEL_1_HIGH')
+      // Evaluated against THIS reading's own value, not a session average.
+      // actualValue is persisted as a Prisma.Decimal — coerce to compare.
+      expect(Number(call![0].data.actualValue)).toBe(135)
+    })
+
+    it('does NOT wait for session-finalize (no singleReadingFinalized needed)', async () => {
+      // readingCount=1 AND singleReadingFinalized=false is the un-finalized
+      // single-reading state the gate used to hold. HFREF_HIGH must already
+      // be persisted on this first pass.
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({
+          systolicBP: 145,
+          diastolicBP: 88,
+          readingCount: 1,
+          singleReadingFinalized: false,
+        }),
+      )
+      profileResolver.resolve.mockResolvedValue(carolCtx())
+
+      const r = await service.evaluate('entry-1')
+      expect(r?.ruleId).toBe('RULE_HFREF_HIGH')
+      expect(persistedIds()).toContain('RULE_HFREF_HIGH')
+    })
+
+    it('still fires when multiple readings present (averaged ≥target → never 0)', async () => {
+      // 3 readings 135/140/132 → averager hands the engine the mean (136).
+      // Gate does not apply (readingCount≥2); Stage C runs as before.
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({
+          systolicBP: 136,
+          diastolicBP: 86,
+          readingCount: 3,
+          singleReadingFinalized: false,
+        }),
+      )
+      profileResolver.resolve.mockResolvedValue(carolCtx())
+
+      await service.evaluate('entry-1')
+      expect(persistedIds()).toContain('RULE_HFREF_HIGH')
+    })
+
+    it('HFREF_LOW is NOT exempt — lone low reading stays gated', async () => {
+      // Only the high branch bypasses the gate. A lone SBP 80 (< lower 85)
+      // must still wait for a 2nd reading / finalize.
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({
+          systolicBP: 80,
+          diastolicBP: 55,
+          readingCount: 1,
+          singleReadingFinalized: false,
+        }),
+      )
+      profileResolver.resolve.mockResolvedValue(carolCtx())
+
+      await service.evaluate('entry-1')
+      expect(persistedIds()).not.toContain('RULE_HFREF_LOW')
+    })
+
+    it('RULE_STANDARD_L1_HIGH stays gated on a lone reading (averaging preserved)', async () => {
+      // Daniel — no conditions, single reading SBP 165. Standard L1 must
+      // still gate on session averaging per Manisha (averaging stays ONLY
+      // for standard L1).
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({
+          systolicBP: 165,
+          diastolicBP: 95,
+          readingCount: 1,
+          singleReadingFinalized: false,
+        }),
+      )
+      await service.evaluate('entry-1')
+      expect(persistedIds()).not.toContain('RULE_STANDARD_L1_HIGH')
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // F9 / #82 — physicianMessage (and the whole three-tier record) is immutable
+  // after fire. The Sprint-1 F9 fix dropped the update branch in persistAlert;
+  // these tests pin that the session-finalize re-evaluation (the path the
+  // 2026-06-01 walk fingered, matching the cron cadence) cannot rewrite the
+  // at-fire-time clinical record — even when the engine would now render a
+  // DIFFERENT message. Covers the adherence + emergency rules named in #82.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('F9/#82 — physicianMessage immutability across session-finalize re-eval', () => {
+    function rewriteOutputOnReeval() {
+      // Make the output generator return a visibly different render so any
+      // write-back on the second pass would be detectable.
+      outputGenerator.generate.mockImplementation((result: any) => ({
+        patientMessage: `PATIENT:${result.ruleId}:REWRITE`,
+        caregiverMessage: `CAREGIVER:${result.ruleId}:REWRITE`,
+        physicianMessage: `PHYSICIAN:${result.ruleId}:REWRITE`,
+      }))
+    }
+
+    it('RULE_ABSOLUTE_EMERGENCY — re-eval finds existing row, never updates messages', async () => {
+      // Pass 1: lone emergency reading fires + creates the at-fire-time record.
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({
+          readingCount: 1,
+          singleReadingFinalized: false,
+          systolicBP: 185,
+          diastolicBP: 122,
+        }),
+      )
+      await service.evaluate('entry-1')
+      const createCall = (
+        prisma.deviationAlert.create.mock.calls as Array<
+          [{ data: { ruleId: string; physicianMessage: string } }]
+        >
+      ).find((c) => c[0].data.ruleId === 'RULE_ABSOLUTE_EMERGENCY')
+      expect(createCall).toBeDefined()
+      const firedPhysicianMessage = createCall![0].data.physicianMessage
+
+      // Pass 2: session-finalize re-runs evaluate() with
+      // singleReadingFinalized=true. The existing row is found; even though
+      // the generator now renders a different message, nothing is written.
+      prisma.deviationAlert.create.mockClear()
+      prisma.deviationAlert.findFirst.mockResolvedValue({
+        id: 'alert-1',
+        escalated: false,
+      })
+      rewriteOutputOnReeval()
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({
+          readingCount: 1,
+          singleReadingFinalized: true,
+          systolicBP: 185,
+          diastolicBP: 122,
+        }),
+      )
+      await service.evaluate('entry-1')
+
+      expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
+      expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
+      // No re-create either → the at-fire-time record is the only write.
+      expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
+      // The fired record never carried the "REWRITE" render.
+      expect(firedPhysicianMessage).not.toContain('REWRITE')
+    })
+
+    it('RULE_MEDICATION_MISSED — re-eval finds existing row, never updates messages', async () => {
+      // Adherence window: two prior days of misses → pattern threshold met.
+      prisma.journalEntry.findMany.mockResolvedValue([
+        {
+          id: 'prev-1',
+          measuredAt: new Date('2026-04-21T10:00:00Z'),
+          medicationTaken: false,
+          missedMedications: null,
+          pulse: 72,
+          systolicBP: 120,
+          diastolicBP: 78,
+          weight: null,
+        },
+        {
+          id: 'prev-2',
+          measuredAt: new Date('2026-04-20T10:00:00Z'),
+          medicationTaken: false,
+          missedMedications: null,
+          pulse: 72,
+          systolicBP: 120,
+          diastolicBP: 78,
+          weight: null,
+        },
+      ])
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({
+          readingCount: 1,
+          singleReadingFinalized: false,
+          systolicBP: 124,
+          diastolicBP: 78,
+          medicationTaken: false,
+        }),
+      )
+      profileResolver.resolve.mockResolvedValue(
+        baseCtx({
+          profile: { ...baseCtx().profile, diagnosedHypertension: true },
+        }),
+      )
+      await service.evaluate('entry-1')
+      const createCall = (
+        prisma.deviationAlert.create.mock.calls as Array<
+          [{ data: { ruleId: string } }]
+        >
+      ).find((c) => c[0].data.ruleId === 'RULE_MEDICATION_MISSED')
+      expect(createCall).toBeDefined()
+
+      // Pass 2: session-finalize re-eval → existing row found, no write-back.
+      prisma.deviationAlert.create.mockClear()
+      prisma.deviationAlert.findFirst.mockResolvedValue({
+        id: 'alert-1',
+        escalated: false,
+      })
+      rewriteOutputOnReeval()
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({
+          readingCount: 1,
+          singleReadingFinalized: true,
+          systolicBP: 124,
+          diastolicBP: 78,
+          medicationTaken: false,
+        }),
+      )
+      await service.evaluate('entry-1')
+
+      expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
+      expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
+      expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
     })
   })
 })

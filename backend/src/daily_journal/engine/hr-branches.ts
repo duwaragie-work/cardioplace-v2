@@ -79,7 +79,7 @@ export const tachySevereRule: RuleFunction = (session, ctx) => {
     pulsePressure: getPulsePressure(session.systolicBP, session.diastolicBP),
     suboptimalMeasurement: session.suboptimalMeasurement,
     actualValue: session.pulse,
-    reason: `Severe tachycardia HR ${session.pulse} > ${TACHY_SEVERE_HR} (single-reading Tier 2 exception per Manisha 5/9 Q5).`,
+    reason: `Severe tachycardia HR ${session.pulse} > ${TACHY_SEVERE_HR} (single-reading Tier 2 exception).`,
     metadata: {
       conditionLabel: 'Tachycardia',
       thresholdValue: TACHY_SEVERE_HR,

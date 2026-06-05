@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { signInAdmin, signInPatient, authedApi } from '../helpers/auth.js'
+import { postSessionWithTwoReadings } from '../helpers/api.js'
 import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
 import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
@@ -97,13 +98,28 @@ test.describe('B3 — STANDARD / PERSONALIZED mode badge on the admin AlertCard'
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const aisha = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(aisha.id)
+    // resetUser wipes readings/alerts but NOT PatientProfile condition flags.
+    // Condition rules (CAD/HF/HCM/DCM/AS/pregnancy) claim the sbp-high axis
+    // BEFORE personalizedHighRule (alert-engine axisRules order), firing a
+    // STANDARD-mode alert that suppresses PERSONALIZED. Aisha's seed baseline
+    // is a clean hypertensive (no condition flags), so clearing any left by a
+    // prior spec just restores baseline and lets the personalized rule be the
+    // sole sbp-high claimant.
+    for (const c of ['hasCAD', 'hasHeartFailure', 'hasHCM', 'hasDCM', 'hasAorticStenosis', 'isPregnant'] as const) {
+      await tc.setUserCondition(aisha.id, c, false)
+    }
     await seedEstablishedHistory(tc, aisha.id) // ≥7 readings → personalized-eligible
     await tc.setUserCondition(aisha.id, 'diagnosedHypertension', true)
     await tc.setPatientThreshold(aisha.id, { sbpUpperTarget: 130 })
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
-    // 155 ≥ 130 + 20 band → RULE_PERSONALIZED_HIGH (mode PERSONALIZED)
-    await api.post('daily-journal', {
-      data: { measuredAt: new Date().toISOString(), systolicBP: 155, diastolicBP: 92, pulse: 76, position: 'SITTING' },
+    // 155 ≥ 130 + 20 band → RULE_PERSONALIZED_HIGH (mode PERSONALIZED). Aisha is
+    // post-Day-3 (≥7 readings), so a LONE reading won't fire — the single-reading
+    // gate requires a 2-reading session (or finalization). Post two so the alert
+    // actually fires. (Confirmed via engine scenario 12b.)
+    await postSessionWithTwoReadings(api, {
+      systolicBP: 155,
+      diastolicBP: 92,
+      pulse: 76,
     })
     await new Promise((r) => setTimeout(r, 1000))
     const open = (await tc.listAlerts(aisha.id)).filter((a: any) => a.status === 'OPEN')
@@ -132,7 +148,20 @@ test.describe('B2 — co-fired alert rows grouped by reading', () => {
   async function fireCadCoFire(tc: any) {
     const aisha = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(aisha.id) // pre-Day-3 → single reading fires
+    // Clear competing condition flags left on the shared persona by earlier
+    // specs (resetUser doesn't touch PatientProfile). Otherwise HF/HCM/DCM/AS
+    // rules also co-fire on 165/65 and the raw patient list balloons. Keep
+    // hasCAD — this is the CAD co-fire under test.
+    for (const c of ['hasHeartFailure', 'hasHCM', 'hasDCM', 'hasAorticStenosis', 'isPregnant'] as const) {
+      await tc.setUserCondition(aisha.id, c, false)
+    }
     await tc.setUserCondition(aisha.id, 'hasCAD', true)
+    // Guarantee a clean alert slate IMMEDIATELY before the trigger so the only
+    // OPEN alerts the patient view sees are this co-fire's (consolidating to one
+    // card). resetUser above clears alerts too, but a sibling spec's async
+    // escalation/dispatch can land alerts between reset and now under CI's
+    // shared DB; this targeted delete (no reading-history wipe) closes that race.
+    await tc.deleteAlertsForUser(aisha.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     await api.post('daily-journal', {
       data: { measuredAt: new Date().toISOString(), systolicBP: 165, diastolicBP: 65, pulse: 74, position: 'SITTING' },
@@ -168,9 +197,16 @@ test.describe('B2 — co-fired alert rows grouped by reading', () => {
       await page.setViewportSize(MOBILE)
       await signInPatient(page, PATIENTS.aisha.email)
       await page.goto('/notifications?tab=alerts')
-      // The 2 co-fired rows merge into ONE consolidated card (same journalEntry).
-      const rows = page.locator('[data-testid^="notification-row-"]')
-      await expect(rows).toHaveCount(1, { timeout: 20_000 })
+      // The 2 co-fired alerts merge into ONE consolidated card (same
+      // journalEntry). Count CARD CONTAINERS only: PatientAlertCard emits
+      // `notification-row-<uuid>` for the card AND `notification-row-<part>-<uuid>`
+      // for title/severity/mode/message/reading/date/status/ack/detail, so a
+      // broad ^= match resolves to ~9 elements PER card. Match the card's bare
+      // UUID suffix so we count one element per card.
+      const cards = page.getByTestId(
+        /^notification-row-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      )
+      await expect(cards).toHaveCount(1, { timeout: 20_000 })
     } finally {
       const aisha = await tc.findUser(PATIENTS.aisha.email)
       await tc.setUserCondition(aisha.id, 'hasCAD', false)

@@ -58,6 +58,37 @@ function tierBucket(t: string | null): TierBucket {
   return 'OTHER';
 }
 
+// #81 — rules whose thresholds are ABSOLUTE (fire regardless of the patient's
+// monitoring stage). For these, a STANDARD mode badge does NOT mean "fewer
+// than 7 baseline readings" — it means the rule is mode-independent. Showing
+// the "<7 readings" tooltip on e.g. Carol's 185/120 emergency (she has 15+
+// readings) is factually wrong. NOTE: there is no RULE_TACHY_SEVERE — severe
+// tachycardia (HR>130) fires under RULE_TACHY_HR, which is also the regular
+// session-averaged tachy rule, so it is intentionally NOT in this set.
+const ABSOLUTE_THRESHOLD_RULES = new Set<string>([
+  'RULE_ABSOLUTE_EMERGENCY',
+  'RULE_ACE_ANGIOEDEMA',
+  'RULE_GENERIC_ANGIOEDEMA',
+  'RULE_PREGNANCY_L2',
+  'RULE_BRADY_ABSOLUTE',
+  'RULE_SYMPTOM_OVERRIDE_GENERAL',
+  'RULE_SYMPTOM_OVERRIDE_PREGNANCY',
+]);
+
+function standardBadgeTooltip(ruleId: string | null | undefined): string {
+  if (ruleId && ABSOLUTE_THRESHOLD_RULES.has(ruleId)) {
+    return 'Emergency thresholds are absolute (e.g., SBP ≥180 / DBP ≥120) — they fire STANDARD regardless of the patient’s monitoring stage.';
+  }
+  return 'This patient is on standard monitoring (fewer than 7 baseline readings). Alerts evaluate against standard AHA thresholds.';
+}
+
+function standardBadgeAria(ruleId: string | null | undefined): string {
+  if (ruleId && ABSOLUTE_THRESHOLD_RULES.has(ruleId)) {
+    return 'Emergency thresholds are absolute: this alert fires STANDARD regardless of the patient’s monitoring stage';
+  }
+  return 'Standard monitoring: evaluated against standard AHA thresholds';
+}
+
 function bucketChrome(b: TierBucket) {
   switch (b) {
     case 'BP_L2':
@@ -132,6 +163,15 @@ interface Props {
   /** When true the row body uses cursor-pointer + button semantics. Both
    *  surfaces want this — tab uses it for expand, notifications for nav. */
   rowClickable?: boolean;
+  /** F27 — true when this alert's patient is not yet ENROLLED, so escalation
+   *  dispatch was deferred. Renders a "No dispatch — awaiting enrollment"
+   *  badge on OPEN alerts so a provider can prioritize enrollment. */
+  patientPreEnrollment?: boolean;
+  /** P3 — suppress the per-alert pre-personalization "X of 7" note. AlertsTab
+   *  hoists it to a single patient-header band (F4), so repeating it on every
+   *  expanded card — three times inside one cofire group — is redundant noise.
+   *  NotificationsScreen has no patient band, so it leaves this false. */
+  hideDisclaimer?: boolean;
 }
 
 /** Round 2 A2 — null/empty/whitespace messages don't get a card (was rendering
@@ -152,6 +192,8 @@ export default function AlertCard({
   followUpScheduledAt,
   heightCm,
   rowClickable = true,
+  patientPreEnrollment = false,
+  hideDisclaimer = false,
 }: Props) {
   const { user } = useAuth();
   // May 2026 access-scope — HEALPLACE_OPS sees the alert row + audit trail
@@ -233,11 +275,42 @@ export default function AlertCard({
             {alert.mode && (
               <span
                 data-testid={`admin-alert-mode-badge-${alert.id}`}
-                title="Thresholds this alert was evaluated against"
-                className="inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+                // F22 — "Personalized" reflects the patient's monitoring stage
+                // (graduated post-7 baseline readings), NOT which rule's
+                // threshold fired. A standard-axis rule can still fire while the
+                // patient is in personalized mode. Spell that out on hover so a
+                // clinician doesn't read the badge as "the personalized
+                // threshold triggered this".
+                title={
+                  alert.mode === 'PERSONALIZED'
+                    ? 'This patient has graduated to personalized monitoring (post-7 baseline readings). The badge reflects the patient’s monitoring stage, not necessarily which rule’s threshold fired — a standard-axis rule may have triggered this alert.'
+                    : standardBadgeTooltip(alert.ruleId)
+                }
+                aria-label={
+                  alert.mode === 'PERSONALIZED'
+                    ? 'Personalized monitoring: reflects the patient’s monitoring stage, not necessarily which rule’s threshold fired'
+                    : standardBadgeAria(alert.ruleId)
+                }
+                className="inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full cursor-help"
                 style={{ backgroundColor: 'var(--brand-surface-muted, #f1f5f9)', color: 'var(--brand-text-secondary)' }}
               >
                 {alert.mode === 'PERSONALIZED' ? 'Personalized' : 'Standard'}
+              </span>
+            )}
+            {/* F27 — pre-enrollment dispatch transparency. The escalation
+                pipeline defers ALL dispatch until the patient is ENROLLED, so
+                this OPEN alert was never sent to the care team. Flag it so a
+                provider can prioritize enrollment instead of assuming someone
+                was paged. */}
+            {patientPreEnrollment && alert.status === 'OPEN' && (
+              <span
+                data-testid={`admin-alert-no-dispatch-badge-${alert.id}`}
+                title="Escalation dispatch is deferred until this patient is enrolled"
+                className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+                style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
+              >
+                <ShieldAlert className="w-2.5 h-2.5" />
+                No dispatch — awaiting enrollment
               </span>
             )}
             {alert.status === 'RESOLVED' && (
@@ -424,7 +497,7 @@ export default function AlertCard({
           {/* Manisha 5/24 Q3 — pre-personalization "X of 7" note. Standard
               thresholds are used until the patient has 7 baseline readings;
               surface the progress so a provider reads the alert in context. */}
-          {alert.preDay3 && alert.personalizationThreshold != null && (
+          {!hideDisclaimer && alert.preDay3 && alert.personalizationThreshold != null && (
             <p
               data-testid={`admin-alert-prepersonalization-${alert.id}`}
               className="text-[11.5px] leading-relaxed px-3 py-2 rounded-lg"

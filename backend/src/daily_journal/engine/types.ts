@@ -26,6 +26,15 @@ export interface SessionAverage {
   systolicBP: number | null
   /** Mean DBP across all readings in the session. Integer (rounded). */
   diastolicBP: number | null
+
+  /** F7 — the anchor (just-submitted) reading's RAW SBP/DBP, before averaging.
+   *  Patient- and caregiver-facing messages cite these so the body matches the
+   *  "Recorded 145/92" header the patient just saw; the physician message keeps
+   *  the session-averaged systolicBP/diastolicBP (the engine's evaluation truth).
+   *  Undefined falls back to the averaged value (e.g. synthetic single-reading
+   *  sessions where the two are identical). */
+  submittedSystolicBP?: number | null
+  submittedDiastolicBP?: number | null
   /** Mean pulse across all readings in the session. Integer. */
   pulse: number | null
   /** Mean weight (lbs) across the session, or null when unrecorded. Used by

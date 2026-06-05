@@ -37,6 +37,7 @@ import {
 } from '@/lib/services/patient-detail.service';
 import { useAuth } from '@/lib/auth-context';
 import { canEditThresholds } from '@/lib/roleGates';
+import { patientConditionLabel } from '@/lib/clinical/conditions';
 
 interface Props {
   patientId: string;
@@ -299,15 +300,8 @@ export default function ThresholdsTab({
               Mandatory configuration required
             </p>
             <p className="text-[11.5px] mt-0.5" style={{ color: 'var(--brand-text-secondary)' }}>
-              This patient has{' '}
-              {[
-                profile?.heartFailureType === 'HFREF' ? 'HFrEF' : null,
-                profile?.hasHCM ? 'HCM' : null,
-                profile?.hasDCM ? 'DCM' : null,
-              ]
-                .filter(Boolean)
-                .join(' / ')}
-              {' '}— set a personalized SBP / DBP target before any further check-ins.
+              This patient has {patientConditionLabel(profile)} — set a
+              personalized SBP / DBP target before any further check-ins.
             </p>
           </div>
         </div>

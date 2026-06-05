@@ -64,6 +64,16 @@ import {
   type AlertTier,
 } from '@/lib/services/provider.service';
 
+// F1: format a Date as YYYY-MM-DD in the viewer's LOCAL timezone. toISOString()
+// is UTC, so late-evening local readings would land on "tomorrow" UTC and the
+// trend end-date would exclude the current local day's data.
+function toLocalISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface ProviderStats {
@@ -300,9 +310,9 @@ export default function AdminDashboard() {
   const [trendStartDate, setTrendStartDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
+    return toLocalISODate(d);
   });
-  const [trendEndDate, setTrendEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [trendEndDate, setTrendEndDate] = useState(() => toLocalISODate(new Date()));
   type BpPoint = { day: string; systolic: number | null; diastolic: number | null; date: string; time: string | null };
   const [bpTrendData, setBpTrendData] = useState<BpPoint[]>([]);
 
@@ -407,8 +417,8 @@ export default function AdminDashboard() {
     const start = new Date();
     start.setDate(start.getDate() - days);
     setTrendPreset(preset);
-    setTrendStartDate(start.toISOString().slice(0, 10));
-    setTrendEndDate(end.toISOString().slice(0, 10));
+    setTrendStartDate(toLocalISODate(start));
+    setTrendEndDate(toLocalISODate(end));
   };
 
   useEffect(() => {
@@ -953,7 +963,7 @@ export default function AdminDashboard() {
                     aria-label="Trend range end date"
                     value={trendEndDate}
                     min={trendStartDate}
-                    max={new Date().toISOString().slice(0, 10)}
+                    max={toLocalISODate(new Date())}
                     onChange={(e) => {
                       setTrendEndDate(e.target.value);
                       setTrendPreset('');

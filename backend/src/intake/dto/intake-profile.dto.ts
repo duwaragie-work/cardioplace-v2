@@ -45,7 +45,7 @@ export class IntakeProfileDto implements IntakeProfilePayload {
 
   @IsOptional()
   @IsBoolean()
-  historyPreeclampsia?: boolean
+  historyHDP?: boolean
 
   @IsOptional()
   @IsBoolean()

@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Mail, KeyRound, Eye, EyeOff } from "lucide-react";
+import { CheckCircle2, Mail, KeyRound, Eye, EyeOff, Lock } from "lucide-react";
 import { useAuth, type OtpVerifyResponse } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import { getOrCreateDeviceId } from "@/lib/device";
@@ -523,6 +523,27 @@ export default function RegisterPage() {
                   </a>
                   .
                 </p>
+                {/* A2 — privacy assurance + A1 — medical disclaimer.
+                    Mobile-only here: on md+ the right info panel is visible and
+                    carries these two notices instead. When that panel collapses
+                    (below md) they stay in their original place below the form. */}
+                {/* Grouped into one tidy tinted card with consistent left
+                    alignment + even spacing — mirrors the right panel so the
+                    notices read clean instead of messy on small screens.
+                    i18n keys: register.privacyAssurance / register.medicalDisclaimer.
+                    Medical disclaimer is MVP US-only — 911 hardcoded in the
+                    string per CROSS_HANDOFF_ADDENDUM_2026_06_03.md. */}
+                <div className="md:hidden mt-4 rounded-2xl bg-[#faf6fe] border border-[#f0e6fa] p-4 space-y-3 text-left">
+                  <div className="flex items-start gap-2.5">
+                    <Lock aria-hidden="true" className="w-4 h-4 text-[#7B00E0] shrink-0 mt-0.5" strokeWidth={2.5} />
+                    <p className="text-[#4b3b55] text-xs leading-relaxed">
+                      {t('register.privacyAssurance')}
+                    </p>
+                  </div>
+                  <p className="text-[#6b5b75] text-[11px] leading-relaxed border-t border-[#f0e6fa] pt-3">
+                    {t('register.medicalDisclaimer')}
+                  </p>
+                </div>
               </div>
 
             </div>
@@ -571,6 +592,21 @@ export default function RegisterPage() {
                   <CheckCircle2 aria-hidden="true" className="w-4 h-4 text-[#7B00E0] shrink-0" strokeWidth={2.5} />
                   <p className="text-[#4b3b55] text-xs lg:text-sm">
                     {t('register.noPassword')}
+                  </p>
+                </div>
+
+                {/* Privacy assurance + medical disclaimer — desktop home for
+                    these notices. The mobile copy (md:hidden) lives below the
+                    form so the wording never disappears when this panel does. */}
+                <div className="border-t border-white/50 pt-4 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <Lock aria-hidden="true" className="w-4 h-4 text-[#7B00E0] shrink-0 mt-0.5" strokeWidth={2.5} />
+                    <p className="text-[#4b3b55] text-xs lg:text-sm leading-relaxed">
+                      {t('register.privacyAssurance')}
+                    </p>
+                  </div>
+                  <p className="text-[#6b5b75] text-[11px] lg:text-xs leading-relaxed pl-6">
+                    {t('register.medicalDisclaimer')}
                   </p>
                 </div>
               </div>

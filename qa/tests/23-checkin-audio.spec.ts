@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { signInPatient } from '../helpers/auth.js'
+import { dismissCheckinGate } from '../helpers/api.js'
 import { PATIENTS } from '../helpers/accounts.js'
 import { byTestId, T } from '../helpers/selectors.js'
 
@@ -43,6 +44,10 @@ test.describe('Check-in audio button', () => {
 
     await signInPatient(page, PATIENTS.carol.email)
     await page.goto('/check-in')
+
+    // /check-in may open on a resume/open-session gate instead of step 1 (the
+    // AudioButtons live on step 1). Poll past whichever gate is shown.
+    await dismissCheckinGate(page)
 
     const audio = page.locator(byTestId(T.checkin.audioButton)).first()
     await expect(audio).toBeVisible({ timeout: 15_000 })

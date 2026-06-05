@@ -1,5 +1,5 @@
-import { render, screen, fireEvent } from '@testing-library/react'
-import AlertsTab from './AlertsTab'
+import { render, screen, fireEvent, within } from '@testing-library/react'
+import AlertsTab, { groupAlertsByReading } from './AlertsTab'
 import type { PatientAlert } from '@/lib/services/patient-detail.service'
 
 // B2 — co-fired alert rows (multiple DeviationAlert rows from ONE reading,
@@ -74,6 +74,125 @@ describe('AlertsTab — co-fired grouping (B2)', () => {
 // stays as a curated view available via the TIER_3 chip (and is suppressed
 // under ALL so rows don't render twice).
 
+// F5 — co-fired alerts get a bordered container scoping the group apart from
+// the standalone alerts; singletons stay as their own cards.
+describe('AlertsTab — cofire group container (F5)', () => {
+  function readingAlert(id: string, measuredAt: string, tier = 'BP_LEVEL_1_HIGH'): PatientAlert {
+    const iso = new Date(measuredAt).toISOString()
+    return makeAlert({
+      id,
+      tier: tier as PatientAlert['tier'],
+      createdAt: iso,
+      journalEntry: {
+        id: `je-${id}`,
+        systolicBP: 165,
+        diastolicBP: 95,
+        pulse: 74,
+        weight: null,
+        measuredAt: iso,
+      },
+    } as Partial<PatientAlert>)
+  }
+
+  it('wraps a 3-alert cofire group in one container and leaves standalones uncontained', () => {
+    const shared = '2026-05-22T10:00:00Z'
+    const alerts = [
+      readingAlert('cf1', shared, 'BP_LEVEL_1_HIGH'),
+      readingAlert('cf2', shared, 'BP_LEVEL_1_LOW'),
+      readingAlert('cf3', shared, 'TIER_2_DISCREPANCY'),
+      readingAlert('solo1', '2026-05-21T08:00:00Z'),
+      readingAlert('solo2', '2026-05-20T08:00:00Z'),
+    ]
+    render(<AlertsTab alerts={alerts} loading={false} onResolved={() => {}} />)
+    // Exactly one cofire container + its header.
+    expect(screen.getAllByTestId('admin-alert-cofire-group')).toHaveLength(1)
+    expect(screen.getAllByTestId('admin-alert-group-header')).toHaveLength(1)
+    // All five alerts still render.
+    for (const id of ['cf1', 'cf2', 'cf3', 'solo1', 'solo2']) {
+      expect(screen.getByTestId(`admin-alert-row-${id}`)).toBeInTheDocument()
+    }
+  })
+
+  it('renders no cofire container when every alert is from a distinct reading', () => {
+    const alerts = [
+      readingAlert('a', '2026-05-22T10:00:00Z'),
+      readingAlert('b', '2026-05-21T10:00:00Z'),
+    ]
+    render(<AlertsTab alerts={alerts} loading={false} onResolved={() => {}} />)
+    expect(screen.queryByTestId('admin-alert-cofire-group')).not.toBeInTheDocument()
+  })
+})
+
+// F6 — within a cofire group the most urgent finding leads. Previously the
+// informational Tier 3 row could sort above BP Level 1.
+describe('AlertsTab — cofire group priority sort (F6)', () => {
+  const shared = '2026-05-22T10:00:00Z'
+  function readingAlert(id: string, tier: string): PatientAlert {
+    const iso = new Date(shared).toISOString()
+    return makeAlert({
+      id,
+      tier: tier as PatientAlert['tier'],
+      createdAt: iso,
+      journalEntry: {
+        id: `je-${id}`,
+        systolicBP: 185,
+        diastolicBP: 100,
+        pulse: 74,
+        weight: null,
+        measuredAt: iso,
+      },
+    } as Partial<PatientAlert>)
+  }
+
+  it('orders [Tier 3, BP L1, BP L2] as [BP L2, BP L1, Tier 3]', () => {
+    const groups = groupAlertsByReading([
+      readingAlert('t3', 'TIER_3_INFO'),
+      readingAlert('bp1', 'BP_LEVEL_1_HIGH'),
+      readingAlert('l2', 'BP_LEVEL_2'),
+    ])
+    expect(groups).toHaveLength(1)
+    const group = groups[0]
+    expect(group.kind).toBe('cofire')
+    if (group.kind === 'cofire') {
+      expect(group.alerts.map((a) => a.id)).toEqual(['l2', 'bp1', 't3'])
+    }
+  })
+
+  it('puts Tier 1 first when present', () => {
+    const groups = groupAlertsByReading([
+      readingAlert('bp1', 'BP_LEVEL_1_HIGH'),
+      readingAlert('t1', 'TIER_1_CONTRAINDICATION'),
+      readingAlert('t3', 'TIER_3_INFO'),
+    ])
+    const group = groups[0]
+    if (group.kind === 'cofire') {
+      expect(group.alerts[0].id).toBe('t1')
+      expect(group.alerts[group.alerts.length - 1].id).toBe('t3')
+    }
+  })
+
+  it('renders the cofire rows in priority order in the DOM', () => {
+    render(
+      <AlertsTab
+        alerts={[
+          readingAlert('t3', 'TIER_3_INFO'),
+          readingAlert('bp1', 'BP_LEVEL_1_HIGH'),
+          readingAlert('l2', 'BP_LEVEL_2'),
+        ]}
+        loading={false}
+        onResolved={() => {}}
+      />,
+    )
+    const group = screen.getByTestId('admin-alert-cofire-group')
+    const rows = within(group).getAllByTestId(/admin-alert-row-/)
+    expect(rows.map((r) => r.getAttribute('data-testid'))).toEqual([
+      'admin-alert-row-l2',
+      'admin-alert-row-bp1',
+      'admin-alert-row-t3',
+    ])
+  })
+})
+
 describe('AlertsTab — Tier-3 in ALL filter (Round 2 A3)', () => {
   function bpL1Alert(id: string): PatientAlert {
     return makeAlert({
@@ -128,5 +247,66 @@ describe('AlertsTab — Tier-3 in ALL filter (Round 2 A3)', () => {
     expect(screen.queryByTestId('admin-alert-row-bp1')).not.toBeInTheDocument()
     expect(screen.getByTestId('admin-alert-row-t3a')).toBeInTheDocument()
     expect(screen.getByTestId('admin-alert-row-t3b')).toBeInTheDocument()
+  })
+})
+
+// F4 — the pre-personalization note is patient-state metadata, hoisted to a
+// header band that renders once per page across every filter (it used to be
+// buried inside each expanded AlertCard).
+describe('AlertsTab — personalization header band (F4)', () => {
+  function preDayAlert(id: string, tier = 'BP_LEVEL_1_HIGH'): PatientAlert {
+    return makeAlert({
+      id,
+      tier: tier as PatientAlert['tier'],
+      preDay3: true,
+      personalizationThreshold: 7,
+      baselineReadingCount: 3,
+      // EscalationAuditTrail (rendered when a card is expanded) iterates this.
+      escalationEvents: [],
+    } as Partial<PatientAlert>)
+  }
+
+  it('renders the band exactly once even with multiple pre-personalization alerts', () => {
+    render(
+      <AlertsTab
+        alerts={[preDayAlert('a1'), preDayAlert('a2'), preDayAlert('a3')]}
+        loading={false}
+        onResolved={() => {}}
+      />,
+    )
+    const bands = screen.getAllByTestId('admin-alerts-personalization-band')
+    expect(bands).toHaveLength(1)
+    expect(bands[0]).toHaveTextContent(/completed 3 of 7 baseline readings/i)
+  })
+
+  it('keeps the band visible after switching to the ALL filter', () => {
+    render(
+      <AlertsTab alerts={[preDayAlert('a1')]} loading={false} onResolved={() => {}} />,
+    )
+    fireEvent.click(screen.getByTestId('admin-alerts-tier-filter-ALL'))
+    expect(screen.getByTestId('admin-alerts-personalization-band')).toBeInTheDocument()
+  })
+
+  it('renders no band when no alert is pre-personalization', () => {
+    render(
+      <AlertsTab alerts={[makeAlert({ id: 'solo' })]} loading={false} onResolved={() => {}} />,
+    )
+    expect(screen.queryByTestId('admin-alerts-personalization-band')).not.toBeInTheDocument()
+  })
+
+  // P3 — a cofire group (3 alerts, same reading, same baseline count) must show
+  // the disclaimer text exactly once, not once per grouped alert.
+  it('shows the disclaimer text exactly once for a 3-alert cofire group', () => {
+    const cofire = [
+      preDayAlert('c1', 'BP_LEVEL_1_HIGH'),
+      preDayAlert('c2', 'BP_LEVEL_1_LOW'),
+      preDayAlert('c3', 'TIER_2_DISCREPANCY'),
+    ]
+    render(<AlertsTab alerts={cofire} loading={false} onResolved={() => {}} />)
+    // Expand every member so each card's own disclaimer would render if present.
+    for (const id of ['c1', 'c2', 'c3']) {
+      fireEvent.click(screen.getByTestId(`admin-alert-row-${id}`))
+    }
+    expect(screen.getAllByText(/personalization begins after/i)).toHaveLength(1)
   })
 })

@@ -44,6 +44,7 @@ import {
   BatteryLow,
   Baby,
   Pill,
+  PauseCircle,
   Scale,
   Save,
   CalendarClock,
@@ -847,6 +848,13 @@ function StepWeight({ form, setField }: StepProps) {
 
 interface MedicationStepProps extends StepProps {
   medications: Array<{ id: string; drugName: string; drugClass: string }>;
+  // F17 — meds on HOLD, shown as non-actionable informational rows.
+  heldMeds: Array<{
+    id: string;
+    drugName: string;
+    drugClass: string;
+    holdReason?: string | null;
+  }>;
   medsLoading: boolean;
 }
 
@@ -880,7 +888,7 @@ const DRUG_CLASS_LABEL_KEYS: Record<string, TranslationKey> = {
   OTHER_UNVERIFIED: 'checkin.b4.classOtherUnverified',
 };
 
-function StepMedication({ form, setField, medications, medsLoading }: MedicationStepProps) {
+function StepMedication({ form, setField, medications, heldMeds, medsLoading }: MedicationStepProps) {
   const { t } = useLanguage();
   // Resolve a drug-class label, falling back to the prisma value humanised
   // (e.g. UNKNOWN_NEW_CLASS → "unknown new class") so a freshly-added enum
@@ -940,7 +948,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
         </div>
       )}
 
-      {!medsLoading && medications.length === 0 && (
+      {!medsLoading && medications.length === 0 && heldMeds.length === 0 && (
         // Defensive fallback — parent flow should have skipped this step when
         // the patient has no meds on file. Kept so a stale render doesn't
         // crash the wizard.
@@ -1132,6 +1140,53 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                   </fieldset>
                 </div>
               )}
+            </div>
+          );
+        })}
+
+      {/* F17 — meds the care team has placed on HOLD. Informational only: no
+          Took/Missed buttons, excluded from the adherence rollup. Copy branches
+          on holdReason — PROVIDER_DIRECTED_HOLD is a clinical "stop taking it";
+          the administrative reasons mean "keep taking it, we're reviewing". */}
+      {!medsLoading &&
+        heldMeds.map((med) => {
+          const isProviderDirected = med.holdReason === 'PROVIDER_DIRECTED_HOLD';
+          return (
+            <div
+              key={med.id}
+              data-testid="checkin-held-med"
+              data-hold-reason={med.holdReason ?? ''}
+              className="rounded-xl p-4 opacity-80"
+              style={{ backgroundColor: 'var(--brand-background)', border: '1.5px dashed var(--brand-border)' }}
+            >
+              <div className="flex items-start gap-3">
+                <PauseCircle
+                  className="w-5 h-5 mt-0.5 shrink-0"
+                  style={{ color: 'var(--brand-text-muted)' }}
+                  aria-hidden="true"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[15px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                      {med.drugName}
+                    </span>
+                    <span
+                      className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full"
+                      style={{ backgroundColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                    >
+                      {t('checkin.b4.onHoldBadge')}
+                    </span>
+                  </div>
+                  <p className="text-[12px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+                    {drugClassLabel(med.drugClass)}
+                  </p>
+                  <p className="text-[13px] mt-1.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+                    {isProviderDirected
+                      ? t('checkin.b4.onHoldDoNotTake')
+                      : t('checkin.b4.onHoldUnderReview')}
+                  </p>
+                </div>
+              </div>
             </div>
           );
         })}
@@ -1540,12 +1595,17 @@ function ConfirmationScreen({
   hasAFib,
   heightCm,
   missedMedNames,
+  isEnrolled,
   onAddAnother,
   onDone,
   pendingFinalizeEntryId,
   onFinalized,
 }: {
   lastReading: SessionReading;
+  /** #88 — true once the patient is ENROLLED (clinical dispatch gate). When
+   *  false, the engine never ran and no care team was notified, so the
+   *  post-submit copy must not claim otherwise. */
+  isEnrolled: boolean;
   /** True count of readings in the session — includes readings carried over
    *  from a joined (cross-visit) session, not just those logged this visit.
    *  Drives the "logged N readings" copy + the AFib ≥3 satisfied indicator. */
@@ -1569,6 +1629,18 @@ function ConfirmationScreen({
   const { t } = useLanguage();
   const total = sessionTotal;
   const aFibSatisfied = !hasAFib || total >= 3;
+  // #90 — AFib check-in state machine. AFib patients need three readings taken
+  // close together (5-min session) for the engine's beat-to-beat averaging.
+  // The copy teaches that without clinical jargon, and tapping "Back to
+  // dashboard" before the 3rd reading prompts a confirm (going to the
+  // dashboard ends the session).
+  const afibStateKey = total >= 3 ? 'state3' : total === 2 ? 'state2' : 'state1';
+  const needsMoreReadings = hasAFib && total < 3;
+  const [showLeaveAfibModal, setShowLeaveAfibModal] = useState(false);
+  const handleBackToDashboard = () => {
+    if (needsMoreReadings) setShowLeaveAfibModal(true);
+    else onDone();
+  };
 
   // Cluster 6 Q2 (Manisha 5/9/26) — 5-min finalize timer. Arms when the
   // backend hint says this is a first-in-session non-AFib non-preDay3
@@ -1662,7 +1734,9 @@ function ConfirmationScreen({
         <AudioButton text={overviewAudio} size="sm" />
       </div>
       <p className="text-[13px] mt-0.5 mb-4" style={{ color: 'var(--brand-text-muted)' }}>
-        {t('checkin.confirm.subtitle')}
+        {/* #88 — un-enrolled patients have no care team yet; the engine didn't
+            run. Don't claim "gets it right away". */}
+        {t(isEnrolled ? 'checkin.confirm.subtitle' : 'checkin.confirm.subtitleUnenrolled')}
       </p>
 
       {/* Reading summary card */}
@@ -1707,8 +1781,11 @@ function ConfirmationScreen({
       </div>
 
       {/* Missed-medication acknowledgement — visible confirmation so the
-          patient knows their answer was captured and will reach the care team. */}
-      {missedMedNames.length > 0 && (
+          patient knows their answer was captured and will reach the care team.
+          #88 — only when ENROLLED: an un-enrolled patient's miss fires no alert
+          and reaches no care team, so the "your care team will see this" line
+          would be misleading. */}
+      {isEnrolled && missedMedNames.length > 0 && (
         <div
           className="w-full rounded-xl px-3 py-2 mb-3 flex items-start gap-2.5 text-left"
           style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}
@@ -1731,21 +1808,24 @@ function ConfirmationScreen({
           }}
         >
           <Activity
-            className="w-4 h-4 shrink-0"
+            className="w-4 h-4 shrink-0 mt-0.5"
             style={{ color: aFibSatisfied ? 'var(--brand-success-green)' : 'var(--brand-warning-amber-text)' }}
           />
-          <p
-            className="text-[12px] leading-snug"
-            style={{ color: aFibSatisfied ? 'var(--brand-success-green)' : 'var(--brand-text-primary)' }}
-          >
-            {aFibSatisfied
-              ? t('checkin.confirm.afibSatisfied').replace('{n}', String(total))
-              : t('checkin.confirm.afibNeeded').replace('{n}', String(total))}
-          </p>
+          <div className="text-left">
+            <p
+              className="text-[12px] font-semibold leading-snug"
+              style={{ color: aFibSatisfied ? 'var(--brand-success-green)' : 'var(--brand-text-primary)' }}
+            >
+              {t(`checkin.afib.${afibStateKey}.heading`)}
+            </p>
+            <p className="text-[11.5px] leading-snug" style={{ color: 'var(--brand-text-muted)' }}>
+              {t(`checkin.afib.${afibStateKey}.body`)}
+            </p>
+          </div>
         </div>
       ) : (
         <p className="text-[12px] mb-3 leading-snug" style={{ color: 'var(--brand-text-muted)' }}>
-          {t('checkin.confirm.nonAfib')}
+          {t(isEnrolled ? 'checkin.confirm.nonAfib' : 'checkin.confirm.nonAfibUnenrolled')}
         </p>
       )}
 
@@ -1791,7 +1871,7 @@ function ConfirmationScreen({
         </motion.button>
         <motion.button
           type="button"
-          onClick={onDone}
+          onClick={handleBackToDashboard}
           className="w-full h-11 rounded-full font-bold text-[13.5px] flex items-center justify-center gap-2 cursor-pointer"
           style={{
             backgroundColor: 'white',
@@ -1804,6 +1884,48 @@ function ConfirmationScreen({
           {t('checkin.confirm.backToDashboard')}
         </motion.button>
       </div>
+
+      {/* #90 — leaving before the 3rd AFib reading ends the session. Confirm,
+          framed as "stay and finish" vs "end and start fresh later" (never
+          "you failed"). */}
+      {showLeaveAfibModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.45)' }}
+          role="dialog"
+          aria-modal="true"
+          data-testid="afib-leave-session-modal"
+        >
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center" style={{ boxShadow: 'var(--brand-shadow-button)' }}>
+            <h3 className="text-[17px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+              {t('checkin.afib.modal.heading')}
+            </h3>
+            <p className="text-[13px] mb-4 leading-snug" style={{ color: 'var(--brand-text-secondary)' }}>
+              {t('checkin.afib.modal.body').replace('{n}', String(total))}
+            </p>
+            <div className="space-y-2">
+              <button
+                type="button"
+                data-testid="afib-modal-stay"
+                onClick={() => { setShowLeaveAfibModal(false); onAddAnother(); }}
+                className="w-full h-11 rounded-full font-bold text-white text-[13.5px] cursor-pointer"
+                style={{ backgroundColor: 'var(--brand-primary-purple)' }}
+              >
+                {t('checkin.afib.modal.stay')}
+              </button>
+              <button
+                type="button"
+                data-testid="afib-modal-leave"
+                onClick={() => { setShowLeaveAfibModal(false); onDone(); }}
+                className="w-full h-11 rounded-full font-bold text-[13.5px] cursor-pointer"
+                style={{ border: '1.5px solid var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+              >
+                {t('checkin.afib.modal.leave')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1838,6 +1960,10 @@ export default function CheckIn() {
     setIntakeIncomplete(!!draft?.currentStep && draft.currentStep !== 'A11');
   }, [user?.id]);
   const [medications, setMedications] = useState<PatientMedication[]>([]);
+  // F17 — meds on PROVIDER/admin HOLD. Rendered in the MEDICATION step as
+  // informational, non-actionable rows so the patient knows the care team has
+  // paused them; excluded from the Took/Missed adherence rollup + validation.
+  const [heldMeds, setHeldMeds] = useState<PatientMedication[]>([]);
   const [medsLoading, setMedsLoading] = useState(true);
 
   const [form, setForm] = useState<FormData>(emptyForm);
@@ -1924,9 +2050,13 @@ export default function CheckIn() {
     if (isLoading || !isAuthenticated) return;
     let cancelled = false;
     (async () => {
-      const meds = await listMyMedications().catch(() => [] as PatientMedication[]);
+      const meds = await listMyMedications({ includeHeld: true }).catch(
+        () => [] as PatientMedication[],
+      );
       if (!cancelled) {
-        setMedications(meds.filter((m) => m.frequency !== 'AS_NEEDED'));
+        const scheduled = meds.filter((m) => m.frequency !== 'AS_NEEDED');
+        setMedications(scheduled.filter((m) => m.verificationStatus !== 'HOLD'));
+        setHeldMeds(scheduled.filter((m) => m.verificationStatus === 'HOLD'));
         setMedsLoading(false);
       }
     })();
@@ -1986,9 +2116,11 @@ export default function CheckIn() {
   // doesn't accidentally shortcut the flow.
   const flow = useMemo(() => {
     const base = readingNumber === 0 ? STEP_FLOW : SECOND_READING_FLOW;
-    if (medsLoading || medications.length > 0) return base;
+    // F17 — keep the MEDICATION step when the only meds on file are on HOLD, so
+    // the patient still sees the non-actionable "ON HOLD" notice.
+    if (medsLoading || medications.length > 0 || heldMeds.length > 0) return base;
     return base.filter((s) => s !== 'MEDICATION');
-  }, [readingNumber, medications.length, medsLoading]);
+  }, [readingNumber, medications.length, heldMeds.length, medsLoading]);
   const stepIndex = flow.indexOf(step);
   const visibleTotal = flow.length;
   const visibleIndex = stepIndex + 1;
@@ -2537,6 +2669,7 @@ export default function CheckIn() {
             lastReading={last}
             sessionTotal={readingNumber}
             hasAFib={hasAFib}
+            isEnrolled={user?.enrollmentStatus === 'ENROLLED'}
             heightCm={profile?.heightCm ?? null}
             missedMedNames={medications
               .filter((m) => form.medicationStatus[m.id]?.taken === 'no')
@@ -2614,6 +2747,7 @@ export default function CheckIn() {
               <StepMedication
                 {...stepProps}
                 medications={medications}
+                heldMeds={heldMeds}
                 medsLoading={medsLoading}
               />
             )}

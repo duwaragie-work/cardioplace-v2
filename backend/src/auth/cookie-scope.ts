@@ -20,11 +20,16 @@ export type CookieScope = 'patient' | 'admin'
 
 // Mirrors the ADMIN_ROLES set in frontend/src/proxy.ts + admin/src/proxy.ts.
 // Any of these means the user's session belongs on the admin app.
+// COORDINATOR joined in phase/23 — they reach the admin app to invite and
+// manage patients in their practice. Missing them here was scoping their
+// session cookies to `cp_patient_*`, so the admin proxy never saw the
+// session and bounced them to /sign-in on invite-activation + OTP login.
 const ADMIN_ROLES: ReadonlySet<string> = new Set([
   'SUPER_ADMIN',
   'MEDICAL_DIRECTOR',
   'PROVIDER',
   'HEALPLACE_OPS',
+  'COORDINATOR',
 ])
 
 /**

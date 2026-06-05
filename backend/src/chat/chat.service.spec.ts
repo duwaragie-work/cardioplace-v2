@@ -38,7 +38,7 @@ function buildResolvedContext(
       heightCm: 165,
       isPregnant: false,
       pregnancyDueDate: null,
-      historyPreeclampsia: false,
+      historyHDP: false,
       hasHeartFailure: false,
       heartFailureType: 'NOT_APPLICABLE',
       resolvedHFType: 'NOT_APPLICABLE',
@@ -113,10 +113,10 @@ describe('ChatService.buildPatientSystemPrompt() — phase/16', () => {
         { provide: OcrService, useValue: {} },
         { provide: MedicationAdherenceService, useValue: {} },
         { provide: SymptomQuickLogService, useValue: {} },
-        {
-          provide: AlertEngineService,
-          useValue: { evaluateAdHoc: jest.fn() },
-        },
+        // ChatService only packages this into its tool-dispatch deps bag
+        // (alertEngine: this.alertEngineService) — no method is invoked in the
+        // spec's paths, so a bare mock satisfies the constructor DI.
+        { provide: AlertEngineService, useValue: { evaluateAdHoc: jest.fn() } },
         {
           provide: IntakeStatusService,
           useValue: {

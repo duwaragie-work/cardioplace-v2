@@ -33,4 +33,8 @@ enum VerificationChangeType {
   // backup/MD) create or update.
   ADMIN_THRESHOLD_UPDATE
   ADMIN_ASSIGNMENT_CHANGE
+  // #85 — one-time historical data cleanup (brand/generic dedup merge). Kept
+  // distinct from ADMIN_CORRECT so auditors can tell migration-merged rows
+  // apart from human provider corrections.
+  SYSTEM_MIGRATION
 }

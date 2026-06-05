@@ -8,7 +8,7 @@ model PatientProfile {
 
   isPregnant          Boolean   @default(false)
   pregnancyDueDate    DateTime?
-  historyPreeclampsia Boolean   @default(false)
+  historyHDP Boolean   @default(false)
 
   hasHeartFailure       Boolean          @default(false)
   heartFailureType      HeartFailureType @default(NOT_APPLICABLE)

@@ -70,7 +70,7 @@ const FIELDS: FieldDef[] = [
   // Pregnancy
   { key: 'isPregnant', label: 'Currently pregnant', type: 'boolean', group: 'pregnancy' },
   { key: 'pregnancyDueDate', label: 'Pregnancy due date', type: 'date', group: 'pregnancy' },
-  { key: 'historyPreeclampsia', label: 'History of preeclampsia', type: 'boolean', group: 'pregnancy' },
+  { key: 'historyHDP', label: 'History of hypertensive disorder of pregnancy (HDP)', type: 'boolean', group: 'pregnancy' },
   // Cardiac
   { key: 'diagnosedHypertension', label: 'Diagnosed hypertension', type: 'boolean', group: 'cardiac' },
   { key: 'hasHeartFailure', label: 'Heart failure', type: 'boolean', group: 'cardiac' },

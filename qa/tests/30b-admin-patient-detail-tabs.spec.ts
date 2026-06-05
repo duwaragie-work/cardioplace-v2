@@ -16,8 +16,9 @@ import { postJournalEntry, setMedActionViaUI } from '../helpers/api.js'
  *     Save is disabled until ALL 4 are set → 30e.4 is a FULL assignment,
  *     not a single-field reassign. Editor renders only for
  *     SUPER_ADMIN/MED_DIR/OPS; PROVIDER sees a read-only summary.
- *   • Medication HOLD rationale is a window.prompt (page.on('dialog'));
- *     REJECT uses MedicationRejectModal; VERIFY is a 1-click toggle.
+ *   • Medication HOLD opens the structured MedicationHoldModal (pick a
+ *     Manisha 5/24 §3 reason → rationale → confirm); REJECT uses
+ *     MedicationRejectModal; VERIFY is a 1-click toggle.
  *   • James is baseline-assigned to primaryProvider — used for the
  *     PROVIDER-scoped read-only check so the detail page loads (≠403).
  *   • tc.seedAlerts → { created, alertIds }.

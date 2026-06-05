@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter'
 import {
   ProfileNotFoundException,
+  RULE_IDS,
   type ResolvedContext,
 } from '@cardioplace/shared'
 import { Prisma } from '../../generated/prisma/client.js'
@@ -578,7 +579,7 @@ export class AlertEngineService {
           session.symptoms.ruqPain
         ) {
           this.logger.log(
-            `Symptom-override suppressed (Manisha 5/9 Q3): pregnancy override ` +
+            `Symptom-override suppressed: pregnancy override ` +
               `fired on ruqPain — RULE_SYMPTOM_OVERRIDE_GENERAL skipped. ` +
               `user=${session.userId} entry=${session.entryId}`,
           )
@@ -626,6 +627,23 @@ export class AlertEngineService {
       claimed.set(axis, r)
     }
 
+    // F20 — emergency is exclusive. Once a BP_LEVEL_2 / 911-warranting rule
+    // (absolute emergency, pregnancy L2, or a symptom-override emergency) has
+    // claimed the 'emergency' axis, no lower-tier BP/HR rule on the SAME
+    // reading is clinically meaningful — and a "contact your provider
+    // tomorrow / recheck before bed" L1 message rendered alongside a "call
+    // 911 now" message is a real harm path. Short-circuit before Stage C so
+    // only the top-tier axes already claimed in Stage A/B survive (airway
+    // angioedema + Tier 1 contraindication co-fire intentionally per D.5;
+    // each runs its own ladder). This also closes the session-finalize
+    // re-eval path: the existing emergency row triggers this early-return so
+    // no L1 row is appended on the second pass.
+    if (claimed.has('emergency')) {
+      return AXIS_PRIORITY
+        .map((axis) => claimed.get(axis))
+        .filter((r): r is RuleResult => r !== undefined)
+    }
+
     // Cluster 6 Q2 (Manisha 5/9/26) — non-emergency BP/HR alerts require
     // ≥2 readings averaged in the current session. Emergency rules from
     // Stage A (symptom override) + Stage B (absolute emergency, pregnancy
@@ -642,9 +660,26 @@ export class AlertEngineService {
       !ctx.preDay3Mode &&
       !ctx.profile.hasAFib
     if (isSingleReadingNonEmergency) {
+      // Manisha Q2 (2026-06-02 reply) — RULE_HFREF_HIGH reverts to
+      // single-reading firing. The HFrEF therapeutic window (≈120–130 mmHg)
+      // is narrow; holding a lone SBP≥target reading behind the ≥2-reading
+      // gate risks missing a clinically actionable HFrEF reading (a patient
+      // takes one reading at 145 and leaves → alert never fires). A
+      // false-positive at 132 is low-cost (clinician reviews, no action); a
+      // missed 145 in HFrEF is high-cost. So HFREF_HIGH — and ONLY the high
+      // branch — bypasses the gate, evaluating this reading's own value. The
+      // low branch (HFREF_LOW) and every other non-emergency rule stay gated,
+      // and RULE_STANDARD_L1_HIGH session-averaging is untouched (Manisha:
+      // averaging stays ONLY for standard L1). Same-session noise is managed
+      // via Q6 per-session dedup, not by re-suppressing the alert.
+      const hfref = hfrefRule(session, ctx)
+      if (hfref && hfref.ruleId === RULE_IDS.HFREF_HIGH) {
+        const axis = axisFor(hfref)
+        if (!claimed.has(axis)) claimed.set(axis, hfref)
+      }
       this.logger.log(
-        `Single-reading session — gating non-emergency rules for entry ${session.entryId}. ` +
-          'Awaiting second reading or finalize call (Manisha 5/9 Q2).',
+        `Single-reading session — gating non-emergency rules for entry ${session.entryId}; ` +
+          'RULE_HFREF_HIGH exempt',
       )
       return AXIS_PRIORITY
         .map((axis) => claimed.get(axis))
@@ -838,6 +873,7 @@ export class AlertEngineService {
       const narrowNote = getNarrowPulsePressureAnnotation(
         session.systolicBP,
         session.diastolicBP,
+        ctx.profile,
       )
       if (narrowNote) annotations.push(narrowNote)
     }
@@ -930,26 +966,22 @@ export class AlertEngineService {
                 journalEntryId: session.entryId,
                 ruleId: result.ruleId,
               },
-              select: { id: true },
+              select: { id: true, escalated: true },
             })
 
+            // F9 (P0 — JCAHO immutability). A DeviationAlert is the
+            // at-fire-time clinical record. When the engine re-evaluates the
+            // same (journalEntryId, ruleId) — session-finalize, an entry edit,
+            // or a later personalized-mode pass — it must NEVER rewrite the
+            // fired-record fields (mode, severity, tier, ruleId, the three-tier
+            // messages, dismissible, actualValue). Doing so retroactively
+            // mutated e.g. a STANDARD-mode alert to PERSONALIZED once the
+            // patient crossed 7 readings, corrupting the audit trail.
+            // Acknowledge / resolve mutations are owned by
+            // AlertResolutionService, not this engine path — so once the row
+            // exists we return it untouched and skip the write entirely.
             const row = existing
-              ? await tx.deviationAlert.update({
-                  where: { id: existing.id },
-                  data: {
-                    severity: legacySeverity,
-                    tier: result.tier,
-                    ruleId: result.ruleId,
-                    mode: result.mode,
-                    pulsePressure: result.pulsePressure,
-                    suboptimalMeasurement: result.suboptimalMeasurement,
-                    dismissible,
-                    actualValue,
-                    patientMessage: messages.patientMessage,
-                    caregiverMessage: messages.caregiverMessage,
-                    physicianMessage: messages.physicianMessage,
-                  },
-                })
+              ? existing
               : await tx.deviationAlert.create({
                   data: {
                     userId: session.userId,
@@ -1063,6 +1095,14 @@ export class AlertEngineService {
       return 'MEDICATION_ADHERENCE'
     }
     if (result.ruleId === 'RULE_CAD_DBP_CRITICAL' && session.diastolicBP != null) {
+      return 'DIASTOLIC_BP'
+    }
+    // F18 — derive the legacy axis from the triggering value rather than
+    // defaulting every BP rule to SYSTOLIC_BP. A DBP-only L1 (e.g. 119/109)
+    // or a DBP-driven emergency carries actualValue == the diastolic reading;
+    // tagging it SYSTOLIC_BP mislabels the audited axis. Comes after the
+    // MEDICATION_ADHERENCE guard so med rules keep their type.
+    if (session.diastolicBP != null && result.actualValue === session.diastolicBP) {
       return 'DIASTOLIC_BP'
     }
     // Default: systolic-axis is the primary surface for BP rules.

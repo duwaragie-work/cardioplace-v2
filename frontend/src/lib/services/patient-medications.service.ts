@@ -8,11 +8,21 @@ const API = process.env.NEXT_PUBLIC_API_URL
  * the checkbox list in the CheckIn MEDICATION step — but we keep the fields
  * the backend returns so a future UI can surface them without another call.
  */
+export type MedicationHoldReason =
+  | 'AWAITING_RECORDS'
+  | 'UNCLEAR_NAME'
+  | 'UNCLEAR_DOSE'
+  | 'PROVIDER_DIRECTED_HOLD'
+  | 'OTHER'
+
 export interface PatientMedication {
   id: string
   drugName: string
   drugClass: string
   verificationStatus: 'UNVERIFIED' | 'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER' | 'HOLD'
+  // F17 — structured hold reason. PROVIDER_DIRECTED_HOLD = "stop taking it"
+  // (clinical); the rest are administrative ("we're reviewing the paperwork").
+  holdReason?: MedicationHoldReason | null
   source: string
   isCombination?: boolean
   frequency?: string | null
@@ -28,11 +38,15 @@ export interface PatientMedication {
  * but exclude:
  *   • HOLD     — the care team told the patient NOT to take it, so asking
  *               "did you take it today?" is wrong (also excluded from the
- *               adherence miss count, CLINICAL_SPEC §14.2).
+ *               adherence miss count, CLINICAL_SPEC §14.2). F17 — the daily
+ *               check-in opts in via `includeHeld` so held meds can re-surface
+ *               as non-actionable "ON HOLD" rows (Manisha A1).
  *   • REJECTED — not the patient's medication.
  *   • discontinued — no longer current.
  */
-export async function listMyMedications(): Promise<PatientMedication[]> {
+export async function listMyMedications(
+  opts: { includeHeld?: boolean } = {},
+): Promise<PatientMedication[]> {
   const res = await fetchWithAuth(`${API}/api/me/medications`)
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
@@ -42,7 +56,7 @@ export async function listMyMedications(): Promise<PatientMedication[]> {
   return (body.data ?? []).filter(
     (m) =>
       !m.discontinuedAt &&
-      m.verificationStatus !== 'HOLD' &&
-      m.verificationStatus !== 'REJECTED',
+      m.verificationStatus !== 'REJECTED' &&
+      (opts.includeHeld || m.verificationStatus !== 'HOLD'),
   )
 }

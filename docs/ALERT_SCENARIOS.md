@@ -62,7 +62,7 @@ Mirrors the `buildSession()` / `buildCtx()` / `buildMed()` helpers at the top of
 | `profile.heightCm` | `165` |
 | `profile.isPregnant` | `false` |
 | `profile.pregnancyDueDate` | `null` |
-| `profile.historyPreeclampsia` | `false` |
+| `profile.historyHDP` | `false` |
 | `profile.hasHeartFailure` | `false` |
 | `profile.heartFailureType` | `'NOT_APPLICABLE'` |
 | `profile.resolvedHFType` | `'NOT_APPLICABLE'` |
@@ -210,7 +210,7 @@ Quick scan by rule ID. Scenarios are ordered by spec file.
 | Category | Field | Value |
 |---|---|---|
 | Context | `isPregnant` | `true` |
-| Context | `profile.historyPreeclampsia` | `true` |
+| Context | `profile.historyHDP` | `true` |
 | Meds | `contextMeds[0]` | Lisinopril · `drugClass=ACE_INHIBITOR` · `verificationStatus=VERIFIED` |
 | Reading | BP | 130/82 |
 | Reading | pulse | 78 |

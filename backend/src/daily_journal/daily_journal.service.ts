@@ -9,6 +9,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
+import { randomUUID } from 'node:crypto'
 import { SESSION_WINDOW_MS } from '@cardioplace/shared'
 import { Prisma, EntrySource, EscalationLevel } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
@@ -24,6 +25,30 @@ const SOURCE_MAP: Record<string, EntrySource> = {
 }
 
 const POSITION_VALUES = ['SITTING', 'STANDING', 'LYING'] as const
+
+/**
+ * Channel-aware predicate for the in-app bell LIST + unread COUNT. Both
+ * exclusions are READ-SIDE ONLY — the escalation write path
+ * (`Notification.create`) and the Resend email send are untouched.
+ *  • EMAIL rows — outbound deliveries, not in-app bell state. A patient with
+ *    both a PUSH and an EMAIL row for one event was seeing it twice while the
+ *    badge counted it once (H3 #80).
+ *  • alert-linked PUSH rows — escalation T+0 dispatch writes a PUSH
+ *    Notification row to the PATIENT for emergency-class alerts (BP_LEVEL_2,
+ *    symptom-override, angioedema). The alert is already shown in the Alerts
+ *    tab, so this must not ALSO render in the Notifications tab (H5 G.4). The
+ *    row STAYS in the DB as the hook for a future real-push service — there is
+ *    no out-of-app push delivery today. System-action PUSH rows (alertId null
+ *    — med-hold, threshold, profile-reject, gap-alert) remain visible.
+ * Memory: project_notification_tab_split_2026_06_04,
+ *         project_no_push_service_pilot_gap_2026_06_04.
+ */
+const BELL_VISIBLE_NOTIFICATION_FILTER: Prisma.NotificationWhereInput = {
+  AND: [
+    { channel: { not: 'EMAIL' } },
+    { NOT: { AND: [{ alertId: { not: null } }, { channel: 'PUSH' }] } },
+  ],
+}
 
 @Injectable()
 export class DailyJournalService {
@@ -576,7 +601,12 @@ export class DailyJournalService {
     userId: string,
     status: 'all' | 'unread' | 'read' = 'all',
   ) {
-    const where: Prisma.NotificationWhereInput = { userId }
+    // Bell LIST uses the shared BELL_VISIBLE_NOTIFICATION_FILTER (H3 #80 EMAIL
+    // exclusion + H5 G.4 alert-linked-PUSH exclusion). READ-SIDE only.
+    const where: Prisma.NotificationWhereInput = {
+      userId,
+      ...BELL_VISIBLE_NOTIFICATION_FILTER,
+    }
 
     if (status === 'unread') {
       where.readAt = null
@@ -618,10 +648,10 @@ export class DailyJournalService {
   }
 
   /**
-   * Count of in-app unread notifications for the bell badge. EMAIL rows
-   * are excluded — they represent outbound deliveries, not in-app state
-   * the user can clear by clicking the bell. Cheap (indexed on
-   * [userId, readAt]).
+   * Count of in-app unread notifications for the bell badge. Uses the SAME
+   * BELL_VISIBLE_NOTIFICATION_FILTER as getNotifications so the badge count and
+   * the list contents can never drift (EMAIL + alert-linked PUSH excluded).
+   * Cheap (indexed on [userId, readAt]).
    */
   async getNotificationsUnreadCount(userId: string) {
     const count = await this.prisma.withConnectionRetry(
@@ -630,7 +660,7 @@ export class DailyJournalService {
           where: {
             userId,
             readAt: null,
-            channel: { not: 'EMAIL' },
+            ...BELL_VISIBLE_NOTIFICATION_FILTER,
           },
         }),
       'getNotificationsUnreadCount',
@@ -1290,25 +1320,47 @@ export class DailyJournalService {
     userId: string,
     sessionId: string | undefined,
     measuredAt: Date,
-  ): Promise<string | null> {
-    if (!sessionId) return null
-    const newest = await this.prisma.journalEntry.findFirst({
-      where: { userId, sessionId },
-      orderBy: { measuredAt: 'desc' },
-      select: { measuredAt: true },
-    })
-    // Fresh session — this reading establishes it; keep the id.
-    if (!newest) return sessionId
-    // Existing members but the window has elapsed → stale reuse; drop the id.
-    const gapMs = Math.abs(measuredAt.getTime() - newest.measuredAt.getTime())
-    if (gapMs > SESSION_WINDOW_MS) {
+  ): Promise<string> {
+    // #91 — a JournalEntry MUST always carry a sessionId. This previously
+    // returned null when no id was supplied OR when the supplied id was stale
+    // (window elapsed), leaving orphaned null-session readings that the
+    // SessionAverager / AFib ≥3-reading gate couldn't group reliably. Now it
+    // resolves to a usable session in every case (never null):
+    //   • valid client id still inside the window → keep it (join the session)
+    //   • no id / stale id → JOIN the patient's open in-window session if one
+    //     exists (preserves proximity averaging for clients that don't pass an
+    //     id), else MINT a fresh UUID so the reading anchors its own session.
+    if (sessionId) {
+      const newest = await this.prisma.journalEntry.findFirst({
+        where: { userId, sessionId },
+        orderBy: { measuredAt: 'desc' },
+        select: { measuredAt: true },
+      })
+      // Fresh session — this reading establishes it; keep the id.
+      if (!newest) return sessionId
+      const gapMs = Math.abs(measuredAt.getTime() - newest.measuredAt.getTime())
+      if (gapMs <= SESSION_WINDOW_MS) return sessionId
+      // Window elapsed → don't smuggle this reading into the stale session.
       this.logger.warn(
-        `create: dropping stale sessionId ${sessionId} for user ${userId} ` +
-          `(gap ${Math.round(gapMs / 60000)}min exceeds session window)`,
+        `create: supplied sessionId ${sessionId} is stale for user ${userId} ` +
+          `(gap ${Math.round(gapMs / 60000)}min exceeds session window); starting a new session`,
       )
-      return null
     }
-    return sessionId
+    // No usable client id — join an open, non-finalized session within the
+    // window if the patient has one, else mint a fresh UUID. Never null.
+    const windowStart = new Date(measuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(measuredAt.getTime() + SESSION_WINDOW_MS)
+    const openInWindow = await this.prisma.journalEntry.findFirst({
+      where: {
+        userId,
+        sessionId: { not: null },
+        singleReadingFinalized: false,
+        measuredAt: { gte: windowStart, lte: windowEnd },
+      },
+      orderBy: { measuredAt: 'desc' },
+      select: { sessionId: true },
+    })
+    return openInWindow?.sessionId ?? randomUUID()
   }
 
   /**

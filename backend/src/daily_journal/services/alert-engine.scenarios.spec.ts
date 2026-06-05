@@ -108,7 +108,7 @@ function buildCtx(over: {
     gender: 'FEMALE',
     heightCm: 165,
     pregnancyDueDate: null,
-    historyPreeclampsia: false,
+    historyHDP: false,
     hasHeartFailure: false,
     heartFailureType: 'NOT_APPLICABLE',
     resolvedHFType: 'NOT_APPLICABLE',
@@ -250,7 +250,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       buildSession({ systolicBP: 130, diastolicBP: 82, pulse: 78 }),
       buildCtx({
         isPregnant: true,
-        profile: { historyPreeclampsia: true },
+        profile: { historyHDP: true },
         contextMeds: [buildMed()],
       }),
     )
@@ -262,8 +262,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.type).toBe('MEDICATION_ADHERENCE')
     expect(createArgs.data.pulsePressure).toBeNull()
     expect(createArgs.data.patientMessage).toContain('Lisinopril')
-    expect(createArgs.data.patientMessage).toContain('pregnant')
-    expect(createArgs.data.physicianMessage).toContain('Teratogenic')
+    expect(createArgs.data.patientMessage).toContain('pregnancy')
+    expect(createArgs.data.physicianMessage).toContain('contraindicated in pregnancy')
     expect(createArgs.data.physicianMessage).toContain('Lisinopril')
     expect(eventArgs[0]).toBe(JOURNAL_EVENTS.ALERT_CREATED)
     expect(eventArgs[1]).toMatchObject({ alertId: 'alert-fixture-id' })
@@ -299,8 +299,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(result?.ruleId).toBe('RULE_NDHP_HFREF')
     expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
     expect(createArgs.data.dismissible).toBe(false)
-    expect(createArgs.data.patientMessage).toContain('heart medicines')
-    expect(createArgs.data.physicianMessage).toContain('Nondihydropyridine CCB')
+    expect(createArgs.data.patientMessage).toContain('heart condition')
+    expect(createArgs.data.physicianMessage).toContain('non-dihydropyridine CCB')
     expect(createArgs.data.physicianMessage).toContain('Diltiazem')
     expect(createArgs.data.physicianMessage).toContain('HFrEF')
   })
@@ -333,8 +333,10 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.tier).toBe('BP_LEVEL_2')
     expect(createArgs.data.dismissible).toBe(false)
     expect(createArgs.data.pulsePressure).toBe(85)
-    expect(createArgs.data.patientMessage).toContain('190/105')
+    // Doc 2: patient tier is directive with no raw number; caregiver carries it.
+    expect(createArgs.data.patientMessage).toContain('dangerously high')
     expect(createArgs.data.patientMessage).toMatch(/911/)
+    expect(createArgs.data.caregiverMessage).toContain('190/105')
     // Wide PP annotation rides on physician msg (>60)
     expect(createArgs.data.physicianMessage.toLowerCase()).toContain(
       'pulse pressure',
@@ -355,8 +357,9 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
     expect(createArgs.data.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
     expect(createArgs.data.dismissible).toBe(false)
-    expect(createArgs.data.patientMessage).toContain('122/76')
+    // Doc 2: symptom-override patient tier carries no number; physician does.
     expect(createArgs.data.patientMessage).toMatch(/911/)
+    expect(createArgs.data.physicianMessage).toContain('122/76')
     expect(createArgs.data.physicianMessage).toContain('severe headache')
   })
 
@@ -368,8 +371,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
 
     expect(result?.ruleId).toBe('RULE_PREGNANCY_L2')
     expect(createArgs.data.tier).toBe('BP_LEVEL_2')
-    expect(createArgs.data.patientMessage).toContain('165/112')
     expect(createArgs.data.patientMessage).toContain('pregnancy')
+    expect(createArgs.data.caregiverMessage).toContain('165/112')
     expect(createArgs.data.physicianMessage).toContain('ACOG')
   })
 
@@ -386,7 +389,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(result?.ruleId).toBe('RULE_PREGNANCY_L1_HIGH')
     expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
     expect(createArgs.data.dismissible).toBe(true)
-    expect(createArgs.data.patientMessage).toContain('144/88')
+    expect(createArgs.data.caregiverMessage).toContain('144/88')
     expect(createArgs.data.physicianMessage).toContain('preeclampsia')
   })
 
@@ -404,8 +407,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(result?.ruleId).toBe('RULE_CAD_DBP_CRITICAL')
     expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
     expect(createArgs.data.type).toBe('DIASTOLIC_BP')
-    expect(createArgs.data.patientMessage).toContain('132/68')
-    expect(createArgs.data.patientMessage).toContain('lower number')
+    expect(createArgs.data.patientMessage).toContain('bottom blood pressure number')
+    expect(createArgs.data.physicianMessage).toContain('132/68')
     expect(createArgs.data.physicianMessage).toContain('J-curve')
   })
 
@@ -427,7 +430,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
 
     expect(result?.ruleId).toBe('RULE_AFIB_HR_HIGH')
     expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
-    expect(createArgs.data.patientMessage).toContain('HR 115 bpm')
+    expect(createArgs.data.caregiverMessage).toContain('115 bpm')
     expect(createArgs.data.physicianMessage).toContain('AFib')
   })
 
@@ -459,9 +462,10 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
 
     expect(result?.ruleId).toBe('RULE_AGE_65_LOW')
     expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
-    expect(createArgs.data.patientMessage).toContain('dizziness')
-    expect(createArgs.data.patientMessage).toContain('fall risk')
-    expect(createArgs.data.physicianMessage).toContain('age 65+')
+    expect(createArgs.data.patientMessage).toContain('dizzy')
+    expect(createArgs.data.patientMessage).toContain('careful when standing')
+    expect(createArgs.data.physicianMessage).toContain('AGE 65+')
+    expect(createArgs.data.physicianMessage).toContain('fall risk')
   })
 
   it('Scenario 12 — Personalized mode + 152/88 → BP L1 High mode=PERSONALIZED', async () => {
@@ -488,7 +492,37 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
     expect(createArgs.data.mode).toBe('PERSONALIZED')
     expect(createArgs.data.patientMessage).toContain('target')
-    expect(createArgs.data.physicianMessage).toContain('target + 20')
+    expect(createArgs.data.physicianMessage).toContain('patient-specific threshold')
+  })
+
+  // Lock for the 30u B3 e2e. A post-Day-3 patient (lifetime ≥ 7) does NOT fire a
+  // non-emergency alert on a lone, non-finalized reading — the session must have
+  // ≥2 readings (or be finalized) per the single-reading gate (getActiveSession:
+  // "post-Day-3 + 1 reading → requiresMoreReadings=true"). With a 2-reading
+  // session the personalized rule fires. The e2e originally posted ONE reading,
+  // so no alert fired and it saw "no PERSONALIZED" — a TEST-SETUP gap, not an
+  // engine bug. Verified: readingCount:1 here yields result=undefined (no alert).
+  it('Scenario 12b — post-Day-3 personalized fires on a 2-reading session (30u B3 lock)', async () => {
+    const { result, createArgs } = await run(
+      buildSession({ systolicBP: 155, diastolicBP: 92, pulse: 76, readingCount: 2, singleReadingFinalized: false }),
+      buildCtx({
+        profile: { diagnosedHypertension: true },
+        readingCount: 8, // lifetime ≥ 7 → post-Day-3 → single reading should fire
+        threshold: {
+          sbpUpperTarget: 130,
+          sbpLowerTarget: null,
+          dbpUpperTarget: null,
+          dbpLowerTarget: null,
+          hrUpperTarget: null,
+          hrLowerTarget: null,
+          setByProviderId: 'prov-1',
+          setAt: TEN_YEARS_AGO,
+          notes: null,
+        },
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_PERSONALIZED_HIGH')
+    expect(createArgs?.data.mode).toBe('PERSONALIZED')
   })
 
   it('Scenario 13 — Pre-Day-3 (readingCount=3) + 165/94 → STANDARD L1 High + disclaimer', async () => {
@@ -514,7 +548,10 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(result?.ruleId).toBe('RULE_STANDARD_L1_HIGH')
     expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
     expect(createArgs.data.mode).toBe('STANDARD')
-    expect(createArgs.data.patientMessage).toMatch(
+    // F26 — the pre-personalization disclaimer is admin-only. It rides on the
+    // physician message, never the patient message.
+    expect(createArgs.data.patientMessage).not.toMatch(/personalization/i)
+    expect(createArgs.data.physicianMessage).toMatch(
       /personalization begins after 7 readings/i,
     )
   })
@@ -677,8 +714,9 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
 
     expect(result?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
     expect(createArgs.data.tier).toBe('BP_LEVEL_2')
-    expect(createArgs.data.patientMessage).toContain('180/95')
+    expect(createArgs.data.patientMessage).toContain('dangerously high')
     expect(createArgs.data.patientMessage).toMatch(/911/)
+    expect(createArgs.data.caregiverMessage).toContain('180/95')
   })
 
   // ========================================================================
@@ -1218,7 +1256,7 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(1)
   })
 
-  it('Scenario 51 — Pregnant + ACE + BP 195/130 → Tier 1 + emergency co-fire (v2 addendum D.5)', async () => {
+  it('Scenario 51 — Pregnant + ACE + BP 195/130 → Tier 1 + emergency co-fire; L1-high suppressed (D.5 + F20)', async () => {
     const { result } = await run(
       buildSession({ systolicBP: 195, diastolicBP: 130 }),
       buildCtx({
@@ -1233,11 +1271,11 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     // qualify on the emergency axis — absoluteEmergency runs first in
     // Stage B and claims the slot.
     expect(result?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
-    // Three distinct rule violations → three rows: contraindication
-    // (Tier 1), emergency (BP L2 absolute), and bp-high (pregnancyL1High
-    // — pregnant + SBP ≥140). Each ladder is independent per v2 addendum
-    // Part D.
-    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(3)
+    // F20 — emergency is exclusive: two rows, not three. The Tier 1 ACE/ARB
+    // contraindication (Stage A) co-fires with the BP L2 911 row, but the
+    // lower-tier pregnancyL1High (bp-high) ladder is suppressed so no
+    // "contact your provider" message renders beside the 911 takeover.
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(2)
     const persistedRuleIds = (
       prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
     ).map((c) => c[0].data.ruleId)
@@ -1245,9 +1283,9 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       expect.arrayContaining([
         'RULE_ABSOLUTE_EMERGENCY',
         'RULE_PREGNANCY_ACE_ARB',
-        'RULE_PREGNANCY_L1_HIGH',
       ]),
     )
+    expect(persistedRuleIds).not.toContain('RULE_PREGNANCY_L1_HIGH')
   })
 
   // ========================================================================
@@ -1307,6 +1345,20 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     // HFrEF SBP 110 is above the 85 lower bound, so the narrow-PP note is the row.
     expect(createArgs.data.ruleId).toBe('RULE_PULSE_PRESSURE_NARROW')
     expect(createArgs.data.physicianMessage).toMatch(/reduced stroke volume/i)
+  })
+
+  it('NARROW-PP F23 — HFrEF co-fire: higher-tier alert carries reduced-stroke-volume annotation', async () => {
+    // Carol CM-9: HFrEF, session-averaged 128/108 (PP=20). DBP≥100 fires a
+    // higher-tier BP alert; narrow PP rides as a physician annotation that must
+    // carry the HFrEF clinical-correlation wording, not the generic note.
+    const { createArgs } = await run(
+      buildSession({ systolicBP: 128, diastolicBP: 108 }),
+      buildCtx({ profile: { hasHeartFailure: true, heartFailureType: 'HFREF', resolvedHFType: 'HFREF' } }),
+    )
+    expect(createArgs.data.ruleId).not.toBe('RULE_PULSE_PRESSURE_NARROW')
+    expect(createArgs.data.physicianMessage).toMatch(
+      /In HFrEF, narrow PP may indicate reduced stroke volume/i,
+    )
   })
 
   it('NARROW-PP — PP ≥ 25 does not fire', async () => {
@@ -1414,10 +1466,10 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.type).toBe('MEDICATION_ADHERENCE')
     expect(createArgs.data.dismissible).toBe(true)
     expect(createArgs.data.severity).toBe('MEDIUM')
-    // Cluster 6 wording — patient message references the missed pattern,
-    // not single-dose phrasing.
+    // #86 wording — patient message anchors to the multi-day pattern
+    // ("the last few days"), never claiming a miss happened "today".
     expect(createArgs.data.patientMessage.toLowerCase()).toContain(
-      'a couple of times',
+      'last few days',
     )
     expect(createArgs.data.physicianMessage).toContain('Tier 2')
     expect(createArgs.data.physicianMessage.toLowerCase()).toContain(
@@ -1645,12 +1697,16 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     )
   })
 
-  it('Scenario 67 (G2) — Pregnant + ACE + 175/115 → ACE_ARB + L2 + L1_HIGH (three ladders)', async () => {
+  it('Scenario 67 (G2) — Pregnant + ACE + 175/115 → ACE_ARB + L2; L1_HIGH suppressed (F20)', async () => {
     await run(
       buildSession({ systolicBP: 175, diastolicBP: 115, pulse: 80 }),
       buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
     )
-    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(3)
+    // F20 — emergency is exclusive. pregnancyL2 (≥160/110) claims the
+    // emergency axis, so the lower-tier pregnancyL1High (bp-high) ladder is
+    // suppressed. The Tier 1 ACE/ARB contraindication (Stage A) survives →
+    // two ladders, not three.
+    expect(prisma.deviationAlert.create).toHaveBeenCalledTimes(2)
     const persistedRuleIds = (
       prisma.deviationAlert.create.mock.calls as Array<[{ data: { ruleId: string } }]>
     ).map((c) => c[0].data.ruleId)
@@ -1658,9 +1714,9 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       expect.arrayContaining([
         'RULE_PREGNANCY_ACE_ARB',
         'RULE_PREGNANCY_L2',
-        'RULE_PREGNANCY_L1_HIGH',
       ]),
     )
+    expect(persistedRuleIds).not.toContain('RULE_PREGNANCY_L1_HIGH')
   })
 
   it('Scenario 68 (G3) — Pregnant + ACE + newOnsetHeadache + normal BP → ACE_ARB + SYMPTOM_OVERRIDE_PREGNANCY', async () => {

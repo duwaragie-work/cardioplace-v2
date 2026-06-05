@@ -64,7 +64,7 @@ export interface IntakeFormState {
   // A2 pregnancy (only relevant if gender === FEMALE)
   isPregnant?: boolean;
   pregnancyDueDate?: string; // YYYY-MM-DD
-  historyPreeclampsia?: boolean;
+  historyHDP?: boolean;
 
   // A3 cardiac conditions
   hasHeartFailure?: boolean;
@@ -93,6 +93,11 @@ export interface IntakeFormState {
   // wizard meta
   currentStep?: IntakeStepKey;
   hasSubmitted?: boolean;
+
+  /** F13 — hydrated from PatientProfile.aceContraindicatedAt. When true, adding
+   *  an ACE inhibitor / ARB is gated behind a contraindication warning and the
+   *  backend holds the med for provider review. UI-only; never submitted. */
+  aceContraindicated?: boolean;
 }
 
 export const EMPTY_INTAKE_STATE: IntakeFormState = {

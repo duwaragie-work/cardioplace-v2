@@ -902,7 +902,7 @@ New condition `PatientProfile.hasAorticStenosis`. `aorticStenosisRule` mirrors H
 ### 24.7 Confirm-only (no code change)
 
 - BP Level 2 "unable to reach" (5D) follows the standard BP-L2 ladder via `BP_L2_UNABLE_TO_REACH_RETRY` (T+4h retry) — already implemented, unchanged.
-- Post-pregnancy preeclampsia flag (5A) — `historyPreeclampsia` already captured and consumed by the pregnancy symptom-override branch.
+- Post-pregnancy preeclampsia flag (5A) — `historyHDP` already captured and consumed by the pregnancy symptom-override branch.
 
 ---
 

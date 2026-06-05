@@ -71,7 +71,7 @@ export interface ContextProfile {
 
   isPregnant: boolean
   pregnancyDueDate: Date | null
-  historyPreeclampsia: boolean
+  historyHDP: boolean
 
   hasHeartFailure: boolean
   heartFailureType: HeartFailureTypeInput

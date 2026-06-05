@@ -383,16 +383,19 @@ test.describe('Cluster 8 §D-ADMIN — angioedema audit + resolution', () => {
       'RULE_ACE_ANGIOEDEMA',
     )
     try {
-      // API-resolve the alert FIRST (post-FIX 5, TIER_1_ANGIOEDEMA accepts
-      // the TIER_1 resolution catalog). The audit footer's
-      // resolutionAction / resolutionRationale / resolved / resolvedBy
-      // rows render after the alert is RESOLVED — testing on RESOLVED
-      // covers the full 15-field JCAHO surface in one shot.
+      // API-resolve the alert FIRST. TIER_1_ANGIOEDEMA has its own bespoke
+      // resolution catalog (Manisha 5/24 Q4) — the generic TIER1_* actions
+      // are NOT valid for it; the airway-emergency equivalent of "false
+      // positive" is ANGIO_FALSE_ALARM (which requires an `actualCause`
+      // sub-field). The audit footer's resolutionAction / resolutionRationale
+      // / resolved / resolvedBy rows render after the alert is RESOLVED —
+      // testing on RESOLVED covers the full 15-field JCAHO surface in one shot.
       const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
       try {
         await adminResolveAlert(adminApi, alertId, {
-          resolutionAction: 'TIER1_FALSE_POSITIVE',
-          resolutionRationale: 'qa-test: angioedema audit-footer coverage (TIER_1 resolution catalog now wired for angioedema per FIX 5)',
+          resolutionAction: 'ANGIO_FALSE_ALARM',
+          resolutionRationale: 'qa-test: angioedema audit-footer coverage (bespoke angioedema resolution catalog per Manisha 5/24 Q4)',
+          resolutionDetails: { actualCause: 'qa-test: lip tingling unrelated to ACE inhibitor' },
         })
       } finally {
         await adminApi.dispose()
@@ -437,11 +440,11 @@ test.describe('Cluster 8 §D-ADMIN — angioedema audit + resolution', () => {
       await expect(page.locator('[data-testid="audit-field-tier"]')).toContainText(/Angioedema|TIER_1/i)
       await expect(page.locator('[data-testid="audit-field-ruleId"]')).toContainText('ACE_ANGIOEDEMA')
       await expect(page.locator('[data-testid="audit-field-resolvedBy"]')).not.toContainText('—')
-      // Audit field humanizes the enum (`TIER1_FALSE_POSITIVE` → "Tier1
-      // False Positive"). Accept either form so the assertion survives a
-      // pure presentation change.
+      // Audit field humanizes the enum (`ANGIO_FALSE_ALARM` → "Angio False
+      // Alarm"). Accept either form so the assertion survives a pure
+      // presentation change.
       await expect(page.locator('[data-testid="audit-field-resolutionAction"]')).toContainText(
-        /TIER1_FALSE_POSITIVE|Tier1\s*False\s*Positive/i,
+        /ANGIO_FALSE_ALARM|Angio\s*False\s*Alarm/i,
       )
     } finally {
       await tc.dispose()
@@ -468,13 +471,14 @@ test.describe('Cluster 8 §D-ADMIN — angioedema audit + resolution', () => {
       await openPatientDetailTab(page, patientName, 'Alerts')
 
       // Use the canonical resolveAlertViaModal helper (spec 13 pattern):
-      // clicks the per-alert Resolve button → modal opens → picks a TIER_1
-      // action → fills rationale → confirms. Post-FIX 5 the Tier-1
-      // resolution catalog is wired for TIER_1_ANGIOEDEMA, so the modal's
-      // action list is populated; without FIX 5 the modal would have no
-      // selectable action.
+      // clicks the per-alert Resolve button → modal opens → picks the
+      // angioedema action → fills the required `actualCause` sub-field →
+      // fills rationale → confirms. TIER_1_ANGIOEDEMA has its own bespoke
+      // 6-option catalog (Manisha 5/24 Q4), so the modal's action list is
+      // populated with ANGIO_* actions (not the generic TIER1_* set).
       await resolveAlertViaModal(page, alertId, {
-        resolutionAction: 'TIER1_FALSE_POSITIVE',
+        resolutionAction: 'ANGIO_FALSE_ALARM',
+        subFields: { actualCause: 'qa-test: angioedema false alarm — symptoms unrelated' },
         rationale: 'qa-test: angioedema non-dismissible resolution + audit row coverage',
       })
 
@@ -486,13 +490,13 @@ test.describe('Cluster 8 §D-ADMIN — angioedema audit + resolution', () => {
       const after = await tc.listAlerts(userId)
       const resolved = after.find((a) => a.id === alertId)
       expect(resolved?.status, 'alert must be RESOLVED after modal flow').toBe('RESOLVED')
-      expect(resolved?.resolutionAction, 'resolutionAction round-trip').toBe('TIER1_FALSE_POSITIVE')
+      expect(resolved?.resolutionAction, 'resolutionAction round-trip').toBe('ANGIO_FALSE_ALARM')
       expect(resolved?.resolvedBy, 'resolvedBy populated (audit attribution)').toBeTruthy()
       // Audit row carries the rationale we filled in the modal.
       const adminApi = await authedApi(API_BASE_URL, ADMINS.manisha.email, 'admin')
       try {
         const audit = await adminAuditAlert(adminApi, alertId)
-        expect(audit.resolutionAction).toBe('TIER1_FALSE_POSITIVE')
+        expect(audit.resolutionAction).toBe('ANGIO_FALSE_ALARM')
         expect(String(audit.resolutionRationale ?? '')).toMatch(/qa-test: angioedema/i)
       } finally {
         await adminApi.dispose()

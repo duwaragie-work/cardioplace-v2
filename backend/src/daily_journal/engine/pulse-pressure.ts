@@ -85,12 +85,27 @@ export const pulsePressureNarrowRule: RuleFunction = (session, ctx) => {
 }
 
 /** Annotation form — appended to another rule's physicianMessage when narrow PP
- *  co-occurs with a higher-tier finding. */
+ *  co-occurs with a higher-tier finding. F23: carry the condition-specific
+ *  clinical-correlation wording (HFrEF / HFpEF / HCM / AS) that the standalone
+ *  RULE_PULSE_PRESSURE_NARROW message builder already produces, so a co-firing
+ *  L1 alert on an HFrEF patient surfaces the same Manisha 5/24 Q2 language. */
 export function getNarrowPulsePressureAnnotation(
   sbp: number | null,
   dbp: number | null,
+  profile?: ResolvedContext['profile'],
 ): string | null {
   const pp = getPulsePressure(sbp, dbp)
   if (pp == null || pp >= NARROW_PP_THRESHOLD) return null
-  return `Narrow pulse pressure: ${pp} mmHg (<${NARROW_PP_THRESHOLD}).`
+  const base = `Narrow pulse pressure: ${pp} mmHg (<${NARROW_PP_THRESHOLD}).`
+  const label = profile ? narrowPpConditionLabel(profile) : undefined
+  if (label === 'HFrEF') {
+    return `${base} In HFrEF, narrow PP may indicate reduced stroke volume. Consider clinical correlation — echocardiography if new finding or worsening trend.`
+  }
+  if (label === 'HFpEF') {
+    return `${base} In HFpEF, narrow PP is less prognostically significant than in HFrEF. Clinical correlation recommended.`
+  }
+  if (label === 'HCM' || label === 'aortic stenosis') {
+    return `${base} In the context of ${label}, narrow PP may reflect fixed outflow obstruction. Clinical correlation recommended.`
+  }
+  return base
 }

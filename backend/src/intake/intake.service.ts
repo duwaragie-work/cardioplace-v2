@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
 import {
   ActorUser,
@@ -14,13 +14,20 @@ import {
   NotificationChannel,
   Prisma,
   ProfileVerificationStatus,
+  UserRole,
   VerificationChangeType,
   VerifierRole,
 } from '../generated/prisma/client.js'
 import { canCompleteEnrollment } from '../practice/enrollment-gate.js'
+import { resolveCanonicalDrugId } from './medication-dedup.js'
+import type {
+  AdminAddMedicationDto,
+  AdminEditMedicationDto,
+} from './dto/admin-medication.dto.js'
 import {
   systemMsgMedicationHold,
   systemMsgProfileFieldRejected,
+  isProviderDirectedHold,
 } from '@cardioplace/shared'
 import type {
   PatientMedication,
@@ -65,7 +72,7 @@ const VERIFIABLE_PROFILE_FIELDS = [
   'heightCm',
   'isPregnant',
   'pregnancyDueDate',
-  'historyPreeclampsia',
+  'historyHDP',
   'hasHeartFailure',
   'heartFailureType',
   'hasAFib',
@@ -98,7 +105,7 @@ const PROFILE_FIELD_LABELS: Record<VerifiableField, string> = {
   heightCm: 'height',
   isPregnant: 'pregnancy status',
   pregnancyDueDate: 'pregnancy due date',
-  historyPreeclampsia: 'history of preeclampsia',
+  historyHDP: 'history of hypertensive disorder of pregnancy (HDP)',
   hasHeartFailure: 'heart failure history',
   heartFailureType: 'heart failure type',
   hasAFib: 'atrial fibrillation history',
@@ -295,8 +302,8 @@ export class IntakeService {
       isPregnant: dto.isPregnant,
       pregnancyDueDate: dto.pregnancyDueDate ?? null,
     }
-    if (dto.historyPreeclampsia !== undefined) {
-      patch.historyPreeclampsia = dto.historyPreeclampsia
+    if (dto.historyHDP !== undefined) {
+      patch.historyHDP = dto.historyHDP
     }
     // Clearing pregnancy also clears the due date by contract.
     if (!dto.isPregnant) {
@@ -309,6 +316,20 @@ export class IntakeService {
 
   async createMedications(userId: string, dto: IntakeMedicationsDto) {
     return this.prisma.$transaction(async (tx) => {
+      // F13 — load-bearing ACE/ARB contraindication. After a B4 angioedema
+      // resolution the provider sets PatientProfile.aceContraindicatedAt. From
+      // then on, an ACE inhibitor or ARB the patient re-adds must NOT be
+      // trusted-then-verified like a normal self-report: it is forced into
+      // AWAITING_PROVIDER (never auto-fires alerts) and the care team is
+      // notified so they can review before the drug goes live.
+      const profile = await tx.patientProfile.findUnique({
+        where: { userId },
+        select: { aceContraindicatedAt: true },
+      })
+      const aceContraindicated = profile?.aceContraindicatedAt != null
+      const isContraindicatedReadd = (drugClass: DrugClass): boolean =>
+        aceContraindicated &&
+        (drugClass === DrugClass.ACE_INHIBITOR || drugClass === DrugClass.ARB)
       // Dedup against the patient's currently-active medications using the
       // same canonical key as PUT /me/medications (see medicationKey). Any
       // incoming item whose key matches an active row is silently dropped —
@@ -359,6 +380,9 @@ export class IntakeService {
               userId,
               drugName: item.drugName,
               drugClass: item.drugClass,
+              // #85 — canonical identity for brand/generic dedup (null when
+              // off-catalog; dedup is skipped for null canonicals).
+              canonicalDrugId: resolveCanonicalDrugId(item.drugName),
               frequency: item.frequency,
               isCombination: item.isCombination ?? false,
               combinationComponents: item.combinationComponents ?? [],
@@ -367,14 +391,23 @@ export class IntakeService {
               notes: item.notes,
               // Patient self-report starts unverified; voice/photo cannot
               // fire automated alerts until a provider verifies (see
-              // BUILD_PLAN §3.4 safety-net table).
+              // BUILD_PLAN §3.4 safety-net table). F13 — a re-added ACE/ARB on
+              // a contraindicated patient is also held for provider review.
               verificationStatus:
-                item.source === 'PATIENT_VOICE' || item.source === 'PATIENT_PHOTO'
+                isContraindicatedReadd(item.drugClass) ||
+                item.source === 'PATIENT_VOICE' ||
+                item.source === 'PATIENT_PHOTO'
                   ? MedicationVerificationStatus.AWAITING_PROVIDER
                   : MedicationVerificationStatus.UNVERIFIED,
             },
           }),
         ),
+      )
+
+      // F13 — collect contraindicated ACE/ARB re-adds so we can alert the care
+      // team and tell the patient app the add needs provider review.
+      const contraindicatedReadd = created.filter((m) =>
+        isContraindicatedReadd(m.drugClass),
       )
 
       if (created.length) {
@@ -396,6 +429,37 @@ export class IntakeService {
         await this.flipProfileToUnverified(tx, userId)
       }
 
+      // F13 — fire a Tier-2-style admin notice to the patient's primary
+      // provider for each contraindicated ACE/ARB re-add, so the care team
+      // reviews before the held medication is ever trusted.
+      if (contraindicatedReadd.length) {
+        const assignment = await tx.patientProviderAssignment.findUnique({
+          where: { userId },
+          select: { primaryProviderId: true },
+        })
+        const providerId = assignment?.primaryProviderId
+        if (providerId) {
+          const drugList = contraindicatedReadd
+            .map((m) => m.drugName)
+            .join(', ')
+          await tx.notification.create({
+            data: {
+              userId: providerId,
+              channel: 'DASHBOARD',
+              title: 'Contraindicated medication re-added',
+              body: `Patient re-added a medication flagged as contraindicated (prior angioedema): ${drugList}. It is held for your review before it can be trusted.`,
+              tips: [],
+            },
+          })
+        } else {
+          this.logger.warn(
+            `F13 — contraindicated ACE/ARB re-add for user ${userId} but no primary provider to notify (${contraindicatedReadd
+              .map((m) => m.drugName)
+              .join(', ')})`,
+          )
+        }
+      }
+
       const responseRows = [...created, ...skippedExisting]
       const message = skippedExisting.length
         ? `${created.length} medication(s) recorded, ${skippedExisting.length} duplicate(s) skipped`
@@ -406,6 +470,10 @@ export class IntakeService {
           statusCode: 201,
           message,
           data: responseRows.map((m) => this.serializeMedication(m)),
+          // F13 — names of any ACE/ARB the patient re-added while
+          // contraindicated. The patient app uses this to confirm the
+          // "needs provider review" outcome after an acknowledged add.
+          contraindicatedReadd: contraindicatedReadd.map((m) => m.drugName),
         },
         created,
       }
@@ -578,6 +646,8 @@ export class IntakeService {
             userId,
             drugName: item.drugName,
             drugClass: item.drugClass,
+            // #85 — canonical identity for brand/generic dedup.
+            canonicalDrugId: resolveCanonicalDrugId(item.drugName),
             frequency: item.frequency,
             isCombination: item.isCombination ?? false,
             combinationComponents: item.combinationComponents ?? [],
@@ -1112,25 +1182,50 @@ export class IntakeService {
     // to dispatch is logged but does not roll back the status change — the
     // medication is on hold regardless of whether the notification landed.
     if (nextStatus === MedicationVerificationStatus.HOLD) {
+      // Provider-directed = "pause it" (names the med); administrative =
+      // "keep taking as usual" (does NOT name the med) — Manisha 5/24 §3.
+      const providerDirected = isProviderDirectedHold(dto.holdReason!)
+      const title = providerDirected ? 'Please pause a medication' : 'Medicine list review'
+      const body = systemMsgMedicationHold(med.drugName, dto.holdReason!)
       try {
-        await this.prisma.notification.create({
-          data: {
-            userId: med.userId,
-            // PUSH (not DASHBOARD) so it lands in the patient's Notifications
-            // tab — that tab renders only PUSH/null channels; DASHBOARD rows
-            // are treated as alert-linked and surface on the Alerts tab. This
-            // is a standalone care-team message (CLINICAL_SPEC §14.2), so it
-            // belongs with gap-alert / monthly-reask / care-team-update (all PUSH).
-            channel: NotificationChannel.PUSH,
-            // Provider-directed = "pause it" (names the med); administrative =
-            // "keep taking as usual" (does NOT name the med) — Manisha 5/24 §3.
-            title:
-              dto.holdReason === 'PROVIDER_DIRECTED_HOLD'
-                ? 'Please pause a medication'
-                : 'Medicine list review',
-            body: systemMsgMedicationHold(med.drugName, dto.holdReason!),
-          },
-        })
+        // F16 — administrative holds consolidate to ONE bell row per Manisha A1
+        // "Display once": a patient with 4 administrative holds should see a
+        // single "Medicine list review" notice, not 4 identical rows. The
+        // administrative body is generic (doesn't name a med), so an unread
+        // notice already standing for one hold covers the rest — bump its
+        // timestamp instead of stacking a duplicate. Provider-directed holds
+        // name a specific medication, so each keeps its own row.
+        const existing = providerDirected
+          ? null
+          : await this.prisma.notification.findFirst({
+              where: {
+                userId: med.userId,
+                channel: NotificationChannel.PUSH,
+                title: 'Medicine list review',
+                readAt: null,
+              },
+              select: { id: true },
+            })
+        if (existing) {
+          await this.prisma.notification.update({
+            where: { id: existing.id },
+            data: { sentAt: new Date(), body },
+          })
+        } else {
+          await this.prisma.notification.create({
+            data: {
+              userId: med.userId,
+              // PUSH (not DASHBOARD) so it lands in the patient's Notifications
+              // tab — that tab renders only PUSH/null channels; DASHBOARD rows
+              // are treated as alert-linked and surface on the Alerts tab. This
+              // is a standalone care-team message (CLINICAL_SPEC §14.2), so it
+              // belongs with gap-alert / monthly-reask / care-team-update (all PUSH).
+              channel: NotificationChannel.PUSH,
+              title,
+              body,
+            },
+          })
+        }
       } catch (err) {
         this.logger.error(
           `HOLD notification failed for medication ${medicationId}`,
@@ -1180,6 +1275,229 @@ export class IntakeService {
       data: profile
         ? { ...this.serializeProfile(profile), dateOfBirth: dob, rejectedFields }
         : null,
+    }
+  }
+
+  // ─── #92 — admin add / edit medication ─────────────────────────────────
+  //
+  // Clinical roles (SUPER_ADMIN / PROVIDER / MEDICAL_DIRECTOR) can record a
+  // medication on a patient's behalf. Admin is authoritative, so the row is
+  // VERIFIED on add — EXCEPT the ACE/ARB-on-angioedema safety gate (mirror of
+  // #84), which forces PROVIDER_DIRECTED_HOLD instead. Dedup reuses #85's
+  // canonical resolution: a brand/generic duplicate of an existing active med
+  // is rejected with 409 + the existing record so the caller edits it instead.
+
+  /** Map the actor's admin role to the audit VerifierRole. */
+  private adminVerifierRole(roles: UserRole[]): VerifierRole {
+    return roles.includes(UserRole.PROVIDER)
+      ? VerifierRole.PROVIDER
+      : VerifierRole.ADMIN
+  }
+
+  /** Fold an optional free-text dose into notes (no dedicated dose column). */
+  private composeNotes(dose?: string, notes?: string): string | null {
+    const parts = [dose?.trim() ? `Dose: ${dose.trim()}` : '', notes?.trim() ?? '']
+      .filter(Boolean)
+    return parts.length ? parts.join(' — ') : null
+  }
+
+  private canonicalDuplicate409(
+    drugName: string,
+    canonicalDrugId: string,
+    existing: { id: string; drugName: string; verificationStatus: MedicationVerificationStatus; holdReason: MedicationHoldReason | null },
+  ): never {
+    throw new ConflictException({
+      statusCode: 409,
+      error: 'DUPLICATE_CANONICAL_DRUG',
+      message: `This medication is already on the patient’s record (${existing.drugName}).`,
+      existing: {
+        id: existing.id,
+        drugName: existing.drugName,
+        canonicalDrugId,
+        verificationStatus: existing.verificationStatus,
+        holdReason: existing.holdReason,
+      },
+    })
+  }
+
+  async adminAddMedication(
+    actor: ActorUser,
+    patientUserId: string,
+    dto: AdminAddMedicationDto,
+  ) {
+    await this.access.assertCanAccessPatient(actor, patientUserId)
+
+    const canonicalDrugId = resolveCanonicalDrugId(dto.drugName)
+    // #85 dedup — only when the name resolves to the catalog. Off-catalog
+    // (null canonical) meds are never blocked.
+    if (canonicalDrugId) {
+      const dup = await this.prisma.patientMedication.findFirst({
+        where: { userId: patientUserId, canonicalDrugId, discontinuedAt: null },
+      })
+      if (dup) this.canonicalDuplicate409(dto.drugName, canonicalDrugId, dup)
+    }
+
+    // ACE/ARB-on-angioedema safety gate (mirror of #84). Auto-hold instead of
+    // auto-verify so an admin can't silently re-introduce a contraindicated drug.
+    const profile = await this.prisma.patientProfile.findUnique({
+      where: { userId: patientUserId },
+      select: { aceContraindicatedAt: true },
+    })
+    const isAceArb =
+      dto.drugClass === DrugClass.ACE_INHIBITOR || dto.drugClass === DrugClass.ARB
+    const angioedemaHold = profile?.aceContraindicatedAt != null && isAceArb
+
+    const now = new Date()
+    const role = this.adminVerifierRole(actor.roles)
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const med = await tx.patientMedication.create({
+        data: {
+          userId: patientUserId,
+          drugName: dto.drugName,
+          drugClass: dto.drugClass,
+          canonicalDrugId,
+          frequency: dto.frequency,
+          notes: this.composeNotes(dto.dose, dto.notes),
+          source: 'PROVIDER_ENTERED',
+          addedByUserId: actor.id,
+          addedByRole: role,
+          addedAt: now,
+          verificationStatus: angioedemaHold
+            ? MedicationVerificationStatus.HOLD
+            : MedicationVerificationStatus.VERIFIED,
+          verifiedByAdminId: angioedemaHold ? null : actor.id,
+          verifiedAt: angioedemaHold ? null : now,
+          holdReason: angioedemaHold ? MedicationHoldReason.PROVIDER_DIRECTED_HOLD : null,
+          holdSetAt: angioedemaHold ? now : null,
+        },
+      })
+      await tx.profileVerificationLog.create({
+        data: {
+          userId: patientUserId,
+          fieldPath: `medication:${med.id}`,
+          previousValue: Prisma.JsonNull,
+          newValue: {
+            drugName: dto.drugName,
+            drugClass: dto.drugClass,
+            verificationStatus: med.verificationStatus,
+            holdReason: med.holdReason,
+          } as Prisma.InputJsonValue,
+          changedBy: actor.id,
+          changedByRole: role,
+          changeType: VerificationChangeType.ADMIN_CORRECT,
+          discrepancyFlag: angioedemaHold,
+          rationale: angioedemaHold
+            ? 'Admin-added ACE/ARB on angioedema-contraindicated patient — auto-held (PROVIDER_DIRECTED_HOLD).'
+            : 'Admin-added medication.',
+        },
+      })
+      return med
+    })
+
+    return {
+      statusCode: 201,
+      message: 'Medication added',
+      // Tells the admin UI to show the confirmation modal explaining the hold.
+      requiresAcknowledgement: angioedemaHold,
+      data: this.serializeMedication(created),
+    }
+  }
+
+  async adminEditMedication(
+    actor: ActorUser,
+    medicationId: string,
+    dto: AdminEditMedicationDto,
+  ) {
+    const med = await this.prisma.patientMedication.findUnique({
+      where: { id: medicationId },
+    })
+    if (!med) throw new NotFoundException('Medication not found')
+    await this.access.assertCanAccessPatient(actor, med.userId)
+
+    const now = new Date()
+    const role = this.adminVerifierRole(actor.roles)
+    const nameChanged = dto.drugName != null && dto.drugName !== med.drugName
+    const newDrugClass = dto.drugClass ?? med.drugClass
+    let canonicalDrugId = med.canonicalDrugId
+    if (nameChanged) {
+      canonicalDrugId = resolveCanonicalDrugId(dto.drugName!)
+      if (canonicalDrugId) {
+        const dup = await this.prisma.patientMedication.findFirst({
+          where: {
+            userId: med.userId,
+            canonicalDrugId,
+            discontinuedAt: null,
+            id: { not: medicationId },
+          },
+        })
+        if (dup) this.canonicalDuplicate409(dto.drugName!, canonicalDrugId, dup)
+      }
+    }
+
+    // If the edit turns this into an ACE/ARB for an angioedema patient, hold it.
+    const isAceArb =
+      newDrugClass === DrugClass.ACE_INHIBITOR || newDrugClass === DrugClass.ARB
+    const profile = isAceArb
+      ? await this.prisma.patientProfile.findUnique({
+          where: { userId: med.userId },
+          select: { aceContraindicatedAt: true },
+        })
+      : null
+    const angioedemaHold = profile?.aceContraindicatedAt != null && isAceArb
+
+    const data: Prisma.PatientMedicationUpdateInput = {
+      lastEditedByUserId: actor.id,
+      lastEditedByRole: role,
+      lastEditedAt: now,
+    }
+    if (dto.drugName != null) data.drugName = dto.drugName
+    if (dto.drugClass != null) data.drugClass = dto.drugClass
+    if (dto.frequency != null) data.frequency = dto.frequency
+    if (dto.dose != null || dto.notes != null) {
+      data.notes = this.composeNotes(dto.dose, dto.notes ?? med.notes ?? undefined)
+    }
+    if (nameChanged) data.canonicalDrugId = canonicalDrugId
+    if (angioedemaHold && med.verificationStatus !== MedicationVerificationStatus.HOLD) {
+      data.verificationStatus = MedicationVerificationStatus.HOLD
+      data.holdReason = MedicationHoldReason.PROVIDER_DIRECTED_HOLD
+      data.holdSetAt = now
+      data.holdEscalationLevel = 0
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.patientMedication.update({ where: { id: medicationId }, data })
+      await tx.profileVerificationLog.create({
+        data: {
+          userId: med.userId,
+          fieldPath: `medication:${medicationId}`,
+          previousValue: {
+            drugName: med.drugName,
+            drugClass: med.drugClass,
+            frequency: med.frequency,
+          } as Prisma.InputJsonValue,
+          newValue: {
+            drugName: dto.drugName ?? med.drugName,
+            drugClass: newDrugClass,
+            frequency: dto.frequency ?? med.frequency,
+          } as Prisma.InputJsonValue,
+          changedBy: actor.id,
+          changedByRole: role,
+          changeType: VerificationChangeType.ADMIN_CORRECT,
+          discrepancyFlag: angioedemaHold,
+          rationale: angioedemaHold
+            ? 'Admin edit to ACE/ARB on angioedema-contraindicated patient — auto-held.'
+            : 'Admin edit to medication.',
+        },
+      })
+      return row
+    })
+
+    return {
+      statusCode: 200,
+      message: 'Medication updated',
+      requiresAcknowledgement: angioedemaHold,
+      data: this.serializeMedication(updated),
     }
   }
 

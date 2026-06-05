@@ -67,6 +67,11 @@ type AuthUser = {
   accountStatus?: string;
   onboardingStatus?: string;
   onboardingRequired?: boolean;
+  // #88 — the clinical dispatch gate (orthogonal to onboardingStatus). The
+  // backend /me already returns this (F27); the patient app reads it so
+  // post-submit + alert surfaces tell the truth ("enrollment pending")
+  // instead of "your care team has been notified" for un-enrolled patients.
+  enrollmentStatus?: string;
   // Cluster 8 Gap 1 — surfaced so LanguageProvider can default the locale
   // to the patient's account language (es/am pilot cohort).
   preferredLanguage?: string | null;
@@ -133,6 +138,7 @@ async function fetchProfile(accessToken: string): Promise<AuthUser | null> {
       riskTier: data.riskTier,
       accountStatus: data.accountStatus,
       onboardingStatus: data.onboardingStatus,
+      enrollmentStatus: data.enrollmentStatus,
       preferredLanguage: data.preferredLanguage ?? null,
     };
   } catch {

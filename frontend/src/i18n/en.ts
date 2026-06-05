@@ -37,7 +37,7 @@ const en = {
   'dashboard.careTeamMonitoring': 'Your care team is monitoring your progress',
   'dashboard.cedarHillConnected': 'Cedar Hill Connected',
   'dashboard.todaysBp': "Today's BP",
-  'dashboard.latestBp': 'Latest BP',
+  'dashboard.latestBp': 'Your last reading', // A5 (Doc 1) — was 'Latest BP'
   'dashboard.withinTarget': 'Within Target',
   'dashboard.elevated': 'Elevated',
   'dashboard.noData': 'No Data',
@@ -98,7 +98,9 @@ const en = {
   'dashboard.hearSummary': 'Hear summary',
   'dashboard.yourGoal': 'Your goal',
   'dashboard.belowTarget': 'Below {target} mmHg',
-  'dashboard.goalTolerance': 'High alerts begin at {value} — your goal plus a small tolerance.',
+  // #89 — diastolic-only goal: clarify the axis so the number isn't read as systolic.
+  'dashboard.belowDiastolic': 'Below {target} mmHg (diastolic)',
+  'dashboard.goalTolerance': 'High alerts begin at {value}, your goal plus a small tolerance.',
   'dashboard.setByCareTeam': '· set by your care team',
   'dashboard.chartDateAxis': 'Date',
   'dashboard.chartAt': 'at',
@@ -233,6 +235,9 @@ const en = {
   'checkin.b4.subtitle': 'Tap each one to tell us if you took it.',
   'checkin.b4.audio': 'Medications today. Tap each one to tell us if you took it.',
   'checkin.b4.noMeds': "We don't have any medications on file for you yet. Add your medications in settings for better follow-up.",
+  'checkin.b4.onHoldBadge': 'On hold',
+  'checkin.b4.onHoldDoNotTake': 'ON HOLD — your care team has paused this medication. Do not take it unless they tell you to.',
+  'checkin.b4.onHoldUnderReview': 'Your care team is reviewing this medication. Keep taking it as usual unless they tell you otherwise.',
   // Drug-class labels — patient-facing descriptive terms shown under the
   // drug name. Clinical abbreviations (ARB, MRA, SGLT2, ARNI) stay as-is.
   'checkin.b4.classAceInhibitor': 'ace inhibitor',
@@ -255,6 +260,9 @@ const en = {
   'checkin.confirm.title': 'Reading sent',
   'checkin.confirm.titleMulti': 'Reading {n} sent',
   'checkin.confirm.subtitle': 'Your care team gets it right away.',
+  // #88 — un-enrolled patients: no care team yet, engine didn't run.
+  'checkin.confirm.subtitleUnenrolled': "We're setting up your care team. They'll start reviewing your readings once your enrollment is complete.",
+  'checkin.confirm.nonAfibUnenrolled': 'Thanks for getting started.',
   'checkin.confirm.thisReading': 'This reading',
   'checkin.confirm.readingAudio': 'Reading {sys} over {dia}',
   'checkin.confirm.readingAudioPulse': 'Reading {sys} over {dia}, pulse {pulse}',
@@ -264,6 +272,18 @@ const en = {
   'checkin.confirm.nonAfib': 'Your care team will review and reach out only if something looks off.',
   'checkin.confirm.addAnother': 'Add another reading',
   'checkin.confirm.backToDashboard': 'Back to dashboard',
+  // #90 — AFib check-in state machine (plain language, no "AFib"/"averaging"
+  // jargon; "irregular heartbeat" is the lay translation).
+  'checkin.afib.state1.heading': 'Two more readings',
+  'checkin.afib.state1.body': "Take another reading in about a minute, while you're still seated. Three readings in a row helps us understand your blood pressure with an irregular heartbeat.",
+  'checkin.afib.state2.heading': 'One more reading',
+  'checkin.afib.state2.body': "One more and you're done. Take it now, while you're still seated.",
+  'checkin.afib.state3.heading': 'All three readings done',
+  'checkin.afib.state3.body': 'Your care team has what they need. Great job taking the time to get an accurate read.',
+  'checkin.afib.modal.heading': 'Take your other readings?',
+  'checkin.afib.modal.body': "You've taken {n} of 3 readings. For an accurate read with your heart rhythm, your care team needs three readings taken close together. Going to the dashboard ends this session — you can come back later for a fresh set of three.",
+  'checkin.afib.modal.stay': 'Stay and add another',
+  'checkin.afib.modal.leave': 'End this session',
 
   // Wizard chrome + session banner
   'checkin.nav.back': 'Back',
@@ -307,6 +327,7 @@ const en = {
   // ─── Chat ──────────────────────────────────────────────────────────────────
   'chat.title': 'Health Assistant',
   'chat.placeholder': 'Type a message...',
+  'chat.voiceEndToType': 'End voice call to type…',
   'chat.newConversation': 'New Conversation',
   'chat.conversations': 'Conversations',
   'chat.noConversations': 'No conversations yet',
@@ -402,6 +423,7 @@ const en = {
   'notifications.bucket.emergency': 'Emergency — call 911 if symptoms',
   'notifications.bucket.tier1': 'Important medication alerts',
   'notifications.bucket.high': 'Elevated blood pressure',
+  'notifications.bucket.heartFailure': 'Heart failure',
   'notifications.bucket.low': 'Low blood pressure',
   'notifications.bucket.info': 'For your information',
   'notifications.bucket.other': 'Other alerts',
@@ -792,6 +814,11 @@ const en = {
   'register.magicLinkInfo': 'We email you a secure link. Tap it from your email and you are signed in, no codes to type.',
   'register.otpTitle': 'OTP Code',
   'register.otpInfo': 'We email you a 6-digit code. Type it here to sign in.',
+  // Handoff 4 A1 — medical disclaimer (Manisha Doc 1). MVP US-only: 911 stays
+  // hardcoded per CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
+  'register.medicalDisclaimer': 'Cardioplace helps you track your health and stay connected to your care team. It is not a substitute for medical advice, diagnosis, or treatment. In an emergency, call 911.',
+  // Handoff 4 A2 — privacy assurance panel (Manisha Doc 1).
+  'register.privacyAssurance': 'Your information is private and secure. Only your care team can see your health data.',
 
   // ─── Onboarding Page ──────────────────────────────────────────────────────
   'onboarding.title': 'Tell Us About Your Health',
@@ -1045,21 +1072,29 @@ const en = {
   'intake.a2.naAudio': 'Not applicable',
   'intake.a2.dueDateLabel': 'When is the baby due? (optional)',
   'intake.a2.dueDateAudio': 'When is the baby due? This is optional.',
-  'intake.a2.preeclampsiaTitle': 'History of preeclampsia',
+  // Q7 (Manisha 2026-06-02) — the field is now the combined "history of
+  // hypertensive disorder of pregnancy (HDP)" (preeclampsia + gestational HTN
+  // + HELLP). Patient-facing copy uses plain "high blood pressure during a
+  // pregnancy" with the clinical terms named parenthetically, so a patient who
+  // had gestational HTN (not preeclampsia) still answers correctly.
+  // i18n: English updated here; es/fr/de/am still carry the narrow
+  // preeclampsia-only wording — flagged in I18N_TRANSLATION_FLAGS for Niva's
+  // 5-language pass.
+  'intake.a2.preeclampsiaTitle': 'High blood pressure during pregnancy',
   'intake.a2.preeclampsiaDesc': 'In a previous pregnancy',
-  'intake.a2.preeclampsiaAudio': 'History of preeclampsia in a previous pregnancy',
+  'intake.a2.preeclampsiaAudio': 'History of high blood pressure during a previous pregnancy',
   // Phase/26 — split A2 into two independent questions. The pregnancy
-  // question gates current-pregnancy alert rules; the preeclampsia
-  // question is a long-term marker per CLINICAL_SPEC §3 that applies
-  // even outside an active pregnancy.
+  // question gates current-pregnancy alert rules; the HDP-history question
+  // is a long-term marker per CLINICAL_SPEC §3 that applies even outside an
+  // active pregnancy.
   'intake.a2.currentlyPregnantQuestion': 'Are you currently pregnant?',
   'intake.a2.currentlyPregnantAudio': 'Are you currently pregnant?',
-  'intake.a2.preeclampsiaQuestion': 'Have you ever had preeclampsia?',
-  'intake.a2.preeclampsiaQuestionAudio': 'Have you ever had preeclampsia in a past pregnancy?',
+  'intake.a2.preeclampsiaQuestion': 'Have you ever had high blood pressure during a pregnancy? This includes preeclampsia, gestational hypertension, or HELLP syndrome.',
+  'intake.a2.preeclampsiaQuestionAudio': 'Have you ever had high blood pressure during a pregnancy? This includes preeclampsia, gestational hypertension, or HELLP syndrome.',
   'intake.a2.preeclampsiaYesDesc': 'Yes, in a past pregnancy',
-  'intake.a2.preeclampsiaYesAudio': 'Yes, I had preeclampsia in a past pregnancy.',
-  'intake.a2.preeclampsiaNoDesc': "I've never had preeclampsia",
-  'intake.a2.preeclampsiaNoAudio': "No, I've never had preeclampsia.",
+  'intake.a2.preeclampsiaYesAudio': 'Yes, in a past pregnancy.',
+  'intake.a2.preeclampsiaNoDesc': 'No, never',
+  'intake.a2.preeclampsiaNoAudio': 'No, never.',
 
   // A3 — heart conditions
   'intake.a3.title': 'Heart conditions',
@@ -1221,12 +1256,43 @@ const en = {
   'intake.exitSave.cta': 'Back to dashboard',
   'intake.exitSave.keepGoing': 'Keep going',
   'intake.exitSave.leaveWithoutSaving': 'Leave without saving',
-  'intake.exitSave.editTitle': 'Save your changes?',
-  'intake.exitSave.editBody': "We'll update your profile and medications with the changes on this page, then take you back to the dashboard.",
+  // A7 (Doc 1, edit mode) — Manisha verbatim "unsaved changes" prompt.
+  'intake.exitSave.editTitle': 'You have unsaved changes',
+  'intake.exitSave.editBody': 'Would you like to save before leaving?',
   'intake.exitSave.editCta': 'Save and exit',
   'intake.exitSave.saving': 'Saving…',
   'intake.exitSave.errorFallback': "We couldn't save your changes. Please try again.",
   'intake.edit.reverifyBanner': 'Editing this information will require your care team to re-verify. Your verified status will reset until they confirm the changes.',
+
+  // ─── Caregivers card (Handoff 4 / Doc 1 + Addendum Decision 2: email-only,
+  //     no SMS, no caregiver app access) ──────────────────────────────────────
+  'caregiver.title': 'Caregivers',
+  'caregiver.add': 'Add',
+  'caregiver.description': 'A caregiver is someone you trust — a family member or friend — who can be emailed if a serious health alert comes up. They’re only contacted for the alerts your care team has approved, and only after you give consent.',
+  'caregiver.loading': 'Loading…',
+  'caregiver.empty': 'No caregivers added yet.',
+  'caregiver.channelEmail': 'Email',
+  'caregiver.channelNone': 'Do not notify',
+  'caregiver.consentGiven': 'Consent given',
+  'caregiver.consentNone': 'No consent — won’t be notified',
+  'caregiver.revoke': 'Revoke',
+  'caregiver.allow': 'Allow alerts',
+  'caregiver.namePlaceholder': 'Caregiver’s name',
+  'caregiver.relationshipPlaceholder': 'Relationship (e.g. daughter) — optional',
+  'caregiver.emailPlaceholder': 'Email address',
+  'caregiver.optionEmail': 'Notify by email',
+  'caregiver.optionNone': 'Don’t notify yet',
+  'caregiver.consentLabel': 'I agree Cardioplace may share my health alerts with this person.',
+  'caregiver.save': 'Save caregiver',
+  'caregiver.saving': 'Saving…',
+  'caregiver.cancel': 'Cancel',
+  'caregiver.removeAria': 'Remove {name}',
+  'caregiver.errNameRequired': 'Please enter the caregiver’s name.',
+  'caregiver.errEmailRequired': 'Email is required to notify by email.',
+  'caregiver.errLoad': 'Could not load caregivers',
+  'caregiver.errAdd': 'Could not add caregiver.',
+  'caregiver.errConsent': 'Could not update consent.',
+  'caregiver.errRemove': 'Could not remove caregiver.',
 
   // "Already on file" page
   'intake.profileExists.title': "You're all set",
@@ -1245,7 +1311,7 @@ const en = {
   'intake.nav.errorDob': 'Please enter your date of birth.',
   'intake.nav.errorHeight': 'Please enter a realistic height (about 3 ft 4 in to 8 ft 2 in).',
   'intake.nav.errorPregnancy': 'Please pick Yes or No.',
-  'intake.nav.errorPreeclampsia': 'Please pick Yes or No for preeclampsia history.',
+  'intake.nav.errorPreeclampsia': 'Please pick Yes or No for high blood pressure during pregnancy.',
   'intake.nav.errorHfType': 'Please pick one — Not sure is OK.',
   'intake.nav.errorFreq': 'Pick how often you take {name}.',
   'intake.nav.errorSubmit': 'Something went wrong submitting your profile.',
@@ -1299,7 +1365,10 @@ const en = {
   'alerts.emergency.callAria': 'Call 911 now',
   'alerts.emergency.understand': 'I understand',
   'alerts.emergency.followupTitle': 'Have you called 911?',
-  'alerts.emergency.followupBody': "Two hours have passed. We want to make sure you're safe.",
+  // #13 — dynamic elapsed time. followupBody is the <30-min short form;
+  // followupBodyElapsed carries the {elapsed} interpolation for older alerts.
+  'alerts.emergency.followupBody': "We want to make sure you're safe.",
+  'alerts.emergency.followupBodyElapsed': "It has been about {elapsed} since this alert. We want to make sure you're safe.",
   'alerts.emergency.followupYes': 'Yes',
   'alerts.emergency.followupNotYet': 'Not yet',
   'alerts.tier.back': 'Back',

@@ -316,6 +316,12 @@ export class AlertResolutionService {
           where: { alertId: alert.id, resolvedAt: null },
           data: { resolvedAt: now, resolvedBy: actor.id },
         }),
+        // #84 — discontinuing every live ACE/ARB here is a STRONGER outcome
+        // than the PROVIDER_DIRECTED_HOLD retro-upgrade (discontinued meds drop
+        // off the patient's med surfaces entirely), so this path already
+        // satisfies the "no benign hold left behind" guarantee. The reusable
+        // retroUpgradeAceArbHoldsForContraindication helper covers the paths
+        // that set the flag WITHOUT discontinuing.
         this.prisma.patientMedication.updateMany({
           where: {
             userId: alert.userId,

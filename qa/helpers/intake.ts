@@ -12,7 +12,7 @@ export type IntakeProfile = {
   heightCm: number
   isPregnant?: boolean
   pregnancyDueDate?: string
-  historyPreeclampsia?: boolean
+  historyHDP?: boolean
   hasHeartFailure?: boolean
   heartFailureType?: 'HFREF' | 'HFPEF' | 'UNKNOWN' | 'NOT_APPLICABLE'
   hasCAD?: boolean

@@ -1,9 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { GapAlertService } from '../crons/gap-alert.service.js'
+import { MedicationHoldEscalationService } from '../crons/medication-hold-escalation.service.js'
 import { MonthlyReaskService } from '../crons/monthly-reask.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
 import { ladderForTier } from '../daily_journal/escalation/ladder-defs.js'
+import { retroUpgradeAceArbHoldsForContraindication } from '../intake/ace-contraindication.js'
+import { VerifierRole } from '../generated/prisma/client.js'
 import type { LadderStep as LadderStepEnum } from '../generated/prisma/client.js'
 
 /**
@@ -19,6 +22,7 @@ export class TestControlService {
     private readonly gapAlerts: GapAlertService,
     private readonly monthlyReask: MonthlyReaskService,
     private readonly escalation: EscalationService,
+    private readonly medicationHoldEscalation: MedicationHoldEscalationService,
   ) {}
 
   // ─── Cron drivers ───────────────────────────────────────────────────────
@@ -37,6 +41,13 @@ export class TestControlService {
   async runMonthlyReaskScan(now: Date): Promise<{ scanned: number; reasked: number }> {
     const sent = await this.monthlyReask.runScan(now)
     return { scanned: 1, reasked: sent }
+  }
+
+  async runMedicationHoldEscalationScan(
+    now: Date,
+  ): Promise<{ scanned: number; rungsFired: number }> {
+    const fired = await this.medicationHoldEscalation.runScan(now)
+    return { scanned: 1, rungsFired: fired }
   }
 
   // ─── Time advancement ───────────────────────────────────────────────────
@@ -241,6 +252,28 @@ export class TestControlService {
   }
 
   /**
+   * Delete a user's DeviationAlert rows (plus their child EscalationEvent rows
+   * and alert-linked Notification rows) WITHOUT touching JournalEntry history —
+   * unlike resetUser, which also wipes readings. A test that needs an
+   * established reading history but a clean alert slate (e.g. 30u B2's co-fire
+   * consolidation, which must see exactly the alerts it just fired) uses this
+   * right before triggering. Ordered children-first + serializable to mirror
+   * resetUser's deadlock-avoidance under CI's shared pgvector DB. (EscalationEvent
+   * cascades and Notification.alertId is SetNull, so this is also FK-safe.)
+   */
+  async deleteAlertsForUser(userId: string): Promise<{ rowsDeleted: number }> {
+    const [, , alerts] = await this.prisma.$transaction(
+      [
+        this.prisma.escalationEvent.deleteMany({ where: { alert: { userId } } }),
+        this.prisma.notification.deleteMany({ where: { userId, alertId: { not: null } } }),
+        this.prisma.deviationAlert.deleteMany({ where: { userId } }),
+      ],
+      { isolationLevel: 'Serializable' },
+    )
+    return { rowsDeleted: alerts.count }
+  }
+
+  /**
    * Delete a user's PatientThreshold so a test can assert the "no threshold"
    * branches — IVR-04 enrollment revert + the THR-REVIEW "missing" lock. There
    * is no production threshold-delete (THR-033), so this is test-control only.
@@ -318,6 +351,35 @@ export class TestControlService {
     }
     // Unreachable — the loop either returns or rethrows on the final attempt.
     return { rowsDeleted: 0 }
+  }
+
+  /**
+   * F13 — set/clear PatientProfile.aceContraindicatedAt so specs can exercise
+   * the ACE/ARB re-add gate without walking the full B4 angioedema-resolution
+   * flow. Test-infra only.
+   *
+   * #84 — setting the flag also retro-upgrades existing live ACE/ARB holds to
+   * PROVIDER_DIRECTED_HOLD ("do not take"), matching the production guarantee
+   * (the angioedema-resolution path already discontinues active ACE/ARB). Done
+   * atomically with the flag write so the two never diverge.
+   */
+  async setAceContraindicated(userId: string, value: boolean): Promise<void> {
+    const now = new Date()
+    await this.prisma.$transaction(async (tx) => {
+      await tx.patientProfile.update({
+        where: { userId },
+        data: { aceContraindicatedAt: value ? now : null },
+      })
+      if (value) {
+        await retroUpgradeAceArbHoldsForContraindication(tx, {
+          userId,
+          changedBy: 'SYSTEM',
+          changedByRole: VerifierRole.ADMIN,
+          reason: 'Angioedema ACE/ARB contraindication flag set (#84 retro-upgrade)',
+          now,
+        })
+      }
+    })
   }
 
   async setEnrollment(userId: string, status: 'NOT_ENROLLED' | 'ENROLLED'): Promise<void> {
@@ -406,7 +468,7 @@ export class TestControlService {
     userId: string,
     flag:
       | 'isPregnant'
-      | 'historyPreeclampsia'
+      | 'historyHDP'
       | 'hasHeartFailure'
       | 'hasAFib'
       | 'hasCAD'
@@ -493,6 +555,39 @@ export class TestControlService {
       select: { id: true },
     })
     return { id: created.id }
+  }
+
+  // F17 — place a user's medication (matched by drugName) on HOLD with a given
+  // reason, mirroring an admin provider-directed hold. Lets the daily-check-in
+  // "held meds surface as non-actionable" spec set up state deterministically.
+  async setMedicationHold(
+    userId: string,
+    drugName: string,
+    holdReason:
+      | 'AWAITING_RECORDS'
+      | 'UNCLEAR_NAME'
+      | 'UNCLEAR_DOSE'
+      | 'PROVIDER_DIRECTED_HOLD'
+      | 'OTHER' = 'PROVIDER_DIRECTED_HOLD',
+  ): Promise<{ id: string }> {
+    const existing = await this.prisma.patientMedication.findFirst({
+      where: { userId, drugName },
+      select: { id: true },
+    })
+    if (!existing) {
+      throw new NotFoundException(
+        `No medication "${drugName}" found for user ${userId}`,
+      )
+    }
+    await this.prisma.patientMedication.update({
+      where: { id: existing.id },
+      data: {
+        verificationStatus: 'HOLD',
+        holdReason,
+        holdSetAt: new Date(),
+      },
+    })
+    return { id: existing.id }
   }
 
   async setProfileVerificationStatus(
@@ -614,6 +709,9 @@ export class TestControlService {
       resolvedBy?: string
       resolutionAction?: string
       resolutionRationale?: string
+      patientMessage?: string
+      caregiverMessage?: string
+      physicianMessage?: string
     }>,
   ): Promise<{ created: number; alertIds: string[] }> {
     const alertIds: string[] = []
@@ -647,6 +745,17 @@ export class TestControlService {
           resolvedBy: a.resolvedBy ?? null,
           resolutionAction: a.resolutionAction ?? null,
           resolutionRationale: a.resolutionRationale ?? null,
+          // Three-tier messages: real alerts always carry these (the admin
+          // AlertCard only renders a tier card when its message is non-empty),
+          // so seeded fixtures must too or the expanded-card 3-tier assertions
+          // (spec 13 §G) find nothing. Override-able per spec; default to a
+          // descriptive non-empty string per tier.
+          patientMessage:
+            a.patientMessage ?? 'Seeded alert — patient-facing message.',
+          caregiverMessage:
+            a.caregiverMessage ?? 'Seeded alert — caregiver-facing message.',
+          physicianMessage:
+            a.physicianMessage ?? 'Seeded alert — physician-facing message.',
         },
         select: { id: true },
       })

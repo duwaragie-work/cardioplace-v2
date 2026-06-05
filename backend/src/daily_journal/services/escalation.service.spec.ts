@@ -109,6 +109,11 @@ describe('EscalationService', () => {
       deviationAlert: {
         findUnique: jest.fn() as jest.Mock<any>,
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+        // F9/#82 — present so a regression that starts mutating the alert at
+        // T+0 dispatch (e.g. rewriting physicianMessage / bumping updatedAt)
+        // is detectable. The escalation path must NEVER write the alert row.
+        update: (jest.fn() as jest.Mock<any>).mockResolvedValue({}),
+        updateMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 0 }),
       },
       escalationEvent: {
         create: jest.fn() as jest.Mock<any>,
@@ -279,6 +284,44 @@ describe('EscalationService', () => {
       )
       // every (alert, recipient) combination appears exactly once
       expect(new Set(keys).size).toBe(keys.length)
+    })
+
+    // F9/#82 — the escalation T+0 dispatch reads the alert (findUnique) and
+    // writes EscalationEvent + Notification rows, but must never write back to
+    // the DeviationAlert itself. A write there would bump updatedAt and could
+    // rewrite the immutable at-fire-time three-tier messages.
+    it('T+0 dispatch does NOT write the DeviationAlert row (emergency)', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildAlert({ tier: 'BP_LEVEL_2', ruleId: 'RULE_ABSOLUTE_EMERGENCY' }),
+      )
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({
+          tier: 'BP_LEVEL_2',
+          ruleId: 'RULE_ABSOLUTE_EMERGENCY',
+        }),
+      )
+      // It fired the ladder (proof the path ran)…
+      expect(prisma.escalationEvent.create).toHaveBeenCalled()
+      // …but never touched the alert record.
+      expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
+      expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
+    })
+
+    it('T+0 dispatch does NOT write the DeviationAlert row (adherence Tier 2)', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildAlert({
+          tier: 'TIER_2_DISCREPANCY',
+          ruleId: 'RULE_MEDICATION_MISSED',
+        }),
+      )
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({
+          tier: 'TIER_2_DISCREPANCY',
+          ruleId: 'RULE_MEDICATION_MISSED',
+        }),
+      )
+      expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
+      expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
     })
   })
 
@@ -610,6 +653,65 @@ describe('EscalationService', () => {
       // Fires immediately (notificationSentAt set, no scheduledFor).
       expect(t0[0].data.notificationSentAt).toEqual(expect.any(Date))
       expect(t0[0].data.scheduledFor).toBeUndefined()
+    })
+
+    it('F12 — BP Level 2 T+0 writes NO patient DASHBOARD bell row, but patient PUSH + provider DASHBOARD survive', async () => {
+      const bpL2 = buildAlert({
+        tier: 'BP_LEVEL_2',
+        createdAt: new Date('2026-04-21T02:00:00Z'),
+      })
+      prisma.deviationAlert.findUnique.mockResolvedValue(bpL2)
+
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({ tier: 'BP_LEVEL_2' }),
+      )
+
+      const notifCalls = prisma.notification.create.mock.calls as Array<
+        [{ data: { userId: string; channel: string } }]
+      >
+      const patientNotifs = notifCalls.filter(
+        (c) => c[0].data.userId === 'patient-1',
+      )
+      // No clinical alert mirrors into the patient bell.
+      expect(
+        patientNotifs.filter((c) => c[0].data.channel === 'DASHBOARD'),
+      ).toHaveLength(0)
+      // The out-of-app PUSH to the patient is preserved (emergency wake).
+      expect(
+        patientNotifs.some((c) => c[0].data.channel === 'PUSH'),
+      ).toBe(true)
+      // Providers still get their DASHBOARD (admin bell) rows.
+      const providerDashboard = notifCalls.filter(
+        (c) =>
+          c[0].data.userId !== 'patient-1' && c[0].data.channel === 'DASHBOARD',
+      )
+      expect(providerDashboard.length).toBeGreaterThan(0)
+    })
+
+    it('G.4 — read-side filter does NOT touch the write/email path: patient PUSH + EMAIL rows still written + patient email still SENT', async () => {
+      const bpL2 = buildAlert({
+        tier: 'BP_LEVEL_2',
+        createdAt: new Date('2026-04-21T02:00:00Z'),
+      })
+      prisma.deviationAlert.findUnique.mockResolvedValue(bpL2)
+
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({ tier: 'BP_LEVEL_2' }),
+      )
+
+      const notifCalls = prisma.notification.create.mock.calls as Array<
+        [{ data: { userId: string; channel: string } }]
+      >
+      const patientNotifs = notifCalls.filter(
+        (c) => c[0].data.userId === 'patient-1',
+      )
+      // G.4 is READ-SIDE ONLY — the write path is unchanged. The PUSH row is
+      // still WRITTEN (the bell query hides it); the EMAIL row is still WRITTEN.
+      expect(patientNotifs.some((c) => c[0].data.channel === 'PUSH')).toBe(true)
+      expect(patientNotifs.some((c) => c[0].data.channel === 'EMAIL')).toBe(true)
+      // And the real Resend email STILL dispatches (the regression lock — the
+      // read filter must never suppress the actual patient email send).
+      expect(email.sendEmail).toHaveBeenCalled()
     })
   })
 

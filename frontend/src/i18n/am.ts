@@ -105,7 +105,9 @@ const am: Record<TranslationKey, string> = {
   'dashboard.hearSummary': 'ማጠቃለያውን ያዳምጡ',
   'dashboard.yourGoal': 'ግብዎ',
   'dashboard.belowTarget': 'ከ{target} mmHg በታች',
-  'dashboard.goalTolerance': 'ከፍተኛ ማንቂያዎች የሚጀምሩት በ{value} ነው — ግብዎ ላይ ትንሽ ተጨማሪ ገደብ።',
+  // #89 — English placeholder; flagged for Niva translation pass.
+  'dashboard.belowDiastolic': 'Below {target} mmHg (diastolic)',
+  'dashboard.goalTolerance': 'ከፍተኛ ማንቂያዎች የሚጀምሩት በ{value} ነው፣ ግብዎ ላይ ትንሽ ተጨማሪ ገደብ።',
   'dashboard.setByCareTeam': '· በተንከባካቢ ቡድንዎ የተዘጋጀ',
   'dashboard.chartDateAxis': 'ቀን',
   'dashboard.chartAt': 'በ',
@@ -237,6 +239,9 @@ const am: Record<TranslationKey, string> = {
   'checkin.b4.subtitle': 'ሁሉንም ነክተው ወሰዱት ወይም አለመውሰዱን ይንገሩን።',
   'checkin.b4.audio': 'ዛሬ የወሰዷቸው መድሃኒቶች። ሁሉንም ነክተው ወሰዱት ወይም አለመውሰዱን ይንገሩን።',
   'checkin.b4.noMeds': 'ለእርስዎ የተመዘገቡ መድሃኒቶች የሉም። ለተሻለ ክትትል በቅንብሮች ውስጥ መድሃኒቶችዎን ይጨምሩ።',
+  'checkin.b4.onHoldBadge': 'ለጊዜው ቆሟል',
+  'checkin.b4.onHoldDoNotTake': 'ለጊዜው ቆሟል — የእንክብካቤ ቡድንዎ ይህን መድኃኒት አቁሟል። እስኪነግሩዎት ድረስ አይውሰዱት።',
+  'checkin.b4.onHoldUnderReview': 'የእንክብካቤ ቡድንዎ ይህን መድኃኒት እየገመገመ ነው። ሌላ እስኪነግሩዎት ድረስ እንደተለመደው መውሰድዎን ይቀጥሉ።',
   'checkin.b4.classAceInhibitor': 'ACE ኢንሂቢተር',
   'checkin.b4.classArb': 'ARB',
   'checkin.b4.classBetaBlocker': 'ቤታ ብሎከር',
@@ -257,6 +262,9 @@ const am: Record<TranslationKey, string> = {
   'checkin.confirm.title': 'ንባብ ተልኳል',
   'checkin.confirm.titleMulti': 'ንባብ {n} ተልኳል',
   'checkin.confirm.subtitle': 'የተንከባካቢ ቡድንዎ ወዲያውኑ ይቀበላል።',
+  // #88 — English placeholder; flagged for Niva translation pass.
+  'checkin.confirm.subtitleUnenrolled': 'We’re setting up your care team. They’ll start reviewing your readings once your enrollment is complete.',
+  'checkin.confirm.nonAfibUnenrolled': 'Thanks for getting started.',
   'checkin.confirm.thisReading': 'ይህ ንባብ',
   'checkin.confirm.readingAudio': 'ንባብ {sys} በ {dia}',
   'checkin.confirm.readingAudioPulse': 'ንባብ {sys} በ {dia}፣ የልብ ምት {pulse}',
@@ -266,6 +274,17 @@ const am: Record<TranslationKey, string> = {
   'checkin.confirm.nonAfib': 'የተንከባካቢ ቡድንዎ ይገመግማል እና የሆነ ችግር ካለ ብቻ ይደውላል።',
   'checkin.confirm.addAnother': 'ሌላ ንባብ ጨምር',
   'checkin.confirm.backToDashboard': 'ወደ ዳሽቦርድ ተመለስ',
+  // #90 — English placeholder; flagged for Niva translation pass.
+  'checkin.afib.state1.heading': 'Two more readings',
+  'checkin.afib.state1.body': 'Take another reading in about a minute, while you’re still seated. Three readings in a row helps us understand your blood pressure with an irregular heartbeat.',
+  'checkin.afib.state2.heading': 'One more reading',
+  'checkin.afib.state2.body': 'One more and you’re done. Take it now, while you’re still seated.',
+  'checkin.afib.state3.heading': 'All three readings done',
+  'checkin.afib.state3.body': 'Your care team has what they need. Great job taking the time to get an accurate read.',
+  'checkin.afib.modal.heading': 'Take your other readings?',
+  'checkin.afib.modal.body': 'You’ve taken {n} of 3 readings. For an accurate read with your heart rhythm, your care team needs three readings taken close together. Going to the dashboard ends this session — you can come back later for a fresh set of three.',
+  'checkin.afib.modal.stay': 'Stay and add another',
+  'checkin.afib.modal.leave': 'End this session',
 
   // Wizard chrome + session banner
   'checkin.nav.back': 'ተመለስ',
@@ -309,6 +328,7 @@ const am: Record<TranslationKey, string> = {
   // ─── Chat ──────────────────────────────────────────────────────────────────
   'chat.title': 'የጤና ረዳት',
   'chat.placeholder': 'መልዕክት ይጻፉ...',
+  'chat.voiceEndToType': 'ለመተየብ የድምጽ ጥሪውን ይጨርሱ…',
   'chat.newConversation': 'አዲስ ውይይት',
   'chat.conversations': 'ውይይቶች',
   'chat.noConversations': 'እስካሁን ውይይት የለም',
@@ -407,6 +427,7 @@ const am: Record<TranslationKey, string> = {
   'notifications.bucket.emergency': 'የአደጋ ጊዜ — ምልክቶች ካሉ 911 ይደውሉ',
   'notifications.bucket.tier1': 'ጠቃሚ የመድሃኒት ማንቂያዎች',
   'notifications.bucket.high': 'ከፍ ያለ የደም ግፊት',
+  'notifications.bucket.heartFailure': 'የልብ ድካም',
   'notifications.bucket.low': 'ዝቅተኛ የደም ግፊት',
   'notifications.bucket.info': 'ለመረጃዎ',
   'notifications.bucket.other': 'ሌሎች ማንቂያዎች',
@@ -791,6 +812,10 @@ const am: Record<TranslationKey, string> = {
   'register.magicLinkInfo': 'ደህንነቱ የተጠበቀ ሊንክ በኢሜል እንልካለን። ከኢሜልዎ ይጫኑት እና ይገባሉ፣ ኮድ መጻፍ አያስፈልግም።',
   'register.otpTitle': 'OTP ኮድ',
   'register.otpInfo': '6-አሃዝ ኮድ በኢሜል እንልካለን። ለመግባት እዚህ ይጻፉት።',
+  // Translated 2026-06-04 (user opted in vs Niva pass). 911 stays per US pilot.
+  // Amharic translation flagged for native-speaker review by Niva.
+  'register.medicalDisclaimer': 'Cardioplace ጤናዎን ለመከታተል እና ከእንክብካቤ ቡድንዎ ጋር ለመገናኘት ይረዳዎታል። ይህ የሕክምና ምክርን፣ ምርመራን ወይም ሕክምናን አይተካም። በአስቸኳይ ጊዜ 911 ይደውሉ።',
+  'register.privacyAssurance': 'መረጃዎ ግላዊ እና ደህንነቱ የተጠበቀ ነው። የጤና መረጃዎን ሊያይ የሚችለው የእንክብካቤ ቡድንዎ ብቻ ነው።',
 
   // ─── Onboarding Page ──────────────────────────────────────────────────────
   'onboarding.title': 'ስለ ጤናዎ ይንገሩን',
@@ -1214,12 +1239,44 @@ const am: Record<TranslationKey, string> = {
   'intake.exitSave.cta': 'ወደ ዳሽቦርድ ተመለስ',
   'intake.exitSave.keepGoing': 'ቀጥል',
   'intake.exitSave.leaveWithoutSaving': 'ሳያስቀምጡ ይውጡ',
-  'intake.exitSave.editTitle': 'ለውጦችዎን ያስቀምጡ?',
-  'intake.exitSave.editBody': 'በዚህ ገጽ ላይ ያሉትን ለውጦች በፕሮፋይልዎ እና በመድኃኒቶችዎ ላይ እናዘምናለን፣ ከዚያም ወደ ዳሽቦርድ እንመልስዎታለን።',
+  // H4 A7 — updated to match Manisha's concise English (2026-06-04).
+  'intake.exitSave.editTitle': 'ያልተቀመጡ ለውጦች አሉዎት',
+  'intake.exitSave.editBody': 'ከመውጣትዎ በፊት ማስቀመጥ ይፈልጋሉ?',
   'intake.exitSave.editCta': 'አስቀምጥ እና ውጣ',
   'intake.exitSave.saving': 'በማስቀመጥ ላይ…',
   'intake.exitSave.errorFallback': 'ለውጦችዎን ማስቀመጥ አልተቻለም። እባክዎ እንደገና ይሞክሩ።',
   'intake.edit.reverifyBanner': 'ይህን መረጃ ማረም ለማረጋገጥ የእንክብካቤ ቡድንዎ እንደገና ማረጋገጥ ይጠይቃል። የተረጋገጠ ሁኔታዎ እስከሚያረጋግጡ ድረስ ይዳግማል።',
+
+  // Caregiver namespace — translated 2026-06-04 (user opted in vs Niva pass).
+  // Amharic translations especially benefit from native-speaker review by
+  // Niva on her next 5-language sweep — initial draft prioritizes clarity.
+  'caregiver.title': 'ተንከባካቢዎች',
+  'caregiver.add': 'ጨምር',
+  'caregiver.description': 'ተንከባካቢ ማለት የሚያምኑት ሰው ነው — የቤተሰብ አባል ወይም ጓደኛ — ከባድ የጤና ማንቂያ ሲነሳ ኢሜይል ሊላክለት የሚችል። የእንክብካቤ ቡድንዎ ያጸደቀውን ማንቂያ ብቻ እና እርስዎ ፈቃድ ከሰጡ በኋላ ብቻ ይነጋገራቸዋል።',
+  'caregiver.loading': 'በመጫን ላይ…',
+  'caregiver.empty': 'እስካሁን ምንም ተንከባካቢ አልተጨመረም።',
+  'caregiver.channelEmail': 'ኢሜይል',
+  'caregiver.channelNone': 'አታሳውቅ',
+  'caregiver.consentGiven': 'ፈቃድ ተሰጥቷል',
+  'caregiver.consentNone': 'ፈቃድ የለም — አይሳወቅም',
+  'caregiver.revoke': 'ሰርዝ',
+  'caregiver.allow': 'ማንቂያዎችን ፍቀድ',
+  'caregiver.namePlaceholder': 'የተንከባካቢ ስም',
+  'caregiver.relationshipPlaceholder': 'ዝምድና (ለምሳሌ ልጅ) — አማራጭ',
+  'caregiver.emailPlaceholder': 'የኢሜይል አድራሻ',
+  'caregiver.optionEmail': 'በኢሜይል አሳውቅ',
+  'caregiver.optionNone': 'አሁን አታሳውቅ',
+  'caregiver.consentLabel': 'Cardioplace የጤና ማንቂያዎቼን ከዚህ ሰው ጋር እንዲያጋራ እስማማለሁ።',
+  'caregiver.save': 'ተንከባካቢ አስቀምጥ',
+  'caregiver.saving': 'በማስቀመጥ ላይ…',
+  'caregiver.cancel': 'ይቅር',
+  'caregiver.removeAria': '{name}ን አስወግድ',
+  'caregiver.errNameRequired': 'እባክዎ የተንከባካቢውን ስም ያስገቡ።',
+  'caregiver.errEmailRequired': 'በኢሜይል ለማሳወቅ ኢሜይል ያስፈልጋል።',
+  'caregiver.errLoad': 'ተንከባካቢዎችን መጫን አልተቻለም',
+  'caregiver.errAdd': 'ተንከባካቢ መጨመር አልተቻለም።',
+  'caregiver.errConsent': 'ፈቃድን ማዘመን አልተቻለም።',
+  'caregiver.errRemove': 'ተንከባካቢ ማስወገድ አልተቻለም።',
 
   // "Already on file" page
   'intake.profileExists.title': 'ሁሉም ተዘጋጅቷል',
@@ -1291,7 +1348,9 @@ const am: Record<TranslationKey, string> = {
   'alerts.emergency.callAria': 'አሁን 911 ይደውሉ',
   'alerts.emergency.understand': 'ገባኝ',
   'alerts.emergency.followupTitle': '911 ደውለዋል?',
-  'alerts.emergency.followupBody': 'ሁለት ሰዓት አልፏል። ደህና መሆንዎን ማረጋገጥ እንፈልጋለን።',
+  // #13 — English placeholder; flagged for Niva translation pass.
+  'alerts.emergency.followupBody': 'We want to make sure you’re safe.',
+  'alerts.emergency.followupBodyElapsed': 'It has been about {elapsed} since this alert. We want to make sure you’re safe.',
   'alerts.emergency.followupYes': 'አዎ',
   'alerts.emergency.followupNotYet': 'ገና',
   'alerts.tier.back': 'ተመለስ',

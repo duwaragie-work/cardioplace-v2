@@ -922,12 +922,12 @@ function appendPregnancy(lines: string[], ctx: ResolvedContext): void {
     } else {
       lines.push('Pregnancy: Currently pregnant.')
     }
-    if (p.historyPreeclampsia) {
-      lines.push('History of preeclampsia.')
+    if (p.historyHDP) {
+      lines.push('History of hypertensive disorder of pregnancy (HDP).')
     }
     lines.push('')
-  } else if (p.historyPreeclampsia) {
-    lines.push('History of preeclampsia (not currently pregnant).')
+  } else if (p.historyHDP) {
+    lines.push('History of hypertensive disorder of pregnancy (HDP) (not currently pregnant).')
     lines.push('')
   }
 }
