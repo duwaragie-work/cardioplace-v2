@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { signInAdmin, signInPatient, authedApi } from '../helpers/auth.js'
+import { postSessionWithTwoReadings } from '../helpers/api.js'
 import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
 import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
@@ -111,9 +112,14 @@ test.describe('B3 — STANDARD / PERSONALIZED mode badge on the admin AlertCard'
     await tc.setUserCondition(aisha.id, 'diagnosedHypertension', true)
     await tc.setPatientThreshold(aisha.id, { sbpUpperTarget: 130 })
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
-    // 155 ≥ 130 + 20 band → RULE_PERSONALIZED_HIGH (mode PERSONALIZED)
-    await api.post('daily-journal', {
-      data: { measuredAt: new Date().toISOString(), systolicBP: 155, diastolicBP: 92, pulse: 76, position: 'SITTING' },
+    // 155 ≥ 130 + 20 band → RULE_PERSONALIZED_HIGH (mode PERSONALIZED). Aisha is
+    // post-Day-3 (≥7 readings), so a LONE reading won't fire — the single-reading
+    // gate requires a 2-reading session (or finalization). Post two so the alert
+    // actually fires. (Confirmed via engine scenario 12b.)
+    await postSessionWithTwoReadings(api, {
+      systolicBP: 155,
+      diastolicBP: 92,
+      pulse: 76,
     })
     await new Promise((r) => setTimeout(r, 1000))
     const open = (await tc.listAlerts(aisha.id)).filter((a: any) => a.status === 'OPEN')

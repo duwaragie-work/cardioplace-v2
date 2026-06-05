@@ -495,6 +495,36 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(createArgs.data.physicianMessage).toContain('patient-specific threshold')
   })
 
+  // Lock for the 30u B3 e2e. A post-Day-3 patient (lifetime ≥ 7) does NOT fire a
+  // non-emergency alert on a lone, non-finalized reading — the session must have
+  // ≥2 readings (or be finalized) per the single-reading gate (getActiveSession:
+  // "post-Day-3 + 1 reading → requiresMoreReadings=true"). With a 2-reading
+  // session the personalized rule fires. The e2e originally posted ONE reading,
+  // so no alert fired and it saw "no PERSONALIZED" — a TEST-SETUP gap, not an
+  // engine bug. Verified: readingCount:1 here yields result=undefined (no alert).
+  it('Scenario 12b — post-Day-3 personalized fires on a 2-reading session (30u B3 lock)', async () => {
+    const { result, createArgs } = await run(
+      buildSession({ systolicBP: 155, diastolicBP: 92, pulse: 76, readingCount: 2, singleReadingFinalized: false }),
+      buildCtx({
+        profile: { diagnosedHypertension: true },
+        readingCount: 8, // lifetime ≥ 7 → post-Day-3 → single reading should fire
+        threshold: {
+          sbpUpperTarget: 130,
+          sbpLowerTarget: null,
+          dbpUpperTarget: null,
+          dbpLowerTarget: null,
+          hrUpperTarget: null,
+          hrLowerTarget: null,
+          setByProviderId: 'prov-1',
+          setAt: TEN_YEARS_AGO,
+          notes: null,
+        },
+      }),
+    )
+    expect(result?.ruleId).toBe('RULE_PERSONALIZED_HIGH')
+    expect(createArgs?.data.mode).toBe('PERSONALIZED')
+  })
+
   it('Scenario 13 — Pre-Day-3 (readingCount=3) + 165/94 → STANDARD L1 High + disclaimer', async () => {
     const { result, createArgs } = await run(
       buildSession({ systolicBP: 165, diastolicBP: 94, pulse: 82 }),
