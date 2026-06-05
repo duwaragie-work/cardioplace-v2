@@ -71,7 +71,7 @@ export interface ContextProfile {
 
   isPregnant: boolean
   pregnancyDueDate: Date | null
-  historyPreeclampsia: boolean
+  historyHDP: boolean
 
   hasHeartFailure: boolean
   heartFailureType: HeartFailureTypeInput
@@ -81,6 +81,9 @@ export interface ContextProfile {
   hasCAD: boolean
   hasHCM: boolean
   hasDCM: boolean
+  // Manisha 5/24 Q5C — aortic stenosis (fixed outflow obstruction; HCM-like
+  // hemodynamics). Interim: HCM-equivalent SBP lower bound + narrow-PP context.
+  hasAorticStenosis: boolean
   hasTachycardia: boolean
   hasBradycardia: boolean
   diagnosedHypertension: boolean
@@ -154,6 +157,11 @@ export interface ResolvedContext {
    *  Drives the Q2 CAD-ramp Phase 2 ("Cedar Hill first"). Null when the
    *  patient has no assignment yet. */
   practiceName: string | null
+
+  /** Gap 5 — patient display name (User.name). Threaded into AlertContext so
+   *  caregiver-facing message templates name the patient ("Carol Miller
+   *  reported…") instead of the generic "The patient". Null when unset. */
+  patientName: string | null
 
   /** Resolved at this instant (UTC). */
   resolvedAt: Date

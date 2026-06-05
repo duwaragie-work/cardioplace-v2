@@ -77,7 +77,7 @@ interface Patient {
    *  (CLINICAL_SPEC §3 enhanced-monitoring marker for women with a
    *  documented history, including outside pregnancy). */
   isPregnant?: boolean;
-  historyPreeclampsia?: boolean;
+  historyHDP?: boolean;
   onboardingStatus: string;
   // Clinical enrollment state (admin-owned). `onboardingStatus` above is
   // identity onboarding only (name/DOB/timezone). See TESTING_FLOW_GUIDE §4.1.
@@ -1240,12 +1240,12 @@ export default function PatientsPage() {
                               pregnancy banner already covers active pregnancies,
                               so the value of this flag is for women with a
                               documented history outside pregnancy. */}
-                          {p.historyPreeclampsia && !p.isPregnant && (
+                          {p.historyHDP && !p.isPregnant && (
                             <span
                               role="img"
                               className="shrink-0 inline-flex items-center"
-                              title="Preeclampsia history. Enhanced monitoring recommended outside pregnancy per 2025 AHA/ACC Hypertension Guideline."
-                              aria-label="Preeclampsia history"
+                              title="History of hypertensive disorder of pregnancy (HDP). Enhanced monitoring recommended outside pregnancy per 2025 AHA/ACC Hypertension Guideline."
+                              aria-label="History of hypertensive disorder of pregnancy"
                             >
                               <Heart
                                 className="w-3 h-3"

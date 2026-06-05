@@ -54,6 +54,7 @@ export default function MedicationCard({
 
   return (
     <motion.div
+      data-testid={`intake-med-tile-${brandName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`}
       onClick={onToggle}
       role="button"
       tabIndex={0}

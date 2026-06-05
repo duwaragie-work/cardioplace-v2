@@ -1046,6 +1046,11 @@ export class AuthService {
         roles: true,
         isVerified: true,
         onboardingStatus: true,
+        // F27 — the escalation pipeline DEFERS all alert dispatch until a
+        // patient is ENROLLED. The patient app needs this so the alert detail
+        // surfaces can tell the patient the truth ("enrollment pending") instead
+        // of a false "your care team has been notified".
+        enrollmentStatus: true,
         accountStatus: true,
         dateOfBirth: true,
         communicationPreference: true,
@@ -1074,6 +1079,7 @@ export class AuthService {
       preferredLanguage: user.preferredLanguage,
       timezone: user.timezone,
       onboardingStatus: user.onboardingStatus,
+      enrollmentStatus: user.enrollmentStatus,
     }
   }
 

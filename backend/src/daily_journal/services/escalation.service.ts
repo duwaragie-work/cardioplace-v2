@@ -4,6 +4,8 @@ import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter'
 import { Cron } from '@nestjs/schedule'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
+import { caregiverEmailHtml } from '../../email/email-templates.js'
+import { SmsService } from '../../sms/sms.service.js'
 import { withDeadlockRetry } from '../../common/deadlock-retry.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import type {
@@ -21,7 +23,8 @@ import {
   type NotificationChannel as LadderChannel,
   TIER_1_BACKUP_ON_T0,
   TIER_1_LADDER,
-  BP_LEVEL_1_PATIENT_T0,
+  // BP_LEVEL_1_PATIENT_T0 — still exported from ladder-defs for future re-instate;
+  // no longer dispatched (Round 2 Group B: patient inbox stops mirroring alerts).
   ANGIOEDEMA_PATIENT_T0,
 } from '../escalation/ladder-defs.js'
 import {
@@ -38,7 +41,7 @@ import {
 const CAREGIVER_ROUTED_RULES: ReadonlySet<string> = new Set<string>([
   'RULE_HF_CAREGIVER_EDEMA',
   // Cluster 8 — angioedema dispatches the approved caregiver message at T+0
-  // (idle until CAREGIVER_DISPATCH_ENABLED + Lakshitha's Gap-5 UI lands).
+  // (gated behind CAREGIVER_DISPATCH_ENABLED + the Gap 5 capture/consent loop).
   'RULE_ACE_ANGIOEDEMA',
   'RULE_GENERIC_ANGIOEDEMA',
 ])
@@ -71,6 +74,7 @@ export class EscalationService {
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
     private readonly emailService: EmailService,
+    private readonly smsService: SmsService,
     config: ConfigService,
   ) {
     // Used by escalation emails to deep-link recipients into the right app.
@@ -165,27 +169,33 @@ export class EscalationService {
     recipientRoles: RecipientRole[]
     channels: LadderChannel[]
     now: Date
+    /** Override the audit reason. Defaults to the BP L2 retry text. */
+    reason?: string
+    /** Override the escalation level. Defaults to LEVEL_2. */
+    escalationLevel?: 'LEVEL_1' | 'LEVEL_2'
   }): Promise<void> {
     const scheduledFor = new Date(args.now.getTime() + args.offsetMs)
     await this.prisma.escalationEvent.create({
       data: {
         alertId: args.alertId,
         userId: args.userId,
-        escalationLevel: 'LEVEL_2',
-        reason: `BP L2 retry — ${args.ladderStep} scheduled ${scheduledFor.toISOString()}`,
+        escalationLevel: args.escalationLevel ?? 'LEVEL_2',
+        reason:
+          args.reason ??
+          `BP L2 retry — ${args.ladderStep} scheduled ${scheduledFor.toISOString()}`,
         ladderStep: args.ladderStep,
         recipientIds: [],
         recipientRoles: args.recipientRoles,
         scheduledFor,
         triggeredByResolution: true,
-        // Finding 5 — scheduled by an admin's BP_L2_UNABLE_TO_REACH_RETRY
-        // resolution action, not the cron scheduler. Human-attributed.
+        // Finding 5 — scheduled by an admin resolution action, not the cron
+        // scheduler. Human-attributed.
         dispatchedBySystem: false,
         afterHours: false,
       },
     })
     this.logger.log(
-      `Scheduled BP L2 retry for alert ${args.alertId} at ${scheduledFor.toISOString()}`,
+      `Scheduled retry for alert ${args.alertId} at ${scheduledFor.toISOString()}`,
     )
   }
 
@@ -349,22 +359,15 @@ export class EscalationService {
       }
     }
 
-    // Phase/23 — BP Level 1 patient-side T+0. Spec mandates out-of-app
-    // notification so the patient doesn't have to open the app to learn
-    // their BP needs attention. Fires immediately regardless of business
-    // hours; channel=PUSH writes a Notification row that surfaces in-app
-    // and (once web-push transport ships) delivers as an OS-level push.
-    if (ladder.kind === 'BP_LEVEL_1') {
-      await this.dispatchStep({
-        alert,
-        step: BP_LEVEL_1_PATIENT_T0,
-        ladderKind: ladder.kind,
-        recipientRoles: BP_LEVEL_1_PATIENT_T0.recipientRoles,
-        practice,
-        assignment,
-        now,
-      })
-    }
+    // Manual-test round 2 — Group B (Manisha sign-off pending). The
+    // BP_LEVEL_1_PATIENT_T0 patient PUSH/DASHBOARD dispatch is RETIRED:
+    // clinical alerts no longer mirror into the patient in-app inbox. The
+    // patient still sees the alert via the /alerts list + the dashboard
+    // banner. The provider ladder dispatch above (PRIMARY/BACKUP/MD email +
+    // push) is unchanged. Angioedema patient T+0 below stays — airway
+    // emergencies MUST page the patient with the 911 CTA.
+    // (The BP_LEVEL_1_PATIENT_T0 import remains for ladder-defs symmetry +
+    // future re-instate if the spec flips back.)
 
     // Cluster 8 — angioedema patient T+0. Out-of-app push + in-app card so
     // the patient sees the full-screen red + 911 CTA without opening the app
@@ -621,6 +624,28 @@ export class EscalationService {
       )
     }
 
+    // Bug 1 — idempotent dispatch. A re-run of evaluate()/fireT0 for the same
+    // alert (an immediate-fire reading later re-evaluated by the single-reading
+    // finalize, or the frontend 5-min timer racing the finalize cron) must NOT
+    // create a second EscalationEvent for the same alert+step+recipients —
+    // that's the doubled-T0 audit/timeline bug. Retries go through the separate
+    // dispatchForExistingEvent path, so a NEW dispatchStep row for an
+    // (alert, step, recipientRoles) triple is always a duplicate.
+    const alreadyDispatched = await this.prisma.escalationEvent.findFirst({
+      where: {
+        alertId: alert.id,
+        ladderStep: step.step,
+        recipientRoles: { equals: resolved.recipientRoles },
+      },
+      select: { id: true },
+    })
+    if (alreadyDispatched) {
+      this.logger.debug(
+        `dispatchStep: ${step.step} for alert ${alert.id} → [${resolved.recipientRoles.join(',')}] already exists (${alreadyDispatched.id}); skipping duplicate`,
+      )
+      return
+    }
+
     if (shouldQueue && practice) {
       const scheduledFor = nextBusinessHoursStart(now, practice)
       // Cluster 6 bug #11 — wrap EscalationEvent.create in deadlock retry.
@@ -814,6 +839,18 @@ export class EscalationService {
       const { title, body } = content
 
       for (const channel of step.channels) {
+        // F12 — clinical alerts NEVER mirror into the patient's in-app bell.
+        // The patient still sees the alert via the /alerts list, the dashboard
+        // banner, and (for airway/emergency tiers) the out-of-app PUSH. The
+        // in-app DASHBOARD (bell) inbox is reserved for admin/care-team action
+        // events (ack / resolve / HOLD / threshold / follow-up / gap-alert).
+        // This single guard covers every clinical-alert ladder that lists
+        // PATIENT as a recipient — BP Level 2, BP-L2 symptom-override, Tier 1
+        // angioedema, and the retired BP Level 1 patient row — so no
+        // clinical Notification row leaks to the patient bell regardless of
+        // tier. Provider / MD / Ops DASHBOARD rows are unaffected.
+        if (role === 'PATIENT' && channel === 'DASHBOARD') continue
+
         // DASHBOARD notifications are implicit via DeviationAlert rows; we
         // still write a row so the admin UI can surface the escalation timeline.
         await this.prisma.notification
@@ -978,12 +1015,13 @@ export class EscalationService {
   }
 
   /**
-   * Cluster 7 A.6 — idle caregiver dispatch path. Writes a DASHBOARD
-   * Notification carrying the alert's caregiverMessage to every caregiver
-   * linked to the patient. Lakshitha's Gap 5 will populate the patient ↔
-   * caregiver relationship; until then `findCaregiverUserIds` returns [] and
-   * this method is a no-op. Gated behind CAREGIVER_DISPATCH_ENABLED=true so
-   * production stays silent until the UI ships.
+   * Gap 5 — caregiver dispatch. For each consented, active caregiver on a
+   * real channel, delivers the signed-off caregiverMessage (Minimum Necessary
+   * — no other PHI) via their channel: EMAIL (Resend), DASHBOARD (account
+   * caregiver inbox), or SMS (NoopSmsService until a provider is wired). A
+   * CaregiverDispatchLog row (unique on alert+caregiver+channel) makes re-fired
+   * alerts idempotent. Gated behind CAREGIVER_DISPATCH_ENABLED so production
+   * stays silent until the capture/consent loop is live.
    */
   private async dispatchCaregiverNotification(
     payload: AlertCreatedEvent,
@@ -991,28 +1029,149 @@ export class EscalationService {
     if (!CAREGIVER_ROUTED_RULES.has(payload.ruleId ?? '')) return
     if (process.env.CAREGIVER_DISPATCH_ENABLED !== 'true') return
 
-    const caregiverUserIds = await this.findCaregiverUserIds(payload.userId)
-    if (caregiverUserIds.length === 0) return
+    // Gap 5 — only consented, active, channel-set caregivers receive PHI.
+    const caregivers = await this.findCaregivers(payload.userId)
+    if (caregivers.length === 0) return
 
     const alert = await this.loadAlert(payload.alertId)
     if (!alert?.caregiverMessage) return
+    const message = alert.caregiverMessage
+    // Gap 5 (Bug 2) — name the patient in the email subject so the caregiver
+    // can tell who it's about. The message body already names them via the
+    // registry (ctx.patientName). Name only — Minimum Necessary.
+    const patientDisplayName = alert.user?.name?.trim() || 'someone you care for'
 
-    for (const caregiverUserId of caregiverUserIds) {
-      await this.prisma.notification.create({
-        data: {
-          userId: caregiverUserId,
-          alertId: alert.id,
-          channel: 'DASHBOARD',
-          title: 'Caregiver update',
-          body: alert.caregiverMessage,
-        },
-      })
+    for (const caregiver of caregivers) {
+      try {
+        // Idempotency for non-Notification channels (email/SMS) — a re-fired
+        // alert must not double-send. createMany skipDuplicates on the unique
+        // (alertId, caregiverId, channel) returns count 0 when already sent.
+        const logged = await this.prisma.caregiverDispatchLog.createMany({
+          data: [
+            { alertId: alert.id, caregiverId: caregiver.id, channel: caregiver.notifyChannel },
+          ],
+          skipDuplicates: true,
+        })
+        if (logged.count === 0) continue // already dispatched for this alert+channel
+
+        let delivered = false
+        switch (caregiver.notifyChannel) {
+          case 'EMAIL': {
+            if (!caregiver.email) break
+            await this.emailService.sendEmail(
+              caregiver.email,
+              `Cardioplace — a health update about ${patientDisplayName}`,
+              caregiverEmailHtml(caregiver.name, message),
+            )
+            delivered = true
+            break
+          }
+          case 'DASHBOARD': {
+            // Option A — caregiver is a User with an in-app inbox.
+            if (!caregiver.caregiverUserId) break
+            await this.prisma.notification.create({
+              data: {
+                userId: caregiver.caregiverUserId,
+                alertId: alert.id,
+                channel: 'DASHBOARD',
+                title: 'Caregiver update',
+                body: message,
+              },
+            })
+            delivered = true
+            break
+          }
+          case 'SMS': {
+            // MVP: caregivers are EMAIL-ONLY (CROSS_HANDOFF_ADDENDUM Decision 2).
+            // SMS dispatch is gated OFF behind ENABLE_CAREGIVER_SMS (default
+            // false) so it can be turned on post-MVP without re-plumbing. The
+            // underlying SmsService is also a Noop today, but the flag is the
+            // explicit product gate.
+            if (process.env.ENABLE_CAREGIVER_SMS !== 'true') {
+              this.logger.warn(
+                `Caregiver SMS suppressed for ${caregiver.id} — ENABLE_CAREGIVER_SMS is off (MVP email-only).`,
+              )
+              break
+            }
+            if (!caregiver.phone) break
+            await this.smsService.sendSms(caregiver.phone, message)
+            delivered = true
+            break
+          }
+          default:
+            break // NONE — captured but not notifiable
+        }
+
+        // A6 — surface the caregiver dispatch in the canonical audit stream
+        // (EscalationEvent) so it shows in the admin timeline + the 15-field
+        // trail as a "Caregiver notified" row, not just CaregiverDispatchLog.
+        if (delivered) {
+          await this.prisma.escalationEvent.create({
+            data: {
+              alertId: alert.id,
+              userId: alert.userId,
+              escalationLevel: 'LEVEL_1',
+              reason: `Caregiver notified (${caregiver.notifyChannel.toLowerCase()})`,
+              ladderStep: 'T0',
+              recipientIds: [caregiver.caregiverUserId ?? caregiver.id],
+              recipientRoles: ['CAREGIVER'],
+              // NotificationChannel enum has no SMS — map text to PHONE for
+              // the audit row's channel chrome.
+              notificationChannel:
+                caregiver.notifyChannel === 'SMS' ? 'PHONE' : caregiver.notifyChannel,
+              notificationSentAt: new Date(),
+              dispatchedBySystem: true,
+            },
+          })
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Caregiver dispatch to ${caregiver.id} (${caregiver.notifyChannel}) failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      }
     }
   }
 
-  private async findCaregiverUserIds(_patientUserId: string): Promise<string[]> {
-    // Placeholder — PatientCaregiver model ships with Lakshitha's Gap 5.
-    return []
+  /**
+   * Gap 5 — caregivers eligible to receive an alert: active, consented
+   * (consentGivenAt is the HIPAA hard gate), and on a real dispatch channel.
+   */
+  private async findCaregivers(patientUserId: string): Promise<
+    Array<{
+      id: string
+      name: string
+      email: string | null
+      phone: string | null
+      caregiverUserId: string | null
+      notifyChannel: 'DASHBOARD' | 'SMS' | 'EMAIL'
+    }>
+  > {
+    const rows = await this.prisma.patientCaregiver.findMany({
+      where: {
+        patientUserId,
+        active: true,
+        consentGivenAt: { not: null },
+        notifyChannel: { not: 'NONE' },
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        caregiverUserId: true,
+        notifyChannel: true,
+      },
+    })
+    return rows as Array<{
+      id: string
+      name: string
+      email: string | null
+      phone: string | null
+      caregiverUserId: string | null
+      notifyChannel: 'DASHBOARD' | 'SMS' | 'EMAIL'
+    }>
   }
 
   private pickMessageForRole(alert: AlertRow, role: RecipientRole): string | null {

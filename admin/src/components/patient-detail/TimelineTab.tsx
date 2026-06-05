@@ -104,6 +104,10 @@ const tzTimeFmt = new Intl.DateTimeFormat('en-US', {
 
 function dayKey(iso: string): string {
   // YYYY-MM-DD in clinic TZ — stable group + sort key independent of viewer.
+  // Adopted over H3 #87's viewer-local day (dev-merge, JCAHO audit timeline
+  // must group identically regardless of who views/exports it). dayLabel()
+  // derives Today/Yesterday by calling dayKey() itself, so #87's old
+  // local-vs-UTC mismatch can't recur with this implementation.
   return tzDayFmt.format(new Date(iso));
 }
 
@@ -150,7 +154,7 @@ const PROFILE_FIELD_LABELS: Record<string, string> = {
   heightCm: 'Height',
   isPregnant: 'Pregnancy status',
   pregnancyDueDate: 'Pregnancy due date',
-  historyPreeclampsia: 'History of preeclampsia',
+  historyHDP: 'History of hypertensive disorder of pregnancy (HDP)',
   diagnosedHypertension: 'Diagnosed hypertension',
   hasHeartFailure: 'Heart failure',
   heartFailureType: 'Heart failure type',
@@ -185,13 +189,16 @@ const USER_FIELD_LABELS: Record<string, string> = {
 };
 
 interface ParsedPath {
-  scope: 'profile' | 'medication';
+  scope: 'profile' | 'medication' | 'caregiver';
   /** Friendly label for the field (or "Medication" if the whole row was added). */
   field: string;
   /** Raw field key (after the prefix), useful for special-casing e.g. "verificationStatus". */
   fieldKey: string | null;
   /** Full medication id for lookups. */
   medId?: string;
+  /** Caregiver id when scope === 'caregiver'. Frontend renders the resolved
+   *  name from log.caregiverName instead of the raw id. */
+  caregiverId?: string;
   /** True when the action was a wholesale add/remove of a medication row. */
   rowLevel?: boolean;
 }
@@ -208,6 +215,21 @@ function parseFieldPath(path: string): ParsedPath {
       fieldKey: fieldName,
       medId,
       rowLevel: !fieldName,
+    };
+  }
+  // Round 2 A4 — caregiver-scoped log (caregiver.service.ts writes
+  // `caregiver:${id}` as the fieldPath on add/edit/remove). Backend resolves
+  // log.caregiverName so the row reads "Caregiver Jane Doe (daughter)"
+  // instead of "Caregiver:9a0446d9-…".
+  if (path.startsWith('caregiver:')) {
+    const id = path.slice('caregiver:'.length).trim();
+    return {
+      scope: 'caregiver',
+      // Generic field label — the rendered subject uses the resolved name.
+      field: 'Caregiver contact',
+      fieldKey: null,
+      caregiverId: id.length > 0 ? id : undefined,
+      rowLevel: true,
     };
   }
   if (path.startsWith('profile.')) {
@@ -384,7 +406,7 @@ interface BuiltLog {
    *  into a single expandable group. */
   groupKey: string;
   changeType: string;
-  scope: 'profile' | 'medication';
+  scope: 'profile' | 'medication' | 'caregiver';
   drugName: string | null;
   actorWord: string;
   actor: string;
@@ -431,6 +453,21 @@ function entriesFromLogs(
           : 'Profile';
       title = `${subject} ${verb}`;
       // Skip the prev → new line — the verb already tells the story.
+      body = l.rationale ?? undefined;
+    }
+    // ── Round 2 A4 — caregiver-scoped log. Backend resolves caregiverName +
+    //    caregiverRelationship; we render "Caregiver Jane Doe (daughter)
+    //    contact updated by admin" instead of "caregiver:9a0446d9-… corrected
+    //    by admin". A deleted caregiver falls back to "Caregiver contact".
+    else if (parsed.scope === 'caregiver') {
+      // dev-merge: actionVerb now takes (changeType, rowLevel, actor) — align
+      // the caregiver branch (Round 2 A4) with its sibling calls.
+      const verb = actionVerb(l.changeType, parsed.rowLevel, actorWord);
+      const name = l.caregiverName?.trim();
+      const subject = name
+        ? `Caregiver ${name}${l.caregiverRelationship ? ` (${l.caregiverRelationship})` : ''}`
+        : 'Caregiver contact';
+      title = `${subject} ${verb}`;
       body = l.rationale ?? undefined;
     }
     // ── Whole-medication add: lead with the drug name.

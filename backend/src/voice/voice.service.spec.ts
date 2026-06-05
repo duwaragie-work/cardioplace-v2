@@ -34,7 +34,7 @@ function buildResolvedContext(
       heightCm: 165,
       isPregnant: false,
       pregnancyDueDate: null,
-      historyPreeclampsia: false,
+      historyHDP: false,
       hasHeartFailure: false,
       heartFailureType: 'NOT_APPLICABLE',
       resolvedHFType: 'NOT_APPLICABLE',
@@ -60,6 +60,7 @@ function buildResolvedContext(
     triggerPregnancyContraindicationCheck: false,
     enrolledAt: null,
     practiceName: null,
+    patientName: null,
     resolvedAt: NOW,
     ...over,
   }

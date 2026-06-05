@@ -23,8 +23,10 @@ import {
   getNotifications,
   markNotificationRead,
 } from '@/lib/services/journal.service';
+import { consolidateAlertsByEntry } from '@/lib/alerts/consolidate';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
+import PatientAlertCard from '@/components/alerts/PatientAlertCard';
 
 type TFn = (key: TranslationKey) => string;
 
@@ -44,6 +46,11 @@ type Alert = {
    *  `type` enum can't represent Tier 1 contraindications, so cards drove
    *  off it would all read "Missed Medication"). */
   tier?: string | null;
+  /** Engine rule that fired. P1 — the bell's tier-based bucketing mislabels
+   *  rules whose engine tier doesn't match their patient meaning (e.g.
+   *  RULE_HF_DECOMPENSATION claims the sbp-low axis → tier BP_LEVEL_1_LOW, so
+   *  it bucketed as "Low blood pressure"). bucketize() consults ruleId first. */
+  ruleId?: string | null;
   /** Three-tier patient-facing message. Backend always populates this on
    *  v2 alerts; falling back to the legacy BP/value rendering when null. */
   patientMessage?: string | null;
@@ -75,6 +82,41 @@ type Alert = {
     weight?: number | null;
   } | null;
 };
+
+/** Patient-facing bell bucket. Tier-derived for most rules, with a rule-aware
+ *  override (P1) for rules whose engine tier doesn't match their patient
+ *  meaning. */
+export type TierBucketKey =
+  | 'emergency'
+  | 'tier1'
+  | 'high'
+  | 'heartFailure'
+  | 'low'
+  | 'info'
+  | 'other';
+
+export function bucketizeAlert(a: Alert): TierBucketKey {
+  const tier = a.tier ?? null;
+  const ruleId = a.ruleId ?? null;
+  const sbp = a.journalEntry?.systolicBP ?? 0;
+  const dbp = a.journalEntry?.diastolicBP ?? 0;
+  // P1 — rule-aware override. RULE_HF_DECOMPENSATION claims the sbp-low axis
+  // (engine tier BP_LEVEL_1_LOW) but is a fluid / heart-failure alert, not low
+  // blood pressure. Bucket it by rule before the tier branches so it stops
+  // reading "Low blood pressure". Other special-cased rules can join here.
+  if (ruleId === 'RULE_HF_DECOMPENSATION') return 'heartFailure';
+  if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'emergency';
+  if (sbp >= 180 || dbp >= 120) return 'emergency';
+  if (tier === 'TIER_1_CONTRAINDICATION') return 'tier1';
+  if (tier === 'BP_LEVEL_1_LOW' || (sbp > 0 && sbp < 90) || (dbp > 0 && dbp < 60)) return 'low';
+  if (tier === 'BP_LEVEL_1_HIGH') return 'high';
+  if (tier === 'TIER_3_INFO') return 'info';
+  // F32 — patient-visible Tier 2 medication-discrepancy alerts (those that
+  // survived the patientMessage filter) bucket under Info.
+  if (tier === 'TIER_2_DISCREPANCY') return 'info';
+  if (a.severity === 'HIGH' || (a.type ?? '').includes('BP')) return 'high';
+  return 'other';
+}
 
 type Notif = {
   id: string;
@@ -246,254 +288,6 @@ function NotifSkeleton({ delay = 0 }: { delay?: number }) {
         <Bone w="65%" h={11} />
       </div>
     </div>
-  );
-}
-
-// ─── Alert Card ───────────────────────────────────────────────────────────────
-function AlertCard({
-  alert,
-  onAcknowledge,
-  acknowledging,
-}: {
-  alert: Alert;
-  onAcknowledge: (id: string) => void;
-  acknowledging: string | null;
-}) {
-  const { t } = useLanguage();
-  // Tier-first label resolution: v2 alerts always carry a `tier`, and the
-  // tier is the only field that distinguishes a Tier 1 contraindication
-  // from a missed-dose Tier 2 (both carry the legacy MEDICATION_ADHERENCE
-  // type). Falls back to the legacy `type` lookup for any v1 row that
-  // never had `tier` populated.
-  const tierMeta = alert.tier ? TIER_META[alert.tier] : null;
-  const meta =
-    tierMeta ??
-    TYPE_META[alert.type as AlertType] ??
-    { label: alert.type ?? '—', icon: AlertTriangle };
-  // Tier severity wins over the legacy severity field so the badge color
-  // matches the actual clinical priority.
-  const effectiveSeverity = (tierMeta?.severity ?? alert.severity) as AlertSeverity | undefined;
-  const sevMeta = SEVERITY_META[effectiveSeverity as AlertSeverity] ?? SEVERITY_META.LOW;
-  const Icon = meta.icon;
-  const isOpen = alert.status === 'OPEN';
-  // CLINICAL_SPEC §V2-C — Tier 1 contraindications + BP Level 2 are
-  // non-dismissable: the escalation cron stops paging once acknowledgedAt is
-  // set, so a patient tap silently kills the provider ladder. Hide the
-  // Acknowledge button entirely for those alerts; only "View details" stays.
-  const canAck = isOpen && alert.dismissible !== false;
-  const isAcking = acknowledging === alert.id;
-
-  const alertTypeLabels: Record<string, string> = {
-    SYSTOLIC_BP: t('alert.systolicBP'),
-    DIASTOLIC_BP: t('alert.diastolicBP'),
-    BP_COMBINED: t('alert.bpCombined') || 'Elevated Blood Pressure',
-    WEIGHT: t('alert.weight'),
-    MEDICATION_ADHERENCE: t('alert.medication'),
-  };
-
-  const sevLabels: Record<string, string> = {
-    HIGH: t('alert.urgent'),
-    MEDIUM: t('alert.moderate'),
-    LOW: t('alert.low'),
-  };
-
-  return (
-    <motion.div
-      layout
-      data-testid={`notification-row-${alert.id}`}
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.97 }}
-      className="rounded-2xl overflow-hidden"
-      style={{
-        border: `1px solid ${sevMeta.border}`,
-        backgroundColor: 'white',
-        boxShadow: `0 2px 16px ${sevMeta.bg}`,
-      }}
-      // Known WCAG debt — card uses sevMeta.text (vibrant red/amber) on
-      // sevMeta.bg (tinted) for small-text chips ("Moderate" badge, BP
-      // reading, etc.) at 11-13px. Vibrant-on-tint fails AA Normal.
-      // Accepted tradeoff per commit 70f2ff4; future fix is font-size bumps.
-      data-axe-debt="avatar-orange-small-text"
-    >
-      {/* Top accent strip */}
-      <div
-        className="h-1 w-full"
-        style={{ backgroundColor: sevMeta.text, opacity: 0.7 }}
-      />
-
-      <div className="p-4">
-        <div className="flex items-start gap-3">
-          {/* Icon */}
-          <div
-            className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-            style={{ backgroundColor: sevMeta.bg }}
-          >
-            <Icon className="w-5 h-5" style={{ color: sevMeta.text }} />
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap mb-1">
-              <span
-                className="text-[14px] font-bold"
-                style={{ color: 'var(--brand-text-primary)' }}
-              >
-                {tierMeta
-                  ? tierMeta.label
-                  : alert.type
-                    ? (alertTypeLabels[alert.type] ?? alert.type)
-                    : '—'}
-              </span>
-              <span
-                className="px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0"
-                style={{ backgroundColor: sevMeta.bg, color: sevMeta.text }}
-              >
-                {effectiveSeverity ? (sevLabels[effectiveSeverity] ?? effectiveSeverity) : '—'}
-              </span>
-              {alert.escalated && (
-                <span
-                  className="px-2 py-0.5 rounded-full text-[11px] font-bold text-white shrink-0 flex items-center gap-1"
-                  style={{ backgroundColor: 'var(--brand-alert-red)' }}
-                >
-                  <Zap className="w-3 h-3" />
-                  {t('notifications.escalated')}
-                </span>
-              )}
-              {alert.resolvedBy && (
-                <span
-                  className="px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0 flex items-center gap-1"
-                  style={{
-                    backgroundColor: 'var(--brand-success-green-light)',
-                    color: 'var(--brand-success-green)',
-                  }}
-                >
-                  <CheckCircle2 className="w-3 h-3" />
-                  {t('alerts.reviewedByCareTeam')}
-                </span>
-              )}
-            </div>
-
-            {/* Tier-1/Tier-2/BP-Level-2 alerts carry a clinical patient
-                message from the alert engine. Surface it verbatim so the
-                instruction (e.g. "stop and call your provider before next
-                dose") reaches the patient on the notifications inbox, not
-                just on the dedicated alert detail screen. */}
-            {alert.patientMessage && (
-              <p
-                className="text-[12.5px] mb-1 leading-relaxed"
-                style={{ color: 'var(--brand-text-secondary)' }}
-              >
-                {alert.patientMessage}
-              </p>
-            )}
-
-            {/* BP reading for combined/BP alerts */}
-            {alert.journalEntry && (alert.type === 'BP_COMBINED' || (alert.type ?? '').includes('BP')) && (
-              <p className="text-[12px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>
-                {t('alert.recorded')}{' '}
-                <span className="font-semibold" style={{ color: sevMeta.text }}>
-                  {alert.journalEntry.systolicBP ?? '—'}/{alert.journalEntry.diastolicBP ?? '—'} mmHg
-                </span>
-                {alert.baselineValue != null && (
-                  <>
-                    {' '}{t('alert.vsBaseline')}{' '}
-                    <span className="font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
-                      {Number(alert.baselineValue).toFixed(0)} mmHg
-                    </span>
-                  </>
-                )}
-              </p>
-            )}
-
-            {/* Non-BP values (weight, medication) */}
-            {alert.actualValue != null && !(alert.type ?? '').includes('BP') && alert.type !== 'BP_COMBINED' && (
-              <p className="text-[12px] mb-1" style={{ color: 'var(--brand-text-muted)' }}>
-                {t('alert.recorded')}{' '}
-                <span className="font-semibold" style={{ color: sevMeta.text }}>
-                  {Number(alert.actualValue).toFixed(0)}
-                </span>
-                {alert.type === 'WEIGHT' ? ' lbs' : ''}
-              </p>
-            )}
-
-            {/* Measured-at — date + time derived from the single timestamp. */}
-            {alert.journalEntry?.measuredAt && (() => {
-              const dt = new Date(alert.journalEntry.measuredAt);
-              const hh = String(dt.getHours()).padStart(2, '0');
-              const mi = String(dt.getMinutes()).padStart(2, '0');
-              return (
-                <p data-testid="notification-date" className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
-                  {formatAlertDate(alert.journalEntry.measuredAt)}
-                  {/* Literal space — `ml-1` is a CSS margin, which doesn't
-                      add a word boundary in innerText. Without this the
-                      copy/screen-reader output collapses to "Fri, May 811:22"
-                      (walkthrough finding §13.1 / Phase D regression). */}
-                  {' '}
-                  <span className="font-semibold">{`${hh}:${mi}`}</span>
-                </p>
-              );
-            })()}
-          </div>
-
-          {/* Status badge */}
-          {!isOpen && (
-            <div className="shrink-0 flex items-center gap-1" style={{ color: '#16A34A' }}>
-              <CheckCircle2 className="w-4 h-4" />
-              <span className="text-[11px] font-semibold">{t('notifications.done')}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Action row — Acknowledge + deep-link to the Flow C alert detail */}
-        <div className="mt-3 flex items-center gap-2">
-          {canAck && (
-            <motion.button
-              data-testid={`notification-dismiss-button-${alert.id}`}
-              onClick={() => onAcknowledge(alert.id)}
-              disabled={isAcking}
-              className="flex-1 h-10 rounded-xl text-[13px] font-bold flex items-center justify-center gap-2 text-white transition disabled:opacity-60 cursor-pointer"
-              // Vibrant CTA: severity color BG + white text. Matches the
-              // patient dashboard top-alert "View details" pattern so each
-              // alert card has a single focal action.
-              style={{ backgroundColor: sevMeta.cta }}
-              whileTap={{ scale: 0.98 }}
-              // Known WCAG debt — orange-500 bg + 13px bold white = 3.31:1
-              // (fails AA Normal; passes AA Large only at ≥14px bold). Same
-              // tracked debt as admin avatar; font-size bump is the planned
-              // future fix.
-              data-axe-debt="avatar-orange-small-text"
-            >
-              {isAcking ? (
-                <>{t('notifications.acknowledging')}</>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4" />
-                  {t('notifications.acknowledge')}
-                </>
-              )}
-            </motion.button>
-          )}
-          <Link
-            href={`/alerts/${alert.id}`}
-            data-testid={`notification-link-${alert.id}`}
-            className={
-              (canAck ? 'h-10 px-4' : 'flex-1 h-10') +
-              ' rounded-xl text-[13px] font-bold flex items-center justify-center gap-1 transition cursor-pointer'
-            }
-            style={{
-              backgroundColor: 'var(--brand-primary-purple-light)',
-              color: 'var(--brand-primary-purple)',
-              border: '1px solid var(--brand-primary-purple-light)',
-            }}
-            aria-label={t('notifications.viewDetailsAria')}
-          >
-            {t('notifications.viewDetails')}
-            <span aria-hidden>→</span>
-          </Link>
-        </div>
-      </div>
-    </motion.div>
   );
 }
 
@@ -847,6 +641,14 @@ export default function NotificationsPage() {
   const [topTab, setTopTab] = useState<TopTab>('alerts');
   const [acknowledging, setAcknowledging] = useState<string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
+  // Round 2 J — alerts list tier filter (admin parity). The buckets the alerts
+  // top-tab renders (emergency / tier1 / high / low / info) collapse to one
+  // when this filter narrows to a single tier. 'ALL' (default) keeps every
+  // patient-visible bucket. Tier 2 is admin-only per spec — the page already
+  // strips it upstream — so it's intentionally absent from the chip set.
+  const [alertTierFilter, setAlertTierFilter] = useState<
+    'ALL' | 'emergency' | 'tier1' | 'high' | 'heartFailure' | 'low' | 'info'
+  >('ALL');
 
   // First load shows the skeleton; subsequent polls refresh state silently
   // so the user doesn't see a "page refresh" flash every 30s. The motion-list
@@ -860,9 +662,18 @@ export default function NotificationsPage() {
       ]);
       const alertArr: Alert[] = Array.isArray(alertData) ? alertData : [];
       const notifArr: Notif[] = Array.isArray(notifData) ? notifData : [];
-      // CLINICAL_SPEC §V2-C — Tier 2 medication discrepancy is admin-only;
-      // patients shouldn't see these. Same filter the patient dashboard uses.
-      const patientVisible = alertArr.filter((a) => a.tier !== 'TIER_2_DISCREPANCY');
+      // F32 — Tier 2 medication-discrepancy alerts are admin-only UNLESS the
+      // rule engine populated a patient-facing message (e.g. the A5-3
+      // beta-blocker carve-out: RULE_MEDICATION_MISSED fires TIER_2_DISCREPANCY
+      // WITH a patientMessage). Mirror the Tier-3 safety-net rule — a non-empty
+      // patientMessage means the alert is meant for the patient. Strip only the
+      // silent (admin-only) Tier-2 rows.
+      const patientVisible = alertArr.filter(
+        (a) =>
+          a.tier !== 'TIER_2_DISCREPANCY' ||
+          (typeof a.patientMessage === 'string' &&
+            a.patientMessage.trim().length > 0),
+      );
       setAlerts(patientVisible.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
       // Only show PUSH notifications in-app — EMAIL records are for tracking only
       const pushOnly = notifArr.filter((n) => !n.channel || n.channel === 'PUSH');
@@ -960,30 +771,9 @@ export default function NotificationsPage() {
     }
   }
 
-  // Consolidate alerts from the same journal entry into one
-  // (e.g., systolic + diastolic from same reading = 1 alert card)
-  const consolidatedAlerts = (() => {
-    const byEntry = new Map<string, Alert[]>();
-    for (const a of alerts) {
-      const key = a.journalEntry?.id ?? a.id;
-      if (!byEntry.has(key)) byEntry.set(key, []);
-      byEntry.get(key)!.push(a);
-    }
-    return [...byEntry.values()].map((group) => {
-      if (group.length === 1) return group[0];
-      // Merge: pick worst severity, combine types, keep first alert's ID for actions
-      const worst = group.find((a) => a.severity === 'HIGH') ?? group[0];
-      const types = group.map((a) => a.type);
-      const hasBoth = types.includes('SYSTOLIC_BP') && types.includes('DIASTOLIC_BP');
-      return {
-        ...worst,
-        type: (hasBoth ? 'BP_COMBINED' : worst.type) as AlertType,
-        // Keep OPEN status if any in group is OPEN
-        status: (group.some((a) => a.status === 'OPEN') ? 'OPEN' : worst.status) as AlertStatus,
-        escalated: group.some((a) => a.escalated),
-      };
-    });
-  })();
+  // Consolidate alerts from the same journal entry into one card (e.g. systolic
+  // + diastolic from the same reading). Logic extracted to a tested helper.
+  const consolidatedAlerts = consolidateAlertsByEntry(alerts);
 
   const openAlerts = consolidatedAlerts.filter((a) => a.status === 'OPEN');
   const pastAlerts = consolidatedAlerts.filter((a) => a.status !== 'OPEN');
@@ -1089,6 +879,53 @@ export default function NotificationsPage() {
           </>
         ) : topTab === 'alerts' ? (
           <>
+            {/* Round 2 J — tier filter chips (admin parity). Default ALL keeps
+                the existing bucket grouping; selecting a tier narrows the list
+                to that bucket. Tier 2 is admin-only per CLINICAL_SPEC §V2-C —
+                already stripped upstream — so no chip for it. */}
+            {(openAlerts.length > 0 || pastAlerts.length > 0) && (
+              <div
+                className="flex flex-wrap gap-1.5 mb-3"
+                data-testid="alerts-tier-filter"
+                role="tablist"
+                aria-label="Filter alerts by tier"
+              >
+                {(
+                  [
+                    ['ALL', 'All'],
+                    ['emergency', 'Emergency'],
+                    ['tier1', 'Tier 1'],
+                    ['high', 'High BP'],
+                    ['heartFailure', 'Heart failure'],
+                    ['low', 'Low BP'],
+                    ['info', 'Info'],
+                  ] as const
+                ).map(([key, label]) => {
+                  const active = alertTierFilter === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      data-testid={`alerts-tier-filter-${key}`}
+                      onClick={() => setAlertTierFilter(key)}
+                      className="px-2.5 h-7 rounded-full text-[11.5px] font-semibold transition cursor-pointer"
+                      style={{
+                        backgroundColor: active
+                          ? 'var(--brand-primary-purple)'
+                          : 'var(--brand-primary-purple-light)',
+                        color: active ? 'white' : 'var(--brand-primary-purple)',
+                        border: '1px solid transparent',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {/* ── Alerts grouped by tier (E1) — emergency first, then Tier 1
                 contraindications, BP Level 1 high, BP Level 1 low, info, then
                 anything that the rule engine hasn't classified. Each section
@@ -1097,58 +934,44 @@ export default function NotificationsPage() {
               <EmptyState message={t('notifications.allCaughtUp')} />
             )}
             {openAlerts.length > 0 && (() => {
-              type TierBucketKey =
-                | 'emergency'
-                | 'tier1'
-                | 'high'
-                | 'low'
-                | 'info'
-                | 'other';
-              const order: TierBucketKey[] = ['emergency', 'tier1', 'high', 'low', 'info', 'other'];
+              const order: TierBucketKey[] = ['emergency', 'tier1', 'high', 'heartFailure', 'low', 'info', 'other'];
               const headings: Record<TierBucketKey, string> = {
                 emergency: t('notifications.bucket.emergency'),
                 tier1: t('notifications.bucket.tier1'),
                 high: t('notifications.bucket.high'),
+                heartFailure: t('notifications.bucket.heartFailure'),
                 low: t('notifications.bucket.low'),
                 info: t('notifications.bucket.info'),
                 other: t('notifications.bucket.other'),
               };
-              const bucketize = (a: typeof openAlerts[number]): TierBucketKey => {
-                const tier = (a as { tier?: string | null }).tier ?? null;
-                const sbp = a.journalEntry?.systolicBP ?? 0;
-                const dbp = a.journalEntry?.diastolicBP ?? 0;
-                if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') return 'emergency';
-                if (sbp >= 180 || dbp >= 120) return 'emergency';
-                if (tier === 'TIER_1_CONTRAINDICATION') return 'tier1';
-                if (tier === 'BP_LEVEL_1_LOW' || (sbp > 0 && sbp < 90) || (dbp > 0 && dbp < 60)) return 'low';
-                if (tier === 'BP_LEVEL_1_HIGH') return 'high';
-                if (tier === 'TIER_3_INFO') return 'info';
-                if (a.severity === 'HIGH' || (a.type ?? '').includes('BP')) return 'high';
-                return 'other';
-              };
               const buckets = new Map<TierBucketKey, typeof openAlerts>();
               for (const a of openAlerts) {
-                const k = bucketize(a);
+                const k = bucketizeAlert(a);
                 if (!buckets.has(k)) buckets.set(k, []);
                 buckets.get(k)!.push(a);
               }
               const sectionTestIds: Partial<Record<TierBucketKey, string>> = {
                 emergency: 'alerts-section-emergency',
                 high: 'alerts-section-elevated',
+                heartFailure: 'alerts-section-heart-failure',
               };
               return order
                 .filter((k) => buckets.has(k))
+                // Round 2 J — narrow to the selected tier chip ('ALL' = all
+                // patient-visible buckets; 'other' is bundled into 'ALL').
+                .filter((k) => alertTierFilter === 'ALL' || alertTierFilter === k)
                 .map((k) => (
                   <div key={k}>
                     <SectionLabel count={buckets.get(k)!.length} testId={sectionTestIds[k]}>{headings[k]}</SectionLabel>
                     <div className="space-y-3">
                       <AnimatePresence mode="popLayout">
                         {buckets.get(k)!.map((alert) => (
-                          <AlertCard
+                          <PatientAlertCard
                             key={alert.id}
                             alert={alert}
                             onAcknowledge={handleAcknowledge}
                             acknowledging={acknowledging}
+                            testIdPrefix="notification-row"
                           />
                         ))}
                       </AnimatePresence>
@@ -1223,11 +1046,12 @@ function PastAlerts({ alerts }: { alerts: Alert[] }) {
             className="overflow-hidden mt-3 space-y-2"
           >
             {alerts.map((alert) => (
-              <AlertCard
+              <PatientAlertCard
                 key={alert.id}
                 alert={alert}
                 onAcknowledge={() => {}}
                 acknowledging={null}
+                testIdPrefix="notification-row"
               />
             ))}
           </motion.div>

@@ -64,6 +64,16 @@ import {
   type AlertTier,
 } from '@/lib/services/provider.service';
 
+// F1: format a Date as YYYY-MM-DD in the viewer's LOCAL timezone. toISOString()
+// is UTC, so late-evening local readings would land on "tomorrow" UTC and the
+// trend end-date would exclude the current local day's data.
+function toLocalISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface ProviderStats {
@@ -150,6 +160,10 @@ function tierBucket(a: RawAlert): TierFilter {
   // Cluster 8 — angioedema buckets into TIER_1 so the dashboard TIER_1
   // filter surfaces it alongside contraindications (Manisha "resolved
   // like all Tier 1 alerts").
+  // B.5 GATE (Manisha sign-off pending): a bespoke "Airway emergency" bucket
+  // + distinctive chrome (vs the generic Tier-1 red Pill) plugs in HERE and
+  // in bucketChrome() once Dr. Singal approves the label/colour. Until then
+  // angioedema is correctly visible + resolvable as Tier 1 (no functional gap).
   if (a.tier === 'TIER_1_CONTRAINDICATION' || a.tier === 'TIER_1_ANGIOEDEMA') return 'TIER_1';
   if (a.tier === 'TIER_2_DISCREPANCY') return 'TIER_2';
   if (a.tier === 'BP_LEVEL_1_HIGH' || a.tier === 'BP_LEVEL_1_LOW') return 'BP_L1';
@@ -296,9 +310,9 @@ export default function AdminDashboard() {
   const [trendStartDate, setTrendStartDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
+    return toLocalISODate(d);
   });
-  const [trendEndDate, setTrendEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [trendEndDate, setTrendEndDate] = useState(() => toLocalISODate(new Date()));
   type BpPoint = { day: string; systolic: number | null; diastolic: number | null; date: string; time: string | null };
   const [bpTrendData, setBpTrendData] = useState<BpPoint[]>([]);
 
@@ -403,8 +417,8 @@ export default function AdminDashboard() {
     const start = new Date();
     start.setDate(start.getDate() - days);
     setTrendPreset(preset);
-    setTrendStartDate(start.toISOString().slice(0, 10));
-    setTrendEndDate(end.toISOString().slice(0, 10));
+    setTrendStartDate(toLocalISODate(start));
+    setTrendEndDate(toLocalISODate(end));
   };
 
   useEffect(() => {
@@ -949,7 +963,7 @@ export default function AdminDashboard() {
                     aria-label="Trend range end date"
                     value={trendEndDate}
                     min={trendStartDate}
-                    max={new Date().toISOString().slice(0, 10)}
+                    max={toLocalISODate(new Date())}
                     onChange={(e) => {
                       setTrendEndDate(e.target.value);
                       setTrendPreset('');

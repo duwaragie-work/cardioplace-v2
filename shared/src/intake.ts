@@ -51,6 +51,15 @@ export type MedicationVerificationStatusInput =
   | 'AWAITING_PROVIDER'
   | 'HOLD'
 
+// Manisha 5/24 Med §3 — structured HOLD reason codes. Only PROVIDER_DIRECTED_HOLD
+// is a clinical "stop taking it" instruction; the others are administrative.
+export type MedicationHoldReasonInput =
+  | 'AWAITING_RECORDS'
+  | 'UNCLEAR_NAME'
+  | 'UNCLEAR_DOSE'
+  | 'PROVIDER_DIRECTED_HOLD'
+  | 'OTHER'
+
 export type ProfileVerificationStatusInput =
   | 'UNVERIFIED'
   | 'VERIFIED'
@@ -69,7 +78,7 @@ export interface IntakeProfilePayload {
 
   isPregnant?: boolean
   pregnancyDueDate?: string | null
-  historyPreeclampsia?: boolean
+  historyHDP?: boolean
 
   hasHeartFailure?: boolean
   heartFailureType?: HeartFailureTypeInput
@@ -77,6 +86,8 @@ export interface IntakeProfilePayload {
   hasCAD?: boolean
   hasHCM?: boolean
   hasDCM?: boolean
+  // Manisha 5/24 Q5C — aortic stenosis (interim HCM-style thresholds).
+  hasAorticStenosis?: boolean
   hasTachycardia?: boolean
   hasBradycardia?: boolean
   diagnosedHypertension?: boolean
@@ -118,7 +129,7 @@ export interface UpdateMedicationPayload {
 export interface PregnancyPayload {
   isPregnant: boolean
   pregnancyDueDate?: string | null
-  historyPreeclampsia?: boolean
+  historyHDP?: boolean
 }
 
 // ── POST /admin/users/:id/verify-profile ───────────────────────────────────
@@ -142,4 +153,7 @@ export interface VerifyMedicationPayload {
     'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER' | 'HOLD'
   >
   rationale?: string
+  // Required when status === 'HOLD' (Manisha 5/24 Med §3). Drives the two-path
+  // patient message; OTHER also requires a free-text rationale.
+  holdReason?: MedicationHoldReasonInput
 }

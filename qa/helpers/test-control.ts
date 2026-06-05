@@ -82,6 +82,19 @@ export class TestControl {
     })
   }
 
+  /**
+   * F33 — run the medication-hold escalation scanner once. Pass `now` to
+   * simulate a future time so a backdated hold crosses a rung (day 7/14/30/45)
+   * without waiting for the daily 15:00 UTC cron.
+   */
+  async runMedicationHoldEscalationScan(
+    now?: Date,
+  ): Promise<{ scanned: number; rungsFired: number }> {
+    return this.post('test-control/cron/medication-hold-escalation/run', {
+      now: (now ?? new Date()).toISOString(),
+    })
+  }
+
   // ─── Time advancement ───────────────────────────────────────────────────
   /**
    * Backdate an alert's T+0 EscalationEvent.notificationSentAt. Equivalent to
@@ -190,12 +203,13 @@ export class TestControl {
     userId: string,
     flag:
       | 'isPregnant'
-      | 'historyPreeclampsia'
+      | 'historyHDP'
       | 'hasHeartFailure'
       | 'hasAFib'
       | 'hasCAD'
       | 'hasHCM'
       | 'hasDCM'
+      | 'hasAorticStenosis'
       | 'hasBradycardia'
       | 'hasTachycardia'
       | 'diagnosedHypertension',
@@ -226,6 +240,27 @@ export class TestControl {
     return this.post('test-control/user/set-medication', { userId, med })
   }
 
+  /**
+   * F17 — place an existing medication (matched by drugName) on HOLD with a
+   * given reason (default PROVIDER_DIRECTED_HOLD), mirroring an admin hold.
+   */
+  async setMedicationHold(
+    userId: string,
+    drugName: string,
+    holdReason:
+      | 'AWAITING_RECORDS'
+      | 'UNCLEAR_NAME'
+      | 'UNCLEAR_DOSE'
+      | 'PROVIDER_DIRECTED_HOLD'
+      | 'OTHER' = 'PROVIDER_DIRECTED_HOLD',
+  ): Promise<{ id: string }> {
+    return this.post('test-control/user/set-medication-hold', {
+      userId,
+      drugName,
+      holdReason,
+    })
+  }
+
   // ─── State reset ────────────────────────────────────────────────────────
   /**
    * Wipe journal/alert/escalation/notification rows for ALL *.cardioplace.test
@@ -249,6 +284,15 @@ export class TestControl {
    */
   async clearUserMedications(userId: string): Promise<{ rowsDeleted: number }> {
     return this.post('test-control/reset/user-medications', { userId })
+  }
+
+  /**
+   * Delete a user's DeviationAlert rows (+ child escalations + alert-linked
+   * notifications) WITHOUT wiping reading history — for tests that need an
+   * established history but a clean alert slate before triggering (30u B2).
+   */
+  async deleteAlertsForUser(userId: string): Promise<{ rowsDeleted: number }> {
+    return this.post('test-control/reset/user-alerts', { userId })
   }
 
   /**
@@ -277,6 +321,12 @@ export class TestControl {
     status: 'NOT_ENROLLED' | 'ENROLLED',
   ): Promise<void> {
     await this.post('test-control/user/set-enrollment', { userId, status })
+  }
+
+  /** F13 — set/clear PatientProfile.aceContraindicatedAt so the ACE/ARB
+   *  re-add gate (modal + provider-review hold) can be exercised directly. */
+  async setAceContraindicated(userId: string, value: boolean): Promise<void> {
+    await this.post('test-control/user/set-ace-contraindicated', { userId, value })
   }
 
   /**

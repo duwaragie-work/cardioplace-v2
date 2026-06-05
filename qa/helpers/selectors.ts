@@ -32,6 +32,9 @@ export const T = {
     timezoneSelect: 'onboarding-timezone-select',
     submitBtn: 'onboarding-submit-btn',
     skipBtn: 'onboarding-skip-btn',
+    // Privacy/trust step (V2-E Gap 7) — shown FIRST, before the profile form.
+    agreeTerms: 'onboarding-agree-terms',
+    privacyContinueBtn: 'onboarding-privacy-continue-btn',
   },
 
   // ─── Patient: clinical intake (A1–A9) ───────────────────────────────────
@@ -87,6 +90,9 @@ export const T = {
         | 'SGLT2'
         | 'OTHER',
     ) => `intake-cat-tile-${key}`,
+    catExpanded: (
+      key: 'WATER_PILL' | 'BLOOD_THINNER' | 'CHOLESTEROL' | 'HEART_RHYTHM' | 'SGLT2',
+    ) => `intake-cat-expanded-${key}`,
     otherMedInput: 'intake-other-med-input',
     // A1: gender + height + DOB
     genderRadio: (v: 'MALE' | 'FEMALE' | 'OTHER') => `intake-gender-${v.toLowerCase()}`,
@@ -97,8 +103,8 @@ export const T = {
     // A2: pregnancy / preeclampsia
     isPregnantYes: 'intake-pregnant-yes',
     isPregnantNo: 'intake-pregnant-no',
-    historyPreeclampsiaYes: 'intake-preeclampsia-yes',
-    historyPreeclampsiaNo: 'intake-preeclampsia-no',
+    historyHDPYes: 'intake-preeclampsia-yes',
+    historyHDPNo: 'intake-preeclampsia-no',
     // A3: cardiac conditions
     conditionCheckbox: (
       key:
@@ -106,6 +112,7 @@ export const T = {
         | 'hasCAD'
         | 'hasHCM'
         | 'hasDCM'
+        | 'hasAorticStenosis'
         | 'hasAFib'
         | 'hasTachycardia'
         | 'hasBradycardia'
@@ -136,6 +143,7 @@ export const T = {
     medicationStreak: 'medication-streak',
     totalCheckins: 'total-checkins',
     bpGoal: 'bp-goal',
+    goalTolerance: 'dashboard-goal-tolerance',
     bpChart: 'bp-chart',
     bpChartXTick: 'bp-chart-x-tick',
     bpChartRangeToggle: (range: '7d' | '30d' | '90d') => `bp-chart-range-${range}`,
@@ -202,6 +210,15 @@ export const T = {
     medicationNo: 'check-in-medication-no',
     pendingSecondReading: 'pending-second-reading',
     addSecondReading: 'add-second-reading',
+    // Silent-literacy TTS button (AudioButton). Shared testid; many render per
+    // screen, so target with .first() / scope to a step container.
+    audioButton: 'audio-button',
+    // Cross-visit "add to this session or start new?" prompt.
+    openSessionPrompt: 'checkin-open-session-prompt',
+    openSessionNeedsMore: 'checkin-open-session-needs-more',
+    joinSession: 'checkin-join-session-btn',
+    newSession: 'checkin-new-session-btn',
+    resumePrompt: 'checkin-resume-prompt',
   },
 
   // ─── Patient: readings ──────────────────────────────────────────────────
@@ -403,6 +420,7 @@ export const T = {
     // ThresholdsTab
     thresholdReadonlyBanner: 'admin-threshold-readonly',
     thresholdSbpUpper: 'admin-threshold-sbp-upper',
+    thresholdSbpBandHelper: 'admin-threshold-sbp-band-helper',
     thresholdSbpLower: 'admin-threshold-sbp-lower',
     thresholdDbpUpper: 'admin-threshold-dbp-upper',
     thresholdDbpLower: 'admin-threshold-dbp-lower',
@@ -472,6 +490,8 @@ export const T = {
     alertCard: (id: string) => `admin-alert-card-${id}`,
     alertRow: (id: string) => `admin-alert-row-${id}`,
     alertTierBadge: (id: string) => `admin-alert-tier-badge-${id}`,
+    alertModeBadge: (id: string) => `admin-alert-mode-badge-${id}`,
+    alertGroupHeader: 'admin-alert-group-header',
     alertStatusBadge: (id: string) => `admin-alert-status-badge-${id}`,
     alertAckBtn: (id: string) => `admin-alert-ack-button-${id}`,
     alertResolveBtnFor: (id: string) => `admin-alert-resolve-button-${id}`,

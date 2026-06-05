@@ -739,7 +739,7 @@ function EntryCard({
 }
 
 // ─── Session Card ─────────────────────────────────────────────────────────────
-// Wraps 2+ readings taken within the same session (≤30 min, same sessionId)
+// Wraps 2+ readings taken within the same session (≤5 min, same sessionId)
 // in a collapsible shell. Header shows the average BP and reading count;
 // expanding renders the individual EntryCards inside. Solo readings render
 // as a plain EntryCard (no shell) so the list doesn't feel over-decorated.

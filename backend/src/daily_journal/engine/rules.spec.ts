@@ -39,7 +39,7 @@ import {
   standardL1HighRule,
   standardL1LowRule,
 } from './standard.js'
-import { afibHrRule, bradyAbsoluteRule, bradySymptomaticRule, buildTachyRule } from './hr-branches.js'
+import { afibHrRule, bradyAbsoluteRule, bradySymptomaticRule, buildTachyRule, tachySevereRule } from './hr-branches.js'
 import { pulsePressureWideRule } from './pulse-pressure.js'
 import { loopDiureticHypotensionRule } from './loop-diuretic.js'
 import { medicationMissedRule, medicationMissedRuleWithWindow } from './adherence.js'
@@ -130,7 +130,7 @@ function ctx(over: {
     heightCm: 165,
     isPregnant: false,
     pregnancyDueDate: null,
-    historyPreeclampsia: false,
+    historyHDP: false,
     hasHeartFailure: false,
     heartFailureType: 'NOT_APPLICABLE',
     resolvedHFType: 'NOT_APPLICABLE',
@@ -170,6 +170,7 @@ function ctx(over: {
       over.triggerPregnancyContraindicationCheck ?? profile.isPregnant,
     enrolledAt: null,
     practiceName: null,
+    patientName: null,
     resolvedAt: FIXED_NOW,
   }
 }
@@ -250,6 +251,41 @@ describe('pregnancyAceArbRule (D.1)', () => {
   it('not pregnant + lisinopril → no alert', () => {
     const r = pregnancyAceArbRule(session(), ctx({ contextMeds: [med()] }))
     expect(r).toBeNull()
+  })
+
+  // Regression: duplicate PatientMedication rows for the same drug were
+  // surfacing as "review Lisinopril, Lisinopril, and Lisinopril". The dedup now
+  // collapses by normalized drugName in addition to row id.
+  it('three duplicate PatientMedication rows for Lisinopril → drugNames lists it ONCE', () => {
+    const r = pregnancyAceArbRule(
+      session(),
+      ctx({
+        profile: { isPregnant: true },
+        contextMeds: [
+          med({ id: 'a', drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR' }),
+          med({ id: 'b', drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR' }),
+          med({ id: 'c', drugName: 'lisinopril', drugClass: 'ACE_INHIBITOR' }),
+        ],
+        triggerPregnancyContraindicationCheck: true,
+      }),
+    )
+    expect(r?.tier).toBe('TIER_1_CONTRAINDICATION')
+    expect(r?.metadata?.drugNames).toEqual(['Lisinopril'])
+  })
+
+  it('genuinely-different ACE/ARB drugs → drugNames lists each (no over-dedup)', () => {
+    const r = pregnancyAceArbRule(
+      session(),
+      ctx({
+        profile: { isPregnant: true },
+        contextMeds: [
+          med({ id: 'a', drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR' }),
+          med({ id: 'b', drugName: 'Losartan', drugClass: 'ARB' }),
+        ],
+        triggerPregnancyContraindicationCheck: true,
+      }),
+    )
+    expect(r?.metadata?.drugNames).toEqual(['Lisinopril', 'Losartan'])
   })
 })
 
@@ -959,29 +995,31 @@ describe('tachy rule (P) — Cluster 6 Q5 (Manisha 5/9)', () => {
     expect(r?.reason).toMatch(/8h/)
   })
 
-  it('HR=132 single-reading (prior=false) → Q5 severe-tachy exception fires immediately', () => {
-    const rule = buildTachyRule(false)
-    const r = rule(session({ pulse: 132 }), tctx)
+  // The HR>130 single-reading Q5 exception moved out of buildTachyRule into
+  // tachySevereRule (NIVA_HR), so it can run pre-gate and fire on one reading.
+  it('HR=132 single-reading → Q5 severe-tachy exception fires immediately (tachySevereRule)', () => {
+    const r = tachySevereRule(session({ pulse: 132 }), tctx)
     expect(r?.tier).toBe('BP_LEVEL_1_HIGH')
     expect(r?.ruleId).toBe('RULE_TACHY_HR')
     expect(r?.reason).toMatch(/severe|130/i)
   })
 
-  it('HR=130 (boundary, not strictly >130) + prior=false → no alert', () => {
-    const rule = buildTachyRule(false)
-    expect(rule(session({ pulse: 130 }), tctx)).toBeNull()
+  it('HR=130 (boundary, not strictly >130) → no severe-tachy alert', () => {
+    expect(tachySevereRule(session({ pulse: 130 }), tctx)).toBeNull()
   })
 
-  it('HR=131 single-reading → severe exception fires', () => {
-    const rule = buildTachyRule(false)
-    const r = rule(session({ pulse: 131 }), tctx)
+  it('HR=131 single-reading → severe exception fires (tachySevereRule)', () => {
+    const r = tachySevereRule(session({ pulse: 131 }), tctx)
     expect(r?.ruleId).toBe('RULE_TACHY_HR')
+  })
+
+  it('buildTachyRule no longer fires on HR>130 alone (prior=false) — that path is tachySevereRule now', () => {
+    expect(buildTachyRule(false)(session({ pulse: 132 }), tctx)).toBeNull()
   })
 
   it('non-tachycardia patient HR=132 → no alert (gate stays on flag)', () => {
     const noFlagCtx = ctx({ profile: { hasTachycardia: false } })
-    const rule = buildTachyRule(false)
-    expect(rule(session({ pulse: 132 }), noFlagCtx)).toBeNull()
+    expect(tachySevereRule(session({ pulse: 132 }), noFlagCtx)).toBeNull()
   })
 })
 
@@ -1402,6 +1440,12 @@ describe('medicationMissedRule — Phase/26 scheduledLater regression', () => {
     )
     expect(r?.ruleId).toBe('RULE_MEDICATION_MISSED')
     expect(r?.metadata.adherenceBetaBlockerCarveOut).toBe(true)
+    // #93 (2026-06-03) — the physician annotation is clinical prose, not the
+    // old "beta-blocker-carve-out" debug tag.
+    expect(r?.metadata.physicianAnnotations).toContain(
+      'Tier 2 dispatched on single missed dose per HFrEF / HCM / AFib β-blocker safety policy.',
+    )
+    expect(r?.metadata.physicianAnnotations).not.toContain('beta-blocker-carve-out')
   })
 
   it('windowed rule: single beta-blocker miss in patient WITHOUT HF/HCM/AFib → null', () => {
@@ -1445,7 +1489,10 @@ describe('medicationMissedRule — Phase/26 scheduledLater regression', () => {
       session({ medicationTaken: false, missedMedications: [] }),
       ctx({ profile: { hasHeartFailure: false } }),
     )
-    expect(r?.metadata.physicianAnnotations).toContain('escalate-3-of-7')
+    expect(r?.metadata.physicianAnnotations).toContain(
+      'Tier 2 dispatched on 3-of-7 missed-dose pattern per adherence-trending escalation policy.',
+    )
+    expect(r?.metadata.physicianAnnotations).not.toContain('escalate-3-of-7')
   })
 })
 
@@ -1475,11 +1522,14 @@ describe('bradySymptomaticRule unverified beta-blocker suppression (P gap)', () 
 
 import {
   aceCoughRule,
+  afibPalpitationsRule,
   betaBlockerFatigueRule,
   betaBlockerSobHfRule,
   betaBlockerSobNonHfRule,
   hfCaregiverEdemaRule,
   nsaidAntihypertensiveRule,
+  palpitationsGeneralRule,
+  tachyPalpitationsRule,
 } from './symptom-rules.js'
 
 describe('Cluster 7 — betaBlockerFatigueRule (A.1)', () => {
@@ -1642,6 +1692,91 @@ describe('Cluster 7 — hfCaregiverEdemaRule (A.6)', () => {
     const r = hfCaregiverEdemaRule(
       session(),
       ctx({ profile: { hasHeartFailure: true, resolvedHFType: 'HFREF' } }),
+    )
+    expect(r).toBeNull()
+  })
+})
+
+// ─── Cluster 5/6 — palpitation rules (B.1 coverage; removed from §F.1 allowlist) ──
+//
+// Three mutually-exclusive branches off session.symptoms.palpitations:
+//   • afibPalpitationsRule       — hasAFib                → BP_LEVEL_1_LOW
+//   • tachyPalpitationsRule      — !hasAFib + pulse >100  → BP_LEVEL_1_HIGH
+//   • palpitationsGeneralRule    — !hasAFib + pulse ≤100  → TIER_3_INFO
+
+describe('Cluster 6 — afibPalpitationsRule', () => {
+  it('fires BP_LEVEL_1_LOW when AFib patient reports palpitations', () => {
+    const r = afibPalpitationsRule(
+      session({ symptoms: { ...noSymptoms(), palpitations: true } }),
+      ctx({ profile: { hasAFib: true } }),
+    )
+    expect(r?.ruleId).toBe('RULE_AFIB_PALPITATIONS')
+    expect(r?.tier).toBe('BP_LEVEL_1_LOW')
+  })
+
+  it('does not fire without the palpitations symptom', () => {
+    const r = afibPalpitationsRule(session(), ctx({ profile: { hasAFib: true } }))
+    expect(r).toBeNull()
+  })
+
+  it('does not fire for a non-AFib patient (defers to tachy/general)', () => {
+    const r = afibPalpitationsRule(
+      session({ symptoms: { ...noSymptoms(), palpitations: true } }),
+      ctx({ profile: { hasAFib: false } }),
+    )
+    expect(r).toBeNull()
+  })
+})
+
+describe('Cluster 6 — tachyPalpitationsRule', () => {
+  it('fires BP_LEVEL_1_HIGH for palpitations + HR >100 in a non-AFib patient', () => {
+    const r = tachyPalpitationsRule(
+      session({ pulse: 118, symptoms: { ...noSymptoms(), palpitations: true } }),
+      ctx({ profile: { hasAFib: false } }),
+    )
+    expect(r?.ruleId).toBe('RULE_TACHY_WITH_PALPITATIONS')
+    expect(r?.tier).toBe('BP_LEVEL_1_HIGH')
+  })
+
+  it('does not fire at exactly HR 100 (strict >100)', () => {
+    const r = tachyPalpitationsRule(
+      session({ pulse: 100, symptoms: { ...noSymptoms(), palpitations: true } }),
+      ctx({ profile: { hasAFib: false } }),
+    )
+    expect(r).toBeNull()
+  })
+
+  it('does not fire for an AFib patient (afib branch owns it)', () => {
+    const r = tachyPalpitationsRule(
+      session({ pulse: 118, symptoms: { ...noSymptoms(), palpitations: true } }),
+      ctx({ profile: { hasAFib: true } }),
+    )
+    expect(r).toBeNull()
+  })
+})
+
+describe('Cluster 6 — palpitationsGeneralRule', () => {
+  it('fires TIER_3_INFO for palpitations + normal rate in a non-AFib patient', () => {
+    const r = palpitationsGeneralRule(
+      session({ pulse: 78, symptoms: { ...noSymptoms(), palpitations: true } }),
+      ctx({ profile: { hasAFib: false } }),
+    )
+    expect(r?.ruleId).toBe('RULE_PALPITATIONS_GENERAL')
+    expect(r?.tier).toBe('TIER_3_INFO')
+  })
+
+  it('does not fire when HR >100 (tachy branch owns it)', () => {
+    const r = palpitationsGeneralRule(
+      session({ pulse: 118, symptoms: { ...noSymptoms(), palpitations: true } }),
+      ctx({ profile: { hasAFib: false } }),
+    )
+    expect(r).toBeNull()
+  })
+
+  it('does not fire for an AFib patient', () => {
+    const r = palpitationsGeneralRule(
+      session({ pulse: 78, symptoms: { ...noSymptoms(), palpitations: true } }),
+      ctx({ profile: { hasAFib: true } }),
     )
     expect(r).toBeNull()
   })

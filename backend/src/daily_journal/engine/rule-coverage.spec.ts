@@ -47,22 +47,16 @@ const ALLOWLIST: Record<string, string> = {
     'pre-cluster-8 placeholder; HR 40-49 no-symptom is now BRADY_SURVEILLANCE',
 
   // ─── PRE-EXISTING TECH DEBT (surfaced by Cluster 8 §F.1) ────────────────
-  // The gate caught four Cluster 5/6/7 rules that shipped with zero test
-  // references. NOT Cluster 8 — but documented here so the gate ships and
-  // catches every NEW uncovered rule from this PR forward. Any PR that
-  // touches one of these four rules MUST either add coverage or refresh
-  // the allowlist note (and ideally clear it).
+  // The gate caught Cluster 5/6/7 rules that shipped with zero test
+  // references. The three palpitation rules (AFIB / TACHY_WITH / GENERAL)
+  // were cleared in B.1 — they now have dedicated engine unit scenarios in
+  // rules.spec.ts and are enforced by this gate. RULE_LOOP_DIURETIC_HYPOTENSION
+  // remains allowlisted pending a dedicated scenario.
   //
   // Tracked in §I anomalies report. Owners TBD per cluster-author handoff
-  // (Dev 2 owns the rule engine; Niva / Lakshitha for symptom rules).
+  // (Dev 2 owns the rule engine; Niva for symptom rules).
   RULE_LOOP_DIURETIC_HYPOTENSION:
     'pre-existing gap — shipped without engine unit scenario; covered manually in CLINICAL_LOGIC_REVIEW',
-  RULE_AFIB_PALPITATIONS:
-    'pre-existing gap — Cluster 5/6 palpitations split, no dedicated scenario yet',
-  RULE_TACHY_WITH_PALPITATIONS:
-    'pre-existing gap — Cluster 5/6 palpitations split, no dedicated scenario yet',
-  RULE_PALPITATIONS_GENERAL:
-    'pre-existing gap — Cluster 5/6 palpitations split, no dedicated scenario yet',
 }
 
 function walk(dir: string, out: string[] = []): string[] {

@@ -60,6 +60,27 @@ export function escalationEmailHtml(
   `)
 }
 
+// Gap 5 — caregiver alert email. Carries ONLY the signed-off caregiverMessage
+// (HIPAA Minimum Necessary): no readings, no other conditions, no diagnosis.
+export function caregiverEmailHtml(
+  caregiverName: string,
+  message: string,
+): string {
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #0d9488; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Caregiver update
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">A health update about someone you care for</h2>
+    <p style="color: #374151; line-height: 1.6;">Hi ${caregiverName},</p>
+    <p style="color: #374151; line-height: 1.6;">${message}</p>
+    <p style="color: #6b7280; line-height: 1.6; font-size: 13px; margin-top: 16px;">
+      You're receiving this because the patient asked Cardioplace to share health alerts with you.
+    </p>
+  `)
+}
+
 export function scheduleCallEmailHtml(
   patientName: string,
   callType: string,

@@ -104,10 +104,42 @@ describe('OutputGeneratorService', () => {
 
   // ─── T.2–T.5 Substitution + tone ───────────────────────────────────────
   describe('substitution + tone (T.2–T.5)', () => {
-    it('standard L1 High substitutes SBP/DBP into patient message', () => {
+    // Handoff 4 / Doc 2 (Manisha 6/2): the patient tier no longer carries the
+    // raw BP number (anxiety-provoking). The reading now rides on the caregiver
+    // tier; the physician tier keeps the session average. F7's "show the reading
+    // the patient saw" intent therefore lives on the caregiver message.
+    it('standard L1 High — patient tier carries no number; caregiver carries the reading', () => {
       const r = baseResult()
       const out = service.generate(r, baseSession, false)
-      expect(out.patientMessage).toContain('150/92')
+      expect(out.patientMessage).not.toContain('150/92')
+      expect(out.caregiverMessage).toContain('150/92')
+    })
+
+    it('F7 — caregiver cites the submitted reading, physician keeps the session average', () => {
+      const r = baseResult({ actualValue: 135 })
+      // Session-averaged 135/86 (engine truth) but the patient submitted 145/92.
+      const session: SessionAverage = {
+        ...baseSession,
+        systolicBP: 135,
+        diastolicBP: 86,
+        submittedSystolicBP: 145,
+        submittedDiastolicBP: 92,
+      }
+      const out = service.generate(r, session, false)
+      expect(out.caregiverMessage).toContain('145/92')
+      expect(out.caregiverMessage).not.toContain('135/86')
+      // Physician/admin still sees the averaged evaluation value.
+      expect(out.physicianMessage).toContain('135/86')
+      // Patient tier carries no raw reading at all (Doc 2).
+      expect(out.patientMessage).not.toContain('145/92')
+      expect(out.patientMessage).not.toContain('135/86')
+    })
+
+    it('F7 — caregiver falls back to the averaged value when no submitted reading is present', () => {
+      const r = baseResult()
+      const out = service.generate(r, baseSession, false)
+      // baseSession has no submitted* fields → caregiver body uses the average.
+      expect(out.caregiverMessage).toContain('150/92')
     })
 
     it('pregnancy+ACE patient message uses warm language (no "teratogenic")', () => {
@@ -117,8 +149,13 @@ describe('OutputGeneratorService', () => {
         metadata: { drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR', conditionLabel: 'Pregnancy' },
       })
       const out = service.generate(r, baseSession, false)
+      // Doc 2 (Manisha 6/2): names the drug, says "not recommended during
+      // pregnancy", and explicitly tells the patient NOT to self-discontinue
+      // (rebound-HTN safety). Warm, plain, no clinical jargon.
       expect(out.patientMessage.toLowerCase()).not.toContain('teratogenic')
-      expect(out.patientMessage).toMatch(/blood pressure medicine/i)
+      expect(out.patientMessage).toMatch(/not recommended during pregnancy/i)
+      expect(out.patientMessage).toMatch(/do not stop taking it on your own/i)
+      expect(out.patientMessage).toContain('Lisinopril')
     })
 
     it('pregnancy+ACE physician message uses clinical terms', () => {
@@ -128,7 +165,7 @@ describe('OutputGeneratorService', () => {
         metadata: { drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR' },
       })
       const out = service.generate(r, baseSession, false)
-      expect(out.physicianMessage.toLowerCase()).toContain('teratogenic')
+      expect(out.physicianMessage.toLowerCase()).toContain('contraindicated in pregnancy')
       expect(out.physicianMessage).toContain('Lisinopril')
     })
 
@@ -161,10 +198,13 @@ describe('OutputGeneratorService', () => {
       expect(out.physicianMessage).toMatch(/pulse pressure/i)
     })
 
-    it('preDay3 flag appends disclaimer on standard-mode alerts', () => {
+    it('F26 — preDay3 disclaimer is admin-only: physician message has it, patient message does NOT', () => {
       const r = baseResult()
       const out = service.generate(r, baseSession, true)
-      expect(out.patientMessage).toMatch(/personalization begins after Day 3/i)
+      // The personalization disclaimer must never leak to the patient surface.
+      expect(out.patientMessage).not.toMatch(/personalization/i)
+      // It still rides on the physician/admin surface for context.
+      expect(out.physicianMessage).toMatch(/personalization begins after 7 readings/i)
     })
 
     it('suboptimalMeasurement flag appends retake suffix', () => {
@@ -193,6 +233,25 @@ describe('OutputGeneratorService', () => {
       })
       const out = service.generate(r, baseSession, false)
       expect(out.physicianMessage.toLowerCase()).toContain('loop diuretic')
+    })
+  })
+
+  // ─── Bug 2 — caregiver message names the patient (Gap 5) ────────────────
+  describe('caregiver message names the patient', () => {
+    const caregiverRule = baseResult({
+      ruleId: 'RULE_HF_CAREGIVER_EDEMA',
+      tier: 'TIER_3_INFO',
+    })
+
+    it('threads the patient name into the caregiver-routed message', () => {
+      const out = service.generate(caregiverRule, baseSession, false, 'Carol Miller')
+      expect(out.caregiverMessage).toContain('Carol Miller')
+      expect(out.caregiverMessage).not.toMatch(/^The patient/)
+    })
+
+    it('falls back to "The patient" when no name is provided', () => {
+      const out = service.generate(caregiverRule, baseSession, false)
+      expect(out.caregiverMessage).toMatch(/^The patient/)
     })
   })
 })

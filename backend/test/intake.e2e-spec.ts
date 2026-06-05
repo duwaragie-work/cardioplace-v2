@@ -760,12 +760,12 @@ describe('Intake API (e2e)', () => {
         .send({
           isPregnant: true,
           pregnancyDueDate: '2026-11-01T00:00:00.000Z',
-          historyPreeclampsia: true,
+          historyHDP: true,
         })
         .expect(200)
 
       expect(res.body.data.isPregnant).toBe(true)
-      expect(res.body.data.historyPreeclampsia).toBe(true)
+      expect(res.body.data.historyHDP).toBe(true)
       expect(res.body.data.pregnancyDueDate).toBe(
         '2026-11-01T00:00:00.000Z',
       )

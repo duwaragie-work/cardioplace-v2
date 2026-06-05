@@ -185,7 +185,13 @@ export async function adminAcknowledgeAlert(
 export async function adminResolveAlert(
   api: APIRequestContext,
   alertId: string,
-  body: { resolutionAction: string; resolutionRationale?: string },
+  body: {
+    resolutionAction: string
+    resolutionRationale?: string
+    // Bespoke angioedema (and other sub-field) actions persist conditional
+    // details (e.g. { actualCause }, { willGo }) into resolutionDetails.
+    resolutionDetails?: Record<string, unknown>
+  },
 ): Promise<void> {
   const res = await api.post(`admin/alerts/${alertId}/resolve`, { data: body })
   expect(res.ok(), `admin resolve: ${await res.text()}`).toBeTruthy()
@@ -332,6 +338,28 @@ export async function acknowledgeAlertViaUI(
 // replaced it with the real `resolveAlertViaModal` flow + a back-compat
 // `resolveAlertViaUI` alias — both defined in the "Phase 3 §B.3" section
 // at the end of this file.
+
+/**
+ * Drive `/check-in` past the pre-step-1 gate. The wizard may open on a resume
+ * prompt (unfinished local draft) or an open-session prompt (#91, a non-expired
+ * server session) INSTEAD of step 1 — and that prompt appears only AFTER an
+ * async active-session fetch resolves, so a one-shot isVisible() check races it.
+ * Poll: if step 1 is already up, done; otherwise dismiss whichever gate button
+ * is present and re-check. Returns once step 1 is reachable (or polling ends).
+ */
+export async function dismissCheckinGate(page: Page): Promise<void> {
+  const step1 = page.locator(byTestId(T.checkin.step(1)))
+  const gate = page.locator(
+    '[data-testid="checkin-new-session-btn"], [data-testid="checkin-startnew-btn"]',
+  )
+  for (let i = 0; i < 16; i++) {
+    if (await step1.isVisible().catch(() => false)) return
+    if (await gate.first().isVisible().catch(() => false)) {
+      await gate.first().click().catch(() => {})
+    }
+    await page.waitForTimeout(500)
+  }
+}
 
 /** Wait for the patient app to land on the full-screen Absolute Emergency screen. */
 export async function waitForEmergencyScreen(page: Page): Promise<void> {
@@ -670,7 +698,15 @@ async function gotoPatientAlertsTab(adminPage: Page, patientId: string): Promise
 export async function resolveAlertViaModal(
   adminPage: Page,
   alertId: string,
-  body: { resolutionAction: string; rationale: string },
+  body: {
+    resolutionAction: string
+    rationale: string
+    // Conditional sub-fields for actions that require them (e.g. angioedema
+    // ANGIO_FALSE_ALARM → { actualCause: '...' }). Strings fill the text
+    // input; booleans click the matching YES/NO toggle. Required sub-fields
+    // gate the Confirm button, so they must be set before confirm enables.
+    subFields?: Record<string, string | boolean>
+  },
 ): Promise<void> {
   await adminPage.locator(byTestId(T.admin.alertResolveBtnFor(alertId))).click()
   await adminPage
@@ -679,6 +715,21 @@ export async function resolveAlertViaModal(
   await adminPage
     .locator(byTestId(T.admin.resolveAction(body.resolutionAction)))
     .click()
+  // Conditional sub-fields render right after the action is picked. Fill them
+  // before touching the rationale so the Confirm gate (subFieldsComplete) opens.
+  for (const [key, val] of Object.entries(body.subFields ?? {})) {
+    if (typeof val === 'boolean') {
+      await adminPage
+        .locator(byTestId(`admin-resolve-subfield-${key}-${val ? 'yes' : 'no'}`))
+        .click()
+        .catch(() => {})
+    } else {
+      await adminPage
+        .locator(byTestId(`admin-resolve-subfield-${key}`))
+        .fill(val)
+        .catch(() => {})
+    }
+  }
   // The rationale textarea renders only AFTER an action is selected (React
   // state update) — and it renders for EVERY tier/action (required for
   // Tier 1, optional for some Tier 2). Wait for it (this also confirms the
@@ -795,9 +846,22 @@ export async function setMedActionViaUI(
     return
   }
   if (action === 'HOLD') {
-    // HOLD rationale is a window.prompt — accept it with the rationale.
-    adminPage.once('dialog', (d) => void d.accept(rationale))
+    // The card's Hold button opens the structured MedicationHoldModal
+    // (Manisha 5/24 Med §3 reason codes) — NOT a window.prompt anymore. Pick
+    // the clinical PROVIDER_DIRECTED_HOLD reason (the patient is told to PAUSE
+    // the med), add the rationale, and confirm. Without driving the modal the
+    // hold is never submitted, so no patient notification dispatches.
     await card.locator('[data-testid^="admin-med-hold-"]').first().click()
+    await adminPage
+      .locator(byTestId('admin-med-hold-modal'))
+      .waitFor({ state: 'visible', timeout: 15_000 })
+    await adminPage.locator(byTestId('admin-med-hold-pick-PROVIDER_DIRECTED_HOLD')).click()
+    await adminPage.locator(byTestId('admin-med-hold-rationale')).fill(rationale)
+    await adminPage.locator(byTestId('admin-med-hold-confirm')).click()
+    await adminPage
+      .locator(byTestId('admin-med-hold-modal'))
+      .waitFor({ state: 'hidden', timeout: 15_000 })
+      .catch(() => {})
     return
   }
   // REJECT → MedicationRejectModal (quick-pick "other" + free-text).

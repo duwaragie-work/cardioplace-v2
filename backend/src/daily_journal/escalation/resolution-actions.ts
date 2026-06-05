@@ -27,8 +27,31 @@ export type ResolutionAction =
   | 'BP_L2_SEEN_IN_OFFICE'
   | 'BP_L2_REVIEWED_TRENDING_DOWN'
   | 'BP_L2_UNABLE_TO_REACH_RETRY'
+  // ── Tier 1 Angioedema (airway emergency, Manisha 5/24 Q4) ──
+  // Bespoke 6-option set with conditional sub-fields + transactional
+  // side-effects (auto-discontinue ACE/ARB, permanent contraindication flag,
+  // targeted MD escalation, compressed re-escalation).
+  | 'ANGIO_ADVISED_ED'
+  | 'ANGIO_CONFIRMED_ED'
+  | 'ANGIO_ACE_DISCONTINUED'
+  | 'ANGIO_SEEN_IN_OFFICE'
+  | 'ANGIO_FALSE_ALARM'
+  | 'ANGIO_UNABLE_TO_REACH'
 
-export type ResolutionTier = 'TIER_1' | 'TIER_2' | 'BP_LEVEL_2'
+export type ResolutionTier = 'TIER_1' | 'TIER_2' | 'BP_LEVEL_2' | 'TIER_1_ANGIOEDEMA'
+
+/**
+ * A conditional sub-field rendered under an angioedema resolution action and
+ * persisted into DeviationAlert.resolutionDetails (Manisha 5/24 Q4). `yesno`
+ * fields gate downstream behavior (e.g. willGo=NO → MD escalation); `text`
+ * fields capture free-text context (facility, replacement med, cause).
+ */
+export interface ResolutionSubField {
+  key: string
+  label: string
+  kind: 'yesno' | 'text'
+  required: boolean
+}
 
 export interface ResolutionActionDef {
   tier: ResolutionTier
@@ -47,6 +70,19 @@ export interface ResolutionActionDef {
    * again at the retry time.
    */
   triggersBpL2Retry?: boolean
+  /** Conditional sub-fields persisted into DeviationAlert.resolutionDetails. */
+  subFields?: ResolutionSubField[]
+  /**
+   * Angioedema #3 — discontinue the patient's active ACE_INHIBITOR + ARB
+   * PatientMedications (set discontinuedAt) AND stamp the permanent
+   * PatientProfile.aceContraindicatedAt flag inside the resolve transaction.
+   */
+  discontinuesAceArb?: boolean
+  /**
+   * Angioedema #6 — leave the alert OPEN so the existing compressed angioedema
+   * ladder (T0/T15M/T1H/T4H) keeps escalating; record the action for audit.
+   */
+  leavesAlertOpen?: boolean
 }
 
 export const RESOLUTION_CATALOG: Record<ResolutionAction, ResolutionActionDef> =
@@ -137,6 +173,56 @@ export const RESOLUTION_CATALOG: Record<ResolutionAction, ResolutionActionDef> =
       requiresRationale: true,
       triggersBpL2Retry: true,
     },
+
+    // ── Tier 1 Angioedema (Manisha 5/24 Q4) ───────────────────────────────
+    ANGIO_ADVISED_ED: {
+      tier: 'TIER_1_ANGIOEDEMA',
+      label: 'Advised patient to call 911 / go to the ED',
+      requiresRationale: true,
+      subFields: [
+        { key: 'willGo', label: 'Patient agreed to go to the ED', kind: 'yesno', required: true },
+      ],
+    },
+    ANGIO_CONFIRMED_ED: {
+      tier: 'TIER_1_ANGIOEDEMA',
+      label: 'Confirmed patient is being evaluated in the ED',
+      requiresRationale: true,
+      subFields: [
+        { key: 'facility', label: 'Facility / ED name', kind: 'text', required: true },
+      ],
+    },
+    ANGIO_ACE_DISCONTINUED: {
+      tier: 'TIER_1_ANGIOEDEMA',
+      label: 'ACE inhibitor / ARB discontinued',
+      requiresRationale: true,
+      discontinuesAceArb: true,
+      subFields: [
+        { key: 'replacementOrdered', label: 'Replacement therapy ordered', kind: 'yesno', required: true },
+        { key: 'replacementMed', label: 'Replacement medication (if ordered)', kind: 'text', required: false },
+      ],
+    },
+    ANGIO_SEEN_IN_OFFICE: {
+      tier: 'TIER_1_ANGIOEDEMA',
+      label: 'Patient seen in office',
+      requiresRationale: true,
+      subFields: [
+        { key: 'outcome', label: 'Office visit outcome', kind: 'text', required: true },
+      ],
+    },
+    ANGIO_FALSE_ALARM: {
+      tier: 'TIER_1_ANGIOEDEMA',
+      label: 'False alarm — not angioedema',
+      requiresRationale: true,
+      subFields: [
+        { key: 'actualCause', label: 'Actual cause of symptoms', kind: 'text', required: true },
+      ],
+    },
+    ANGIO_UNABLE_TO_REACH: {
+      tier: 'TIER_1_ANGIOEDEMA',
+      label: 'Unable to reach patient — continue escalation',
+      requiresRationale: true,
+      leavesAlertOpen: true,
+    },
   }
 
 export const ALL_RESOLUTION_ACTIONS = Object.keys(
@@ -149,6 +235,9 @@ export function resolutionActionsForTier(tier: string | null): ResolutionAction[
     switch (tier) {
       case 'TIER_1_CONTRAINDICATION':
         return 'TIER_1'
+      // Manisha 5/24 Q4 — angioedema now has its own bespoke 6-option catalog.
+      case 'TIER_1_ANGIOEDEMA':
+        return 'TIER_1_ANGIOEDEMA'
       case 'TIER_2_DISCREPANCY':
         return 'TIER_2'
       case 'BP_LEVEL_2':
@@ -160,4 +249,40 @@ export function resolutionActionsForTier(tier: string | null): ResolutionAction[
   })()
   if (!group) return []
   return ALL_RESOLUTION_ACTIONS.filter((a) => RESOLUTION_CATALOG[a].tier === group)
+}
+
+/**
+ * Validates the submitted resolutionDetails against an action's required
+ * sub-fields (Manisha 5/24 Q4 angioedema actions). Returns the list of missing
+ * required sub-field keys — empty means valid. `yesno` fields accept boolean or
+ * the 'YES'/'NO' strings the admin modal sends.
+ */
+export function missingRequiredSubFields(
+  action: ResolutionAction,
+  details: Record<string, unknown> | undefined | null,
+): string[] {
+  const def = RESOLUTION_CATALOG[action]
+  if (!def.subFields) return []
+  const d = details ?? {}
+  return def.subFields
+    .filter((f) => f.required)
+    .filter((f) => {
+      const v = d[f.key]
+      if (f.kind === 'yesno') {
+        return v !== true && v !== false && v !== 'YES' && v !== 'NO'
+      }
+      return typeof v !== 'string' || v.trim().length === 0
+    })
+    .map((f) => f.key)
+}
+
+/** True when an angioedema "advised ED" resolution recorded the patient
+ * declining to go — drives the targeted Medical Director escalation. */
+export function angioedemaPatientDeclinedEd(
+  action: ResolutionAction,
+  details: Record<string, unknown> | undefined | null,
+): boolean {
+  if (action !== 'ANGIO_ADVISED_ED') return false
+  const v = (details ?? {}).willGo
+  return v === false || v === 'NO'
 }

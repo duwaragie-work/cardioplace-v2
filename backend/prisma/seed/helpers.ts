@@ -69,7 +69,7 @@ export type PatientSeed = {
   profile: {
     isPregnant?: boolean
     pregnancyDueDate?: Date
-    historyPreeclampsia?: boolean
+    historyHDP?: boolean
     hasHeartFailure?: boolean
     heartFailureType?: 'HFREF' | 'HFPEF' | 'UNKNOWN' | 'NOT_APPLICABLE'
     hasAFib?: boolean

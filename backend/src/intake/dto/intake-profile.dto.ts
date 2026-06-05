@@ -45,7 +45,7 @@ export class IntakeProfileDto implements IntakeProfilePayload {
 
   @IsOptional()
   @IsBoolean()
-  historyPreeclampsia?: boolean
+  historyHDP?: boolean
 
   @IsOptional()
   @IsBoolean()
@@ -70,6 +70,11 @@ export class IntakeProfileDto implements IntakeProfilePayload {
   @IsOptional()
   @IsBoolean()
   hasDCM?: boolean
+
+  // Manisha 5/24 Q5C — aortic stenosis (interim HCM-style thresholds).
+  @IsOptional()
+  @IsBoolean()
+  hasAorticStenosis?: boolean
 
   @IsOptional()
   @IsBoolean()

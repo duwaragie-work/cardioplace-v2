@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common'
 import { Type } from '@google/genai'
 import type { FunctionDeclaration } from '@google/genai'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
+import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
+import type { SessionSymptoms } from '../../daily_journal/engine/types.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
 
 // Voice-tool I/O — argument shapes are stable contract with the Gemini Live
@@ -65,6 +67,7 @@ export class VoiceToolsService {
   constructor(
     private readonly dailyJournal: DailyJournalService,
     private readonly gemini: GeminiService,
+    private readonly alertEngine: AlertEngineService,
   ) {}
 
   /**
@@ -107,6 +110,11 @@ export class VoiceToolsService {
             syncope: { type: Type.BOOLEAN, description: 'Patient fainted or had a near-fainting episode recently.' },
             palpitations: { type: Type.BOOLEAN, description: "Patient reports heart racing or fluttering." },
             leg_swelling: { type: Type.BOOLEAN, description: 'Patient reports new leg/foot swelling or rapid weight gain. Routes to HF decompensation and DHP-CCB rules.' },
+            // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
+            // Fires TIER_1_ANGIOEDEMA from a single reading, any patient. Voice
+            // parity with text — pilot blocker resolved on the voice surface.
+            face_swelling: { type: Type.BOOLEAN, description: 'Patient reports new swelling of the face, lips, or tongue. Airway-emergency trigger (TIER_1_ANGIOEDEMA) — fires regardless of BP value.' },
+            throat_tightness: { type: Type.BOOLEAN, description: 'Patient reports throat tightening or difficulty swallowing. Airway-emergency trigger (TIER_1_ANGIOEDEMA) — fires regardless of BP value.' },
             other_symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Patient-described symptoms not covered by the structured booleans. ALWAYS English.' },
             measurement_conditions: {
               type: Type.OBJECT,
@@ -193,6 +201,33 @@ export class VoiceToolsService {
           required: ['image_base64', 'mime_type'],
         },
       },
+      {
+        name: 'evaluate_reading',
+        description:
+          "Ask the patient's personalised rule engine what a BP / HR reading means FOR THIS PATIENT. " +
+          'Returns the canonical patient-tier alert message signed off by the clinical director ' +
+          '(or null if the reading is within their targets). ' +
+          "Call this whenever the patient asks 'what does X over Y mean for me', 'is N safe for me', " +
+          'or wants an interpretation of a specific reading. ' +
+          'Do NOT use this to log a check-in — use submit_checkin for that. ' +
+          'Nothing is persisted; the engine only computes the verdict.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            systolic_bp: { type: Type.NUMBER, description: 'Systolic BP in mmHg.' },
+            diastolic_bp: { type: Type.NUMBER, description: 'Diastolic BP in mmHg.' },
+            heart_rate: { type: Type.NUMBER, description: 'Pulse in bpm (optional, 0 = unspecified).' },
+            symptoms: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description:
+                'Optional symptoms the patient mentioned alongside the reading ' +
+                '(e.g. dizziness, chest pain, palpitations, severe headache, swelling).',
+            },
+          },
+          required: ['systolic_bp', 'diastolic_bp'],
+        },
+      },
     ]
   }
 
@@ -201,6 +236,23 @@ export class VoiceToolsService {
     args: Record<string, unknown>,
     ctx: ToolContext,
   ): Promise<DispatchResult> {
+    // Fail-loud multi-tenant guard: every dispatch MUST carry an authenticated
+    // userId from the voice gateway's JWT handshake. If a future refactor ever
+    // drops the JWT verify in voice.gateway.ts or forgets to thread userId
+    // into ActiveSession, abort here rather than silently emit unscoped
+    // Prisma queries downstream.
+    if (typeof ctx.userId !== 'string' || ctx.userId.length === 0) {
+      this.logger.error(
+        `[SECURITY] dispatch_without_auth tool=${name} — refusing to execute`,
+      )
+      return {
+        llmResponse: {
+          ok: false,
+          error: 'Voice tool dispatch requires an authenticated patient.',
+        },
+        events: [],
+      }
+    }
     try {
       switch (name) {
         case 'submit_checkin':
@@ -213,6 +265,8 @@ export class VoiceToolsService {
           return await this.deleteCheckin(args, ctx)
         case 'submit_bp_from_photo':
           return await this.submitBpFromPhoto(args, ctx)
+        case 'evaluate_reading':
+          return await this.evaluateReading(args, ctx)
         default:
           return {
             llmResponse: { ok: false, error: `Unknown tool: ${name}` },
@@ -236,7 +290,28 @@ export class VoiceToolsService {
   ): Promise<DispatchResult> {
     const sbp = toInt(args.systolic_bp, 0)
     const dbp = toInt(args.diastolic_bp, 0)
-    const bpProvided = sbp > 0 || dbp > 0
+    // Anti-hallucination guard: a BP reading is two numbers — if the LLM
+    // supplies one without the other, it almost certainly hallucinated the
+    // value it has and never heard the value it doesn't. Refuse the save and
+    // make the model ask the patient. True sparse logging (no BP at all)
+    // still works because both will be 0 here.
+    const sbpProvided = sbp > 0
+    const dbpProvided = dbp > 0
+    if (sbpProvided !== dbpProvided) {
+      this.logger.warn(`Asymmetric BP rejected: sbp=${sbp} dbp=${dbp} — likely hallucination`)
+      return {
+        llmResponse: {
+          saved: false,
+          message:
+            `Got ${sbp || 'no'} over ${dbp || 'no'} — that's incomplete. ` +
+            'A blood pressure reading needs BOTH numbers. ' +
+            'Please ask the patient for the missing number and re-call submit_checkin, ' +
+            'OR leave both at 0 if the patient is only logging medication/symptoms.',
+        },
+        events: [],
+      }
+    }
+    const bpProvided = sbpProvided && dbpProvided
     if (bpProvided && (sbp < 60 || sbp > 250 || dbp < 40 || dbp > 150)) {
       this.logger.warn(`BP out of range: ${sbp}/${dbp} — rejecting`)
       return {
@@ -315,6 +390,11 @@ export class VoiceToolsService {
     dto.syncope = toBool(args.syncope, false)
     dto.palpitations = toBool(args.palpitations, false)
     dto.legSwelling = toBool(args.leg_swelling, false)
+    // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
+    // Setting either of these on a JournalEntry trips TIER_1_ANGIOEDEMA in
+    // the rule engine regardless of BP value (single-reading, any patient).
+    dto.faceSwelling = toBool(args.face_swelling, false)
+    dto.throatTightness = toBool(args.throat_tightness, false)
     const otherSymptoms = toStringArray(args.other_symptoms)
     if (otherSymptoms.length) dto.otherSymptoms = otherSymptoms
 
@@ -411,6 +491,14 @@ export class VoiceToolsService {
       )
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const entries = (result?.data ?? []) as Array<any>
+      // ── LLM privacy boundary ───────────────────────────────────────────
+      // The narrow `entry_id="…" | <date> | BP <sbp>/<dbp> | meds … | symptoms …`
+      // line below is the privacy boundary between the JournalEntry row
+      // (which carries internal columns like userId, sessionId, source,
+      // sourceMetadata, createdAt, updatedAt) and what the LLM receives.
+      // NEVER widen this string to include internal fields — the model can
+      // quote them back to the patient. Mirror chat/tools/journal-tools.ts
+      // `get_recent_readings` if changing the shape.
       const lines: string[] = []
       for (const e of entries.slice(0, 5)) {
         const entryId = e.id ?? 'unknown'
@@ -725,6 +813,88 @@ export class VoiceToolsService {
       }
     }
   }
+
+  // ── Tool 6: evaluate_reading ───────────────────────────────────────────────
+  // Mirrors the text-chat tool: ask the rule engine what THIS reading means
+  // for THIS patient without persisting anything. The engine returns the
+  // canonical patient-tier alert wording from the signed-off registry.
+
+  private async evaluateReading(
+    args: Record<string, unknown>,
+    ctx: ToolContext,
+  ): Promise<DispatchResult> {
+    const sbp = toInt(args.systolic_bp, 0)
+    const dbp = toInt(args.diastolic_bp, 0)
+    if (sbp <= 0 || dbp <= 0) {
+      return {
+        llmResponse: {
+          evaluated: false,
+          message: 'systolic_bp and diastolic_bp must be positive numbers.',
+        },
+        events: [],
+      }
+    }
+    const pulseRaw = toInt(args.heart_rate, 0)
+    const pulse = pulseRaw > 0 ? pulseRaw : null
+    const symptoms = mapVoiceSymptomsToFlags(args.symptoms)
+    try {
+      const result = await this.alertEngine.evaluateAdHoc({
+        userId: ctx.userId,
+        systolicBP: sbp,
+        diastolicBP: dbp,
+        pulse,
+        symptoms,
+      })
+      return {
+        llmResponse: { ...result },
+        events: [],
+      }
+    } catch (err) {
+      this.logger.error('evaluate_reading failed', err)
+      return {
+        llmResponse: {
+          evaluated: false,
+          message: 'Reading evaluation failed.',
+        },
+        events: [],
+      }
+    }
+  }
+}
+
+/**
+ * Voice mirror of the text-chat symptom mapper — folds the loose
+ * `symptoms: string[]` the model passes (e.g. ["dizziness","chest pain"])
+ * into the structured-symptom booleans the rule engine consumes.
+ */
+function mapVoiceSymptomsToFlags(raw: unknown): Partial<SessionSymptoms> | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined
+  const flags: Partial<SessionSymptoms> = {}
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    const k = item.trim().toLowerCase()
+    if (!k) continue
+    if (k === 'severeheadache' || k.includes('severe headache')) flags.severeHeadache = true
+    else if (k === 'newonsetheadache' || k.includes('new headache') || k.includes('new-onset')) flags.newOnsetHeadache = true
+    else if (k === 'visualchanges' || k.includes('vision') || k.includes('blurr')) flags.visualChanges = true
+    else if (k === 'alteredmentalstatus' || k.includes('confus') || k.includes('mental status')) flags.alteredMentalStatus = true
+    else if (k === 'chestpainordyspnea' || k.includes('chest pain') || k.includes('chest tight') || k.includes('dyspnea')) flags.chestPainOrDyspnea = true
+    else if (k === 'focalneurodeficit' || k.includes('one side') || k.includes('weakness')) flags.focalNeuroDeficit = true
+    else if (k === 'severeepigastricpain' || k.includes('epigastric')) flags.severeEpigastricPain = true
+    else if (k === 'ruqpain' || k.includes('ruq') || k.includes('right upper')) flags.ruqPain = true
+    else if (k === 'edema' || k === 'swelling') flags.edema = true
+    else if (k === 'dizziness' || k.includes('dizzy') || k.includes('lighthead')) flags.dizziness = true
+    else if (k === 'syncope' || k.includes('faint') || k.includes('pass out')) flags.syncope = true
+    else if (k === 'palpitations' || k.includes('palpit') || k.includes('flutter')) flags.palpitations = true
+    else if (k === 'legswelling' || k.includes('leg swell') || k.includes('ankle swell')) flags.legSwelling = true
+    else if (k === 'fatigue' || k.includes('tired')) flags.fatigue = true
+    else if (k === 'shortnessofbreath' || k.includes('short of breath') || k.includes('breathless')) flags.shortnessOfBreath = true
+    else if (k === 'drycough' || k.includes('dry cough')) flags.dryCough = true
+    else if (k === 'nsaiduse' || k.includes('nsaid') || k.includes('ibuprofen')) flags.nsaidUse = true
+    else if (k === 'faceswelling' || k.includes('face swell')) flags.faceSwelling = true
+    else if (k === 'throattightness' || k.includes('throat')) flags.throatTightness = true
+  }
+  return Object.keys(flags).length > 0 ? flags : undefined
 }
 
 // ── Coercion helpers ─────────────────────────────────────────────────────────

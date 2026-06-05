@@ -25,7 +25,7 @@ const patients: PatientSeed[] = [
     profile: {
       isPregnant: true,
       pregnancyDueDate: new Date(Date.now() + 90 * 24 * 3600 * 1000),
-      historyPreeclampsia: true,
+      historyHDP: true,
     },
     // Lisinopril on a pregnant patient — Tier 1 teratogenic contraindication.
     medications: [
@@ -380,6 +380,34 @@ const patients: PatientSeed[] = [
       { daysAgo: 13, sbp: 123, dbp: 78, pulse: 70 },
     ],
     archetype: 'Young adult (18–29 bucket) — general adult HTN, no PREVENT validation',
+  },
+
+  // ─── Handoff 5 Wave D — HDP-only (not pregnant) persona ─────────────────
+  // Q7 broadened the A2 follow-up from "preeclampsia" to any hypertensive
+  // disorder of pregnancy (historyHDP), asked of female patients regardless of
+  // current pregnancy. The existing HDP persona (Priya) is pregnant; this one
+  // is NOT pregnant with a documented HDP history — the target for the
+  // broadened-question intake path + future risk stratification. Benign
+  // readings so the seed import never fires an alert.
+  {
+    email: 'fatima.diallo@cardioplace.test',
+    name: 'Fatima Diallo',
+    dateOfBirth: new Date('1979-03-08'),
+    gender: 'FEMALE',
+    heightCm: 165,
+    profile: {
+      historyHDP: true,
+      diagnosedHypertension: true,
+    },
+    medications: [
+      { drugName: 'Amlodipine', drugClass: 'DHP_CCB', frequency: 'ONCE_DAILY', verificationStatus: 'VERIFIED' },
+    ],
+    readings: [
+      { daysAgo: 0, sbp: 134, dbp: 84, pulse: 74 },
+      { daysAgo: 3, sbp: 130, dbp: 82, pulse: 72 },
+      { daysAgo: 7, sbp: 132, dbp: 84, pulse: 76 },
+    ],
+    archetype: 'HDP history, not pregnant — broadened-question (Q7) coverage target',
   },
 ]
 

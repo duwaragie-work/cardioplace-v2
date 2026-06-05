@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Req,
 } from '@nestjs/common'
@@ -18,6 +19,10 @@ import {
   VerifyProfileDto,
 } from './dto/correct-profile.dto.js'
 import { VerifyMedicationDto } from './dto/verify-medication.dto.js'
+import {
+  AdminAddMedicationDto,
+  AdminEditMedicationDto,
+} from './dto/admin-medication.dto.js'
 
 type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
 
@@ -128,6 +133,38 @@ export class AdminIntakeController {
     @Body() dto: VerifyMedicationDto,
   ) {
     return this.intake.verifyMedication(
+      { id: req.user.id, roles: req.user.roles },
+      medicationId,
+      dto,
+    )
+  }
+
+  // #92 — admin adds a medication on the patient's behalf (clinical roles).
+  @Post('users/:id/medications')
+  @HttpCode(HttpStatus.CREATED)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.PROVIDER, UserRole.MEDICAL_DIRECTOR)
+  adminAddMedication(
+    @Req() req: AuthedReq,
+    @Param('id') patientUserId: string,
+    @Body() dto: AdminAddMedicationDto,
+  ) {
+    return this.intake.adminAddMedication(
+      { id: req.user.id, roles: req.user.roles },
+      patientUserId,
+      dto,
+    )
+  }
+
+  // #92 — admin edits an existing medication (clinical roles).
+  @Patch('medications/:id')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.PROVIDER, UserRole.MEDICAL_DIRECTOR)
+  adminEditMedication(
+    @Req() req: AuthedReq,
+    @Param('id') medicationId: string,
+    @Body() dto: AdminEditMedicationDto,
+  ) {
+    return this.intake.adminEditMedication(
       { id: req.user.id, roles: req.user.roles },
       medicationId,
       dto,

@@ -429,7 +429,7 @@
             },
             {
               "name": "Scenario 9 (1/3) — AFib + 3 readings, pulse 115 (charles.brown — call THREE times)",
-              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Run this request THREE times within 30 minutes (same sessionUuid). Expected on 3rd: RULE_AFIB_HR_HIGH');"] } }],
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Run this request THREE times within 5 minutes (same sessionUuid). Expected on 3rd: RULE_AFIB_HR_HIGH');"] } }],
               "request": {
                 "method": "POST",
                 "header": [{ "key": "Content-Type", "value": "application/json" }],

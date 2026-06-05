@@ -6,8 +6,11 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
+import { randomUUID } from 'node:crypto'
+import { SESSION_WINDOW_MS } from '@cardioplace/shared'
 import { Prisma, EntrySource, EscalationLevel } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from './constants/events.js'
@@ -22,6 +25,30 @@ const SOURCE_MAP: Record<string, EntrySource> = {
 }
 
 const POSITION_VALUES = ['SITTING', 'STANDING', 'LYING'] as const
+
+/**
+ * Channel-aware predicate for the in-app bell LIST + unread COUNT. Both
+ * exclusions are READ-SIDE ONLY — the escalation write path
+ * (`Notification.create`) and the Resend email send are untouched.
+ *  • EMAIL rows — outbound deliveries, not in-app bell state. A patient with
+ *    both a PUSH and an EMAIL row for one event was seeing it twice while the
+ *    badge counted it once (H3 #80).
+ *  • alert-linked PUSH rows — escalation T+0 dispatch writes a PUSH
+ *    Notification row to the PATIENT for emergency-class alerts (BP_LEVEL_2,
+ *    symptom-override, angioedema). The alert is already shown in the Alerts
+ *    tab, so this must not ALSO render in the Notifications tab (H5 G.4). The
+ *    row STAYS in the DB as the hook for a future real-push service — there is
+ *    no out-of-app push delivery today. System-action PUSH rows (alertId null
+ *    — med-hold, threshold, profile-reject, gap-alert) remain visible.
+ * Memory: project_notification_tab_split_2026_06_04,
+ *         project_no_push_service_pilot_gap_2026_06_04.
+ */
+const BELL_VISIBLE_NOTIFICATION_FILTER: Prisma.NotificationWhereInput = {
+  AND: [
+    { channel: { not: 'EMAIL' } },
+    { NOT: { AND: [{ alertId: { not: null } }, { channel: 'PUSH' }] } },
+  ],
+}
 
 @Injectable()
 export class DailyJournalService {
@@ -55,6 +82,41 @@ export class DailyJournalService {
       })
     }
 
+    // Manisha 5/24 Q1 Tier 1 — physiologically-impossible reading (diastolic at
+    // or above systolic). Reject at entry: do NOT persist, do NOT run the rule
+    // engine (a transposed 120/140 would otherwise fire a false DBP≥120 Level-2
+    // emergency). Log the rejected values for QA + the provider dashboard note.
+    if (
+      dto.systolicBP != null &&
+      dto.diastolicBP != null &&
+      dto.diastolicBP >= dto.systolicBP
+    ) {
+      await this.prisma.rejectedReadingLog.create({
+        data: {
+          userId,
+          systolicBP: dto.systolicBP,
+          diastolicBP: dto.diastolicBP,
+          pulse: dto.pulse ?? null,
+          reason: 'diastolic-ge-systolic',
+        },
+      })
+      throw new UnprocessableEntityException({
+        message: 'implausible-reading',
+        reason:
+          "That reading doesn't look right — the bottom number should be lower than the top number. Please check your cuff and try again.",
+      })
+    }
+
+    // Manisha 5/24 Q1 Tier 2 — narrow pulse pressure on THIS individual reading
+    // (artifact range, 0 < SBP−DBP < 15). Physician-only flag (no alert tier, no
+    // patient message); the reading still enters the session average where the
+    // separate <25 hemodynamic rule may fire.
+    const narrowPpArtifact =
+      dto.systolicBP != null &&
+      dto.diastolicBP != null &&
+      dto.systolicBP - dto.diastolicBP > 0 &&
+      dto.systolicBP - dto.diastolicBP < 15
+
     // Resolve any missed-medication rows that came in with only `drugName`
     // (voice agent / chat tool). Looks up PatientMedication.id by name,
     // filters out AS_NEEDED (PRN) drugs since they aren't on a daily
@@ -62,6 +124,16 @@ export class DailyJournalService {
     const resolvedMissedMedications = await this.resolveMissedMedications(
       userId,
       dto.missedMedications,
+    )
+
+    // Reject attaching this reading to an EXPIRED session. The client supplies
+    // sessionId, so a stale/reused id (e.g. a cached id from a prior sitting)
+    // could otherwise smuggle a reading hours apart into one averaged session.
+    // Dropped (not 400) so voice/chat flows that pass a cached id don't fail.
+    const effectiveSessionId = await this.resolveCreateSessionId(
+      userId,
+      dto.sessionId,
+      new Date(dto.measuredAt),
     )
 
     try {
@@ -72,9 +144,10 @@ export class DailyJournalService {
           systolicBP: dto.systolicBP ?? null,
           diastolicBP: dto.diastolicBP ?? null,
           pulse: dto.pulse ?? null,
+          narrowPpArtifact,
           weight: dto.weight != null ? new Prisma.Decimal(dto.weight) : null,
           position: dto.position ?? null,
-          sessionId: dto.sessionId ?? null,
+          sessionId: effectiveSessionId,
           measurementConditions: (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull,
           medicationTaken: dto.medicationTaken ?? null,
           medicationScheduledLater: dto.medicationScheduledLater ?? false,
@@ -166,6 +239,14 @@ export class DailyJournalService {
     })
 
     if (!existing) {
+      // Composite WHERE failed — either the entry doesn't exist OR it exists
+      // but belongs to a different patient. We don't distinguish: both surface
+      // the same NotFoundException so a probe can't confirm an id's existence.
+      // The log line lets ops detect cross-tenant probes + LLM-hallucinated
+      // UUIDs (Gemini native-audio hallucinates ids, python-genai#1894).
+      this.logger.warn(
+        `[SECURITY] cross_tenant_attempt service=journal action=update userId=${userId} requestedId=${entryId}`,
+      )
       throw new NotFoundException('Journal entry not found')
     }
 
@@ -383,6 +464,9 @@ export class DailyJournalService {
     })
 
     if (!entry) {
+      this.logger.warn(
+        `[SECURITY] cross_tenant_attempt service=journal action=findOne userId=${userId} requestedId=${id}`,
+      )
       throw new NotFoundException('Journal entry not found')
     }
 
@@ -397,6 +481,12 @@ export class DailyJournalService {
     const alerts = await this.prisma.deviationAlert.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
+      // Cap at 200 most-recent alerts — a heavy patient with years of
+      // history doesn't need every alert dumped at once. Older alerts can
+      // be fetched via paginated routes if/when needed. Defence-in-depth
+      // for OWASP LLM02 "minimum necessary" — even within a single
+      // patient's data, don't fetch more than the UI uses.
+      take: 200,
       include: {
         journalEntry: {
           select: {
@@ -411,10 +501,23 @@ export class DailyJournalService {
       },
     })
 
+    // Manual-test round 2 — Group C: hide Tier-3 caregiver/physician-only rules
+    // from the patient surfaces entirely. RULE_HF_CAREGIVER_EDEMA,
+    // RULE_HCM_VASODILATOR, RULE_PULSE_PRESSURE_NARROW, RULE_DHP_CCB_LEG_SWELLING,
+    // loop-diuretic et al. emit empty patientMessage by design — patient sees no
+    // card and no notification (caregiver still gets their dispatch in
+    // escalation.service.ts:dispatchCaregiverNotification). Tier-3 with a
+    // non-empty patientMessage (e.g. RULE_FIRST_MONTH_ADHERENCE_NUDGE) stays.
+    // The admin endpoint is unchanged — admin keeps seeing them in Physician Notes.
+    const patientVisible = alerts.filter((a) => {
+      if (a.tier !== 'TIER_3_INFO') return true
+      return typeof a.patientMessage === 'string' && a.patientMessage.trim().length > 0
+    })
+
     return {
       statusCode: 200,
       message: 'Alerts retrieved successfully',
-      data: alerts.map((alert) => ({
+      data: patientVisible.map((alert) => ({
         ...alert,
         magnitude: alert.magnitude != null ? Number(alert.magnitude) : null,
         baselineValue: alert.baselineValue
@@ -498,7 +601,12 @@ export class DailyJournalService {
     userId: string,
     status: 'all' | 'unread' | 'read' = 'all',
   ) {
-    const where: Prisma.NotificationWhereInput = { userId }
+    // Bell LIST uses the shared BELL_VISIBLE_NOTIFICATION_FILTER (H3 #80 EMAIL
+    // exclusion + H5 G.4 alert-linked-PUSH exclusion). READ-SIDE only.
+    const where: Prisma.NotificationWhereInput = {
+      userId,
+      ...BELL_VISIBLE_NOTIFICATION_FILTER,
+    }
 
     if (status === 'unread') {
       where.readAt = null
@@ -511,6 +619,10 @@ export class DailyJournalService {
         this.prisma.notification.findMany({
           where,
           orderBy: { sentAt: 'desc' },
+          // Cap at 200 — bell shows the most-recent N; older notifications
+          // exist in the DB but don't need to flood the response. Same
+          // OWASP LLM02 "minimum necessary" rationale as getAlerts above.
+          take: 200,
           // Pull the patient userId via the linked alert so the bell can
           // deep-link clicks to /patients/{patientUserId}?alert={alertId}.
           // notification.userId is the *recipient* (admin/provider/ops), not
@@ -536,10 +648,10 @@ export class DailyJournalService {
   }
 
   /**
-   * Count of in-app unread notifications for the bell badge. EMAIL rows
-   * are excluded — they represent outbound deliveries, not in-app state
-   * the user can clear by clicking the bell. Cheap (indexed on
-   * [userId, readAt]).
+   * Count of in-app unread notifications for the bell badge. Uses the SAME
+   * BELL_VISIBLE_NOTIFICATION_FILTER as getNotifications so the badge count and
+   * the list contents can never drift (EMAIL + alert-linked PUSH excluded).
+   * Cheap (indexed on [userId, readAt]).
    */
   async getNotificationsUnreadCount(userId: string) {
     const count = await this.prisma.withConnectionRetry(
@@ -548,7 +660,7 @@ export class DailyJournalService {
           where: {
             userId,
             readAt: null,
-            channel: { not: 'EMAIL' },
+            ...BELL_VISIBLE_NOTIFICATION_FILTER,
           },
         }),
       'getNotificationsUnreadCount',
@@ -718,10 +830,22 @@ export class DailyJournalService {
       }
     }
 
-    await this.prisma.journalEntry.update({
-      where: { id: entryId },
+    // Bug 1 (secondary) — atomic claim. The frontend 5-min timer and the
+    // SessionFinalizeService cron (and two cron ticks) can call this
+    // concurrently; the read-then-update above would let both pass the guard,
+    // both re-emit ENTRY_UPDATED, and double-fire the alert. updateMany flips
+    // the flag only while it's still false, so exactly one caller wins
+    // (count === 1) and proceeds to re-evaluate — the rest no-op.
+    const claim = await this.prisma.journalEntry.updateMany({
+      where: { id: entryId, singleReadingFinalized: false },
       data: { singleReadingFinalized: true },
     })
+    if (claim.count === 0) {
+      return {
+        statusCode: 200,
+        message: 'Already finalized — no-op.',
+      }
+    }
 
     // Re-trigger evaluation. AlertEngineService.handleEntryUpdated subscribes.
     this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
@@ -754,13 +878,16 @@ export class DailyJournalService {
     })
 
     if (!entry) {
+      this.logger.warn(
+        `[SECURITY] cross_tenant_attempt service=journal action=delete userId=${userId} requestedId=${id}`,
+      )
       throw new NotFoundException('Journal entry not found')
     }
 
     // Resolve the session anchor that will trigger a re-evaluation BEFORE the
-    // delete cascades. SessionAveragerService groups by sessionId OR a 30-min
-    // measuredAt window; we mirror that here so the rule engine recomputes the
-    // averaged vitals for what's left of the session.
+    // delete cascades. SessionAveragerService groups by sessionId OR a 5-min
+    // measuredAt window (CLINICAL_SPEC §5.2); we mirror that here so the rule
+    // engine recomputes the averaged vitals for what's left of the session.
     //
     // DeviationAlert / EscalationEvent rows owned by `entry` cascade-delete
     // via the FK (phase/2 schema). The re-evaluation below re-runs the rule
@@ -805,7 +932,21 @@ export class DailyJournalService {
     sessionId: string | null
     measuredAt: Date
   }) {
-    const SESSION_WINDOW_MS = 30 * 60 * 1000
+    // Window is anchored on this entry's measuredAt; mirror SessionAverager so
+    // the surviving anchor we pick is one that would actually re-average with
+    // what's left of the session (same id AND within the window, or null + window).
+    const windowStart = new Date(entry.measuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS)
+    const select = {
+      id: true,
+      userId: true,
+      sessionId: true,
+      measuredAt: true,
+      systolicBP: true,
+      diastolicBP: true,
+      pulse: true,
+      weight: true,
+    }
 
     if (entry.sessionId) {
       return this.prisma.journalEntry.findFirst({
@@ -813,23 +954,13 @@ export class DailyJournalService {
           userId: entry.userId,
           sessionId: entry.sessionId,
           id: { not: entry.id },
+          measuredAt: { gte: windowStart, lte: windowEnd },
         },
         orderBy: { measuredAt: 'desc' },
-        select: {
-          id: true,
-          userId: true,
-          sessionId: true,
-          measuredAt: true,
-          systolicBP: true,
-          diastolicBP: true,
-          pulse: true,
-          weight: true,
-        },
+        select,
       })
     }
 
-    const windowStart = new Date(entry.measuredAt.getTime() - SESSION_WINDOW_MS)
-    const windowEnd = new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS)
     return this.prisma.journalEntry.findFirst({
       where: {
         userId: entry.userId,
@@ -838,16 +969,7 @@ export class DailyJournalService {
         measuredAt: { gte: windowStart, lte: windowEnd },
       },
       orderBy: { measuredAt: 'desc' },
-      select: {
-        id: true,
-        userId: true,
-        sessionId: true,
-        measuredAt: true,
-        systolicBP: true,
-        diastolicBP: true,
-        pulse: true,
-        weight: true,
-      },
+      select,
     })
   }
 
@@ -859,12 +981,19 @@ export class DailyJournalService {
     const [totalEntries, recentEntries, allEntries] = await Promise.all([
       this.prisma.journalEntry.count({ where: { userId } }),
       this.prisma.journalEntry.findMany({
+        // 30-day window is the natural cap for recentEntries — already
+        // date-bounded so no `take` ceiling needed (worst-case: a patient
+        // who logs 50 entries/day for 30 days = 1500 narrow rows, fine).
         where: { userId, measuredAt: { gte: thirtyDaysAgo } },
         select: { systolicBP: true, diastolicBP: true },
       }),
       this.prisma.journalEntry.findMany({
         where: { userId },
         orderBy: { measuredAt: 'desc' },
+        // Cap full-history streak read at 1000 entries (~3 years of daily
+        // check-ins) — long enough to compute any plausible streak, short
+        // enough that a pathological row count can't blow the response.
+        take: 1000,
         select: { measuredAt: true, medicationTaken: true },
       }),
     ])
@@ -935,6 +1064,10 @@ export class DailyJournalService {
     const escalations = await this.prisma.escalationEvent.findMany({
       where: { userId },
       orderBy: { triggeredAt: 'desc' },
+      // Cap at 200 most-recent escalations — patient escalation history
+      // can grow large over time; older events are still queryable via
+      // paginated routes if needed. Same OWASP "minimum necessary" rationale.
+      take: 200,
       include: {
         alert: {
           select: {
@@ -1135,23 +1268,33 @@ export class DailyJournalService {
     userId: string,
     entry: { id: string; sessionId: string | null; measuredAt: Date },
   ): Promise<boolean> {
-    const SESSION_WINDOW_MS = 30 * 60 * 1000
+    return this.shouldFinalizeAsSingleReading(userId, entry)
+  }
+
+  /**
+   * Single source of truth for "is this a lone reading that should fire a
+   * single-reading-informational alert if no second reading arrives?" — i.e.
+   * the only sibling-free, non-AFib, post-Day-3 case. Used by:
+   *  - `computePendingSecondReading` (create-time frontend hint),
+   *  - the server-side session-finalize cron (SessionFinalizeService),
+   * so the rule lives in exactly one place. AFib (own ≥3 gate) and Pre-Day-3
+   * (rules already fire on a single reading) are excluded.
+   */
+  async shouldFinalizeAsSingleReading(
+    userId: string,
+    entry: { id: string; sessionId: string | null; measuredAt: Date },
+  ): Promise<boolean> {
     const PRE_DAY_3_THRESHOLD = 7
+    const windowStart = new Date(entry.measuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS)
 
     const [siblingCount, profile, lifetimeReadingCount] = await Promise.all([
       this.prisma.journalEntry.count({
         where: {
           userId,
           id: { not: entry.id },
-          ...(entry.sessionId
-            ? { sessionId: entry.sessionId }
-            : {
-                sessionId: null,
-                measuredAt: {
-                  gte: new Date(entry.measuredAt.getTime() - SESSION_WINDOW_MS),
-                  lte: new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS),
-                },
-              }),
+          measuredAt: { gte: windowStart, lte: windowEnd },
+          ...(entry.sessionId ? { sessionId: entry.sessionId } : { sessionId: null }),
         },
       }),
       this.prisma.patientProfile
@@ -1164,6 +1307,139 @@ export class DailyJournalService {
     if (profile?.hasAFib) return false
     if (lifetimeReadingCount < PRE_DAY_3_THRESHOLD) return false
     return true
+  }
+
+  /**
+   * Resolve the sessionId a new reading should actually be persisted with.
+   * A client-supplied sessionId is honoured for a fresh session (no existing
+   * members) or one still inside the window; an expired/stale id is dropped to
+   * null (with a log) so it can't average readings taken hours apart. Returns
+   * null when no id was supplied.
+   */
+  private async resolveCreateSessionId(
+    userId: string,
+    sessionId: string | undefined,
+    measuredAt: Date,
+  ): Promise<string> {
+    // #91 — a JournalEntry MUST always carry a sessionId. This previously
+    // returned null when no id was supplied OR when the supplied id was stale
+    // (window elapsed), leaving orphaned null-session readings that the
+    // SessionAverager / AFib ≥3-reading gate couldn't group reliably. Now it
+    // resolves to a usable session in every case (never null):
+    //   • valid client id still inside the window → keep it (join the session)
+    //   • no id / stale id → JOIN the patient's open in-window session if one
+    //     exists (preserves proximity averaging for clients that don't pass an
+    //     id), else MINT a fresh UUID so the reading anchors its own session.
+    if (sessionId) {
+      const newest = await this.prisma.journalEntry.findFirst({
+        where: { userId, sessionId },
+        orderBy: { measuredAt: 'desc' },
+        select: { measuredAt: true },
+      })
+      // Fresh session — this reading establishes it; keep the id.
+      if (!newest) return sessionId
+      const gapMs = Math.abs(measuredAt.getTime() - newest.measuredAt.getTime())
+      if (gapMs <= SESSION_WINDOW_MS) return sessionId
+      // Window elapsed → don't smuggle this reading into the stale session.
+      this.logger.warn(
+        `create: supplied sessionId ${sessionId} is stale for user ${userId} ` +
+          `(gap ${Math.round(gapMs / 60000)}min exceeds session window); starting a new session`,
+      )
+    }
+    // No usable client id — join an open, non-finalized session within the
+    // window if the patient has one, else mint a fresh UUID. Never null.
+    const windowStart = new Date(measuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(measuredAt.getTime() + SESSION_WINDOW_MS)
+    const openInWindow = await this.prisma.journalEntry.findFirst({
+      where: {
+        userId,
+        sessionId: { not: null },
+        singleReadingFinalized: false,
+        measuredAt: { gte: windowStart, lte: windowEnd },
+      },
+      orderBy: { measuredAt: 'desc' },
+      select: { sessionId: true },
+    })
+    return openInWindow?.sessionId ?? randomUUID()
+  }
+
+  /**
+   * Returns the patient's currently OPEN reading session, or null. "Open" =
+   * the latest reading is within SESSION_WINDOW_MS of `now` AND the session
+   * hasn't been finalized as single-reading. Reads server state so it catches
+   * sessions opened by ANY path (form / voice / chat), not just the form.
+   * Drives the patient app's "add to this session or start new?" prompt.
+   */
+  async getActiveSession(
+    userId: string,
+    now: Date = new Date(),
+  ): Promise<{
+    sessionId: string | null
+    openedAt: string
+    lastReadingAt: string
+    readingCount: number
+    expiresAt: string
+    requiresMoreReadings: boolean
+  } | null> {
+    const PRE_DAY_3_THRESHOLD = 7
+
+    const latest = await this.prisma.journalEntry.findFirst({
+      where: { userId },
+      orderBy: { measuredAt: 'desc' },
+      select: {
+        id: true,
+        sessionId: true,
+        measuredAt: true,
+        singleReadingFinalized: true,
+      },
+    })
+    if (!latest) return null
+    // Expired — last reading older than the window.
+    if (now.getTime() - latest.measuredAt.getTime() > SESSION_WINDOW_MS) return null
+    // Closed — single-reading already finalized; its alert has fired.
+    if (latest.singleReadingFinalized) return null
+
+    // Resolve the session group exactly like SessionAverager.loadSessionSiblings.
+    const windowStart = new Date(latest.measuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(latest.measuredAt.getTime() + SESSION_WINDOW_MS)
+    const members = await this.prisma.journalEntry.findMany({
+      where: {
+        userId,
+        measuredAt: { gte: windowStart, lte: windowEnd },
+        ...(latest.sessionId ? { sessionId: latest.sessionId } : { sessionId: null }),
+      },
+      orderBy: { measuredAt: 'asc' },
+      select: { measuredAt: true },
+    })
+    if (members.length === 0) return null
+
+    const readingCount = members.length
+    const openedAt = members[0].measuredAt
+    const lastReadingAt = members[members.length - 1].measuredAt
+    const expiresAt = new Date(lastReadingAt.getTime() + SESSION_WINDOW_MS)
+
+    const [profile, lifetimeReadingCount] = await Promise.all([
+      this.prisma.patientProfile
+        .findUnique({ where: { userId }, select: { hasAFib: true } })
+        .catch(() => null),
+      this.prisma.journalEntry.count({ where: { userId } }),
+    ])
+    const hasAFib = profile?.hasAFib ?? false
+    const preDay3 = lifetimeReadingCount < PRE_DAY_3_THRESHOLD
+    // Mirror the engine gates: AFib needs ≥3, other non-emergency tiers need
+    // ≥2; Pre-Day-3 fires on a single reading so nothing more is required.
+    const requiresMoreReadings = hasAFib
+      ? readingCount < 3
+      : !preDay3 && readingCount < 2
+
+    return {
+      sessionId: latest.sessionId,
+      openedAt: openedAt.toISOString(),
+      lastReadingAt: lastReadingAt.toISOString(),
+      readingCount,
+      expiresAt: expiresAt.toISOString(),
+      requiresMoreReadings,
+    }
   }
 
   private async resolveMissedMedications(

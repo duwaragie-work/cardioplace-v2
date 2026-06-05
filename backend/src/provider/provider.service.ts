@@ -61,7 +61,7 @@ interface PatientProfileShape {
   hasBradycardia: boolean
   diagnosedHypertension: boolean
   isPregnant: boolean
-  historyPreeclampsia: boolean
+  historyHDP: boolean
 }
 
 @Injectable()
@@ -90,8 +90,8 @@ export class ProviderService {
     // later switched to OTHER) doesn't surface a "Pregnancy" pill in the
     // admin patient list / detail header.
     if (profile.gender === 'FEMALE' && profile.isPregnant) return 'Pregnancy'
-    if (profile.gender === 'FEMALE' && profile.historyPreeclampsia)
-      return 'Preeclampsia history'
+    if (profile.gender === 'FEMALE' && profile.historyHDP)
+      return 'HDP history'
     if (profile.hasHeartFailure) {
       const t = profile.heartFailureType
       if (t === 'HFREF') return 'Heart Failure (HFrEF)'
@@ -143,13 +143,13 @@ export class ProviderService {
     }
 
     // Elevated tier — recommended provider config / notation flag.
-    if (profile.gender === 'FEMALE' && profile.historyPreeclampsia && !profile.isPregnant) {
+    if (profile.gender === 'FEMALE' && profile.historyHDP && !profile.isPregnant) {
       // Hidden during active pregnancy because the Pregnancy tag above
       // already conveys the clinical state — avoids double-flagging the
       // same patient with two related pills.
       tags.push({
         id: 'preeclampsia-history',
-        label: 'Preeclampsia history',
+        label: 'HDP history',
         severity: 'elevated',
       })
     }
@@ -185,7 +185,7 @@ export class ProviderService {
     }
     const femalePregnancyRisk =
       profile.gender === 'FEMALE' &&
-      (profile.isPregnant || profile.historyPreeclampsia)
+      (profile.isPregnant || profile.historyHDP)
     if (
       femalePregnancyRisk ||
       profile.hasHeartFailure ||
@@ -215,7 +215,7 @@ export class ProviderService {
       return {
         OR: [
           { isPregnant: true },
-          { historyPreeclampsia: true },
+          { historyHDP: true },
           { hasHeartFailure: true },
           { hasHCM: true },
           { hasDCM: true },
@@ -235,7 +235,7 @@ export class ProviderService {
       return {
         AND: [
           { isPregnant: false },
-          { historyPreeclampsia: false },
+          { historyHDP: false },
           { hasHeartFailure: false },
           { hasHCM: false },
           { hasDCM: false },
@@ -266,7 +266,7 @@ export class ProviderService {
     hasBradycardia: true,
     diagnosedHypertension: true,
     isPregnant: true,
-    historyPreeclampsia: true,
+    historyHDP: true,
     // Phase/8 — Flow K patient list shows the verification status pill in
     // its own column. Including it here keeps downstream callers happy too
     // (they can just ignore the field).
@@ -479,8 +479,8 @@ export class ProviderService {
         // priority and the row doesn't double-flag. Gated on FEMALE so
         // stale rows from a previously-FEMALE patient don't surface here.
         isPregnant: profile?.gender === 'FEMALE' ? (profile?.isPregnant ?? false) : false,
-        historyPreeclampsia:
-          profile?.gender === 'FEMALE' ? (profile?.historyPreeclampsia ?? false) : false,
+        historyHDP:
+          profile?.gender === 'FEMALE' ? (profile?.historyHDP ?? false) : false,
         onboardingStatus: u.onboardingStatus,
         enrollmentStatus: u.enrollmentStatus,
         // Flow K — surface the patient's profile verification state so the
@@ -607,6 +607,16 @@ export class ProviderService {
     }
     const names = await resolveUserDisplays(this.prisma, idsToResolve)
 
+    // Manisha 5/24 Q3 — provider "X of 7" pre-personalization surface. The
+    // patient's lifetime reading count drives the admin alert-detail note
+    // ("personalization begins after 7 readings; completed X of 7"). One count,
+    // attached to every alert in the list.
+    const PERSONALIZATION_READINGS = 7
+    const lifetimeReadingCount = await this.prisma.journalEntry.count({
+      where: { userId },
+    })
+    const preDay3 = lifetimeReadingCount < PERSONALIZATION_READINGS
+
     return {
       statusCode: 200,
       data: alerts.map((a) => ({
@@ -642,6 +652,10 @@ export class ProviderService {
         createdAt: a.createdAt,
         acknowledgedAt: a.acknowledgedAt,
         resolvedAt: a.resolvedAt,
+        // Manisha 5/24 Q3 — pre-personalization "X of 7" provider surface.
+        baselineReadingCount: lifetimeReadingCount,
+        personalizationThreshold: PERSONALIZATION_READINGS,
+        preDay3,
         journalEntry: a.journalEntry
           ? {
               ...a.journalEntry,
@@ -913,6 +927,9 @@ export class ProviderService {
           otherSymptoms: entry.otherSymptoms,
           measurementConditions: conditions,
           suboptimalMeasurement,
+          // Manisha 5/24 Q1 — narrow pulse pressure (<15) recorded at entry as a
+          // possible measurement artifact. Physician-only flag, no patient tier.
+          narrowPpArtifact: entry.narrowPpArtifact,
           failedConditions,
           teachBackAnswer: entry.teachBackAnswer,
           teachBackCorrect: entry.teachBackCorrect,
@@ -945,15 +962,47 @@ export class ProviderService {
     }
   }
 
+  // ─── GET /provider/patients/:userId/rejected-readings ───────────────────────
+
+  // Manisha 5/24 Q1 — readings rejected at entry (DBP ≥ SBP) are never persisted
+  // as JournalEntry rows (they'd trip a false Level-2 emergency), but they ARE
+  // logged for QA + provider visibility. The Readings tab surfaces these as an
+  // informational note so a provider can see the patient attempted an
+  // implausible reading and prompt re-measurement / cuff check.
+  async getPatientRejectedReadings(userId: string, limit: number) {
+    const logs = await this.prisma.rejectedReadingLog.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    })
+    return {
+      statusCode: 200,
+      message: 'Rejected readings retrieved successfully',
+      data: logs.map((log) => ({
+        id: log.id,
+        systolicBP: log.systolicBP,
+        diastolicBP: log.diastolicBP,
+        pulse: log.pulse,
+        reason: log.reason,
+        createdAt: log.createdAt,
+      })),
+    }
+  }
+
   // ─── GET /provider/patients/:userId/bp-trend ────────────────────────────────
 
   async getPatientBpTrend(userId: string, startDate: string, endDate: string) {
+    // F1: endDate arrives as a calendar date (e.g. "2026-06-01"), which parses to
+    // UTC midnight and would exclude every reading taken during that day. Extend
+    // the upper bound to the end of the calendar day so the current day is included.
+    const endDateObj = new Date(endDate)
+    endDateObj.setUTCHours(23, 59, 59, 999)
     const entries = await this.prisma.journalEntry.findMany({
       where: {
         userId,
         measuredAt: {
           gte: new Date(startDate),
-          lte: new Date(endDate),
+          lte: endDateObj,
         },
         systolicBP: { not: null },
       },

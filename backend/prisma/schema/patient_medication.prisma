@@ -12,15 +12,39 @@ model PatientMedication {
   verifiedAt               DateTime?
   reportedAt               DateTime                     @default(now())
   discontinuedAt           DateTime?
+  // Manisha 5/24 Med §3 — structured HOLD reason (drives the two-path patient
+  // message: PROVIDER_DIRECTED_HOLD = "pause it" clinical instruction; the
+  // administrative reasons = "keep taking it" informational). holdSetAt anchors
+  // the 7/14/30/45-day reconciliation escalation ladder.
+  holdReason               MedicationHoldReason?
+  holdSetAt                DateTime?
+  // Manisha 5/24 Med §4 — reconciliation escalation ladder progress (0 = none,
+  // 1 = day-7, 2 = day-14, 3 = day-30, 4 = day-45). Bumped by the hold-
+  // escalation cron so a given rung never double-fires; reset to 0 when the
+  // medication leaves HOLD.
+  holdEscalationLevel      Int                          @default(0)
   rawInputText             String?
   notes                    String?                      @db.Text
   pillImageUrl             String?
   plainLanguageDescription String?                      @db.Text
+  // #85 — canonical drug identity (shared catalog `id`, e.g. "losartan" for
+  // BOTH Cozaar and Losartan), resolved via matchToCatalog(drugName). Enables
+  // brand/generic dedup. Null for off-catalog / free-text meds — dedup skipped.
+  canonicalDrugId          String?
+  // #92 — admin-add provenance. source distinguishes patient self-report from
+  // an admin-entered med; the added*/lastEdited* fields record who/when.
+  addedByUserId            String?
+  addedByRole              VerifierRole?
+  addedAt                  DateTime?
+  lastEditedByUserId       String?
+  lastEditedByRole         VerifierRole?
+  lastEditedAt             DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, discontinuedAt])
   @@index([userId, verificationStatus])
+  @@index([userId, canonicalDrugId])
 }
 
 enum DrugClass {
@@ -69,4 +93,15 @@ enum MedicationVerificationStatus {
   // Triggers SYSTEM_MSG_MEDICATION_HOLD to the patient's inbox + suppresses
   // adherence rule fires for this med until status returns to VERIFIED.
   HOLD
+}
+
+// Manisha 5/24 Med §3 — structured HOLD reason codes. Only PROVIDER_DIRECTED_HOLD
+// is a clinical "stop taking it" instruction; the rest are administrative
+// ("keep taking it, we're reviewing the paperwork"). OTHER requires free text.
+enum MedicationHoldReason {
+  AWAITING_RECORDS
+  UNCLEAR_NAME
+  UNCLEAR_DOSE
+  PROVIDER_DIRECTED_HOLD
+  OTHER
 }

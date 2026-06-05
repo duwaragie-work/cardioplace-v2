@@ -110,6 +110,19 @@ export class ClinicalIntakeRequiredError extends Error {
   }
 }
 
+/**
+ * Thrown when POST /daily-journal returns 422 `implausible-reading` — a
+ * physiologically-impossible reading (diastolic ≥ systolic, Manisha 5/24 Q1).
+ * The reading is NOT saved; callers prompt the patient to re-take it.
+ */
+export class ImplausibleReadingError extends Error {
+  readonly code = 'implausible-reading' as const
+  constructor(reason?: string) {
+    super(reason || "That reading doesn't look right — please check your cuff and try again.")
+    this.name = 'ImplausibleReadingError'
+  }
+}
+
 async function unwrap<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
@@ -146,6 +159,9 @@ export async function createJournalEntry(
     if (res.status === 403 && err?.message === 'clinical-intake-required') {
       throw new ClinicalIntakeRequiredError(err.reason)
     }
+    if (res.status === 422 && err?.message === 'implausible-reading') {
+      throw new ImplausibleReadingError(err.reason)
+    }
     throw new Error(err.message || `Request failed: ${res.status}`)
   }
   const json = await res.json()
@@ -153,6 +169,33 @@ export async function createJournalEntry(
     entry: (json.data ?? json) as JournalEntryDto,
     pendingSecondReading: Boolean(json.pendingSecondReading),
   }
+}
+
+/**
+ * GET /daily-journal/active-session — the patient's currently OPEN reading
+ * session, or null when none/expired. Drives the check-in "add to this
+ * session or start a new one?" prompt. `sessionId` is null for a time-window
+ * (un-tagged) session — join it by sending no sessionId.
+ */
+export interface ActiveSessionDto {
+  sessionId: string | null
+  openedAt: string // ISO — first reading in the session
+  lastReadingAt: string // ISO — most recent reading
+  readingCount: number
+  expiresAt: string // ISO — lastReadingAt + SESSION_WINDOW_MS (server-authoritative)
+  requiresMoreReadings: boolean // e.g. AFib && readingCount < 3
+}
+
+export async function getActiveSession(): Promise<ActiveSessionDto | null> {
+  const res = await fetchWithAuth(`${API}/api/daily-journal/active-session`)
+  if (res.status === 204) return null
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json().catch(() => null)
+  const data = (json?.data ?? json) as ActiveSessionDto | null
+  return data ?? null
 }
 
 /**
@@ -276,7 +319,16 @@ export interface DeviationAlertDto {
 
 export async function getAlerts(): Promise<DeviationAlertDto[]> {
   const res = await fetchWithAuth(`${API}/api/daily-journal/alerts`)
-  return unwrap<DeviationAlertDto[]>(res)
+  const all = await unwrap<DeviationAlertDto[]>(res)
+  // Manual-test round 2 — Group C frontend safety net. The backend already
+  // filters Tier-3 caregiver/physician-only alerts (empty patientMessage) out
+  // of the patient surface; this guard is defense-in-depth so a backend
+  // regression can't leak a "FOR YOUR INFORMATION" green card or an empty
+  // notification row onto the patient.
+  return all.filter((a) => {
+    if (a.tier !== 'TIER_3_INFO') return true
+    return typeof a.patientMessage === 'string' && a.patientMessage.trim().length > 0
+  })
 }
 
 export async function acknowledgeAlert(alertId: string) {

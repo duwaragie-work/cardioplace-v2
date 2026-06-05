@@ -269,10 +269,18 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
   const audioStreamEndSentRef = useRef(false);
   // Scheduled playback — each arriving audio chunk is scheduled to start at
   // nextStartTimeRef on the playback AudioContext, avoiding the onended gap
-  // that caused choppy output. When no chunks arrive for ~200ms after the
-  // last scheduled end, drainTimerRef fires and reverts state to 'listening'.
+  // that caused choppy output. The drain timer is a BACKSTOP only — the
+  // authoritative end-of-turn signal is now the backend's
+  // `agent_generation_complete` event (Google's documented signal for "model
+  // done producing audio"). The backstop fires only if that event never
+  // arrives (socket reconnect mid-turn, etc.).
   const nextStartTimeRef = useRef<number>(0);
   const drainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True between the first audio_response of a turn and the eventual
+  // agent_generation_complete / agent_interrupted / drain backstop. Gates
+  // the +60 ms preroll reseed in playAudio so we don't inject fresh silence
+  // every time a late chunk arrives mid-turn (the choppy-audio bug).
+  const inTurnRef = useRef(false);
   // Latency: stamp when user's final transcript arrives, measure again on the
   // first agent audio chunk of the reply. Cleared after one measurement so we
   // don't keep rewriting the stamp as more audio streams in.
@@ -480,21 +488,82 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
     setSessionState('listening', 'startMic success');
   }, [setSessionState, armListeningWatchdog]);
 
+  // End-of-agent-turn — single source of truth, used by three triggers:
+  //   • 'generation_complete' : backend forwarded Gemini's authoritative
+  //                             serverContent.generationComplete signal.
+  //   • 'interrupted'         : Gemini said the user barged in. Per Live API
+  //                             docs the client MUST discard its buffer
+  //                             immediately — we close the AudioContext.
+  //   • 'drain_backstop'      : NEITHER of the above arrived within 2 s of
+  //                             the last scheduled chunk's end (socket
+  //                             reconnect mid-turn, server quirk, etc.).
+  // For non-interrupt reasons we wait for the already-scheduled audio to
+  // finish playing, then flip state — direct flip would cut the last word.
+  const endAgentTurn = useCallback(
+    (reason: 'generation_complete' | 'interrupted' | 'drain_backstop') => {
+      inTurnRef.current = false;
+      if (drainTimerRef.current) {
+        clearTimeout(drainTimerRef.current);
+        drainTimerRef.current = null;
+      }
+      const ctx = playbackContextRef.current;
+
+      const flipToListening = () => {
+        debug('audio', `agent turn ended (${reason}) — reverting to listening`);
+        setSessionState(
+          (prev) => (prev === 'agent_speaking' ? 'listening' : prev),
+          `audio_${reason}`,
+        );
+        // Clear VAD bookkeeping so the next user turn starts clean.
+        speakingRef.current = false;
+        silenceStartRef.current = null;
+        audioStreamEndSentRef.current = false;
+        drainTimerRef.current = null;
+      };
+
+      if (reason === 'interrupted') {
+        // Live API docs: "You must immediately discard your client-side audio
+        // buffer." Closing the AudioContext is the only reliable way to stop
+        // already-scheduled sources — disconnect/suspend leaves queued buffers
+        // in flight.
+        if (ctx) {
+          ctx.close().catch(() => {});
+        }
+        playbackContextRef.current = null;
+        nextStartTimeRef.current = 0;
+        flipToListening();
+        return;
+      }
+
+      // generation_complete / drain_backstop — wait for the tail of already-
+      // scheduled audio (plus a 50 ms cushion) before flipping state.
+      const msUntilEnd = ctx
+        ? Math.max(0, (nextStartTimeRef.current - ctx.currentTime) * 1000) + 50
+        : 50;
+      drainTimerRef.current = setTimeout(flipToListening, msUntilEnd);
+    },
+    [setSessionState],
+  );
+
   // Scheduled playback — eliminates the onended gap that causes choppy audio.
   // Each arriving chunk is decoded and scheduled to start at nextStartTimeRef.
-  // If the first chunk in a turn, seed the scheduler PREROLL_MS ahead of
-  // currentTime so one late-arriving second chunk can't underrun. After the
-  // last scheduled chunk ends, DRAIN_MS of silence triggers a revert to
-  // 'listening' state.
+  // First chunk of a real turn seeds the scheduler PREROLL_MS ahead; late
+  // chunks arriving mid-turn (Gemini inter-chunk jitter > playback rate) snap
+  // forward 5 ms instead of injecting fresh silence. End-of-turn comes from
+  // the backend's agent_generation_complete event; the drain timer is only a
+  // backstop when that event fails to arrive.
   const playAudio = useCallback((audioBase64: string) => {
     const OUTPUT_SAMPLE_RATE = 24000;
     // Playback pre-roll. Seeds the scheduler this many ms ahead of
     // currentTime on the first chunk of a turn so one late-arriving second
-    // chunk can't underrun. Lower = first syllable arrives sooner; higher =
-    // more tolerant of network jitter. 60 ms is tight but tolerable on a
-    // wired/good-WiFi connection for most listeners.
+    // chunk can't underrun. Paid ONCE per real agent turn (gated by
+    // inTurnRef) — late chunks mid-turn never reseed.
     const PREROLL_MS = 60;
-    const DRAIN_MS = 200;
+    // Backstop only — fires if backend never delivers agent_generation_complete
+    // (socket reconnect mid-turn, etc.). Real end-of-turn comes from the
+    // explicit socket event; this 2 s is intentionally generous so we don't
+    // race with Gemini's inter-chunk arrival jitter.
+    const DRAIN_MS = 2000;
 
     if (!playbackContextRef.current) {
       playbackContextRef.current = new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
@@ -507,12 +576,17 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
       return;
     }
 
-    // Seed the scheduler if this is the first chunk of a new agent turn.
-    // nextStartTime is "behind" the clock when there's been a gap.
     const now = ctx.currentTime;
-    if (nextStartTimeRef.current < now + 0.01) {
+    if (!inTurnRef.current) {
+      // Genuine new turn — preroll for jitter tolerance.
+      inTurnRef.current = true;
       nextStartTimeRef.current = now + PREROLL_MS / 1000;
       debug('audio', `first chunk of turn — seeded scheduler at +${PREROLL_MS}ms`);
+    } else if (nextStartTimeRef.current < now) {
+      // Late chunk mid-turn — snap forward 5 ms without injecting a fresh
+      // PREROLL_MS gap. Patient hears a tiny click instead of choppy silence.
+      nextStartTimeRef.current = now + 0.005;
+      debug('audio', `mid-turn underrun caught — snapped scheduler to now+5ms`);
     }
 
     const source = ctx.createBufferSource();
@@ -523,23 +597,14 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
 
     setSessionState('agent_speaking', 'audio_response');
 
-    // Reset the drain timer — if no more chunks arrive for DRAIN_MS after the
-    // last scheduled chunk ends, revert to listening.
+    // Arm / re-arm the drain backstop. Only fires if neither
+    // agent_generation_complete nor agent_interrupted arrives within
+    // DRAIN_MS after the last scheduled chunk's end. endAgentTurn handles
+    // the state revert + VAD bookkeeping so logic stays in one place.
     if (drainTimerRef.current) clearTimeout(drainTimerRef.current);
     const msUntilEnd = Math.max(0, (nextStartTimeRef.current - now) * 1000) + DRAIN_MS;
-    drainTimerRef.current = setTimeout(() => {
-      debug('audio', 'drain timer fired — reverting to listening');
-      setSessionState((prev) => (prev === 'agent_speaking' ? 'listening' : prev), 'audio drained');
-      // Clear VAD bookkeeping so the next user turn starts clean — no stale
-      // silenceStart ticking down from before the agent spoke. Also re-arm
-      // audio_stream_end so the next user pause can signal end-of-turn
-      // (the previous turn used its one allotted fire).
-      speakingRef.current = false;
-      silenceStartRef.current = null;
-      audioStreamEndSentRef.current = false;
-      drainTimerRef.current = null;
-    }, msUntilEnd);
-  }, [setSessionState]);
+    drainTimerRef.current = setTimeout(() => endAgentTurn('drain_backstop'), msUntilEnd);
+  }, [setSessionState, endAgentTurn]);
 
   const appendTranscript = useCallback(
     (text: string, speaker: 'user' | 'agent', isFinal: boolean) => {
@@ -708,6 +773,22 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
         setActionType((current) => (current ? null : current), 'audio_response safety net');
       });
 
+      // Authoritative end-of-agent-turn signal from Gemini, forwarded by the
+      // backend. Used INSTEAD of the silence-based drain timer so we don't
+      // flap state mid-sentence on inter-chunk arrival jitter.
+      socket.on('agent_generation_complete', () => {
+        if (VOICE_DEBUG) debug('socket', 'agent_generation_complete');
+        endAgentTurn('generation_complete');
+      });
+
+      // User barged in (Gemini-side VAD detected speech overlap). Live API
+      // docs require immediate buffer discard — endAgentTurn closes the
+      // AudioContext for 'interrupted'.
+      socket.on('agent_interrupted', () => {
+        debug('socket', 'agent_interrupted');
+        endAgentTurn('interrupted');
+      });
+
       socket.on('transcript', (data: { text: string; isFinal: boolean; speaker: 'user' | 'agent' }) => {
         if (data.isFinal && data.text.trim()) {
           debug('socket', `transcript [${data.speaker}] "${data.text.slice(0, 60)}"`);
@@ -866,11 +947,24 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
       });
 
       socket.on('connect', () => {
-        debug('socket', `connect → emit start_session sessionId=${sessionId ?? 'new'}`);
-        socket.emit('start_session', { sessionId: sessionId ?? null });
+        // Send the browser's IANA timezone so the backend records voice
+        // check-in measuredAt values in the patient's actual local time.
+        // The stored User.timezone may be stale (signup region, never
+        // updated after travel) — the browser is the ground truth.
+        // Older browsers may return '' from resolvedOptions; pass null in
+        // that case and let the backend fall back to User.timezone.
+        let clientTimezone: string | null = null;
+        try {
+          const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+          if (detected) clientTimezone = detected;
+        } catch {
+          // Intl unavailable — leave null.
+        }
+        debug('socket', `connect → emit start_session sessionId=${sessionId ?? 'new'} tz=${clientTimezone ?? 'null'}`);
+        socket.emit('start_session', { sessionId: sessionId ?? null, clientTimezone });
       });
     },
-    [startMic, stopMic, playAudio, appendTranscript, setSessionState, setActionType, clearListeningWatchdog],
+    [startMic, stopMic, playAudio, endAgentTurn, appendTranscript, setSessionState, setActionType, clearListeningWatchdog],
   );
 
   // Keep the _openRef synced to the latest _open instance so the inner
