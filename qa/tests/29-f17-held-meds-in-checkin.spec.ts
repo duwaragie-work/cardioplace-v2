@@ -48,15 +48,28 @@ test.describe('F17 — held meds appear as ON HOLD in daily check-in', () => {
     await signInPatient(page, PATIENTS.aisha.email)
     await page.goto('/check-in')
 
+    // /check-in may open on a resume/open-session gate instead of step 1.
+    // Start fresh past whichever gate is shown (no-op if neither is present).
+    for (const id of ['checkin-startnew-btn', 'checkin-new-session-btn']) {
+      const b = page.locator(byTestId(id))
+      if (await b.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await b.click().catch(() => {})
+      }
+    }
+
     // B1 checklist → Continue.
     await expect(page.locator(byTestId(T.checkin.step(1)))).toBeVisible({ timeout: 15_000 })
     await page.locator(byTestId(T.checkin.next)).click()
 
-    // B2 BP entry → fill a benign reading → Continue.
+    // B2 BP entry → fill a benign reading → Continue. NOTE: validateStep('B2')
+    // requires a position selection — without it, Continue silently no-ops and
+    // the wizard never advances to the MEDICATION step (the real cause of the
+    // step-4 timeout: step 1 rendered fine, but B2 never validated).
     await expect(page.locator(byTestId(T.checkin.systolic))).toBeVisible({ timeout: 10_000 })
     await page.locator(byTestId(T.checkin.systolic)).fill('124')
     await page.locator(byTestId(T.checkin.diastolic)).fill('78')
     await page.locator(byTestId(T.checkin.pulse)).fill('72')
+    await page.locator(byTestId('check-in-position-sitting')).click().catch(() => {})
     await page.locator(byTestId(T.checkin.next)).click()
 
     // WEIGHT (optional) → Continue without entering a weight.
