@@ -8,38 +8,22 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/lib/auth-context';
 
 interface LandingHeaderProps {
+  /** Accepted for caller compatibility; the nav no longer renders page tabs
+   *  (the logo is the only home affordance), so this is unused. */
   activeLink?: string;
 }
 
-// Smooth-scroll to an in-page anchor AND update the URL hash so the
-// address bar reflects the section the user just jumped to (and so the
-// link is shareable / back-button works). Pure scrollIntoView() leaves
-// the URL stale.
-function jumpToAnchor(href: string) {
-  if (typeof window === 'undefined') return;
-  document.querySelector(href)?.scrollIntoView({ behavior: 'smooth' });
-  if (href.startsWith('#')) {
-    window.history.pushState(null, '', href);
-  }
-}
-
-export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProps) {
+export default function LandingHeader(_props: LandingHeaderProps) {
   const { t } = useLanguage();
   const { isAuthenticated, isLoading } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
-  const links = [
-    { label: 'Home', href: '/', text: t('landing.home') },
-    { label: 'About', href: '/about', text: t('landing.about') },
-    { label: 'Contact', href: '#contact', text: t('landing.contact') },
-  ];
-
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl bg-white/80 shadow-[0_1px_2px_rgba(76,29,149,0.05)]">
       <div className="max-w-[1280px] mx-auto flex items-center justify-between px-6 md:px-8 py-4">
-        <Link href="/" className="flex items-center">
+        <Link href="/" className="flex items-center gap-2">
           <Image
             src="/cardioplace-logo.svg"
             alt="Cardioplace"
@@ -48,38 +32,11 @@ export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProp
             className="h-7 w-auto md:h-9"
             priority
           />
+          {/* "Admin" tag so staff can tell this apart from the patient app. */}
+          <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-[#f5eafa] text-[#6b00d1]">
+            Admin
+          </span>
         </Link>
-
-        {/* Desktop nav */}
-        <div className="hidden md:flex items-center gap-10">
-          {links.map((link) =>
-            link.href.startsWith('#') ? (
-              <button
-                key={link.label}
-                onClick={() => jumpToAnchor(link.href)}
-                className={
-                  activeLink === link.label
-                    ? 'font-semibold text-[#6d28d9] text-base border-b-2 border-[#6d28d9] pb-0.5'
-                    : 'text-[#475569] text-base hover:text-[#6d28d9] transition-colors cursor-pointer'
-                }
-              >
-                {link.text}
-              </button>
-            ) : (
-              <Link
-                key={link.label}
-                href={link.href}
-                className={
-                  activeLink === link.label
-                    ? 'font-semibold text-[#6d28d9] text-base border-b-2 border-[#6d28d9] pb-0.5'
-                    : 'text-[#475569] text-base hover:text-[#6d28d9] transition-colors'
-                }
-              >
-                {link.text}
-              </Link>
-            )
-          )}
-        </div>
 
         <div className="flex items-center gap-3">
           {/* Admin app is English-only — language selector intentionally hidden. */}
@@ -115,26 +72,6 @@ export default function LandingHeader({ activeLink = 'Home' }: LandingHeaderProp
       {/* Mobile menu */}
       {menuOpen && (
         <div className="md:hidden bg-white border-t border-[#eedbff] px-6 py-4 flex flex-col gap-4">
-          {links.map((link) =>
-            link.href.startsWith('#') ? (
-              <button
-                key={link.label}
-                onClick={() => { jumpToAnchor(link.href); setMenuOpen(false); }}
-                className={`text-left text-base py-2 ${activeLink === link.label ? 'font-semibold text-[#6d28d9]' : 'text-[#475569]'}`}
-              >
-                {link.text}
-              </button>
-            ) : (
-              <Link
-                key={link.label}
-                href={link.href}
-                onClick={() => setMenuOpen(false)}
-                className={`text-base py-2 ${activeLink === link.label ? 'font-semibold text-[#6d28d9]' : 'text-[#475569]'}`}
-              >
-                {link.text}
-              </Link>
-            )
-          )}
           {/* Admin app is English-only — language selector intentionally hidden. */}
           {mounted && !isLoading && (
             isAuthenticated ? (
