@@ -128,18 +128,28 @@ test.describe('Round 2 J — tier filter chips on patient /notifications', () =>
       'HIGH chip page shows the elevated/high framing',
     ).toMatch(/elevated|high/i)
 
-    // ── 'Low BP' chip: at least one card (the HF-decomp) ──────────────────
-    await page.locator('[data-testid="alerts-tier-filter-low"]').click()
+    // ── 'Heart failure' chip: the HF-decomp card lives here. Despite the
+    // engine tier BP_LEVEL_1_LOW, HF-decomp is a fluid/heart-failure alert and
+    // is deliberately bucketed to `heartFailure`, NOT `low` (notifications
+    // bucketize.test.ts encodes this contract). ──────────────────────────────
+    await page.locator('[data-testid="alerts-tier-filter-heartFailure"]').click()
     await page.waitForTimeout(300)
     await page.screenshot({
-      path: `reports/screenshots/${testInfo.title}-03-chip-low.png`,
+      path: `reports/screenshots/${testInfo.title}-03-chip-heart-failure.png`,
       fullPage: true,
     })
-    expect(await cardCount(), 'LOW chip shows at least one card (HF-decomp)').toBeGreaterThanOrEqual(1)
+    expect(await cardCount(), 'Heart-failure chip shows the HF-decomp card').toBeGreaterThanOrEqual(1)
     expect(
       await page.locator('body').innerText(),
-      'LOW chip page shows the amber HF-decomp framing (A1)',
+      'Heart-failure chip shows the amber HF-decomp framing (A1)',
     ).toMatch(/care team needs to know/i)
+
+    // ── 'Low BP' chip: HF-decomp must NOT appear here — it is a fluid alert,
+    // not low blood pressure. No genuine low-BP alert was fired, so the chip
+    // is empty (mirrors the bucketize unit contract). ────────────────────────
+    await page.locator('[data-testid="alerts-tier-filter-low"]').click()
+    await page.waitForTimeout(300)
+    expect(await cardCount(), 'LOW chip excludes HF-decomp (not low BP)').toBe(0)
 
     // ── 'Tier 1' chip: nothing matches this scenario ───────────────────────
     await page.locator('[data-testid="alerts-tier-filter-tier1"]').click()
