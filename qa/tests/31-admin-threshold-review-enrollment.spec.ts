@@ -556,6 +556,13 @@ test.describe('Timeline audit trail (UI E2E)', () => {
     await expect(tl).toContainText(/verified by (admin|medical director|provider)/i, {
       timeout: 20_000,
     })
+    // Same-second same-type logs collapse into an expandable burst ("Profile
+    // rejected · N fields") that hides individual field names. Expand every
+    // collapsed group so per-field labels (e.g. "Atrial fibrillation") render.
+    const groups = page.locator('[data-testid^="admin-timeline-group-"]')
+    for (let i = 0, n = await groups.count(); i < n; i++) {
+      await groups.nth(i).click().catch(() => {})
+    }
     await expect(tl).toContainText(/atrial fibrillation/i)
     await expect(tl).toContainText(/rejected by (admin|medical director|provider)/i)
     await expect(tl).toContainText(/heart failure/i)
