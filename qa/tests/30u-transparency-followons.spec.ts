@@ -197,17 +197,16 @@ test.describe('B2 — co-fired alert rows grouped by reading', () => {
       await page.setViewportSize(MOBILE)
       await signInPatient(page, PATIENTS.aisha.email)
       await page.goto('/notifications?tab=alerts')
-      // The 2 co-fired rows merge into ONE consolidated card (same
-      // journalEntry). The page ALSO renders a separate, default-OPEN
-      // "Past alerts" section (PastAlerts) of raw, un-consolidated rows sharing
-      // the notification-row- prefix — collapse it so we count only the OPEN
-      // consolidated cards. Then scope with :visible (matching spec 25).
-      await page
-        .locator('[data-testid="alerts-section-past"]')
-        .click()
-        .catch(() => {})
-      const rows = page.locator('[data-testid^="notification-row-"]:visible')
-      await expect(rows).toHaveCount(1, { timeout: 20_000 })
+      // The 2 co-fired alerts merge into ONE consolidated card (same
+      // journalEntry). Count CARD CONTAINERS only: PatientAlertCard emits
+      // `notification-row-<uuid>` for the card AND `notification-row-<part>-<uuid>`
+      // for title/severity/mode/message/reading/date/status/ack/detail, so a
+      // broad ^= match resolves to ~9 elements PER card. Match the card's bare
+      // UUID suffix so we count one element per card.
+      const cards = page.getByTestId(
+        /^notification-row-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      )
+      await expect(cards).toHaveCount(1, { timeout: 20_000 })
     } finally {
       const aisha = await tc.findUser(PATIENTS.aisha.email)
       await tc.setUserCondition(aisha.id, 'hasCAD', false)
