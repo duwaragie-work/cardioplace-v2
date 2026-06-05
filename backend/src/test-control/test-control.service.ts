@@ -252,6 +252,28 @@ export class TestControlService {
   }
 
   /**
+   * Delete a user's DeviationAlert rows (plus their child EscalationEvent rows
+   * and alert-linked Notification rows) WITHOUT touching JournalEntry history —
+   * unlike resetUser, which also wipes readings. A test that needs an
+   * established reading history but a clean alert slate (e.g. 30u B2's co-fire
+   * consolidation, which must see exactly the alerts it just fired) uses this
+   * right before triggering. Ordered children-first + serializable to mirror
+   * resetUser's deadlock-avoidance under CI's shared pgvector DB. (EscalationEvent
+   * cascades and Notification.alertId is SetNull, so this is also FK-safe.)
+   */
+  async deleteAlertsForUser(userId: string): Promise<{ rowsDeleted: number }> {
+    const [, , alerts] = await this.prisma.$transaction(
+      [
+        this.prisma.escalationEvent.deleteMany({ where: { alert: { userId } } }),
+        this.prisma.notification.deleteMany({ where: { userId, alertId: { not: null } } }),
+        this.prisma.deviationAlert.deleteMany({ where: { userId } }),
+      ],
+      { isolationLevel: 'Serializable' },
+    )
+    return { rowsDeleted: alerts.count }
+  }
+
+  /**
    * Delete a user's PatientThreshold so a test can assert the "no threshold"
    * branches — IVR-04 enrollment revert + the THR-REVIEW "missing" lock. There
    * is no production threshold-delete (THR-033), so this is test-control only.

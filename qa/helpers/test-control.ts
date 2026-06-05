@@ -287,6 +287,15 @@ export class TestControl {
   }
 
   /**
+   * Delete a user's DeviationAlert rows (+ child escalations + alert-linked
+   * notifications) WITHOUT wiping reading history — for tests that need an
+   * established history but a clean alert slate before triggering (30u B2).
+   */
+  async deleteAlertsForUser(userId: string): Promise<{ rowsDeleted: number }> {
+    return this.post('test-control/reset/user-alerts', { userId })
+  }
+
+  /**
    * THR-REVIEW / IVR-04 — delete a user's PatientThreshold so the "no
    * threshold" branches (enrollment revert + missing-threshold lock) are
    * deterministically reachable. Idempotent.

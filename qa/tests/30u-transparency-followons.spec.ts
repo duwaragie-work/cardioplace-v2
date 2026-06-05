@@ -156,6 +156,12 @@ test.describe('B2 — co-fired alert rows grouped by reading', () => {
       await tc.setUserCondition(aisha.id, c, false)
     }
     await tc.setUserCondition(aisha.id, 'hasCAD', true)
+    // Guarantee a clean alert slate IMMEDIATELY before the trigger so the only
+    // OPEN alerts the patient view sees are this co-fire's (consolidating to one
+    // card). resetUser above clears alerts too, but a sibling spec's async
+    // escalation/dispatch can land alerts between reset and now under CI's
+    // shared DB; this targeted delete (no reading-history wipe) closes that race.
+    await tc.deleteAlertsForUser(aisha.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     await api.post('daily-journal', {
       data: { measuredAt: new Date().toISOString(), systolicBP: 165, diastolicBP: 65, pulse: 74, position: 'SITTING' },

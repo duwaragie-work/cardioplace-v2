@@ -313,6 +313,19 @@ export class TestControlController {
     return this.svc.clearUserMedications(body.userId)
   }
 
+  // Delete a user's DeviationAlert rows (+ child escalations + alert-linked
+  // notifications) WITHOUT wiping their reading history — for tests that need an
+  // established history but a clean alert slate before triggering (30u B2).
+  @Post('reset/user-alerts')
+  @HttpCode(200)
+  async deleteAlertsForUser(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.deleteAlertsForUser(body.userId)
+  }
+
   // THR-REVIEW / IVR-04 E2E setup — delete a user's threshold so the
   // "no threshold" branches (enrollment revert + missing-threshold lock) are
   // reachable deterministically across re-runs.
