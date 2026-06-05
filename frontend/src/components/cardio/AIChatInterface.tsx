@@ -1188,6 +1188,13 @@ export default function AIChatInterface() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const justCreatedSessionRef = useRef(false);
+  // Bug 17 — when voice ADOPTS an existing text session (sessionId passed
+  // through to startVoice), the on-idle teardown below must NOT wipe the
+  // visible text bubbles + replace them with a single voice-summary block.
+  // Instead, reload the full mixed transcript via getSessionHistory once
+  // the voice turns persist. This ref records whether we adopted, so the
+  // teardown can branch cleanly.
+  const adoptedSessionAtVoiceStartRef = useRef(false);
 
   // ─── Dictation (speech-to-text into the chat input box) ──────────────────
   // Distinct from the voice-call mic — this is one-shot dictation that fills
@@ -1401,9 +1408,13 @@ export default function AIChatInterface() {
     prevVoiceStateRef.current = voiceState;
     if (prev !== 'idle' && voiceState === 'idle') {
       voiceDebug('AIChat', `idle transition from=${prev} — tearing down voice session and loading summary`);
-      // Clear everything immediately — show skeleton
+      const sessionId = activeSessionId;
+      const wasAdopted = adoptedSessionAtVoiceStartRef.current && sessionId !== null;
+      adoptedSessionAtVoiceStartRef.current = false;
+
+      // Always clear transient card state — those cards are tied to the
+      // just-ended voice turn, not to the persistent message history.
       clearTranscript();
-      setMessages([]);
       setPendingCheckin(null);
       setPendingUpdateCard(null);
       setPendingDeleteCard(null);
@@ -1412,7 +1423,66 @@ export default function AIChatInterface() {
       setPendingPhoto(null);
       setVoiceSummaryLoading(true);
 
-      const sessionId = activeSessionId;
+      if (wasAdopted) {
+        // Bug 17 — voice adopted an existing text session. Keep the visible
+        // text bubbles, then once the voice turns persist (saveVoiceTranscript
+        // writes async on endSession), reload the FULL mixed transcript from
+        // getSessionHistory and render text+voice bubbles inline together.
+        // Do NOT setMessages([]) — that would wipe the patient's prior
+        // text history from the UI until they refresh.
+        const reloadMixedTranscript = async () => {
+          if (!sessionId) return;
+          const maxAttempts = 8;
+          const delayMs = 2500;
+          for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            if (attempt > 0) await new Promise((r) => setTimeout(r, delayMs));
+            try {
+              const history = await getSessionHistory(sessionId);
+              const arr = Array.isArray(history) ? history : [];
+              const hasVoiceRow = arr.some((r: { source: string }) => r.source === 'voice');
+              // Either a voice row appeared (transcript persisted) OR we've
+              // waited enough that the patient didn't actually speak — render
+              // whatever we have, including the case of no voice rows at all.
+              if (hasVoiceRow || attempt >= 3) {
+                const msgs: Message[] = [];
+                arr.forEach(
+                  (
+                    item: { id: string; userMessage: string; aiSummary: string; source: string; timestamp: string },
+                    idx: number,
+                  ) => {
+                    msgs.push({
+                      id: idx * 2,
+                      type: 'patient',
+                      source: (item.source as MessageSource) || 'text',
+                      text: item.userMessage,
+                      time: formatMsgTime(item.timestamp),
+                    });
+                    msgs.push({
+                      id: idx * 2 + 1,
+                      type: 'ai',
+                      source: (item.source as MessageSource) || 'text',
+                      text: item.aiSummary,
+                      time: formatMsgTime(item.timestamp),
+                    });
+                  },
+                );
+                setMessages(msgs);
+                getChatSessions()
+                  .then((d) => setSessions(mapSessions(Array.isArray(d) ? d : [])))
+                  .catch(() => {});
+                return;
+              }
+            } catch {
+              // retry on transient failure
+            }
+          }
+        };
+        reloadMixedTranscript().finally(() => setVoiceSummaryLoading(false));
+        return;
+      }
+
+      // Pure voice session (no prior text turns) — existing summary-only path.
+      setMessages([]);
 
       const loadVoiceSummary = async () => {
         if (!sessionId) return;
@@ -1857,7 +1927,16 @@ export default function AIChatInterface() {
     if (isVoiceActive || isVoiceConnecting) {
       await endVoice();
     } else if (token) {
-      await startVoice({ token });
+      // Bug 17 — pass the currently-active session id so voice ADOPTS the
+      // text conversation instead of starting an orphaned session in the
+      // sidebar. Backend's resolveSession validates `{ id, userId }` and
+      // falls through to creating a new one if the lookup fails, so
+      // passing a value is safe even on fresh chats (when activeSessionId
+      // is null we pass undefined and the backend creates one as before).
+      // Record whether we adopted, so the post-voice teardown can keep the
+      // visible text history instead of wiping it for a summary-only block.
+      adoptedSessionAtVoiceStartRef.current = activeSessionId !== null;
+      await startVoice({ token, sessionId: activeSessionId ?? undefined });
     }
   };
 

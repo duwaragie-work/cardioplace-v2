@@ -72,6 +72,7 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
   let prisma: Record<string, any>
   let profileResolver: { resolve: jest.Mock }
   let configService: { get: jest.Mock; getOrThrow: jest.Mock }
+  let conversationHistory: { getSessionSummaryForVoice: jest.Mock<any> }
 
   beforeEach(async () => {
     prisma = {
@@ -103,6 +104,13 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
       get: jest.fn().mockImplementation((key: string, dflt?: string) => dflt),
       getOrThrow: jest.fn().mockReturnValue('test-secret'),
     }
+    // Bug 17 — voice now fetches the rolling session summary from
+    // ConversationHistoryService so tests can control what prior text/voice
+    // turns the system instruction sees. Default = empty string (fresh
+    // session, no prior conversation block injected).
+    conversationHistory = {
+      getSessionSummaryForVoice: (jest.fn() as jest.Mock<any>).mockResolvedValue(''),
+    }
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -111,7 +119,7 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
         { provide: ConfigService, useValue: configService },
         { provide: PrismaService, useValue: prisma },
         { provide: ProfileResolverService, useValue: profileResolver },
-        { provide: ConversationHistoryService, useValue: {} },
+        { provide: ConversationHistoryService, useValue: conversationHistory },
         { provide: GeminiService, useValue: { clientInstance: {} } },
         { provide: VoiceToolsService, useValue: { getToolDeclarations: () => [] } },
         {
@@ -228,18 +236,20 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
   // Query shape + parallelism
   // ==========================================================================
   describe('query shape', () => {
-    it('runs user/journal/deviation/session/resolver in parallel', async () => {
+    it('runs user/journal/deviation/session-summary/resolver in parallel', async () => {
       await run('user-1', 'session-xyz')
       expect(prisma.user.findUnique).toHaveBeenCalledTimes(1)
       expect(prisma.journalEntry.findMany).toHaveBeenCalledTimes(1)
       expect(prisma.deviationAlert.findMany).toHaveBeenCalledTimes(1)
-      expect(prisma.session.findUnique).toHaveBeenCalledTimes(1)
+      // Bug 17 — session lookup moved from prisma.session.findUnique (unscoped)
+      // to ConversationHistoryService.getSessionSummaryForVoice (userId-scoped).
+      expect(conversationHistory.getSessionSummaryForVoice).toHaveBeenCalledTimes(1)
       expect(profileResolver.resolve).toHaveBeenCalledTimes(1)
     })
 
-    it('omits session query when no sessionId passed', async () => {
+    it('omits session-summary query when no sessionId passed', async () => {
       await run('user-1')
-      expect(prisma.session.findUnique).not.toHaveBeenCalled()
+      expect(conversationHistory.getSessionSummaryForVoice).not.toHaveBeenCalled()
     })
   })
 
@@ -385,6 +395,73 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
 
       expect(() => service.onIntakeUpdated({ userId: 'user-1' })).not.toThrow()
       expect(ok.sendRealtimeInput).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Bug 17 — prior-conversation summary injection so voice knows what the
+  // patient already said in text (and earlier voice) when joining a session
+  // mid-conversation. Without this, Gemini Live opens fresh and greets the
+  // patient like a new conversation, re-asking questions already answered.
+  // ────────────────────────────────────────────────────────────────────────────
+  describe('prior-conversation summary injection (Bug 17)', () => {
+    it('does NOT call getSessionSummaryForVoice when sessionId is undefined', async () => {
+      await run('user-1')
+      expect(conversationHistory.getSessionSummaryForVoice).not.toHaveBeenCalled()
+    })
+
+    it('passes BOTH userId and sessionId to the summary lookup (defence-in-depth scope guard)', async () => {
+      conversationHistory.getSessionSummaryForVoice.mockResolvedValue('')
+      await run('user-1', 'session-A')
+      expect(conversationHistory.getSessionSummaryForVoice).toHaveBeenCalledWith(
+        'user-1',
+        'session-A',
+      )
+    })
+
+    it('omits the prior-conversation block when summary is empty (fresh session, no fresh-greet weirdness)', async () => {
+      conversationHistory.getSessionSummaryForVoice.mockResolvedValue('')
+      const context = await run('user-1', 'session-A')
+      expect(context).not.toContain('PRIOR CONVERSATION SUMMARY')
+      expect(context).not.toContain('JOINING an ongoing conversation')
+    })
+
+    it('omits the prior-conversation block when summary is whitespace-only', async () => {
+      conversationHistory.getSessionSummaryForVoice.mockResolvedValue('   \n  ')
+      const context = await run('user-1', 'session-A')
+      expect(context).not.toContain('PRIOR CONVERSATION SUMMARY')
+    })
+
+    it('injects the prior-conversation block + JOIN instruction when summary is non-empty', async () => {
+      const summary = [
+        'Compressed bullets from the older history.',
+        '- [Text] Patient: My BP was 145/95 → AI: That is elevated — take it again in 5 minutes.',
+        '- [Voice] Patient: I took my meds → AI: Good — keep it up.',
+      ].join('\n')
+      conversationHistory.getSessionSummaryForVoice.mockResolvedValue(summary)
+      const context = await run('user-1', 'session-A')
+      // Block header + footer present
+      expect(context).toContain('--- PRIOR CONVERSATION SUMMARY (text + voice turns so far) ---')
+      expect(context).toContain('--- END PRIOR CONVERSATION ---')
+      // Summary content present verbatim — both [Text] and [Voice] lines
+      expect(context).toContain('Compressed bullets from the older history.')
+      expect(context).toContain('[Text] Patient: My BP was 145/95')
+      expect(context).toContain('[Voice] Patient: I took my meds')
+      // JOIN instruction tells Gemini Live not to greet fresh
+      expect(context).toContain('JOINING an ongoing conversation')
+      expect(context).toMatch(/do NOT greet the patient as if it'?s a fresh conversation/)
+      expect(context).toMatch(/do NOT re-ask questions already answered/)
+    })
+
+    it('keeps the CURRENT DATE AND TIME block AFTER the prior-conversation block', async () => {
+      conversationHistory.getSessionSummaryForVoice.mockResolvedValue(
+        '- [Text] Patient: hi → AI: hello',
+      )
+      const context = await run('user-1', 'session-A')
+      const priorIdx = context.indexOf('PRIOR CONVERSATION SUMMARY')
+      const dateIdx = context.indexOf('CURRENT DATE AND TIME')
+      expect(priorIdx).toBeGreaterThan(-1)
+      expect(dateIdx).toBeGreaterThan(priorIdx)
     })
   })
 })

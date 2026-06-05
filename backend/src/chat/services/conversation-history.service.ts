@@ -171,6 +171,43 @@ export class ConversationHistoryService {
     }
   }
 
+  /**
+   * Bug 17 — read the rolling session summary for voice's Gemini Live system
+   * instruction. Unlike text chat (which slices off the last 12 append lines
+   * because they're already shipped verbatim in the Gemini `contents` array),
+   * VOICE has no `contents` array — the system instruction is the ONLY way
+   * to seed Gemini Live with the prior conversation at session open. So we
+   * return the WHOLE summary (compressed bullets + ALL append lines) without
+   * slicing.
+   *
+   * Same userId-scope + `[SECURITY] cross_tenant_attempt` guard as the text
+   * sibling above. The summary includes both `[Text]` and `[Voice]` tagged
+   * turns thanks to `updateRollingSummary`'s label, so when voice joins a
+   * conversation that already has text turns (or vice versa), Gemini Live
+   * gets the full picture across modalities.
+   */
+  async getSessionSummaryForVoice(
+    userId: string,
+    sessionId: string,
+  ): Promise<string> {
+    if (!userId || !sessionId) return ''
+    try {
+      const session = await this.prisma.session.findFirst({
+        where: { id: sessionId, userId },
+        select: { summary: true },
+      })
+      if (!session) {
+        this.logger.warn(
+          `[SECURITY] cross_tenant_attempt service=conversation_history.summary_for_voice userId=${userId} sessionId=${sessionId}`,
+        )
+        return ''
+      }
+      return session.summary ?? ''
+    } catch {
+      return ''
+    }
+  }
+
   // ── Saving ──────────────────────────────────────────────────────────────────
 
   /**

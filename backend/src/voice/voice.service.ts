@@ -987,12 +987,18 @@ export class VoiceService implements OnModuleDestroy {
           take: 5,
           select: PATIENT_DEVIATION_ALERT_FIELDS_FOR_LLM_PROMPT,
         }),
+        // Bug 17 — prior-conversation summary so voice knows what the
+        // patient already said in text (and in earlier voice turns) in this
+        // same session. The full summary (compressed bullets + ALL append
+        // lines, both [Text]- and [Voice]-tagged) — unlike the text-chat
+        // path which slices the last 12 because they're shipped raw in the
+        // Gemini `contents` array, voice has no contents array; the system
+        // instruction is the only seed. Userid-scope guard inside the
+        // helper (defence-in-depth against any future call site that
+        // passes an unvalidated sessionId).
         sessionId
-          ? this.prisma.session.findUnique({
-              where: { id: sessionId },
-              select: { summary: true },
-            })
-          : Promise.resolve(null),
+          ? this.conversationHistory.getSessionSummaryForVoice(userId, sessionId)
+          : Promise.resolve(''),
         this.profileResolver.resolve(userId).catch((err: unknown) => {
           if (err instanceof ProfileNotFoundException) return null
           throw err
@@ -1061,11 +1067,17 @@ export class VoiceService implements OnModuleDestroy {
       const currentDate = `${y}-${mo}-${d}`
       const currentTime = `${h}:${mi}`
 
-      // historySummary intentionally NOT injected — Gemini Live accumulates
-      // conversation context turn-by-turn, duplicating adds no value.
-      void sessionData
+      // Bug 17 — when joining a session that already has prior turns (text
+      // or voice or both), seed Gemini Live with the rolling summary so the
+      // bot doesn't greet fresh and re-ask questions already answered. The
+      // summary already labels each turn `[Text]` / `[Voice]`. Empty string
+      // → fresh session, no block injected, no fresh-greet weirdness.
+      const priorConversationBlock =
+        typeof sessionData === 'string' && sessionData.trim().length > 0
+          ? `\n\n--- PRIOR CONVERSATION SUMMARY (text + voice turns so far) ---\n${sessionData}\n--- END PRIOR CONVERSATION ---\n\nYou are JOINING an ongoing conversation. The block above is what the patient and the chatbot already discussed in this session — across text AND voice turns. Use it to maintain continuity: do NOT greet the patient as if it's a fresh conversation, do NOT re-ask questions already answered, and acknowledge anything the patient already told you.`
+          : ''
 
-      return `${patientContext}\n\nCURRENT DATE AND TIME (patient timezone ${tz}): ${currentDate} at ${currentTime}. When the patient says "now", "today", or "right now", use EXACTLY this date and time. NEVER guess a different date or time.`
+      return `${patientContext}${priorConversationBlock}\n\nCURRENT DATE AND TIME (patient timezone ${tz}): ${currentDate} at ${currentTime}. When the patient says "now", "today", or "right now", use EXACTLY this date and time. NEVER guess a different date or time.`
     } catch {
       return 'Patient context unavailable.'
     }

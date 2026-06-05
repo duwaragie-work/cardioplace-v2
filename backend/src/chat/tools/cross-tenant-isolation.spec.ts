@@ -246,6 +246,49 @@ describe('ConversationHistoryService.getConversationHistory ownership guard', ()
     )
   })
 
+  // Bug 17 — voice's prior-conversation summary path. Same userId-scope
+  // guard as the sibling above; differs by returning the FULL (un-sliced)
+  // summary because voice has no `contents` array to duplicate against.
+  it('getSessionSummaryForVoice: returns "" + logs [SECURITY] for cross-tenant sessionId', async () => {
+    prisma.session.findFirst.mockResolvedValue(null as never)
+    const r = await svc.getSessionSummaryForVoice('user-B', 'session-of-A')
+    expect(r).toBe('')
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringMatching(/\[SECURITY\] cross_tenant_attempt service=conversation_history\.summary_for_voice/),
+    )
+  })
+
+  it('getSessionSummaryForVoice: returns the FULL summary (no slicing) for the owning user', async () => {
+    // Build a summary with both compressed bullets AND tail append lines —
+    // voice MUST receive both because Gemini Live has no `contents` array
+    // for the raw recent turns.
+    const fullSummary = [
+      'Compressed bullets up here.',
+      '- [Text] Patient: My BP was 145/95 → AI: That is elevated…',
+      '- [Voice] Patient: I took my meds → AI: Good — keep it up.',
+    ].join('\n')
+    prisma.session.findFirst.mockResolvedValue({ summary: fullSummary } as never)
+    const r = await svc.getSessionSummaryForVoice('user-A', 'session-A')
+    expect(r).toBe(fullSummary)
+    expect(loggerWarn).not.toHaveBeenCalled()
+  })
+
+  it('getSessionSummaryForVoice: scopes the Prisma query by BOTH id AND userId', async () => {
+    prisma.session.findFirst.mockResolvedValue({ summary: '' } as never)
+    await svc.getSessionSummaryForVoice('user-A', 'session-A')
+    expect(prisma.session.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'session-A', userId: 'user-A' },
+      }),
+    )
+  })
+
+  it('getSessionSummaryForVoice: returns "" when userId or sessionId is empty', async () => {
+    expect(await svc.getSessionSummaryForVoice('', 'session-A')).toBe('')
+    expect(await svc.getSessionSummaryForVoice('user-A', '')).toBe('')
+    expect(prisma.session.findFirst).not.toHaveBeenCalled()
+  })
+
   it('returns rows + does NOT log when sessionId belongs to current user', async () => {
     prisma.session.findFirst.mockResolvedValue({ id: 'session-A' } as never)
     prisma.$queryRawUnsafe.mockResolvedValue([
