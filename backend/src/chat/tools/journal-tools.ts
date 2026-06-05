@@ -8,6 +8,7 @@ import { Type } from '@google/genai'
 import type { FunctionDeclaration } from '@google/genai'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
 import { isoFromTzWallclock } from '../../common/datetime.js'
+import { normaliseWeightToKg } from '../../common/units.js'
 import type { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import type { SessionSymptoms } from '../../daily_journal/engine/types.js'
 import type { OcrService } from '../../ocr/ocr.service.js'
@@ -379,7 +380,8 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
           position: { type: Type.STRING, description: 'Position during measurement: SITTING, STANDING, or LYING. Optional — omit if not asked.' },
           medication_taken: { type: Type.BOOLEAN, description: 'Did the patient take their meds? Must be explicitly answered by the patient.' },
           medication_scheduled_later: { type: Type.BOOLEAN, description: 'Set to true when the patient says their medication is "not due yet" / scheduled for later. Treats the dose as a neutral state (no adherence alert) instead of "missed".' },
-          weight: { type: Type.NUMBER, description: 'Weight in lbs. Omit if skipped.' },
+          weight: { type: Type.NUMBER, description: 'Weight as a number — pass whatever value the patient said. Omit if skipped. Set weight_unit to specify lbs or kg.' },
+          weight_unit: { type: Type.STRING, description: 'Unit for `weight`: "LBS" or "KG". Use whichever unit the patient actually said — do NOT convert in your head. Defaults to LBS when omitted (back-compat).' },
           symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Legacy freeform symptom list in English. Empty array [] if patient said none. Prefer the structured booleans below for the 9 known clinical symptoms.' },
           severe_headache: { type: Type.BOOLEAN, description: 'Patient reports a severe headache (Level-2 trigger). Default false.' },
           visual_changes: { type: Type.BOOLEAN, description: 'Patient reports visual changes / blurred / double vision (Level-2 trigger). Default false.' },
@@ -479,7 +481,8 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
           position: { type: Type.STRING, description: 'New position: SITTING, STANDING, or LYING.' },
           medication_taken: { type: Type.BOOLEAN, description: 'New medication status.' },
           medication_scheduled_later: { type: Type.BOOLEAN, description: 'Set true if patient now says the dose is "not due yet" / scheduled for later (neutralises the missed flag).' },
-          weight: { type: Type.NUMBER, description: 'New weight in lbs.' },
+          weight: { type: Type.NUMBER, description: 'New weight value. Set weight_unit to specify lbs or kg.' },
+          weight_unit: { type: Type.STRING, description: 'Unit for `weight`: "LBS" or "KG". Use whichever unit the patient said. Defaults to LBS.' },
           symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'New legacy freeform symptom list. ALWAYS in English. Prefer structured booleans below for the 9 known clinical symptoms.' },
           severe_headache: { type: Type.BOOLEAN, description: 'New severe-headache flag.' },
           visual_changes: { type: Type.BOOLEAN, description: 'New visual-changes flag.' },
@@ -824,7 +827,18 @@ export async function executeJournalTool(
           medicationTaken: effectiveMedicationTaken,
           medicationScheduledLater: args.medication_scheduled_later === true,
           missedMedications,
-          weight: args.weight,
+          // Bug 19 + kg/lbs follow-up — `weight` may arrive in lbs OR kg
+          // depending on the new `weight_unit` arg. Backend always
+          // persists kg. normaliseWeightToKg handles the branch (default
+          // = LBS when weight_unit omitted, for back-compat). Returns 0
+          // for invalid input so we omit the field.
+          weight: (() => {
+            const kg = normaliseWeightToKg(
+              typeof args.weight === 'number' ? args.weight : 0,
+              typeof args.weight_unit === 'string' ? args.weight_unit : undefined,
+            )
+            return kg > 0 ? kg : undefined
+          })(),
           symptoms: args.symptoms ?? [],
           // 9 structured Level-2 symptom booleans — explicit LLM arg wins;
           // otherwise pick up what the keyword mapper extracted from the
@@ -938,7 +952,14 @@ export async function executeJournalTool(
         if (updPosition) dto.position = updPosition
         if (args.medication_taken != null) dto.medicationTaken = args.medication_taken
         if (args.medication_scheduled_later != null) dto.medicationScheduledLater = args.medication_scheduled_later === true
-        if (args.weight != null) dto.weight = args.weight
+        // Bug 19 + kg/lbs follow-up — same normalisation as submit_checkin.
+        if (typeof args.weight === 'number' && args.weight > 0) {
+          const kg = normaliseWeightToKg(
+            args.weight,
+            typeof args.weight_unit === 'string' ? args.weight_unit : undefined,
+          )
+          if (kg > 0) dto.weight = kg
+        }
         if (args.symptoms != null) dto.symptoms = args.symptoms
         // Structured Level-2 booleans (only set what the model explicitly sent)
         if (args.severe_headache != null) dto.severeHeadache = args.severe_headache === true

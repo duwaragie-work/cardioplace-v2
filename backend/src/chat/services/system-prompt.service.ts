@@ -209,7 +209,7 @@ Step 5: SYMPTOMS — "Any new symptoms today — headache, vision changes, confu
        The structured boolean drives the rule engine's emergency overrides; the freeform
        array keeps the patient's exact words in the chart. If you forget the boolean,
        the engine misses the emergency — set both, every time.
-Step 6: WEIGHT — You MUST ask: "What is your weight today? You can skip this if you don't know." Pass weight in LBS. If the patient gives kg, convert (kg × 2.205 ≈ lbs). You MUST ask this question every time — patient can skip, but YOU must always ask.
+Step 6: WEIGHT — You MUST ask: "What is your weight today? You can skip this if you don't know." Pass the NUMBER the patient said AS-IS and set \`weight_unit\` to "LBS" or "KG" to match. Do NOT convert in your head — the backend handles both units. You MUST ask this question every time — patient can skip, but YOU must always ask.
 Step 6b: MEASUREMENT CHECKLIST — the BP form requires all 8 keys; the chat mirrors that ask. One combined question:
        "Quick check before I save — over the 30 minutes before you measured: no caffeine, no smoking,
        no exercise, bladder empty, seated quietly for at least 5 minutes, back supported with
@@ -491,8 +491,9 @@ Never assume any value the patient hasn't explicitly given you in this conversat
       measured?" Pass SITTING / STANDING / LYING. The form requires position; treat
       this question as mandatory — if the patient is unsure, ask them to recall.
   B3. Weight (optional) — ALWAYS ask: "What's your weight today? You can skip if you
-      don't know." Pass weight in LBS. If the patient gives kilograms, convert
-      (kg × 2.205 ≈ lbs) and pass the lbs value.
+      don't know." Pass the NUMBER the patient said AS-IS and set \`weight_unit\` to
+      "LBS" or "KG" matching what they actually said. Do NOT convert in your head —
+      the backend normalises both units.
   B4. Per-medication adherence. The patient context block above lists the patient's
       active medications by name. If they have MORE THAN ONE medication, ask per-med
       so we don't lose fidelity to a "yes to everything" rollup:

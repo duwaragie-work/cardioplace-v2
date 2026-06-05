@@ -14,6 +14,7 @@ import {
   type EmergencyFlaggedPayload,
 } from '../../chat/emergency-events.js'
 import { isoFromTzWallclock } from '../../common/datetime.js'
+import { normaliseWeightToKg } from '../../common/units.js'
 
 // Voice-tool I/O — argument shapes are stable contract with the Gemini Live
 // system prompt; field-name and sentinel-value changes ripple into the
@@ -99,7 +100,8 @@ export class VoiceToolsService {
             systolic_bp: { type: Type.INTEGER, description: 'Top number 60-250. 0 = not provided (sparse log).' },
             diastolic_bp: { type: Type.INTEGER, description: 'Bottom number 40-150. 0 = not provided (sparse log).' },
             medication_taken: { type: Type.BOOLEAN, description: 'Whether the patient took all medications.' },
-            weight: { type: Type.NUMBER, description: 'Weight in lbs. 0 = not provided.' },
+            weight: { type: Type.NUMBER, description: 'Weight as a number — whatever value the patient said. 0 = not provided. Set weight_unit to specify lbs or kg.' },
+            weight_unit: { type: Type.STRING, description: 'Unit for `weight`: "LBS" or "KG". Use whichever unit the patient actually said — do NOT convert in your head. Defaults to LBS when omitted.' },
             symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Legacy freeform symptom list. Prefer the structured booleans below.' },
             notes: { type: Type.STRING, description: 'Extra notes. ALWAYS in English.' },
             entry_date: { type: Type.STRING, description: 'YYYY-MM-DD or "" for today.' },
@@ -195,7 +197,8 @@ export class VoiceToolsService {
             systolic_bp: { type: Type.INTEGER, description: '0 = leave unchanged' },
             diastolic_bp: { type: Type.INTEGER, description: '0 = leave unchanged' },
             medication_taken: { type: Type.STRING, description: '"yes" / "no" / "" leave unchanged' },
-            weight: { type: Type.NUMBER, description: '0 = leave unchanged' },
+            weight: { type: Type.NUMBER, description: 'New weight. 0 = leave unchanged. Set weight_unit to specify lbs or kg.' },
+            weight_unit: { type: Type.STRING, description: 'Unit for `weight`: "LBS" or "KG". Use whichever unit the patient said. Defaults to LBS.' },
             symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: '[] = leave unchanged' },
             notes: { type: Type.STRING, description: '"" = leave unchanged. ALWAYS English.' },
             measurement_time: { type: Type.STRING, description: 'HH:mm. "" = leave unchanged.' },
@@ -487,7 +490,18 @@ export class VoiceToolsService {
       dto.systolicBP = sbp
       dto.diastolicBP = dbp
     }
-    if (weight > 0) dto.weight = weight
+    // Bug 19 + kg/lbs follow-up — tool now accepts BOTH units via the
+    // new `weight_unit` arg ('LBS' | 'KG'). Default = LBS for back-compat
+    // when the LLM omits the unit. JournalEntry.weight stores kg, so
+    // normalise here. The submitCheckin response below still echoes raw
+    // patient lbs for the frontend CheckinCard (which displays lbs).
+    if (weight > 0) {
+      const kg = normaliseWeightToKg(
+        weight,
+        typeof args.weight_unit === 'string' ? args.weight_unit : undefined,
+      )
+      if (kg > 0) dto.weight = kg
+    }
     const pulse = toInt(args.pulse, 0)
     if (pulse > 0) dto.pulse = pulse
     const position = asString(args.position, '').trim().toUpperCase()
@@ -761,7 +775,14 @@ export class VoiceToolsService {
       else if (['no', 'false', 'missed', 'not taken'].includes(medicationTakenStr)) dto.medicationTaken = false
     }
     const weight = toNumber(args.weight, 0)
-    if (weight > 0) dto.weight = weight
+    // Bug 19 + kg/lbs follow-up — same normalisation as submitCheckin.
+    if (weight > 0) {
+      const kg = normaliseWeightToKg(
+        weight,
+        typeof args.weight_unit === 'string' ? args.weight_unit : undefined,
+      )
+      if (kg > 0) dto.weight = kg
+    }
     const symptoms = toStringArray(args.symptoms)
     if (symptoms.length) dto.symptoms = symptoms
     const notes = asString(args.notes, '')
@@ -780,7 +801,8 @@ export class VoiceToolsService {
     if ('systolicBP' in dto) changes.push(`systolic=${dto.systolicBP}`)
     if ('diastolicBP' in dto) changes.push(`diastolic=${dto.diastolicBP}`)
     if ('medicationTaken' in dto) changes.push(`medication=${dto.medicationTaken ? 'taken' : 'missed'}`)
-    if ('weight' in dto) changes.push(`weight=${dto.weight}lbs`)
+    // Bug 19 — dto.weight is now kg (post lbsToKg conversion above).
+    if ('weight' in dto) changes.push(`weight=${dto.weight}kg`)
     if ('symptoms' in dto) {
       const syms = dto.symptoms as string[]
       changes.push(`symptoms=${syms.length ? syms.join(',') : 'none'}`)

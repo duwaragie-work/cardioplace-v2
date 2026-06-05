@@ -188,7 +188,9 @@ describe('VoiceToolsService.dispatch', () => {
       systolicBP: 130,
       diastolicBP: 80,
       medicationTaken: true,
-      weight: 165,
+      // Bug 19 — args.weight is lbs (per tool description + voice prompt);
+      // DTO must be kg. 165 × 0.45359237 = 74.84 → rounded = 74.8 kg.
+      weight: 74.8,
       pulse: 72,
       position: 'SITTING',
       severeHeadache: true,
@@ -303,6 +305,92 @@ describe('VoiceToolsService.dispatch', () => {
     const r = await service.dispatch('get_recent_readings', {}, CTX)
     expect((r.llmResponse as any).summary).toBe('No readings found.')
     expect((r.llmResponse as any).count).toBe(0)
+  })
+
+  // ─── Bug 19 — weight lbs→kg conversion at voice dispatcher ────────────
+  // Voice tool description + voice prompt both tell the LLM to pass
+  // weight in lbs. JournalEntry.weight stores kg. submitCheckin /
+  // updateCheckin both must convert before writing — pre-fix they
+  // persisted the lbs value as kg, then formatWeightLbs() re-multiplied
+  // for display (150 lbs → 330.7 lbs in My Readings).
+
+  it('submit_checkin: omits weight when args.weight is 0 (skipped)', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 120,
+        diastolic_bp: 80,
+        medication_taken: true,
+        weight: 0,
+        symptoms: [],
+      },
+      CTX,
+    )
+    const dto = (dailyJournal.create as jest.Mock).mock.calls[0][1] as { weight?: number }
+    // 0-weight (skip sentinel from voice) must not land as 0 kg.
+    expect(dto.weight).toBeUndefined()
+  })
+
+  // ─── kg/lbs follow-up — weight_unit handling on voice ─────────────────
+  it('submit_checkin: weight_unit="KG" persists raw (no conversion)', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 120,
+        diastolic_bp: 80,
+        medication_taken: true,
+        weight: 68,
+        weight_unit: 'KG',
+        symptoms: [],
+      },
+      CTX,
+    )
+    const dto = (dailyJournal.create as jest.Mock).mock.calls[0][1] as { weight: number }
+    expect(dto.weight).toBe(68.0)
+  })
+
+  it('submit_checkin: weight_unit="LBS" converts to kg', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 120,
+        diastolic_bp: 80,
+        medication_taken: true,
+        weight: 150,
+        weight_unit: 'LBS',
+        symptoms: [],
+      },
+      CTX,
+    )
+    const dto = (dailyJournal.create as jest.Mock).mock.calls[0][1] as { weight: number }
+    expect(dto.weight).toBe(68.0)
+  })
+
+  it('update_checkin: weight_unit="KG" persists raw on update', async () => {
+    ;(dailyJournal.update as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'update_checkin',
+      { entry_id: 'entry-1', weight: 90, weight_unit: 'KG' },
+      CTX,
+    )
+    const dto = (dailyJournal.update as jest.Mock).mock.calls[0][2] as { weight: number }
+    expect(dto.weight).toBe(90.0)
+  })
+
+  it('update_checkin: applies same lbs→kg conversion when weight is updated', async () => {
+    ;(dailyJournal.update as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'update_checkin',
+      { entry_id: 'entry-1', weight: 200 },
+      CTX,
+    )
+    expect(dailyJournal.update).toHaveBeenCalledTimes(1)
+    const dto = (dailyJournal.update as jest.Mock).mock.calls[0][2] as { weight: number }
+    // 200 × 0.45359237 = 90.71874 → 90.7 kg
+    expect(dto.weight).toBe(90.7)
   })
 
   // ── update_checkin ────────────────────────────────────────────────────────

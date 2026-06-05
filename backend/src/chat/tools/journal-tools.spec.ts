@@ -517,6 +517,174 @@ describe('journal-tools', () => {
       expect(dto.measuredAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/)
     })
 
+    // ─── Bug 19 — weight lbs→kg conversion at dispatcher ────────────────
+    // Tool description tells the LLM to pass weight in lbs; system prompt
+    // reinforces it. JournalEntry.weight is stored in kg. Dispatcher must
+    // convert before writing — pre-fix it persisted the lbs value as kg,
+    // and the readings page then re-multiplied for display (150 → 330.7).
+    it('submit_checkin: converts patient lbs weight to kg before persisting', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'ok', systolicBP: 120, diastolicBP: 80 },
+      })
+      const today = new Date().toISOString().slice(0, 10)
+      const ctx = { journalService: mockJournalService as any }
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: today,
+          measurement_time: '09:00',
+          systolic_bp: 120,
+          diastolic_bp: 80,
+          weight: 150, // patient said "150 lbs"
+          medication_taken: true,
+          symptoms: [],
+        },
+        ctx as any,
+        'user-1',
+      )
+      expect(mockJournalService.create).toHaveBeenCalledTimes(1)
+      const dto = mockJournalService.create.mock.calls[0][1] as { weight: number }
+      // 150 × 0.45359237 = 68.0386 → rounded to one decimal = 68.0 kg
+      expect(dto.weight).toBe(68.0)
+    })
+
+    it('submit_checkin: omits weight when args.weight is 0', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'ok', systolicBP: 120, diastolicBP: 80 },
+      })
+      const today = new Date().toISOString().slice(0, 10)
+      const ctx = { journalService: mockJournalService as any }
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: today,
+          measurement_time: '09:00',
+          systolic_bp: 120,
+          diastolic_bp: 80,
+          weight: 0,
+          medication_taken: true,
+          symptoms: [],
+        },
+        ctx as any,
+        'user-1',
+      )
+      const dto = mockJournalService.create.mock.calls[0][1] as { weight?: number }
+      // Skipped weight should not land as 0 kg — must be omitted entirely.
+      expect(dto.weight).toBeUndefined()
+    })
+
+    // ─── kg/lbs follow-up — weight_unit arg handling ────────────────────
+    // Tool now accepts BOTH units; LLM passes the unit the patient said.
+    // Backend normalises to kg before persisting. Default = LBS for
+    // back-compat with the pre-feature contract.
+    it('submit_checkin: weight_unit="KG" persists weight raw (no conversion)', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'ok', systolicBP: 120, diastolicBP: 80 },
+      })
+      const today = new Date().toISOString().slice(0, 10)
+      const ctx = { journalService: mockJournalService as any }
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: today,
+          measurement_time: '09:00',
+          systolic_bp: 120,
+          diastolic_bp: 80,
+          weight: 68, // patient said "68 kg"
+          weight_unit: 'KG',
+          medication_taken: true,
+          symptoms: [],
+        },
+        ctx as any,
+        'user-1',
+      )
+      const dto = mockJournalService.create.mock.calls[0][1] as { weight: number }
+      // 68 kg — stored as-is (rounded to 1 decimal).
+      expect(dto.weight).toBe(68.0)
+    })
+
+    it('submit_checkin: weight_unit="LBS" converts to kg', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'ok', systolicBP: 120, diastolicBP: 80 },
+      })
+      const today = new Date().toISOString().slice(0, 10)
+      const ctx = { journalService: mockJournalService as any }
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: today,
+          measurement_time: '09:00',
+          systolic_bp: 120,
+          diastolic_bp: 80,
+          weight: 150,
+          weight_unit: 'LBS',
+          medication_taken: true,
+          symptoms: [],
+        },
+        ctx as any,
+        'user-1',
+      )
+      const dto = mockJournalService.create.mock.calls[0][1] as { weight: number }
+      expect(dto.weight).toBe(68.0)
+    })
+
+    it('submit_checkin: weight_unit lowercase "kg" still matches (case-insensitive)', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'ok', systolicBP: 120, diastolicBP: 80 },
+      })
+      const today = new Date().toISOString().slice(0, 10)
+      const ctx = { journalService: mockJournalService as any }
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: today,
+          measurement_time: '09:00',
+          systolic_bp: 120,
+          diastolic_bp: 80,
+          weight: 75,
+          weight_unit: 'kg',
+          medication_taken: true,
+          symptoms: [],
+        },
+        ctx as any,
+        'user-1',
+      )
+      const dto = mockJournalService.create.mock.calls[0][1] as { weight: number }
+      expect(dto.weight).toBe(75.0)
+    })
+
+    it('update_checkin: weight_unit="KG" persists raw on update', async () => {
+      mockJournalService.update.mockResolvedValue({
+        data: { id: 'entry-1', systolicBP: 120, diastolicBP: 80 },
+      })
+      const ctx = { journalService: mockJournalService as any }
+      await executeJournalTool(
+        'update_checkin',
+        { entry_id: 'entry-1', weight: 90, weight_unit: 'KG' },
+        ctx as any,
+        'user-1',
+      )
+      const dto = mockJournalService.update.mock.calls[0][2] as { weight: number }
+      expect(dto.weight).toBe(90.0)
+    })
+
+    it('update_checkin: applies same lbs→kg conversion when weight is updated', async () => {
+      mockJournalService.update.mockResolvedValue({
+        data: { id: 'entry-1', systolicBP: 120, diastolicBP: 80 },
+      })
+      const ctx = { journalService: mockJournalService as any }
+      await executeJournalTool(
+        'update_checkin',
+        { entry_id: 'entry-1', weight: 200 },
+        ctx as any,
+        'user-1',
+      )
+      expect(mockJournalService.update).toHaveBeenCalledTimes(1)
+      const dto = mockJournalService.update.mock.calls[0][2] as { weight: number }
+      // 200 × 0.45359237 = 90.71874 → 90.7 kg
+      expect(dto.weight).toBe(90.7)
+    })
+
     it('update_checkin: applies ctx.timezone when only measurement_time changes', async () => {
       mockJournalService.update.mockResolvedValue({
         data: { id: 'entry-1', systolicBP: 130, diastolicBP: 90 },
