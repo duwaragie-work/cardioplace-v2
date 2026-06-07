@@ -12,6 +12,8 @@ import {
   BP_LEVEL_2_SYMPTOM_OVERRIDE_LADDER,
   TIER_1_BACKUP_ON_T0,
   ANGIOEDEMA_PATIENT_T0,
+  BP_LEVEL_1_PATIENT_T0,
+  TIER_1_CONTRAINDICATION_PATIENT_T0,
 } from './ladder-defs.js'
 
 describe('ladderForTier', () => {
@@ -313,6 +315,36 @@ describe('Cluster 8 — TIER_1_ANGIOEDEMA_LADDER (compressed)', () => {
     expect(ANGIOEDEMA_PATIENT_T0.offsetMs).toBe(0)
     expect(ANGIOEDEMA_PATIENT_T0.recipientRoles).toEqual(['PATIENT'])
     expect(ANGIOEDEMA_PATIENT_T0.afterHoursBehavior).toBe('FIRE_IMMEDIATELY')
+  })
+
+  // Manisha Open-Decisions sign-off 2026-06-06 (Decision 6) — BP_LEVEL_1
+  // patient row re-instated, cohort-gated by EscalationService.fireT0 to
+  // STANDARD mode + HIGH tier only. Ladder-defs spec asserts shape only;
+  // cohort-gate enforcement is covered in the service spec.
+  it('BP_LEVEL_1_PATIENT_T0 row carries EMAIL+DASHBOARD for the PATIENT at T+0', () => {
+    expect(BP_LEVEL_1_PATIENT_T0.step).toBe('T0')
+    expect(BP_LEVEL_1_PATIENT_T0.offsetMs).toBe(0)
+    expect(BP_LEVEL_1_PATIENT_T0.recipientRoles).toEqual(['PATIENT'])
+    expect(BP_LEVEL_1_PATIENT_T0.afterHoursBehavior).toBe('FIRE_IMMEDIATELY')
+    // EMAIL is the real out-of-app channel (no live PUSH transport yet);
+    // DASHBOARD row is written + filtered at the F12 guard for any PATIENT
+    // recipient, so it intentionally doesn't reach the bell.
+    expect(BP_LEVEL_1_PATIENT_T0.channels).toEqual(['EMAIL', 'DASHBOARD'])
+  })
+
+  // Manisha Open-Decisions sign-off 2026-06-06 (Decision 5) — new patient
+  // EMAIL dispatch closes the contraindication "continued exposure" gap.
+  it('TIER_1_CONTRAINDICATION_PATIENT_T0 row carries EMAIL+DASHBOARD for the PATIENT at T+0', () => {
+    expect(TIER_1_CONTRAINDICATION_PATIENT_T0.step).toBe('T0')
+    expect(TIER_1_CONTRAINDICATION_PATIENT_T0.offsetMs).toBe(0)
+    expect(TIER_1_CONTRAINDICATION_PATIENT_T0.recipientRoles).toEqual(['PATIENT'])
+    expect(TIER_1_CONTRAINDICATION_PATIENT_T0.afterHoursBehavior).toBe(
+      'FIRE_IMMEDIATELY',
+    )
+    expect(TIER_1_CONTRAINDICATION_PATIENT_T0.channels).toEqual([
+      'EMAIL',
+      'DASHBOARD',
+    ])
   })
 
   it('nextStep walks the compressed ladder end-to-end', () => {

@@ -94,7 +94,8 @@ function tierChrome(b: TierFilter | 'OTHER'): { label: string; color: string; bg
     case 'TIER_1': return { label: 'Tier 1', color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)' };
     case 'TIER_2': return { label: 'Tier 2', color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
     case 'BP_L1': return { label: 'BP L1', color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
-    case 'TIER_3': return { label: 'Tier 3', color: 'var(--brand-accent-teal)', bg: 'var(--brand-accent-teal-light)' };
+    // Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — Tier 3 = info-blue.
+    case 'TIER_3': return { label: 'Tier 3', color: 'var(--brand-info-blue)', bg: 'var(--brand-info-blue-light)' };
     default: return { label: 'Other', color: 'var(--brand-text-muted)', bg: 'var(--brand-background)' };
   }
 }

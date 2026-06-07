@@ -3,6 +3,7 @@
 
 import { RULE_IDS, type ContextMedication, type DrugClassInput } from '@cardioplace/shared'
 import type { RuleFunction } from './types.js'
+import { gestationalAgeWeeksFromProfile } from './pregnancy-thresholds.js'
 
 /**
  * Rule 1 — Pregnancy + ACE/ARB (teratogenic). Fires regardless of BP.
@@ -62,6 +63,13 @@ export const pregnancyAceArbRule: RuleFunction = (session, ctx) => {
       drugClass: unique[0].drugClass,
       drugNames,
       conditionLabel: 'Pregnancy',
+      // Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, conditional
+      // exception) — gestational age threaded through to the physician message
+      // because teratogenic ACE/ARB risk differs by trimester.
+      gestationalAgeWeeks: gestationalAgeWeeksFromProfile(
+        ctx.profile.pregnancyDueDate,
+        session.measuredAt,
+      ),
     },
   }
 }

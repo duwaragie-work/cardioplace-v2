@@ -324,16 +324,18 @@ export default function MedicationsTab({ patientUserId, medications, loading, on
               </div>
               <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
                 {/* Tier 3 informational notes for this drug class. Quiet
-                    teal palette + Info icon — physician-only context, not
-                    a safety-critical warning. Tooltip carries the full
-                    physicianMessage. */}
+                    info-blue palette + Info icon — physician-only context,
+                    not a safety-critical warning. Tooltip carries the full
+                    physicianMessage.
+                    Manisha Open-Decisions sign-off 2026-06-06 (Decision 1):
+                    Tier 3 chrome moved from teal to info-blue. */}
                 {tier3Notes.map((note) => (
                   <span
                     key={note.id}
                     className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-2 py-0.5 rounded-full"
                     style={{
-                      backgroundColor: 'var(--brand-accent-teal-light)',
-                      color: 'var(--brand-accent-teal)',
+                      backgroundColor: 'var(--brand-info-blue-light)',
+                      color: 'var(--brand-info-blue)',
                     }}
                     title={note.physicianMessage ?? note.patientMessage ?? note.ruleId ?? 'Physician note'}
                   >
