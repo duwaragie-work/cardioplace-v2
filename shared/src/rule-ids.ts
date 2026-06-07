@@ -32,6 +32,10 @@ export const RULE_IDS = {
   HCM_VASODILATOR: 'RULE_HCM_VASODILATOR',
   DCM_LOW: 'RULE_DCM_LOW',
   DCM_HIGH: 'RULE_DCM_HIGH',
+  // Manisha 5/24 Q5C — aortic stenosis (interim HCM-style thresholds: low <100,
+  // high ≥160; provider-overridable, mandatory provider thresholds).
+  AORTIC_STENOSIS_LOW: 'RULE_AORTIC_STENOSIS_LOW',
+  AORTIC_STENOSIS_HIGH: 'RULE_AORTIC_STENOSIS_HIGH',
 
   // Personalized (threshold + ≥7 readings)
   PERSONALIZED_HIGH: 'RULE_PERSONALIZED_HIGH',
@@ -53,6 +57,10 @@ export const RULE_IDS = {
 
   // Physician-only
   PULSE_PRESSURE_WIDE: 'RULE_PULSE_PRESSURE_WIDE',
+  // Manisha 5/24 Q2 — narrow pulse pressure on the session average (<25 mmHg),
+  // condition-specific physician note. Distinct from the per-reading <15
+  // artifact flag (JournalEntry.narrowPpArtifact, set at entry).
+  PULSE_PRESSURE_NARROW: 'RULE_PULSE_PRESSURE_NARROW',
   LOOP_DIURETIC_HYPOTENSION: 'RULE_LOOP_DIURETIC_HYPOTENSION',
 
   // Medication adherence (Tier 2 discrepancy, dismissable) — fires on a
@@ -194,6 +202,8 @@ export const RULE_AXIS: Record<RuleId, RuleAxis> = {
   [RULE_IDS.HCM_HIGH]: 'systolic',
   [RULE_IDS.DCM_LOW]: 'systolic',
   [RULE_IDS.DCM_HIGH]: 'systolic',
+  [RULE_IDS.AORTIC_STENOSIS_LOW]: 'systolic',
+  [RULE_IDS.AORTIC_STENOSIS_HIGH]: 'systolic',
   [RULE_IDS.AGE_65_LOW]: 'systolic',
   [RULE_IDS.PREGNANCY_L1_HIGH]: 'systolic',
   [RULE_IDS.PREGNANCY_L2]: 'systolic',
@@ -201,6 +211,7 @@ export const RULE_AXIS: Record<RuleId, RuleAxis> = {
   [RULE_IDS.SYMPTOM_OVERRIDE_PREGNANCY]: 'systolic',
   [RULE_IDS.LOOP_DIURETIC_HYPOTENSION]: 'systolic',
   [RULE_IDS.PULSE_PRESSURE_WIDE]: 'systolic',
+  [RULE_IDS.PULSE_PRESSURE_NARROW]: 'systolic',
 
   // Profile / medication / symptom-driven rules (actualValue is null)
   [RULE_IDS.NDHP_HFREF]: 'profile',

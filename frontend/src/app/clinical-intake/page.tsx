@@ -77,6 +77,8 @@ import {
   STEP_ORDER,
 } from '@/lib/intake/draft';
 import { EMPTY_INTAKE_STATE, type IntakeFormState, type IntakeStepKey, type SelectedMedication } from '@/lib/intake/types';
+import { categoriesForSelectedMeds } from '@/lib/intake/categories';
+import CaregiversCard from '@/components/cardio/CaregiversCard';
 
 import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
@@ -160,7 +162,8 @@ function computeFlow(state: IntakeFormState): IntakeStepKey[] {
   // an empty list the patient just sees "you can skip ahead" copy and a
   // disabled Continue — drop the step entirely instead.
   if (state.selectedMedications.length > 0) flow.push('A9');
-  flow.push('A10', 'A11');
+  // Gap 5 — optional caregiver capture sits just before review.
+  flow.push('ACG', 'A10', 'A11');
   return flow;
 }
 
@@ -289,8 +292,8 @@ function buildProfilePayload(s: IntakeFormState): IntakeProfilePayload {
       s.gender === 'FEMALE' && s.isPregnant === true
         ? (s.pregnancyDueDate || null)
         : null,
-    historyPreeclampsia:
-      s.gender === 'FEMALE' ? (s.historyPreeclampsia ?? false) : false,
+    historyHDP:
+      s.gender === 'FEMALE' ? (s.historyHDP ?? false) : false,
     hasHeartFailure: s.hasHeartFailure ?? false,
     heartFailureType: s.hasHeartFailure
       ? (s.heartFailureType ?? 'UNKNOWN')
@@ -299,6 +302,7 @@ function buildProfilePayload(s: IntakeFormState): IntakeProfilePayload {
     hasCAD: s.hasCAD ?? false,
     hasHCM: s.hasHCM ?? false,
     hasDCM: s.hasDCM ?? false,
+    hasAorticStenosis: s.hasAorticStenosis ?? false,
     diagnosedHypertension: s.diagnosedHypertension ?? false,
   };
 }
@@ -663,7 +667,7 @@ function A2Pregnancy({ state, setState }: StepProps) {
                 ...p,
                 isPregnant: false,
                 // Due date is gated behind the Yes panel so it's safe to
-                // wipe here. historyPreeclampsia is its own independent
+                // wipe here. historyHDP is its own independent
                 // question now and is left untouched.
                 pregnancyDueDate: undefined,
               }))
@@ -702,17 +706,22 @@ function A2Pregnancy({ state, setState }: StepProps) {
             icon={<Shield className="w-6 h-6" />}
             title={t('intake.a2.yesTitle')}
             description={t('intake.a2.preeclampsiaYesDesc')}
-            selected={state.historyPreeclampsia === true}
-            onClick={() => setState((p) => ({ ...p, historyPreeclampsia: true }))}
+            selected={state.historyHDP === true}
+            onClick={() => setState((p) => ({ ...p, historyHDP: true }))}
             audioText={t('intake.a2.preeclampsiaYesAudio')}
+            // #16 — testId the qa intake helper already targets. Was missing,
+            // so the HDP step's click silently no-op'd (helper .catch()).
+            // Stable id kept as `preeclampsia` to match the i18n key naming.
+            testId="intake-preeclampsia-yes"
           />
           <ChoiceCard
             icon={<Heart className="w-6 h-6" />}
             title={t('intake.a2.noTitle')}
             description={t('intake.a2.preeclampsiaNoDesc')}
-            selected={state.historyPreeclampsia === false}
-            onClick={() => setState((p) => ({ ...p, historyPreeclampsia: false }))}
+            selected={state.historyHDP === false}
+            onClick={() => setState((p) => ({ ...p, historyHDP: false }))}
             audioText={t('intake.a2.preeclampsiaNoAudio')}
+            testId="intake-preeclampsia-no"
           />
         </div>
       </div>
@@ -787,6 +796,15 @@ function A3Conditions({ state, setState }: StepProps) {
           audioText={t('intake.a3.dcmAudio')}
         />
         <ChoiceCard
+          icon={<Stethoscope className="w-6 h-6" />}
+          title={t('intake.a3.aorticStenosisTitle')}
+          description={t('intake.a3.aorticStenosisDesc')}
+          selected={has('hasAorticStenosis')}
+          onClick={() => set('hasAorticStenosis', !state.hasAorticStenosis)}
+          audioText={t('intake.a3.aorticStenosisAudio')}
+          testId="intake-condition-AORTIC_STENOSIS"
+        />
+        <ChoiceCard
           icon={<X className="w-6 h-6" />}
           title={t('intake.a3.noneTitle')}
           description={t('intake.a3.noneDesc')}
@@ -799,6 +817,7 @@ function A3Conditions({ state, setState }: StepProps) {
             hasCAD: false,
             hasHCM: false,
             hasDCM: false,
+            hasAorticStenosis: false,
             heartFailureType: undefined,
             // Explicit acknowledgement — distinguishes "user said no"
             // from "user hasn't touched the step yet".
@@ -1035,25 +1054,53 @@ function useRejectedDrugKeys(): Set<string> {
 // `requestAdd` runs `doAdd` immediately for a drug that wasn't previously
 // rejected, or defers it behind the modal when it was (option c: warn → allow).
 // Render the returned `modal` somewhere in the consuming step's JSX.
-function useReAddConfirm(): {
-  requestAdd: (canonicalKey: string, displayName: string, doAdd: () => void) => void;
+function useReAddConfirm(aceContraindicated = false): {
+  requestAdd: (
+    canonicalKey: string,
+    displayName: string,
+    doAdd: () => void,
+    drugClass?: string,
+  ) => void;
   modal: React.ReactNode;
 } {
   const rejectedKeys = useRejectedDrugKeys();
-  const [pending, setPending] = useState<{ name: string; onConfirm: () => void } | null>(null);
+  const [pending, setPending] = useState<{
+    name: string;
+    onConfirm: () => void;
+    variant: 'rejected' | 'contraindicated';
+    drugClass?: string;
+  } | null>(null);
 
-  const requestAdd = (canonicalKey: string, displayName: string, doAdd: () => void) => {
+  const requestAdd = (
+    canonicalKey: string,
+    displayName: string,
+    doAdd: () => void,
+    drugClass?: string,
+  ) => {
+    // F13 — ACE/ARB on a contraindicated patient: gate behind the
+    // contraindication warning (takes priority over the rejected re-add path).
+    // The backend independently holds the med for provider review + notifies
+    // the care team, so this modal is the patient-facing transparency layer.
+    if (
+      aceContraindicated &&
+      (drugClass === 'ACE_INHIBITOR' || drugClass === 'ARB')
+    ) {
+      setPending({ name: displayName, onConfirm: doAdd, variant: 'contraindicated', drugClass });
+      return;
+    }
     if (!rejectedKeys.has(canonicalKey)) {
       doAdd();
       return;
     }
-    setPending({ name: displayName, onConfirm: doAdd });
+    setPending({ name: displayName, onConfirm: doAdd, variant: 'rejected' });
   };
 
   const modal = (
     <ReAddConfirmModal
       open={pending != null}
       drugName={pending?.name ?? ''}
+      variant={pending?.variant ?? 'rejected'}
+      drugClass={pending?.drugClass}
       onConfirm={() => {
         const p = pending;
         setPending(null);
@@ -1067,7 +1114,7 @@ function useReAddConfirm(): {
 }
 
 function A5CoreMeds({ state, setState }: StepProps) {
-  const { requestAdd, modal: reAddModal } = useReAddConfirm();
+  const { requestAdd, modal: reAddModal } = useReAddConfirm(state.aceContraindicated);
   const selectedIds = useMemo(
     () => new Set(state.selectedMedications.filter((m) => !m.isCombination).map((m) => m.catalogId).filter(Boolean) as string[]),
     [state.selectedMedications],
@@ -1104,7 +1151,9 @@ function A5CoreMeds({ state, setState }: StepProps) {
       return;
     }
     // IVR-19 — re-adding a med the care team rejected: confirm via modal first.
-    requestAdd(med.id, med.brandName, () => addMed(med));
+    // F13 — pass drugClass so an ACE/ARB re-add on a contraindicated patient
+    // is gated behind the contraindication warning.
+    requestAdd(med.id, med.brandName, () => addMed(med), med.drugClass);
   };
 
   // Phase/28 — OTHER_UNVERIFIED meds list at the bottom of A5. The hook
@@ -1238,7 +1287,7 @@ function A5CoreMeds({ state, setState }: StepProps) {
 
 function A6Combos({ state, setState }: StepProps) {
   const { t } = useLanguage();
-  const { requestAdd, modal: reAddModal } = useReAddConfirm();
+  const { requestAdd, modal: reAddModal } = useReAddConfirm(state.aceContraindicated);
   const selectedIds = useMemo(
     () => new Set(state.selectedMedications.filter((m) => m.isCombination).map((m) => m.catalogId).filter(Boolean) as string[]),
     [state.selectedMedications],
@@ -1274,6 +1323,9 @@ function A6Combos({ state, setState }: StepProps) {
       return;
     }
     // IVR-19 — re-adding a combo the care team rejected: confirm via modal first.
+    // F13 — combo entries don't expose a single drugClass, so the modal-level
+    // ACE/ARB gate doesn't apply here; the backend still holds any ACE/ARB
+    // component for provider review on a contraindicated patient.
     requestAdd(combo.id, combo.brandName, () => addCombo(combo));
   };
   const contains = t('intake.a6.audioContains');
@@ -1312,20 +1364,32 @@ function A8Categories({ state, setState }: StepProps) {
   // a Furosemide tick when they go check the blood-thinner list. Selections
   // already persist cross-category in state.selectedMedications; this just
   // matches the UI affordance to that reality.
-  const [activeCategories, setActiveCategories] = useState<Set<string>>(() => {
-    // Auto-expand any category that already has a selected med — e.g. a
+  const [activeCategories, setActiveCategories] = useState<Set<string>>(() =>
+    // Auto-expand any category that already has a selected med on mount — e.g. a
     // prescription scan matched a water pill / blood thinner that lives inside
     // one of these dropdowns. Without this the med is selected but hidden, so
-    // the patient can't see it was picked up. (selectedIds already shows it as
-    // checked; this just reveals the right dropdown on entry.)
-    const set = new Set<string>();
-    for (const m of state.selectedMedications) {
-      if (!m.catalogId) continue;
-      const cat = CATEGORY_MEDS.find((c) => c.id === m.catalogId);
-      if (cat?.category) set.add(cat.category);
-    }
-    return set;
-  });
+    // the patient can't see it was picked up.
+    categoriesForSelectedMeds(state.selectedMedications),
+  );
+  // The lazy initializer above runs once on mount. A prescription scan
+  // (addOcrMedications) or any other LATE add updates selectedMedications
+  // afterwards, so a newly-matched category med would be ticked yet its card
+  // left collapsed. React to selection changes and union the matched
+  // categories in — add-only, so we never auto-collapse a card the patient
+  // manually closed.
+  useEffect(() => {
+    setActiveCategories((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const cat of categoriesForSelectedMeds(state.selectedMedications)) {
+        if (!next.has(cat)) {
+          next.add(cat);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [state.selectedMedications]);
   const [otherText, setOtherText] = useState(state.otherDraft?.text ?? '');
   // Phase/25 — inline dedup error for the voice/photo "anything else" path.
   // Cleared on next keystroke or after a 3.5s timeout so the UI doesn't
@@ -1335,7 +1399,7 @@ function A8Categories({ state, setState }: StepProps) {
   // dictation instead. Backend still accepts PATIENT_PHOTO source for
   // back-compat; we just don't surface that path in the UI any more.
 
-  const { requestAdd, modal: reAddModal } = useReAddConfirm();
+  const { requestAdd, modal: reAddModal } = useReAddConfirm(state.aceContraindicated);
   const selectedIds = useMemo(
     () => new Set(state.selectedMedications.map((m) => m.catalogId).filter(Boolean) as string[]),
     [state.selectedMedications],
@@ -1369,7 +1433,9 @@ function A8Categories({ state, setState }: StepProps) {
       return;
     }
     // IVR-19 — re-adding a med the care team rejected: confirm via modal first.
-    requestAdd(med.id, med.brandName, () => addCategoryMed(med));
+    // F13 — category meds carry drugClass; ARBs (e.g. Cozaar) live here and are
+    // gated when the patient is contraindicated.
+    requestAdd(med.id, med.brandName, () => addCategoryMed(med), med.drugClass);
   };
 
   const addOther = (source: 'PATIENT_VOICE' | 'PATIENT_PHOTO', rawText: string) => {
@@ -1465,6 +1531,7 @@ function A8Categories({ state, setState }: StepProps) {
           .map((cat) => (
             <motion.div
               key={cat.key}
+              data-testid={`intake-cat-expanded-${cat.key}`}
               initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
@@ -1709,6 +1776,26 @@ function A9Frequency({ state, setState }: StepProps) {
   );
 }
 
+// Gap 5 — optional caregiver capture during intake. Reuses the self-contained
+// CaregiversCard (same add/edit/remove + consent the profile page uses); it
+// persists each caregiver immediately via /api/me/caregivers, so the sticky
+// "Continue" button just advances — no special submit wiring needed. Fully
+// optional: the patient can continue without adding anyone.
+function ACGCaregivers(_props: StepProps) {
+  return (
+    <div data-testid="intake-step-caregivers">
+      <StepHeader
+        title="Add a caregiver (optional)"
+        subtitle="A family member or friend we can notify if a serious health alert comes up. They’re only contacted for care-team-approved alerts, and only after you give consent. You can skip this and add someone later from your profile."
+        audio="Optionally add a caregiver — a family member or friend we can notify if a serious health alert comes up. They are only contacted after you give consent. You can skip this and add someone later from your profile."
+      />
+      <div className="mt-4">
+        <CaregiversCard />
+      </div>
+    </div>
+  );
+}
+
 function A10Review({ state, goTo }: StepProps) {
   const { t } = useLanguage();
 
@@ -1730,6 +1817,7 @@ function A10Review({ state, goTo }: StepProps) {
   if (state.hasCAD) conditionList.push(t('intake.a10.conditionCad'));
   if (state.hasHCM) conditionList.push(t('intake.a10.conditionHcm'));
   if (state.hasDCM) conditionList.push(t('intake.a10.conditionDcm'));
+  if (state.hasAorticStenosis) conditionList.push(t('intake.a10.conditionAorticStenosis'));
 
   const pregnancyValue = state.isPregnant === true
     ? (state.pregnancyDueDate
@@ -2232,17 +2320,21 @@ function ClinicalIntakeWizard() {
           // Branch 2 — populate form with existing data so the patient sees
           // their current answers and can edit just what changed.
           const seeded: IntakeFormState = {
+            // F13 — carry the ACE/ARB contraindication flag so the med-add
+            // step can gate re-adds behind the contraindication warning.
+            aceContraindicated: profile.aceContraindicatedAt != null,
             gender: profile.gender ?? undefined,
             heightCm: profile.heightCm ?? undefined,
             dateOfBirth: carriedDob,
             isPregnant: profile.isPregnant ?? undefined,
             pregnancyDueDate: toDateInput(profile.pregnancyDueDate),
-            historyPreeclampsia: profile.historyPreeclampsia ?? false,
+            historyHDP: profile.historyHDP ?? false,
             hasHeartFailure: profile.hasHeartFailure ?? false,
             hasAFib: profile.hasAFib ?? false,
             hasCAD: profile.hasCAD ?? false,
             hasHCM: profile.hasHCM ?? false,
             hasDCM: profile.hasDCM ?? false,
+            hasAorticStenosis: profile.hasAorticStenosis ?? false,
             heartFailureType:
               profile.heartFailureType && profile.heartFailureType !== 'NOT_APPLICABLE'
                 ? profile.heartFailureType
@@ -2431,7 +2523,7 @@ function ClinicalIntakeWizard() {
       if (state.isPregnant !== true && state.isPregnant !== false) {
         return { kind: 'key', key: 'intake.nav.errorPregnancy' };
       }
-      if (state.historyPreeclampsia !== true && state.historyPreeclampsia !== false) {
+      if (state.historyHDP !== true && state.historyHDP !== false) {
         return { kind: 'key', key: 'intake.nav.errorPreeclampsia' };
       }
     }
@@ -2806,6 +2898,7 @@ function ClinicalIntakeWizard() {
             {step === 'A6' && <A6Combos {...stepProps} />}
             {step === 'A8' && <A8Categories {...stepProps} />}
             {step === 'A9' && <A9Frequency {...stepProps} />}
+            {step === 'ACG' && <ACGCaregivers {...stepProps} />}
             {step === 'A10' && <A10Review {...stepProps} />}
             {step === 'A11' && <A11Complete onDone={() => router.push('/dashboard')} />}
           </motion.div>

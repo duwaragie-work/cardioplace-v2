@@ -2,15 +2,24 @@ import { Body, Controller, Post, Res, Req, Get, Param, Delete, UseGuards } from 
 import type { Request, Response } from 'express'
 import { randomUUID } from 'crypto'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js'
+import { Roles } from '../auth/decorators/roles.decorator.js'
+import { UserRole } from '../generated/prisma/enums.js'
 import { ChatService } from './chat.service.js'
 import { ChatRequestDto } from './dto/chat-request.dto.js'
 
 /**
- * All chat endpoints require JWT authentication.
+ * All chat endpoints require JWT authentication AND PATIENT role.
  * The userId is extracted from the JWT token (req.user.id).
+ *
+ * Role gate (least privilege): only PATIENT may hit these routes. The global
+ * RolesGuard rejects PROVIDER / MEDICAL_DIRECTOR / HEALPLACE_OPS / SUPER_ADMIN
+ * with 403 — admin/care-team uses the separate admin app (different surface,
+ * different endpoints). This prevents a misissued admin token from being used
+ * to invoke the patient chatbot and burning tokens on a profile-less account.
  */
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
+@Roles(UserRole.PATIENT)
 export class ChatController {
   constructor(private readonly chatService: ChatService) { }
 
@@ -34,22 +43,29 @@ export class ChatController {
       isNewSession = true
     }
 
+    // Kick title generation off in parallel with the response stream so we can
+    // push it back over SSE before [DONE] — no extra round-trip from the client.
+    const titlePromise: Promise<string | null> | null = isNewSession
+      ? this.chatService.generateSessionTitle(body.sessionId, body.prompt).catch(() => null)
+      : null
+
     res.write(`data: ${JSON.stringify({ sessionId: body.sessionId })}\n\n`)
 
     try {
       for await (const chunk of this.chatService.getStreamingResponse(body, userId)) {
         res.write(`data: ${JSON.stringify(chunk)}\n\n`)
       }
+      if (titlePromise) {
+        const title = await titlePromise
+        if (title) {
+          res.write(`data: ${JSON.stringify({ type: 'sessionTitle', sessionId: body.sessionId, title })}\n\n`)
+        }
+      }
       res.write('data: [DONE]\n\n')
       res.end()
     } catch (_err) {
       res.write(`data: ${JSON.stringify({ error: 'An error occurred' })}\n\n`)
       res.end()
-    }
-
-    // Generate title after streaming completes to avoid concurrent API calls
-    if (isNewSession) {
-      this.chatService.generateSessionTitle(body.sessionId, body.prompt).catch(console.error)
     }
   }
 
@@ -67,12 +83,15 @@ export class ChatController {
       await this.chatService.createSession(body.sessionId, userId)
       isNewSession = true
     }
-    const response = await this.chatService.getStructuredResponse(body, userId)
 
-    // Generate title after the main response to avoid concurrent API calls
-    if (isNewSession) {
-      this.chatService.generateSessionTitle(body.sessionId, body.prompt).catch(console.error)
-    }
+    // Run title generation alongside the main response so the title can be
+    // returned in this same JSON body — clients update their sidebar instantly.
+    const titlePromise: Promise<string | null> | null = isNewSession
+      ? this.chatService.generateSessionTitle(body.sessionId, body.prompt).catch(() => null)
+      : null
+
+    const response = await this.chatService.getStructuredResponse(body, userId)
+    const title = titlePromise ? await titlePromise : null
 
     return {
       sessionId: body.sessionId,
@@ -80,6 +99,7 @@ export class ChatController {
       isEmergency: response.isEmergency,
       emergencySituation: response.emergencySituation,
       toolResults: response.toolResults,
+      title,
     }
   }
 

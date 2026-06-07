@@ -1,0 +1,19 @@
+// Membership row linking a COORDINATOR user to exactly one practice. One
+// practice per coordinator (enforced by @unique on userId) — a coordinator
+// belongs to one front-desk team and inherits that practice's patient list
+// scope (status-only — no clinical data).
+//
+// Mirror of PracticeProvider / PracticeMedicalDirector in shape, but with
+// the 1:1 unique on userId because the access model treats a coordinator
+// as a single-practice role.
+model PracticeCoordinator {
+  id         String   @id @default(ulid())
+  practiceId String
+  userId     String   @unique
+  assignedAt DateTime @default(now())
+
+  practice Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([practiceId])
+}

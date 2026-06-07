@@ -123,7 +123,7 @@ Five scenarios matching the five demo patients in [seed.ts](../backend/prisma/se
 |---|---|---|
 | PatientContext | `patientName` | `'Priya Menon'` |
 | Profile | `isPregnant` | `true` |
-| Profile | `historyPreeclampsia` | `true` |
+| Profile | `historyHDP` | `true` |
 | Meds | `contextMeds[0]` | Lisinopril · `drugClass=ACE_INHIBITOR` |
 | Alerts | `activeAlerts[0]` | `tier=TIER_1_CONTRAINDICATION` · `ruleId=RULE_PREGNANCY_ACE_ARB` · `dismissible=false` · `patientMessage='Your care team needs to review your blood pressure medicine because you are pregnant. Please call your provider today before taking your next dose.'` |
 

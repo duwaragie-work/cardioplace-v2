@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { signInPatient, authedApi } from '../helpers/auth.js'
+import { dismissCheckinGate } from '../helpers/api.js'
 import { PATIENTS } from '../helpers/accounts.js'
 import { byTestId, T } from '../helpers/selectors.js'
 import { newTestControl } from '../helpers/test-control.js'
@@ -23,6 +24,7 @@ test.describe('Check-in wizard — UI spine', () => {
 
   test('step 1 renders the pre-measurement checklist', async ({ page }) => {
     await page.goto('/check-in')
+    await dismissCheckinGate(page)
     // CLINICAL_SPEC §6 — exactly 8 pre-measurement checklist rows. Each row
     // carries data-testid="checkin-checklist-<formKey>"; count those instead
     // of regex-matching translated copy (en/es/etc strings differ).
@@ -32,6 +34,7 @@ test.describe('Check-in wizard — UI spine', () => {
 
   test('Continue advances from step 1 to BP entry', async ({ page }) => {
     await page.goto('/check-in')
+    await dismissCheckinGate(page)
     // Wait for step 1 to actually mount + hydrate before clicking Next.
     // Next 16 ships interactive DOM ahead of the React onClick attachment;
     // a straight-to-click race occasionally swallows the goNext() call,

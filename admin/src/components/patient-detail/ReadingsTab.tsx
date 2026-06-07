@@ -36,7 +36,9 @@ import {
 } from 'lucide-react';
 import {
   getPatientJournalEntries,
+  getPatientRejectedReadings,
   type PatientJournalEntry,
+  type RejectedReading,
 } from '@/lib/services/provider.service';
 
 interface Props {
@@ -116,8 +118,41 @@ function dateFilterCutoff(filter: DateFilter): Date | null {
   return d;
 }
 
+// F25 — a single BP check-in writes one JournalEntry per reading, all sharing
+// a sessionId. The flat list rendered them as N indistinguishable rows, so an
+// admin couldn't tell three rows were one sitting. Group consecutive entries
+// that share a non-null sessionId; a group of ≥2 becomes a bordered session
+// card, singletons stay plain rows.
+export type ReadingGroup =
+  | { kind: 'session'; sessionId: string; entries: PatientJournalEntry[] }
+  | { kind: 'single'; entry: PatientJournalEntry };
+
+export function groupReadingsBySession(entries: PatientJournalEntry[]): ReadingGroup[] {
+  const groups: ReadingGroup[] = [];
+  let i = 0;
+  while (i < entries.length) {
+    const sid = entries[i].sessionId;
+    if (sid != null) {
+      let j = i + 1;
+      while (j < entries.length && entries[j].sessionId === sid) j++;
+      const slice = entries.slice(i, j);
+      groups.push(
+        slice.length >= 2
+          ? { kind: 'session', sessionId: sid, entries: slice }
+          : { kind: 'single', entry: slice[0] },
+      );
+      i = j;
+    } else {
+      groups.push({ kind: 'single', entry: entries[i] });
+      i++;
+    }
+  }
+  return groups;
+}
+
 export default function ReadingsTab({ patientId }: Props) {
   const [entries, setEntries] = useState<PatientJournalEntry[]>([]);
+  const [rejected, setRejected] = useState<RejectedReading[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<DateFilter>('30D');
@@ -138,6 +173,15 @@ export default function ReadingsTab({ patientId }: Props) {
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
+      });
+    // Rejected readings are a separate, non-blocking QA note — a fetch failure
+    // here shouldn't break the main readings list.
+    getPatientRejectedReadings(patientId, { limit: 20 })
+      .then((data) => {
+        if (!cancelled) setRejected(data);
+      })
+      .catch(() => {
+        if (!cancelled) setRejected([]);
       });
     return () => { cancelled = true; };
   }, [patientId]);
@@ -243,6 +287,14 @@ export default function ReadingsTab({ patientId }: Props) {
         </p>
       </div>
 
+      {/* Rejected-reading QA note (Manisha 5/24 Q1) — readings the patient
+          tried to log with DBP ≥ SBP were rejected at entry (never persisted)
+          to avoid a false Level-2 emergency. Surfaced so a provider can prompt
+          a cuff check / re-measurement. */}
+      {!loading && rejected.length > 0 && (
+        <RejectedReadingsNote rejected={rejected} />
+      )}
+
       {/* List */}
       {loading ? (
         <ReadingsSkeleton />
@@ -252,11 +304,51 @@ export default function ReadingsTab({ patientId }: Props) {
         <EmptyCard hasReadings={entries.length > 0} />
       ) : (
         <div className="space-y-2" data-testid="admin-readings-list">
-          {filtered.map((entry) => (
-            <ReadingCard key={entry.id} entry={entry} />
-          ))}
+          {groupReadingsBySession(filtered).map((g) =>
+            g.kind === 'session' ? (
+              <SessionGroupCard key={`session-${g.sessionId}`} group={g} />
+            ) : (
+              <ReadingCard key={g.entry.id} entry={g.entry} />
+            ),
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Session group ───────────────────────────────────────────────────────────
+
+function SessionGroupCard({
+  group,
+}: {
+  group: Extract<ReadingGroup, { kind: 'session' }>;
+}) {
+  const times = group.entries.map((e) => new Date(e.measuredAt).getTime());
+  const first = new Date(Math.min(...times)).toISOString();
+  const last = new Date(Math.max(...times)).toISOString();
+  return (
+    <div
+      data-testid={`admin-readings-session-${group.sessionId}`}
+      className="rounded-2xl overflow-hidden"
+      style={{
+        border: '1.5px solid var(--brand-border)',
+        backgroundColor: 'var(--brand-background)',
+      }}
+    >
+      <div
+        data-testid="admin-readings-session-header"
+        className="px-4 py-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider"
+        style={{ color: 'var(--brand-text-muted)' }}
+      >
+        <Clock className="w-3 h-3" />
+        Session: {group.entries.length} readings · {formatTime(first)} – {formatTime(last)}
+      </div>
+      <div className="px-2 pb-2 space-y-2">
+        {group.entries.map((e) => (
+          <ReadingCard key={e.id} entry={e} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -412,6 +504,22 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
           </span>
         )}
       </div>
+
+      {/* Narrow pulse-pressure artifact (Manisha 5/24 Q1) — PP < 15 at entry;
+          physician-only flag, possible measurement artifact, no alert tier. */}
+      {entry.narrowPpArtifact && (
+        <div
+          className="mb-3 inline-flex items-start gap-1.5 text-[11.5px] px-2.5 py-1.5 rounded-lg"
+          data-testid={`admin-readings-narrow-pp-${entry.id}`}
+          style={{
+            backgroundColor: 'var(--brand-warning-amber-light)',
+            color: 'var(--brand-warning-amber-text)',
+          }}
+        >
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+          <span>Narrow pulse pressure (&lt;15 mmHg) — possible measurement artifact.</span>
+        </div>
+      )}
 
       {/* Medication row */}
       {(entry.medicationTaken != null || missedRows.length > 0) && (
@@ -651,6 +759,37 @@ function EmptyCard({ hasReadings }: { hasReadings: boolean }) {
           ? 'Widen the date range or clear the tier filter.'
           : "This patient hasn't logged any blood-pressure readings."}
       </p>
+    </div>
+  );
+}
+
+function RejectedReadingsNote({ rejected }: { rejected: RejectedReading[] }) {
+  const latest = rejected[0];
+  return (
+    <div
+      className="bg-white rounded-2xl p-4 flex items-start gap-3"
+      data-testid="admin-readings-rejected-note"
+      style={{
+        boxShadow: 'var(--brand-shadow-card)',
+        borderLeft: '4px solid var(--brand-warning-amber)',
+      }}
+    >
+      <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--brand-warning-amber)' }} />
+      <div className="flex-1 min-w-0">
+        <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+          {rejected.length} physiologically implausible {rejected.length === 1 ? 'reading' : 'readings'} rejected at entry
+        </p>
+        <p className="text-[12px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+          The patient attempted to log {rejected.length === 1 ? 'a reading' : 'readings'} where the bottom
+          number was not below the top number. These were not saved and did not
+          trigger alerts. Consider prompting a cuff check or re-measurement.
+        </p>
+        {latest && (latest.systolicBP != null || latest.diastolicBP != null) && (
+          <p className="text-[11.5px] mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+            Most recent: {latest.systolicBP ?? '—'}/{latest.diastolicBP ?? '—'} mmHg · {formatDate(latest.createdAt)} {formatTime(latest.createdAt)}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

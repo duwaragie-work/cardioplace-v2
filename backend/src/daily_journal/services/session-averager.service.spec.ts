@@ -1,3 +1,5 @@
+import { jest } from '@jest/globals'
+import { SESSION_WINDOW_MS } from '@cardioplace/shared'
 import { SessionAveragerService } from './session-averager.service.js'
 
 function entry(over: Partial<any> = {}) {
@@ -160,5 +162,52 @@ describe('SessionAveragerService.aggregate (C.1 session averaging)', () => {
     })
     const r = SessionAveragerService.aggregate(a, [a, b])
     expect(r?.symptoms.otherSymptoms.sort()).toEqual(['dizzy', 'nausea'])
+  })
+})
+
+describe('SessionAveragerService.loadSessionSiblings (window bound)', () => {
+  const anchorAt = new Date('2026-05-22T10:00:00Z')
+
+  function makeService() {
+    const findUnique = jest.fn()
+    const findMany = jest.fn()
+    const prisma = { journalEntry: { findUnique, findMany } } as any
+    return { service: new SessionAveragerService(prisma), findUnique, findMany }
+  }
+
+  it('bounds the non-null sessionId query by ±SESSION_WINDOW_MS (stale reuse can not average across hours)', async () => {
+    const { service, findUnique, findMany } = makeService()
+    findUnique.mockResolvedValueOnce({
+      id: 'e1',
+      userId: 'u1',
+      sessionId: 's1',
+      measuredAt: anchorAt,
+    })
+    findMany.mockResolvedValueOnce([])
+
+    await service.averageForEntry('e1')
+
+    const where = (findMany.mock.calls[0][0] as any).where
+    expect(where.sessionId).toBe('s1')
+    expect(where.measuredAt.gte).toEqual(new Date(anchorAt.getTime() - SESSION_WINDOW_MS))
+    expect(where.measuredAt.lte).toEqual(new Date(anchorAt.getTime() + SESSION_WINDOW_MS))
+  })
+
+  it('bounds the null-session query by the same window', async () => {
+    const { service, findUnique, findMany } = makeService()
+    findUnique.mockResolvedValueOnce({
+      id: 'e1',
+      userId: 'u1',
+      sessionId: null,
+      measuredAt: anchorAt,
+    })
+    findMany.mockResolvedValueOnce([])
+
+    await service.averageForEntry('e1')
+
+    const where = (findMany.mock.calls[0][0] as any).where
+    expect(where.sessionId).toBeNull()
+    expect(where.measuredAt.gte).toEqual(new Date(anchorAt.getTime() - SESSION_WINDOW_MS))
+    expect(where.measuredAt.lte).toEqual(new Date(anchorAt.getTime() + SESSION_WINDOW_MS))
   })
 })

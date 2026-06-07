@@ -19,7 +19,7 @@ function buildProfile(
     heightCm: 165,
     isPregnant: false,
     pregnancyDueDate: null,
-    historyPreeclampsia: false,
+    historyHDP: false,
     hasHeartFailure: false,
     heartFailureType: 'NOT_APPLICABLE',
     resolvedHFType: 'NOT_APPLICABLE',
@@ -81,6 +81,7 @@ function buildResolvedContext(
     triggerPregnancyContraindicationCheck: over.profile?.isPregnant ?? false,
     enrolledAt: null,
     practiceName: null,
+    patientName: null,
     resolvedAt: NOW,
   }
 }
@@ -261,11 +262,11 @@ describe('SystemPromptService', () => {
       const out = service.buildPatientContext(
         buildContext({
           resolvedContext: buildResolvedContext({
-            profile: { isPregnant: false, historyPreeclampsia: true },
+            profile: { isPregnant: false, historyHDP: true },
           }),
         }),
       )
-      expect(out).toContain('History of preeclampsia')
+      expect(out).toContain('History of hypertensive disorder of pregnancy (HDP)')
     })
 
     it('not pregnant + no history → neither line appears', () => {

@@ -252,6 +252,32 @@ export const hcmRule: RuleFunction = (session, ctx) => {
   return null
 }
 
+// ─── Aortic stenosis (Manisha 5/24 Q5C) ──────────────────────────────────────
+// Interim thresholds mirror HCM (low <100, high ≥160) — both are fixed-outflow-
+// obstruction lesions where hypotension is the dominant risk. Provider-set
+// PatientThreshold always wins (thresholds are mandatory for this condition;
+// these defaults are the safety net until the provider sets targets).
+
+const AORTIC_STENOSIS_DEFAULT_LOWER = 100
+const AORTIC_STENOSIS_DEFAULT_UPPER = 160
+
+export const aorticStenosisRule: RuleFunction = (session, ctx) => {
+  if (!ctx.profile.hasAorticStenosis) return null
+  const { systolicBP: sbp } = session
+  if (sbp == null) return null
+
+  const lower = ctx.threshold?.sbpLowerTarget ?? AORTIC_STENOSIS_DEFAULT_LOWER
+  const upper = ctx.threshold?.sbpUpperTarget ?? AORTIC_STENOSIS_DEFAULT_UPPER
+
+  if (sbp < lower) {
+    return lowAlert(session, ctx, RULE_IDS.AORTIC_STENOSIS_LOW, 'aortic stenosis', lower)
+  }
+  if (sbp >= upper) {
+    return highAlert(session, ctx, RULE_IDS.AORTIC_STENOSIS_HIGH, 'aortic stenosis', upper)
+  }
+  return null
+}
+
 // ─── DCM ────────────────────────────────────────────────────────────────────
 
 export const dcmRule: RuleFunction = (session, ctx) => {

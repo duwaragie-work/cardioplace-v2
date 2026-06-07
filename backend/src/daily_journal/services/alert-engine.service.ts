@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter'
 import {
   ProfileNotFoundException,
+  RULE_IDS,
   type ResolvedContext,
 } from '@cardioplace/shared'
 import { Prisma } from '../../generated/prisma/client.js'
@@ -9,7 +10,30 @@ import { withDeadlockRetry } from '../../common/deadlock-retry.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import type { JournalEntryCreatedEvent, JournalEntryUpdatedEvent } from '../interfaces/events.interface.js'
-import type { RuleFunction, RuleResult, SessionAverage } from '../engine/types.js'
+import type { RuleFunction, RuleResult, SessionAverage, SessionSymptoms } from '../engine/types.js'
+
+const EMPTY_SESSION_SYMPTOMS: SessionSymptoms = {
+  severeHeadache: false,
+  visualChanges: false,
+  alteredMentalStatus: false,
+  chestPainOrDyspnea: false,
+  focalNeuroDeficit: false,
+  severeEpigastricPain: false,
+  newOnsetHeadache: false,
+  ruqPain: false,
+  edema: false,
+  dizziness: false,
+  syncope: false,
+  palpitations: false,
+  legSwelling: false,
+  fatigue: false,
+  shortnessOfBreath: false,
+  dryCough: false,
+  nsaidUse: false,
+  faceSwelling: false,
+  throatTightness: false,
+  otherSymptoms: [],
+}
 import { OutputGeneratorService } from './output-generator.service.js'
 import { ProfileResolverService } from './profile-resolver.service.js'
 import { SessionAveragerService } from './session-averager.service.js'
@@ -28,6 +52,7 @@ import {
   pregnancyL2Rule,
 } from '../engine/pregnancy-thresholds.js'
 import {
+  aorticStenosisRule,
   cadDbpRule,
   cadDbpHighRule,
   cadDefaultUpper,
@@ -70,10 +95,13 @@ import {
   bradySymptomaticRule,
   buildTachyRule,
   getHrContextAnnotation,
+  tachySevereRule,
 } from '../engine/hr-branches.js'
 import {
   getWidePulsePressureAnnotation,
+  getNarrowPulsePressureAnnotation,
   pulsePressureWideRule,
+  pulsePressureNarrowRule,
 } from '../engine/pulse-pressure.js'
 import {
   getLoopDiureticAnnotation,
@@ -384,6 +412,114 @@ export class AlertEngineService {
     return primary ?? adherenceResult
   }
 
+  // ─── ad-hoc evaluation (chatbot tool) ──────────────────────────────────
+
+  /**
+   * Chatbot entry point: "what does this reading mean *for me*?" Runs the
+   * same pipeline as `evaluate()` against a synthetic, non-persisted
+   * `SessionAverage` so the LLM can quote the canonical patient-tier
+   * message from the alert registry instead of paraphrasing thresholds.
+   *
+   * Differences vs `evaluate()`:
+   *   - no DeviationAlert / Notification rows are written
+   *   - no events emitted (no escalation ladder, no caregiver dispatch)
+   *   - `runPipeline` is reused as-is; prior-elevation + prior-weight/SBP
+   *     are still queried so the verdict matches what would happen if the
+   *     patient actually logged this reading
+   *   - `readingCount=1`, single-reading sessions can fire AFib/single-
+   *     reading-gated rules only via the same fallback paths used by
+   *     `evaluate()`; trend rules that need history (e.g. brady-surveillance,
+   *     adherence-window) are deliberately skipped — they aren't single-
+   *     reading questions and including them would surprise the patient
+   *     with verdicts that depend on data they haven't logged yet
+   */
+  async evaluateAdHoc(input: {
+    userId: string
+    systolicBP: number
+    diastolicBP: number
+    pulse?: number | null
+    symptoms?: Partial<SessionSymptoms>
+    measuredAt?: Date
+  }): Promise<
+    | {
+        evaluated: true
+        ruleId: RuleResult['ruleId'] | null
+        tier: RuleResult['tier'] | null
+        mode: RuleResult['mode'] | null
+        preDay3: boolean
+        patientMessage: string | null
+      }
+    | { evaluated: false; reason: 'PROFILE_NOT_FOUND' }
+  > {
+    const measuredAt = input.measuredAt ?? new Date()
+
+    let ctx: ResolvedContext
+    try {
+      ctx = await this.profileResolver.resolve(input.userId, measuredAt)
+    } catch (err) {
+      if (err instanceof ProfileNotFoundException) {
+        return { evaluated: false, reason: 'PROFILE_NOT_FOUND' }
+      }
+      throw err
+    }
+
+    const session: SessionAverage = {
+      entryId: '',
+      userId: input.userId,
+      measuredAt,
+      systolicBP: input.systolicBP,
+      diastolicBP: input.diastolicBP,
+      pulse: input.pulse ?? null,
+      weight: null,
+      readingCount: 1,
+      // The patient is explicitly asking us to interpret ONE reading. That's
+      // semantically the same as the 5-min frontend-finalize flow that the
+      // engine's single-reading gate is designed for — flipping this flag
+      // lets Stage C non-emergency rules (pregnancyL1High, personalizedHigh,
+      // standardL1High, etc.) actually fire. Without this, the chatbot would
+      // get ruleId:null on borderline-elevated readings and have nothing to
+      // quote back to the patient.
+      singleReadingFinalized: true,
+      symptoms: { ...EMPTY_SESSION_SYMPTOMS, ...(input.symptoms ?? {}) },
+      suboptimalMeasurement: false,
+      sessionId: null,
+      medicationTaken: null,
+      missedMedications: [],
+    }
+
+    const priorElevated = await this.wasPriorReadingPulseElevated(session, ctx)
+    await this.attachPriorReading(session)
+
+    const results = await this.runPipeline(session, ctx, priorElevated)
+    const top = results[0] ?? null
+
+    const totalReadings = await this.prisma.journalEntry.count({
+      where: { userId: input.userId },
+    })
+    const preDay3 = totalReadings < 7
+
+    if (!top) {
+      return {
+        evaluated: true,
+        ruleId: null,
+        tier: null,
+        mode: null,
+        preDay3,
+        patientMessage: null,
+      }
+    }
+
+    const messages = this.outputGenerator.generate(top, session, preDay3, null)
+    return {
+      evaluated: true,
+      ruleId: top.ruleId,
+      tier: top.tier,
+      mode: top.mode,
+      preDay3,
+      patientMessage: messages.patientMessage,
+    }
+  }
+
   // ─── pipeline ──────────────────────────────────────────────────────────
 
   private async runPipeline(
@@ -419,6 +555,12 @@ export class AlertEngineService {
       // axis so only the first match claims it.
       symptomOverridePregnancyRule,
       symptomOverrideGeneralRule,
+      // HR<40 absolute bradycardia (Tier 1) — a hard emergency floor that
+      // must fire on a SINGLE reading, so it runs pre-gate (NIVA_HR doc /
+      // Cluster 6). Listed AFTER the contraindication rules above so they
+      // keep priority on the shared 'contraindication' axis. Bypasses the
+      // single-reading gate AND fires for AFib <3 (like angioedema).
+      bradyAbsoluteRule,
     ]
     for (const rule of preGateRules) {
       const r = rule(session, ctx)
@@ -437,7 +579,7 @@ export class AlertEngineService {
           session.symptoms.ruqPain
         ) {
           this.logger.log(
-            `Symptom-override suppressed (Manisha 5/9 Q3): pregnancy override ` +
+            `Symptom-override suppressed: pregnancy override ` +
               `fired on ruqPain — RULE_SYMPTOM_OVERRIDE_GENERAL skipped. ` +
               `user=${session.userId} entry=${session.entryId}`,
           )
@@ -470,6 +612,12 @@ export class AlertEngineService {
     const emergencyRules: RuleFunction[] = [
       absoluteEmergencyRule,
       pregnancyL2Rule,
+      // HR>130 severe tachycardia (Cluster 6 Q5) — fires immediately on a
+      // single reading, so it runs in the emergency set to bypass the
+      // single-reading gate. Placed in Stage B (after the AFib gate) so AFib
+      // patients keep their ≥3-reading gate, since AFib rapid-HR is expected.
+      // Claims the 'hr' axis.
+      tachySevereRule,
     ]
     for (const rule of emergencyRules) {
       const r = rule(session, ctx)
@@ -477,6 +625,23 @@ export class AlertEngineService {
       const axis = axisFor(r)
       if (claimed.has(axis)) continue
       claimed.set(axis, r)
+    }
+
+    // F20 — emergency is exclusive. Once a BP_LEVEL_2 / 911-warranting rule
+    // (absolute emergency, pregnancy L2, or a symptom-override emergency) has
+    // claimed the 'emergency' axis, no lower-tier BP/HR rule on the SAME
+    // reading is clinically meaningful — and a "contact your provider
+    // tomorrow / recheck before bed" L1 message rendered alongside a "call
+    // 911 now" message is a real harm path. Short-circuit before Stage C so
+    // only the top-tier axes already claimed in Stage A/B survive (airway
+    // angioedema + Tier 1 contraindication co-fire intentionally per D.5;
+    // each runs its own ladder). This also closes the session-finalize
+    // re-eval path: the existing emergency row triggers this early-return so
+    // no L1 row is appended on the second pass.
+    if (claimed.has('emergency')) {
+      return AXIS_PRIORITY
+        .map((axis) => claimed.get(axis))
+        .filter((r): r is RuleResult => r !== undefined)
     }
 
     // Cluster 6 Q2 (Manisha 5/9/26) — non-emergency BP/HR alerts require
@@ -495,9 +660,26 @@ export class AlertEngineService {
       !ctx.preDay3Mode &&
       !ctx.profile.hasAFib
     if (isSingleReadingNonEmergency) {
+      // Manisha Q2 (2026-06-02 reply) — RULE_HFREF_HIGH reverts to
+      // single-reading firing. The HFrEF therapeutic window (≈120–130 mmHg)
+      // is narrow; holding a lone SBP≥target reading behind the ≥2-reading
+      // gate risks missing a clinically actionable HFrEF reading (a patient
+      // takes one reading at 145 and leaves → alert never fires). A
+      // false-positive at 132 is low-cost (clinician reviews, no action); a
+      // missed 145 in HFrEF is high-cost. So HFREF_HIGH — and ONLY the high
+      // branch — bypasses the gate, evaluating this reading's own value. The
+      // low branch (HFREF_LOW) and every other non-emergency rule stay gated,
+      // and RULE_STANDARD_L1_HIGH session-averaging is untouched (Manisha:
+      // averaging stays ONLY for standard L1). Same-session noise is managed
+      // via Q6 per-session dedup, not by re-suppressing the alert.
+      const hfref = hfrefRule(session, ctx)
+      if (hfref && hfref.ruleId === RULE_IDS.HFREF_HIGH) {
+        const axis = axisFor(hfref)
+        if (!claimed.has(axis)) claimed.set(axis, hfref)
+      }
       this.logger.log(
-        `Single-reading session — gating non-emergency rules for entry ${session.entryId}. ` +
-          'Awaiting second reading or finalize call (Manisha 5/9 Q2).',
+        `Single-reading session — gating non-emergency rules for entry ${session.entryId}; ` +
+          'RULE_HFREF_HIGH exempt',
       )
       return AXIS_PRIORITY
         .map((axis) => claimed.get(axis))
@@ -535,17 +717,19 @@ export class AlertEngineService {
       // RULE_HCM_VASODILATOR (Tier 3, physician-only) AND RULE_HCM_LOW
       // (BP_LEVEL_1_LOW, patient-facing) per §4.6.
       hcmVasodilatorRule,
+      // Manisha 5/24 Q5C — aortic stenosis (interim HCM-style thresholds).
+      // Claims the systolic axis like the other condition rules.
+      aorticStenosisRule,
       personalizedHighRule,
       personalizedLowRule,
       standardL1HighRule,
       standardL1LowRule,
       afibHrRule,
       tachyRule,
-      // Cluster 6 — brady split into two emitters. bradyAbsoluteRule (HR<40)
-      // claims 'contraindication' (Tier 1); bradySymptomaticRule (HR<50 +
-      // dizziness/syncope/AMS/etc.) claims 'hr'. They're on different axes
-      // so both can co-fire on the same reading.
-      bradyAbsoluteRule,
+      // Cluster 6 — bradyAbsoluteRule (HR<40, Tier 1 'contraindication') was
+      // moved to the Stage A pre-gate set so the emergency floor fires on a
+      // single reading. bradySymptomaticRule (HR<50 + dizziness/syncope/AMS/
+      // etc., 'hr' axis) stays gated here — it needs symptom confirmation.
       bradySymptomaticRule,
       // Cluster 6 — HF decompensation + DHP-CCB side-effect + the six
       // symptom-rules.ts entries. Each claims a distinct axis so they
@@ -591,6 +775,7 @@ export class AlertEngineService {
       const fallbackRules: RuleFunction[] = [
         loopDiureticHypotensionRule,
         pulsePressureWideRule,
+        pulsePressureNarrowRule,
       ]
       for (const rule of fallbackRules) {
         const r = rule(session, ctx)
@@ -682,6 +867,17 @@ export class AlertEngineService {
       if (ppNote) annotations.push(ppNote)
     }
 
+    // Manisha 5/24 Q2 — narrow PP rides as a physician annotation when a
+    // higher-tier finding already fired (mirrors the wide-PP pattern).
+    if (result.ruleId !== 'RULE_PULSE_PRESSURE_NARROW') {
+      const narrowNote = getNarrowPulsePressureAnnotation(
+        session.systolicBP,
+        session.diastolicBP,
+        ctx.profile,
+      )
+      if (narrowNote) annotations.push(narrowNote)
+    }
+
     if (result.ruleId !== 'RULE_LOOP_DIURETIC_HYPOTENSION') {
       const loopNote = getLoopDiureticAnnotation(ctx.contextMeds, session.systolicBP)
       if (loopNote) annotations.push(loopNote)
@@ -736,7 +932,12 @@ export class AlertEngineService {
     const legacyType = this.legacyTypeFor(result, session)
     const legacySeverity = this.legacySeverityFor(result)
     const dismissible = !isNonDismissableTier(result.tier)
-    const messages = this.outputGenerator.generate(result, session, ctx.preDay3Mode)
+    const messages = this.outputGenerator.generate(
+      result,
+      session,
+      ctx.preDay3Mode,
+      ctx.patientName,
+    )
 
     const actualValue =
       result.actualValue != null
@@ -765,26 +966,22 @@ export class AlertEngineService {
                 journalEntryId: session.entryId,
                 ruleId: result.ruleId,
               },
-              select: { id: true },
+              select: { id: true, escalated: true },
             })
 
+            // F9 (P0 — JCAHO immutability). A DeviationAlert is the
+            // at-fire-time clinical record. When the engine re-evaluates the
+            // same (journalEntryId, ruleId) — session-finalize, an entry edit,
+            // or a later personalized-mode pass — it must NEVER rewrite the
+            // fired-record fields (mode, severity, tier, ruleId, the three-tier
+            // messages, dismissible, actualValue). Doing so retroactively
+            // mutated e.g. a STANDARD-mode alert to PERSONALIZED once the
+            // patient crossed 7 readings, corrupting the audit trail.
+            // Acknowledge / resolve mutations are owned by
+            // AlertResolutionService, not this engine path — so once the row
+            // exists we return it untouched and skip the write entirely.
             const row = existing
-              ? await tx.deviationAlert.update({
-                  where: { id: existing.id },
-                  data: {
-                    severity: legacySeverity,
-                    tier: result.tier,
-                    ruleId: result.ruleId,
-                    mode: result.mode,
-                    pulsePressure: result.pulsePressure,
-                    suboptimalMeasurement: result.suboptimalMeasurement,
-                    dismissible,
-                    actualValue,
-                    patientMessage: messages.patientMessage,
-                    caregiverMessage: messages.caregiverMessage,
-                    physicianMessage: messages.physicianMessage,
-                  },
-                })
+              ? existing
               : await tx.deviationAlert.create({
                   data: {
                     userId: session.userId,
@@ -804,31 +1001,15 @@ export class AlertEngineService {
                   },
                 })
 
-            // Patient-facing in-app dashboard notification. Independent of
-            // the EscalationService ladder (which only pages PROVIDER/MD/OPS
-            // for most tiers per CLINICAL_SPEC §V2-D). Idempotent via the
-            // @@unique([alertId, escalationEventId, userId, channel]) index
-            // — re-evaluation of the same entry won't double-write.
-            if (messages.patientMessage) {
-              const patientTitle = patientNotificationTitle(result.tier)
-              try {
-                await tx.notification.create({
-                  data: {
-                    userId: session.userId,
-                    alertId: row.id,
-                    escalationEventId: null,
-                    channel: 'DASHBOARD',
-                    title: patientTitle,
-                    body: messages.patientMessage,
-                    tips: [],
-                  },
-                })
-              } catch (err: unknown) {
-                // P2002 = duplicate (re-evaluation of same entry). Safe to ignore.
-                const code = (err as { code?: string })?.code
-                if (code !== 'P2002') throw err
-              }
-            }
+            // Manual-test round 2 — Group B (Manisha sign-off pending). Reverses
+            // CLINICAL_SPEC Part 13.2's "immediate patient DASHBOARD/push" rule:
+            // clinical alerts NO LONGER mirror into the patient in-app
+            // Notification surface. The alert detail page (TierAlertView) and
+            // the dashboard banner already carry the patient-facing message;
+            // the inbox is reserved for admin/care-team action events
+            // (HOLD, profile reject, ack/resolve, threshold change, follow-up
+            // call, gap-alert + monthly-reask crons). Provider/MD escalation
+            // PUSH+EMAIL and the caregiver dispatch path remain unchanged.
 
             return row
           },
@@ -916,6 +1097,14 @@ export class AlertEngineService {
     if (result.ruleId === 'RULE_CAD_DBP_CRITICAL' && session.diastolicBP != null) {
       return 'DIASTOLIC_BP'
     }
+    // F18 — derive the legacy axis from the triggering value rather than
+    // defaulting every BP rule to SYSTOLIC_BP. A DBP-only L1 (e.g. 119/109)
+    // or a DBP-driven emergency carries actualValue == the diastolic reading;
+    // tagging it SYSTOLIC_BP mislabels the audited axis. Comes after the
+    // MEDICATION_ADHERENCE guard so med rules keep their type.
+    if (session.diastolicBP != null && result.actualValue === session.diastolicBP) {
+      return 'DIASTOLIC_BP'
+    }
     // Default: systolic-axis is the primary surface for BP rules.
     return 'SYSTOLIC_BP'
   }
@@ -956,29 +1145,6 @@ function isNonDismissableTier(tier: RuleResult['tier']): boolean {
   )
 }
 
-/**
- * Title shown on the patient's in-app notification card. Mirrors what the
- * patient sees in the dashboard banner — derived from the alert tier so the
- * notifications inbox can't drift away from the alert's actual severity.
- */
-function patientNotificationTitle(tier: RuleResult['tier']): string {
-  switch (tier) {
-    case 'BP_LEVEL_2':
-    case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
-      return 'Urgent Blood Pressure Alert'
-    case 'TIER_1_ANGIOEDEMA':
-      return 'Urgent — get medical help now'
-    case 'TIER_1_CONTRAINDICATION':
-      return 'Important medication alert'
-    case 'TIER_2_DISCREPANCY':
-      return 'Medication check-in needed'
-    case 'BP_LEVEL_1_HIGH':
-      return 'Elevated blood pressure'
-    case 'BP_LEVEL_1_LOW':
-      return 'Low blood pressure'
-    case 'TIER_3_INFO':
-      return 'Care team update'
-    default:
-      return 'Cardioplace Alert'
-  }
-}
+// patientNotificationTitle() removed in Round 2 Group B — the patient inbox
+// no longer mirrors alerts. The alert detail screen (TierAlertView) and the
+// dashboard banner carry the patient-facing title now.

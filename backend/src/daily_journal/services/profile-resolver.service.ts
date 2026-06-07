@@ -64,6 +64,29 @@ export class ProfileResolverService {
     const assignment = this.buildAssignment(user.providerAssignmentAsPatient)
 
     const preDay3Mode = readingCount < ProfileResolverService.PRE_DAY_3_MIN_READINGS
+    /**
+     * Personalization semantics (per Dr. Singal Q3, 2026-06-02):
+     *
+     * Personalization requires explicit provider-set PatientThreshold rows.
+     * The "Personalization begins after 7 readings" copy in patient-facing UI
+     * means providers CAN now set personalized thresholds — it does NOT mean
+     * the engine auto-derives them. That is exactly what this line encodes:
+     * `personalizedEligible` is true ONLY when a provider-set threshold exists
+     * AND the patient has ≥7 readings; it is never derived from the readings.
+     *
+     * Patients with no condition flags (e.g., isolated essential hypertension)
+     * remain on mode=STANDARD indefinitely unless a provider explicitly sets
+     * PatientThreshold rows.
+     *
+     * Auto-derivation is off the table: it could normalize dangerously high BP
+     * (example: 7 baseline readings averaging 155/95 → "personalized" threshold
+     * at 155 → patient stops getting alerts for clearly out-of-target readings).
+     * This crosses from alerting into clinical decision-making — the line we do
+     * not cross.
+     *
+     * Phase 2 (post-MVP, optional): admin dashboard "7+ readings" provider
+     * prompt to nudge them to review and consider personalization.
+     */
     const personalizedEligible = threshold != null && !preDay3Mode
 
     // Safety-net: pregnancy thresholds + ACE/ARB contraindication fire even on
@@ -90,6 +113,8 @@ export class ProfileResolverService {
       enrolledAt: user.enrolledAt ?? null,
       practiceName:
         user.providerAssignmentAsPatient?.practice?.name ?? null,
+      // Gap 5 — name the patient in caregiver-facing messages.
+      patientName: user.name ?? null,
       resolvedAt: now,
     }
   }
@@ -167,13 +192,14 @@ export class ProfileResolverService {
     heightCm: number | null
     isPregnant: boolean
     pregnancyDueDate: Date | null
-    historyPreeclampsia: boolean
+    historyHDP: boolean
     hasHeartFailure: boolean
     heartFailureType: string
     hasAFib: boolean
     hasCAD: boolean
     hasHCM: boolean
     hasDCM: boolean
+    hasAorticStenosis: boolean
     hasTachycardia: boolean
     hasBradycardia: boolean
     diagnosedHypertension: boolean
@@ -193,7 +219,7 @@ export class ProfileResolverService {
       heightCm: p.heightCm,
       isPregnant: p.isPregnant,
       pregnancyDueDate: p.pregnancyDueDate,
-      historyPreeclampsia: p.historyPreeclampsia,
+      historyHDP: p.historyHDP,
       hasHeartFailure: p.hasHeartFailure,
       heartFailureType: declaredHFType,
       resolvedHFType,
@@ -201,6 +227,7 @@ export class ProfileResolverService {
       hasCAD: p.hasCAD,
       hasHCM: p.hasHCM,
       hasDCM: p.hasDCM,
+      hasAorticStenosis: p.hasAorticStenosis,
       hasTachycardia: p.hasTachycardia,
       hasBradycardia: p.hasBradycardia,
       diagnosedHypertension: p.diagnosedHypertension,

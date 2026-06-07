@@ -51,6 +51,7 @@ import {
   type PatientMedicationDto,
   type CareTeamDto,
 } from '@/lib/services/intake.service';
+import CaregiversCard from '@/components/cardio/CaregiversCard';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -64,7 +65,7 @@ const REJECTABLE_FIELD_LABELS: Record<string, string> = {
   heightCm: 'Height',
   isPregnant: 'Pregnancy status',
   pregnancyDueDate: 'Pregnancy due date',
-  historyPreeclampsia: 'History of preeclampsia',
+  historyHDP: 'History of preeclampsia',
   hasHeartFailure: 'Heart failure',
   heartFailureType: 'Heart failure type',
   hasAFib: 'Atrial fibrillation',
@@ -927,7 +928,7 @@ export default function ProfilePage() {
                   if (profile?.isPregnant && profile?.pregnancyDueDate) {
                     parts.push(`${t('profile.dueDate')}: ${formatDate(profile.pregnancyDueDate)}.`);
                   }
-                  if (profile?.historyPreeclampsia) {
+                  if (profile?.historyHDP) {
                     parts.push(`${t('intake.a2.preeclampsiaTitle')}: ${t('common.yes')}.`);
                   }
                   return parts.join(' ');
@@ -950,7 +951,7 @@ export default function ProfilePage() {
                     value={profile?.pregnancyDueDate ? formatDate(profile.pregnancyDueDate) : t('profile.notSet')}
                   />
                 )}
-                {profile?.historyPreeclampsia && (
+                {profile?.historyHDP && (
                   <Row label={t('intake.a2.preeclampsiaTitle')} value={t('common.yes')} />
                 )}
               </SectionCard>
@@ -1151,6 +1152,9 @@ export default function ProfilePage() {
           </div>
         </div>
         {/* /grid */}
+
+        {/* Gap 5 — caregiver contacts + consent (full width below the grid) */}
+        <CaregiversCard />
 
         {/* Re-check prompt — when the care team rejected specific fields, name
             them so the patient knows exactly what to update. Falls back to the

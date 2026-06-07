@@ -33,10 +33,14 @@ export default function Homepage() {
   // stops; we lock body scroll, wire Esc/backdrop dismissal, and return
   // focus to the play button after close.
   const [showDemo, setShowDemo] = useState(false);
+  // Cleared every time the modal opens so the spinner shows on first frame
+  // and is hidden by the iframe's onLoad once YouTube finishes streaming in.
+  const [videoLoaded, setVideoLoaded] = useState(false);
   const playButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!showDemo) return;
+    setVideoLoaded(false);
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setShowDemo(false);
     };
@@ -215,10 +219,7 @@ export default function Homepage() {
             <div className="flex flex-col md:flex-row items-center gap-8 md:gap-12 lg:gap-16">
               {/* LEFT — title + description */}
               <div className="flex-1 flex flex-col gap-4 md:gap-5 text-center md:text-left">
-                <span className="text-[#7b00e0] text-xs sm:text-sm font-semibold tracking-widest uppercase">
-                  {t('home.demoEyebrow')}
-                </span>
-                <h2 className="font-semibold text-[#1f1924] text-2xl sm:text-3xl md:text-4xl lg:text-[42px] leading-tight">
+                <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[42px] leading-tight tracking-tight">
                   {t('home.demoTitle')}
                 </h2>
                 <p className="text-[#4c4355] text-sm sm:text-base md:text-lg leading-relaxed max-w-[520px] mx-auto md:mx-0">
@@ -519,6 +520,18 @@ export default function Homepage() {
             >
               <X className="w-5 h-5" />
             </button>
+            {/* Centered spinner while the YouTube iframe streams in. Hidden
+                once `onLoad` fires (YT player UI then covers the parent's
+                black background). pointer-events-none so it never eats the
+                close button's click. */}
+            {!videoLoaded && (
+              <div
+                aria-hidden="true"
+                className="absolute inset-0 flex items-center justify-center pointer-events-none"
+              >
+                <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+              </div>
+            )}
             <iframe
               src={`https://www.youtube.com/embed/${YOUTUBE_VIDEO_ID}?autoplay=1&rel=0&modestbranding=1`}
               title="Cardioplace — 5-minute platform walkthrough"
@@ -526,6 +539,7 @@ export default function Homepage() {
               height="100%"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowFullScreen
+              onLoad={() => setVideoLoaded(true)}
               className="w-full h-full"
             />
           </div>

@@ -46,6 +46,26 @@ test.describe('Phase 4a — patient auth + onboarding', () => {
     await page.locator(byTestId(T.signIn.verifyBtn)).click()
   }
 
+  /**
+   * Onboarding now opens on a privacy/trust step (V2-E Gap 7) that gates the
+   * profile form behind a Terms+Privacy consent. Click through it so the
+   * `#onboarding-name` field becomes reachable. No-ops if the privacy step
+   * isn't shown (e.g. a build that lands straight on the form).
+   */
+  async function advancePastPrivacyStep(page: Page): Promise<void> {
+    const cont = page.locator(byTestId(T.onboarding.privacyContinueBtn))
+    if (await cont.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      // The consent checkbox (16px) sits under an absolutely-positioned 44px
+      // tap-target <span> overlay, which intercepts a normal check()'s click at
+      // the input's center → the box never toggles and Continue stays disabled.
+      // Force the check so the click lands on the real <input> and fires its
+      // onChange (agreedToTerms=true), then wait for Continue to enable.
+      await page.locator(byTestId(T.onboarding.agreeTerms)).check({ force: true })
+      await expect(cont).toBeEnabled({ timeout: 10_000 })
+      await cont.click()
+    }
+  }
+
   test('20a.1 — new user (onboardingStatus≠COMPLETED) lands on /onboarding', async ({
     page,
   }) => {
@@ -55,6 +75,7 @@ test.describe('Phase 4a — patient auth + onboarding', () => {
     // shouldShowOnboardingForUser() returns true for a NOT_COMPLETED user.
     await page.waitForURL(/\/onboarding/, { timeout: 30_000 })
     await expect(page).toHaveURL(/\/onboarding/)
+    await advancePastPrivacyStep(page)
     await expect(page.locator('#onboarding-name')).toBeVisible({ timeout: 10_000 })
   })
 
@@ -64,6 +85,7 @@ test.describe('Phase 4a — patient auth + onboarding', () => {
     await tc.setOnboardingStatus(taylorId, 'NOT_COMPLETED')
     await otpSignIn(page, PATIENTS.taylor.email)
     await page.waitForURL(/\/onboarding/, { timeout: 30_000 })
+    await advancePastPrivacyStep(page)
     await page.locator('#onboarding-name').fill('Taylor Brown')
     // Use the real submit testid (v3.1) — the prior getByRole name-regex was
     // i18n/CI-fragile. handleContinue → submitProfile → router.push.

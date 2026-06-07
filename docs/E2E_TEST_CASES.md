@@ -191,7 +191,7 @@ See [intake.controller.ts](../backend/src/intake/intake.controller.ts). All endp
 
 | TC | Layer | Request | Expected |
 |---|---|---|---|
-| **TC-INT.01** | [E2E] | `POST /intake/profile  { gender: "FEMALE", heightCm: 165, isPregnant: true, pregnancyDueDate: "2026-09-01", historyPreeclampsia: false }` | 200; PatientProfile upserted; `profileVerificationStatus: UNVERIFIED`; `profileLastEditedAt: now`; one ProfileVerificationLog row |
+| **TC-INT.01** | [E2E] | `POST /intake/profile  { gender: "FEMALE", heightCm: 165, isPregnant: true, pregnancyDueDate: "2026-09-01", historyHDP: false }` | 200; PatientProfile upserted; `profileVerificationStatus: UNVERIFIED`; `profileLastEditedAt: now`; one ProfileVerificationLog row |
 | **TC-INT.02** | [E2E] | `POST /intake/profile  { hasHeartFailure: true, heartFailureType: "HFREF" }` | 200; HF fields stored |
 | **TC-INT.03** | [E2E] | `POST /intake/profile  { hasHeartFailure: true, heartFailureType: "UNKNOWN" }` | 200; resolver will bias to HFREF later |
 | **TC-INT.04** | [E2E] | Second `POST /intake/profile  { heightCm: 170 }` after TC-INT.01 | 200; profileVerificationStatus flips back to UNVERIFIED (or stays UNVERIFIED); new ProfileVerificationLog row for `heightCm` change |
@@ -240,7 +240,7 @@ See [intake.controller.ts](../backend/src/intake/intake.controller.ts). All endp
 |---|---|---|---|
 | **TC-INT.40** | [E2E] | `POST /me/pregnancy  { isPregnant: true, pregnancyDueDate: "2026-09-01" }` | 200; PatientProfile updated; UNVERIFIED |
 | **TC-INT.41** | [E2E] | `POST /me/pregnancy  { isPregnant: false, pregnancyDueDate: null }` | 200; due date cleared |
-| **TC-INT.42** | [E2E] | `POST /me/pregnancy  { isPregnant: true, historyPreeclampsia: true }` | 200 |
+| **TC-INT.42** | [E2E] | `POST /me/pregnancy  { isPregnant: true, historyHDP: true }` | 200 |
 | **TC-INT.43** | [E2E] | `POST /me/pregnancy  { isPregnant: "yes" }` | 400 — bool required |
 
 ---
@@ -474,7 +474,7 @@ See [daily_journal.controller.ts](../backend/src/daily_journal/daily_journal.con
 | TC | Layer | Setup | Expected alert mode |
 |---|---|---|---|
 | **TC-JNL.30** | [E2E] | Two readings with same `sessionId`, 5 min apart, both 165/95 | Mean 165/95 applied to rule engine; **one** alert, not two |
-| **TC-JNL.31** | [E2E] | Two readings no sessionId, 10 min apart | Grouped by ±30-min proximity; averaged |
+| **TC-JNL.31** | [E2E] | Two readings no sessionId, 3 min apart | Grouped by ±5-min proximity (CLINICAL_SPEC §5.2); averaged |
 | **TC-JNL.32** | [E2E] | Two readings no sessionId, 45 min apart | Separate sessions |
 | **TC-JNL.33** | [E2E] | AFib patient with **1** reading HR 115 | No alert (AFib gate) |
 | **TC-JNL.34** | [E2E] | AFib patient with **3** readings HR avg 115 | `RULE_AFIB_HR_HIGH` fires |
@@ -1355,7 +1355,7 @@ Every branch enumerated in [TESTING_FLOW_GUIDE.md §8](TESTING_FLOW_GUIDE.md) ma
 | no JWT | TC-JNL.16 |
 | authenticated + no PatientProfile (Layer A gate) | TC-JNL.GATE.01–04 |
 | has sessionId → exact match grouping | TC-JNL.30 |
-| no sessionId → ±30 min grouping | TC-JNL.31, TC-JNL.32 |
+| no sessionId → ±5 min grouping | TC-JNL.31, TC-JNL.32 |
 | legacy symptoms[] merged | TC-JNL.05 |
 | structured symptom flag | TC-JNL.03 |
 | suboptimalMeasurement propagation | TC-JNL.04 + TC-RUL.L1H.06 |

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Toaster } from "sonner";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { LanguageProvider } from "@/contexts/LanguageContext";
@@ -26,6 +27,19 @@ export default function RootLayout({
                 / auth routes pass through unchanged so they keep their own
                 marketing chrome. */}
             <AdminShell>{children}</AdminShell>
+            <Toaster
+              position="top-right"
+              richColors
+              closeButton
+              expand
+              toastOptions={{
+                style: {
+                  fontFamily: 'inherit',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                },
+              }}
+            />
           </LanguageProvider>
         </AuthProvider>
       </body>

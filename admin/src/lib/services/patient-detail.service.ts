@@ -23,7 +23,7 @@ export interface PatientProfile {
   dateOfBirth: string | null
   isPregnant: boolean
   pregnancyDueDate: string | null
-  historyPreeclampsia: boolean
+  historyHDP: boolean
   hasHeartFailure: boolean
   heartFailureType: HeartFailureType
   hasAFib: boolean
@@ -33,6 +33,12 @@ export interface PatientProfile {
   hasTachycardia: boolean
   hasBradycardia: boolean
   diagnosedHypertension: boolean
+  // Manisha 5/24 Q5C — aortic stenosis (HCM-interim thresholds).
+  hasAorticStenosis: boolean
+  // Manisha 5/24 Q4 — permanent ACE-inhibitor contraindication set when an
+  // angioedema alert is resolved via "ACE/ARB discontinued".
+  aceContraindicatedAt: string | null
+  aceContraindicationReason: string | null
   profileVerificationStatus: ProfileVerificationStatus
   profileVerifiedAt: string | null
   profileVerifiedBy: string | null
@@ -94,6 +100,9 @@ export interface PatientMedication {
   discontinuedAt: string | null
   rawInputText: string | null
   notes: string | null
+  // #92 — admin-add provenance (null for patient-reported meds).
+  addedByRole?: 'PATIENT' | 'ADMIN' | 'PROVIDER' | null
+  addedAt?: string | null
 }
 
 export interface PatientThreshold {
@@ -149,6 +158,11 @@ export interface ProfileVerificationLog {
    *  changedByRole stores a coarse ADMIN for every admin action. Falls back to
    *  changedByRole. Used by the Timeline actor line. */
   changedByRoleResolved: string | null
+  /** Round 2 A4 — resolved caregiver display when fieldPath is `caregiver:${id}`.
+   *  Both null when the log isn't caregiver-scoped or the caregiver row has been
+   *  deleted; the TimelineTab UI then falls back to "Caregiver contact". */
+  caregiverName?: string | null
+  caregiverRelationship?: string | null
   changeType: VerificationChangeType
   discrepancyFlag: boolean
   rationale: string | null
@@ -230,6 +244,10 @@ export interface PatientAlert {
   /** Distinct resolution timestamp (DeviationAlert.resolvedAt). The footer
    *  previously showed acknowledgedAt mislabelled as "Resolved". */
   resolvedAt: string | null
+  // Manisha 5/24 Q3 — pre-personalization "X of 7" provider surface.
+  baselineReadingCount?: number | null
+  personalizationThreshold?: number | null
+  preDay3?: boolean | null
   journalEntry: {
     measuredAt: string | null
     systolicBP: number | null
@@ -344,17 +362,65 @@ export async function getPatientMedications(userId: string): Promise<PatientMedi
   return jsonOrThrow<PatientMedication[]>(res, 'Could not load medications')
 }
 
+export type MedicationHoldReason =
+  | 'AWAITING_RECORDS'
+  | 'UNCLEAR_NAME'
+  | 'UNCLEAR_DOSE'
+  | 'PROVIDER_DIRECTED_HOLD'
+  | 'OTHER';
+
 export async function verifyMedication(
   medicationId: string,
   status: 'VERIFIED' | 'REJECTED' | 'AWAITING_PROVIDER' | 'HOLD',
   rationale?: string,
+  holdReason?: MedicationHoldReason,
 ): Promise<PatientMedication> {
   const res = await fetchWithAuth(`${API}/api/admin/medications/${medicationId}/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status, rationale }),
+    body: JSON.stringify({ status, rationale, holdReason }),
   })
   return jsonOrThrow<PatientMedication>(res, 'Could not verify medication')
+}
+
+// #92 — admin add / edit medication on a patient's behalf.
+export interface AdminMedicationInput {
+  drugName: string
+  drugClass: string
+  frequency: string
+  dose?: string
+  notes?: string
+}
+
+export interface AdminMedicationResult {
+  statusCode: number
+  message: string
+  requiresAcknowledgement: boolean
+  data: PatientMedication
+}
+
+export async function adminAddMedication(
+  userId: string,
+  input: AdminMedicationInput,
+): Promise<AdminMedicationResult> {
+  const res = await fetchWithAuth(`${API}/api/admin/users/${userId}/medications`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  return jsonOrThrow<AdminMedicationResult>(res, 'Could not add medication')
+}
+
+export async function adminEditMedication(
+  medicationId: string,
+  input: Partial<AdminMedicationInput>,
+): Promise<AdminMedicationResult> {
+  const res = await fetchWithAuth(`${API}/api/admin/medications/${medicationId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  return jsonOrThrow<AdminMedicationResult>(res, 'Could not update medication')
 }
 
 // ─── Alerts (H3) ─────────────────────────────────────────────────────────────
@@ -427,7 +493,10 @@ export async function getVerificationLogs(userId: string): Promise<ProfileVerifi
  * Returns the partial threshold to suggest as defaults given a profile.
  */
 export function thresholdDefaultsFor(
-  profile: Pick<PatientProfile, 'hasCAD' | 'hasHCM' | 'hasDCM' | 'heartFailureType'> | null,
+  profile: Pick<
+    PatientProfile,
+    'hasCAD' | 'hasHCM' | 'hasDCM' | 'hasAorticStenosis' | 'heartFailureType'
+  > | null,
 ): UpsertThresholdPayload {
   if (!profile) return {}
   const out: UpsertThresholdPayload = {}
@@ -435,15 +504,26 @@ export function thresholdDefaultsFor(
   // THR-016 — DCM is managed as HFrEF (spec §4.8): default lower-bound SBP <85.
   if (profile.heartFailureType === 'HFREF' || profile.hasDCM) out.sbpLowerTarget = 85
   if (profile.hasHCM) out.sbpLowerTarget = 100 // HCM trumps HFrEF/DCM if both
+  // Manisha 5/24 Q5C — aortic stenosis shares HCM's interim lower bound (100).
+  if (profile.hasAorticStenosis) out.sbpLowerTarget = 100
   return out
 }
 
-/** Patients flagged HFrEF / HCM / DCM require an explicit threshold per spec. */
+/** Patients flagged HFrEF / HCM / DCM / aortic stenosis require an explicit
+ *  threshold per spec (Manisha 5/24 Q5C adds aortic stenosis). */
 export function thresholdMandatory(
-  profile: Pick<PatientProfile, 'hasHCM' | 'hasDCM' | 'heartFailureType'> | null,
+  profile: Pick<
+    PatientProfile,
+    'hasHCM' | 'hasDCM' | 'hasAorticStenosis' | 'heartFailureType'
+  > | null,
 ): boolean {
   if (!profile) return false
-  return profile.hasHCM || profile.hasDCM || profile.heartFailureType === 'HFREF'
+  return (
+    profile.hasHCM ||
+    profile.hasDCM ||
+    profile.hasAorticStenosis ||
+    profile.heartFailureType === 'HFREF'
+  )
 }
 
 // ─── Verification-log derivation (IVR-08 / IVR-23 / THR-REVIEW) ──────────────
@@ -539,6 +619,8 @@ export function mandatoryConditionChangedAt(
     const changed =
       log.fieldPath === 'profile.hasHCM' ||
       log.fieldPath === 'profile.hasDCM' ||
+      // Manisha 5/24 Q5C — aortic stenosis is threshold-mandatory too.
+      log.fieldPath === 'profile.hasAorticStenosis' ||
       (log.fieldPath === 'profile.heartFailureType' &&
         (log.newValue === 'HFREF' || log.previousValue === 'HFREF'))
     if (changed) latest = Math.max(latest, new Date(log.createdAt).getTime())

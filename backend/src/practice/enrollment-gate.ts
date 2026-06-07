@@ -55,7 +55,9 @@ export async function canCompleteEnrollment(
     const requiresThreshold =
       profile.heartFailureType === 'HFREF' ||
       profile.hasHCM ||
-      profile.hasDCM
+      profile.hasDCM ||
+      // Manisha 5/24 Q5C — aortic stenosis is threshold-mandatory too.
+      profile.hasAorticStenosis
     if (requiresThreshold && !threshold) {
       reasons.push('threshold-required-for-condition')
     }

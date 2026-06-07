@@ -45,10 +45,13 @@ test.describe('/readings — TZ day-grouping regression (brief §13.1, walkthrou
       const firstRowDate = (
         await group.locator(byTestId(T.readings.rowDate)).first().innerText()
       ).trim()
+      // W10 (Lakshitha readings restyle) — the group header now renders the
+      // weekday UPPERCASE ("THU, JUN 4") while the row keeps title-case
+      // ("Thu, Jun 4"). Compare case-insensitively on the weekday token.
       expect(
-        firstRowDate,
+        firstRowDate.toUpperCase(),
         `row date "${firstRowDate}" does not match group "${headerDate}"`,
-      ).toContain(headerDate.split(',')[0])
+      ).toContain(headerDate.split(',')[0].toUpperCase())
     }
   })
 
@@ -172,12 +175,17 @@ test.describe('Phase 4h — notifications (20h)', () => {
     const alertId = alertIds[0]
     await signInPatient(page, PATIENTS.aisha.email)
     await page.goto('/notifications')
-    // The AlertCard "acknowledge" is the patient's mark-handled action
-    // (§B.4 mapped it to notification-dismiss-button-{id}).
-    const ackBtn = page.locator(
-      `[data-testid="notification-dismiss-button-${alertId}"]`,
-    )
+    // The clinical alert lives in the Alerts sub-tab (PatientAlertCard).
+    // testIdPrefix="notification-row" → acknowledge is notification-row-ack-{id}.
+    const ackBtn = page.locator(`[data-testid="notification-row-ack-${alertId}"]`)
     await ackBtn.waitFor({ state: 'visible', timeout: 12_000 })
+    // G.4 defensive — the clinical alert must NOT mirror into the Notifications
+    // sub-tab (matches the 22-no-alert-mirror invariant).
+    await page.locator('[data-testid="notifications-tab-notifications"]').click().catch(() => {})
+    await expect(
+      page.locator(`[data-testid="notification-row-${alertId}"]`),
+    ).toHaveCount(0)
+    await page.locator('[data-testid="notifications-tab-alerts"]').click().catch(() => {})
     await ackBtn.click()
     // State sanity: the alert is acknowledged.
     await expect
@@ -199,7 +207,8 @@ test.describe('Phase 4h — notifications (20h)', () => {
     await signInPatient(page, PATIENTS.aisha.email)
     await page.goto('/notifications')
     // Alerts tab (default) → the seeded alert's "View details" deep-link.
-    const link = page.locator(`[data-testid="notification-link-${alertIds[0]}"]`)
+    // PatientAlertCard testIdPrefix="notification-row" → notification-row-detail-{id}.
+    const link = page.locator(`[data-testid="notification-row-detail-${alertIds[0]}"]`)
     await link.waitFor({ state: 'visible', timeout: 12_000 })
     await link.click()
     await page.waitForURL(new RegExp(`/alerts/${alertIds[0]}`), {

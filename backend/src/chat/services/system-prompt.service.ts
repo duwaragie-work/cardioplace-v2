@@ -52,6 +52,15 @@ export interface PatientContext {
   resolvedContext: ResolvedContext | null
   /** Phase/16 always sends 'PATIENT'. Scaffolding for future tones. */
   toneMode: ToneMode
+  /**
+   * Voice surface: render a single summary line ("32 readings, most recent on
+   * …") instead of dumping every BP value inline. Native-audio LLMs
+   * (Gemini 2.5 Flash) routinely confuse prompt-injected numbers with
+   * live-spoken ones — see python-genai#1894. When the patient asks about
+   * past readings the LLM calls `get_recent_readings` to fetch them fresh.
+   * Default false (text chat behaviour unchanged).
+   */
+  omitReadingValues?: boolean
 }
 
 @Injectable()
@@ -289,6 +298,9 @@ Call delete_checkin with:
 
 IMPORTANT: When the patient tells you which reading to edit or delete, ALWAYS call the tool with the date and time they specified. The tool will find the entry. NEVER say "I can't find it" without calling the tool first.
 
+INTERPRETING A READING (evaluate_reading):
+When the patient asks what a specific BP / HR reading means FOR THEM ("is 140 over 90 ok for me?", "what does my pulse of 110 mean?", "should I worry about 160 over 100?"), call evaluate_reading with the values they mentioned. The tool runs the same personalised rule engine that produces their real alerts and returns the canonical patient-tier message from the clinical alert registry — quote or paraphrase that message verbatim; do NOT invent your own interpretation. If patientMessage is null, the reading is within their targets — say so plainly using the goals from patient health data below. Nothing is saved by this tool. Do NOT call it during a check-in save (submit_checkin already runs the engine for real).
+
 FLAGGING AN EMERGENCY (flag_emergency):
 Call ONLY when the patient describes an acute life-threatening emergency happening RIGHT NOW:
 - Crushing or severe chest pain NOW
@@ -468,8 +480,22 @@ and measurement_conditions are optional — proceed without if patient skipped, 
 you must still ASK the optional questions (framed as "you can skip"). The
 executor will reject the tool call if entry_date or measurement_time is empty.
 
+RETRIEVING READINGS (get_recent_readings):
+Use when the patient asks about past readings, trends, history, or before updating/deleting.
+Call get_recent_readings with:
+- days (number, 1–30; default 7) — how many days to look back.
+When presenting results to the patient:
+- Show EVERY reading with full details: date, time, BP, weight, medication status, symptoms.
+- Show EXACT measurement times as stored (e.g. "00:05", "23:39") — do NOT round.
+- NEVER show entry IDs to the patient — IDs are internal.
+- If the result has count 0 or empty readings, say "You don't have any readings for that period. Would you like to log a new check-in?".
+- If the patient asks for FUTURE readings, do NOT call the tool — say "I can only show past readings. Would you like to see your recent readings instead?".
+
 UPDATE / DELETE:
-Identify the reading by date + time. Always summarise what you're about to update or delete and ask for explicit confirmation. Use update_checkin / delete_checkin.
+Identify the reading by date + time. Always summarise what you're about to update or delete and ask for explicit confirmation. Use update_checkin / delete_checkin. Call get_recent_readings first to confirm the exact date+time you'll act on.
+
+INTERPRETING A SPECIFIC READING (evaluate_reading):
+When the patient asks what a specific BP / HR reading means FOR THEM ("is 140 over 90 ok for me?", "what does my pulse of 110 mean?", "should I worry about 160 over 100?"), call evaluate_reading with the values they mentioned. The tool runs the same personalised rule engine that produces their real alerts and returns the canonical patient-tier message — quote or paraphrase it verbatim; do NOT invent new clinical wording. If patientMessage is null, the reading is within their targets — say so using the goals from patient context. Nothing is persisted by this tool. Do NOT call it during a check-in save (submit_checkin already runs the engine).
 
 TONE FOR ALERT REFERENCES (CAD bidirectional, HR context, BB suppression):
 The rule engine attaches physician-only annotations to alerts (J-curve risk, uncontrolled SBP context, brady-symptomatic context). Do NOT repeat the clinician annotations to the patient. If the patient asks "why did I get this alert?", use the alert's patientMessage verbatim or lightly paraphrase. Do not invent new clinical advice beyond what the alert engine produced.
@@ -518,37 +544,61 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
     }
 
     // ── BP readings ───────────────────────────────────────────────────────
-    lines.push(`All BP readings (${data.recentEntries.length} total):`)
-    if (data.recentEntries.length === 0) {
-      lines.push('- No readings recorded yet')
+    if (data.omitReadingValues) {
+      // Voice surface — render history *shape* only, never the actual numbers.
+      // Native-audio LLMs hallucinate by echoing prompt-injected numbers as if
+      // just spoken (python-genai#1894). The LLM must call get_recent_readings
+      // when the patient asks about specific values; nothing inline to parrot.
+      if (data.recentEntries.length === 0) {
+        lines.push('BP readings: none recorded yet.')
+      } else {
+        const mostRecent = new Date(data.recentEntries[0].measuredAt)
+        const date = mostRecent.toLocaleDateString('en-US', {
+          month: 'short', day: 'numeric', year: 'numeric',
+        })
+        const time = mostRecent.toLocaleTimeString('en-US', {
+          hour: '2-digit', minute: '2-digit', hour12: false,
+        })
+        lines.push(
+          `BP readings: ${data.recentEntries.length} total, most recent on ${date} at ${time}.`,
+        )
+        lines.push(
+          '(Call get_recent_readings if the patient asks about specific past values.)',
+        )
+      }
     } else {
-      for (const entry of data.recentEntries) {
-        const measured = new Date(entry.measuredAt)
-        const date = measured.toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-        })
-        const time = measured.toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        })
-        const bp =
-          entry.systolicBP != null && entry.diastolicBP != null
-            ? `${entry.systolicBP}/${entry.diastolicBP} mmHg`
-            : 'not recorded'
-        const med =
-          entry.medicationTaken === true
-            ? 'taken'
-            : entry.medicationTaken === false
-              ? 'missed'
+      lines.push(`All BP readings (${data.recentEntries.length} total):`)
+      if (data.recentEntries.length === 0) {
+        lines.push('- No readings recorded yet')
+      } else {
+        for (const entry of data.recentEntries) {
+          const measured = new Date(entry.measuredAt)
+          const date = measured.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          })
+          const time = measured.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+          })
+          const bp =
+            entry.systolicBP != null && entry.diastolicBP != null
+              ? `${entry.systolicBP}/${entry.diastolicBP} mmHg`
               : 'not recorded'
-        const wt = entry.weight != null ? `, Weight: ${entry.weight} lbs` : ''
-        const sym = entry.otherSymptoms?.length
-          ? `, Symptoms: ${entry.otherSymptoms.join(', ')}`
-          : ''
-        lines.push(`- ${date} at ${time}: ${bp}, Medication: ${med}${wt}${sym}`)
+          const med =
+            entry.medicationTaken === true
+              ? 'taken'
+              : entry.medicationTaken === false
+                ? 'missed'
+                : 'not recorded'
+          const wt = entry.weight != null ? `, Weight: ${entry.weight} lbs` : ''
+          const sym = entry.otherSymptoms?.length
+            ? `, Symptoms: ${entry.otherSymptoms.join(', ')}`
+            : ''
+          lines.push(`- ${date} at ${time}: ${bp}, Medication: ${med}${wt}${sym}`)
+        }
       }
     }
 
@@ -558,9 +608,17 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
       data.baseline.baselineSystolic != null &&
       data.baseline.baselineDiastolic != null
     ) {
-      lines.push(
-        `Baseline: ${data.baseline.baselineSystolic}/${data.baseline.baselineDiastolic} mmHg`,
-      )
+      if (data.omitReadingValues) {
+        // Voice surface — same anti-leak rationale as the BP list above.
+        // The LLM only needs to know a baseline EXISTS (for clinical framing),
+        // not its specific value; calling get_recent_readings reveals it
+        // freshly if the patient asks.
+        lines.push('Baseline: established (call get_recent_readings to read the actual numbers).')
+      } else {
+        lines.push(
+          `Baseline: ${data.baseline.baselineSystolic}/${data.baseline.baselineDiastolic} mmHg`,
+        )
+      }
     } else {
       const count = data.recentEntries.filter(
         (e) => e.systolicBP != null && e.diastolicBP != null,
@@ -634,6 +692,7 @@ function appendConditions(lines: string[], ctx: ResolvedContext): void {
   if (p.hasCAD) parts.push('Coronary artery disease (CAD)')
   if (p.hasAFib) parts.push('Atrial fibrillation (AFib)')
   if (p.hasHCM) parts.push('Hypertrophic cardiomyopathy (HCM)')
+  if (p.hasAorticStenosis) parts.push('Aortic stenosis')
   if (p.hasTachycardia) parts.push('Tachycardia')
   if (p.hasBradycardia) parts.push('Bradycardia')
   if (p.diagnosedHypertension) parts.push('Hypertension (on treatment)')
@@ -655,12 +714,12 @@ function appendPregnancy(lines: string[], ctx: ResolvedContext): void {
     } else {
       lines.push('Pregnancy: Currently pregnant.')
     }
-    if (p.historyPreeclampsia) {
-      lines.push('History of preeclampsia.')
+    if (p.historyHDP) {
+      lines.push('History of hypertensive disorder of pregnancy (HDP).')
     }
     lines.push('')
-  } else if (p.historyPreeclampsia) {
-    lines.push('History of preeclampsia (not currently pregnant).')
+  } else if (p.historyHDP) {
+    lines.push('History of hypertensive disorder of pregnancy (HDP) (not currently pregnant).')
     lines.push('')
   }
 }
@@ -744,7 +803,7 @@ function appendThreshold(lines: string[], ctx: ResolvedContext): void {
 function appendPreDay3Disclaimer(lines: string[], ctx: ResolvedContext): void {
   if (ctx.preDay3Mode) {
     lines.push(
-      `Patient has fewer than 7 readings (${ctx.readingCount} total); alerts use standard thresholds until personalization begins after Day 3.`,
+      `Patient has fewer than 7 readings (${ctx.readingCount} total); alerts use standard thresholds until personalization begins after 7 readings.`,
     )
     lines.push('')
   }

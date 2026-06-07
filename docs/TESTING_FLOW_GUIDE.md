@@ -112,7 +112,7 @@ One narrative, one patient, all the way through. Each step lists the file/endpoi
 │  POST /daily-journal  { measuredAt, systolicBP, diastolicBP, pulse, │
 │                         position, sessionId, symptoms..., conditions } │
 │  → 202 ACCEPTED; async rule engine evaluates                        │
-│  → session averaging applies (±30 min window or explicit sessionId) │
+│  → session averaging applies (±5 min window or explicit sessionId)  │
 │  → AFib gates BP/HR rules until ≥3 readings                         │
 │  → pre-Day-3 mode (<7 readings) forces STANDARD mode + disclaimer   │
 └─────────────────────────────────────────────────────────────────────┘
@@ -363,7 +363,7 @@ If `hasAFib = true` AND `session.readingCount < 3` → engine returns `null` for
 
 ### 7.4 Key gating details
 
-- **Session averaging** ([session-averager.service.ts](../backend/src/daily_journal/services/session-averager.service.ts)): readings grouped by explicit `sessionId` or ±30-min proximity. SBP/DBP/pulse averaged; symptom booleans OR-reduced; `otherSymptoms` deduplicated; `suboptimalMeasurement = true` if any reading had a false checklist item.
+- **Session averaging** ([session-averager.service.ts](../backend/src/daily_journal/services/session-averager.service.ts)): readings grouped by explicit `sessionId` or ±5-min proximity (CLINICAL_SPEC §5.2 — the same 5-min window also bounds explicit-`sessionId` grouping). SBP/DBP/pulse averaged; symptom booleans OR-reduced; `otherSymptoms` deduplicated; `suboptimalMeasurement = true` if any reading had a false checklist item.
 - **Pre-Day-3 mode** (readingCount <7): sets `personalizedEligible = false` (rules 13–14 skipped); standard mode wording tags a disclaimer.
 - **Age 65+** (from `dateOfBirth`): overrides lower bound for rule 16 to `<100`.
 - **Admin/no-profile user logs a reading**: Layer A gate returns **403** `{ message: "clinical-intake-required" }` from [daily_journal.service.ts](../backend/src/daily_journal/daily_journal.service.ts) before the row is written. The alert-engine skip path at [alert-engine.service.ts:114](../backend/src/daily_journal/services/alert-engine.service.ts) remains as defense-in-depth (in case a row arrives from some other path).
@@ -392,7 +392,7 @@ Expanded view of the final four steps of the happy path, with every branch point
 | No JWT | **401** |
 | Authenticated + no `PatientProfile` | **403** `{ message: "clinical-intake-required", reason: "..." }` — Layer A gate |
 | Has `sessionId` | Reading grouped with all siblings sharing same `sessionId` + same userId (exact match) |
-| No `sessionId` | Reading grouped with siblings within ±30 min of `measuredAt` (proximity window) |
+| No `sessionId` | Reading grouped with siblings within ±5 min of `measuredAt` (proximity window, CLINICAL_SPEC §5.2) |
 | Legacy `symptoms[]` array populated | Merged into `otherSymptoms` column at create time ([daily_journal.service.ts:61](../backend/src/daily_journal/daily_journal.service.ts)) |
 | Structured symptom flag true (`severeHeadache` etc.) | Stored as-is; triggers symptom override rule in engine |
 | Any checklist item in `measurementConditions` is false | `suboptimalMeasurement = true` propagates through session averager |
@@ -602,7 +602,7 @@ Three distinct time windows + three reading-count gates. Easy to confuse — kee
 | Magic link expiry | **24 hours** | Auth flow | [auth.service.ts](../backend/src/auth/auth.service.ts) |
 | `measuredAt` future tolerance | **+5 minutes** | Clock-skew slack — phone clock may be a few seconds off; 5 min is generous | [CreateJournalEntryDto](../backend/src/daily_journal/dto/create-journal-entry.dto.ts) validator |
 | `measuredAt` past tolerance | **−30 days** | Backfill limit — rejects obviously-wrong timestamps | Same file |
-| Session grouping window | **±30 minutes** | Two readings without explicit `sessionId` grouped if within 30 min of each other | [session-averager.service.ts](../backend/src/daily_journal/services/session-averager.service.ts) |
+| Session grouping window | **±5 minutes** | Two readings grouped if within 5 min of each other (CLINICAL_SPEC §5.2 — 5-min rolling window). Same `SESSION_WINDOW_MS` bounds explicit-`sessionId` grouping too. | [session-averager.service.ts](../backend/src/daily_journal/services/session-averager.service.ts) |
 | Gap-alert idempotency | **24 hours** | Prevent repeat "Time for your BP check" pushes | [gap-alert.service.ts](../backend/src/crons/gap-alert.service.ts) |
 | Gap-alert trigger threshold | **48 hours** since last entry | When to send the nudge | Same file |
 | Monthly re-ask idempotency | **28 days** | Prevent repeat "Confirm your medications" pushes | [monthly-reask.service.ts](../backend/src/crons/monthly-reask.service.ts) |

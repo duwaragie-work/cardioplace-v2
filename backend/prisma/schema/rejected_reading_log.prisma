@@ -1,0 +1,18 @@
+// Manisha 5/24 Q1 Tier 1 — physiologically-impossible BP readings (DBP >= SBP)
+// are rejected at entry (never persisted as a JournalEntry, never processed by
+// the rule engine) to avoid a false Level-2 emergency from a transposed reading.
+// The rejected values are logged here for QA analysis + a provider-dashboard
+// informational note (device malfunction / cuff placement / data-entry error).
+model RejectedReadingLog {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  systolicBP  Int?
+  diastolicBP Int?
+  pulse       Int?
+  // Machine reason code, e.g. "diastolic-ge-systolic".
+  reason      String
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+}

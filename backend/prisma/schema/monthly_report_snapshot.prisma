@@ -1,0 +1,25 @@
+// Phase/24 — Cache table for the Monthly Practice Analytics Report.
+//
+// Each row is the immutable result of `ReportsService.generateMonthly` for
+// a (practice, month) pair. The cron writes rows on the 1st of each month
+// for every active practice; on-demand reads return the cached payload
+// if present so historical reports never shift even when older alerts
+// get retroactively resolved.
+//
+// `payload` is the JSON shape declared in @cardioplace/shared
+// `MonthlyReport` — backend writes it verbatim and the frontend types
+// the response directly off the shared interface.
+model MonthlyReportSnapshot {
+  id          String   @id @default(uuid())
+  practiceId  String
+  // YYYY-MM identifier interpreted in the practice's businessHoursTimezone
+  // (not UTC). One snapshot per practice per month.
+  monthYear   String
+  generatedAt DateTime @default(now())
+  payload     Json
+
+  practice Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  @@unique([practiceId, monthYear])
+  @@index([practiceId, generatedAt(sort: Desc)])
+}

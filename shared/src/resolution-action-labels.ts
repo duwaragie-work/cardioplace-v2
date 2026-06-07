@@ -26,6 +26,13 @@ export type ResolutionAction =
   | 'BP_L2_SEEN_IN_OFFICE'
   | 'BP_L2_REVIEWED_TRENDING_DOWN'
   | 'BP_L2_UNABLE_TO_REACH_RETRY'
+  // Tier 1 angioedema (Manisha 5/24 Q4)
+  | 'ANGIO_ADVISED_ED'
+  | 'ANGIO_CONFIRMED_ED'
+  | 'ANGIO_ACE_DISCONTINUED'
+  | 'ANGIO_SEEN_IN_OFFICE'
+  | 'ANGIO_FALSE_ALARM'
+  | 'ANGIO_UNABLE_TO_REACH'
 
 export const RESOLUTION_PATIENT_LABELS: Record<ResolutionAction, string> = {
   TIER1_DISCONTINUED:
@@ -51,6 +58,17 @@ export const RESOLUTION_PATIENT_LABELS: Record<ResolutionAction, string> = {
   BP_L2_REVIEWED_TRENDING_DOWN:
     'Reviewed — your blood pressure is trending down.',
   BP_L2_UNABLE_TO_REACH_RETRY:
+    'Your care team has been trying to reach you — please answer when they call.',
+
+  ANGIO_ADVISED_ED:
+    'Your care team advised you to call 911 or go to the emergency department.',
+  ANGIO_CONFIRMED_ED:
+    'Your care team confirmed you are being evaluated in the emergency department.',
+  ANGIO_ACE_DISCONTINUED:
+    'Your care team has stopped a medication that can cause this reaction. Do not restart it unless your care team tells you to.',
+  ANGIO_SEEN_IN_OFFICE: 'You were seen in office and your care team updated your plan.',
+  ANGIO_FALSE_ALARM: 'Reviewed — your symptoms were found to have another cause.',
+  ANGIO_UNABLE_TO_REACH:
     'Your care team has been trying to reach you — please answer when they call.',
 }
 

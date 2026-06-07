@@ -26,8 +26,14 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     setDrawerOpen(false);
   }, [pathname]);
 
-  // Bypass on landing / auth routes — they keep their own chrome.
-  if (PUBLIC_PATHS.has(pathname) || pathname.startsWith('/auth/')) {
+  // Bypass on landing / auth / invite-activation routes — they keep
+  // their own chrome (and the invitee has no session yet, so the admin
+  // sidebar/top bar would just bounce them back to /sign-in).
+  if (
+    PUBLIC_PATHS.has(pathname) ||
+    pathname.startsWith('/auth/') ||
+    pathname.startsWith('/activate/')
+  ) {
     return <>{children}</>;
   }
 

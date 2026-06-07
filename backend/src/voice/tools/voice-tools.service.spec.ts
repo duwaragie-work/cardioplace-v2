@@ -8,6 +8,7 @@ import { jest } from '@jest/globals'
 import { Test } from '@nestjs/testing'
 import { VoiceToolsService } from './voice-tools.service.js'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
+import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
 
 const CTX = { userId: 'user-1', timezone: 'America/New_York' }
@@ -16,6 +17,7 @@ describe('VoiceToolsService.dispatch', () => {
   let service: VoiceToolsService
   let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock }
   let gemini: { extractBpFromImage: jest.Mock }
+  let alertEngine: { evaluateAdHoc: jest.Mock }
 
   beforeEach(async () => {
     dailyJournal = {
@@ -26,12 +28,14 @@ describe('VoiceToolsService.dispatch', () => {
       delete: jest.fn(),
     }
     gemini = { extractBpFromImage: jest.fn() }
+    alertEngine = { evaluateAdHoc: jest.fn() }
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         VoiceToolsService,
         { provide: DailyJournalService, useValue: dailyJournal },
         { provide: GeminiService, useValue: gemini },
+        { provide: AlertEngineService, useValue: alertEngine },
       ],
     }).compile()
 
@@ -40,11 +44,12 @@ describe('VoiceToolsService.dispatch', () => {
 
   // ── declarations ──────────────────────────────────────────────────────────
 
-  it('exposes 5 function declarations matching the Python contract', () => {
+  it('exposes 6 function declarations (5 Python-contract + evaluate_reading)', () => {
     const decls = service.getToolDeclarations()
     const names = decls.map((d) => d.name).sort()
     expect(names).toEqual([
       'delete_checkin',
+      'evaluate_reading',
       'get_recent_readings',
       'submit_bp_from_photo',
       'submit_checkin',
@@ -288,5 +293,143 @@ describe('VoiceToolsService.dispatch', () => {
       parsed: false,
       code: 'LOW_CONFIDENCE',
     }))
+  })
+
+  // ── evaluate_reading ──────────────────────────────────────────────────────
+  // Voice mirror of the text-chat tool: ask the rule engine what a reading
+  // means for THIS patient without persisting anything. The engine itself is
+  // mocked — see alert-engine.evaluate-ad-hoc.spec.ts for engine behaviour.
+
+  describe('evaluate_reading', () => {
+    it('calls evaluateAdHoc with mapped sbp/dbp/pulse and returns the engine result via llmResponse', async () => {
+      ;(alertEngine.evaluateAdHoc as jest.Mock<any>).mockResolvedValue({
+        evaluated: true,
+        ruleId: 'RULE_PERSONALIZED_HIGH',
+        tier: 'BP_LEVEL_1_HIGH',
+        mode: 'PERSONALIZED',
+        preDay3: false,
+        patientMessage: 'Your 140/90 is above the SBP goal of 130 your provider set.',
+      })
+      const r = await service.dispatch(
+        'evaluate_reading',
+        { systolic_bp: 140, diastolic_bp: 90, heart_rate: 78 },
+        CTX,
+      )
+      expect(alertEngine.evaluateAdHoc).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          systolicBP: 140,
+          diastolicBP: 90,
+          pulse: 78,
+        }),
+      )
+      expect(r.llmResponse).toEqual(
+        expect.objectContaining({
+          evaluated: true,
+          ruleId: 'RULE_PERSONALIZED_HIGH',
+          patientMessage: expect.stringMatching(/above the SBP goal/),
+        }),
+      )
+      // Voice-only: evaluate_reading must NOT trigger a Socket.io side-channel
+      // event. It is read-only — nothing to fan out to the UI.
+      expect(r.events).toEqual([])
+    })
+
+    it('omits pulse (pulse=null) when heart_rate is absent or 0', async () => {
+      ;(alertEngine.evaluateAdHoc as jest.Mock<any>).mockResolvedValue({
+        evaluated: true,
+        ruleId: null,
+        tier: null,
+        mode: null,
+        preDay3: false,
+        patientMessage: null,
+      })
+      await service.dispatch(
+        'evaluate_reading',
+        { systolic_bp: 122, diastolic_bp: 76 },
+        CTX,
+      )
+      expect(alertEngine.evaluateAdHoc).toHaveBeenCalledWith(
+        expect.objectContaining({ pulse: null }),
+      )
+    })
+
+    it('rejects zero or missing sbp/dbp without calling the engine', async () => {
+      const r = await service.dispatch(
+        'evaluate_reading',
+        { systolic_bp: 0, diastolic_bp: 0 },
+        CTX,
+      )
+      expect(alertEngine.evaluateAdHoc).not.toHaveBeenCalled()
+      expect(r.llmResponse).toEqual(
+        expect.objectContaining({
+          evaluated: false,
+          message: expect.stringMatching(/positive numbers/i),
+        }),
+      )
+    })
+
+    it('returns a graceful failure when the engine throws — voice never crashes mid-turn', async () => {
+      ;(alertEngine.evaluateAdHoc as jest.Mock<any>).mockRejectedValue(new Error('engine down'))
+      const r = await service.dispatch(
+        'evaluate_reading',
+        { systolic_bp: 140, diastolic_bp: 90 },
+        CTX,
+      )
+      // The evaluateReading() handler catches its own errors and returns a
+      // typed `{evaluated:false, message}` envelope so the LLM can degrade
+      // gracefully — the outer dispatch catch only fires for unhandled throws.
+      expect(r.llmResponse).toEqual(
+        expect.objectContaining({
+          evaluated: false,
+          message: expect.stringMatching(/evaluation failed/i),
+        }),
+      )
+      expect(r.events).toEqual([])
+    })
+
+    it('surfaces PROFILE_NOT_FOUND from the engine into llmResponse so the LLM can degrade gracefully', async () => {
+      ;(alertEngine.evaluateAdHoc as jest.Mock<any>).mockResolvedValue({
+        evaluated: false,
+        reason: 'PROFILE_NOT_FOUND',
+      })
+      const r = await service.dispatch(
+        'evaluate_reading',
+        { systolic_bp: 140, diastolic_bp: 90 },
+        CTX,
+      )
+      expect(r.llmResponse).toEqual({
+        evaluated: false,
+        reason: 'PROFILE_NOT_FOUND',
+      })
+    })
+
+    it('maps natural-language symptom phrases onto structured engine flags', async () => {
+      ;(alertEngine.evaluateAdHoc as jest.Mock<any>).mockResolvedValue({
+        evaluated: true,
+        ruleId: 'RULE_SYMPTOM_OVERRIDE_GENERAL',
+        tier: 'BP_LEVEL_2',
+        mode: 'STANDARD',
+        preDay3: false,
+        patientMessage: 'Call 911 — chest pressure with elevated BP.',
+      })
+      await service.dispatch(
+        'evaluate_reading',
+        {
+          systolic_bp: 150,
+          diastolic_bp: 95,
+          symptoms: ['chest pain', 'dizzy', 'palpitations'],
+        },
+        CTX,
+      )
+      const call = (alertEngine.evaluateAdHoc as jest.Mock).mock.calls[0][0] as Record<string, any>
+      expect(call.symptoms).toEqual(
+        expect.objectContaining({
+          chestPainOrDyspnea: true,
+          dizziness: true,
+          palpitations: true,
+        }),
+      )
+    })
   })
 })

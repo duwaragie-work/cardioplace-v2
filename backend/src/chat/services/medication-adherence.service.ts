@@ -155,8 +155,12 @@ export class MedicationAdherenceService {
         select: { id: true, drugName: true, drugClass: true },
       })
       if (byId) return byId
-      // Don't fall through to drugName when a wrong id was supplied — the
-      // model gave us garbage; ask for clarification rather than guessing.
+      // Composite WHERE missed — either the id doesn't exist OR it belongs to
+      // a different patient. Log for ops (cross-tenant probe / LLM-
+      // hallucinated UUID detection) and refuse to fall through to drugName.
+      this.logger.warn(
+        `[SECURITY] cross_tenant_attempt service=adherence action=findByMedicationId userId=${userId} requestedId=${input.medicationId}`,
+      )
       return null
     }
     if (!input.drugName) return null

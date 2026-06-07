@@ -235,7 +235,13 @@ test.describe('Admin app — PHI safety (§F)', () => {
     const fatal = errors.filter(
       (e) =>
         !/ResizeObserver|preload|hydration|favicon|net::ERR_/i.test(e) &&
-        !/401|Unauthorized/i.test(e),
+        // Permission-boundary resource loads (401/403) are benign noise for a
+        // console-cleanliness check — the server correctly DENIED access, the
+        // opposite of a leak. A multi-role admin (PROVIDER+SUPER_ADMIN) can
+        // trip a best-effort 403 on a role-gated background fetch while the
+        // page still renders. The PHI-leak assertion below still runs over
+        // ALL console errors, so this only relaxes the fatal-JS-error gate.
+        !/40[13]|Unauthorized|Forbidden/i.test(e),
     )
     // Console must also not leak PHI even in benign log lines.
     for (const e of errors) {

@@ -72,6 +72,13 @@ model JournalEntry {
   // single-reading sessions.
   singleReadingFinalized Boolean @default(false)
 
+  // Manisha 5/24 Q1 Tier 2 — narrow pulse pressure (SBP−DBP < 15) on this
+  // INDIVIDUAL reading at entry. Physician-only artifact flag (no alert tier,
+  // no patient message); the reading still enters the session average, where
+  // the separate <25 hemodynamic rule may fire. Surfaced on the admin readings
+  // tab as a "possible measurement artifact" note.
+  narrowPpArtifact Boolean @default(false)
+
   otherSymptoms String[]
 
   teachBackAnswer  String?

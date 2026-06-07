@@ -77,7 +77,7 @@ interface Patient {
    *  (CLINICAL_SPEC §3 enhanced-monitoring marker for women with a
    *  documented history, including outside pregnancy). */
   isPregnant?: boolean;
-  historyPreeclampsia?: boolean;
+  historyHDP?: boolean;
   onboardingStatus: string;
   // Clinical enrollment state (admin-owned). `onboardingStatus` above is
   // identity onboarding only (name/DOB/timezone). See TESTING_FLOW_GUIDE §4.1.
@@ -1011,21 +1011,19 @@ export default function PatientsPage() {
               )}
             </div>
 
-            {/* Filter chip row — wraps on tablet, scroll-x on phone so it
-                never breaks layout. -mx-4 + px-4 lets the scroll strip
-                bleed to the screen edges on mobile so users can flick
-                without bumping the page padding. */}
-            <div
-              className="flex items-center gap-2 overflow-x-auto sm:overflow-visible -mx-4 px-4 sm:mx-0 sm:px-0 pb-1 sm:pb-0"
-              style={{ scrollbarWidth: 'thin' }}
-            >
+            {/* Filter chip row — on phones the three controls share the row
+                width (fit-to-width) so there's no horizontal scroll; on sm+
+                they revert to natural widths inline. pt-1 leaves room for the
+                threshold chip's pulsing ring (a box-shadow that would clip if
+                an ancestor scrolled). */}
+            <div className="flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto pt-1 sm:pt-0">
               {/* Risk filter */}
-              <div className="relative shrink-0">
+              <div className="relative flex-1 min-w-0 sm:flex-none">
                 <select
                   value={riskFilter}
                   onChange={(e) => setRiskFilter(e.target.value)}
                   data-testid="admin-patient-risk-filter"
-                  className="appearance-none h-9 pl-3 pr-7 rounded-full text-[12px] font-semibold outline-none cursor-pointer"
+                  className="appearance-none w-full sm:w-auto h-9 pl-3 pr-7 rounded-full text-[12px] font-semibold outline-none cursor-pointer"
                   style={{
                     backgroundColor: 'white',
                     border: '1.5px solid var(--brand-border)',
@@ -1060,18 +1058,18 @@ export default function PatientsPage() {
                     data-testid="admin-patient-awaiting-filter"
                     aria-pressed={active}
                     aria-label={active ? 'Showing only unverified patients' : 'Filter to unverified patients'}
-                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap"
+                    className="inline-flex items-center justify-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer flex-1 min-w-0 sm:flex-none whitespace-nowrap"
                     style={{
                       backgroundColor: active ? 'var(--brand-warning-amber)' : 'var(--brand-warning-amber-light)',
                       color: active ? 'white' : 'var(--brand-warning-amber)',
                       border: `1.5px solid ${active ? 'var(--brand-warning-amber)' : 'transparent'}`,
                     }}
                   >
-                    <ShieldAlert className="w-3 h-3" />
+                    <ShieldAlert className="w-3 h-3 shrink-0" />
                     <span className="hidden md:inline">Awaiting verification</span>
-                    <span className="md:hidden">Unverified</span>
+                    <span className="md:hidden truncate">Unverified</span>
                     <span
-                      className="text-[10px] font-bold px-1.5 rounded-full"
+                      className="text-[10px] font-bold px-1.5 rounded-full shrink-0"
                       style={{
                         backgroundColor: active ? 'rgba(255,255,255,0.25)' : 'white',
                         color: active ? 'white' : 'var(--brand-warning-amber)',
@@ -1083,7 +1081,7 @@ export default function PatientsPage() {
                     </span>
                     {active && (
                       <X
-                        className="w-3 h-3"
+                        className="w-3 h-3 shrink-0"
                         onClick={(e) => {
                           e.stopPropagation();
                           setAwaitingVerificationOnly(false);
@@ -1109,7 +1107,7 @@ export default function PatientsPage() {
                     data-testid="admin-patient-threshold-filter"
                     aria-pressed={active}
                     aria-label={active ? 'Showing only patients needing a threshold' : 'Filter to patients needing a threshold'}
-                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap"
+                    className="inline-flex items-center justify-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer flex-1 min-w-0 sm:flex-none whitespace-nowrap"
                     style={{
                       backgroundColor: active
                         ? 'var(--brand-alert-red)'
@@ -1125,11 +1123,11 @@ export default function PatientsPage() {
                       animation: alarming && !active ? 'threshold-pulse 1.6s ease-in-out infinite' : undefined,
                     }}
                   >
-                    <AlertTriangle className="w-3 h-3" />
+                    <AlertTriangle className="w-3 h-3 shrink-0" />
                     <span className="hidden md:inline">Threshold needed</span>
-                    <span className="md:hidden">Threshold</span>
+                    <span className="md:hidden truncate">Threshold</span>
                     <span
-                      className="text-[10px] font-bold px-1.5 rounded-full"
+                      className="text-[10px] font-bold px-1.5 rounded-full shrink-0"
                       style={{
                         backgroundColor: active ? 'rgba(255,255,255,0.25)' : 'white',
                         color: active ? 'white' : 'var(--brand-alert-red-text)',
@@ -1141,7 +1139,7 @@ export default function PatientsPage() {
                     </span>
                     {active && (
                       <X
-                        className="w-3 h-3"
+                        className="w-3 h-3 shrink-0"
                         onClick={(e) => {
                           e.stopPropagation();
                           setThresholdNeededOnly(false);
@@ -1242,12 +1240,12 @@ export default function PatientsPage() {
                               pregnancy banner already covers active pregnancies,
                               so the value of this flag is for women with a
                               documented history outside pregnancy. */}
-                          {p.historyPreeclampsia && !p.isPregnant && (
+                          {p.historyHDP && !p.isPregnant && (
                             <span
                               role="img"
                               className="shrink-0 inline-flex items-center"
-                              title="Preeclampsia history. Enhanced monitoring recommended outside pregnancy per 2025 AHA/ACC Hypertension Guideline."
-                              aria-label="Preeclampsia history"
+                              title="History of hypertensive disorder of pregnancy (HDP). Enhanced monitoring recommended outside pregnancy per 2025 AHA/ACC Hypertension Guideline."
+                              aria-label="History of hypertensive disorder of pregnancy"
                             >
                               <Heart
                                 className="w-3 h-3"

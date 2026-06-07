@@ -17,5 +17,5 @@ export class PregnancyDto implements PregnancyPayload {
 
   @IsOptional()
   @IsBoolean()
-  historyPreeclampsia?: boolean
+  historyHDP?: boolean
 }

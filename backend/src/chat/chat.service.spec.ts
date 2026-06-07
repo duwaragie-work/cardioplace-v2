@@ -15,6 +15,10 @@ import { PrismaService } from '../prisma/prisma.service.js'
 import { DailyJournalService } from '../daily_journal/daily_journal.service.js'
 import { ProfileResolverService } from '../daily_journal/services/profile-resolver.service.js'
 import { GeminiService } from '../gemini/gemini.service.js'
+import { OcrService } from '../ocr/ocr.service.js'
+import { MedicationAdherenceService } from './services/medication-adherence.service.js'
+import { SymptomQuickLogService } from './services/symptom-quick-log.service.js'
+import { AlertEngineService } from '../daily_journal/services/alert-engine.service.js'
 
 const NOW = new Date('2026-04-22T10:00:00Z')
 const DOB = new Date('1980-06-15T00:00:00Z')
@@ -32,7 +36,7 @@ function buildResolvedContext(
       heightCm: 165,
       isPregnant: false,
       pregnancyDueDate: null,
-      historyPreeclampsia: false,
+      historyHDP: false,
       hasHeartFailure: false,
       heartFailureType: 'NOT_APPLICABLE',
       resolvedHFType: 'NOT_APPLICABLE',
@@ -58,6 +62,7 @@ function buildResolvedContext(
     triggerPregnancyContraindicationCheck: false,
     enrolledAt: null,
     practiceName: null,
+    patientName: null,
     resolvedAt: NOW,
     ...over,
   }
@@ -103,6 +108,13 @@ describe('ChatService.buildPatientSystemPrompt() — phase/16', () => {
         { provide: ConfigService, useValue: { get: jest.fn() } },
         { provide: DailyJournalService, useValue: {} },
         { provide: GeminiService, useValue: {} },
+        { provide: OcrService, useValue: {} },
+        { provide: MedicationAdherenceService, useValue: {} },
+        { provide: SymptomQuickLogService, useValue: {} },
+        // ChatService only packages this into its tool-dispatch deps bag
+        // (alertEngine: this.alertEngineService) — no method is invoked in the
+        // spec's paths, so a bare mock satisfies the constructor DI.
+        { provide: AlertEngineService, useValue: { evaluateAdHoc: jest.fn() } },
       ],
     }).compile()
     service = module.get(ChatService)

@@ -141,7 +141,7 @@ All tests use anchor `userId = user-1`, starting `measuredAt = 2026-04-22T08:00Z
 | Case | Readings | Expected session |
 |---|---|---|
 | Single reading | `[160/95, pulse 80]` | `systolic=160, diastolic=95, pulse=80, readingCount=1` |
-| Two readings same sessionId | `[160/90/70, 140/80/80]` 10 min apart, sessionId `s1` | `mean = 150/85/75, readingCount=2` |
+| Two readings same sessionId | `[160/90/70, 140/80/80]` 3 min apart, sessionId `s1` | `mean = 150/85/75, readingCount=2` |
 | ≥3 readings | `[SBP 160, 170, 180]` sessionId `s1`, 5 min apart each | `mean SBP = 170, readingCount=3` |
 | OR-reduce symptoms | entry A `severeHeadache=true`, entry B `chestPainOrDyspnea=true` | both flags `true`, `visualChanges=false` |
 | Any false checklist item | `measurementConditions = { noCaffeine: true, seatedRest: false }` | `suboptimalMeasurement = true` |
