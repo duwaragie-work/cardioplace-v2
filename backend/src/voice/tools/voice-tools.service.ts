@@ -6,7 +6,7 @@ import { DailyJournalService } from '../../daily_journal/daily_journal.service.j
 import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import type { SessionSymptoms } from '../../daily_journal/engine/types.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
-import { isIntakeIncompleteError } from '../../chat/tools/journal-tools.js'
+import { dedupeSymptomsAgainstFlags, isIntakeIncompleteError } from '../../chat/tools/journal-tools.js'
 import { IntakeStatusService } from '../../intake/intake-status.service.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import {
@@ -537,7 +537,31 @@ export class VoiceToolsService {
     dto.faceSwelling = toBool(args.face_swelling, false)
     dto.throatTightness = toBool(args.throat_tightness, false)
     const otherSymptoms = toStringArray(args.other_symptoms)
-    if (otherSymptoms.length) dto.otherSymptoms = otherSymptoms
+    if (otherSymptoms.length) {
+      // Bug 23 — strip any phrasing already captured by a TRUE structured
+      // boolean (e.g. "vision changes" when visualChanges is set). Prevents
+      // the chart from showing the same symptom under both "Symptoms" and
+      // "Other symptoms". Defense-in-depth alongside the prompt strengthening.
+      const flagsForDedupe: Partial<SessionSymptoms> = {
+        severeHeadache: dto.severeHeadache === true,
+        visualChanges: dto.visualChanges === true,
+        alteredMentalStatus: dto.alteredMentalStatus === true,
+        chestPainOrDyspnea: dto.chestPainOrDyspnea === true,
+        focalNeuroDeficit: dto.focalNeuroDeficit === true,
+        severeEpigastricPain: dto.severeEpigastricPain === true,
+        newOnsetHeadache: dto.newOnsetHeadache === true,
+        ruqPain: dto.ruqPain === true,
+        edema: dto.edema === true,
+        dizziness: dto.dizziness === true,
+        syncope: dto.syncope === true,
+        palpitations: dto.palpitations === true,
+        legSwelling: dto.legSwelling === true,
+        faceSwelling: dto.faceSwelling === true,
+        throatTightness: dto.throatTightness === true,
+      }
+      const deduped = dedupeSymptomsAgainstFlags(otherSymptoms, flagsForDedupe)
+      if (deduped && deduped.length) dto.otherSymptoms = deduped
+    }
 
     const sessionId = asString(args.session_id, '').trim()
     if (sessionId) dto.sessionId = sessionId

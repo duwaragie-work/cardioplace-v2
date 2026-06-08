@@ -825,6 +825,36 @@ export async function executeJournalTool(
         // preserved (`symptoms` and `otherSymptoms` below) so the chart
         // keeps the patient's exact words.
         const mappedFromFreeform = mapSymptomsArrayToFlags(args.symptoms) ?? {}
+        // Bug 23 — compute the final set of TRUE structured booleans (explicit
+        // arg OR freeform-mapped), then strip duplicates from both `symptoms`
+        // (V1 legacy) and `other_symptoms` (V2). Keeps each symptom in exactly
+        // one place — the structured boolean — so the UI doesn't render it
+        // twice under "Symptoms" + "Other symptoms".
+        const finalFlags: Partial<SessionSymptoms> = {
+          severeHeadache: args.severe_headache === true || mappedFromFreeform.severeHeadache === true,
+          visualChanges: args.visual_changes === true || mappedFromFreeform.visualChanges === true,
+          alteredMentalStatus: args.altered_mental_status === true || mappedFromFreeform.alteredMentalStatus === true,
+          chestPainOrDyspnea: args.chest_pain_or_dyspnea === true || mappedFromFreeform.chestPainOrDyspnea === true,
+          focalNeuroDeficit: args.focal_neuro_deficit === true || mappedFromFreeform.focalNeuroDeficit === true,
+          severeEpigastricPain: args.severe_epigastric_pain === true || mappedFromFreeform.severeEpigastricPain === true,
+          newOnsetHeadache: args.new_onset_headache === true || mappedFromFreeform.newOnsetHeadache === true,
+          ruqPain: args.ruq_pain === true || mappedFromFreeform.ruqPain === true,
+          edema: args.edema === true || mappedFromFreeform.edema === true,
+          dizziness: mappedFromFreeform.dizziness === true,
+          syncope: mappedFromFreeform.syncope === true,
+          palpitations: mappedFromFreeform.palpitations === true,
+          legSwelling: mappedFromFreeform.legSwelling === true,
+          fatigue: mappedFromFreeform.fatigue === true,
+          shortnessOfBreath: mappedFromFreeform.shortnessOfBreath === true,
+          dryCough: mappedFromFreeform.dryCough === true,
+          nsaidUse: mappedFromFreeform.nsaidUse === true,
+          faceSwelling: mappedFromFreeform.faceSwelling === true,
+          throatTightness: mappedFromFreeform.throatTightness === true,
+        }
+        const dedupedSymptoms = dedupeSymptomsAgainstFlags(args.symptoms ?? [], finalFlags) ?? []
+        const dedupedOtherSymptoms = Array.isArray(args.other_symptoms)
+          ? dedupeSymptomsAgainstFlags(args.other_symptoms, finalFlags)
+          : undefined
         const result = await journalService.create(userId, {
           measuredAt,
           systolicBP: args.systolic_bp,
@@ -847,37 +877,29 @@ export async function executeJournalTool(
             )
             return kg > 0 ? kg : undefined
           })(),
-          symptoms: args.symptoms ?? [],
-          // 9 structured Level-2 symptom booleans — explicit LLM arg wins;
-          // otherwise pick up what the keyword mapper extracted from the
-          // freeform array. Default `false` when neither source set it so
-          // the rule engine sees a clean fully-populated entry.
-          severeHeadache: args.severe_headache === true || mappedFromFreeform.severeHeadache === true,
-          visualChanges: args.visual_changes === true || mappedFromFreeform.visualChanges === true,
-          alteredMentalStatus: args.altered_mental_status === true || mappedFromFreeform.alteredMentalStatus === true,
-          chestPainOrDyspnea: args.chest_pain_or_dyspnea === true || mappedFromFreeform.chestPainOrDyspnea === true,
-          focalNeuroDeficit: args.focal_neuro_deficit === true || mappedFromFreeform.focalNeuroDeficit === true,
-          severeEpigastricPain: args.severe_epigastric_pain === true || mappedFromFreeform.severeEpigastricPain === true,
-          newOnsetHeadache: args.new_onset_headache === true || mappedFromFreeform.newOnsetHeadache === true,
-          ruqPain: args.ruq_pain === true || mappedFromFreeform.ruqPain === true,
-          edema: args.edema === true || mappedFromFreeform.edema === true,
-          // Cluster-6 / Cluster-7 / Cluster-8 keys aren't on the text tool's
-          // arg schema, but the rule engine consumes them and the keyword
-          // mapper recognises them in freeform text. Pass them through when
-          // the mapper detected one so the engine's downstream rules
-          // (brady-symptomatic, palpitations, HF-decomp, ACE-angioedema, etc.)
-          // can still fire.
-          dizziness: mappedFromFreeform.dizziness === true,
-          syncope: mappedFromFreeform.syncope === true,
-          palpitations: mappedFromFreeform.palpitations === true,
-          legSwelling: mappedFromFreeform.legSwelling === true,
-          fatigue: mappedFromFreeform.fatigue === true,
-          shortnessOfBreath: mappedFromFreeform.shortnessOfBreath === true,
-          dryCough: mappedFromFreeform.dryCough === true,
-          nsaidUse: mappedFromFreeform.nsaidUse === true,
-          faceSwelling: mappedFromFreeform.faceSwelling === true,
-          throatTightness: mappedFromFreeform.throatTightness === true,
-          otherSymptoms: Array.isArray(args.other_symptoms) ? args.other_symptoms : undefined,
+          symptoms: dedupedSymptoms,
+          // Structured booleans computed once above (finalFlags) — reuse so
+          // the persistence row and the dedupe see exactly the same truth.
+          severeHeadache: finalFlags.severeHeadache === true,
+          visualChanges: finalFlags.visualChanges === true,
+          alteredMentalStatus: finalFlags.alteredMentalStatus === true,
+          chestPainOrDyspnea: finalFlags.chestPainOrDyspnea === true,
+          focalNeuroDeficit: finalFlags.focalNeuroDeficit === true,
+          severeEpigastricPain: finalFlags.severeEpigastricPain === true,
+          newOnsetHeadache: finalFlags.newOnsetHeadache === true,
+          ruqPain: finalFlags.ruqPain === true,
+          edema: finalFlags.edema === true,
+          dizziness: finalFlags.dizziness === true,
+          syncope: finalFlags.syncope === true,
+          palpitations: finalFlags.palpitations === true,
+          legSwelling: finalFlags.legSwelling === true,
+          fatigue: finalFlags.fatigue === true,
+          shortnessOfBreath: finalFlags.shortnessOfBreath === true,
+          dryCough: finalFlags.dryCough === true,
+          nsaidUse: finalFlags.nsaidUse === true,
+          faceSwelling: finalFlags.faceSwelling === true,
+          throatTightness: finalFlags.throatTightness === true,
+          otherSymptoms: dedupedOtherSymptoms,
           notes: args.notes ?? '',
           sessionId:
             typeof args.session_id === 'string' && args.session_id.trim() ? args.session_id.trim() : undefined,
@@ -980,6 +1002,28 @@ export async function executeJournalTool(
         if (args.ruq_pain != null) dto.ruqPain = args.ruq_pain === true
         if (args.edema != null) dto.edema = args.edema === true
         if (Array.isArray(args.other_symptoms)) dto.otherSymptoms = args.other_symptoms
+        // Bug 23 — server-side dedupe. After all the symptom-related fields
+        // are staged on `dto`, strip any freeform phrasing that maps to a
+        // structured boolean we just set TRUE. Prevents the UI from showing
+        // the same symptom under both "Symptoms" (from the boolean) and
+        // "Other symptoms" (from the freeform array).
+        const dtoFlagsForDedupe: Partial<SessionSymptoms> = {
+          severeHeadache: dto.severeHeadache === true,
+          visualChanges: dto.visualChanges === true,
+          alteredMentalStatus: dto.alteredMentalStatus === true,
+          chestPainOrDyspnea: dto.chestPainOrDyspnea === true,
+          focalNeuroDeficit: dto.focalNeuroDeficit === true,
+          severeEpigastricPain: dto.severeEpigastricPain === true,
+          newOnsetHeadache: dto.newOnsetHeadache === true,
+          ruqPain: dto.ruqPain === true,
+          edema: dto.edema === true,
+        }
+        if (Array.isArray(dto.symptoms)) {
+          dto.symptoms = dedupeSymptomsAgainstFlags(dto.symptoms, dtoFlagsForDedupe) ?? []
+        }
+        if (Array.isArray(dto.otherSymptoms)) {
+          dto.otherSymptoms = dedupeSymptomsAgainstFlags(dto.otherSymptoms, dtoFlagsForDedupe)
+        }
         if (args.notes != null) dto.notes = args.notes
         if (typeof args.session_id === 'string' && args.session_id.trim()) {
           dto.sessionId = args.session_id.trim()
@@ -1343,4 +1387,40 @@ export function mapSymptomsArrayToFlags(raw: unknown): Partial<SessionSymptoms> 
     else if (kn === 'throattightness' || kn.includes('throat')) flags.throatTightness = true
   }
   return Object.keys(flags).length > 0 ? flags : undefined
+}
+
+/**
+ * Bug 23 — strip freeform entries from a symptoms array when the same symptom
+ * is already captured by a TRUE structured boolean. The patient reports
+ * "vision changes" → the LLM correctly sets `visualChanges: true` AND adds
+ * "vision changes" to `other_symptoms[]` / `symptoms[]`. The chart UI then
+ * shows the symptom twice: once under "Symptoms" (rendered from the boolean
+ * label) and once under "Other symptoms" (rendered from the freeform array).
+ *
+ * Defense-in-depth alongside the prompt strengthening: even when the LLM
+ * ignores the "do not duplicate" instruction, the server quietly strips the
+ * duplicate before persistence. Reuses `mapSymptomsArrayToFlags` so the
+ * recognition rules stay in one place — if a freeform entry maps to ANY flag
+ * that's currently true, it's a duplicate and gets dropped.
+ *
+ * Entries that don't map to any structured flag (e.g. "throbbing knee pain",
+ * "anxiety") are preserved unchanged — they're the legitimate other_symptoms.
+ */
+export function dedupeSymptomsAgainstFlags(
+  arr: string[] | undefined,
+  trueFlags: Partial<SessionSymptoms>,
+): string[] | undefined {
+  if (!arr || arr.length === 0) return arr
+  const truthy = new Set(
+    Object.entries(trueFlags)
+      .filter(([, v]) => v === true)
+      .map(([k]) => k),
+  )
+  if (truthy.size === 0) return arr
+  return arr.filter((entry) => {
+    if (typeof entry !== 'string' || !entry.trim()) return false
+    const mapped = mapSymptomsArrayToFlags([entry])
+    if (!mapped) return true
+    return !Object.keys(mapped).some((k) => truthy.has(k))
+  })
 }

@@ -4,6 +4,7 @@ import {
   executeJournalTool,
   normaliseTime,
   mapSymptomsArrayToFlags,
+  dedupeSymptomsAgainstFlags,
 } from './journal-tools.js'
 
 describe('journal-tools', () => {
@@ -81,6 +82,74 @@ describe('journal-tools', () => {
       expect(mapSymptomsArrayToFlags(['altered_mental_status'])).toEqual({ alteredMentalStatus: true })
       expect(mapSymptomsArrayToFlags(['focal_neuro_deficit'])).toEqual({ focalNeuroDeficit: true })
       expect(mapSymptomsArrayToFlags(['throat_tightness'])).toEqual({ throatTightness: true })
+    })
+  })
+
+  // ─── Bug 23 — server-side dedupe of freeform phrasings against TRUE
+  //              structured booleans. Stops the UI showing the same symptom
+  //              under both "Symptoms" (boolean label) and "Other symptoms"
+  //              (freeform array). Defense-in-depth alongside the prompt
+  //              rule telling the LLM not to duplicate.
+  describe('dedupeSymptomsAgainstFlags (Bug 23)', () => {
+    it('strips "vision changes" phrasing when visualChanges flag is true', () => {
+      const out = dedupeSymptomsAgainstFlags(
+        ['vision changes', 'throbbing knee pain'],
+        { visualChanges: true },
+      )
+      expect(out).toEqual(['throbbing knee pain'])
+    })
+
+    it('keeps everything when no flags are true', () => {
+      const out = dedupeSymptomsAgainstFlags(
+        ['vision changes', 'throbbing knee pain'],
+        { visualChanges: false },
+      )
+      expect(out).toEqual(['vision changes', 'throbbing knee pain'])
+    })
+
+    it('strips multiple distinct duplicates in one pass', () => {
+      const out = dedupeSymptomsAgainstFlags(
+        ['vision changes', 'chest pain', 'anxiety', 'severe headache'],
+        {
+          visualChanges: true,
+          chestPainOrDyspnea: true,
+          severeHeadache: true,
+        },
+      )
+      expect(out).toEqual(['anxiety'])
+    })
+
+    it('is case-insensitive (mapSymptomsArrayToFlags lowercases input)', () => {
+      const out = dedupeSymptomsAgainstFlags(
+        ['Vision Changes', 'VISION CHANGES'],
+        { visualChanges: true },
+      )
+      expect(out).toEqual([])
+    })
+
+    it('returns input unchanged when array is empty or undefined', () => {
+      expect(dedupeSymptomsAgainstFlags([], { visualChanges: true })).toEqual([])
+      expect(dedupeSymptomsAgainstFlags(undefined, { visualChanges: true })).toBeUndefined()
+    })
+
+    it('preserves entries that map to a flag that is FALSE / unset', () => {
+      // visualChanges is true but the entry maps to chestPainOrDyspnea
+      // (which is false), so it should stay.
+      const out = dedupeSymptomsAgainstFlags(
+        ['chest pain', 'vision changes'],
+        { visualChanges: true, chestPainOrDyspnea: false },
+      )
+      expect(out).toEqual(['chest pain'])
+    })
+
+    it('does not strip negated phrasings (mapper already returns no flag)', () => {
+      // "no vision changes" doesn't map to visualChanges via the mapper,
+      // so it's preserved even when visualChanges is true.
+      const out = dedupeSymptomsAgainstFlags(
+        ['no vision changes'],
+        { visualChanges: true },
+      )
+      expect(out).toEqual(['no vision changes'])
     })
   })
 

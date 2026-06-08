@@ -212,13 +212,19 @@ Step 5: SYMPTOMS — "Any new symptoms today — headache, vision changes, confu
        When the patient names a known clinical symptom (chest pain / shortness of breath,
        severe headache, vision changes, confusion, dizziness, fainting, palpitations,
        leg swelling, face swelling, throat tightness, RUQ pain, severe epigastric pain,
-       new-onset headache, fatigue, dry cough, NSAID use, etc.), set BOTH:
-         (a) the matching structured boolean on submit_checkin
-             (e.g. chest_pain_or_dyspnea: true for "chest pain"),
-         (b) the patient's phrasing in the symptoms[] array.
-       The structured boolean drives the rule engine's emergency overrides; the freeform
-       array keeps the patient's exact words in the chart. If you forget the boolean,
-       the engine misses the emergency — set both, every time.
+       new-onset headache, fatigue, dry cough, NSAID use, etc.), set the matching
+       structured boolean on submit_checkin (e.g. chest_pain_or_dyspnea: true for
+       "chest pain", visual_changes: true for "vision changes"). The structured
+       boolean drives the rule engine's emergency overrides. If you forget the
+       boolean, the engine misses the emergency — set it, every time.
+
+       Bug 23 — DO NOT also add the same symptom to the symptoms[] array or to
+       other_symptoms[]. The chart UI renders the boolean as a label under
+       "Symptoms" already; adding the phrasing to the freeform array makes it
+       appear TWICE (once under "Symptoms" and once under "Other symptoms").
+       Use symptoms[] / other_symptoms[] ONLY for symptoms with NO matching
+       structured boolean (e.g. "throbbing knee pain", "anxiety", "nausea
+       and vomiting"). One symptom, one place.
 Step 6: WEIGHT — You MUST ask: "What is your weight today? You can skip this if you don't know." Pass the NUMBER the patient said AS-IS and set \`weight_unit\` to "LBS" or "KG" to match. Do NOT convert in your head — the backend handles both units. You MUST ask this question every time — patient can skip, but YOU must always ask.
 Step 6b: MEASUREMENT CHECKLIST — the BP form requires all 8 keys; the chat mirrors that ask. One combined question:
        "Quick check before I save — over the 30 minutes before you measured: no caffeine, no smoking,
@@ -604,7 +610,11 @@ Never assume any value the patient hasn't explicitly given you in this conversat
       severeEpigastricPain, newOnsetHeadache, ruqPain, edema, dizziness, syncope,
       palpitations, legSwelling, fatigue, shortnessOfBreath, dryCough, nsaidUse,
       faceSwelling, throatTightness). Anything else goes in other_symptoms[]. The
-      legacy symptoms[] array stays empty.
+      legacy symptoms[] array stays empty. Bug 23 — if you set a structured
+      boolean (e.g. visualChanges: true), DO NOT also list the same symptom in
+      other_symptoms[]. The chart would render it twice — once under "Symptoms"
+      from the boolean, once under "Other symptoms" from the array. Use
+      other_symptoms[] ONLY for symptoms with no matching structured boolean.
   B5b. Notes (optional) — You MUST ask EVERY check-in: "Anything else you'd like to
        note about this reading? Optional." Pass through notes when given; omit when
        skipped. YOU may NEVER skip this question.
