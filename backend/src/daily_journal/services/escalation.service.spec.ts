@@ -384,21 +384,29 @@ describe('EscalationService', () => {
       prisma.deviationAlert.findUnique.mockResolvedValue(duringBusinessHours)
     })
 
-    it('fires ONLY the primary row (no backup courtesy fire during business hours)', async () => {
+    it('fires the primary provider row + D5 patient mirror, but NO backup courtesy fire during business hours', async () => {
       await service.handleAlertCreated(buildAlertCreatedPayload(), businessHoursNow)
 
-      expect(createdEvents).toHaveLength(1)
-      const only = createdEvents[0]
-      expect(only.data.ladderStep).toBe('T0')
-      expect(only.data.recipientRoles).toEqual(['PRIMARY_PROVIDER'])
+      // D5 (Manisha 2026-06-06): TIER_1_CONTRAINDICATION now mirrors a patient
+      // EMAIL row at T+0 alongside the provider step. Both are T0; neither
+      // pages the BACKUP provider during business hours (backup enters at T+4h).
+      const roles = createdEvents
+        .map((e) => e.data.recipientRoles as string[])
+        .flat()
+      expect(roles).toContain('PRIMARY_PROVIDER')
+      expect(roles).toContain('PATIENT')
+      expect(roles).not.toContain('BACKUP_PROVIDER')
+      expect(createdEvents.every((e) => e.data.ladderStep === 'T0')).toBe(true)
     })
 
-    it('emits ESCALATION_DISPATCHED once', async () => {
+    it('emits ESCALATION_DISPATCHED per dispatch — provider step + D5 patient mirror', async () => {
       await service.handleAlertCreated(buildAlertCreatedPayload(), businessHoursNow)
       const calls = eventEmitter.emit.mock.calls.filter(
         (c) => c[0] === JOURNAL_EVENTS.ESCALATION_DISPATCHED,
       )
-      expect(calls).toHaveLength(1)
+      // ESCALATION_DISPATCHED fires after every successful dispatch, so the
+      // provider step + the D5 patient EMAIL mirror = 2 emits.
+      expect(calls).toHaveLength(2)
     })
   })
 
@@ -686,6 +694,104 @@ describe('EscalationService', () => {
           c[0].data.userId !== 'patient-1' && c[0].data.channel === 'DASHBOARD',
       )
       expect(providerDashboard.length).toBeGreaterThan(0)
+    })
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Manisha Open-Decisions sign-off 2026-06-06 — D5 (TIER_1_CONTRAINDICATION
+    // patient email at T+0) + D6 (BP_LEVEL_1_HIGH patient email re-instated,
+    // cohort-gated to STANDARD mode only; HIGH only, not LOW).
+    // ──────────────────────────────────────────────────────────────────────
+    it('D5 — TIER_1_CONTRAINDICATION T+0 writes a patient EMAIL row + sends the email', async () => {
+      const alert = buildAlert({
+        tier: 'TIER_1_CONTRAINDICATION',
+        ruleId: 'RULE_PREGNANCY_ACE_ARB',
+        patientMessage:
+          'We noticed something about one of your medications. Your care team is reviewing and will contact you. Please don’t stop any medicine without talking to your doctor.',
+      })
+      prisma.deviationAlert.findUnique.mockResolvedValue(alert)
+
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({ tier: 'TIER_1_CONTRAINDICATION' }),
+      )
+
+      const notifCalls = prisma.notification.create.mock.calls as Array<
+        [{ data: { userId: string; channel: string } }]
+      >
+      const patientEmailRows = notifCalls.filter(
+        (c) => c[0].data.userId === 'patient-1' && c[0].data.channel === 'EMAIL',
+      )
+      // Patient gets the EMAIL row (no in-app bell DASHBOARD row — F12 filter).
+      expect(patientEmailRows.length).toBeGreaterThan(0)
+      // Real send went out — Manisha's whole point of D5: close the
+      // "continued exposure before they open the app" gap.
+      expect(email.sendEmail).toHaveBeenCalled()
+    })
+
+    it('D6 — BP_LEVEL_1_HIGH + STANDARD mode T+0 writes patient EMAIL row + sends', async () => {
+      const alert = buildAlert({
+        tier: 'BP_LEVEL_1_HIGH',
+        mode: 'STANDARD',
+        ruleId: 'RULE_STANDARD_L1_HIGH',
+      })
+      prisma.deviationAlert.findUnique.mockResolvedValue(alert)
+
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({ tier: 'BP_LEVEL_1_HIGH' }),
+      )
+
+      const notifCalls = prisma.notification.create.mock.calls as Array<
+        [{ data: { userId: string; channel: string } }]
+      >
+      const patientEmailRows = notifCalls.filter(
+        (c) => c[0].data.userId === 'patient-1' && c[0].data.channel === 'EMAIL',
+      )
+      expect(patientEmailRows.length).toBeGreaterThan(0)
+      expect(email.sendEmail).toHaveBeenCalled()
+    })
+
+    it('D6 — BP_LEVEL_1_HIGH + PERSONALIZED mode T+0 writes NO patient EMAIL (alarm-fatigue guard)', async () => {
+      const alert = buildAlert({
+        tier: 'BP_LEVEL_1_HIGH',
+        mode: 'PERSONALIZED',
+        ruleId: 'RULE_HFREF_HIGH',
+      })
+      prisma.deviationAlert.findUnique.mockResolvedValue(alert)
+
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({ tier: 'BP_LEVEL_1_HIGH' }),
+      )
+
+      const notifCalls = prisma.notification.create.mock.calls as Array<
+        [{ data: { userId: string; channel: string } }]
+      >
+      const patientEmailRows = notifCalls.filter(
+        (c) => c[0].data.userId === 'patient-1' && c[0].data.channel === 'EMAIL',
+      )
+      // Personalized cohort (HFrEF/HCM) is on tighter thresholds; suppressing
+      // the patient email avoids alarm fatigue per Manisha 2026-06-06.
+      expect(patientEmailRows).toHaveLength(0)
+    })
+
+    it('D6 — BP_LEVEL_1_LOW + STANDARD mode T+0 writes NO patient EMAIL (HIGH-only sign-off)', async () => {
+      const alert = buildAlert({
+        tier: 'BP_LEVEL_1_LOW',
+        mode: 'STANDARD',
+      })
+      prisma.deviationAlert.findUnique.mockResolvedValue(alert)
+
+      await service.handleAlertCreated(
+        buildAlertCreatedPayload({ tier: 'BP_LEVEL_1_LOW' }),
+      )
+
+      const notifCalls = prisma.notification.create.mock.calls as Array<
+        [{ data: { userId: string; channel: string } }]
+      >
+      const patientEmailRows = notifCalls.filter(
+        (c) => c[0].data.userId === 'patient-1' && c[0].data.channel === 'EMAIL',
+      )
+      // Manisha's D6 sign-off is HIGH-specific (severe Stage 2 reading at
+      // 165/100). LOW alerts retain the previous suppression.
+      expect(patientEmailRows).toHaveLength(0)
     })
 
     it('G.4 — read-side filter does NOT touch the write/email path: patient PUSH + EMAIL rows still written + patient email still SENT', async () => {
@@ -1188,6 +1294,47 @@ describe('EscalationService', () => {
       )
     })
 
+    // Manisha Open-Decisions sign-off 2026-06-06 (Decision 5) — calm,
+    // care-team-led subject. Pairs with the registry patientMessage's
+    // "please don't stop any medicine without talking to your doctor".
+    it('escalationEmailBody renders Manisha contraindication subject for TIER_1_CONTRAINDICATION patient email', () => {
+      const out = escalationEmailBody({
+        alert: buildAlert({ tier: 'TIER_1_CONTRAINDICATION' }) as any,
+        step: 'T0',
+        role: 'PATIENT',
+        message:
+          'We noticed something about one of your medications. Your care team is reviewing and will contact you. Please don’t stop any medicine without talking to your doctor.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        patientBaseUrl: 'https://app.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-06-06T15:00:00Z'),
+      })
+      expect(out.subject).toBe(
+        'Important medication alert from your care team — Cardioplace',
+      )
+      expect(out.html).toContain('Please don’t stop any medicine')
+    })
+
+    // Manisha Open-Decisions sign-off 2026-06-06 (Decision 6) — patient
+    // email subject for the cohort-gated BP_LEVEL_1_HIGH re-instatement
+    // (standard cohort only). Informative without alarming.
+    it('escalationEmailBody renders informational subject for BP_LEVEL_1_HIGH patient email', () => {
+      const out = escalationEmailBody({
+        alert: buildAlert({ tier: 'BP_LEVEL_1_HIGH' }) as any,
+        step: 'T0',
+        role: 'PATIENT',
+        message: 'Your blood pressure is higher than your target.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        patientBaseUrl: 'https://app.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-06-06T15:00:00Z'),
+      })
+      expect(out.subject).toBe(
+        'Your recent blood pressure reading — Cardioplace',
+      )
+      expect(out.subject).not.toMatch(/urgent/i)
+    })
+
     it('escalationEmailBody routes PATIENT recipients to the patient app /alerts/{id} URL', () => {
       const out = escalationEmailBody({
         alert: buildAlert({ tier: 'BP_LEVEL_2' }) as any,
@@ -1305,12 +1452,12 @@ describe('EscalationService', () => {
       })
     }
 
-    // Round 2 Group B (Manisha sign-off pending) — BP Level 1 no longer mirrors
-    // into the patient in-app inbox. The provider ladder (PRIMARY email +
-    // dashboard) fires unchanged; the BP_LEVEL_1_PATIENT_T0 dispatch is retired.
-    // The patient sees the alert via the /alerts list + dashboard banner.
+    // D6 (Manisha sign-off 2026-06-06) — BP Level 1 patient EMAIL mirror is
+    // RE-INSTATED, cohort-gated to BP_LEVEL_1_HIGH + STANDARD mode. The provider
+    // ladder (PRIMARY email + dashboard) fires unchanged; the patient now also
+    // receives an out-of-app EMAIL (BP_LEVEL_1_PATIENT_T0) at T+0.
 
-    it('BP_LEVEL_1_HIGH T+0 in business hours fires PRIMARY (email+dashboard) and NO patient mirror (Round 2 Group B)', async () => {
+    it('BP_LEVEL_1_HIGH + STANDARD T+0 in business hours fires PRIMARY (email+dashboard) + D6 patient EMAIL mirror', async () => {
       const now = new Date('2026-04-22T15:00:00Z') // 11:00 NY business hours
       prisma.deviationAlert.findUnique.mockResolvedValue(
         buildBpL1HighAlert({ createdAt: now }),
@@ -1318,19 +1465,18 @@ describe('EscalationService', () => {
 
       await service.handleAlertCreated(buildBpL1Payload(), now)
 
-      // One EscalationEvent row at T+0: the provider step only. The patient
-      // courtesy fire is retired (Round 2 Group B).
-      expect(prisma.escalationEvent.create).toHaveBeenCalledTimes(1)
+      // Two EscalationEvent rows at T+0: the provider step + the D6-reinstated
+      // patient EMAIL mirror (cohort-gated to BP_LEVEL_1_HIGH + STANDARD).
+      expect(prisma.escalationEvent.create).toHaveBeenCalledTimes(2)
       const recipientRoles = createdEvents.map(
         (e) => e.data.recipientRoles as string[],
       )
       expect(recipientRoles.flat()).toEqual(
-        expect.arrayContaining(['PRIMARY_PROVIDER']),
+        expect.arrayContaining(['PRIMARY_PROVIDER', 'PATIENT']),
       )
-      expect(recipientRoles.flat()).not.toContain('PATIENT')
 
-      // Provider notifications fan out (EMAIL + DASHBOARD). No PATIENT-recipient
-      // PUSH or DASHBOARD notification is written for this alert.
+      // Provider notifications fan out (EMAIL + DASHBOARD); the patient mirror
+      // is EMAIL-only (no in-app DASHBOARD bell row — F12 filter).
       const notifCalls = prisma.notification.create.mock.calls as Array<[{ data: any }]>
       const notifChannels = notifCalls.map((c) => c[0].data.channel)
       expect(notifChannels).toEqual(
@@ -1338,14 +1484,19 @@ describe('EscalationService', () => {
       )
       const patientUserId = (buildBpL1HighAlert().user as any).id
       const patientWrites = notifCalls.filter((c) => c[0].data.userId === patientUserId)
-      expect(patientWrites).toHaveLength(0)
+      expect(patientWrites.length).toBeGreaterThan(0)
+      expect(patientWrites.every((c) => c[0].data.channel === 'EMAIL')).toBe(true)
 
       // Provider email subject/body uses the BP LEVEL 1 HIGH label.
       const emailCalls = email.sendEmail.mock.calls as Array<
         [string, string, string]
       >
-      expect(emailCalls.length).toBeGreaterThan(0)
-      const [, subject, html] = emailCalls[0]
+      const providerEmail = emailCalls.find(
+        ([, subject]) =>
+          subject.includes('BP LEVEL 1 HIGH') && subject.includes('Alan Smith'),
+      )
+      expect(providerEmail).toBeTruthy()
+      const [, subject, html] = providerEmail!
       expect(subject).toContain('T+0')
       expect(subject).toContain('BP LEVEL 1 HIGH')
       expect(subject).toContain('Alan Smith')
@@ -1381,21 +1532,27 @@ describe('EscalationService', () => {
       expect(subject).toContain('BP LEVEL 1 LOW')
     })
 
-    it('after-hours: PRIMARY queued for next business window; NO patient push fires (Round 2 Group B)', async () => {
+    it('after-hours: PRIMARY queued for next business window; D6 patient EMAIL fires immediately', async () => {
       // Default fixture's createdAt is 06:00 NY = after-hours.
       const afterHoursNow = new Date('2026-04-22T10:00:00Z')
       prisma.deviationAlert.findUnique.mockResolvedValue(buildBpL1HighAlert())
 
       await service.handleAlertCreated(buildBpL1Payload(), afterHoursNow)
 
-      // Only the provider event is created; it's queued (scheduledFor set,
-      // notificationSentAt null) for the next business window. No patient
-      // event exists — Group B retired BP_LEVEL_1_PATIENT_T0.
-      expect(createdEvents).toHaveLength(1)
-      const providerEvent = createdEvents[0].data
-      expect(providerEvent.recipientRoles).toContain('PRIMARY_PROVIDER')
+      // Two T+0 rows. The provider step is queued (scheduledFor set,
+      // notificationSentAt null) for the next business window. The D6 patient
+      // EMAIL mirror is FIRE_IMMEDIATELY (out-of-app reach doesn't wait for
+      // business hours), so it dispatches now (notificationSentAt set).
+      expect(createdEvents).toHaveLength(2)
+      const providerEvent = createdEvents.find((e) =>
+        (e.data.recipientRoles as string[]).includes('PRIMARY_PROVIDER'),
+      )!.data
       expect(providerEvent.scheduledFor).toBeTruthy()
       expect(providerEvent.notificationSentAt).toBeFalsy()
+      const patientEvent = createdEvents.find((e) =>
+        (e.data.recipientRoles as string[]).includes('PATIENT'),
+      )!.data
+      expect(patientEvent.notificationSentAt).toBeTruthy()
     })
 
     it('Layer B enrollment gate suppresses BP L1 dispatch for un-enrolled patients', async () => {

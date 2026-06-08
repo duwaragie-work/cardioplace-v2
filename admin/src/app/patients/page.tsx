@@ -314,7 +314,8 @@ function tierChrome(tier: string | null): {
     case 'BP_LEVEL_1_LOW':
       return { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)', label: 'BP L1', short: 'L1' };
     case 'TIER_3_INFO':
-      return { bg: 'var(--brand-accent-teal-light)', color: 'var(--brand-accent-teal)', label: 'Tier 3', short: 'T3' };
+      // Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — Tier 3 = info-blue.
+      return { bg: 'var(--brand-info-blue-light)', color: 'var(--brand-info-blue)', label: 'Tier 3', short: 'T3' };
     default:
       return { bg: 'var(--brand-background)', color: 'var(--brand-text-muted)', label: 'Open', short: 'OP' };
   }

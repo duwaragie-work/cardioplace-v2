@@ -126,6 +126,12 @@ export class OutputGeneratorService implements OnModuleInit {
       // Cluster 8 Q1 — consecutive ≤45 bpm sessions for the brady-
       // surveillance physician message Tier 3 → Tier 2 wording.
       bradySustainedSessions: result.metadata.bradySustainedSessions,
+      // Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, conditional
+      // exception) — gestational age in completed weeks for pregnancy
+      // physician messages. Populated by pregnancy threshold + ACE/ARB
+      // contraindication rules from PatientProfile.pregnancyDueDate;
+      // remains null/undefined for non-pregnancy alerts.
+      gestationalAgeWeeks: result.metadata.gestationalAgeWeeks,
       // Cluster 6 Q2 (Manisha 5/9/26) — true when alert fired on a single-
       // reading session finalized by the 5-min timeout. Drives the
       // "— confirm with next reading" physician-message annotation.

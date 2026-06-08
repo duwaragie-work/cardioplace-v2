@@ -358,21 +358,31 @@ export const BP_LEVEL_1_LADDER: LadderStep[] = [
 ]
 
 /**
- * Patient-facing T+0 row for BP Level 1. Spec mandates out-of-app
- * notification so the patient doesn't have to open the app to learn their
- * BP needs attention. Fires immediately regardless of business hours
- * (informational, not interrupting the provider escalation clock). Wired as
- * a separate dispatch in EscalationService.fireT0 so it doesn't pollute the
- * provider ladder's recipientRoles[0].
+ * Patient-facing T+0 row for BP Level 1 HIGH. Per Manisha Open-Decisions
+ * sign-off 2026-06-06 (Decision 6) this re-instates the previously-retired
+ * patient row, but COHORT-GATED — standard-cohort patients only. Personalized-
+ * threshold cohorts (HFrEF, HCM, etc.) stay suppressed: tighter thresholds
+ * would generate more frequent patient emails and risk alarm fatigue in the
+ * very population it's meant to protect.
  *
- * Web-push transport is not yet wired; the Notification row is written and
- * surfaces in the patient app's in-app inbox until transport ships.
+ * Channels: EMAIL + DASHBOARD. Out-of-app PUSH is not viable yet (no real
+ * FCM/APNs/web-push transport — see project memory note "no push service
+ * pilot gap 2026-06-04"). EMAIL is the actual out-of-app reach.
+ *
+ * Cohort gate is enforced in EscalationService.fireT0 by checking
+ * `alert.mode === 'STANDARD' && alert.tier === 'BP_LEVEL_1_HIGH'` (NOT
+ * BP_LEVEL_1_LOW — Manisha's sign-off is HIGH-specific). Wired as a
+ * separate dispatch so it doesn't pollute the provider ladder's
+ * recipientRoles[0].
+ *
+ * Fires immediately regardless of business hours (informational, doesn't
+ * interrupt the provider escalation clock).
  */
 export const BP_LEVEL_1_PATIENT_T0: LadderStep = {
   step: 'T0',
   offsetMs: 0,
   recipientRoles: ['PATIENT'],
-  channels: ['PUSH', 'DASHBOARD'],
+  channels: ['EMAIL', 'DASHBOARD'],
   afterHoursBehavior: 'FIRE_IMMEDIATELY',
 }
 
@@ -389,6 +399,31 @@ export const ANGIOEDEMA_PATIENT_T0: LadderStep = {
   offsetMs: 0,
   recipientRoles: ['PATIENT'],
   channels: ['PUSH', 'DASHBOARD'],
+  afterHoursBehavior: 'FIRE_IMMEDIATELY',
+}
+
+/**
+ * Patient-facing T+0 row for TIER_1_CONTRAINDICATION. Per Manisha Open-
+ * Decisions sign-off 2026-06-06 (Decision 5) — adds patient-EMAIL at T+0 to
+ * close the "patient takes another teratogenic/contraindicated dose before
+ * opening the app" gap.
+ *
+ * Clinical rationale: ACE/ARB in pregnancy is category X — the harm of
+ * another dose during the inbox-unread window outweighs the (already-
+ * addressed) panic-driven self-discontinuation risk. Email body uses the
+ * registry patientMessage which explicitly says "please don't stop any
+ * medicine without talking to your doctor."
+ *
+ * Channels: EMAIL + DASHBOARD. Out-of-app PUSH not viable yet (no real
+ * transport; see project memory note "no push service pilot gap 2026-06-04").
+ * Fires immediately regardless of business hours — contraindication is a
+ * continued-exposure risk that doesn't wait for office hours.
+ */
+export const TIER_1_CONTRAINDICATION_PATIENT_T0: LadderStep = {
+  step: 'T0',
+  offsetMs: 0,
+  recipientRoles: ['PATIENT'],
+  channels: ['EMAIL', 'DASHBOARD'],
   afterHoursBehavior: 'FIRE_IMMEDIATELY',
 }
 
