@@ -58,14 +58,16 @@ function tierBucket(t: string | null): TierBucket {
   return 'OTHER';
 }
 
-// #81 — rules whose thresholds are ABSOLUTE (fire regardless of the patient's
-// monitoring stage). For these, a STANDARD mode badge does NOT mean "fewer
-// than 7 baseline readings" — it means the rule is mode-independent. Showing
-// the "<7 readings" tooltip on e.g. Carol's 185/120 emergency (she has 15+
-// readings) is factually wrong. NOTE: there is no RULE_TACHY_SEVERE — severe
-// tachycardia (HR>130) fires under RULE_TACHY_HR, which is also the regular
-// session-averaged tachy rule, so it is intentionally NOT in this set.
-const ABSOLUTE_THRESHOLD_RULES = new Set<string>([
+// #81 — rules whose thresholds are ABSOLUTE: they fire as STANDARD
+// regardless of the patient's monitoring stage or reading count. For these,
+// the STANDARD badge does NOT mean "fewer than 7 baseline readings" — it
+// means the rule itself is monitoring-stage-independent. Showing the
+// "<7 readings" tooltip on e.g. Carol's 185/120 emergency (she has 15+
+// readings) is factually wrong. NOTE: there is no RULE_TACHY_SEVERE —
+// severe tachycardia (HR>130) fires under RULE_TACHY_HR, which is also
+// the regular session-averaged tachy rule, so it is intentionally NOT in
+// this set.
+const ABSOLUTE_EMERGENCY_RULES = new Set<string>([
   'RULE_ABSOLUTE_EMERGENCY',
   'RULE_ACE_ANGIOEDEMA',
   'RULE_GENERIC_ANGIOEDEMA',
@@ -75,16 +77,44 @@ const ABSOLUTE_THRESHOLD_RULES = new Set<string>([
   'RULE_SYMPTOM_OVERRIDE_PREGNANCY',
 ]);
 
+// User-flagged 2026-06-07 — contraindication rules ALSO fire as STANDARD
+// regardless of reading count or personalization. They're structural rules
+// (the patient is on a contraindicated drug — that doesn't change based on
+// how many readings they have). The "<7 readings" fallback tooltip was
+// misleading on these. Examples: James (HFrEF + Diltiazem on 9+ readings)
+// or Priya (pregnant + Lisinopril). Both fire STANDARD because the rule
+// itself is condition-structural, not threshold-personalized.
+const CONTRAINDICATION_RULES = new Set<string>([
+  'RULE_PREGNANCY_ACE_ARB',
+  'RULE_NDHP_HFREF',
+  // Future contraindication rules go here. Any TIER_1_CONTRAINDICATION rule.
+]);
+
 function standardBadgeTooltip(ruleId: string | null | undefined): string {
-  if (ruleId && ABSOLUTE_THRESHOLD_RULES.has(ruleId)) {
+  if (ruleId && ABSOLUTE_EMERGENCY_RULES.has(ruleId)) {
     return 'Emergency thresholds are absolute (e.g., SBP ≥180 / DBP ≥120) — they fire STANDARD regardless of the patient’s monitoring stage.';
   }
-  return 'This patient is on standard monitoring (fewer than 7 baseline readings). Alerts evaluate against standard AHA thresholds.';
+  if (ruleId && CONTRAINDICATION_RULES.has(ruleId)) {
+    return 'Contraindication alerts fire as STANDARD regardless of the patient’s monitoring stage or reading count — the rule is structural (the patient is on a contraindicated medication).';
+  }
+  // Threshold-based standard rules — STANDARD here means "evaluated against
+  // standard AHA thresholds" rather than condition-personalized ones. This
+  // applies whether the patient is pre-baseline (<7 readings), post-baseline
+  // without a condition that warrants personalization, or post-baseline with
+  // a condition that doesn't yet have provider-set personalized thresholds.
+  // Note: tooltip intentionally doesn't assert reading count here because
+  // the AlertCard doesn't have that data without an extra fetch — follow-on
+  // ticket can pipe reading-count through so the copy can split out the
+  // pre-Day-3 vs post-Day-3 cases.
+  return 'This alert was evaluated against standard AHA thresholds (no condition-specific personalization applied).';
 }
 
 function standardBadgeAria(ruleId: string | null | undefined): string {
-  if (ruleId && ABSOLUTE_THRESHOLD_RULES.has(ruleId)) {
+  if (ruleId && ABSOLUTE_EMERGENCY_RULES.has(ruleId)) {
     return 'Emergency thresholds are absolute: this alert fires STANDARD regardless of the patient’s monitoring stage';
+  }
+  if (ruleId && CONTRAINDICATION_RULES.has(ruleId)) {
+    return 'Contraindication alert: fires as STANDARD regardless of monitoring stage';
   }
   return 'Standard monitoring: evaluated against standard AHA thresholds';
 }

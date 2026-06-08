@@ -18,20 +18,26 @@ import { signInPatient } from '../helpers/auth.js'
  */
 
 test.describe('H4 — sign-in disclaimer + privacy (A1/A2, Decision 1)', () => {
+  // Lakshitha's admin-redesign companion frontend edit (commit ec50c03 — patient
+  // sign-in privacy/disclaimer reorganized into mobile card + desktop right
+  // panel) now legitimately renders BOTH copies at typical desktop widths.
+  // Use `.first()` so the strict-mode duplicate-match doesn't fail the spec —
+  // the wording is what we're asserting, not the responsive single-copy
+  // contract.
   test('medical disclaimer is visible and hardcodes 911', async ({ page }) => {
     await page.goto('/sign-in')
     // A1 — register.medicalDisclaimer
     await expect(
-      page.getByText(/not a substitute for medical advice, diagnosis, or treatment/i),
+      page.getByText(/not a substitute for medical advice, diagnosis, or treatment/i).first(),
     ).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText(/In an emergency, call 911/i)).toBeVisible()
+    await expect(page.getByText(/In an emergency, call 911/i).first()).toBeVisible()
   })
 
   test('privacy assurance is visible', async ({ page }) => {
     await page.goto('/sign-in')
     // A2 — register.privacyAssurance
     await expect(
-      page.getByText(/Only your care team can see your health data/i),
+      page.getByText(/Only your care team can see your health data/i).first(),
     ).toBeVisible({ timeout: 15_000 })
   })
 })

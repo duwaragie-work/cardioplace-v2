@@ -92,6 +92,36 @@ export class EscalationService {
     this.patientBaseUrl = config
       .get<string>('PATIENT_BASE_URL', 'http://localhost:3000')
       .replace(/\/+$/, '')
+
+    // 2026-06-07 user-flagged — a localhost URL leaked into a Resend email
+    // would (a) be unclickable for recipients, (b) trigger spam-filter
+    // mismatched-domain heuristics that Resend specifically warns about.
+    // Loud warning at boot if NODE_ENV is production but the URLs still
+    // contain localhost — catches a missed deploy-time env var without
+    // breaking local dev.
+    const nodeEnv = config.get<string>('NODE_ENV', 'development')
+    if (nodeEnv === 'production') {
+      for (const [name, url] of [
+        ['ADMIN_BASE_URL', this.adminBaseUrl],
+        ['PATIENT_BASE_URL', this.patientBaseUrl],
+      ] as const) {
+        if (url.includes('localhost') || url.includes('127.0.0.1')) {
+          this.logger.error(
+            `${name} is set to "${url}" in production. Escalation emails will ` +
+              `contain unclickable localhost links and will likely trip Resend ` +
+              `spam filters (domain-URL mismatch). Set this env var to the ` +
+              `production domain (e.g. https://app.cardioplace.ai) before ` +
+              `the next deploy.`,
+          )
+        }
+        if (!url.startsWith('https://')) {
+          this.logger.warn(
+            `${name} is not https in production ("${url}"). Email recipients ` +
+              `may see a mixed-content warning. Use https in production.`,
+          )
+        }
+      }
+    }
   }
 
   // ─── event + cron entry points ──────────────────────────────────────────
