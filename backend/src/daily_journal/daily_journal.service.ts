@@ -264,6 +264,30 @@ export class DailyJournalService {
           ? (dto.position as typeof POSITION_VALUES[number])
           : null
       if (dto.sessionId !== undefined) data.sessionId = dto.sessionId
+
+      // Bug 25 — when measuredAt changes AND the caller did NOT explicitly
+      // override sessionId, re-evaluate the session assignment against the
+      // new time. Auto-joins a 5-min-window sibling session, leaves a stale
+      // session when moving away from originals, or stays put when still
+      // grouped with current siblings. See resolveUpdateSessionId for the
+      // full policy. Skips the resolve when sessionId was explicitly passed
+      // (LLM is doing an intentional move-to-session) or when measuredAt
+      // isn't changing.
+      if (dto.measuredAt !== undefined && dto.sessionId === undefined) {
+        const resolved = await this.resolveUpdateSessionId(
+          userId,
+          entryId,
+          existing.sessionId,
+          data.measuredAt as Date,
+        )
+        if (resolved !== existing.sessionId) {
+          this.logger.log(
+            `update: time-edit auto-regrouping entry=${entryId} ` +
+              `${existing.sessionId ?? 'null'} → ${resolved}`,
+          )
+        }
+        data.sessionId = resolved
+      }
       if (dto.measurementConditions !== undefined)
         data.measurementConditions =
           (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull
@@ -1361,6 +1385,99 @@ export class DailyJournalService {
       select: { sessionId: true },
     })
     return openInWindow?.sessionId ?? randomUUID()
+  }
+
+  /**
+   * Bug 25 — when the patient edits an existing entry's measurement_time, the
+   * session_id must be re-evaluated against the new time. Pre-fix, `update()`
+   * mutated `measuredAt` but left `sessionId` untouched. Two failure modes:
+   *
+   *   1. Entry moves AWAY from its current session's siblings: stays glued
+   *      to a stale session_id whose other members are now > 5 min away.
+   *      The averaging window already prevents data corruption (sibling
+   *      lookup bounds by measuredAt too), but the session_id is misleading
+   *      and the UI groups them visually as one session.
+   *
+   *   2. Entry moves INTO another session's window: stays in its lone /
+   *      stale session and is never grouped with what the clinical spec
+   *      ("readings within 5 min average together") says should be its
+   *      new session-mates.
+   *
+   * Resolution policy:
+   *   • Caller explicitly passed dto.sessionId → respect it (LLM move).
+   *     Handled by the caller; this helper is only invoked when sessionId
+   *     was NOT explicitly set.
+   *   • New time falls within ±5 min of a sibling sharing the CURRENT
+   *     session_id (excluding self) → keep current session_id. (Still
+   *     grouped with our originals.)
+   *   • New time falls within ±5 min of a DIFFERENT-session entry → adopt
+   *     the newest such entry's session_id. (Join their session.)
+   *   • New time is not within ±5 min of any other entry → if current
+   *     session has other siblings, mint a fresh UUID (we're leaving);
+   *     else keep current session_id (we were alone — nothing to regroup).
+   */
+  private async resolveUpdateSessionId(
+    userId: string,
+    entryId: string,
+    currentSessionId: string | null,
+    newMeasuredAt: Date,
+  ): Promise<string> {
+    const windowStart = new Date(newMeasuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(newMeasuredAt.getTime() + SESSION_WINDOW_MS)
+
+    // Any sibling in our CURRENT session (other than us) still within the
+    // new window? If yes, stay put — we're still grouped with our originals.
+    if (currentSessionId) {
+      const stillNearOriginalSibling =
+        await this.prisma.journalEntry.findFirst({
+          where: {
+            userId,
+            sessionId: currentSessionId,
+            id: { not: entryId },
+            measuredAt: { gte: windowStart, lte: windowEnd },
+          },
+          select: { id: true },
+        })
+      if (stillNearOriginalSibling) return currentSessionId
+    }
+
+    // No sibling-in-original-session match. Look for a different-session
+    // entry within the window — we should join it. AND-stacking the two
+    // sessionId constraints because Prisma's field-level filter takes
+    // exactly one `not`; layering needs explicit AND.
+    const otherSessionInWindow = await this.prisma.journalEntry.findFirst({
+      where: {
+        userId,
+        id: { not: entryId },
+        singleReadingFinalized: false,
+        measuredAt: { gte: windowStart, lte: windowEnd },
+        AND: [
+          { sessionId: { not: null } },
+          ...(currentSessionId ? [{ sessionId: { not: currentSessionId } }] : []),
+        ],
+      },
+      orderBy: { measuredAt: 'desc' },
+      select: { sessionId: true },
+    })
+    if (otherSessionInWindow?.sessionId) return otherSessionInWindow.sessionId
+
+    // Nothing within ±5 min. If our original session has other members
+    // (we're leaving them behind), mint a fresh id. Otherwise we were
+    // alone in our session — keep the id so we don't churn the UUID.
+    if (currentSessionId) {
+      const originalSibling = await this.prisma.journalEntry.findFirst({
+        where: {
+          userId,
+          sessionId: currentSessionId,
+          id: { not: entryId },
+        },
+        select: { id: true },
+      })
+      if (originalSibling) return randomUUID()
+      return currentSessionId
+    }
+    // No current session id (rare — pre-#91 data) — mint one.
+    return randomUUID()
   }
 
   /**
