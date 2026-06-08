@@ -51,6 +51,7 @@ export class OutputGeneratorService implements OnModuleInit {
     session: SessionAverage,
     preDay3: boolean,
     patientName: string | null = null,
+    dateOfBirth: Date | null = null,
   ): {
     patientMessage: string
     caregiverMessage: string
@@ -61,7 +62,13 @@ export class OutputGeneratorService implements OnModuleInit {
     // truth). F7 — patient/caregiver messages cite the just-submitted reading so
     // the body matches the "Recorded" header the patient saw, instead of an
     // averaged value they never entered.
-    const physicianCtx = this.buildContext(result, session, preDay3, patientName)
+    const physicianCtx = this.buildContext(
+      result,
+      session,
+      preDay3,
+      patientName,
+      dateOfBirth,
+    )
     const patientCtx: AlertContext = {
       ...physicianCtx,
       systolicBP: session.submittedSystolicBP ?? physicianCtx.systolicBP,
@@ -79,6 +86,7 @@ export class OutputGeneratorService implements OnModuleInit {
     session: SessionAverage,
     preDay3: boolean,
     patientName: string | null = null,
+    dateOfBirth: Date | null = null,
   ): AlertContext {
     // Default `drugNames` from rule metadata; fall back to a single-element
     // array of `drugName` so legacy single-drug rules still satisfy the
@@ -132,6 +140,12 @@ export class OutputGeneratorService implements OnModuleInit {
       // contraindication rules from PatientProfile.pregnancyDueDate;
       // remains null/undefined for non-pregnancy alerts.
       gestationalAgeWeeks: result.metadata.gestationalAgeWeeks,
+      // Manisha Open-Decisions sign-off 2026-06-06 (Decision 4) — patient age
+      // in completed years for rules where age modifies clinical significance.
+      // Issue #68 — plumbing only; rule message edits await Manisha wording
+      // confirmation. Computed centrally here (vs in each rule) so all rules
+      // can opt in by inlining `agePhrase(ctx)` once message wording lands.
+      patientAgeYears: ageFromDob(dateOfBirth, session.measuredAt),
       // Cluster 6 Q2 (Manisha 5/9/26) — true when alert fired on a single-
       // reading session finalized by the 5-min timeout. Drives the
       // "— confirm with next reading" physician-message annotation.
@@ -141,4 +155,24 @@ export class OutputGeneratorService implements OnModuleInit {
       patientName,
     }
   }
+}
+
+/**
+ * Issue #68 — compute completed years between DOB and a reference date.
+ * Mirrors the `ageFromDob` helper in `escalation.service.ts` (which renders
+ * the email patient-identifier block) so both surfaces use the same value
+ * for the same alert. Returns null when DOB is missing, future, or the
+ * derived age is implausible (>130).
+ *
+ * Anchored on `session.measuredAt` so the value is deterministic in tests
+ * and consistent with the gestational-age pattern (same anchor used by
+ * `gestationalAgeWeeksFromProfile`).
+ */
+function ageFromDob(dob: Date | null, now: Date): number | null {
+  if (!dob) return null
+  const ms = now.getTime() - dob.getTime()
+  if (!Number.isFinite(ms) || ms < 0) return null
+  const years = Math.floor(ms / (365.2425 * 24 * 60 * 60 * 1000))
+  if (years < 0 || years > 130) return null
+  return years
 }

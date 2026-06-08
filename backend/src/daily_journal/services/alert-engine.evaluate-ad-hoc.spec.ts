@@ -234,11 +234,16 @@ describe('AlertEngineService.evaluateAdHoc', () => {
       expect(result.preDay3).toBe(true)
       // Verify the flag was threaded into OutputGenerator (downstream
       // wording differs based on whether the patient is pre-Day-3).
+      // Issue #68 — the call signature gained a 5th arg (dateOfBirth) so
+      // the output generator can compute `patientAgeYears` for any rule
+      // that opts into `agePhrase(ctx)`. Assert it's a Date (the engine
+      // pipes `ctx.dateOfBirth`) without pinning the exact value.
       expect(outputGenerator.generate).toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
         true,
         null,
+        expect.any(Date),
       )
     }
   })

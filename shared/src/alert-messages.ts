@@ -113,11 +113,27 @@ export interface AlertContext {
    * elevated risk; second/third trimester causes classic fetopathy:
    * renal dysgenesis, oligohydramnios, pulmonary hypoplasia). Populated
    * by OutputGenerator from PatientProfile when the rule fires against a
-   * pregnant patient; null when unknown or non-pregnancy alerts. The
-   * other Decision-4 placeholders ([age], [medication list]) remain
-   * backlogged.
+   * pregnant patient; null when unknown or non-pregnancy alerts.
    */
   gestationalAgeWeeks?: number | null
+
+  /**
+   * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4) — patient age
+   * in completed years. Decision 4 backlog item #1 (issue #68). Threaded
+   * through to physician messages where age modifies clinical
+   * significance (e.g. brady surveillance in patients on rate-controlling
+   * meds — MESA study found HR ≤50 bpm associated with markedly elevated
+   * mortality in this population, varying by age). Populated by
+   * OutputGenerator from `User.dateOfBirth` and `session.measuredAt` at
+   * fire-time. Null when DOB unknown.
+   *
+   * NOTE: which specific rule messages render this suffix is an open
+   * clinical-wording decision — see issue #68 for the candidate list
+   * pending Manisha confirmation. The helper `agePhrase(ctx)` always
+   * returns the rendered fragment ("(age 67)" or ""), so a future
+   * commit can apply it without re-touching the plumbing.
+   */
+  patientAgeYears?: number | null
 }
 
 export type MessageBuilder = (ctx: AlertContext) => string
@@ -243,6 +259,27 @@ function gestationalAgePhrase(ctx: AlertContext): string {
   if (ga == null) return ''
   if (!Number.isFinite(ga) || ga < 1 || ga > 45) return ''
   return ` (${ga}w gestation)`
+}
+
+/**
+ * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, issue #68) —
+ * render the patient's age as a clinician-readable suffix like `(age 67)`.
+ * Returns empty string when age is unknown (DOB missing, future date,
+ * implausibly old). Format follows convention used in escalation emails
+ * (`ageFromDob` + `age X` suffix on the patient identifier block).
+ *
+ * Kept generic (no rule-id check) — any rule that wants it inlines the call.
+ * Plausibility clamp: 0–130 years; anything outside returns empty string.
+ *
+ * Example use in a physician message:
+ *   `BRADY SURVEILLANCE — HR ${hr}${agePhrase(ctx)}. Sustained HR ≤49…`
+ *   →  "BRADY SURVEILLANCE — HR 45 (age 67). Sustained HR ≤49…"
+ */
+function agePhrase(ctx: AlertContext): string {
+  const age = ctx.patientAgeYears
+  if (age == null) return ''
+  if (!Number.isFinite(age) || age < 0 || age > 130) return ''
+  return ` (age ${age})`
 }
 
 /**
