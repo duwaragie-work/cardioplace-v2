@@ -52,6 +52,7 @@ export class OutputGeneratorService implements OnModuleInit {
     preDay3: boolean,
     patientName: string | null = null,
     dateOfBirth: Date | null = null,
+    contextMeds: ReadonlyArray<{ drugName: string; drugClass: string }> = [],
   ): {
     patientMessage: string
     caregiverMessage: string
@@ -68,6 +69,7 @@ export class OutputGeneratorService implements OnModuleInit {
       preDay3,
       patientName,
       dateOfBirth,
+      contextMeds,
     )
     const patientCtx: AlertContext = {
       ...physicianCtx,
@@ -87,6 +89,7 @@ export class OutputGeneratorService implements OnModuleInit {
     preDay3: boolean,
     patientName: string | null = null,
     dateOfBirth: Date | null = null,
+    contextMeds: ReadonlyArray<{ drugName: string; drugClass: string }> = [],
   ): AlertContext {
     // Default `drugNames` from rule metadata; fall back to a single-element
     // array of `drugName` so legacy single-drug rules still satisfy the
@@ -146,6 +149,13 @@ export class OutputGeneratorService implements OnModuleInit {
       // confirmation. Computed centrally here (vs in each rule) so all rules
       // can opt in by inlining `agePhrase(ctx)` once message wording lands.
       patientAgeYears: ageFromDob(dateOfBirth, session.measuredAt),
+      // Manisha Open-Decisions sign-off 2026-06-06 (Decision 4) — patient's
+      // other active medications, EXCLUDING the triggering drug(s) already
+      // named via `drugNames`. Issue #69 — plumbing only; rule message edits
+      // await Manisha wording confirmation. Dedup happens here so the helper
+      // `medicationListPhrase(ctx)` doesn't have to know which meds were
+      // already cited inline.
+      activeMedications: dedupeActiveMeds(contextMeds, drugNames),
       // Cluster 6 Q2 (Manisha 5/9/26) — true when alert fired on a single-
       // reading session finalized by the 5-min timeout. Drives the
       // "— confirm with next reading" physician-message annotation.
@@ -175,4 +185,28 @@ function ageFromDob(dob: Date | null, now: Date): number | null {
   const years = Math.floor(ms / (365.2425 * 24 * 60 * 60 * 1000))
   if (years < 0 || years > 130) return null
   return years
+}
+
+/**
+ * Issue #69 — strip any drug already named via the rule's `drugNames` (case-
+ * insensitive) so the rendered "Currently also taking: …" list never
+ * duplicates a drug the message already cites inline. Returns
+ * `Array<{drugName, drugClass}>` shaped for the `AlertContext` field
+ * (lighter than `ContextMedication`, which carries verification status,
+ * combo flags, etc., that the wording doesn't need).
+ *
+ * Stable order: preserved from input. Empty array when every active med
+ * matches the triggering set OR the input was already empty.
+ */
+function dedupeActiveMeds(
+  contextMeds: ReadonlyArray<{ drugName: string; drugClass: string }>,
+  triggerDrugNames: string[],
+): Array<{ drugName: string; drugClass: string }> {
+  if (contextMeds.length === 0) return []
+  const triggerSet = new Set(
+    triggerDrugNames.map((n) => n.trim().toLowerCase()).filter(Boolean),
+  )
+  return contextMeds
+    .filter((m) => m.drugName && !triggerSet.has(m.drugName.trim().toLowerCase()))
+    .map((m) => ({ drugName: m.drugName, drugClass: m.drugClass }))
 }

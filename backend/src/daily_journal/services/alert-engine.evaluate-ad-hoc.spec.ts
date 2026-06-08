@@ -238,12 +238,16 @@ describe('AlertEngineService.evaluateAdHoc', () => {
       // the output generator can compute `patientAgeYears` for any rule
       // that opts into `agePhrase(ctx)`. Assert it's a Date (the engine
       // pipes `ctx.dateOfBirth`) without pinning the exact value.
+      // Issue #69 — and a 6th arg `contextMeds` so the generator can
+      // compute `activeMedications` for any rule that opts into
+      // `medicationListPhrase(ctx)`. Assert it's an Array.
       expect(outputGenerator.generate).toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
         true,
         null,
         expect.any(Date),
+        expect.any(Array),
       )
     }
   })

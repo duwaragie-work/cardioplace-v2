@@ -134,6 +134,31 @@ export interface AlertContext {
    * commit can apply it without re-touching the plumbing.
    */
   patientAgeYears?: number | null
+
+  /**
+   * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4) — patient's
+   * full active medication list, EXCLUDING the triggering drug(s) already
+   * cited via `drugNames`. Decision 4 backlog item #2 (issue #69).
+   *
+   * Threaded through to contraindication-related physician messages where
+   * the broader regimen context helps the clinician judge substitution
+   * options (e.g. for a pregnancy + ACE/ARB contraindication, knowing the
+   * patient is also on a thiazide and a beta-blocker frames the
+   * substitution decision).
+   *
+   * Populated by OutputGenerator from `ResolvedContext.contextMeds`. The
+   * dedup against `drugNames` happens at populate-time so the rendered
+   * "currently taking: …" list never duplicates a drug the message
+   * already names. Empty array when no other active meds exist.
+   *
+   * NOTE: which specific rule messages render this list is an open
+   * clinical-wording decision — see issue #69 for the candidate list
+   * pending Manisha confirmation. The helper `medicationListPhrase(ctx)`
+   * always returns the rendered fragment ("currently also taking:
+   * Atenolol, HCTZ" or ""), so a future commit can apply it without
+   * re-touching the plumbing.
+   */
+  activeMedications?: Array<{ drugName: string; drugClass: string }>
 }
 
 export type MessageBuilder = (ctx: AlertContext) => string
@@ -280,6 +305,32 @@ function agePhrase(ctx: AlertContext): string {
   if (age == null) return ''
   if (!Number.isFinite(age) || age < 0 || age > 130) return ''
   return ` (age ${age})`
+}
+
+/**
+ * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, issue #69) —
+ * render the patient's other active medications as a clinician-readable
+ * suffix. Format: `" Currently also taking: Atenolol, HCTZ."` or empty
+ * string when no other meds.
+ *
+ * Dedup is done at the populate-time in OutputGenerator (it strips any
+ * drug already named in `drugNames`), so this helper just renders.
+ *
+ * Plain-English join: "X" / "X and Y" / "X, Y, and Z" — matches
+ * `formatDrugList` already used in patient/caregiver messages so the
+ * three tiers read consistently.
+ *
+ * Example use in a physician message:
+ *   `CONTRAINDICATION — ${drug}.${medicationListPhrase(ctx)} Recommend…`
+ *   → "CONTRAINDICATION — Lisinopril. Currently also taking: Atenolol
+ *      and HCTZ. Recommend immediate substitution…"
+ */
+function medicationListPhrase(ctx: AlertContext): string {
+  const meds = ctx.activeMedications
+  if (!meds || meds.length === 0) return ''
+  const names = meds.map((m) => m.drugName).filter(Boolean)
+  if (names.length === 0) return ''
+  return ` Currently also taking: ${formatDrugList(names)}.`
 }
 
 /**

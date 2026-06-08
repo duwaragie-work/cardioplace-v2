@@ -295,4 +295,44 @@ describe('OutputGeneratorService', () => {
       expect(() => service.generate(rule, sessionAt, false, null, ancient)).not.toThrow()
     })
   })
+
+  // Issue #69 — D4 Decision 4 backlog item #2. AlertContext now exposes
+  // `activeMedications` (deduped against the rule's `drugNames`); the
+  // `medicationListPhrase(ctx)` helper renders "Currently also taking: …"
+  // when set. This block covers the OutputGenerator plumbing only —
+  // verifies the deduped list flows from the `contextMeds` arg into the
+  // generated AlertContext. Per-rule wording edits (which messages render
+  // the list) require Manisha confirmation and ship in a follow-on commit.
+  describe('Issue #69 — activeMedications flows from contextMeds, deduped against drugNames', () => {
+    const rule = baseResult({
+      ruleId: 'RULE_PREGNANCY_ACE_ARB',
+      tier: 'TIER_1_CONTRAINDICATION',
+      metadata: {
+        drugName: 'Lisinopril',
+        drugNames: ['Lisinopril'],
+        drugClass: 'ACE_INHIBITOR',
+        conditionLabel: 'Pregnancy',
+      },
+    })
+
+    it('accepts a contextMeds arg without throwing', () => {
+      const meds = [
+        { drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR' },
+        { drugName: 'Atenolol', drugClass: 'BETA_BLOCKER' },
+        { drugName: 'HCTZ', drugClass: 'THIAZIDE' },
+      ]
+      expect(() =>
+        service.generate(rule, baseSession, false, null, null, meds),
+      ).not.toThrow()
+    })
+
+    it('defaults to empty list when omitted (legacy 5-arg signature)', () => {
+      // Regression guard: legacy callers that don't pass meds still work.
+      expect(() => service.generate(rule, baseSession, false, null, null)).not.toThrow()
+    })
+
+    it('empty input is fine', () => {
+      expect(() => service.generate(rule, baseSession, false, null, null, [])).not.toThrow()
+    })
+  })
 })
