@@ -561,6 +561,7 @@ export class ChatService {
     | string
     | { type: 'emergency'; emergencySituation: string | null }
     | { type: 'toolResult'; tool: string; result: any }
+    | { type: 'hallucinationSuspected'; claim: 'save' | 'update' | 'delete'; excerpt: string }
   > {
     const { prompt } = request
     const sessionId = request.sessionId as string
@@ -600,6 +601,11 @@ export class ChatService {
       // message, userMessageSince starts true (LLM may have called OCR in
       // a PRIOR turn that's now stale-bypassed by the current message).
       const ocrState = { lastAt: 0, userMessageSince: true }
+
+      // Bug 22 Fix 1 — accumulate which write-tools fired across the
+      // entire turn (across all 5 internal iterations). Used by the
+      // hallucination detector after the tool loop completes.
+      const writeToolsCalledThisTurn = new Set<string>()
 
       for (let iteration = 0; iteration < 5; iteration++) {
         const stream = this.geminiService.streamContentWithTools({
@@ -648,6 +654,11 @@ export class ChatService {
           console.log(`Executing tool: ${toolName}`, JSON.stringify(toolArgs))
 
           let resultStr: string
+          // Bug 22 Fix 1 — track every tool fired this turn. Write tools
+          // are correlated against the LLM's text at end-of-turn to catch
+          // hallucinated "I saved it" / "I deleted it" with no real call.
+          if (toolName) writeToolsCalledThisTurn.add(toolName)
+
           if (toolName === 'submit_checkin') {
             const gate = ChatService.checkSubmitCheckinDiscussion(contents, toolArgs)
             if (gate.block) {
@@ -763,6 +774,48 @@ export class ChatService {
           'or did you want to change something first?'
         fullResponse = fallback
         yield fallback
+      }
+
+      // Bug 22 Fix 1 — hallucination detector. Worst-case clinical-chat
+      // bug: the LLM emits "your reading is saved" / "I've deleted that
+      // for you" without firing the matching write tool. Prompt-level
+      // guards are real but soft. Here we cross-check at the protocol
+      // level: if the assistant text claims a write but no matching
+      // tool fired across the whole turn (5 internal iterations
+      // included), we log an error and emit a structured event the
+      // frontend can use to surface a "I'm not sure that saved — let
+      // me check" banner + re-verify via get_recent_readings.
+      //
+      // Past-tense indicative only — "saving" / "deleting" gerunds
+      // don't trigger (the action is still in progress). False
+      // positives (e.g. "I saved your preferences earlier") are
+      // tolerable; missing a true hallucination on a hypertensive
+      // patient is not.
+      if (fullResponse.trim()) {
+        const saveClaim =
+          /\b(?:saved|recorded|logged it)\b|your\s+(?:reading|check[- ]?in)\s+(?:is|has\s+been)\s+(?:saved|recorded|logged)/i
+        const updateClaim =
+          /\b(?:updated|changed it|edited|modified it)\b|your\s+(?:reading|check[- ]?in)\s+(?:is|has\s+been)\s+updated/i
+        const deleteClaim =
+          /\b(?:deleted|removed|erased)\b|your\s+(?:reading|check[- ]?in)\s+(?:is|has\s+been)\s+(?:deleted|removed)/i
+        const firedSave =
+          writeToolsCalledThisTurn.has('submit_checkin') ||
+          writeToolsCalledThisTurn.has('finalize_checkin') ||
+          writeToolsCalledThisTurn.has('submit_bp_from_photo')
+        const firedUpdate = writeToolsCalledThisTurn.has('update_checkin')
+        const firedDelete = writeToolsCalledThisTurn.has('delete_checkin')
+        let claim: 'save' | 'update' | 'delete' | null = null
+        if (saveClaim.test(fullResponse) && !firedSave) claim = 'save'
+        else if (updateClaim.test(fullResponse) && !firedUpdate) claim = 'update'
+        else if (deleteClaim.test(fullResponse) && !firedDelete) claim = 'delete'
+        if (claim) {
+          const excerpt = fullResponse.slice(0, 240).replace(/\s+/g, ' ').trim()
+          console.error(
+            `[CHAT hallucination_suspected] type=${claim} tools=[${[...writeToolsCalledThisTurn].join(',')}] ` +
+              `excerpt="${excerpt}" session=${sessionId}`,
+          )
+          yield { type: 'hallucinationSuspected', claim, excerpt }
+        }
       }
 
       // Strip any leaked internal guard messages from the persisted record
