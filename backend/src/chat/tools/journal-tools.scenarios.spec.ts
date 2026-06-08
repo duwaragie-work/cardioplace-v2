@@ -841,3 +841,65 @@ describe('flag_emergency scenarios', () => {
     expect(JSON.parse(result).flagged).toBe(true)
   })
 })
+
+// ─── Bug 28 — UTC-default fallback when LLM forgets entry_date / measurement_time ──
+// Pre-fix the dispatcher defaulted entry_date to UTC's calendar date and
+// measurement_time to UTC's HH:mm, then handed both to isoFromTzWallclock
+// which interpreted them as patient-local — landing the stored instant on
+// the wrong day for patients near a UTC midnight, and shifting the time
+// by the tz offset twice. Lower-severity than Bug 27 because the prompts
+// strictly tell the LLM to ALWAYS ask date + time — this is a defensive
+// fallback that only fires on prompt non-compliance.
+
+describe('Bug 28 — UTC-default fallback when args omit date / time', () => {
+  // Canonical failure case: 23:30 NY EDT on June 7 = 03:30Z on June 8.
+  // UTC's calendar has rolled over but the patient's local clock is still
+  // on the prior day.
+  const NY_NEAR_MIDNIGHT_UTC = new Date('2026-06-08T03:30:00.000Z')
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+    jest.setSystemTime(NY_NEAR_MIDNIGHT_UTC)
+  })
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  it('submit_checkin: future-date guard uses patient-local calendar, not UTC', async () => {
+    // NY local "today" is June 7. June 8 is in the future for the patient.
+    // Pre-fix the guard compared against UTC today ("2026-06-08") so it
+    // mistakenly let June 8 through.
+    const ctx = { ...makeCtx(), timezone: 'America/New_York' }
+    const result = await executeJournalTool(
+      'submit_checkin',
+      {
+        entry_date: '2026-06-08',
+        measurement_time: '08:00',
+        systolic_bp: 130,
+        diastolic_bp: 80,
+        medication_taken: true,
+        symptoms: [],
+      },
+      ctx as any,
+      USER,
+    )
+    const parsed = JSON.parse(result)
+    expect(parsed.saved).toBe(false)
+    expect(parsed.message).toMatch(/future date/i)
+    expect(ctx.journalService.create).not.toHaveBeenCalled()
+  })
+
+  it('update_checkin: NY patient at 23:30 EDT passes only measurement_time → date defaults to local June 7, not UTC June 8', async () => {
+    const ctx = { ...makeCtx(), timezone: 'America/New_York' }
+    await executeJournalTool(
+      'update_checkin',
+      { entry_id: 'e-known', measurement_time: '09:00' },
+      ctx as any,
+      USER,
+    )
+    const dto = (ctx.journalService.update as jest.Mock).mock.calls[0][2] as { measuredAt: string }
+    // Local June 7 at 09:00 EDT = 13:00Z June 7. Pre-fix this defaulted
+    // to UTC's date (June 8) and landed at 13:00Z June 8 — wrong day.
+    expect(dto.measuredAt).toBe('2026-06-07T13:00:00.000Z')
+  })
+})

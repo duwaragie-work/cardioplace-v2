@@ -756,12 +756,21 @@ export async function executeJournalTool(
       }
       // Resolve the date — accepts "today" / "yesterday" verbatim too in case
       // the model didn't substitute the injected timestamp. Falls back to
-      // today's UTC date only if the gate above somehow let an empty value
+      // today's date only if the gate above somehow let an empty value
       // through (defensive — required field is supposed to block this).
-      const entryDate =
-        normaliseDate(args.entry_date) ?? new Date().toISOString().slice(0, 10)
+      //
+      // Bug 28 — fallback used to be `new Date().toISOString().slice(0, 10)`
+      // which is UTC's calendar date. For a patient in NY at 23:30 EDT on
+      // June 7 (= 03:30Z June 8) this defaulted to "2026-06-08" and then
+      // got fed to isoFromTzWallclock — landing the reading on the wrong
+      // day. Project through ctx.timezone so the fallback "today" matches
+      // what the patient calls today. Same fix for the future-date guard
+      // below so it compares against the patient's local calendar.
+      const tz = ctx.timezone ?? 'America/New_York'
+      const todayLocal = tzWallclockFromIso(new Date(), tz).date
+      const entryDate = normaliseDate(args.entry_date) ?? todayLocal
       // Block future dates
-      const today = new Date().toISOString().slice(0, 10)
+      const today = todayLocal
       if (entryDate > today) {
         return JSON.stringify({
           saved: false,
@@ -783,18 +792,20 @@ export async function executeJournalTool(
         })
       }
       try {
-        const time = normaliseTime(args.measurement_time) ?? new Date().toISOString().slice(11, 16)
+        // Bug 28 — same UTC-default issue as the entry_date fallback above.
+        // Pre-fix this took `new Date().toISOString().slice(11, 16)` (UTC's
+        // HH:mm) and handed it to isoFromTzWallclock which treated it as
+        // local — shifting the stored instant by the tz offset twice. Use
+        // the patient's local now-time instead so the round-trip is clean.
+        const time =
+          normaliseTime(args.measurement_time) ??
+          tzWallclockFromIso(new Date(), tz).time
         // Bug 18 — was `new Date(\`${entryDate}T${time}:00.000Z\`).toISOString()`
         // which treated the patient's wallclock as UTC. A patient in IST saying
         // "3:32 PM" got stored as 15:32Z, then My Readings rendered the UTC
         // instant in client-local (+5:30) → "9:02 PM". Voice already used
-        // this helper; text chat now matches. Falls back to 'America/New_York'
-        // only when ctx.timezone is unset (legacy callers / older tests).
-        const measuredAt = isoFromTzWallclock(
-          entryDate,
-          time,
-          ctx.timezone ?? 'America/New_York',
-        )
+        // this helper; text chat now matches.
+        const measuredAt = isoFromTzWallclock(entryDate, time, tz)
         // Position whitelist — Gemini may return lowercase or unexpected values.
         const position = normalisePosition(args.position)
         // B1 pre-measurement checklist — pass through only the booleans the
@@ -973,16 +984,18 @@ export async function executeJournalTool(
       try {
         const dto: any = {}
         if (args.entry_date != null || args.measurement_time != null) {
-          const d = args.entry_date || new Date().toISOString().slice(0, 10)
-          const t =
-            normaliseTime(args.measurement_time) ??
-            new Date().toISOString().slice(11, 16)
+          // Bug 28 — when the LLM updates JUST the time (or JUST the date),
+          // the other field used to default to UTC today/now. For a NY
+          // patient near midnight UTC the date default landed the entry on
+          // the wrong calendar day; the time default shifted the stored
+          // instant by the tz offset. Both defaults now project through
+          // ctx.timezone so they match what the patient sees.
+          const tz = ctx.timezone ?? 'America/New_York'
+          const localNow = tzWallclockFromIso(new Date(), tz)
+          const d = args.entry_date || localNow.date
+          const t = normaliseTime(args.measurement_time) ?? localNow.time
           // Bug 18 — same wallclock-as-UTC fix as submit_checkin above.
-          dto.measuredAt = isoFromTzWallclock(
-            d,
-            t,
-            ctx.timezone ?? 'America/New_York',
-          )
+          dto.measuredAt = isoFromTzWallclock(d, t, tz)
         }
         if (args.systolic_bp != null) dto.systolicBP = args.systolic_bp
         if (args.diastolic_bp != null) dto.diastolicBP = args.diastolic_bp
