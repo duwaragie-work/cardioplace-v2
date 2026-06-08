@@ -13,7 +13,7 @@ import {
   EMERGENCY_EVENTS,
   type EmergencyFlaggedPayload,
 } from '../../chat/emergency-events.js'
-import { isoFromTzWallclock } from '../../common/datetime.js'
+import { isoFromTzWallclock, tzWallclockFromIso } from '../../common/datetime.js'
 import { normaliseWeightToKg } from '../../common/units.js'
 
 // Voice-tool I/O — argument shapes are stable contract with the Gemini Live
@@ -683,14 +683,19 @@ export class VoiceToolsService {
       // composite { id, userId } scoping on every mutation still prevents
       // cross-tenant leak. Mirror chat/tools/journal-tools.ts
       // `get_recent_readings` if changing the shape.
+      // Bug 26 — project measuredAt into the patient's local timezone
+      // before formatting for the LLM. Pre-fix this took the raw UTC
+      // wallclock from toISOString() and read it back as if it were
+      // local — so a New York patient who saved at 04:04 EDT (08:04 UTC)
+      // had voice echo "at 08:04" in the summary. Symmetric with the
+      // write-side isoFromTzWallclock used in submit/update.
+      const tz = ctx.timezone ?? 'America/New_York'
       const lines: string[] = []
       for (const e of entries.slice(0, 5)) {
         const entryId = e.id ?? 'unknown'
-        const measuredAt: string = e.measuredAt instanceof Date
-          ? e.measuredAt.toISOString()
-          : String(e.measuredAt ?? '')
-        const date = measuredAt.length >= 10 ? measuredAt.slice(0, 10) : 'unknown'
-        const time = measuredAt.length >= 16 ? measuredAt.slice(11, 16) : ''
+        const local = tzWallclockFromIso(e.measuredAt ?? '', tz)
+        const date = local.date || 'unknown'
+        const time = local.time
         const sbp = e.systolicBP ?? '?'
         const dbp = e.diastolicBP ?? '?'
         const med = e.medicationTaken ? 'yes' : 'no'

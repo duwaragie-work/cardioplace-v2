@@ -7,7 +7,7 @@ import { UnauthorizedException } from '@nestjs/common'
 import { Type } from '@google/genai'
 import type { FunctionDeclaration } from '@google/genai'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
-import { isoFromTzWallclock } from '../../common/datetime.js'
+import { isoFromTzWallclock, tzWallclockFromIso } from '../../common/datetime.js'
 import { normaliseWeightToKg } from '../../common/units.js'
 import type { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import type { SessionSymptoms } from '../../daily_journal/engine/types.js'
@@ -940,12 +940,21 @@ export async function executeJournalTool(
         // a security boundary — composite { id, userId } scoping on every
         // mutation still prevents cross-tenant leak. Mirror voice
         // voice-tools.service.ts:getRecentReadings if changing the shape.
+        // Bug 26 — project `measuredAt` into the patient's local timezone
+        // before handing it to the LLM. Pre-fix this used
+        // `d.toISOString().slice(0, 10)` and `.slice(11, 16)` which return
+        // UTC strings — so a New York patient who saved at 04:04 EDT
+        // (stored as 08:04Z) saw the chatbot's "how am I doing?" summary
+        // echo "08:04" while My Readings correctly showed "04:04".
+        // tzWallclockFromIso() is the read-side mirror of the write-side
+        // isoFromTzWallclock helper used elsewhere in this file.
+        const tz = ctx.timezone ?? 'America/New_York'
         const entries = (result.data ?? []).map((e: any) => {
-          const d = new Date(e.measuredAt)
+          const local = tzWallclockFromIso(e.measuredAt, tz)
           return {
             id: e.id,
-            date: d.toISOString().slice(0, 10),
-            measurement_time: d.toISOString().slice(11, 16),
+            date: local.date,
+            measurement_time: local.time,
             systolic: e.systolicBP,
             diastolic: e.diastolicBP,
             weight: e.weight,

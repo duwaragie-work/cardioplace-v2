@@ -385,6 +385,13 @@ describe('submit_checkin scenarios', () => {
 
 describe('get_recent_readings scenarios', () => {
   it('returns count + reading list when entries exist', async () => {
+    // Bug 26 — measurement_time must be projected into the patient's
+    // local timezone, not echoed as the raw UTC wallclock slice. ctx
+    // has no timezone here, so the dispatcher falls back to
+    // 'America/New_York'. May 19 2026 is EDT (UTC-4) → stored 08:30Z
+    // projects to 04:30 local. Pre-fix this returned '08:30' (UTC), so
+    // a New York patient asking "how am I doing?" saw chatbot times
+    // four hours later than the My Readings UI.
     const ctx = makeCtx()
     ;(ctx.journalService.findAll as jest.Mock<any>).mockResolvedValueOnce({
       data: [
@@ -408,7 +415,35 @@ describe('get_recent_readings scenarios', () => {
     expect(parsed.count).toBe(1)
     expect(parsed.readings[0].systolic).toBe(132)
     expect(parsed.readings[0].date).toBe('2026-05-19')
-    expect(parsed.readings[0].measurement_time).toBe('08:30')
+    expect(parsed.readings[0].measurement_time).toBe('04:30')
+  })
+
+  it('Bug 26 — projects measuredAt into ctx.timezone when explicitly provided', async () => {
+    // Same UTC instant, different ctx tz. IST = UTC+5:30, no DST →
+    // 08:30Z projects to 14:00 IST. Confirms ctx.timezone is the
+    // override path, not just the default.
+    const ctx = { ...makeCtx(), timezone: 'Asia/Kolkata' }
+    ;(ctx.journalService.findAll as jest.Mock<any>).mockResolvedValueOnce({
+      data: [
+        {
+          id: 'e1',
+          measuredAt: '2026-05-19T08:30:00.000Z',
+          systolicBP: 132,
+          diastolicBP: 84,
+          medicationTaken: true,
+          otherSymptoms: [],
+        },
+      ],
+    })
+    const result = await executeJournalTool(
+      'get_recent_readings',
+      { days: 7 },
+      ctx as any,
+      USER,
+    )
+    const parsed = JSON.parse(result)
+    expect(parsed.readings[0].date).toBe('2026-05-19')
+    expect(parsed.readings[0].measurement_time).toBe('14:00')
   })
 
   it('returns empty when no entries exist', async () => {

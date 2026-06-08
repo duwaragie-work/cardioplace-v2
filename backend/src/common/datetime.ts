@@ -48,3 +48,39 @@ export function tzOffsetMs(utcMs: number, tz: string): number {
   )
   return localMs - utcMs
 }
+
+/**
+ * Bug 26 — inverse of `isoFromTzWallclock`. Given a UTC instant (Date or ISO
+ * string) and the patient's IANA timezone, return the patient's local
+ * wallclock as `{ date: 'YYYY-MM-DD', time: 'HH:mm' }`.
+ *
+ * Used by `get_recent_readings` (chat + voice) when projecting stored
+ * `measuredAt` (UTC) into the JSON the LLM sees. Pre-fix the chat
+ * dispatcher used `d.toISOString().slice(0, 10)` and `.slice(11, 16)`,
+ * which gives UTC date/time strings — so a New York patient who saved at
+ * 04:04 EDT (08:04 UTC) saw their reading echoed back as "08:04" by the
+ * chatbot's "how am I doing?" summary, even though My Readings displayed
+ * "04:04" correctly. Symmetric with the write-side helper above so chat
+ * + voice agree end-to-end with the rest of the UI.
+ */
+export function tzWallclockFromIso(
+  iso: string | Date,
+  tz: string,
+): { date: string; time: string } {
+  const date = iso instanceof Date ? iso : new Date(iso)
+  if (Number.isNaN(date.getTime())) return { date: '', time: '' }
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+    hour12: false,
+  })
+  const parts = formatter.formatToParts(date)
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? ''
+  // Intl returns "24" for midnight on some platforms — normalise to "00".
+  const hh = get('hour') === '24' ? '00' : get('hour')
+  return {
+    date: `${get('year')}-${get('month')}-${get('day')}`,
+    time: `${hh}:${get('minute')}`,
+  }
+}
