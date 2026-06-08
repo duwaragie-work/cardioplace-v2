@@ -759,12 +759,15 @@ export class VoiceToolsService {
         const existing = await this.dailyJournal.findOne(ctx.userId, entryId)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const existingIso = (existing?.data as any)?.measuredAt
-        const existingDate =
-          existingIso instanceof Date
-            ? existingIso.toISOString().slice(0, 10)
-            : typeof existingIso === 'string' && existingIso.length >= 10
-              ? existingIso.slice(0, 10)
-              : null
+        // Bug 27 — pre-fix this took the UTC date slice of the existing
+        // measuredAt and combined it with the new local time. For a
+        // patient near a UTC midnight (e.g. 11 PM EDT stored as 03:00Z
+        // next day), the UTC date was already the NEXT calendar day, so
+        // the rebase moved the entry to the wrong day. Project through
+        // ctx.timezone first so the date matches what the patient sees.
+        const existingDate = existingIso
+          ? tzWallclockFromIso(existingIso, ctx.timezone).date || null
+          : null
         if (existingDate) {
           dto.measuredAt = isoFromTzWallclock(existingDate, measurementTime, ctx.timezone)
         } else {

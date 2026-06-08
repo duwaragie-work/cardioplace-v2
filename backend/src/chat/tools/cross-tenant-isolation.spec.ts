@@ -139,7 +139,8 @@ describe('userId source — LLM args never override dispatch context', () => {
 describe('Cross-tenant id rejections', () => {
   it('update_checkin — when journalService.update throws (cross-tenant), tool returns updated:false', async () => {
     const findAll = jest.fn().mockResolvedValue({
-      data: [{ id: 'entry-foreign', measuredAt: new Date('2026-05-30T08:00:00Z') }],
+      // Bug 27 — 08:00 NY EDT (default ctx tz) = 12:00Z stored.
+      data: [{ id: 'entry-foreign', measuredAt: new Date('2026-05-30T12:00:00Z') }],
     } as never) as jest.Mock
     // Simulate the daily-journal service rejection — its findFirst returned null
     // because the entry belongs to a different patient, so it threw.
@@ -161,7 +162,8 @@ describe('Cross-tenant id rejections', () => {
 
   it('delete_checkin — when journalService.delete throws (cross-tenant), tool returns deleted:false', async () => {
     const findAll = jest.fn().mockResolvedValue({
-      data: [{ id: 'entry-foreign', measuredAt: new Date('2026-05-30T08:00:00Z') }],
+      // Bug 27 — 08:00 NY EDT (default ctx tz) = 12:00Z stored.
+      data: [{ id: 'entry-foreign', measuredAt: new Date('2026-05-30T12:00:00Z') }],
     } as never) as jest.Mock
     const del = jest.fn().mockRejectedValue(new Error('Journal entry not found') as never)
     const ctx = {

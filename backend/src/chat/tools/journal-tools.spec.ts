@@ -324,8 +324,13 @@ describe('journal-tools', () => {
     })
 
     it('should execute update_checkin with date/time lookup', async () => {
+      // Bug 27 — LLM passes the patient-local time the LLM saw via
+      // get_recent_readings (14:30). Stored measuredAt is UTC. April 7
+      // is NY EDT (UTC-4), so 14:30 local = 18:30Z stored. The dispatcher
+      // projects measuredAt through ctx.timezone (default NY) before
+      // comparing — pre-fix the UTC-slice comparison never matched.
       mockJournalService.findAll.mockResolvedValue({
-        data: [{ id: '123', measuredAt: '2026-04-07T14:30:00.000Z', systolicBP: 120, diastolicBP: 80 }],
+        data: [{ id: '123', measuredAt: '2026-04-07T18:30:00.000Z', systolicBP: 120, diastolicBP: 80 }],
       })
       mockJournalService.update.mockResolvedValue({
         data: { id: '123', systolicBP: 125 },
@@ -344,7 +349,7 @@ describe('journal-tools', () => {
 
     it('should execute delete_checkin with date/time lookup', async () => {
       mockJournalService.findAll.mockResolvedValue({
-        data: [{ id: '123', measuredAt: '2026-04-07T14:30:00.000Z' }],
+        data: [{ id: '123', measuredAt: '2026-04-07T18:30:00.000Z' }],
       })
       mockJournalService.delete.mockResolvedValue(undefined)
 

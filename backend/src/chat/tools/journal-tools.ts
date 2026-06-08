@@ -1054,12 +1054,18 @@ export async function executeJournalTool(
           const recent = await journalService.findAll(userId, startDate.toISOString().slice(0, 10), endDate.toISOString().slice(0, 10), 50)
           const entries = recent.data ?? []
 
+          // Bug 27 — symmetric with Bug 26. After Bug 26 the LLM receives
+          // patient-local times from get_recent_readings (e.g. "13:36" EDT)
+          // and passes those back when picking which entry to update. The
+          // pre-fix comparison sliced UTC time off measuredAt (e.g. "17:36")
+          // — so the lookup never matched and the LLM bounced with "Could
+          // not find the reading. Please specify the date and time."
+          // Project measuredAt through ctx.timezone before comparing.
+          const tz = ctx.timezone ?? 'America/New_York'
           const match = entries.find((e: any) => {
-            const d = new Date(e.measuredAt)
-            const entryDateStr = d.toISOString().slice(0, 10)
-            const entryTimeStr = d.toISOString().slice(11, 16)
-            const dateMatch = !argDate || entryDateStr === argDate
-            const timeMatch = !origTime || entryTimeStr === origTime
+            const local = tzWallclockFromIso(e.measuredAt, tz)
+            const dateMatch = !argDate || local.date === argDate
+            const timeMatch = !origTime || local.time === origTime
             return dateMatch && timeMatch
           })
 
@@ -1098,18 +1104,22 @@ export async function executeJournalTool(
           const recent = await journalService.findAll(userId, startDate.toISOString().slice(0, 10), endDate.toISOString().slice(0, 10), 50)
           const entries = recent.data ?? []
 
-          console.log(`[delete_checkin] Found ${entries.length} entries, looking for date=${argDate} time=${origTime}`)
+          // Bug 27 — symmetric with Bug 26. Compare in patient-local time
+          // (what the LLM saw via get_recent_readings) rather than UTC slice.
+          // Pre-fix, the LLM passed "13:36" (NY EDT) but the dispatcher
+          // compared against "17:36" (UTC) — every delete bounced with
+          // "0 readings removed / 1 could not be deleted".
+          const tz = ctx.timezone ?? 'America/New_York'
+          console.log(`[delete_checkin] Found ${entries.length} entries, looking for date=${argDate} time=${origTime} (tz=${tz})`)
           for (const e of entries) {
-            const d = new Date(e.measuredAt)
-            console.log(`  entry: date=${d.toISOString().slice(0, 10)} time=${d.toISOString().slice(11, 16)} id=${e.id}`)
+            const local = tzWallclockFromIso(e.measuredAt, tz)
+            console.log(`  entry: date=${local.date} time=${local.time} id=${e.id}`)
           }
 
           const match = entries.find((e: any) => {
-            const d = new Date(e.measuredAt)
-            const entryDateStr = d.toISOString().slice(0, 10)
-            const entryTimeStr = d.toISOString().slice(11, 16)
-            const dateMatch = !argDate || entryDateStr === argDate
-            const timeMatch = !origTime || entryTimeStr === origTime
+            const local = tzWallclockFromIso(e.measuredAt, tz)
+            const dateMatch = !argDate || local.date === argDate
+            const timeMatch = !origTime || local.time === origTime
             return dateMatch && timeMatch
           })
 
