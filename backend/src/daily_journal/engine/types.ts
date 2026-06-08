@@ -183,6 +183,15 @@ export interface RuleResultMetadata {
    *  brady-surveillance Tier 3 → Tier 2 escalation. Rendered in the
    *  physician message. */
   bradySustainedSessions?: number
+  /**
+   * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, conditional
+   * exception) — gestational age in weeks for pregnancy-rule alerts.
+   * Populated by pregnancy rules + the pregnancy ACE/ARB contraindication
+   * rule when the patient profile carries a `pregnancyDueDate`.
+   * `OutputGenerator.buildContext` propagates this to `AlertContext`, which
+   * the registry physician messages render as a "(Xw gestation)" suffix.
+   */
+  gestationalAgeWeeks?: number | null
 }
 
 /**

@@ -104,6 +104,20 @@ export interface AlertContext {
    *  BP/HR threshold rules only (see physSuffix). Optional so direct test
    *  callers can omit it; OutputGenerator always populates it in production. */
   ruleId?: RuleId
+
+  /**
+   * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, conditional
+   * exception) — gestational age in weeks. Threaded through to the
+   * pregnancy-rule physician messages because teratogenic ACE/ARB risk
+   * differs by trimester (first-trimester carries a lower but still
+   * elevated risk; second/third trimester causes classic fetopathy:
+   * renal dysgenesis, oligohydramnios, pulmonary hypoplasia). Populated
+   * by OutputGenerator from PatientProfile when the rule fires against a
+   * pregnant patient; null when unknown or non-pregnancy alerts. The
+   * other Decision-4 placeholders ([age], [medication list]) remain
+   * backlogged.
+   */
+  gestationalAgeWeeks?: number | null
 }
 
 export type MessageBuilder = (ctx: AlertContext) => string
@@ -211,6 +225,27 @@ function patientNameOr(ctx: AlertContext): string {
 }
 
 /**
+ * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, conditional
+ * exception) — render gestational age as a clinician-readable suffix that
+ * inlines naturally after the BP value or drug-list. Returns empty string
+ * when GA is unknown (non-pregnancy alert, missing profile field, or
+ * pre-pilot data). Format follows obstetrics convention "Xw" (weeks).
+ *
+ * Examples:
+ *   gestationalAgePhrase({...gestationalAgeWeeks: 28}) → " (28w)"
+ *   gestationalAgePhrase({...gestationalAgeWeeks: null}) → ""
+ *
+ * Kept generic (no rule-id check) — every pregnancy rule that wants it
+ * just inlines the call.
+ */
+function gestationalAgePhrase(ctx: AlertContext): string {
+  const ga = ctx.gestationalAgeWeeks
+  if (ga == null) return ''
+  if (!Number.isFinite(ga) || ga < 1 || ga > 45) return ''
+  return ` (${ga}w gestation)`
+}
+
+/**
  * Plain-English join of drug names: "" / "X" / "X and Y" / "X, Y, and Z".
  * Used by patient + caregiver messages so a multi-drug Tier 1 reads as
  * natural prose instead of a comma-joined CSV.
@@ -249,7 +284,11 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
           ? ctx.drugNames.join(', ')
           : (ctx.drugName ?? 'unknown')
       const cls = ctx.drugClass ?? 'ACE inhibitor/ARB'
-      return `CONTRAINDICATION — Pregnant patient on ${cls}: ${names}. ACE/ARBs are contraindicated in pregnancy (FDA Category D/X). Recommend immediate substitution (CHAP-protocol alternative — labetalol or long-acting nifedipine). Patient has been advised not to self-discontinue.${physSuffix(ctx)}`
+      // Decision 4 conditional — gestational age is most clinically
+      // meaningful for the ACE/ARB rule: 2nd/3rd trimester carries the
+      // classic fetopathy (renal dysgenesis, oligohydramnios, pulmonary
+      // hypoplasia); 1st trimester carries lower but still elevated risk.
+      return `CONTRAINDICATION — Pregnant patient on ${cls}: ${names}${gestationalAgePhrase(ctx)}. ACE/ARBs are contraindicated in pregnancy (FDA Category D/X). Recommend immediate substitution (CHAP-protocol alternative — labetalol or long-acting nifedipine). Patient has been advised not to self-discontinue.${physSuffix(ctx)}`
     },
   },
 
@@ -313,16 +352,20 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   },
 
   // ── Pregnancy thresholds ──────────────────────────────────────────────
-  // Doc 2 (Manisha 6/2). Gestational age is referenced in her clinician wording
-  // but is not carried on AlertContext — omitted here (backlog: thread GA into
-  // the alert context). MVP US-only: 911 hardcoded per CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
+  // Doc 2 (Manisha 6/2). Gestational age threaded through to the physician
+  // tier per Manisha Open-Decisions sign-off 2026-06-06 (Decision 4,
+  // conditional exception): the pilot population includes pregnant patients
+  // on ACE/ARB, so trimester-specific teratogenic risk context becomes
+  // pilot-priority. Other Decision-4 placeholders ([age], [medication list])
+  // remain backlogged. MVP US-only: 911 hardcoded per
+  // CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
   RULE_PREGNANCY_L2: {
     patientMessage: () =>
       "Your blood pressure is very high. During pregnancy, this needs urgent attention. Please call your doctor or go to the hospital right away. If you can't reach your doctor, call 911.",
     caregiverMessage: (ctx) =>
       `URGENT — ${patientNameOr(ctx)}'s blood pressure is very high (${bp(ctx)}) during pregnancy. Please help them contact their doctor or go to the hospital immediately.`,
     physicianMessage: (ctx) =>
-      `PREGNANCY BP LEVEL 2 — BP ${bp(ctx)}. Meets ACOG criteria for severe hypertension in pregnancy (SBP ≥160 or DBP ≥110). Initiate antihypertensive therapy within 30–60 min. Evaluate for preeclampsia with severe features.${physSuffix(ctx)}`,
+      `PREGNANCY BP LEVEL 2 — BP ${bp(ctx)}${gestationalAgePhrase(ctx)}. Meets ACOG criteria for severe hypertension in pregnancy (SBP ≥160 or DBP ≥110). Initiate antihypertensive therapy within 30–60 min. Evaluate for preeclampsia with severe features.${physSuffix(ctx)}`,
   },
 
   RULE_PREGNANCY_L1_HIGH: {
@@ -331,7 +374,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     caregiverMessage: (ctx) =>
       `${patientNameOr(ctx)}'s blood pressure is elevated (${bp(ctx)}) during pregnancy. ${CARE_TEAM_NOTIFIED} Watch for severe headache, vision changes, or upper belly pain — if these occur, help them contact their doctor immediately.`,
     physicianMessage: (ctx) =>
-      `PREGNANCY BP LEVEL 1 HIGH — BP ${bp(ctx)}. Above pregnancy HTN threshold (≥140/90). Monitor for progression to severe range or preeclampsia features.${physSuffix(ctx)}`,
+      `PREGNANCY BP LEVEL 1 HIGH — BP ${bp(ctx)}${gestationalAgePhrase(ctx)}. Above pregnancy HTN threshold (≥140/90). Monitor for progression to severe range or preeclampsia features.${physSuffix(ctx)}`,
   },
 
   // ── HFrEF ─────────────────────────────────────────────────────────────
@@ -381,8 +424,13 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   // Doc 2 (Manisha 6/2) patient + caregiver wording. Physician tier keeps the
   // threshold-accurate Cluster 8 Q2 (5/18) detail — the alert fires at the
   // engine's ctx.thresholdValue, so the message must not assert a different
-  // number. (OPEN #2: Doc 2 references DBP-critical 60 / CAD-high ≥130; engine
-  // uses <70 and ≥140 respectively — surfaced for Duwaragie to reconcile.)
+  // number.
+  //
+  // Manisha sign-off 2026-06-06 (Open Decisions Doc, Decision 2): the engine's
+  // Cluster 8 Q2 thresholds stand (SBP ≥140 alert, DBP <70 perfusion warning).
+  // Doc 2's ≥130 was a treatment-initiation target, not an alert threshold.
+  // Physician-tier wording here matches the engine; Doc 2 markdown will be
+  // updated separately to cite ≥140.
   RULE_CAD_DBP_CRITICAL: {
     patientMessage: (ctx) =>
       `Your bottom blood pressure number is lower than expected. If you feel dizzy, have chest pain, or feel faint, please sit down and call your care team. If symptoms are severe, call 911.${suboptimalSuffix(ctx)}`,

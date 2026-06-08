@@ -66,7 +66,8 @@ function bucketChromeFilter(b: TierBucket): { color: string; bg: string } {
     case 'TIER_1': return { color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)' };
     case 'TIER_2': return { color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
     case 'BP_L1': return { color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
-    case 'TIER_3': return { color: 'var(--brand-accent-teal)', bg: 'var(--brand-accent-teal-light)' };
+    // Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — Tier 3 = info-blue.
+    case 'TIER_3': return { color: 'var(--brand-info-blue)', bg: 'var(--brand-info-blue-light)' };
     default: return { color: 'var(--brand-text-muted)', bg: 'var(--brand-background)' };
   }
 }
@@ -505,17 +506,21 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
           className="bg-white rounded-2xl overflow-hidden"
           style={{ boxShadow: 'var(--brand-shadow-card)' }}
         >
+          {/* Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — Tier 3
+              chrome moves from teal to info-blue across the Physician notes
+              block (background tint, icon, heading, count chip, list-item
+              avatar). */}
           <div
             className="px-4 md:px-5 py-2.5 flex items-center gap-2"
             style={{
-              backgroundColor: 'var(--brand-accent-teal-light)',
+              backgroundColor: 'var(--brand-info-blue-light)',
               borderBottom: '1px solid var(--brand-border)',
             }}
           >
-            <Stethoscope className="w-3.5 h-3.5" style={{ color: 'var(--brand-accent-teal)' }} />
+            <Stethoscope className="w-3.5 h-3.5" style={{ color: 'var(--brand-info-blue)' }} />
             <p
               className="text-[11px] font-bold uppercase tracking-wider"
-              style={{ color: 'var(--brand-accent-teal)' }}
+              style={{ color: 'var(--brand-info-blue)' }}
             >
               Physician notes
             </p>
@@ -523,7 +528,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
               className="text-[10px] font-bold px-1.5 rounded-full ml-auto"
               style={{
                 backgroundColor: 'white',
-                color: 'var(--brand-accent-teal)',
+                color: 'var(--brand-info-blue)',
                 minWidth: 18,
                 textAlign: 'center',
               }}
@@ -540,7 +545,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
               <div className="flex items-start gap-3">
                 <div
                   className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-white"
-                  style={{ backgroundColor: 'var(--brand-accent-teal)' }}
+                  style={{ backgroundColor: 'var(--brand-info-blue)' }}
                   aria-hidden
                 >
                   <Bell className="w-3 h-3" />

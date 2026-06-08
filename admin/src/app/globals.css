@@ -11,9 +11,18 @@
   --brand-primary-purple-ultra-light: #FAF5FF;
 
   /* Cluster-3 / B11+B12: teal-600 (#0D9488) on teal-100 was 3.32:1 — fails
-     AA. Bumped to teal-800 ~6.4:1. */
+     AA. Bumped to teal-800 ~6.4:1. Used for care-team / backup-provider /
+     caregiver-consent chrome; NOT for TIER_3_INFO (see info-blue below). */
   --brand-accent-teal: #115E59;
   --brand-accent-teal-light: #CCFBF1;
+
+  /* Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — TIER_3_INFO
+     moved from teal to blue. Rationale: blue is the CDSS standard for
+     informational alerts; green could be misread as "normal/safe", and
+     teal is now reserved for non-alert care-team accents. blue-600 on
+     blue-100 = 4.7:1 → AA Normal. */
+  --brand-info-blue: #2563EB;
+  --brand-info-blue-light: #DBEAFE;
 
   /* SEMANTIC PALETTE — vibrant single-shade for red + amber.
      Green stays single-token (chips only, no button-bg variant). Teal too.
