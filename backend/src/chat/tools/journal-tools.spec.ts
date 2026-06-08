@@ -628,9 +628,46 @@ describe('journal-tools', () => {
       )
       expect(mockJournalService.create).toHaveBeenCalledTimes(1)
       const dto = mockJournalService.create.mock.calls[0][1] as { weight: number }
-      // 150 × 0.45359237 = 68.0386 → rounded to one decimal = 68.0 kg
-      expect(dto.weight).toBe(68.0)
+      // Bug 24 — 150 × 0.45359237 = 68.0388555 → rounded to TWO decimals
+      // = 68.04 kg. Two-dp precision is needed so the kg→lbs display
+      // round-trip stays clean (68.04 / 0.45359237 = 150.00 lbs).
+      expect(dto.weight).toBe(68.04)
     })
+
+    // Bug 24 — round-trip regression. Confirms that the kg value persisted
+    // for common integer-lbs inputs round-trips back to the same lbs at
+    // 1-decimal-place display precision. Pre-fix the kg column was rounded
+    // to 1 dp which caused 145, 150, 160, 165 lbs to drift by 0.1 on
+    // display (e.g. "150 lbs" stored 68.0 kg, displayed 149.9 lbs).
+    it.each([140, 145, 150, 155, 160, 165, 175, 200])(
+      'submit_checkin: Bug 24 round-trip — %i lbs stored as kg round-trips back to the same lbs (1dp)',
+      async (lbs) => {
+        mockJournalService.create.mockResolvedValue({
+          data: { id: 'ok', systolicBP: 120, diastolicBP: 80 },
+        })
+        const today = new Date().toISOString().slice(0, 10)
+        const ctx = { journalService: mockJournalService as any }
+        await executeJournalTool(
+          'submit_checkin',
+          {
+            entry_date: today,
+            measurement_time: '09:00',
+            systolic_bp: 120,
+            diastolic_bp: 80,
+            weight: lbs,
+            medication_taken: true,
+            symptoms: [],
+          },
+          ctx as any,
+          'user-1',
+        )
+        const dto = mockJournalService.create.mock.calls[0][1] as { weight: number }
+        // Simulate the frontend's kg→lbs display conversion (kg / KG_PER_LB,
+        // rounded to 1 dp). MUST equal the original lbs input.
+        const displayLbs = Math.round((dto.weight / 0.45359237) * 10) / 10
+        expect(displayLbs).toBe(lbs)
+      },
+    )
 
     it('submit_checkin: omits weight when args.weight is 0', async () => {
       mockJournalService.create.mockResolvedValue({
@@ -709,7 +746,8 @@ describe('journal-tools', () => {
         'user-1',
       )
       const dto = mockJournalService.create.mock.calls[0][1] as { weight: number }
-      expect(dto.weight).toBe(68.0)
+      // Bug 24 — same 2-dp precision as the default-LBS branch above.
+      expect(dto.weight).toBe(68.04)
     })
 
     it('submit_checkin: weight_unit lowercase "kg" still matches (case-insensitive)', async () => {
@@ -765,8 +803,8 @@ describe('journal-tools', () => {
       )
       expect(mockJournalService.update).toHaveBeenCalledTimes(1)
       const dto = mockJournalService.update.mock.calls[0][2] as { weight: number }
-      // 200 × 0.45359237 = 90.71874 → 90.7 kg
-      expect(dto.weight).toBe(90.7)
+      // Bug 24 — 200 × 0.45359237 = 90.718474 → 2 dp = 90.72 kg.
+      expect(dto.weight).toBe(90.72)
     })
 
     it('update_checkin: applies ctx.timezone when only measurement_time changes', async () => {

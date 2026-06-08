@@ -204,8 +204,9 @@ describe('VoiceToolsService.dispatch', () => {
       diastolicBP: 80,
       medicationTaken: true,
       // Bug 19 — args.weight is lbs (per tool description + voice prompt);
-      // DTO must be kg. 165 × 0.45359237 = 74.84 → rounded = 74.8 kg.
-      weight: 74.8,
+      // DTO must be kg. Bug 24 — now rounded to 2 dp for clean round-trip.
+      // 165 × 0.45359237 = 74.84274 → 74.84 kg.
+      weight: 74.84,
       pulse: 72,
       position: 'SITTING',
       severeHeadache: true,
@@ -363,6 +364,8 @@ describe('VoiceToolsService.dispatch', () => {
       CTX,
     )
     const dto = (dailyJournal.create as jest.Mock).mock.calls[0][1] as { weight: number }
+    // KG branch keeps 1-dp rounding — patient said 68 kg, store 68.0 kg.
+    // Display will show 149.9 lbs which is correct for 68 kg.
     expect(dto.weight).toBe(68.0)
   })
 
@@ -381,7 +384,11 @@ describe('VoiceToolsService.dispatch', () => {
       CTX,
     )
     const dto = (dailyJournal.create as jest.Mock).mock.calls[0][1] as { weight: number }
-    expect(dto.weight).toBe(68.0)
+    // Bug 24 — 150 lbs × 0.45359237 = 68.0388555 → stored as 68.04 kg
+    // (two decimal places). Display round-trip is exact: 68.04 /
+    // 0.45359237 = 150.00 lbs. Pre-fix this rounded to 68.0 kg, which
+    // displayed back as 149.9 lbs.
+    expect(dto.weight).toBe(68.04)
   })
 
   it('update_checkin: weight_unit="KG" persists raw on update', async () => {
@@ -404,8 +411,8 @@ describe('VoiceToolsService.dispatch', () => {
     )
     expect(dailyJournal.update).toHaveBeenCalledTimes(1)
     const dto = (dailyJournal.update as jest.Mock).mock.calls[0][2] as { weight: number }
-    // 200 × 0.45359237 = 90.71874 → 90.7 kg
-    expect(dto.weight).toBe(90.7)
+    // Bug 24 — 200 × 0.45359237 = 90.718474 → rounded to 2 dp = 90.72 kg.
+    expect(dto.weight).toBe(90.72)
   })
 
   // ── update_checkin ────────────────────────────────────────────────────────

@@ -19,13 +19,22 @@
 const KG_PER_LB = 0.45359237
 
 /**
- * Convert pounds to kilograms, rounded to one decimal place. Returns 0
+ * Convert pounds to kilograms, rounded to two decimal places. Returns 0
  * for non-finite / non-positive input — callers should treat 0 as
  * "weight not provided" and omit the field from the DTO.
+ *
+ * Bug 24 — historically this rounded to ONE decimal place, which caused
+ * a visible round-trip drift on integer-lbs inputs: 150 lbs × 0.45359237
+ * = 68.0388555 kg → rounded to 68.0 kg → displayed back as 68.0 /
+ * 0.45359237 = 149.914 lbs → rounded to 149.9 lbs. About half of
+ * common integer-lbs values (145, 150, 160, 165, …) drifted by 0.1 lbs
+ * because the 0.1 kg quantum doesn't align with 1.0 lbs. Two decimal
+ * places of kg precision is the minimum that closes the gap — verified
+ * round-trip-clean for 140–200 lbs.
  */
 export function lbsToKg(lbs: number): number {
   if (!Number.isFinite(lbs) || lbs <= 0) return 0
-  return Math.round(lbs * KG_PER_LB * 10) / 10
+  return Math.round(lbs * KG_PER_LB * 100) / 100
 }
 
 /**
