@@ -154,6 +154,21 @@ describe('VoiceToolsService.dispatch', () => {
     expect(desc).toMatch(/do not ask.*date/i)
   })
 
+  // Bug 21c — voice get_recent_readings description was narrow ("Use for
+  // history questions"). LLM didn't reliably route phrases like "give me
+  // my readings" / "show me my BP" / "my history" to this tool. Now the
+  // description enumerates common patient phrasings so the LLM has concrete
+  // examples to match against.
+  it('get_recent_readings description lists patient phrasings (Bug 21c)', () => {
+    const decls = service.getToolDeclarations()
+    const get = decls.find((d) => d.name === 'get_recent_readings')
+    expect(get).toBeDefined()
+    const desc = (get?.description ?? '').toLowerCase()
+    expect(desc).toContain('give me my readings')
+    expect(desc).toContain('show me my')
+    expect(desc).toMatch(/my history|my check-ins|my measurements/)
+  })
+
   it('returns ok:false for an unknown tool name', async () => {
     const r = await service.dispatch('not_a_tool', {}, CTX)
     expect(r.llmResponse).toEqual(expect.objectContaining({ ok: false }))

@@ -447,7 +447,15 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
       name: 'get_recent_readings',
       description:
         "Retrieve the patient's recent blood pressure readings. " +
-        'Use when the patient asks about past readings, trends, or before updating/deleting.',
+        'Use when the patient asks about past readings, trends, or before updating/deleting. ' +
+        'Bug 21c — triggers on ANY patient phrasing meaning "show me my past readings" — ' +
+        'e.g. "give me my readings", "show me my readings", "show my readings", ' +
+        '"show me my BP", "give me my BP", "what\'s my BP history", "list my readings", ' +
+        '"list my check-ins", "what are my readings", "my history", "my BP history", ' +
+        '"my check-ins", "my measurements", "my recent BPs", "my last few readings", ' +
+        '"show me my last reading", "what was my last reading", ' +
+        '"what did I record last week". Also use before update_checkin / delete_checkin ' +
+        'when the patient hasn\'t specified which entry.',
       parameters: {
         type: Type.OBJECT,
         properties: {

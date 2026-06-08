@@ -67,9 +67,13 @@ describe('voice system instruction — Bug 14 form-parity guards', () => {
         expect(positionAsk).not.toMatch(/optional|you can skip/i)
       })
 
-      it('weight ask specifies LBS and includes kg → lbs conversion guidance', () => {
+      // Bug 14 + kg/lbs follow-up — pre-fix asked LBS only and asked the
+      // LLM to convert kg in its head. Now both units flow via weight_unit.
+      it('weight ask supports both LBS and KG via weight_unit (no in-head conversion)', () => {
         expect(prompt).toMatch(/lbs/i)
-        expect(prompt).toMatch(/kg.*lbs|convert.*lbs/i)
+        expect(prompt).toMatch(/kg/i)
+        expect(prompt).toMatch(/weight_unit/i)
+        expect(prompt).toMatch(/do not convert|don'?t convert/i)
       })
     })
   }
@@ -86,16 +90,102 @@ describe('voice system instruction — Bug 14 form-parity guards', () => {
     expect(v1).toMatch(/anything else.*note/i)
   })
 
-  // Bug 15 — patient said "yes correct", bot went silent. Voice prompts
-  // must EXPLICITLY tell the LLM to call submit_checkin in the same turn
-  // when the patient confirms, not just say "okay" and wait for another
-  // utterance.
+  // Bug 15 + Bug 21b — patient said "yes correct" / "save it", bot went
+  // silent. Voice prompts must tell the LLM the tool call IS the response
+  // (no leading text reply). Bug 21b strengthened the wording from
+  // "immediately call submit_checkin" to "your NEXT action MUST be the
+  // submit_checkin tool call" — either is acceptable.
   for (const v2 of [false, true]) {
     const label = v2 ? 'V2' : 'V1'
-    it(`${label} voice prompt explicitly instructs IMMEDIATE submit_checkin on confirmation`, () => {
+    it(`${label} voice prompt instructs submit_checkin as next action on confirmation (Bug 15 + 21b)`, () => {
       const prompt = buildVoiceSystemInstruction('PATIENT CONTEXT', v2)
-      expect(prompt).toMatch(/immediately call submit_checkin/i)
-      expect(prompt).toMatch(/yes.*is the save trigger|patient'?s.*yes.*save/i)
+      expect(prompt).toMatch(/submit_checkin/i)
+      expect(prompt).toMatch(/next\s+action\s+must|immediately call/i)
+    })
+  }
+
+  // ─── Bug 21 — voice surface ────────────────────────────────────────────
+  // Mirror of the chat-prompt Bug 21 guards. Voice uses the same approach:
+  // strengthen optional-field wording, add a pre-summary verification gate,
+  // expand the save-trigger phrase list, forbid a leading text reply,
+  // expose reading-query synonyms.
+  for (const v2 of [false, true]) {
+    const label = v2 ? 'V2' : 'V1'
+    const prompt = buildVoiceSystemInstruction('PATIENT CONTEXT', v2)
+
+    describe(`Bug 21 — ${label} voice prompt`, () => {
+      it('Bug 21a — pulse ask uses strong "MUST ask EVERY check-in" wording', () => {
+        // Robust: "MUST ask EVERY check-in" within 200 chars before the pulse question.
+        expect(prompt).toMatch(/MUST ask EVERY check-in[\s\S]{0,200}(pulse number|cuff also show)/i)
+      })
+
+      it('Bug 21a — position ask uses strong "MUST ask EVERY check-in" wording', () => {
+        expect(prompt).toMatch(/MUST ask EVERY check-in[\s\S]{0,200}sitting,\s*standing,\s*or\s*lying/i)
+      })
+
+      it('Bug 21a — notes ask uses strong "MUST ask EVERY check-in" wording', () => {
+        expect(prompt).toMatch(/MUST ask EVERY check-in[\s\S]{0,200}anything else/i)
+      })
+
+      it('Bug 21a — pre-summary verification gate present', () => {
+        expect(prompt).toMatch(/verification gate/i)
+        expect(prompt).toMatch(/pulse.*position.*weight.*notes.*measurement_conditions/i)
+      })
+
+      it('Bug 21b — save-trigger phrase list contains the expanded set', () => {
+        const phrases = [
+          'save', 'save it', 'submit', 'record it', 'log it', 'confirm',
+          'do it', 'send it', 'go ahead', 'looks good', "that's right",
+          'perfect', 'absolutely', 'yep',
+        ]
+        const matches = phrases.filter((p) => prompt.toLowerCase().includes(p.toLowerCase()))
+        expect(matches.length).toBeGreaterThanOrEqual(8)
+      })
+
+      it('Bug 21b — save step forbids leading text reply before tool call', () => {
+        expect(prompt).toMatch(/no leading text reply/i)
+        expect(prompt).toMatch(/tool call is the response/i)
+      })
+
+      it('Bug 21c — prompt mentions the get_recent_readings synonym list', () => {
+        expect(prompt).toMatch(/give me my readings/i)
+        expect(prompt).toMatch(/show me my BP|list my readings|my history|my check-ins/i)
+      })
+
+      // ─── Bug 22 — voice reliability hardening ─────────────────────────
+
+      it('Bug 22 Fix 2 — top + bottom BP are asked as SEPARATE steps', () => {
+        expect(prompt).toMatch(/top number[\s\S]{0,200}(?:systolic|bigger)/i)
+        expect(prompt).toMatch(/bottom number[\s\S]{0,200}(?:diastolic|smaller)/i)
+        expect(prompt).toMatch(/3a/)
+      })
+
+      it('Bug 22 Fix 3 — verification gate covers COMPULSORY fields', () => {
+        expect(prompt).toMatch(/compulsory/i)
+        expect(prompt).toMatch(/entry_date.*measurement_time/i)
+        expect(prompt).toMatch(/systolic.*diastolic|top.*bottom/i)
+      })
+
+      it("Bug 22 Fix 3 — voice prompt forbids \"let's start over\" terminal re-ask", () => {
+        expect(prompt).toMatch(/never say.*start over|let'?s start over/i)
+        expect(prompt).toMatch(/never re-ask BP|do not re-ask|do NOT re-ask/i)
+      })
+
+      it('Bug 22 Fix 4 — update flow teaches entry_id MUST come from get_recent_readings', () => {
+        expect(prompt).toMatch(/entry_id MUST come from|never reuse an entry_id/i)
+        expect(prompt).toMatch(/get_recent_readings/)
+      })
+
+      it('Bug 22 Fix 5 — "adding to existing session" guidance is present for ALL patients', () => {
+        expect(prompt).toMatch(/adding to an existing session/i)
+        expect(prompt).toMatch(/ALL patients/i)
+      })
+
+      it('Bug 22 Fix 6 — position normalisation table covers reclined / supine / in a chair', () => {
+        expect(prompt).toMatch(/reclined|supine/i)
+        expect(prompt).toMatch(/in a chair|seated/i)
+        expect(prompt).toMatch(/never invent a fourth/i)
+      })
     })
   }
 })

@@ -173,7 +173,13 @@ export class VoiceToolsService {
       },
       {
         name: 'get_recent_readings',
-        description: "Retrieve the patient's recent BP readings. Use for history questions or to find entry_id before update/delete.",
+        description:
+          "Retrieve the patient's recent BP readings. Use for history questions or to find entry_id before update/delete. " +
+          'Bug 21c — triggers on ANY patient phrasing meaning "show me my past readings" — ' +
+          'e.g. "give me my readings", "show me my readings", "show me my BP", ' +
+          '"what\'s my BP history", "list my readings", "what are my readings", ' +
+          '"my history", "my check-ins", "my measurements", "my recent BPs", ' +
+          '"show me my last reading", "what was my last reading".',
         parameters: {
           type: Type.OBJECT,
           properties: {

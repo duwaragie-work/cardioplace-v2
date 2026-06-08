@@ -130,9 +130,16 @@ describe('SystemPromptService — Bug 14 chat-prompt form-parity guards', () => 
         expect(prompt).toMatch(/nsaid|ibuprofen|advil/i)
       })
 
-      it('weight ask specifies LBS and includes kg → lbs conversion guidance', () => {
+      // Bug 14 + kg/lbs follow-up — pre-fix the prompt only asked for LBS
+      // and told the LLM to convert kg→lbs in its head. Now the LLM passes
+      // the raw number + a weight_unit field; backend normalises. Assert
+      // the new contract: both units mentioned, weight_unit set, LLM told
+      // NOT to convert.
+      it('weight ask supports both LBS and KG via weight_unit (no in-head conversion)', () => {
         expect(prompt).toMatch(/lbs/i)
-        expect(prompt).toMatch(/kg.*lbs|convert.*lbs/i)
+        expect(prompt).toMatch(/kg/i)
+        expect(prompt).toMatch(/weight_unit/i)
+        expect(prompt).toMatch(/do not convert|don'?t convert/i)
       })
 
       it('position is asked but NOT hedged as "you can skip"', () => {
@@ -147,12 +154,113 @@ describe('SystemPromptService — Bug 14 chat-prompt form-parity guards', () => 
         expect(prompt).toMatch(/for each of your medications/i)
       })
 
-      // Bug 15 — patient said "yes correct", bot went silent. The prompt's
-      // save step must EXPLICITLY tell the LLM to call submit_checkin in the
-      // same turn when the patient confirms, not just say "okay" and wait.
-      it('save step explicitly instructs IMMEDIATE submit_checkin on patient confirmation', () => {
-        expect(prompt).toMatch(/immediately call submit_checkin/i)
-        expect(prompt).toMatch(/yes.*is the save trigger|patient'?s.*yes.*save/i)
+      // Bug 15 + Bug 21b — patient said "yes correct" / "save it", bot went
+      // silent. Step 8 must instruct the LLM to call submit_checkin as the
+      // NEXT response (not text first). Bug 21b strengthened the wording:
+      // "your NEXT response MUST be the submit_checkin tool call. NO leading
+      // text reply." Either the original "immediately call" wording OR the
+      // new stronger "NEXT response MUST be the tool call" wording is OK —
+      // both express the same intent.
+      it('save step instructs tool call as the immediate next response (Bug 15 + 21b)', () => {
+        expect(prompt).toMatch(/submit_checkin/i)
+        // \s+ allows the wording to wrap across a newline in the V2 prompt.
+        expect(prompt).toMatch(/next\s+response\s+must|immediately call/i)
+      })
+
+      // ─── Bug 21a — optional-field asks ─────────────────────────────────
+      // Pre-fix: prompts said "ALWAYS ask" for pulse / position / notes —
+      // soft contract the LLM sometimes ignored. Post-fix: every optional
+      // field is wrapped in "You MUST ask EVERY check-in" + "YOU may NEVER
+      // skip the question". Patient skipping the ANSWER is fine; the bot
+      // skipping the QUESTION is a bug.
+
+      it('Bug 21a — pulse ask uses strong "MUST ask EVERY check-in" wording', () => {
+        // Robust: "MUST ask EVERY check-in" within 200 chars before the pulse question.
+        expect(prompt).toMatch(/MUST ask EVERY check-in[\s\S]{0,200}(pulse number|cuff also show)/i)
+        expect(prompt).toMatch(/never skip/i)
+      })
+
+      it('Bug 21a — position ask uses strong "MUST ask EVERY check-in" wording', () => {
+        expect(prompt).toMatch(/MUST ask EVERY check-in[\s\S]{0,200}sitting,\s*standing,\s*or\s*lying/i)
+      })
+
+      it('Bug 21a — notes ask uses strong "MUST ask EVERY check-in" wording', () => {
+        expect(prompt).toMatch(/MUST ask EVERY check-in[\s\S]{0,200}anything else/i)
+      })
+
+      it('Bug 21a — pre-summary verification gate present', () => {
+        expect(prompt).toMatch(/verification gate/i)
+        // The gate must enumerate the fields to verify.
+        expect(prompt).toMatch(/pulse.*position.*weight.*notes.*measurement_conditions/i)
+      })
+
+      it('Bug 21a — summary instruction forbids silently omitting a field', () => {
+        expect(prompt).toMatch(/never silently omit|use the literal word "skipped"|use "skipped"/i)
+      })
+
+      // ─── Bug 21b — expanded save-trigger phrases ───────────────────────
+
+      it('Bug 21b — save-trigger phrase list contains the expanded set', () => {
+        // At least 8 of the expanded phrases must appear in the prompt.
+        const phrases = [
+          'save', 'save it', 'submit', 'record it', 'log it', 'confirm',
+          'do it', 'send it', 'go ahead', 'looks good', "that's right",
+          'perfect', 'absolutely', 'yep',
+        ]
+        const matches = phrases.filter((p) => prompt.toLowerCase().includes(p.toLowerCase()))
+        expect(matches.length).toBeGreaterThanOrEqual(8)
+      })
+
+      it('Bug 21b — save step explicitly forbids a leading text reply before the tool call', () => {
+        expect(prompt).toMatch(/no leading text reply|no text reply first/i)
+        expect(prompt).toMatch(/tool call is the response/i)
+      })
+
+      // ─── Bug 21c — readings-query synonyms ─────────────────────────────
+
+      it('Bug 21c — prompt lists multiple synonyms that trigger get_recent_readings', () => {
+        expect(prompt).toMatch(/give me my readings/i)
+        expect(prompt).toMatch(/show me my BP|show my readings|list my readings/i)
+        expect(prompt).toMatch(/my history|my check-ins|my measurements/i)
+      })
+
+      // ─── Bug 22 — voice + chat reliability hardening ────────────────────
+
+      it('Bug 22 Fix 2 — BP top number and bottom number are asked SEPARATELY', () => {
+        // Prompt must contain an explicit ask for the top number on its own
+        // AND a follow-up ask for the bottom number — proving the two-step
+        // structure is teaching one-question-per-turn for BP.
+        expect(prompt).toMatch(/top number[\s\S]{0,200}systolic|systolic[\s\S]{0,200}bigger/i)
+        expect(prompt).toMatch(/bottom number[\s\S]{0,200}diastolic|diastolic[\s\S]{0,200}smaller/i)
+        // The verification gate / step ordering must show 3 + 3a separately.
+        expect(prompt).toMatch(/3a|B2a/)
+      })
+
+      it('Bug 22 Fix 3 — verification gate enumerates COMPULSORY fields', () => {
+        // Beyond Bug 21a's optional-field check, the gate must also list
+        // the compulsory fields it verifies before summarising.
+        expect(prompt).toMatch(/compulsory/i)
+        expect(prompt).toMatch(/entry_date.*measurement_time/i)
+        expect(prompt).toMatch(/systolic.*diastolic|top.*bottom/i)
+      })
+
+      it("Bug 22 Fix 3 — prompt forbids \"let's start over\" terminal re-ask", () => {
+        // Defends against the bug where the bot re-asks BP at the end
+        // saying "I didn't catch any of that".
+        expect(prompt).toMatch(/never say[\s\S]{0,80}start over|let'?s\s+start over/i)
+        expect(prompt).toMatch(/never re-ask BP|do not re-ask|do NOT re-ask/i)
+      })
+
+      it('Bug 22 Fix 4 — update/delete prompt teaches entry_id MUST come from get_recent_readings', () => {
+        expect(prompt).toMatch(/entry_id MUST come from|entry_id.*must come from|never reuse an id/i)
+        // The worked WRONG/RIGHT example or equivalent guidance.
+        expect(prompt).toMatch(/get_recent_readings/)
+      })
+
+      it('Bug 22 Fix 5 — "add to existing session" guidance is present for ALL patients (not AFib-only)', () => {
+        // The block must appear in the main flow, not gated on AFib.
+        expect(prompt).toMatch(/adding to an existing session/i)
+        expect(prompt).toMatch(/ALL patients/i)
       })
     })
   }

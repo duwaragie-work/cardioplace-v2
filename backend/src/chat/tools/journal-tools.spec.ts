@@ -152,6 +152,21 @@ describe('journal-tools', () => {
       expect(desc.toLowerCase()).toContain('last reading')
       expect(desc.toLowerCase()).toMatch(/do not ask.*date/i)
     })
+
+    // Bug 21c — pre-fix the get_recent_readings description was narrow
+    // ("Use when the patient asks about past readings, trends..."). The LLM
+    // didn't reliably route phrases like "give me my readings" or "show me
+    // my BP" to this tool. Description now enumerates the common patient
+    // phrasings so the LLM has concrete examples to match against.
+    it('get_recent_readings description lists patient phrasings (Bug 21c)', () => {
+      const declarations = getJournalToolDeclarations()
+      const get = declarations.find((d) => d.name === 'get_recent_readings')!
+      const desc = (get.description ?? '').toLowerCase()
+      expect(desc).toContain('give me my readings')
+      expect(desc).toContain('show me my')
+      expect(desc).toMatch(/my history|my check-ins|my measurements/)
+      expect(desc).toMatch(/last reading|recent bps/)
+    })
   })
 
   describe('executeJournalTool', () => {
