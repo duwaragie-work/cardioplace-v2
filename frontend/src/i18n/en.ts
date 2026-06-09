@@ -153,6 +153,20 @@ const en = {
   'checkin.b2.whenLabel': 'When was this taken?',
   'checkin.b2.dateAria': 'Date',
   'checkin.b2.timeAria': 'Time',
+  // Chunk C — backdated-readings time-picker affordances.
+  'checkin.b2.takenNow': 'Taken just now',
+  'checkin.b2.changeTime': 'Change',
+  // PENDING-MANISHA-WORDING 2026-06-09 — subject to confirmation in a follow-on
+  // sign-off doc (bundled with the Chunk B DELAYED_ENTRY wordings). Drops the 911
+  // urgency for a stale reading per Manisha 2026-06-06 backdated-readings sign-off.
+  'checkin.delay.title': 'Just checking the time',
+  'checkin.delay.body': "Heads up — this is from a few hours ago. We'll save it and your care team will see it, but the system won't act on it as an active emergency.",
+  'checkin.delay.confirm': 'Save anyway',
+  'checkin.delay.back': 'Change time',
+  // PENDING-MANISHA-WORDING 2026-06-09 — HISTORICAL_ENTRY (>24h) informational note.
+  'checkin.historical.note': "Got it — saved. This reading is from more than a day ago, so we won't trigger any real-time alerts on it. Your care team will still see it in your history.",
+  // PENDING-MANISHA-WORDING 2026-06-09 — quieter DELAYED_ENTRY post-save note.
+  'checkin.delayed.note': 'Recorded — your care team will see this.',
   'checkin.b2.positionLabel': 'How were you positioned?',
   'checkin.b2.positionAudio': 'How were you positioned? Sitting, standing, or lying down.',
   'checkin.b2.positionSitting': 'Sitting',

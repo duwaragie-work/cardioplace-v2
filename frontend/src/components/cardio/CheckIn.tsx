@@ -58,6 +58,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, getActiveSession, type ActiveSessionDto } from '@/lib/services/journal.service';
+import { delayBandFor, type DelayBand } from '@/lib/delayBand';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
 import { hasDraft, loadDraft } from '@/lib/intake/draft';
 import {
@@ -168,6 +169,9 @@ interface SessionReading {
    *  to compute BMI for the confirmation screen — patients never enter BMI
    *  themselves per Niva's spec sign-off. */
   weightKg?: number;
+  /** Chunk C — measurement-lag band from the POST response (server truth).
+   *  Drives the HISTORICAL_ENTRY / DELAYED_ENTRY note on the success screen. */
+  delayBand?: DelayBand;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -182,6 +186,16 @@ function nowDate(): string {
 function nowTime(): string {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// Chunk C — treat a stored measured datetime within ~10 min of now as "just now"
+// so the B2 time-picker stays collapsed for the real-time 95% case. A backdated
+// time (or one the DELAYED modal sent the patient back to fix) reads as not-now,
+// so the editor auto-expands.
+function isNowish(measuredDate: string, measuredTime: string): boolean {
+  const ms = new Date(`${measuredDate}T${measuredTime}`).getTime();
+  if (Number.isNaN(ms)) return false;
+  return Math.abs(Date.now() - ms) < 10 * 60 * 1000;
 }
 
 function emptyForm(): FormData {
@@ -507,6 +521,15 @@ function B2Reading({ form, setField }: StepProps) {
   // full-width below the button (above the reading inputs) instead of being
   // squeezed in beside the camera icon inside the label row.
   const [bpPhotoError, setBpPhotoError] = useState<string | null>(null);
+  // Chunk C — collapse the date/time behind a disclosure so the real-time 95%
+  // path is one tap. Auto-expanded when the stored time isn't ~now.
+  const [editingTime, setEditingTime] = useState(() => !isNowish(form.measuredDate, form.measuredTime));
+  const measuredIsNow = isNowish(form.measuredDate, form.measuredTime);
+  const whenSummary = measuredIsNow
+    ? t('checkin.b2.takenNow')
+    : new Date(`${form.measuredDate}T${form.measuredTime}`).toLocaleString(undefined, {
+        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+      });
 
   return (
     <div data-testid="checkin-step-2" className="space-y-6">
@@ -525,6 +548,23 @@ function B2Reading({ form, setField }: StepProps) {
           <CalendarClock className="w-4 h-4" />
           {t('checkin.b2.whenLabel')}
         </label>
+        {!editingTime ? (
+          <button
+            type="button"
+            data-testid="checkin-when-summary"
+            onClick={() => setEditingTime(true)}
+            className="w-full h-12 px-3 rounded-xl flex items-center justify-between gap-2 text-[14px] cursor-pointer"
+            style={{ border: '2px solid var(--brand-border)', backgroundColor: 'white', color: 'var(--brand-text-primary)' }}
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              <CalendarClock className="w-4 h-4 shrink-0" style={{ color: 'var(--brand-text-muted)' }} />
+              <span className="truncate">{whenSummary}</span>
+            </span>
+            <span className="text-[13px] font-semibold shrink-0" style={{ color: 'var(--brand-primary-purple)' }}>
+              {t('checkin.b2.changeTime')}
+            </span>
+          </button>
+        ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           <input
             type="date"
@@ -557,6 +597,7 @@ function B2Reading({ form, setField }: StepProps) {
             onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
           />
         </div>
+        )}
       </div>
 
       {/* Position */}
@@ -1780,6 +1821,34 @@ function ConfirmationScreen({
         )}
       </div>
 
+      {/* Chunk C — backdated-readings post-save note. HISTORICAL_ENTRY (>24h)
+          gets the "won't trigger real-time alerts" note; DELAYED_ENTRY (1-24h)
+          gets a quieter "recorded" confirmation. Server-truth band from the POST
+          response. PENDING-MANISHA-WORDING 2026-06-09. */}
+      {lastReading?.delayBand === 'HISTORICAL_ENTRY' && (
+        <div
+          data-testid="checkin-historical-note"
+          className="w-full rounded-xl px-3 py-2 mb-3 flex items-start gap-2.5 text-left"
+          style={{ backgroundColor: 'var(--brand-info-bg, #EEF2FF)' }}
+        >
+          <CalendarClock className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--brand-primary-purple)' }} />
+          <p className="text-[12px] leading-snug" style={{ color: 'var(--brand-text-primary)' }}>
+            {t('checkin.historical.note')}
+          </p>
+        </div>
+      )}
+      {lastReading?.delayBand === 'DELAYED_ENTRY' && (
+        <div
+          data-testid="checkin-delayed-note"
+          className="w-full rounded-xl px-3 py-2 mb-3 flex items-start gap-2.5 text-left"
+          style={{ backgroundColor: 'var(--brand-info-bg, #EEF2FF)' }}
+        >
+          <CalendarClock className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--brand-text-muted)' }} />
+          <p className="text-[12px] leading-snug" style={{ color: 'var(--brand-text-secondary)' }}>
+            {t('checkin.delayed.note')}
+          </p>
+        </div>
+      )}
       {/* Missed-medication acknowledgement — visible confirmation so the
           patient knows their answer was captured and will reach the care team.
           #88 — only when ENROLLED: an un-enrolled patient's miss fires no alert
@@ -1988,6 +2057,8 @@ export default function CheckIn() {
   const [sessionId, setSessionId] = useState<string | null>(() => uuid());
   const [sessionReadings, setSessionReadings] = useState<SessionReading[]>([]);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  // Chunk C — DELAYED_ENTRY soft-warning modal gate (shown at submit when 1-24h old).
+  const [showDelayWarning, setShowDelayWarning] = useState(false);
   const [readingNumber, setReadingNumber] = useState(0); // count of submitted readings in session
   // Cluster 6 Q2 — set to the entry id of a first-in-session non-AFib
   // non-preDay3 reading. Drives the "Take a second reading" prompt + 5-min
@@ -2185,9 +2256,19 @@ export default function CheckIn() {
     return null;
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(confirmedDelayed = false) {
     if (submitting) return;
     setError('');
+
+    // Chunk C — DELAYED_ENTRY (1-24h) soft pre-submit warning. The reading still
+    // saves + the care team still sees it, but the engine won't treat stale data
+    // as an active emergency (Manisha 2026-06-06 backdated-readings sign-off).
+    // PENDING-MANISHA-WORDING 2026-06-09 (copy in i18n: checkin.delay.*).
+    const measuredMs = new Date(`${form.measuredDate}T${form.measuredTime}`).getTime();
+    if (!confirmedDelayed && delayBandFor(measuredMs, Date.now()) === 'DELAYED_ENTRY') {
+      setShowDelayWarning(true);
+      return;
+    }
 
     // Build payload
     const measurementConditions = {
@@ -2314,6 +2395,8 @@ export default function CheckIn() {
         diastolicBP: dia,
         pulse: pul,
         weightKg,
+        // Chunk C — server-truth band from the POST response (Chunk A serializeEntry).
+        delayBand: created.entry.delayBand,
       };
       setSessionReadings((prev) => [...prev, reading]);
       setReadingNumber((n) => n + 1);
@@ -2799,6 +2882,59 @@ export default function CheckIn() {
           modal. The reading is already auto-saved to this device; this just
           confirms leaving for the dashboard. */}
       <AnimatePresence>
+        {showDelayWarning && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ backgroundColor: 'rgba(15,23,42,0.5)' }}
+          >
+            <div className="absolute inset-0" onClick={() => setShowDelayWarning(false)} aria-hidden />
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              data-testid="checkin-delay-warning"
+              initial={{ scale: 0.92, y: 12 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.92, y: 12 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 26 }}
+              className="relative bg-white rounded-3xl p-6 max-w-sm w-full text-center"
+              style={{ boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}
+            >
+              <div
+                className="rounded-full mx-auto mb-4 flex items-center justify-center"
+                style={{ width: 64, height: 64, backgroundColor: 'var(--brand-warning-amber-light)' }}
+              >
+                <CalendarClock className="w-7 h-7" style={{ color: 'var(--brand-warning-amber-text)' }} />
+              </div>
+              <h3 className="text-[18px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+                {t('checkin.delay.title')}
+              </h3>
+              <p className="text-[13px] mb-5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+                {t('checkin.delay.body')}
+              </p>
+              <button
+                type="button"
+                data-testid="checkin-delay-confirm"
+                onClick={() => { setShowDelayWarning(false); void handleSubmit(true); }}
+                className="w-full h-11 rounded-full text-white font-bold text-[14px] cursor-pointer"
+                style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
+              >
+                {t('checkin.delay.confirm')}
+              </button>
+              <button
+                type="button"
+                data-testid="checkin-delay-back"
+                onClick={() => { setShowDelayWarning(false); setDirection(-1); setStep('B2'); }}
+                className="w-full mt-2 text-[12px] font-semibold cursor-pointer"
+                style={{ color: 'var(--brand-text-muted)' }}
+              >
+                {t('checkin.delay.back')}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
         {showSaveConfirm && (
           <motion.div
             initial={{ opacity: 0 }}

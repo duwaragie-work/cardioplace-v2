@@ -4,6 +4,7 @@
 // booleans were added in phase/15 alongside Flow B.
 
 import { fetchWithAuth } from './token'
+import type { DelayBand } from '../delayBand'
 
 const API = process.env.NEXT_PUBLIC_API_URL
 
@@ -94,6 +95,10 @@ export interface JournalEntryDto extends JournalEntryPayload {
   userId: string
   createdAt: string
   updatedAt: string
+  /** Chunk A backend (serializeEntry) surfaces the measurement-lag band on the
+   *  journal-entry POST response; Chunk C reads it to render the
+   *  HISTORICAL_ENTRY informational note. Defaults to 'REAL_TIME' server-side. */
+  delayBand?: DelayBand
 }
 
 /**
