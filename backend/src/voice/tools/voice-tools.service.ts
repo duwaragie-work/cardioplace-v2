@@ -1,4 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common'
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  UnprocessableEntityException,
+} from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
 import { Type } from '@google/genai'
 import type { FunctionDeclaration } from '@google/genai'
@@ -607,11 +612,38 @@ export class VoiceToolsService {
     } catch (err) {
       this.logger.error('submit_checkin: dailyJournal.create failed', err)
       saved = false
+      // Bug 32 — pre-fix this only handled isIntakeIncompleteError. Every
+      // other throw kept the generic "There was a problem saving..." default,
+      // so the LLM had no way to know WHY the save failed and the patient
+      // kept hearing "having trouble in recording the BP reading" on every
+      // retry. Now we surface a specific reason per exception so the LLM
+      // can either re-ask the patient (BP transpose) or move on (duplicate
+      // timestamp), mirroring the text-chat dispatcher which has always
+      // passed err.message through.
       if (isIntakeIncompleteError(err)) {
         intakeIncomplete = true
         savedMessage =
           "Before I can save a check-in I need you to complete your one-time intake form. " +
           "Please go to /clinical-intake and come back when you're done."
+      } else if (err instanceof UnprocessableEntityException) {
+        // "implausible-reading" — diastolic ≥ systolic. Almost always a BP
+        // transpose at the tool-call layer. Tell the LLM to re-ask both
+        // numbers; do NOT silently retry with the same args.
+        savedMessage =
+          "The numbers look transposed — the top number should be bigger than the bottom. " +
+          "Ask the patient to repeat both numbers and re-call submit_checkin with the corrected values."
+      } else if (err instanceof ConflictException) {
+        // P2002 unique constraint on (userId, measuredAt). Two readings
+        // resolved to the same minute (patient took two within a minute,
+        // or the LLM submitted twice with measurement_time="now").
+        savedMessage =
+          "There's already a reading at that exact time. " +
+          "If the patient meant to add a new reading, ask them what time the new one was taken " +
+          'and pass it as measurement_time in HH:mm — do NOT retry with measurement_time="now".'
+      } else {
+        // Surface the real message so the LLM has context, like chat does.
+        const msg = (err as Error)?.message
+        if (msg) savedMessage = `Couldn't save the check-in: ${msg}. Please try again later.`
       }
     }
 

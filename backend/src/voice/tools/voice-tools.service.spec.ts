@@ -257,6 +257,58 @@ describe('VoiceToolsService.dispatch', () => {
     expect(ac.success).toBe(false)
   })
 
+  // ─── Bug 32 — surface specific create() errors to the LLM ─────────────
+  // Pre-fix the dispatcher swallowed every error except isIntakeIncompleteError
+  // and gave the LLM a generic "There was a problem saving the check-in"
+  // message. The LLM would then tell the patient "having trouble in recording
+  // the BP reading" and retry with the SAME args, looping forever on the same
+  // failure. Now each known exception gets a specific, actionable message so
+  // the LLM knows what to fix on the next call.
+
+  it('Bug 32 — UnprocessableEntityException (transposed BP) → LLM gets re-ask guidance', async () => {
+    const { UnprocessableEntityException } = await import('@nestjs/common')
+    ;(dailyJournal.create as jest.Mock<any>).mockRejectedValue(
+      new UnprocessableEntityException({
+        message: 'implausible-reading',
+        reason: "That reading doesn't look right.",
+      }),
+    )
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 80, diastolic_bp: 120, medication_taken: true },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: false }))
+    expect((r.llmResponse as any).message).toMatch(/transposed/i)
+    expect((r.llmResponse as any).message).toMatch(/re-call submit_checkin/i)
+  })
+
+  it('Bug 32 — ConflictException (duplicate timestamp) → LLM gets "ask for the time" guidance', async () => {
+    const { ConflictException } = await import('@nestjs/common')
+    ;(dailyJournal.create as jest.Mock<any>).mockRejectedValue(
+      new ConflictException('A journal entry already exists for this timestamp'),
+    )
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80, medication_taken: true },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: false }))
+    expect((r.llmResponse as any).message).toMatch(/already a reading/i)
+    expect((r.llmResponse as any).message).toMatch(/do NOT retry/i)
+  })
+
+  it('Bug 32 — generic Error → real message surfaces to LLM (not the swallowed default)', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockRejectedValue(new Error('connection refused'))
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80, medication_taken: true },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: false }))
+    expect((r.llmResponse as any).message).toMatch(/connection refused/i)
+  })
+
   // Bug 5 regression — without the guard, an LLM call without medication_taken
   // would silently flag the patient as non-adherent (toBool default false).
   // Stage-B medication-adherence alerts (Tier 2/3) would fire on a patient who
