@@ -49,6 +49,7 @@ import {
 } from '@/lib/services/ocr.service';
 import BpPhotoConfirmModal from '@/components/intake/BpPhotoConfirmModal';
 import { transcribeAudio } from '@/lib/services/chat.service';
+import { kgToLbs } from '@/lib/units';
 import CheckinCard from '@/components/cardio/cards/CheckinCard';
 import UpdateCard from '@/components/cardio/cards/UpdateCard';
 import DeleteCard from '@/components/cardio/cards/DeleteCard';
@@ -1759,7 +1760,13 @@ export default function AIChatInterface() {
             setPendingCheckin({
               systolicBP: d.systolicBP as number | undefined,
               diastolicBP: d.diastolicBP as number | undefined,
-              weight: d.weight as number | undefined,
+              // Bug 36 — backend persists kg (per Bug 19's lbs→kg conversion
+              // at the dispatcher) and returns kg in data.weight. CheckinCard
+              // hardcodes the "lbs" label, so the popup must convert kg→lbs
+              // for display. Pre-fix the popup showed 181 lbs for a 400 lb
+              // entry while the LLM's confirmation text + My Readings both
+              // correctly showed 400 lbs.
+              weight: typeof d.weight === 'number' ? kgToLbs(d.weight) : undefined,
               medicationTaken: d.medicationTaken as boolean | undefined,
               // Bug 16B fix — read missedMedications so the card surfaces
               // WHICH meds were missed (was: rendered "All taken" even when
@@ -1785,7 +1792,10 @@ export default function AIChatInterface() {
               entryDate: d.entryDate as string | undefined,
               systolicBP: d.systolicBP as number | undefined,
               diastolicBP: d.diastolicBP as number | undefined,
-              weight: d.weight as number | undefined,
+              // Bug 36 — same kg→lbs conversion as the submit_checkin popup
+              // above. UpdateCard hardcodes the "lbs" label and the backend
+              // returns kg in data.weight.
+              weight: typeof d.weight === 'number' ? kgToLbs(d.weight) : undefined,
               medicationTaken: d.medicationTaken as boolean | undefined,
               missedMedications: pickMissedMedications(d),
               symptoms: [],
