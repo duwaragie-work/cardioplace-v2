@@ -2,6 +2,7 @@ import {
   ConflictException,
   Injectable,
   Logger,
+  NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
@@ -962,6 +963,17 @@ export class VoiceToolsService {
     let finalMed = dto.medicationTaken === true
     let finalSymptoms = symptoms
 
+    // Bug 34 — pre-fix this catch just logged the error and left `updated`
+    // false with a generic "Could not update the reading. Please try again"
+    // message. Same family as Bug 32 (submit): every error from
+    // dailyJournal.update was swallowed, so the LLM couldn't tell whether
+    // the entry_id was stale, the BP was transposed, the new time collided
+    // with another reading, or it was a generic failure. The patient looped
+    // hearing the same generic "couldn't update" while the LLM retried with
+    // identical args. Now we route each known exception to an actionable
+    // message so the LLM knows whether to re-ask BP, ask for a different
+    // time, or pick a fresh entry id.
+    let failureMessage: string | null = null
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await this.dailyJournal.update(ctx.userId, entryId, dto as any)
@@ -979,6 +991,30 @@ export class VoiceToolsService {
       finalSymptoms = Array.isArray(data.otherSymptoms) ? data.otherSymptoms : finalSymptoms
     } catch (err) {
       this.logger.error(`update_checkin failed for ${entryId}`, err)
+      updated = false
+      if (err instanceof NotFoundException) {
+        // Stale or hallucinated entry_id.
+        failureMessage =
+          `Entry ${entryId} not found — likely a stale or hallucinated id. ` +
+          'Call get_recent_readings to fetch a fresh list and ask the patient which entry they meant.'
+      } else if (err instanceof UnprocessableEntityException) {
+        // "implausible-reading" — diastolic ≥ systolic. BP transpose at
+        // the tool-call layer (same as Bug 32 submit path).
+        failureMessage =
+          "The new BP numbers look transposed — the top number should be bigger than the bottom. " +
+          'Ask the patient to repeat both numbers and re-call update_checkin with the corrected values.'
+      } else if (err instanceof ConflictException) {
+        // P2002 on (userId, measuredAt). The new time collides with a
+        // sibling entry's measuredAt.
+        failureMessage =
+          "The new time collides with another reading at that same minute. " +
+          'Ask the patient for a different time and re-call update_checkin with the corrected measurement_time.'
+      } else {
+        const msg = (err as Error)?.message
+        failureMessage = msg
+          ? `Couldn't update the reading: ${msg}. Please try again.`
+          : 'Could not update the reading. Please try again.'
+      }
     }
 
     const summary: UpdateSummary = {
@@ -1004,7 +1040,7 @@ export class VoiceToolsService {
         updated,
         message: updated
           ? 'Reading updated successfully.'
-          : 'Could not update the reading. Please try again.',
+          : failureMessage ?? 'Could not update the reading. Please try again.',
       },
       events,
     }
@@ -1044,17 +1080,33 @@ export class VoiceToolsService {
       },
     ]
 
+    // Bug 35 — pre-fix per-id errors were logged but never surfaced to the
+    // LLM. The aggregate message just said "Could not delete the reading(s)"
+    // or "X reading(s) deleted, but Y could not". The LLM had no idea WHY
+    // each id failed — most commonly NotFoundException (stale or
+    // hallucinated id), which the LLM would otherwise just retry. Now we
+    // track each failure with its reason so the LLM can tell the patient
+    // something useful and pick a fresh id from get_recent_readings instead
+    // of looping on the same stale ones.
     let deletedCount = 0
-    let failedCount = 0
+    const failures: Array<{ entry_id: string; reason: string }> = []
     for (const eid of ids) {
       try {
         await this.dailyJournal.delete(ctx.userId, eid)
         deletedCount += 1
       } catch (err) {
-        failedCount += 1
-        this.logger.warn(`delete_checkin: ${eid} failed: ${(err as Error).message}`)
+        const errMsg = (err as Error)?.message ?? 'unknown error'
+        this.logger.warn(`delete_checkin: ${eid} failed: ${errMsg}`)
+        let reason: string
+        if (err instanceof NotFoundException) {
+          reason = 'not found (likely already deleted or stale id)'
+        } else {
+          reason = errMsg
+        }
+        failures.push({ entry_id: eid, reason })
       }
     }
+    const failedCount = failures.length
 
     let message: string
     if (failedCount === 0) {
@@ -1062,9 +1114,15 @@ export class VoiceToolsService {
         ? 'Reading deleted successfully.'
         : `All ${deletedCount} readings deleted successfully.`
     } else if (deletedCount === 0) {
-      message = 'Could not delete the reading(s). Please try again.'
+      const detail = failures.map((f) => `${f.entry_id} (${f.reason})`).join('; ')
+      message =
+        `Could not delete the reading(s): ${detail}. ` +
+        'Ask the patient to call get_recent_readings to fetch fresh entry ids and pick again.'
     } else {
-      message = `Deleted ${deletedCount} reading(s), but ${failedCount} could not be deleted.`
+      const detail = failures.map((f) => `${f.entry_id} (${f.reason})`).join('; ')
+      message =
+        `Deleted ${deletedCount} reading(s), but ${failedCount} could not be deleted: ${detail}. ` +
+        'For the failed ones, ask the patient to call get_recent_readings and pick again.'
     }
 
     const summary: DeleteSummary = {
@@ -1083,7 +1141,12 @@ export class VoiceToolsService {
     })
 
     return {
-      llmResponse: { deleted_count: deletedCount, failed_count: failedCount, message },
+      llmResponse: {
+        deleted_count: deletedCount,
+        failed_count: failedCount,
+        message,
+        ...(failures.length > 0 ? { failures } : {}),
+      },
       events,
     }
   }

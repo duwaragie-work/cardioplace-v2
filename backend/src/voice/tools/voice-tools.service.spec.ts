@@ -628,6 +628,77 @@ describe('VoiceToolsService.dispatch', () => {
     expect(cu.payload.entryId).toBe('abc')
   })
 
+  // ─── Bug 34 — surface dailyJournal.update exceptions to LLM ───────────
+  // Pre-fix every exception was swallowed with a generic "Could not update
+  // the reading. Please try again." message — same family as Bug 32 on
+  // submit. The LLM had no way to know whether the entry_id was stale,
+  // BP was transposed, or the new time collided with another entry.
+
+  it('Bug 34 — NotFoundException → LLM gets stale-id guidance', async () => {
+    const { NotFoundException } = await import('@nestjs/common')
+    ;(dailyJournal.update as jest.Mock<any>).mockRejectedValue(
+      new NotFoundException('Journal entry not found'),
+    )
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'stale-id', systolic_bp: 135, diastolic_bp: 85 },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ updated: false }))
+    expect((r.llmResponse as any).message).toMatch(/stale-id/)
+    expect((r.llmResponse as any).message).toMatch(/not found|stale|hallucinated/i)
+    expect((r.llmResponse as any).message).toMatch(/get_recent_readings/i)
+  })
+
+  it('Bug 34 — UnprocessableEntityException (transposed BP) → LLM gets re-ask guidance', async () => {
+    const { UnprocessableEntityException } = await import('@nestjs/common')
+    ;(dailyJournal.update as jest.Mock<any>).mockRejectedValue(
+      new UnprocessableEntityException({
+        message: 'implausible-reading',
+        reason: "That reading doesn't look right.",
+      }),
+    )
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'e1', systolic_bp: 80, diastolic_bp: 120 },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ updated: false }))
+    expect((r.llmResponse as any).message).toMatch(/transposed/i)
+    expect((r.llmResponse as any).message).toMatch(/re-call update_checkin/i)
+  })
+
+  it('Bug 34 — ConflictException (time collision) → LLM gets "ask for different time" guidance', async () => {
+    const { ConflictException } = await import('@nestjs/common')
+    // findOne returns the existing entry so the rebase path succeeds and we
+    // reach dailyJournal.update where we throw the ConflictException.
+    ;(dailyJournal.findOne as jest.Mock<any>).mockResolvedValue({
+      data: { measuredAt: new Date('2026-04-22T12:00:00Z') },
+    })
+    ;(dailyJournal.update as jest.Mock<any>).mockRejectedValue(
+      new ConflictException('A journal entry already exists for this timestamp'),
+    )
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'e1', measurement_time: '08:30' },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ updated: false }))
+    expect((r.llmResponse as any).message).toMatch(/collides/i)
+    expect((r.llmResponse as any).message).toMatch(/different time/i)
+  })
+
+  it('Bug 34 — generic Error → real message surfaces (not the swallowed default)', async () => {
+    ;(dailyJournal.update as jest.Mock<any>).mockRejectedValue(new Error('connection refused'))
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'e1', systolic_bp: 135, diastolic_bp: 85 },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ updated: false }))
+    expect((r.llmResponse as any).message).toMatch(/connection refused/i)
+  })
+
   // ── delete_checkin ────────────────────────────────────────────────────────
 
   it('delete_checkin: parses comma-separated ids and calls delete per id', async () => {
@@ -659,6 +730,55 @@ describe('VoiceToolsService.dispatch', () => {
       failed_count: 0,
       message: 'No entry IDs provided.',
     })
+  })
+
+  // ─── Bug 35 — surface per-id delete failures to LLM ───────────────────
+  // Pre-fix the dispatcher swallowed per-id errors with a generic "Could
+  // not delete the reading(s)" — the LLM had no idea WHY each id failed
+  // and would retry the same stale ids forever. Now each failure carries
+  // its reason (NotFoundException is the common case for stale ids).
+
+  it('Bug 35 — NotFoundException on delete → LLM gets specific stale-id guidance', async () => {
+    const { NotFoundException } = await import('@nestjs/common')
+    ;(dailyJournal.delete as jest.Mock<any>).mockRejectedValue(
+      new NotFoundException('Journal entry not found'),
+    )
+    const r = await service.dispatch('delete_checkin', { entry_ids: 'stale-id' }, CTX)
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({ deleted_count: 0, failed_count: 1 }),
+    )
+    expect((r.llmResponse as any).message).toMatch(/stale-id/)
+    expect((r.llmResponse as any).message).toMatch(/not found|stale/i)
+    expect((r.llmResponse as any).message).toMatch(/get_recent_readings/i)
+    expect((r.llmResponse as any).failures).toEqual([
+      expect.objectContaining({ entry_id: 'stale-id', reason: expect.stringMatching(/not found/i) }),
+    ])
+  })
+
+  it('Bug 35 — partial failure: aggregates per-id reasons in message', async () => {
+    const { NotFoundException } = await import('@nestjs/common')
+    ;(dailyJournal.delete as jest.Mock).mockImplementation((_uid: unknown, id: unknown) => {
+      if (id === 'b') return Promise.reject(new NotFoundException('Journal entry not found'))
+      return Promise.resolve({})
+    })
+    const r = await service.dispatch('delete_checkin', { entry_ids: 'a,b,c' }, CTX)
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({ deleted_count: 2, failed_count: 1 }),
+    )
+    expect((r.llmResponse as any).message).toMatch(/Deleted 2/)
+    expect((r.llmResponse as any).message).toMatch(/b \(not found/i)
+    expect((r.llmResponse as any).failures).toEqual([
+      expect.objectContaining({ entry_id: 'b' }),
+    ])
+  })
+
+  it('Bug 35 — generic Error surfaces real message per failed id', async () => {
+    ;(dailyJournal.delete as jest.Mock<any>).mockRejectedValue(new Error('connection refused'))
+    const r = await service.dispatch('delete_checkin', { entry_ids: 'x' }, CTX)
+    expect((r.llmResponse as any).message).toMatch(/connection refused/)
+    expect((r.llmResponse as any).failures).toEqual([
+      { entry_id: 'x', reason: 'connection refused' },
+    ])
   })
 
   // ── submit_bp_from_photo ──────────────────────────────────────────────────
