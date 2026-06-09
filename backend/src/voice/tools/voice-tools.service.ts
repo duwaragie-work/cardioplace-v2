@@ -428,8 +428,7 @@ export class VoiceToolsService {
         events: [],
       }
     }
-    const bpProvided = sbpProvided && dbpProvided
-    if (bpProvided && (sbp < 60 || sbp > 250 || dbp < 40 || dbp > 150)) {
+    if (sbpProvided && dbpProvided && (sbp < 60 || sbp > 250 || dbp < 40 || dbp > 150)) {
       this.logger.warn(`BP out of range: ${sbp}/${dbp} — rejecting`)
       return {
         llmResponse: {
@@ -461,6 +460,76 @@ export class VoiceToolsService {
     }
     const medicationTaken = toBool(args.medication_taken, false)
     const weight = toNumber(args.weight, 0)
+
+    // Bug 33 — ghost-save guard. The dispatcher allows BP=0/0 because V2's
+    // PARTIAL LOGGING flow uses it for medication-only, symptom-only, or
+    // missed-med-only logs (where the patient only mentions one thing). But
+    // the LLM can also misfire submit_checkin from ambient conversation
+    // ("hi, how are you doing?") if the prompt-side discipline fails —
+    // creating a journal entry with no BP, no symptoms, no missed meds,
+    // and nothing to record. The patient sees a phantom reading in
+    // My Readings.
+    //
+    // Require at least ONE concrete signal:
+    //   - BP (both numbers > 0)
+    //   - any structured symptom boolean = true
+    //   - missed_medications array with content
+    //   - medication_scheduled_later = true
+    //   - notes string starting with a sparse-log marker
+    //     ("Medication-only log:" / "Symptom-only log:")
+    // medication_taken alone does NOT count because it's required on every
+    // call by the schema — it can't distinguish "I took my meds" intent from
+    // a default-filled hallucination.
+    const hasStructuredSymptom =
+      toBool(args.severe_headache, false) ||
+      toBool(args.visual_changes, false) ||
+      toBool(args.altered_mental_status, false) ||
+      toBool(args.chest_pain_or_dyspnea, false) ||
+      toBool(args.focal_neuro_deficit, false) ||
+      toBool(args.severe_epigastric_pain, false) ||
+      toBool(args.new_onset_headache, false) ||
+      toBool(args.ruq_pain, false) ||
+      toBool(args.edema, false) ||
+      toBool(args.dizziness, false) ||
+      toBool(args.syncope, false) ||
+      toBool(args.palpitations, false) ||
+      toBool(args.leg_swelling, false) ||
+      toBool(args.face_swelling, false) ||
+      toBool(args.throat_tightness, false)
+    const hasMissedMeds =
+      Array.isArray(args.missed_medications) && args.missed_medications.length > 0
+    const hasScheduledLater = toBool(args.medication_scheduled_later, false)
+    const notesRaw = asString(args.notes, '').trim().toLowerCase()
+    const hasPartialLogMarker =
+      notesRaw.startsWith('medication-only log') ||
+      notesRaw.startsWith('symptom-only log')
+    const hasFreeformSymptoms = symptoms.length > 0
+    const bpProvided = sbpProvided && dbpProvided
+    if (
+      !bpProvided &&
+      !hasStructuredSymptom &&
+      !hasMissedMeds &&
+      !hasScheduledLater &&
+      !hasPartialLogMarker &&
+      !hasFreeformSymptoms
+    ) {
+      this.logger.warn(
+        `submit_checkin rejected: no BP, no symptoms, no missed meds, no scheduled-later, no partial-log marker — ghost save guard`,
+      )
+      return {
+        llmResponse: {
+          saved: false,
+          reason: 'NO_DATA_TO_SAVE',
+          message:
+            "I don't have anything to record yet. The patient hasn't given BP numbers, " +
+            'symptoms, or any medication-change detail this turn. Ask them what they want ' +
+            'to log — a BP reading, a symptom they\'re having, or a medication update — and ' +
+            're-call submit_checkin only when there is concrete data.',
+        },
+        events: [],
+      }
+    }
+
     const detail = `BP=${sbp}/${dbp} meds=${medicationTaken ? 'taken' : 'missed'} symptoms=${
       symptoms.length ? symptoms.join(',') : 'none'
     } weight=${weight || 'N/A'}`

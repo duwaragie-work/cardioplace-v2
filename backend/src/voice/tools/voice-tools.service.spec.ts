@@ -309,6 +309,103 @@ describe('VoiceToolsService.dispatch', () => {
     expect((r.llmResponse as any).message).toMatch(/connection refused/i)
   })
 
+  // ─── Bug 33 — ghost-save guard ────────────────────────────────────────
+  // The dispatcher allows BP=0/0 to support V2 partial logging (medication-
+  // only, symptom-only, missed-med-only). But if the LLM misfires
+  // submit_checkin from ambient conversation, the patient ends up with a
+  // phantom journal entry containing nothing. The guard rejects calls
+  // with no BP AND no symptoms AND no missed meds AND no scheduled-later
+  // AND no partial-log marker. medication_taken=true alone does NOT count
+  // (it's required by schema on every call).
+
+  it('Bug 33 — rejects ghost save: no BP, no symptoms, no missed meds, no scheduled-later, no notes', async () => {
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 0, diastolic_bp: 0, medication_taken: true },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({ saved: false, reason: 'NO_DATA_TO_SAVE' }),
+    )
+    expect((r.llmResponse as any).message).toMatch(/anything to record|nothing to record/i)
+    expect(dailyJournal.create).not.toHaveBeenCalled()
+  })
+
+  it('Bug 33 — allows valid partial log: medication-only with explicit notes marker', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 0,
+        diastolic_bp: 0,
+        medication_taken: true,
+        notes: 'Medication-only log: Lisinopril',
+      },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: true }))
+    expect(dailyJournal.create).toHaveBeenCalled()
+  })
+
+  it('Bug 33 — allows valid partial log: symptom-only with structured boolean', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 0,
+        diastolic_bp: 0,
+        medication_taken: true,
+        severe_headache: true,
+      },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: true }))
+    expect(dailyJournal.create).toHaveBeenCalled()
+  })
+
+  it('Bug 33 — allows valid partial log: medication_scheduled_later=true', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 0,
+        diastolic_bp: 0,
+        medication_taken: false,
+        medication_scheduled_later: true,
+      },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: true }))
+    expect(dailyJournal.create).toHaveBeenCalled()
+  })
+
+  it('Bug 33 — allows valid partial log: missed_medications array present', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 0,
+        diastolic_bp: 0,
+        medication_taken: false,
+        missed_medications: [{ drug_name: 'Lisinopril', reason: 'FORGOT', missed_doses: 1 }],
+      },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: true }))
+    expect(dailyJournal.create).toHaveBeenCalled()
+  })
+
+  it('Bug 33 — BP present means guard does NOT fire (normal check-in path)', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80, medication_taken: true },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: true }))
+    expect(dailyJournal.create).toHaveBeenCalled()
+  })
+
   // Bug 5 regression — without the guard, an LLM call without medication_taken
   // would silently flag the patient as non-adherent (toBool default false).
   // Stage-B medication-adherence alerts (Tier 2/3) would fire on a patient who
