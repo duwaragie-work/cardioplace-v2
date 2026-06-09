@@ -509,7 +509,19 @@ export class AlertEngineService {
       }
     }
 
-    const messages = this.outputGenerator.generate(top, session, preDay3, null)
+    // Issue #68 — pass dateOfBirth so the output generator can compute
+    // `patientAgeYears` for any rule message that opts in via `agePhrase(ctx)`.
+    // Issue #69 — also pipe `contextMeds` so the generator can compute
+    // `activeMedications` (deduped against `drugNames`) for any rule message
+    // that opts in via `medicationListPhrase(ctx)`.
+    const messages = this.outputGenerator.generate(
+      top,
+      session,
+      preDay3,
+      null,
+      ctx.dateOfBirth,
+      ctx.contextMeds,
+    )
     return {
       evaluated: true,
       ruleId: top.ruleId,
@@ -937,6 +949,15 @@ export class AlertEngineService {
       session,
       ctx.preDay3Mode,
       ctx.patientName,
+      // Issue #68 — pipe DOB so rule messages can render `(age X)` via
+      // `agePhrase(ctx)`. The output generator computes age once from
+      // `session.measuredAt` so both surfaces agree with the email block.
+      ctx.dateOfBirth,
+      // Issue #69 — pipe the full active-meds list (verified + UNVERIFIED
+      // known-class) so rule messages can render "Currently also taking:
+      // …" via `medicationListPhrase(ctx)`. Dedup against `drugNames`
+      // happens in the generator.
+      ctx.contextMeds,
     )
 
     const actualValue =

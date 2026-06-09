@@ -485,13 +485,40 @@ export class TestControlService {
     if (flag === 'hasHeartFailure') {
       data.heartFailureType = value ? heartFailureType ?? 'UNKNOWN' : 'NOT_APPLICABLE'
     }
-    await this.prisma.patientProfile.updateMany({ where: { userId }, data })
-    // ProfileResolverService doesn't cache today (one fresh user.findUnique
-    // per resolve), so this delay is defensive: if Cluster 6 introduces a
-    // profile cache for performance, tests that flip a flag immediately
-    // before submitting a reading would race the cache invalidation. A
-    // small post-write hold keeps those tests stable across the refactor.
-    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    const result = await this.prisma.patientProfile.updateMany({
+      where: { userId },
+      data,
+    })
+    // Loud-fail the silent no-op: updateMany affects 0 rows when no
+    // PatientProfile exists for the user (seed not run, or the row was
+    // cascade-deleted by a prior test). Previously this returned success and
+    // the flag never flipped, so the engine evaluated a stale profile.
+    if (result.count === 0) {
+      throw new Error(
+        `setUserCondition: no PatientProfile row for userId=${userId}. Seed must run first.`,
+      )
+    }
+
+    // Read-back verification replaces the prior fixed 100ms hold. Under full-
+    // suite backend load the async alert-evaluation pipeline backlogs (~13s
+    // eval observed on CI shard 4 vs ~0.8s isolated); a fixed delay could let
+    // a reading post before the flag write was visible, so the engine fired
+    // the all-flags-false fallback (RULE_STANDARD_L1_HIGH) instead of the
+    // condition rule. Poll until the write is visible, with a 2s ceiling.
+    const deadline = Date.now() + 2000
+    while (Date.now() < deadline) {
+      const profile = await this.prisma.patientProfile.findUnique({
+        where: { userId },
+      })
+      if (profile && (profile as Record<string, unknown>)[flag] === value) {
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    throw new Error(
+      `setUserCondition: write did not propagate within 2s (userId=${userId} flag=${flag} value=${value})`,
+    )
   }
 
   /**
