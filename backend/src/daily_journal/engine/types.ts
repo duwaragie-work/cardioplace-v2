@@ -35,6 +35,12 @@ export interface SessionAverage {
    *  sessions where the two are identical). */
   submittedSystolicBP?: number | null
   submittedDiastolicBP?: number | null
+  /** Chunk B (Manisha Backdated Readings sign-off 2026-06-06) — the anchor
+   *  entry's measurement-lag band, computed at create time (Chunk A). Drives
+   *  the engine's HISTORICAL_ENTRY Level-2 suppression + the DELAYED_ENTRY
+   *  patient 911-CTA suppression. String (not the Prisma enum) to keep the
+   *  engine types dependency-light, mirroring serializeEntry's pattern. */
+  delayBand?: string
   /** Mean pulse across all readings in the session. Integer. */
   pulse: number | null
   /** Mean weight (lbs) across the session, or null when unrecorded. Used by

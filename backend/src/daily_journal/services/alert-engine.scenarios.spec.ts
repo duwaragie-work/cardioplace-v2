@@ -2547,4 +2547,98 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     expect(ruleIds).toContain('RULE_MEDICATION_MISSED')
     expect(ruleIds).not.toContain('RULE_FIRST_MONTH_ADHERENCE_NUDGE')
   })
+
+  // ========================================================================
+  // Chunk B — DelayBand gating (Manisha Backdated Readings sign-off 2026-06-06)
+  // HISTORICAL_ENTRY suppresses only Level 2; DELAYED_ENTRY suppresses the
+  // patient 911 CTA + adds the physician [DELAYED ENTRY] badge. The patient
+  // "recorded but won't alert" courtesy note for HISTORICAL_ENTRY is Chunk C
+  // (frontend) scope — renders off serializeEntry's delayBand on the entry response.
+  // ========================================================================
+  describe('Chunk B — DelayBand gating', () => {
+    const createdTiers = () =>
+      (
+        prisma.deviationAlert.create.mock.calls as Array<[{ data: { tier: string } }]>
+      ).map((c) => c[0].data.tier)
+
+    it('BP_LEVEL_2 fires normally on a REAL_TIME entry (911 intact, no badge)', async () => {
+      const { result, createArgs } = await run(
+        buildSession({ systolicBP: 190, diastolicBP: 105, pulse: 88, delayBand: 'REAL_TIME' }),
+        buildCtx({ profile: { diagnosedHypertension: true } }),
+      )
+      expect(result?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+      expect(createArgs.data.tier).toBe('BP_LEVEL_2')
+      expect(createArgs.data.patientMessage).toMatch(/911/)
+      expect(createArgs.data.physicianMessage).not.toContain('DELAYED ENTRY')
+    })
+
+    it('BP_LEVEL_2 on DELAYED_ENTRY fires but suppresses the patient 911 CTA + adds physician badge', async () => {
+      const { result, createArgs } = await run(
+        buildSession({ systolicBP: 190, diastolicBP: 105, pulse: 88, delayBand: 'DELAYED_ENTRY' }),
+        buildCtx({ profile: { diagnosedHypertension: true } }),
+      )
+      expect(result?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+      expect(createArgs.data.tier).toBe('BP_LEVEL_2')
+      expect(createArgs.data.patientMessage).not.toMatch(/911/)
+      expect(createArgs.data.patientMessage).toContain('care team')
+      expect(createArgs.data.physicianMessage).toContain('DELAYED ENTRY')
+    })
+
+    it('BP_LEVEL_2 is suppressed entirely on HISTORICAL_ENTRY (no L2 alert persisted)', async () => {
+      const { result } = await run(
+        buildSession({ systolicBP: 190, diastolicBP: 105, pulse: 88, delayBand: 'HISTORICAL_ENTRY' }),
+        buildCtx({ profile: { diagnosedHypertension: true } }),
+      )
+      expect(createdTiers()).not.toContain('BP_LEVEL_2')
+      expect(result?.tier).not.toBe('BP_LEVEL_2')
+    })
+
+    it('BP_LEVEL_2_SYMPTOM_OVERRIDE on DELAYED_ENTRY fires with CTA suppressed + badge', async () => {
+      const { result, createArgs } = await run(
+        buildSession({
+          systolicBP: 122,
+          diastolicBP: 76,
+          pulse: 74,
+          symptoms: { ...noSymptoms(), severeHeadache: true },
+          delayBand: 'DELAYED_ENTRY',
+        }),
+        buildCtx({ profile: { diagnosedHypertension: true } }),
+      )
+      expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
+      expect(createArgs.data.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+      expect(createArgs.data.patientMessage).not.toMatch(/911/)
+      expect(createArgs.data.physicianMessage).toContain('DELAYED ENTRY')
+    })
+
+    it('BP_LEVEL_2_SYMPTOM_OVERRIDE is suppressed entirely on HISTORICAL_ENTRY', async () => {
+      const { result } = await run(
+        buildSession({
+          systolicBP: 122,
+          diastolicBP: 76,
+          pulse: 74,
+          symptoms: { ...noSymptoms(), severeHeadache: true },
+          delayBand: 'HISTORICAL_ENTRY',
+        }),
+        buildCtx({ profile: { diagnosedHypertension: true } }),
+      )
+      expect(createdTiers()).not.toContain('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+      expect(result?.tier).not.toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+    })
+
+    it('BP_LEVEL_1_HIGH STILL fires on HISTORICAL_ENTRY (only Level 2 is suppressed)', async () => {
+      const { createArgs } = await run(
+        buildSession({ systolicBP: 144, diastolicBP: 88, pulse: 82, delayBand: 'HISTORICAL_ENTRY' }),
+        buildCtx({ isPregnant: true }),
+      )
+      expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
+    })
+
+    it('TIER_1_CONTRAINDICATION STILL fires on HISTORICAL_ENTRY (only Level 2 is suppressed)', async () => {
+      const { createArgs } = await run(
+        buildSession({ systolicBP: 130, diastolicBP: 82, pulse: 78, delayBand: 'HISTORICAL_ENTRY' }),
+        buildCtx({ isPregnant: true, profile: { historyHDP: true }, contextMeds: [buildMed()] }),
+      )
+      expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
+    })
+  })
 })

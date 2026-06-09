@@ -163,6 +163,11 @@ export class OutputGeneratorService implements OnModuleInit {
         session.singleReadingFinalized && session.readingCount < 2,
       // Gap 5 — name the patient in caregiver-facing message templates.
       patientName,
+      // Chunk B (Manisha Backdated Readings sign-off 2026-06-06) — measurement-
+      // lag band from the anchor entry (via SessionAverage). Drives the
+      // DELAYED_ENTRY patient 911-CTA suppression + the physician DELAYED badge
+      // in the shared message registry.
+      delayBand: session.delayBand,
     }
   }
 }

@@ -95,6 +95,7 @@ export class SessionAveragerService {
       measuredAt: Date
       sessionId: string | null
       singleReadingFinalized?: boolean
+      delayBand?: string
     },
     siblings: Array<{
       id: string
@@ -179,6 +180,10 @@ export class SessionAveragerService {
       // Cluster 6 Q2 — bypass the non-emergency single-reading gate when
       // the anchor entry has been finalized by the frontend 5-min timeout.
       singleReadingFinalized: anchor.singleReadingFinalized ?? false,
+      // Chunk B (Manisha Backdated Readings sign-off 2026-06-06) — carry the
+      // anchor entry's measurement-lag band so the engine can suppress L2 on
+      // HISTORICAL_ENTRY and the registry can drop the 911 CTA on DELAYED_ENTRY.
+      delayBand: anchor.delayBand,
     }
   }
 }

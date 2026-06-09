@@ -90,6 +90,14 @@ export interface AlertContext {
    *  "— confirm with next reading" annotation on the physician message. */
   singleReadingSession?: boolean
 
+  /** Chunk B (Manisha Backdated Readings sign-off 2026-06-06) — the firing
+   *  entry's measurement-lag band ('REAL_TIME' | 'NEAR_REAL_TIME' |
+   *  'DELAYED_ENTRY' | 'HISTORICAL_ENTRY'). When 'DELAYED_ENTRY' the four BP
+   *  Level-2 patient messages suppress the 911 CTA and the physician messages
+   *  carry a [DELAYED ENTRY] badge. String (not the Prisma enum) to keep the
+   *  registry prisma-dependency-free, matching the rest of AlertContext. */
+  delayBand?: string
+
   /** Cluster 8 — which angioedema symptom(s) the patient reported. Drives
    *  whether the message leads with face-swelling or throat-tightness
    *  phrasing. Populated only for the angioedema rules. */
@@ -345,6 +353,29 @@ function formatDrugList(names: string[]): string {
   return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`
 }
 
+// ─── Chunk B: backdated-reading message modifiers ─────────────────────────────
+// Manisha Backdated Readings sign-off 2026-06-06. A reading logged ≥1h after it
+// was measured (DELAYED_ENTRY) can't confirm an active emergency, so the four BP
+// Level-2 patient messages drop the directive 911 CTA and redirect to the care
+// team; the physician messages carry a band-only [DELAYED ENTRY] badge.
+// HISTORICAL_ENTRY (≥24h) never reaches this layer for L2 — the engine suppresses
+// those alerts upstream (alert-engine.service.ts). The patient "recorded but
+// won't alert" courtesy note for HISTORICAL_ENTRY is Chunk C (frontend) scope:
+// it renders off serializeEntry's delayBand on the entry response — no new
+// rule_id, no new dispatch path.
+function isDelayedEntry(ctx: AlertContext): boolean {
+  return ctx.delayBand === 'DELAYED_ENTRY'
+}
+
+// Band-only physician badge (exact-hours figure deferred per Manisha 2026-06-06;
+// can land later if she asks). Trailing space so it composes as a prefix.
+const PHYS_DELAYED_BADGE =
+  '[DELAYED ENTRY — logged ≥1h after measurement; confirm current symptoms before acting] '
+
+function physDelayedBadge(ctx: AlertContext): string {
+  return isDelayedEntry(ctx) ? PHYS_DELAYED_BADGE : ''
+}
+
 // ─── registry ────────────────────────────────────────────────────────────────
 
 export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
@@ -404,24 +435,34 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   // time is referenced in Manisha's clinician wording but isn't on AlertContext
   // (omitted). MVP US-only: 911 hardcoded per CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
   RULE_SYMPTOM_OVERRIDE_GENERAL: {
-    patientMessage: () =>
-      'Based on what you reported, your care team needs to know right away. If you are having chest pain, trouble breathing, or feel like you might faint, call 911. Otherwise, your care team has been notified and will contact you.',
+    // PENDING-MANISHA-WORDING 2026-06-09 — subject to confirmation in a follow-on sign-off doc.
+    // Tone matches existing patient-tier style. Removes 911 CTA per Manisha 2026-06-06 backdated-
+    // readings sign-off (DELAYED_ENTRY: stale data cannot confirm active emergency).
+    patientMessage: (ctx) =>
+      isDelayedEntry(ctx)
+        ? "You logged symptoms from earlier along with this reading. Because it wasn't just recorded, we can't treat it as an active emergency — please share it with your care team today."
+        : 'Based on what you reported, your care team needs to know right away. If you are having chest pain, trouble breathing, or feel like you might faint, call 911. Otherwise, your care team has been notified and will contact you.',
     caregiverMessage: (ctx) =>
       `${patientNameOr(ctx)} reported symptoms that need attention: ${ctx.conditionLabel ?? '—'}. ${CARE_TEAM_NOTIFIED} If they are having chest pain, trouble breathing, or feel faint, please help them call 911.`,
     physicianMessage: (ctx) =>
-      `SYMPTOM OVERRIDE — Patient reported: ${ctx.conditionLabel ?? '—'}. BP at time of report: ${bp(ctx)}, ${hr(ctx)}. Symptoms triggered override regardless of BP threshold. Recommend urgent clinical assessment.${physSuffix(ctx)}`,
+      `${physDelayedBadge(ctx)}SYMPTOM OVERRIDE — Patient reported: ${ctx.conditionLabel ?? '—'}. BP at time of report: ${bp(ctx)}, ${hr(ctx)}. Symptoms triggered override regardless of BP threshold. Recommend urgent clinical assessment.${physSuffix(ctx)}`,
   },
 
   // Doc 2 (Manisha 6/2) supersedes the Cluster 6 Q6 (5/9) "preeclampsia"
   // patient wording — newest sign-off wins. Gestational age omitted (not on
   // AlertContext). MVP US-only: 911 hardcoded per CROSS_HANDOFF_ADDENDUM.
   RULE_SYMPTOM_OVERRIDE_PREGNANCY: {
-    patientMessage: () =>
-      "Some of the symptoms you reported can be serious during pregnancy. Please call your doctor or go to the hospital right away. If you have trouble breathing or a very bad headache that won't go away, call 911.",
+    // PENDING-MANISHA-WORDING 2026-06-09 — subject to confirmation in a follow-on sign-off doc.
+    // Tone matches existing patient-tier style. Removes 911 CTA per Manisha 2026-06-06 backdated-
+    // readings sign-off (DELAYED_ENTRY: stale data cannot confirm active emergency).
+    patientMessage: (ctx) =>
+      isDelayedEntry(ctx)
+        ? "You logged pregnancy-related symptoms from earlier. Because they weren't just recorded, please contact your doctor or care team today to discuss them."
+        : "Some of the symptoms you reported can be serious during pregnancy. Please call your doctor or go to the hospital right away. If you have trouble breathing or a very bad headache that won't go away, call 911.",
     caregiverMessage: (ctx) =>
       `${patientNameOr(ctx)} reported pregnancy-related symptoms that may be serious: ${ctx.conditionLabel ?? '—'}. Please help them contact their doctor or go to the hospital. If they have trouble breathing, call 911.`,
     physicianMessage: (ctx) =>
-      `PREGNANCY SYMPTOM OVERRIDE — Patient reported: ${ctx.conditionLabel ?? '—'}. BP: ${bp(ctx)}. Evaluate for preeclampsia with severe features. ACOG criteria: headache unresponsive to medication, visual disturbances, RUQ/epigastric pain, thrombocytopenia, elevated LFTs, renal insufficiency.${physSuffix(ctx)}`,
+      `${physDelayedBadge(ctx)}PREGNANCY SYMPTOM OVERRIDE — Patient reported: ${ctx.conditionLabel ?? '—'}. BP: ${bp(ctx)}. Evaluate for preeclampsia with severe features. ACOG criteria: headache unresponsive to medication, visual disturbances, RUQ/epigastric pain, thrombocytopenia, elevated LFTs, renal insufficiency.${physSuffix(ctx)}`,
   },
 
   // ── Absolute emergency ────────────────────────────────────────────────
@@ -431,12 +472,17 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   // MVP US-only: emergency number hardcoded to 911. See CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
   // Post-MVP: replace with {{emergencyNumber}} resolved by locale.
   RULE_ABSOLUTE_EMERGENCY: {
-    patientMessage: () =>
-      'Your blood pressure is dangerously high and you are having symptoms that need emergency care. Call 911 or go to the nearest emergency room right now. Do not wait.',
+    // PENDING-MANISHA-WORDING 2026-06-09 — subject to confirmation in a follow-on sign-off doc.
+    // Tone matches existing patient-tier style. Removes 911 CTA per Manisha 2026-06-06 backdated-
+    // readings sign-off (DELAYED_ENTRY: stale data cannot confirm active emergency).
+    patientMessage: (ctx) =>
+      isDelayedEntry(ctx)
+        ? "You logged a high blood pressure reading from earlier. Because it wasn't just taken, we can't treat it as a current emergency — but it still matters. Please share it with your care team today."
+        : 'Your blood pressure is dangerously high and you are having symptoms that need emergency care. Call 911 or go to the nearest emergency room right now. Do not wait.',
     caregiverMessage: (ctx) =>
       `URGENT — ${patientNameOr(ctx)}'s blood pressure is dangerously high (${bp(ctx)}) and they are having symptoms. Please help them call 911 or get to the nearest emergency room immediately.`,
     physicianMessage: (ctx) =>
-      `HYPERTENSIVE EMERGENCY — BP ${bp(ctx)} with symptoms: ${ctx.conditionLabel ?? '—'}. Meets criteria for hypertensive emergency (SBP ≥180 and/or DBP ≥120 with target organ damage). Patient advised to call 911. Immediate evaluation required.${physSuffix(ctx)}`,
+      `${physDelayedBadge(ctx)}HYPERTENSIVE EMERGENCY — BP ${bp(ctx)} with symptoms: ${ctx.conditionLabel ?? '—'}. Meets criteria for hypertensive emergency (SBP ≥180 and/or DBP ≥120 with target organ damage). Patient advised to call 911. Immediate evaluation required.${physSuffix(ctx)}`,
   },
 
   // ── Pregnancy thresholds ──────────────────────────────────────────────
@@ -448,12 +494,17 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   // remain backlogged. MVP US-only: 911 hardcoded per
   // CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
   RULE_PREGNANCY_L2: {
-    patientMessage: () =>
-      "Your blood pressure is very high. During pregnancy, this needs urgent attention. Please call your doctor or go to the hospital right away. If you can't reach your doctor, call 911.",
+    // PENDING-MANISHA-WORDING 2026-06-09 — subject to confirmation in a follow-on sign-off doc.
+    // Tone matches existing patient-tier style. Removes 911 CTA per Manisha 2026-06-06 backdated-
+    // readings sign-off (DELAYED_ENTRY: stale data cannot confirm active emergency).
+    patientMessage: (ctx) =>
+      isDelayedEntry(ctx)
+        ? "You logged a high blood pressure reading from earlier in your pregnancy. Because it wasn't just taken, please share it with your doctor or care team today rather than treating it as an emergency right now."
+        : "Your blood pressure is very high. During pregnancy, this needs urgent attention. Please call your doctor or go to the hospital right away. If you can't reach your doctor, call 911.",
     caregiverMessage: (ctx) =>
       `URGENT — ${patientNameOr(ctx)}'s blood pressure is very high (${bp(ctx)}) during pregnancy. Please help them contact their doctor or go to the hospital immediately.`,
     physicianMessage: (ctx) =>
-      `PREGNANCY BP LEVEL 2 — BP ${bp(ctx)}${gestationalAgePhrase(ctx)}. Meets ACOG criteria for severe hypertension in pregnancy (SBP ≥160 or DBP ≥110). Initiate antihypertensive therapy within 30–60 min. Evaluate for preeclampsia with severe features.${physSuffix(ctx)}`,
+      `${physDelayedBadge(ctx)}PREGNANCY BP LEVEL 2 — BP ${bp(ctx)}${gestationalAgePhrase(ctx)}. Meets ACOG criteria for severe hypertension in pregnancy (SBP ≥160 or DBP ≥110). Initiate antihypertensive therapy within 30–60 min. Evaluate for preeclampsia with severe features.${physSuffix(ctx)}`,
   },
 
   RULE_PREGNANCY_L1_HIGH: {
