@@ -11,7 +11,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter'
 import { randomUUID } from 'node:crypto'
 import { SESSION_WINDOW_MS } from '@cardioplace/shared'
-import { Prisma, EntrySource, EscalationLevel } from '../generated/prisma/client.js'
+import { Prisma, EntrySource, EscalationLevel, DelayBand } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from './constants/events.js'
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto.js'
@@ -25,6 +25,26 @@ const SOURCE_MAP: Record<string, EntrySource> = {
 }
 
 const POSITION_VALUES = ['SITTING', 'STANDING', 'LYING'] as const
+
+// Manisha Backdated Readings sign-off 2026-06-06 (Chunk A) — bucketed lag
+// between when the patient says they measured (measuredAt) and when the
+// system received the row (now). Thresholds match the DelayBand enum
+// comments in prisma/schema/daily_journal.prisma:
+//   REAL_TIME         (<5 min)        normal current-session entry
+//   NEAR_REAL_TIME    (5 min - <1 h)  acceptable lag (e.g. forgot to log)
+//   DELAYED_ENTRY     (1 h - <24 h)   L2 911 CTA suppressed (provider flag)
+//   HISTORICAL_ENTRY  (>=24 h)        L2 not fired; CMS 99454 16-day excluded
+const DELAY_BAND_NEAR_MS = 5 * 60 * 1000
+const DELAY_BAND_DELAYED_MS = 60 * 60 * 1000
+const DELAY_BAND_HISTORICAL_MS = 24 * 60 * 60 * 1000
+
+export function computeDelayBand(measuredAt: Date, now: Date): DelayBand {
+  const lagMs = now.getTime() - measuredAt.getTime()
+  if (lagMs < DELAY_BAND_NEAR_MS) return DelayBand.REAL_TIME
+  if (lagMs < DELAY_BAND_DELAYED_MS) return DelayBand.NEAR_REAL_TIME
+  if (lagMs < DELAY_BAND_HISTORICAL_MS) return DelayBand.DELAYED_ENTRY
+  return DelayBand.HISTORICAL_ENTRY
+}
 
 /**
  * Channel-aware predicate for the in-app bell LIST + unread COUNT. Both
@@ -137,10 +157,14 @@ export class DailyJournalService {
     )
 
     try {
+      // Chunk A — compute the measurement-lag band at persist time so the
+      // patient app + admin can render the right affordance off a stored value.
+      const delayBand = computeDelayBand(new Date(dto.measuredAt), new Date())
       const entry = await this.prisma.journalEntry.create({
         data: {
           userId,
           measuredAt: new Date(dto.measuredAt),
+          delayBand,
           systolicBP: dto.systolicBP ?? null,
           diastolicBP: dto.diastolicBP ?? null,
           pulse: dto.pulse ?? null,
@@ -1156,6 +1180,12 @@ export class DailyJournalService {
     id: string
     userId: string
     measuredAt: Date
+    // Manisha Backdated Readings sign-off 2026-06-06 (Chunk A) — bucketed
+    // measurement-lag band. Surfaced for the patient time-picker UI (Chunk C)
+    // and the admin "DELAYED" badge. Optional so legacy callers / tests that
+    // mock the entry without delayBand keep compiling — Prisma always supplies
+    // it on real reads via the @default(REAL_TIME) on the column.
+    delayBand?: string
     systolicBP: number | null
     diastolicBP: number | null
     pulse: number | null
@@ -1201,6 +1231,11 @@ export class DailyJournalService {
       id: entry.id,
       userId: entry.userId,
       measuredAt: entry.measuredAt,
+      // Chunk A — surface the bucketed lag so the patient app + admin can
+      // show the right UI affordance (DELAYED badge, 911-CTA-suppression
+      // copy, HISTORICAL_ENTRY informational note). Defaults to REAL_TIME for
+      // legacy rows persisted before the migration.
+      delayBand: entry.delayBand ?? 'REAL_TIME',
       systolicBP: entry.systolicBP,
       diastolicBP: entry.diastolicBP,
       pulse: entry.pulse,

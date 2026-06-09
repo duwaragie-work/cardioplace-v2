@@ -3,8 +3,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { UnprocessableEntityException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { EntrySource } from '../generated/prisma/client.js';
-import { DailyJournalService } from './daily_journal.service.js';
+import { EntrySource, DelayBand } from '../generated/prisma/client.js';
+import { DailyJournalService, computeDelayBand } from './daily_journal.service.js';
 import { SESSION_WINDOW_MS } from '@cardioplace/shared';
 
 const mockPrisma = {
@@ -406,6 +406,63 @@ describe('DailyJournalService', () => {
       const clause = { NOT: { AND: [{ alertId: { not: null } }, { channel: 'PUSH' }] } }
       // Sanity: the predicate requires BOTH alertId-present AND channel=PUSH to drop.
       expect(clause.NOT.AND).toEqual([{ alertId: { not: null } }, { channel: 'PUSH' }])
+    })
+  });
+
+  // Manisha Backdated Readings sign-off 2026-06-06 — chunk A.
+  describe('computeDelayBand', () => {
+    const now = new Date('2026-06-09T12:00:00Z')
+
+    it('classifies a same-instant reading as REAL_TIME', () => {
+      expect(computeDelayBand(now, now)).toBe(DelayBand.REAL_TIME)
+    })
+
+    it('classifies a 4-min-old reading as REAL_TIME (boundary just under 5 min)', () => {
+      const measured = new Date(now.getTime() - 4 * 60 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.REAL_TIME)
+    })
+
+    it('classifies a 5-min-old reading as NEAR_REAL_TIME (boundary exactly at 5 min)', () => {
+      const measured = new Date(now.getTime() - 5 * 60 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.NEAR_REAL_TIME)
+    })
+
+    it('classifies a 45-min-old reading as NEAR_REAL_TIME', () => {
+      const measured = new Date(now.getTime() - 45 * 60 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.NEAR_REAL_TIME)
+    })
+
+    it('classifies a 1-hour-old reading as DELAYED_ENTRY (boundary exactly at 1 h)', () => {
+      const measured = new Date(now.getTime() - 60 * 60 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.DELAYED_ENTRY)
+    })
+
+    it('classifies a 6-hour-old reading as DELAYED_ENTRY', () => {
+      const measured = new Date(now.getTime() - 6 * 60 * 60 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.DELAYED_ENTRY)
+    })
+
+    it('classifies a 23h59m-old reading as DELAYED_ENTRY (just under 24 h)', () => {
+      const measured = new Date(now.getTime() - (24 * 60 * 60 * 1000 - 60 * 1000))
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.DELAYED_ENTRY)
+    })
+
+    it('classifies a 24-hour-old reading as HISTORICAL_ENTRY (boundary exactly at 24 h)', () => {
+      const measured = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.HISTORICAL_ENTRY)
+    })
+
+    it('classifies a 7-day-old reading as HISTORICAL_ENTRY', () => {
+      const measured = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.HISTORICAL_ENTRY)
+    })
+
+    it('classifies a clock-skew future reading as REAL_TIME (DTO validator rejects >5 min future)', () => {
+      // The DTO's `IsMeasuredAtReasonable` rejects >5 min future at the
+      // controller boundary, so this only matters for tiny clock drift.
+      // A measuredAt 30 seconds in the future is REAL_TIME, not historical.
+      const measured = new Date(now.getTime() + 30 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.REAL_TIME)
     })
   });
 });
