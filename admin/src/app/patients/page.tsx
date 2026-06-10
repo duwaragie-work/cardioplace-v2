@@ -753,16 +753,25 @@ function PatientModal({
                               {entry.systolicBP && entry.diastolicBP ? `${entry.systolicBP}/${entry.diastolicBP}` : '--'}
                             </td>
                             <td className="px-3 py-2">
-                              <span
-                                className="inline-block w-2 h-2 rounded-full"
-                                style={{
-                                  backgroundColor: entry.medicationTaken
-                                    ? 'var(--brand-success-green)'
-                                    : entry.medicationTaken === false
-                                    ? 'var(--brand-alert-red)'
-                                    : 'var(--brand-border)',
-                                }}
-                              />
+                              {(() => {
+                                // WCAG 1.4.1 — don't rely on the dot colour alone;
+                                // pair it with a text label (Taken / Missed / —).
+                                const meta = entry.medicationTaken
+                                  ? { color: 'var(--brand-success-green)', label: 'Taken' }
+                                  : entry.medicationTaken === false
+                                  ? { color: 'var(--brand-alert-red)', label: 'Missed' }
+                                  : { color: 'var(--brand-border)', label: '—' };
+                                return (
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <span
+                                      className="inline-block w-2 h-2 rounded-full shrink-0"
+                                      style={{ backgroundColor: meta.color }}
+                                      aria-hidden
+                                    />
+                                    <span style={{ color: 'var(--brand-text-secondary)' }}>{meta.label}</span>
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="px-3 py-2" style={{ color: 'var(--brand-text-muted)' }}>
                               {entry.symptoms.length > 0 ? entry.symptoms.join(', ') : 'None'}
