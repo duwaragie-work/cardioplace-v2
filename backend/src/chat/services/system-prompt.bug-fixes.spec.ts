@@ -175,8 +175,9 @@ describe('SystemPromptService — Bug 14 chat-prompt form-parity guards', () => 
       // skipping the QUESTION is a bug.
 
       it('Bug 21a — pulse ask uses strong "MUST ask EVERY check-in" wording', () => {
-        // Robust: "MUST ask EVERY check-in" within 200 chars before the pulse question.
-        expect(prompt).toMatch(/MUST ask EVERY check-in[\s\S]{0,200}(pulse number|cuff also show)/i)
+        // Window widened from 200 → 500 to accommodate Bug 38 (round 2),
+        // which inserted a SKIP-if-photo branch into the pulse step.
+        expect(prompt).toMatch(/MUST ask EVERY check-in[\s\S]{0,500}(pulse number|cuff also show)/i)
         expect(prompt).toMatch(/never skip/i)
       })
 
@@ -261,6 +262,33 @@ describe('SystemPromptService — Bug 14 chat-prompt form-parity guards', () => 
         // The block must appear in the main flow, not gated on AFib.
         expect(prompt).toMatch(/adding to an existing session/i)
         expect(prompt).toMatch(/ALL patients/i)
+      })
+
+      // Bug 38 (round 2) — the original fix at the AVAILABLE TOOLS section was
+      // too easy for the LLM to miss; it walked the FULL CHECK-IN FLOW and
+      // dutifully asked B2/B2a anyway. The strengthened fix puts the SKIP
+      // instruction in three places: (1) a PHOTO OCR EXCEPTION block at the
+      // top of the FULL CHECK-IN FLOW; (2) inside the B2 step itself; (3)
+      // inside the B2a step. Plus the pulse step now has a conditional skip.
+      it('Bug 38 (round 2) — FULL CHECK-IN FLOW header has the PHOTO OCR EXCEPTION block', () => {
+        // V1 chat doesn't expose submit_bp_from_photo; only V2 needs the block.
+        if (label === 'V1') return
+        expect(prompt).toMatch(/PHOTO OCR EXCEPTION/i)
+        expect(prompt).toMatch(/B2.*B2a.*pulse.*SKIPPED|SKIP them/i)
+      })
+
+      it('Bug 38 (round 2) — B2 / B2a / pulse steps each have an explicit SKIP-if-photo branch', () => {
+        if (label === 'V1') return
+        // Block windows widened (B2→B2a is ~800 chars after the SKIP block;
+        // B2a tail extends ~1200 chars through the pulse + position section).
+        const b2Block = prompt.match(/B2\. BP TOP[\s\S]{0,1500}B2a\./)?.[0] ?? ''
+        expect(b2Block).toMatch(/SKIP this step|skip this step/i)
+        expect(b2Block).toMatch(/Bug 38/i)
+        const b2aBlock = prompt.match(/B2a\.[\s\S]{0,1500}/)?.[0] ?? ''
+        expect(b2aBlock).toMatch(/SKIP rule|skip this step|same SKIP/i)
+        // Pulse step (inside or right after B2a) should also have the
+        // conditional skip.
+        expect(prompt).toMatch(/UNLESS Bug 38 SKIP applies|photo OCR returned a pulse/i)
       })
     })
   }
