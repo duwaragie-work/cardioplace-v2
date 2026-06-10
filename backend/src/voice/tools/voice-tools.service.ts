@@ -20,7 +20,7 @@ import {
   type EmergencyFlaggedPayload,
 } from '../../chat/emergency-events.js'
 import { isoFromTzWallclock, tzWallclockFromIso } from '../../common/datetime.js'
-import { normaliseWeightToKg } from '../../common/units.js'
+import { kgToLbs, normaliseWeightToKg } from '../../common/units.js'
 
 // Voice-tool I/O — argument shapes are stable contract with the Gemini Live
 // system prompt; field-name and sentinel-value changes ripple into the
@@ -717,10 +717,21 @@ export class VoiceToolsService {
       }
     }
 
+    // Bug 40 — pre-fix this emitted the RAW LLM-passed weight value, which
+    // could be lbs OR kg depending on weight_unit. The VoiceChat card
+    // hardcodes the "lbs" label, so a patient saying "150 kg" via voice saw
+    // the popup show "150 lbs" (off by 2.2x). Bug 36 fixed the chat surface
+    // the same way; voice was missed at the time. Now we normalise to kg
+    // first (the storage unit) then project to lbs for the popup payload —
+    // same contract as the chat AIChatInterface mapping.
+    const popupKg = weight > 0
+      ? normaliseWeightToKg(weight, typeof args.weight_unit === 'string' ? args.weight_unit : undefined)
+      : 0
+    const popupLbs = popupKg > 0 ? kgToLbs(popupKg) : 0
     const checkinSummary: CheckinSummary = {
       systolicBP: bpProvided ? sbp : undefined,
       diastolicBP: bpProvided ? dbp : undefined,
-      weight: weight > 0 ? weight : undefined,
+      weight: popupLbs > 0 ? popupLbs : undefined,
       medicationTaken,
       symptoms,
       saved,
@@ -1022,7 +1033,18 @@ export class VoiceToolsService {
       entryDate: entryDate || undefined,
       systolicBP: finalSbp || undefined,
       diastolicBP: finalDbp || undefined,
-      weight: finalWeight > 0 ? finalWeight : undefined,
+      // Bug 40 — always normalise from the raw LLM-passed args (which the
+      // patient actually said) rather than finalWeight, which was kg on
+      // success but raw input on failure — ambiguous. Patient says "200
+      // lbs" → popup shows 200 lbs regardless of whether the underlying
+      // update succeeded. The VoiceChat card hardcodes the "lbs" label.
+      weight: (() => {
+        if (!weight || weight <= 0) return undefined
+        const inputUnit = typeof args.weight_unit === 'string' ? args.weight_unit : undefined
+        const kg = normaliseWeightToKg(weight, inputUnit)
+        const lbs = kg > 0 ? kgToLbs(kg) : 0
+        return lbs > 0 ? lbs : undefined
+      })(),
       medicationTaken: finalMed,
       symptoms: finalSymptoms,
       updated,

@@ -309,6 +309,59 @@ describe('VoiceToolsService.dispatch', () => {
     expect((r.llmResponse as any).message).toMatch(/connection refused/i)
   })
 
+  // ─── Bug 40 — voice popup weight conversion ───────────────────────────
+  // Pre-fix the CheckinSummary/UpdateSummary payload emitted the RAW
+  // LLM-passed weight value (could be lbs or kg depending on weight_unit).
+  // The VoiceChat card hardcodes the "lbs" label, so a patient saying
+  // "150 kg" via voice saw "150 lbs" in the popup (off by 2.2x). Bug 36
+  // fixed the chat surface; this is the symmetric voice fix.
+
+  it('Bug 40 — submit_checkin: patient says "150 lbs" → popup payload = 150 lbs', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 130,
+        diastolic_bp: 80,
+        medication_taken: true,
+        weight: 150,
+        weight_unit: 'LBS',
+      },
+      CTX,
+    )
+    const event = r.events.find((e) => e.kind === 'checkin_saved') as any
+    expect(event.payload.weight).toBe(150)
+  })
+
+  it('Bug 40 — submit_checkin: patient says "68 kg" → popup payload = 149.9 lbs (not 68)', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 130,
+        diastolic_bp: 80,
+        medication_taken: true,
+        weight: 68,
+        weight_unit: 'KG',
+      },
+      CTX,
+    )
+    const event = r.events.find((e) => e.kind === 'checkin_saved') as any
+    // 68 kg / 0.45359237 = 149.91 lbs → rounded to 1 dp = 149.9.
+    expect(event.payload.weight).toBe(149.9)
+  })
+
+  it('Bug 40 — update_checkin: same conversion on the update popup', async () => {
+    ;(dailyJournal.update as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'e1', weight: 200, weight_unit: 'LBS' },
+      CTX,
+    )
+    const event = r.events.find((e) => e.kind === 'checkin_updated') as any
+    expect(event.payload.weight).toBe(200)
+  })
+
   // ─── Bug 33 — ghost-save guard ────────────────────────────────────────
   // The dispatcher allows BP=0/0 to support V2 partial logging (medication-
   // only, symptom-only, missed-med-only). But if the LLM misfires

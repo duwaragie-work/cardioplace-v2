@@ -56,3 +56,14 @@ export function normaliseWeightToKg(weight: number, unit?: string | null): numbe
   // Default + 'LBS' branch — convert to kg.
   return lbsToKg(weight)
 }
+
+/**
+ * Convert kilograms to pounds, rounded to one decimal place. Backend mirror
+ * of `frontend/src/lib/units.ts:kgToLbs`. Used when emitting LBS-shaped
+ * values to the frontend for display (e.g. voice CheckinSummary/UpdateSummary
+ * popups, where the card hardcodes the "lbs" label).
+ */
+export function kgToLbs(kg: number): number {
+  if (!Number.isFinite(kg) || kg <= 0) return 0
+  return Math.round((kg / KG_PER_LB) * 10) / 10
+}
