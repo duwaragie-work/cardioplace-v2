@@ -234,10 +234,34 @@ export class DailyJournalService {
       // patient sees the prompt without polling.
       const pendingSecondReading = await this.computePendingSecondReading(userId, entry)
 
+      // Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06) —
+      // Gate A (structural "is new latest?") POST signal. If a strictly later
+      // reading already exists OUTSIDE this entry's 5-min session window, the
+      // engine will suppress all alerts for this entry, and the patient app
+      // shows the "recorded but won't trigger real-time alerts" banner. The
+      // window margin keeps a second same-session reading from false-
+      // positives; the engine's own gate (alert-engine.service.ts) compares
+      // against the session max, so the two predicates agree except in
+      // exotic overlap cases, where the engine (suppression side) wins.
+      // Computed at create time only — not on GETs (recomputing later could
+      // misreport entries whose alerts genuinely fired before a later-
+      // measured entry arrived; persisting it would need a schema change).
+      const newerOutsideSession = await this.prisma.journalEntry.findFirst({
+        where: {
+          userId,
+          measuredAt: {
+            gt: new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS),
+          },
+        },
+        select: { id: true },
+      })
+
       return {
         statusCode: 202,
         message: 'Journal entry accepted. Background analysis in progress.',
-        data: this.serializeEntry(entry),
+        data: this.serializeEntry(entry, {
+          gateASuppressed: newerOutsideSession != null,
+        }),
         pendingSecondReading,
       }
     } catch (error) {
@@ -1226,7 +1250,11 @@ export class DailyJournalService {
     sourceMetadata: JsonValue
     createdAt: Date
     updatedAt: Date
-  }) {
+  },
+  // Chunk B fix-up — POST-time-only signals that can't be derived from the
+  // row itself. Omitted by GET/list callers.
+  opts?: { gateASuppressed?: boolean },
+  ) {
     return {
       id: entry.id,
       userId: entry.userId,
@@ -1236,6 +1264,18 @@ export class DailyJournalService {
       // copy, HISTORICAL_ENTRY informational note). Defaults to REAL_TIME for
       // legacy rows persisted before the migration.
       delayBand: entry.delayBand ?? 'REAL_TIME',
+      // Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06) — why
+      // real-time alerts were suppressed for this entry, if at all.
+      // 'HISTORICAL_ENTRY' derives from the stored band, so it is stable on
+      // POST and every subsequent GET and takes precedence; 'GATE_A' is
+      // computed at create time only (see create()). Drives the Chunk C
+      // "recorded but won't trigger real-time alerts" banner.
+      alertsSuppressedReason:
+        (entry.delayBand ?? 'REAL_TIME') === 'HISTORICAL_ENTRY'
+          ? ('HISTORICAL_ENTRY' as const)
+          : opts?.gateASuppressed
+            ? ('GATE_A' as const)
+            : null,
       systolicBP: entry.systolicBP,
       diastolicBP: entry.diastolicBP,
       pulse: entry.pulse,

@@ -1,7 +1,7 @@
 // Chunk C — boundary tests for the client-side delay-band predictor. Mirrors
 // the backend computeDelayBand spec (daily_journal.service.spec.ts) so the
 // pre-submit DELAYED warning fires on exactly the same 5min/1h/24h cutoffs.
-import { delayBandFor } from './delayBand'
+import { delayBandFor, showsSuppressedBanner } from './delayBand'
 
 describe('delayBandFor', () => {
   const now = new Date('2026-06-09T12:00:00Z').getTime()
@@ -37,5 +37,28 @@ describe('delayBandFor', () => {
   })
   it('30 s in the future -> REAL_TIME (clock skew)', () => {
     expect(delayBandFor(now + 30 * 1000, now)).toBe('REAL_TIME')
+  })
+})
+
+// Chunk B fix-up — success-screen suppression banner predicate. Renders for
+// HISTORICAL_ENTRY (time-window gate) and for the POST-response GATE_A signal
+// (structural "is new latest?" gate); same banner, same i18n key.
+describe('showsSuppressedBanner', () => {
+  it('HISTORICAL_ENTRY -> banner (regardless of reason)', () => {
+    expect(showsSuppressedBanner('HISTORICAL_ENTRY')).toBe(true)
+    expect(showsSuppressedBanner('HISTORICAL_ENTRY', null)).toBe(true)
+    expect(showsSuppressedBanner('HISTORICAL_ENTRY', 'HISTORICAL_ENTRY')).toBe(true)
+  })
+  it('GATE_A on a non-historical band -> banner', () => {
+    expect(showsSuppressedBanner('REAL_TIME', 'GATE_A')).toBe(true)
+    expect(showsSuppressedBanner('DELAYED_ENTRY', 'GATE_A')).toBe(true)
+    expect(showsSuppressedBanner(undefined, 'GATE_A')).toBe(true)
+  })
+  it('no suppression -> no banner', () => {
+    expect(showsSuppressedBanner('REAL_TIME')).toBe(false)
+    expect(showsSuppressedBanner('REAL_TIME', null)).toBe(false)
+    expect(showsSuppressedBanner('NEAR_REAL_TIME', null)).toBe(false)
+    expect(showsSuppressedBanner('DELAYED_ENTRY', null)).toBe(false)
+    expect(showsSuppressedBanner(undefined, undefined)).toBe(false)
   })
 })

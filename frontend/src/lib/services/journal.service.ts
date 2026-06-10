@@ -99,6 +99,12 @@ export interface JournalEntryDto extends JournalEntryPayload {
    *  journal-entry POST response; Chunk C reads it to render the
    *  HISTORICAL_ENTRY informational note. Defaults to 'REAL_TIME' server-side. */
   delayBand?: DelayBand
+  /** Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06) — why
+   *  real-time alerts were suppressed for this entry, if at all. 'GATE_A'
+   *  (a later-measured reading already exists) is POST-response-only;
+   *  'HISTORICAL_ENTRY' also appears on GETs (derived from delayBand). Both
+   *  render the same "recorded but won't trigger real-time alerts" banner. */
+  alertsSuppressedReason?: 'GATE_A' | 'HISTORICAL_ENTRY' | null
 }
 
 /**

@@ -98,6 +98,24 @@ export interface AlertContext {
    *  registry prisma-dependency-free, matching the rest of AlertContext. */
   delayBand?: string
 
+  /** Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06,
+   *  Recheck #1 refinement) — measurement timestamp of the firing session
+   *  (latest sibling reading), used by the signed DELAYED_ENTRY physician
+   *  wording to render the "[date/time]" placeholder. */
+  measuredAt?: Date
+
+  /** Chunk B fix-up — integer hours between measurement and entry
+   *  (floor((loggedAt − measuredAt) / 1h), clamped ≥0). Renders the "[X]
+   *  hours" placeholder in the signed DELAYED_ENTRY physician wording.
+   *  Always populated by OutputGenerator in production; optional for
+   *  direct test callers (helpers fall back to band-only phrasing). */
+  delayHours?: number
+
+  /** Chunk B fix-up — IANA timezone for rendering measuredAt in the
+   *  patient's local time (pilot default America/New_York — rendering UTC
+   *  would read 4–5h off to providers). */
+  timezone?: string | null
+
   /** Cluster 8 — which angioedema symptom(s) the patient reported. Drives
    *  whether the message leads with face-swelling or throat-tightness
    *  phrasing. Populated only for the angioedema rules. */
@@ -357,23 +375,95 @@ function formatDrugList(names: string[]): string {
 // Manisha Backdated Readings sign-off 2026-06-06. A reading logged ≥1h after it
 // was measured (DELAYED_ENTRY) can't confirm an active emergency, so the four BP
 // Level-2 patient messages drop the directive 911 CTA and redirect to the care
-// team; the physician messages carry a band-only [DELAYED ENTRY] badge.
-// HISTORICAL_ENTRY (≥24h) never reaches this layer for L2 — the engine suppresses
-// those alerts upstream (alert-engine.service.ts). The patient "recorded but
-// won't alert" courtesy note for HISTORICAL_ENTRY is Chunk C (frontend) scope:
-// it renders off serializeEntry's delayBand on the entry response — no new
-// rule_id, no new dispatch path.
+// team; the physician messages carry Manisha's signed delayed-entry flag
+// (Recheck #1 refinement — physL2DelayedFlag below). Level-1 physician
+// messages get a provider-only disclaimer (Recheck #2 — physL1DelayedDisclaimer
+// below, applied centrally by OutputGenerator keyed on tier). HISTORICAL_ENTRY
+// (≥24h) never reaches this layer — the engine suppresses ALL alerts upstream
+// (alert-engine.service.ts, Chunk B fix-up). The patient "recorded but won't
+// alert" courtesy note renders off serializeEntry's delayBand /
+// alertsSuppressedReason on the entry response (Chunk C) — no new rule_id,
+// no new dispatch path.
 function isDelayedEntry(ctx: AlertContext): boolean {
   return ctx.delayBand === 'DELAYED_ENTRY'
 }
 
-// Band-only physician badge (exact-hours figure deferred per Manisha 2026-06-06;
-// can land later if she asks). Trailing space so it composes as a prefix.
+// Band-only physician badge — retained as the graceful fallback when a direct
+// caller supplies delayBand without delayHours/measuredAt (production always
+// populates both via OutputGenerator). Trailing space so it composes as a prefix.
 const PHYS_DELAYED_BADGE =
   '[DELAYED ENTRY — logged ≥1h after measurement; confirm current symptoms before acting] '
 
-function physDelayedBadge(ctx: AlertContext): string {
-  return isDelayedEntry(ctx) ? PHYS_DELAYED_BADGE : ''
+/** "1 hour" / "n hours" — Manisha's signed template substitutes an integer
+ *  into "[X] hours"; plural-aware rendering is a grammatical instantiation,
+ *  not a wording change (approved 2026-06-10). */
+function delayHoursPhrase(hours: number): string {
+  return `${hours} hour${hours === 1 ? '' : 's'}`
+}
+
+/** Render a measurement timestamp in the patient's local time, e.g.
+ *  "Jun 9, 2026, 2:30 PM". Falls back to America/New_York (the pilot
+ *  population) when the profile timezone is missing or invalid. */
+function formatMeasuredAt(
+  measuredAt: Date,
+  timezone: string | null | undefined,
+): string {
+  const opts: Intl.DateTimeFormatOptions = {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      ...opts,
+      timeZone: timezone || 'America/New_York',
+    }).format(measuredAt)
+  } catch {
+    return new Intl.DateTimeFormat('en-US', {
+      ...opts,
+      timeZone: 'America/New_York',
+    }).format(measuredAt)
+  }
+}
+
+/**
+ * Chunk B fix-up — Manisha's SIGNED physician-tier delayed-entry flag for the
+ * four BP Level-2 rules (Backdated Readings sign-off 2026-06-06, Recheck #1
+ * refinement, signed verbatim):
+ *   "Delayed entry: patient reported [BP] for [date/time]. Reading entered
+ *    [X] hours later. Verify current BP and assess for headache, visual
+ *    changes, chest pain, or dyspnea. If unable to reach patient, escalate
+ *    per standard protocol."
+ * [BP] renders via bp(ctx) (registry house style, mmHg-suffixed). Trailing
+ * space so it composes as a prefix on the rule's physician message.
+ */
+function physL2DelayedFlag(ctx: AlertContext): string {
+  if (!isDelayedEntry(ctx)) return ''
+  if (ctx.delayHours == null || ctx.measuredAt == null) return PHYS_DELAYED_BADGE
+  return `Delayed entry: patient reported ${bp(ctx)} for ${formatMeasuredAt(ctx.measuredAt, ctx.timezone)}. Reading entered ${delayHoursPhrase(ctx.delayHours)} later. Verify current BP and assess for headache, visual changes, chest pain, or dyspnea. If unable to reach patient, escalate per standard protocol. `
+}
+
+/**
+ * Chunk B fix-up — Recheck #2 provider-only disclaimer for Level-1 alerts on
+ * DELAYED_ENTRY: "Note: this reading was entered [X] hours after measurement.
+ * Clinical context may have changed." Patient + caregiver tiers stay identical
+ * to real-time (the patient already knows they backdated — repeating it adds
+ * no clinical value, per the signed doc). Applied CENTRALLY by OutputGenerator
+ * to every rule result whose tier is BP_LEVEL_1_HIGH / BP_LEVEL_1_LOW —
+ * Recheck #2 is reading-generic, so the HR-axis and HF-decompensation L1
+ * rules are included. Leading space so it composes as a suffix.
+ *
+ * TIER_1 contraindication + TIER_2 discrepancy DELAYED disclaimers are NOT
+ * itemized in the signed doc — deferred until clarified with Manisha; do not
+ * widen the OutputGenerator dispatch without a sign-off.
+ */
+export function physL1DelayedDisclaimer(ctx: AlertContext): string {
+  if (!isDelayedEntry(ctx)) return ''
+  const lag =
+    ctx.delayHours == null ? 'more than 1 hour' : delayHoursPhrase(ctx.delayHours)
+  return ` Note: this reading was entered ${lag} after measurement. Clinical context may have changed.`
 }
 
 // ─── registry ────────────────────────────────────────────────────────────────
@@ -445,7 +535,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     caregiverMessage: (ctx) =>
       `${patientNameOr(ctx)} reported symptoms that need attention: ${ctx.conditionLabel ?? '—'}. ${CARE_TEAM_NOTIFIED} If they are having chest pain, trouble breathing, or feel faint, please help them call 911.`,
     physicianMessage: (ctx) =>
-      `${physDelayedBadge(ctx)}SYMPTOM OVERRIDE — Patient reported: ${ctx.conditionLabel ?? '—'}. BP at time of report: ${bp(ctx)}, ${hr(ctx)}. Symptoms triggered override regardless of BP threshold. Recommend urgent clinical assessment.${physSuffix(ctx)}`,
+      `${physL2DelayedFlag(ctx)}SYMPTOM OVERRIDE — Patient reported: ${ctx.conditionLabel ?? '—'}. BP at time of report: ${bp(ctx)}, ${hr(ctx)}. Symptoms triggered override regardless of BP threshold. Recommend urgent clinical assessment.${physSuffix(ctx)}`,
   },
 
   // Doc 2 (Manisha 6/2) supersedes the Cluster 6 Q6 (5/9) "preeclampsia"
@@ -462,7 +552,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     caregiverMessage: (ctx) =>
       `${patientNameOr(ctx)} reported pregnancy-related symptoms that may be serious: ${ctx.conditionLabel ?? '—'}. Please help them contact their doctor or go to the hospital. If they have trouble breathing, call 911.`,
     physicianMessage: (ctx) =>
-      `${physDelayedBadge(ctx)}PREGNANCY SYMPTOM OVERRIDE — Patient reported: ${ctx.conditionLabel ?? '—'}. BP: ${bp(ctx)}. Evaluate for preeclampsia with severe features. ACOG criteria: headache unresponsive to medication, visual disturbances, RUQ/epigastric pain, thrombocytopenia, elevated LFTs, renal insufficiency.${physSuffix(ctx)}`,
+      `${physL2DelayedFlag(ctx)}PREGNANCY SYMPTOM OVERRIDE — Patient reported: ${ctx.conditionLabel ?? '—'}. BP: ${bp(ctx)}. Evaluate for preeclampsia with severe features. ACOG criteria: headache unresponsive to medication, visual disturbances, RUQ/epigastric pain, thrombocytopenia, elevated LFTs, renal insufficiency.${physSuffix(ctx)}`,
   },
 
   // ── Absolute emergency ────────────────────────────────────────────────
@@ -482,7 +572,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     caregiverMessage: (ctx) =>
       `URGENT — ${patientNameOr(ctx)}'s blood pressure is dangerously high (${bp(ctx)}) and they are having symptoms. Please help them call 911 or get to the nearest emergency room immediately.`,
     physicianMessage: (ctx) =>
-      `${physDelayedBadge(ctx)}HYPERTENSIVE EMERGENCY — BP ${bp(ctx)} with symptoms: ${ctx.conditionLabel ?? '—'}. Meets criteria for hypertensive emergency (SBP ≥180 and/or DBP ≥120 with target organ damage). Patient advised to call 911. Immediate evaluation required.${physSuffix(ctx)}`,
+      `${physL2DelayedFlag(ctx)}HYPERTENSIVE EMERGENCY — BP ${bp(ctx)} with symptoms: ${ctx.conditionLabel ?? '—'}. Meets criteria for hypertensive emergency (SBP ≥180 and/or DBP ≥120 with target organ damage). Patient advised to call 911. Immediate evaluation required.${physSuffix(ctx)}`,
   },
 
   // ── Pregnancy thresholds ──────────────────────────────────────────────
@@ -504,7 +594,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     caregiverMessage: (ctx) =>
       `URGENT — ${patientNameOr(ctx)}'s blood pressure is very high (${bp(ctx)}) during pregnancy. Please help them contact their doctor or go to the hospital immediately.`,
     physicianMessage: (ctx) =>
-      `${physDelayedBadge(ctx)}PREGNANCY BP LEVEL 2 — BP ${bp(ctx)}${gestationalAgePhrase(ctx)}. Meets ACOG criteria for severe hypertension in pregnancy (SBP ≥160 or DBP ≥110). Initiate antihypertensive therapy within 30–60 min. Evaluate for preeclampsia with severe features.${physSuffix(ctx)}`,
+      `${physL2DelayedFlag(ctx)}PREGNANCY BP LEVEL 2 — BP ${bp(ctx)}${gestationalAgePhrase(ctx)}. Meets ACOG criteria for severe hypertension in pregnancy (SBP ≥160 or DBP ≥110). Initiate antihypertensive therapy within 30–60 min. Evaluate for preeclampsia with severe features.${physSuffix(ctx)}`,
   },
 
   RULE_PREGNANCY_L1_HIGH: {

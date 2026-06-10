@@ -310,6 +310,42 @@ export class AlertEngineService {
     const session = await this.sessionAverager.averageForEntry(entryId)
     if (!session) return null
 
+    // Manisha Backdated Readings sign-off 2026-06-06 (Chunk B fix-up) — the
+    // signed dual-gate framework. See docs/clinical-signoffs/
+    // MANISHA_2026_06_06_OPEN_DECISIONS_AND_BACKDATING_SIGNOFF.md.
+    //
+    // Gate B (time-window): a HISTORICAL_ENTRY reading (logged ≥24h after
+    // measurement) fires NO alerts of ANY tier — the data is too stale to
+    // support real-time action; it persists for trend analysis only. (The
+    // original Chunk B dropped only BP Level 2; the signed policy suppresses
+    // every tier, so this early-return covers all four passes below.)
+    if (session.delayBand === 'HISTORICAL_ENTRY') {
+      return null
+    }
+
+    // Gate A (structural "is new latest?"): if ANY entry for this user has a
+    // strictly later measuredAt, this entry is a backfill — the later reading
+    // already represents the patient's current state, so no alerts fire (any
+    // tier); the data persists. Comparing against session.measuredAt (= MAX
+    // of the session siblings' measuredAt) means same-session siblings can
+    // never suppress each other: they all have measuredAt <= the session max,
+    // so the strict `gt` excludes them without id-exclusion gymnastics. Ties
+    // pass (the (journalEntryId, ruleId) dedup guards double-fires). Cheap —
+    // hits the (userId, measuredAt) index. The POST response mirrors this
+    // signal via `alertsSuppressedReason` (daily_journal.service.ts) computed
+    // at create time; a newer entry landing between create and this event can
+    // only flip toward suppression (the safe direction).
+    const newerEntry = await this.prisma.journalEntry.findFirst({
+      where: {
+        userId: session.userId,
+        measuredAt: { gt: session.measuredAt },
+      },
+      select: { id: true },
+    })
+    if (newerEntry) {
+      return null
+    }
+
     let ctx: ResolvedContext
     try {
       ctx = await this.profileResolver.resolve(session.userId, session.measuredAt)
@@ -334,25 +370,13 @@ export class AlertEngineService {
     // pair) and the same row covers both fields.
     await this.attachPriorReading(session)
 
-    // Pass 1 — multi-axis BP/HR pipeline
-    const rawBpResults = await this.runPipeline(session, ctx, priorElevated)
-    // Manisha Backdated Readings sign-off 2026-06-06 (Chunk B) — a HISTORICAL_ENTRY
-    // reading (logged ≥24h after measurement) does NOT fire Level-2 alerts: the
-    // data is too stale to confirm an active emergency, so it persists for trend
-    // analysis only. ONLY BP_LEVEL_2 / BP_LEVEL_2_SYMPTOM_OVERRIDE are dropped —
-    // Tier 1 contraindications, Tier 2 discrepancy, Tier 3 info, and BP Level 1
-    // High/Low continue to fire regardless of band (Manisha did not suppress
-    // those). DELAYED_ENTRY (1h–<24h) keeps the alert but renders with the 911
-    // CTA suppressed via ctx.delayBand in the message registry — no engine change.
-    // The patient "recorded but won't alert" courtesy note for HISTORICAL_ENTRY
-    // is Chunk C (frontend) scope — it renders off serializeEntry's delayBand.
-    const bpResults =
-      session.delayBand === 'HISTORICAL_ENTRY'
-        ? rawBpResults.filter(
-            (r) =>
-              r.tier !== 'BP_LEVEL_2' && r.tier !== 'BP_LEVEL_2_SYMPTOM_OVERRIDE',
-          )
-        : rawBpResults
+    // Pass 1 — multi-axis BP/HR pipeline. HISTORICAL_ENTRY + Gate A failures
+    // never reach here (suppressed at engine entry above). DELAYED_ENTRY
+    // (1h–<24h) keeps every alert but renders with the 911 CTA suppressed,
+    // the signed L2 physician delayed-entry wording, and the L1 provider-only
+    // disclaimer — all via ctx.delayBand in the message layer, no engine
+    // change (Chunk B fix-up).
+    const bpResults = await this.runPipeline(session, ctx, priorElevated)
     const primary = bpResults[0] ?? null
     // HR-context annotation (added below in addPhysicianAnnotations) was a
     // workaround for the old terminal-stage pattern where Stage C never ran.
@@ -538,6 +562,9 @@ export class AlertEngineService {
       null,
       ctx.dateOfBirth,
       ctx.contextMeds,
+      // Chunk B fix-up — timezone renders the signed DELAYED_ENTRY
+      // "[date/time]" placeholder in the patient's local time.
+      ctx.timezone ?? null,
     )
     return {
       evaluated: true,
@@ -975,6 +1002,9 @@ export class AlertEngineService {
       // …" via `medicationListPhrase(ctx)`. Dedup against `drugNames`
       // happens in the generator.
       ctx.contextMeds,
+      // Chunk B fix-up — timezone renders the signed DELAYED_ENTRY
+      // "[date/time]" placeholder in the patient's local time.
+      ctx.timezone ?? null,
     )
 
     const actualValue =

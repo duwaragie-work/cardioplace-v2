@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import {
   ALL_RULE_IDS,
   alertMessageRegistry,
+  physL1DelayedDisclaimer,
   type AlertContext,
   type RuleId,
 } from '@cardioplace/shared'
@@ -53,6 +54,7 @@ export class OutputGeneratorService implements OnModuleInit {
     patientName: string | null = null,
     dateOfBirth: Date | null = null,
     contextMeds: ReadonlyArray<{ drugName: string; drugClass: string }> = [],
+    timezone: string | null = null,
   ): {
     patientMessage: string
     caregiverMessage: string
@@ -70,16 +72,32 @@ export class OutputGeneratorService implements OnModuleInit {
       patientName,
       dateOfBirth,
       contextMeds,
+      timezone,
     )
     const patientCtx: AlertContext = {
       ...physicianCtx,
       systolicBP: session.submittedSystolicBP ?? physicianCtx.systolicBP,
       diastolicBP: session.submittedDiastolicBP ?? physicianCtx.diastolicBP,
     }
+    // Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06,
+    // Recheck #2) — provider-only DELAYED_ENTRY disclaimer on every Level-1
+    // alert. Dispatched centrally on tier (not per-rule in the registry) so
+    // no L1 rule can be missed: Recheck #2 reasons about "Level 1 alerts"
+    // generically, which includes the HR-axis (AFib/tachy/brady) and
+    // HF-decompensation rules that persist as BP_LEVEL_1_*. Patient +
+    // caregiver messages are intentionally untouched (the patient already
+    // knows they backdated). L2 rules carry their own signed wording via
+    // physL2DelayedFlag inside the registry — they never reach this branch.
+    // TIER_1 / TIER_2 DELAYED disclaimers are not itemized in the signed
+    // doc — deferred until clarified with Manisha.
+    const l1Disclaimer =
+      result.tier === 'BP_LEVEL_1_HIGH' || result.tier === 'BP_LEVEL_1_LOW'
+        ? physL1DelayedDisclaimer(physicianCtx)
+        : ''
     return {
       patientMessage: entry.patientMessage(patientCtx),
       caregiverMessage: entry.caregiverMessage(patientCtx),
-      physicianMessage: entry.physicianMessage(physicianCtx),
+      physicianMessage: entry.physicianMessage(physicianCtx) + l1Disclaimer,
     }
   }
 
@@ -90,6 +108,7 @@ export class OutputGeneratorService implements OnModuleInit {
     patientName: string | null = null,
     dateOfBirth: Date | null = null,
     contextMeds: ReadonlyArray<{ drugName: string; drugClass: string }> = [],
+    timezone: string | null = null,
   ): AlertContext {
     // Default `drugNames` from rule metadata; fall back to a single-element
     // array of `drugName` so legacy single-drug rules still satisfy the
@@ -165,9 +184,16 @@ export class OutputGeneratorService implements OnModuleInit {
       patientName,
       // Chunk B (Manisha Backdated Readings sign-off 2026-06-06) — measurement-
       // lag band from the anchor entry (via SessionAverage). Drives the
-      // DELAYED_ENTRY patient 911-CTA suppression + the physician DELAYED badge
-      // in the shared message registry.
+      // DELAYED_ENTRY patient 911-CTA suppression + the physician delayed-entry
+      // wording in the shared message registry.
       delayBand: session.delayBand,
+      // Chunk B fix-up (Recheck #1 refinement + Recheck #2) — inputs for the
+      // signed DELAYED_ENTRY physician wording: "[date/time]" renders from
+      // measuredAt in the patient's local timezone; "[X] hours" renders from
+      // delayHours (computed in SessionAverager from the anchor's createdAt).
+      measuredAt: session.measuredAt,
+      delayHours: session.delayHours,
+      timezone,
     }
   }
 }

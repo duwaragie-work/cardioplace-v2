@@ -58,7 +58,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, getActiveSession, type ActiveSessionDto } from '@/lib/services/journal.service';
-import { delayBandFor, type DelayBand } from '@/lib/delayBand';
+import { delayBandFor, showsSuppressedBanner, type DelayBand } from '@/lib/delayBand';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
 import { hasDraft, loadDraft } from '@/lib/intake/draft';
 import {
@@ -172,6 +172,10 @@ interface SessionReading {
   /** Chunk C — measurement-lag band from the POST response (server truth).
    *  Drives the HISTORICAL_ENTRY / DELAYED_ENTRY note on the success screen. */
   delayBand?: DelayBand;
+  /** Chunk B fix-up — Gate A ("is new latest?") suppression signal from the
+   *  POST response. 'GATE_A' renders the same banner as HISTORICAL_ENTRY:
+   *  recorded, but no real-time alerts. */
+  alertsSuppressedReason?: 'GATE_A' | 'HISTORICAL_ENTRY' | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1825,7 +1829,7 @@ function ConfirmationScreen({
           gets the "won't trigger real-time alerts" note; DELAYED_ENTRY (1-24h)
           gets a quieter "recorded" confirmation. Server-truth band from the POST
           response. PENDING-MANISHA-WORDING 2026-06-09. */}
-      {lastReading?.delayBand === 'HISTORICAL_ENTRY' && (
+      {showsSuppressedBanner(lastReading?.delayBand, lastReading?.alertsSuppressedReason) && (
         <div
           data-testid="checkin-historical-note"
           className="w-full rounded-xl px-3 py-2 mb-3 flex items-start gap-2.5 text-left"
@@ -2397,6 +2401,8 @@ export default function CheckIn() {
         weightKg,
         // Chunk C — server-truth band from the POST response (Chunk A serializeEntry).
         delayBand: created.entry.delayBand,
+        // Chunk B fix-up — Gate A suppression signal (POST-response-only).
+        alertsSuppressedReason: created.entry.alertsSuppressedReason,
       };
       setSessionReadings((prev) => [...prev, reading]);
       setReadingNumber((n) => n + 1);

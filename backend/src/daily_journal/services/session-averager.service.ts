@@ -96,6 +96,10 @@ export class SessionAveragerService {
       sessionId: string | null
       singleReadingFinalized?: boolean
       delayBand?: string
+      /** Chunk B fix-up — anchor row's DB persist time ("loggedAt"). Always
+       *  present on real reads (averageForEntry passes the full Prisma row);
+       *  optional so pure-aggregation test callers keep compiling. */
+      createdAt?: Date
     },
     siblings: Array<{
       id: string
@@ -181,9 +185,24 @@ export class SessionAveragerService {
       // the anchor entry has been finalized by the frontend 5-min timeout.
       singleReadingFinalized: anchor.singleReadingFinalized ?? false,
       // Chunk B (Manisha Backdated Readings sign-off 2026-06-06) — carry the
-      // anchor entry's measurement-lag band so the engine can suppress L2 on
-      // HISTORICAL_ENTRY and the registry can drop the 911 CTA on DELAYED_ENTRY.
+      // anchor entry's measurement-lag band so the engine can suppress ALL
+      // alerts on HISTORICAL_ENTRY (fix-up) and the registry can drop the
+      // 911 CTA on DELAYED_ENTRY.
       delayBand: anchor.delayBand,
+      // Chunk B fix-up (Recheck #1 refinement + Recheck #2) — integer hours
+      // between the anchor's measurement and its persist time. Renders the
+      // "[X] hours" placeholder in the signed DELAYED_ENTRY physician
+      // wording. Anchored on the anchor entry (not `latest`) so the figure
+      // matches the delayBand computed at create time.
+      delayHours: anchor.createdAt
+        ? Math.max(
+            0,
+            Math.floor(
+              (anchor.createdAt.getTime() - anchor.measuredAt.getTime()) /
+                3_600_000,
+            ),
+          )
+        : undefined,
     }
   }
 }

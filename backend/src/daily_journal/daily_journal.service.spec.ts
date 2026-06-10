@@ -272,6 +272,88 @@ describe('DailyJournalService', () => {
     })
   })
 
+  // Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06) — the
+  // POST response's alertsSuppressedReason: 'GATE_A' when a later-measured
+  // reading exists outside the 5-min session window, 'HISTORICAL_ENTRY' when
+  // the stored band is ≥24h (takes precedence — stable on GETs too), null
+  // otherwise. Drives the Chunk C "recorded but won't alert" banner.
+  describe('create — alertsSuppressedReason (Chunk B fix-up)', () => {
+    function suppressionEntry(delayBand: DelayBand) {
+      return {
+        id: 'new-1',
+        userId: 'u1',
+        measuredAt: new Date('2026-05-22T10:00:00Z'),
+        delayBand,
+        systolicBP: 130,
+        diastolicBP: 80,
+        pulse: 72,
+        weight: null,
+        position: null,
+        sessionId: 's-1',
+        medicationTaken: null,
+        medicationScheduledLater: false,
+        missedDoses: null,
+        missedMedications: null,
+        otherSymptoms: [],
+        teachBackAnswer: null,
+        teachBackCorrect: null,
+        notes: null,
+        source: EntrySource.MANUAL,
+        sourceMetadata: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+    }
+
+    const measuredAt = '2026-05-22T10:00:00Z'
+
+    /** Queue the create-flow Once chain up to (not including) the Gate A
+     *  findFirst probe, which runs LAST in create(). */
+    function queueCreateFlow(delayBand: DelayBand) {
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ userId: 'u1' }) // gate
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // no open session
+      mockPrisma.journalEntry.create.mockResolvedValueOnce(suppressionEntry(delayBand))
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(0) // siblings
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ hasAFib: false })
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(20) // lifetime
+    }
+
+    it('GATE_A when a later-measured reading exists outside the session window', async () => {
+      queueCreateFlow(DelayBand.REAL_TIME)
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce({ id: 'later-entry' }) // Gate A probe
+
+      const res = await service.create('u1', { measuredAt, systolicBP: 130, diastolicBP: 80 } as any)
+
+      expect(res.data.alertsSuppressedReason).toBe('GATE_A')
+      // The probe uses a 5-min sibling tolerance so a second same-session
+      // reading never false-positives (the engine compares the session max).
+      const gateACall = mockPrisma.journalEntry.findFirst.mock.calls.at(-1)[0]
+      expect(gateACall.where.userId).toBe('u1')
+      expect(gateACall.where.measuredAt.gt).toEqual(
+        new Date(new Date(measuredAt).getTime() + SESSION_WINDOW_MS),
+      )
+    })
+
+    it('no suppression → null (no later reading exists)', async () => {
+      queueCreateFlow(DelayBand.REAL_TIME)
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // Gate A probe
+
+      const res = await service.create('u1', { measuredAt, systolicBP: 130, diastolicBP: 80 } as any)
+
+      expect(res.data.alertsSuppressedReason).toBeNull()
+      expect(res.data.delayBand).toBe(DelayBand.REAL_TIME)
+    })
+
+    it('HISTORICAL_ENTRY takes precedence over GATE_A (stable across GETs)', async () => {
+      queueCreateFlow(DelayBand.HISTORICAL_ENTRY)
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce({ id: 'later-entry' }) // Gate A also trips
+
+      const res = await service.create('u1', { measuredAt, systolicBP: 130, diastolicBP: 80 } as any)
+
+      expect(res.data.alertsSuppressedReason).toBe('HISTORICAL_ENTRY')
+    })
+  })
+
   describe('create — DBP>=SBP reject + narrow-PP artifact (Manisha 5/24 Q1)', () => {
     const measuredAt = '2026-05-22T10:00:00Z'
 

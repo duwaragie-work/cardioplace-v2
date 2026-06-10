@@ -27,3 +27,23 @@ export function delayBandFor(measuredAtMs: number, nowMs: number): DelayBand {
   if (lagMs < HISTORICAL_MS) return 'DELAYED_ENTRY'
   return 'HISTORICAL_ENTRY'
 }
+
+/** Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06) — server
+ *  signal on the journal-entry POST response for why real-time alerts were
+ *  suppressed. 'GATE_A' = a later-measured reading already exists (structural
+ *  "is new latest?" gate); 'HISTORICAL_ENTRY' = ≥24h lag (time-window gate). */
+export type AlertsSuppressedReason = 'GATE_A' | 'HISTORICAL_ENTRY' | null
+
+/**
+ * Whether the success screen shows the "recorded, but won't trigger real-time
+ * alerts" banner (same wording + i18n key for both suppression paths —
+ * PENDING-MANISHA wording markers live on the i18n strings, not here).
+ * HISTORICAL_ENTRY keys off the server-truth band; GATE_A only ever arrives
+ * via `alertsSuppressedReason` on the POST response.
+ */
+export function showsSuppressedBanner(
+  delayBand: DelayBand | undefined,
+  alertsSuppressedReason?: AlertsSuppressedReason,
+): boolean {
+  return delayBand === 'HISTORICAL_ENTRY' || alertsSuppressedReason === 'GATE_A'
+}
