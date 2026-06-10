@@ -99,6 +99,20 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
+/* ── Visible keyboard focus (WCAG 2.4.7 Focus Visible) ────────────────────
+   Many admin controls use Tailwind's `outline-none`, which otherwise leaves
+   keyboard focus invisible. Restore a clear, on-brand focus ring for keyboard
+   / programmatic focus only — `:focus-visible` does NOT match mouse clicks, so
+   pointer users are unaffected. `outline` (not box-shadow) can't be clipped by
+   `overflow-hidden` ancestors and stays visible in Windows high-contrast /
+   forced-colors mode. Defined after the Tailwind import so it wins over plain
+   `.outline-none` (equal specificity, later source); controls that set their
+   own `focus:ring` still show those too. */
+:focus-visible {
+  outline: 2px solid var(--brand-primary-purple, #7B00E0);
+  outline-offset: 2px;
+}
+
 /* In-page anchor jumps (hero "Watch demo" → #demo) ease instead of snapping. */
 html {
   scroll-behavior: smooth;
