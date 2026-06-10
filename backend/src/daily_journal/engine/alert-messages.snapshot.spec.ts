@@ -56,6 +56,17 @@ function baseCtx(): AlertContext {
     angioedemaFace: true,
     angioedemaThroat: false,
     bradySustainedSessions: 0,
+    // D4 #1 + #2 (Manisha 2026-06-09) — populate the age + active-med fields
+    // so the snapshot gate actually captures agePhrase / medicationListPhrase
+    // rendering. With these undefined the helpers return '' and the signed
+    // wording would be invisible to the gate (a future splice deletion would
+    // pass CI green). age 67 sits in the MESA J-curve cohort; the two meds
+    // exercise medicationListPhrase without overloading the snapshot output.
+    patientAgeYears: 67,
+    activeMedications: [
+      { drugName: 'Atenolol', drugClass: 'BETA_BLOCKER' },
+      { drugName: 'HCTZ', drugClass: 'THIAZIDE' },
+    ],
   }
 }
 

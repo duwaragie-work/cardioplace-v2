@@ -497,7 +497,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       // meaningful for the ACE/ARB rule: 2nd/3rd trimester carries the
       // classic fetopathy (renal dysgenesis, oligohydramnios, pulmonary
       // hypoplasia); 1st trimester carries lower but still elevated risk.
-      return `CONTRAINDICATION — Pregnant patient on ${cls}: ${names}${gestationalAgePhrase(ctx)}. ACE/ARBs are contraindicated in pregnancy (FDA Category D/X). Recommend immediate substitution (CHAP-protocol alternative — labetalol or long-acting nifedipine). Patient has been advised not to self-discontinue.${physSuffix(ctx)}`
+      return `CONTRAINDICATION — Pregnant patient on ${cls}: ${names}${gestationalAgePhrase(ctx)}.${medicationListPhrase(ctx)} ACE/ARBs are contraindicated in pregnancy (FDA Category D/X). Recommend immediate substitution (CHAP-protocol alternative — labetalol or long-acting nifedipine). Patient has been advised not to self-discontinue.${physSuffix(ctx)}`
     },
   },
 
@@ -517,7 +517,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       return `${patientNameOr(ctx)} is taking a medication${med} that may need to be reviewed given their heart failure diagnosis. ${CARE_TEAM_NOTIFIED}`
     },
     physicianMessage: (ctx) =>
-      `CONTRAINDICATION — HFrEF patient on non-dihydropyridine CCB: ${ctx.drugName ?? 'unknown'} (diltiazem/verapamil). NDHP-CCBs are potentially harmful in HFrEF (negative inotropy) per 2022 AHA/ACC/HFSA HF guideline. Recommend review and substitution.${physSuffix(ctx)}`,
+      `CONTRAINDICATION — HFrEF patient on non-dihydropyridine CCB: ${ctx.drugName ?? 'unknown'} (diltiazem/verapamil).${medicationListPhrase(ctx)} NDHP-CCBs are potentially harmful in HFrEF (negative inotropy) per 2022 AHA/ACC/HFSA HF guideline. Recommend review and substitution.${physSuffix(ctx)}`,
   },
 
   // ── BP Level 2 symptom overrides ──────────────────────────────────────
@@ -666,7 +666,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     caregiverMessage: (ctx) =>
       `${patientNameOr(ctx)}'s diastolic blood pressure is critically low (${ctx.diastolicBP ?? '?'} mmHg). If they have chest pain or feel faint, help them call 911.`,
     physicianMessage: (ctx) =>
-      `CAD DBP CRITICAL — DBP < ${ctx.thresholdValue ?? 70}: ${bp(ctx)}. Low DBP may compromise coronary perfusion (J-curve). Assess for symptomatic hypotension. Consider dose reduction of antihypertensives, particularly vasodilators.${physSuffix(ctx)}`,
+      `CAD DBP CRITICAL — DBP < ${ctx.thresholdValue ?? 70}: ${bp(ctx)}${agePhrase(ctx)}. Low DBP may compromise coronary perfusion (J-curve). Assess for symptomatic hypotension. Consider dose reduction of antihypertensives, particularly vasodilators.${physSuffix(ctx)}`,
   },
   RULE_CAD_HIGH: {
     patientMessage: (ctx) =>
@@ -799,7 +799,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     // the axis that actually triggered. Evaluated on the session-averaged
     // values (physicianCtx), which is the engine's evaluation truth.
     physicianMessage: (ctx) =>
-      `BP Level 1 High — ${stage2Band(ctx)} at ${bp(ctx)}.${preDaySuffix(ctx)}${physSuffix(ctx)}`,
+      `BP Level 1 High — ${stage2Band(ctx)} at ${bp(ctx)}${agePhrase(ctx)}.${preDaySuffix(ctx)}${physSuffix(ctx)}`,
   },
   RULE_STANDARD_L1_LOW: {
     // F26 — disclaimer is admin-only, not patient. Wording per Doc 2 (Manisha 6/2).
@@ -1104,7 +1104,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       "You told us you've taken a pain reliever like ibuprofen, Advil, Aleve, or naproxen. These can raise your blood pressure and make your blood-pressure medicine work less well, especially if you take them often. If your pain needs a few days of relief, acetaminophen (Tylenol) is usually a safer choice — please check with your care team.",
     caregiverMessage: () => '',
     physicianMessage: (ctx) =>
-      `Tier 3 — NSAID use reported alongside antihypertensive therapy. Blunts ACE/ARB/diuretic efficacy + drives sodium retention. Counsel patient on acetaminophen alternative; reassess BP trend.${physSuffix(ctx)}`,
+      `Tier 3 — NSAID use reported alongside antihypertensive therapy.${medicationListPhrase(ctx)} Blunts ACE/ARB/diuretic efficacy + drives sodium retention. Counsel patient on acetaminophen alternative; reassess BP trend.${physSuffix(ctx)}`,
   },
 
   RULE_ACE_COUGH: {
@@ -1135,6 +1135,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       const name = ctx.patientName?.trim() || 'The patient'
       return `${name} reported swelling of their face, lips, or tongue. This can be a dangerous reaction to one of their blood pressure medicines. If they have trouble breathing or throat tightness, call 911 now. If not, take them to the nearest emergency room now. Do not let them take another dose of that medicine.`
     },
+    // D4 #2 — Manisha 2026-06-09: med-list rejected here (airway emergency). Tier 2 post-resolution provider note deferred to backlog.
     physicianMessage: (ctx) => {
       const drug = ctx.drugName ?? 'unknown'
       const airway = ctx.angioedemaThroat
@@ -1175,9 +1176,9 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       const cls = ctx.drugClass ?? 'rate-control'
       const sessions = ctx.bradySustainedSessions ?? 0
       if (sessions >= 3) {
-        return `Tier 2 — Sustained asymptomatic bradycardia: mean resting HR ≤45 bpm on ${sessions} consecutive sessions (current ${hr} bpm). Patient is on ${med} (${cls}). ECG and medication-dose review recommended.${physSuffix(ctx)}`
+        return `Tier 2 — Sustained asymptomatic bradycardia: mean resting HR ≤45 bpm on ${sessions} consecutive sessions (current ${hr} bpm)${agePhrase(ctx)}. Patient is on ${med} (${cls}). ECG and medication-dose review recommended.${physSuffix(ctx)}`
       }
-      return `Tier 3 — Surveillance: resting HR ${hr} bpm (asymptomatic). Patient is on ${med} (${cls}). Consider: is this the therapeutic target? Trend review recommended. If HR persists ≤45 on multiple sessions, consider ECG and medication-dose review.${physSuffix(ctx)}`
+      return `Tier 3 — Surveillance: resting HR ${hr} bpm${agePhrase(ctx)} (asymptomatic). Patient is on ${med} (${cls}). Consider: is this the therapeutic target? Trend review recommended. If HR persists ≤45 on multiple sessions, consider ECG and medication-dose review.${physSuffix(ctx)}`
     },
   },
 

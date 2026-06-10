@@ -16,6 +16,34 @@ Each round has:
 
 ---
 
+## 2026-06-09 — D4 Backlog #1 + #2 Physician-Tier Wording
+
+**Sources:** [`MANISHA_2026_06_09_D4_AGE_WORDING_SIGNOFF.md`](./clinical-signoffs/MANISHA_2026_06_09_D4_AGE_WORDING_SIGNOFF.md) (D4 #1, issue #68) · [`MANISHA_2026_06_09_D4_MEDLIST_WORDING_SIGNOFF.md`](./clinical-signoffs/MANISHA_2026_06_09_D4_MEDLIST_WORDING_SIGNOFF.md) (D4 #2, issue #69)
+**Status:** ✅ Signed off; wording shipped on `duwaragie-round2-fixes` (2026-06-09). Purely physician-tier wording — no engine / escalation / schema change (plumbing landed earlier under issues #68/#69). Closes #68, #69.
+
+### D4 #1 — Patient age suffix (`agePhrase(ctx)` → `" (age X)"`)
+
+| # | Rule | Decision | Splice | Code location |
+|---|---|---|---|---|
+| D4#1-A | `RULE_BRADY_SURVEILLANCE` | APPROVED — both Tier 2 + Tier 3 branches (MESA J-curve applies at any session count) | after `${hr} bpm` | `shared/src/alert-messages.ts` |
+| D4#1-B | `RULE_CAD_DBP_CRITICAL` | APPROVED | after `${bp}` | `shared/src/alert-messages.ts` |
+| D4#1-C | `RULE_STANDARD_L1_HIGH` | APPROVED (contextual, less critical than A/B per doc) | after `${bp}` | `shared/src/alert-messages.ts` |
+
+### D4 #2 — Active medication-list suffix (`medicationListPhrase(ctx)` → `" Currently also taking: …"`)
+
+| # | Rule | Decision | Splice | Code location |
+|---|---|---|---|---|
+| D4#2-A | `RULE_PREGNANCY_ACE_ARB` | APPROVED (substitution choice depends on regimen) | after `${gestationalAgePhrase}.` | `shared/src/alert-messages.ts` |
+| D4#2-B | `RULE_NDHP_HFREF` | APPROVED (GDMT-gap assessment for substitution) | after drug-id `(…).` | `shared/src/alert-messages.ts` |
+| D4#2-C | `RULE_ACE_ANGIOEDEMA` | **REJECTED** — med list is cognitive noise during an airway emergency; deferred to a post-resolution Tier 2 provider note (backlog) | none (code comment only) | `shared/src/alert-messages.ts` |
+| D4#2-D | `RULE_NSAID_ANTIHTN_INTERACTION` | APPROVED (triple-whammy AKI risk needs full-regimen visibility). Doc paraphrased the rule as `RULE_NSAID_ANTIHYPERTENSIVE`; actual registry key is `RULE_NSAID_ANTIHTN_INTERACTION`. | after `reports NSAID use.` (first sentence) | `shared/src/alert-messages.ts` |
+
+### Backlog ticket created from this round
+
+- **D4#2-C follow-up** — post-resolution Tier 2 provider note carrying the medication list for ACE-angioedema substitution planning (separates the airway-emergency signal from medication reconciliation).
+
+---
+
 ## 2026-06-06 — Open Decisions (D1–D6) + Backdating Policy
 
 **Source:** [`MANISHA_2026_06_06_OPEN_DECISIONS_AND_BACKDATING_SIGNOFF.md`](./clinical-signoffs/MANISHA_2026_06_06_OPEN_DECISIONS_AND_BACKDATING_SIGNOFF.md)
@@ -45,8 +73,8 @@ Each round has:
 
 ### Backlog tickets created from this round
 
-- **D4 #1** — Thread `patientAgeYears` through `AlertContext` + populate age-related rule physician messages.
-- **D4 #2** — Thread `activeMedicationList` through `AlertContext` + populate contraindication-related physician messages.
+- **D4 #1** — Thread `patientAgeYears` through `AlertContext` + populate age-related rule physician messages. ✅ Plumbing shipped (#68); wording signed off + shipped 2026-06-09 (see section above).
+- **D4 #2** — Thread `activeMedicationList` through `AlertContext` + populate contraindication-related physician messages. ✅ Plumbing shipped (#69); wording signed off + shipped 2026-06-09 (see section above).
 - **BD3 follow-up** — Implement provider-flag delayed-entry symptom-assessment wording when backdating pipeline ships.
 
 ---
@@ -226,7 +254,7 @@ These are the open questions next on the queue for Dr. Singal. Once she signs of
 | Topic | Status | Owner |
 |---|---|---|
 | BD6 — Retrospective symptom reporting (>24h symptoms) | Manisha noted "needs separate sign-off document" 2026-06-06 | Duwaragie to draft |
-| Backlog tickets D4 #1 + #2 — `[age]` + `[medication list]` placeholder threading | Manisha said backlog; no immediate signoff needed | Engineering backlog |
+| Backlog tickets D4 #1 + #2 — `[age]` + `[medication list]` placeholder threading | ✅ Signed off + shipped 2026-06-09 (see 2026-06-09 section). Closes #68/#69. One follow-up backlog item remains: D4#2-C post-resolution Tier 2 angioedema med-list note. | Done (Duwaragie) |
 | Q4 from 2026-06-02 — DHP-CCB + Aortic Stenosis Tier 1 + soft-block | Signed off but implementation pending | Engineering backlog |
 | Q6 from 2026-06-02 — Per-session dedup for repeated same-rule triggers | Signed off but implementation pending; current per-reading behavior is the safer interim | Engineering backlog |
 | **Caregiver dispatch channel (Gap 5 §1)** — Option A (lightweight User + dashboard) vs Option B (contact + SMS/email via Twilio) vs Option C (no dispatch, patient shows them) | **Pending Manisha + healthcare counsel.** PHI-over-SMS consent/compliance question. Niva's recommendation per [`CAREGIVER_GAP5_IMPLEMENTATION_HANDOFF.md`](./clinical-signoffs/CAREGIVER_GAP5_IMPLEMENTATION_HANDOFF.md) §1: Option B with a swappable channel abstraction. Blocks dispatch (§3/§6) but not schema/UI (§2/§4/§5). | Duwaragie to send prompt |
