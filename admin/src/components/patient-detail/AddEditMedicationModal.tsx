@@ -107,10 +107,11 @@ export default function AddEditMedicationModal({ patientUserId, medication, onCl
       style={{ backgroundColor: 'rgba(0,0,0,0.45)' }}
       role="dialog"
       aria-modal="true"
+      aria-labelledby="admin-med-modal-title"
       data-testid="admin-add-edit-medication-modal"
     >
       <div className="w-full max-w-md rounded-2xl bg-white p-5" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
-        <h3 className="text-[17px] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
+        <h3 id="admin-med-modal-title" className="text-[17px] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
           {isEdit ? `Edit ${medication!.drugName}` : 'Add medication'}
         </h3>
 

@@ -1894,10 +1894,11 @@ function ConfirmationScreen({
           style={{ backgroundColor: 'rgba(0,0,0,0.45)' }}
           role="dialog"
           aria-modal="true"
+          aria-labelledby="afib-leave-modal-title"
           data-testid="afib-leave-session-modal"
         >
           <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center" style={{ boxShadow: 'var(--brand-shadow-button)' }}>
-            <h3 className="text-[17px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+            <h3 id="afib-leave-modal-title" className="text-[17px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
               {t('checkin.afib.modal.heading')}
             </h3>
             <p className="text-[13px] mb-4 leading-snug" style={{ color: 'var(--brand-text-secondary)' }}>
@@ -2815,6 +2816,7 @@ export default function CheckIn() {
             <motion.div
               role="dialog"
               aria-modal="true"
+              aria-labelledby="checkin-save-confirm-title"
               data-testid="checkin-save-confirm"
               initial={{ scale: 0.92, y: 12 }}
               animate={{ scale: 1, y: 0 }}
@@ -2829,7 +2831,7 @@ export default function CheckIn() {
               >
                 <Save className="w-7 h-7" style={{ color: 'var(--brand-primary-purple)' }} />
               </div>
-              <h3 className="text-[18px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+              <h3 id="checkin-save-confirm-title" className="text-[18px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
                 {t('checkin.saveExit.title')}
               </h3>
               <p className="text-[13px] mb-5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
