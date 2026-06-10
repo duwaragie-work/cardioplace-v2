@@ -32,7 +32,7 @@ import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
 import BpPhotoButton from '@/components/intake/BpPhotoButton';
 import SymptomTagInput from '@/components/intake/SymptomTagInput';
-import { kgToLbs } from '@/lib/units';
+import { kgToLbs, lbsToKg } from '@/lib/units';
 
 type TFn = (key: TranslationKey) => string;
 
@@ -2040,7 +2040,16 @@ export default function ReadingsPage() {
       systolic: entry.systolicBP?.toString() ?? '',
       diastolic: entry.diastolicBP?.toString() ?? '',
       pulse: entry.pulse?.toString() ?? '',
-      weight: entry.weight?.toString() ?? '',
+      // Bug 39 — edit modal field is labelled "lbs" (readings.weightLbs).
+      // Pre-fix this loaded entry.weight (kg from DB) as a raw string, so
+      // a 150 lb reading (stored as 68.04 kg) displayed as "68.04" next to
+      // a "lbs" label. Either the patient saw the wrong value and was
+      // confused, or they tried to correct it to "150" — backend then
+      // stored that as 150 kg (= 330 lbs) because the POST never went
+      // through the lbs→kg conversion. Now we convert on load + save so
+      // the form is consistently lbs end-to-end, matching the label and
+      // matching CheckIn.tsx's submit flow.
+      weight: entry.weight != null ? kgToLbs(entry.weight).toString() : '',
       medicationStatus: buildMedStatus(entry, medications),
       severeHeadache: entry.severeHeadache ?? false,
       visualChanges: entry.visualChanges ?? false,
@@ -2111,7 +2120,15 @@ export default function ReadingsPage() {
       if (editForm.systolic) payload.systolicBP = parseInt(editForm.systolic, 10);
       if (editForm.diastolic) payload.diastolicBP = parseInt(editForm.diastolic, 10);
       if (editForm.pulse) payload.pulse = parseInt(editForm.pulse, 10);
-      if (editForm.weight) payload.weight = parseFloat(editForm.weight);
+      // Bug 39 — form holds lbs (matching the visible label and the load
+      // conversion above). Backend stores kg, so convert before POSTing.
+      // This also fixes the "weight must not exceed 300" false rejection
+      // patients hit when entering legitimate lbs values like 350 (= 159
+      // kg, well under the @Max(300) DTO bound).
+      if (editForm.weight) {
+        const lbs = parseFloat(editForm.weight);
+        if (Number.isFinite(lbs) && lbs > 0) payload.weight = lbsToKg(lbs);
+      }
       // Per-medication adherence → the rollup shape the backend stores.
       // Mirrors CheckIn's submit: each med marked "no" becomes a
       // missedMedications entry (with its reason + dose count); "not due yet"
