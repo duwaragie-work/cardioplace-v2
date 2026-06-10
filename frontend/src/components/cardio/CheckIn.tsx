@@ -309,12 +309,12 @@ function StepHeader({
   const { t } = useLanguage();
   return (
     <div>
-      <p className="text-[12px] font-semibold mb-1" style={{ color: 'var(--brand-text-muted)' }}>
+      <p className="text-[0.75rem] font-semibold mb-1" style={{ color: 'var(--brand-text-muted)' }}>
         {t('checkin.nav.stepOf').replace('{current}', String(step)).replace('{total}', String(total))}
       </p>
       <div className="flex items-start justify-between gap-3 mb-1">
         <h2
-          className="text-[20px] sm:text-[24px] font-bold tracking-tight min-w-0 flex-1"
+          className="text-[1.25rem] sm:text-[1.5rem] font-bold tracking-tight min-w-0 flex-1"
           style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
         >
           {title}
@@ -323,7 +323,7 @@ function StepHeader({
           <AudioButton text={audio} />
         </div>
       </div>
-      <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>{subtitle}</p>
+      <p className="text-[0.875rem]" style={{ color: 'var(--brand-text-muted)' }}>{subtitle}</p>
     </div>
   );
 }
@@ -382,7 +382,7 @@ function ChecklistRow({
       >
         {icon}
       </div>
-      <p className="flex-1 text-[13.5px]" style={{ color: 'var(--brand-text-primary)' }}>
+      <p className="flex-1 text-[0.84375rem]" style={{ color: 'var(--brand-text-primary)' }}>
         {text}
       </p>
       {audioText && (
@@ -447,7 +447,7 @@ function B1Checklist({ form, setField }: StepProps) {
           phones; on very small screens the whole row wraps cleanly. */}
       <div className="flex items-center justify-between gap-2 flex-wrap rounded-xl p-3"
         style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
-        <p className="text-[12.5px] min-w-0 flex-1 truncate" style={{ color: 'var(--brand-text-secondary)' }}>
+        <p className="text-[0.78125rem] min-w-0 flex-1 truncate" style={{ color: 'var(--brand-text-secondary)' }}>
           {allChecked
             ? t('checkin.b1.allSet')
             : t('checkin.b1.progress').replace('{n}', String(checkedCount))}
@@ -458,7 +458,7 @@ function B1Checklist({ form, setField }: StepProps) {
             data-testid="checkin-b1-toggle-all"
             onClick={toggleAll}
             aria-pressed={allChecked}
-            className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-2.5 py-1 rounded-full transition-all cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary-purple)]"
+            className="inline-flex items-center gap-1.5 text-[0.71875rem] font-semibold px-2.5 py-1 rounded-full transition-all cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary-purple)]"
             style={{
               backgroundColor: 'white',
               color: 'var(--brand-primary-purple)',
@@ -469,7 +469,7 @@ function B1Checklist({ form, setField }: StepProps) {
             {allChecked ? t('checkin.b1.unselectAll') : t('checkin.b1.selectAll')}
           </button>
           <span
-            className="text-[11px] font-bold px-2 py-0.5 rounded-full"
+            className="text-[0.6875rem] font-bold px-2 py-0.5 rounded-full"
             style={{
               backgroundColor: allChecked ? 'var(--brand-success-green)' : 'white',
               color: allChecked ? 'white' : 'var(--brand-primary-purple)',
@@ -494,7 +494,7 @@ function B1Checklist({ form, setField }: StepProps) {
         ))}
       </div>
 
-      <p className="text-[12px] text-center" style={{ color: 'var(--brand-text-muted)' }}>
+      <p className="text-[0.75rem] text-center" style={{ color: 'var(--brand-text-muted)' }}>
         {t('checkin.b1.footer')}
       </p>
     </div>
@@ -521,7 +521,7 @@ function B2Reading({ form, setField }: StepProps) {
       {/* Date + Time — split into two pickers (cleaner than datetime-local on
           small screens where the native picker eats horizontal space). */}
       <div>
-        <label className="flex items-center gap-2 text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+        <label className="flex items-center gap-2 text-[0.8125rem] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
           <CalendarClock className="w-4 h-4" />
           {t('checkin.b2.whenLabel')}
         </label>
@@ -531,7 +531,7 @@ function B2Reading({ form, setField }: StepProps) {
             aria-label={t('checkin.b2.dateAria')}
             value={form.measuredDate}
             onChange={(e) => setField('measuredDate', e.target.value)}
-            className="h-12 px-3 rounded-xl text-[15px] outline-none transition box-border min-w-0 w-full"
+            className="h-12 px-3 rounded-xl text-[0.9375rem] outline-none transition box-border min-w-0 w-full"
             style={{
               border: '2px solid var(--brand-border)',
               color: 'var(--brand-text-primary)',
@@ -546,7 +546,7 @@ function B2Reading({ form, setField }: StepProps) {
             aria-label={t('checkin.b2.timeAria')}
             value={form.measuredTime}
             onChange={(e) => setField('measuredTime', e.target.value)}
-            className="h-12 px-3 rounded-xl text-[15px] outline-none transition box-border min-w-0 w-full"
+            className="h-12 px-3 rounded-xl text-[0.9375rem] outline-none transition box-border min-w-0 w-full"
             style={{
               border: '2px solid var(--brand-border)',
               color: 'var(--brand-text-primary)',
@@ -561,7 +561,7 @@ function B2Reading({ form, setField }: StepProps) {
 
       {/* Position */}
       <div>
-        <label className="flex items-center justify-between text-[13px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
+        <label className="flex items-center justify-between text-[0.8125rem] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
           <span>{t('checkin.b2.positionLabel')}</span>
           <AudioButton text={t('checkin.b2.positionAudio')} size="sm" />
         </label>
@@ -598,7 +598,7 @@ function B2Reading({ form, setField }: StepProps) {
 
       {/* BP */}
       <div>
-        <label htmlFor="checkin-systolic" className="flex items-center justify-between gap-2 text-[13px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
+        <label htmlFor="checkin-systolic" className="flex items-center justify-between gap-2 text-[0.8125rem] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
           <span className="min-w-0">{t('checkin.b2.bpLabel')}</span>
           <span className="flex items-center gap-2 shrink-0">
             {/* Phase/27 BP photo OCR — patient snaps cuff display, confirms numbers
@@ -618,7 +618,7 @@ function B2Reading({ form, setField }: StepProps) {
         {bpPhotoError && (
           <p
             role="alert"
-            className="-mt-1 mb-3 text-[12px] leading-snug font-medium"
+            className="-mt-1 mb-3 text-[0.75rem] leading-snug font-medium"
             style={{ color: 'var(--brand-alert-red)' }}
           >
             {bpPhotoError}
@@ -641,13 +641,13 @@ function B2Reading({ form, setField }: StepProps) {
                 height: 76,
                 borderRadius: 'var(--brand-radius-input)',
                 border: '2px solid var(--brand-border)',
-                fontSize: 32,
+                fontSize: '2rem',
                 color: form.systolicBP ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
                 backgroundColor: 'white',
               }}
             />
             <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-              <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpTopLabel')}</p>
+              <p className="text-[0.6875rem]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpTopLabel')}</p>
               <MicButton
                 inputId="checkin-systolic"
                 numeric
@@ -655,7 +655,7 @@ function B2Reading({ form, setField }: StepProps) {
               />
             </div>
           </div>
-          <div className="pb-7 text-[28px] sm:text-[32px] font-light shrink-0" style={{ color: 'var(--brand-text-muted)' }}>/</div>
+          <div className="pb-7 text-[1.75rem] sm:text-[2rem] font-light shrink-0" style={{ color: 'var(--brand-text-muted)' }}>/</div>
           <div data-testid="check-in-diastolic" className="flex-1 min-w-0">
             <input
               data-testid="checkin-diastolic"
@@ -672,13 +672,13 @@ function B2Reading({ form, setField }: StepProps) {
                 height: 76,
                 borderRadius: 'var(--brand-radius-input)',
                 border: '2px solid var(--brand-border)',
-                fontSize: 32,
+                fontSize: '2rem',
                 color: form.diastolicBP ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
                 backgroundColor: 'white',
               }}
             />
             <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-              <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpBottomLabel')}</p>
+              <p className="text-[0.6875rem]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpBottomLabel')}</p>
               <MicButton
                 inputId="checkin-diastolic"
                 numeric
@@ -692,7 +692,7 @@ function B2Reading({ form, setField }: StepProps) {
 
       {/* Pulse */}
       <div>
-        <label htmlFor="checkin-pulse" className="flex items-center justify-between text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+        <label htmlFor="checkin-pulse" className="flex items-center justify-between text-[0.8125rem] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
           <span className="flex items-center gap-2"><Heart className="w-4 h-4" /> {t('checkin.b2.pulseLabel')}</span>
           <AudioButton text={t('checkin.b2.pulseAudio')} size="sm" />
         </label>
@@ -712,7 +712,7 @@ function B2Reading({ form, setField }: StepProps) {
               border: '2px solid var(--brand-border)',
               color: form.pulse ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
               backgroundColor: 'white',
-              fontSize: 18,
+              fontSize: '1.125rem',
             }}
           />
           <MicButton
@@ -777,7 +777,7 @@ function StepWeight({ form, setField }: StepProps) {
       />
 
       <div>
-        <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('checkin.weight.unitLabel')}</label>
+        <label className="block text-[0.8125rem] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('checkin.weight.unitLabel')}</label>
         <div
           className="inline-flex rounded-full p-1 gap-1"
           style={{ backgroundColor: 'var(--brand-background)', border: '1px solid var(--brand-border)' }}
@@ -800,7 +800,7 @@ function StepWeight({ form, setField }: StepProps) {
       </div>
 
       <div>
-        <label htmlFor="checkin-weight" className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+        <label htmlFor="checkin-weight" className="block text-[0.8125rem] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
           {t('checkin.weight.weightLabel').replace('{unit}', form.weightUnit)}
         </label>
         <div className="flex items-center gap-2">
@@ -819,12 +819,12 @@ function StepWeight({ form, setField }: StepProps) {
                 height: 72,
                 borderRadius: 'var(--brand-radius-input)',
                 border: '2px solid var(--brand-border)',
-                fontSize: 32,
+                fontSize: '2rem',
                 color: form.weight ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
                 backgroundColor: 'white',
               }}
             />
-            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[16px]" style={{ color: 'var(--brand-text-muted)' }}>
+            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[1rem]" style={{ color: 'var(--brand-text-muted)' }}>
               {form.weightUnit}
             </span>
           </div>
@@ -838,7 +838,7 @@ function StepWeight({ form, setField }: StepProps) {
 
       <div className="rounded-xl p-3.5 flex gap-3" style={{ backgroundColor: 'var(--brand-accent-teal-light)' }}>
         <Scale className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-accent-teal)' }} />
-        <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+        <p className="text-[0.75rem] leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
           {t('checkin.weight.fluidHint')}
         </p>
       </div>
@@ -953,7 +953,7 @@ function StepMedication({ form, setField, medications, heldMeds, medsLoading }: 
         // the patient has no meds on file. Kept so a stale render doesn't
         // crash the wizard.
         <div
-          className="rounded-xl p-3 text-[13px] leading-relaxed"
+          className="rounded-xl p-3 text-[0.8125rem] leading-relaxed"
           style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-text-primary)' }}
         >
           {t('checkin.b4.noMeds')}
@@ -987,13 +987,13 @@ function StepMedication({ form, setField, medications, heldMeds, medsLoading }: 
                   <Pill className="w-4 h-4 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />
                   <div className="flex-1 min-w-0">
                     <p
-                      className="text-[14px] font-semibold truncate"
+                      className="text-[0.875rem] font-semibold truncate"
                       style={{ color: 'var(--brand-text-primary)' }}
                     >
                       {med.drugName}
                     </p>
                     <p
-                      className="text-[11px]"
+                      className="text-[0.6875rem]"
                       style={{ color: 'var(--brand-text-muted)' }}
                     >
                       {drugClassLabel(med.drugClass)}
@@ -1039,7 +1039,7 @@ function StepMedication({ form, setField, medications, heldMeds, medsLoading }: 
                               : undefined
                         }
                         onClick={() => setTaken(med.id, opt.value)}
-                        className="h-11 rounded-xl text-[12px] font-semibold border-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="h-11 rounded-xl text-[0.75rem] font-semibold border-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                         style={{
                           backgroundColor: active ? opt.accent : 'white',
                           borderColor: active ? opt.accent : 'var(--brand-border)',
@@ -1061,7 +1061,7 @@ function StepMedication({ form, setField, medications, heldMeds, medsLoading }: 
                   <div className="pt-3">
                     <label
                       htmlFor={`reason-${med.id}`}
-                      className="text-[11px] font-semibold uppercase tracking-wide"
+                      className="text-[0.6875rem] font-semibold uppercase tracking-wide"
                       style={{ color: 'var(--brand-text-muted)' }}
                     >
                       {t('readings.whyMissed')}
@@ -1074,7 +1074,7 @@ function StepMedication({ form, setField, medications, heldMeds, medsLoading }: 
                           reason: (e.target.value || null) as MedicationEntry['reason'],
                         })
                       }
-                      className="mt-1 w-full px-3 py-2 rounded-lg border text-[14px] bg-white"
+                      className="mt-1 w-full px-3 py-2 rounded-lg border text-[0.875rem] bg-white"
                       style={{
                         borderColor: 'var(--brand-border)',
                         color: 'var(--brand-text-primary)',
@@ -1092,7 +1092,7 @@ function StepMedication({ form, setField, medications, heldMeds, medsLoading }: 
 
                   <fieldset className="border-0 p-0 m-0">
                     <legend
-                      className="text-[11px] font-semibold uppercase tracking-wide"
+                      className="text-[0.6875rem] font-semibold uppercase tracking-wide"
                       style={{ color: 'var(--brand-text-muted)' }}
                     >
                       {t('readings.howManyDoses')}
@@ -1115,7 +1115,7 @@ function StepMedication({ form, setField, medications, heldMeds, medsLoading }: 
                         −
                       </button>
                       <span
-                        className="text-[16px] font-bold w-6 text-center"
+                        className="text-[1rem] font-bold w-6 text-center"
                         style={{ color: 'var(--brand-text-primary)' }}
                       >
                         {entry.missedDoses}
@@ -1167,20 +1167,20 @@ function StepMedication({ form, setField, medications, heldMeds, medsLoading }: 
                 />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[15px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                    <span className="text-[0.9375rem] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
                       {med.drugName}
                     </span>
                     <span
-                      className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full"
+                      className="text-[0.625rem] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full"
                       style={{ backgroundColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
                     >
                       {t('checkin.b4.onHoldBadge')}
                     </span>
                   </div>
-                  <p className="text-[12px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+                  <p className="text-[0.75rem] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
                     {drugClassLabel(med.drugClass)}
                   </p>
-                  <p className="text-[13px] mt-1.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+                  <p className="text-[0.8125rem] mt-1.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
                     {isProviderDirected
                       ? t('checkin.b4.onHoldDoNotTake')
                       : t('checkin.b4.onHoldUnderReview')}
@@ -1473,7 +1473,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
       <div className="rounded-xl p-3 flex items-start gap-3"
         style={{ backgroundColor: 'var(--brand-alert-red-light)' }}>
         <Heart className="w-4 h-4 mt-0.5 shrink-0" style={{ color: 'var(--brand-alert-red-text)' }} />
-        <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+        <p className="text-[0.75rem] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
           {t('checkin.b3.alertBanner')}
         </p>
       </div>
@@ -1502,7 +1502,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
           >
             <div className="flex items-center gap-2 mt-3">
               <Baby className="w-4 h-4" style={{ color: 'var(--brand-primary-purple)' }} />
-              <p className="text-[12.5px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-primary-purple)' }}>
+              <p className="text-[0.78125rem] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-primary-purple)' }}>
                 {t('checkin.b3.pregnancyHeader')}
               </p>
             </div>
@@ -1539,7 +1539,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
           voice dictation + a live character counter. */}
       <div>
         <div className="flex items-center justify-between gap-2 mb-2">
-          <label htmlFor="checkin-other-symptoms" className="block text-[13px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+          <label htmlFor="checkin-other-symptoms" className="block text-[0.8125rem] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
             {t('checkin.b3.notesLabel')}
           </label>
           <MicButton
@@ -1561,7 +1561,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
           onChange={(e) => setField('notes', e.target.value.slice(0, NOTE_MAX))}
           placeholder={t('readings.notesPlaceholder')}
           aria-describedby="checkin-notes-count"
-          className="w-full rounded-xl px-4 py-3 text-[13px] resize-none outline-none transition"
+          className="w-full rounded-xl px-4 py-3 text-[0.8125rem] resize-none outline-none transition"
           style={{
             border: '2px solid var(--brand-border)',
             color: 'var(--brand-text-primary)',
@@ -1570,7 +1570,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
         />
         <p
           id="checkin-notes-count"
-          className="mt-1 text-[11px] text-right tabular-nums"
+          className="mt-1 text-[0.6875rem] text-right tabular-nums"
           style={{
             color:
               form.notes.length >= NOTE_MAX
@@ -1728,12 +1728,12 @@ function ConfirmationScreen({
       </motion.div>
 
       <div className="flex items-center gap-2">
-        <h2 className="text-[20px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
+        <h2 className="text-[1.25rem] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
           {total > 1 ? t('checkin.confirm.titleMulti').replace('{n}', String(total)) : t('checkin.confirm.title')}
         </h2>
         <AudioButton text={overviewAudio} size="sm" />
       </div>
-      <p className="text-[13px] mt-0.5 mb-4" style={{ color: 'var(--brand-text-muted)' }}>
+      <p className="text-[0.8125rem] mt-0.5 mb-4" style={{ color: 'var(--brand-text-muted)' }}>
         {/* #88 — un-enrolled patients have no care team yet; the engine didn't
             run. Don't claim "gets it right away". */}
         {t(isEnrolled ? 'checkin.confirm.subtitle' : 'checkin.confirm.subtitleUnenrolled')}
@@ -1745,17 +1745,17 @@ function ConfirmationScreen({
         style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)', boxShadow: 'var(--brand-shadow-card)' }}
       >
         <div className="flex items-center justify-between mb-1">
-          <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
+          <span className="text-[0.625rem] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
             {t('checkin.confirm.thisReading')}
           </span>
         </div>
         <div className="flex items-baseline gap-2 justify-center">
-          <span className="text-[30px] font-bold leading-none" style={{ color: 'var(--brand-primary-purple)' }}>
+          <span className="text-[1.875rem] font-bold leading-none" style={{ color: 'var(--brand-primary-purple)' }}>
             {lastReading.systolicBP ?? '--'}/{lastReading.diastolicBP ?? '--'}
           </span>
-          <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.confirm.unit')}</span>
+          <span className="text-[0.6875rem]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.confirm.unit')}</span>
           {lastReading.pulse != null && (
-            <span className="text-[12px] font-semibold ml-2 flex items-center gap-1" style={{ color: 'var(--brand-text-secondary)' }}>
+            <span className="text-[0.75rem] font-semibold ml-2 flex items-center gap-1" style={{ color: 'var(--brand-text-secondary)' }}>
               <Heart className="w-3.5 h-3.5" /> {lastReading.pulse}
             </span>
           )}
@@ -1769,11 +1769,11 @@ function ConfirmationScreen({
             style={{ borderTop: '1px solid var(--brand-border)' }}
           >
             <Scale className="w-3.5 h-3.5" style={{ color: 'var(--brand-text-muted)' }} />
-            <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
+            <span className="text-[0.6875rem]" style={{ color: 'var(--brand-text-muted)' }}>
               Weight {Math.round((lastReading.weightKg ?? 0) * 10) / 10} kg
             </span>
-            <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>·</span>
-            <span className="text-[11px] font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
+            <span className="text-[0.6875rem]" style={{ color: 'var(--brand-text-muted)' }}>·</span>
+            <span className="text-[0.6875rem] font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
               BMI {bmi.toFixed(1)}
             </span>
           </div>
@@ -1791,7 +1791,7 @@ function ConfirmationScreen({
           style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}
         >
           <Pill className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--brand-warning-amber-text)' }} />
-          <p className="text-[12px] leading-snug" style={{ color: 'var(--brand-text-primary)' }}>
+          <p className="text-[0.75rem] leading-snug" style={{ color: 'var(--brand-text-primary)' }}>
             We noted you missed{' '}
             <span className="font-bold">{missedMedNames.join(', ')}</span>
             {' '}today — your care team will see this.
@@ -1813,18 +1813,18 @@ function ConfirmationScreen({
           />
           <div className="text-left">
             <p
-              className="text-[12px] font-semibold leading-snug"
+              className="text-[0.75rem] font-semibold leading-snug"
               style={{ color: aFibSatisfied ? 'var(--brand-success-green)' : 'var(--brand-text-primary)' }}
             >
               {t(`checkin.afib.${afibStateKey}.heading`)}
             </p>
-            <p className="text-[11.5px] leading-snug" style={{ color: 'var(--brand-text-muted)' }}>
+            <p className="text-[0.71875rem] leading-snug" style={{ color: 'var(--brand-text-muted)' }}>
               {t(`checkin.afib.${afibStateKey}.body`)}
             </p>
           </div>
         </div>
       ) : (
-        <p className="text-[12px] mb-3 leading-snug" style={{ color: 'var(--brand-text-muted)' }}>
+        <p className="text-[0.75rem] mb-3 leading-snug" style={{ color: 'var(--brand-text-muted)' }}>
           {t(isEnrolled ? 'checkin.confirm.nonAfib' : 'checkin.confirm.nonAfibUnenrolled')}
         </p>
       )}
@@ -1837,7 +1837,7 @@ function ConfirmationScreen({
       {pendingFinalizeEntryId && (
         <div
           data-testid="pending-second-reading"
-          className="w-full mb-3 rounded-2xl border-2 px-4 py-3 text-[13px] leading-snug"
+          className="w-full mb-3 rounded-2xl border-2 px-4 py-3 text-[0.8125rem] leading-snug"
           style={{
             backgroundColor: 'var(--brand-info-bg, #EEF2FF)',
             borderColor: 'var(--brand-primary-purple)',
@@ -1859,7 +1859,7 @@ function ConfirmationScreen({
           type="button"
           data-testid="add-second-reading"
           onClick={onAddAnother}
-          className="w-full h-11 rounded-full font-bold text-white text-[13.5px] flex items-center justify-center gap-2 cursor-pointer"
+          className="w-full h-11 rounded-full font-bold text-white text-[0.84375rem] flex items-center justify-center gap-2 cursor-pointer"
           style={{
             backgroundColor: hasAFib && !aFibSatisfied ? 'var(--brand-warning-amber)' : 'var(--brand-primary-purple)',
             boxShadow: 'var(--brand-shadow-button)',
@@ -1872,7 +1872,7 @@ function ConfirmationScreen({
         <motion.button
           type="button"
           onClick={handleBackToDashboard}
-          className="w-full h-11 rounded-full font-bold text-[13.5px] flex items-center justify-center gap-2 cursor-pointer"
+          className="w-full h-11 rounded-full font-bold text-[0.84375rem] flex items-center justify-center gap-2 cursor-pointer"
           style={{
             backgroundColor: 'white',
             border: '1.5px solid var(--brand-border)',
@@ -1898,10 +1898,10 @@ function ConfirmationScreen({
           data-testid="afib-leave-session-modal"
         >
           <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center" style={{ boxShadow: 'var(--brand-shadow-button)' }}>
-            <h3 id="afib-leave-modal-title" className="text-[17px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+            <h3 id="afib-leave-modal-title" className="text-[1.0625rem] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
               {t('checkin.afib.modal.heading')}
             </h3>
-            <p className="text-[13px] mb-4 leading-snug" style={{ color: 'var(--brand-text-secondary)' }}>
+            <p className="text-[0.8125rem] mb-4 leading-snug" style={{ color: 'var(--brand-text-secondary)' }}>
               {t('checkin.afib.modal.body').replace('{n}', String(total))}
             </p>
             <div className="space-y-2">
@@ -1909,7 +1909,7 @@ function ConfirmationScreen({
                 type="button"
                 data-testid="afib-modal-stay"
                 onClick={() => { setShowLeaveAfibModal(false); onAddAnother(); }}
-                className="w-full h-11 rounded-full font-bold text-white text-[13.5px] cursor-pointer"
+                className="w-full h-11 rounded-full font-bold text-white text-[0.84375rem] cursor-pointer"
                 style={{ backgroundColor: 'var(--brand-primary-purple)' }}
               >
                 {t('checkin.afib.modal.stay')}
@@ -1918,7 +1918,7 @@ function ConfirmationScreen({
                 type="button"
                 data-testid="afib-modal-leave"
                 onClick={() => { setShowLeaveAfibModal(false); onDone(); }}
-                className="w-full h-11 rounded-full font-bold text-[13.5px] cursor-pointer"
+                className="w-full h-11 rounded-full font-bold text-[0.84375rem] cursor-pointer"
                 style={{ border: '1.5px solid var(--brand-border)', color: 'var(--brand-text-secondary)' }}
               >
                 {t('checkin.afib.modal.leave')}
@@ -2552,7 +2552,7 @@ export default function CheckIn() {
             {/* Progress of the unfinished check-in */}
             <div className="flex flex-col items-center gap-2 mb-6">
               <StepDots current={resumeStepNum} total={resumeTotal} />
-              <p className="text-[12px] font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.75rem] font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('checkin.nav.stepOf')
                   .replace('{current}', String(resumeStepNum))
                   .replace('{total}', String(resumeTotal))}
@@ -2622,7 +2622,7 @@ export default function CheckIn() {
             {activeSession.requiresMoreReadings && (
               <p
                 data-testid="checkin-open-session-needs-more"
-                className="text-[12px] font-semibold mb-5"
+                className="text-[0.75rem] font-semibold mb-5"
                 style={{ color: 'var(--brand-warning-amber)' }}
               >
                 {t('checkin.openSession.needsMore').replace(
@@ -2695,7 +2695,7 @@ export default function CheckIn() {
           <button
             type="button"
             onClick={goBack}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[13px] font-semibold cursor-pointer"
+            className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[0.8125rem] font-semibold cursor-pointer"
             style={{ color: 'var(--brand-text-secondary)' }}
           >
             <ArrowLeft className="w-4 h-4" />
@@ -2706,7 +2706,7 @@ export default function CheckIn() {
             type="button"
             data-testid="checkin-save-exit-btn"
             onClick={() => setShowSaveConfirm(true)}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[13px] font-semibold cursor-pointer"
+            className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[0.8125rem] font-semibold cursor-pointer"
             style={{ color: 'var(--brand-text-muted)' }}
             aria-label={t('checkin.nav.saveAria')}
           >
@@ -2716,7 +2716,7 @@ export default function CheckIn() {
         </div>
         {readingNumber > 0 && (
           <div
-            className="px-4 sm:px-6 py-2 flex items-center justify-center gap-2 text-[12px] font-semibold"
+            className="px-4 sm:px-6 py-2 flex items-center justify-center gap-2 text-[0.75rem] font-semibold"
             style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
           >
             <Volume2 className="w-3.5 h-3.5" />
@@ -2758,7 +2758,7 @@ export default function CheckIn() {
 
         {error && (
           <p
-            className="mt-5 text-[13px] text-center font-semibold px-4 py-2 rounded-lg"
+            className="mt-5 text-[0.8125rem] text-center font-semibold px-4 py-2 rounded-lg"
             style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
           >
             {error}
@@ -2781,7 +2781,7 @@ export default function CheckIn() {
             data-testid={step === 'B3' ? 'checkin-submit-btn' : 'checkin-next-btn'}
             onClick={goNext}
             disabled={submitting}
-            className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+            className="w-full h-12 rounded-full text-white font-bold text-[0.875rem] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
             style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
             whileTap={{ scale: 0.98 }}
           >
@@ -2831,17 +2831,17 @@ export default function CheckIn() {
               >
                 <Save className="w-7 h-7" style={{ color: 'var(--brand-primary-purple)' }} />
               </div>
-              <h3 id="checkin-save-confirm-title" className="text-[18px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+              <h3 id="checkin-save-confirm-title" className="text-[1.125rem] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
                 {t('checkin.saveExit.title')}
               </h3>
-              <p className="text-[13px] mb-5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+              <p className="text-[0.8125rem] mb-5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
                 {t('checkin.saveExit.body')}
               </p>
               <button
                 type="button"
                 data-testid="checkin-save-confirm-btn"
                 onClick={handleSaveExit}
-                className="w-full h-11 rounded-full text-white font-bold text-[14px] cursor-pointer"
+                className="w-full h-11 rounded-full text-white font-bold text-[0.875rem] cursor-pointer"
                 style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
               >
                 {t('checkin.saveExit.confirm')}
@@ -2849,7 +2849,7 @@ export default function CheckIn() {
               <button
                 type="button"
                 onClick={() => setShowSaveConfirm(false)}
-                className="w-full mt-2 text-[12px] font-semibold cursor-pointer"
+                className="w-full mt-2 text-[0.75rem] font-semibold cursor-pointer"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 {t('checkin.saveExit.keepGoing')}

@@ -76,7 +76,7 @@ export default function About() {
               <div className="bg-[#7b00e0] inline-flex items-center justify-center px-4 py-1.5 md:py-2 rounded-full w-fit">
                 <span className="font-bold text-white text-xs md:text-sm tracking-widest uppercase">{t('about.visionBadge')}</span>
               </div>
-              <h1 className="font-bold text-[#191c1d] text-2xl sm:text-3xl md:text-5xl lg:text-[64px] leading-[1.1] tracking-tight">
+              <h1 className="font-bold text-[#191c1d] text-2xl sm:text-3xl md:text-5xl lg:text-[4rem] leading-[1.1] tracking-tight">
                 {t('about.heroTitle').split(t('about.heroTitleHighlight')).map((part, i, arr) => (
                   <span key={i}>
                     {part}
@@ -103,7 +103,7 @@ export default function About() {
                         <p className="font-bold text-[#191c1d] text-sm">{t('about.assistantName')}</p>
                         <div className="flex items-center gap-1">
                           <div className="w-1.5 h-1.5 rounded-full bg-[#16a34a]" />
-                          <span className="text-[#16a34a] text-[10px]">{t('about.online')}</span>
+                          <span className="text-[#16a34a] text-[0.625rem]">{t('about.online')}</span>
                         </div>
                       </div>
                     </div>
@@ -122,7 +122,7 @@ export default function About() {
                       <div className="bg-[#edeeef] w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0">
                         <Mic aria-hidden="true" className="w-3 h-3 sm:w-4 sm:h-4 text-[#4c4355]" />
                       </div>
-                      <span className="text-[#475569] text-[10px] sm:text-xs flex-1">{t('about.chatPlaceholder')}</span>
+                      <span className="text-[#475569] text-[0.625rem] sm:text-xs flex-1">{t('about.chatPlaceholder')}</span>
                       <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 shadow-md" style={{ backgroundImage: 'linear-gradient(135deg, #7b00e0 0%, #5c00a9 100%)' }}>
                         <Send aria-hidden="true" className="w-3 h-3 text-white" />
                       </div>
@@ -130,7 +130,7 @@ export default function About() {
                   </div>
                 </div>
                 <div className="absolute -bottom-6 sm:-bottom-8 -left-6 sm:-left-10 bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-xl border border-[rgba(207,194,216,0.1)] z-20">
-                  <p className="font-bold text-[#4c4355] text-[9px] sm:text-[10px] tracking-wider uppercase mb-2">{t('about.healthScoreLabel')}</p>
+                  <p className="font-bold text-[#4c4355] text-[0.5625rem] sm:text-[0.625rem] tracking-wider uppercase mb-2">{t('about.healthScoreLabel')}</p>
                   <div className="w-16 sm:w-20 h-1.5 rounded-full bg-gradient-to-r from-[#5c00a9] to-[#7b00e0] mb-3" />
                   <div className="flex items-center gap-2">
                     <div className="w-2.5 h-2.5 rounded-full bg-[#dc2626] animate-pulse" />
@@ -169,7 +169,7 @@ export default function About() {
               <div className="bg-white rounded-2xl px-4 py-2 sm:px-5 sm:py-3 shadow-md border border-[#eedbff]">
                 <Image src="/DCHA-Logo.png" alt="DC Hospital Association" width={300} height={300} className="w-28 h-20 sm:w-32 sm:h-24 md:w-36 md:h-28 object-contain" />
               </div>
-              <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center">{t('about.partnershipTitle')}</h2>
+              <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[3rem] text-center">{t('about.partnershipTitle')}</h2>
             </div>
 
             <div className="max-w-[896px] mx-auto flex flex-col gap-5 md:gap-6">
@@ -196,8 +196,8 @@ export default function About() {
         <section className="w-full bg-[#fef7ff] py-12 md:py-24">
           <div className="max-w-[1280px] mx-auto px-4 sm:px-6 md:px-8 flex flex-col items-center gap-10 md:gap-24">
             <div className="max-w-[896px] flex flex-col items-center gap-6 md:gap-8 text-center">
-              <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px]">{t('about.missionTitle')}</h2>
-              <blockquote className="text-[#1f1924] text-lg sm:text-xl md:text-2xl lg:text-[28px] leading-snug italic">
+              <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[3rem]">{t('about.missionTitle')}</h2>
+              <blockquote className="text-[#1f1924] text-lg sm:text-xl md:text-2xl lg:text-[1.75rem] leading-snug italic">
                 {t('about.missionQuote')}
               </blockquote>
               <p className="text-[#5c00a9] text-sm sm:text-base font-medium">{t('about.missionQuoteAuthor')}</p>
@@ -227,7 +227,7 @@ export default function About() {
               </div>
             </div>
             <div className="lg:col-span-7 flex flex-col gap-6 md:gap-8">
-              <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px]">{t('about.silentLiteracyTitle')}</h2>
+              <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[3rem]">{t('about.silentLiteracyTitle')}</h2>
               <div className="flex flex-col gap-4 md:gap-6">
                 <div className="text-[#1f1924] text-base sm:text-lg md:text-xl leading-relaxed">
                   {t('about.silentLiteracyDesc1').split('\n\n').map((p, i) => (
@@ -262,7 +262,7 @@ export default function About() {
         <section className="w-full bg-[#fef7ff] py-12 md:py-24">
           <div className="max-w-[1280px] mx-auto px-4 sm:px-6 md:px-8">
             <div className="flex flex-col items-center gap-4 md:gap-6 mb-10 md:mb-20">
-              <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center">{t('about.timelineTitle')}</h2>
+              <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[3rem] text-center">{t('about.timelineTitle')}</h2>
               <div className="w-24 md:w-32 h-2 bg-[#7b00e0] rounded-full" />
             </div>
 
@@ -288,7 +288,7 @@ export default function About() {
         <section id="team" className="w-full bg-[#f5eafa] py-12 md:py-24 scroll-mt-20">
           <div className="max-w-[1280px] mx-auto px-4 sm:px-6 md:px-8">
             <div className="flex flex-col items-center gap-4 md:gap-6 mb-10 md:mb-20 text-center">
-              <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px]">{t('about.teamTitle')}</h2>
+              <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[3rem]">{t('about.teamTitle')}</h2>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 mb-8 md:mb-12">
@@ -311,7 +311,7 @@ export default function About() {
                 <h3 className="text-[#1f1924] text-lg sm:text-xl font-semibold">Dr. Manisha Singal</h3>
                 <p className="text-[#7b00e0] text-xs sm:text-sm mt-1">{t('about.manishaCredentials')}</p>
                 <p className="text-[#4c4355] text-xs sm:text-sm font-medium mt-2">{t('about.manishaRole')}</p>
-                <p className="text-[#5c00a9] text-[10px] sm:text-xs mt-0.5">{t('about.manishaOrg')}</p>
+                <p className="text-[#5c00a9] text-[0.625rem] sm:text-xs mt-0.5">{t('about.manishaOrg')}</p>
                 <p className="text-[#4c4355] text-xs sm:text-sm leading-relaxed mt-4 sm:mt-5">{t('about.manishaBio')}</p>
               </div>
 
@@ -346,7 +346,7 @@ export default function About() {
         {/* ============ CLOSING SECTION ============ */}
         <section className="w-full px-4 sm:px-6 md:px-8 py-12 md:py-24 flex justify-center">
           <div className="max-w-[1024px] w-full rounded-[32px] sm:rounded-[48px] p-8 sm:p-10 md:p-16 flex flex-col items-center gap-6 md:gap-8 overflow-hidden" style={{ backgroundImage: 'linear-gradient(153deg, #5c00a9 0%, #a04cee 46%, #c79afd 93%)' }}>
-            <h2 className="text-white text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center font-semibold">{t('about.closingTitle')}</h2>
+            <h2 className="text-white text-2xl sm:text-3xl md:text-4xl lg:text-[3rem] text-center font-semibold">{t('about.closingTitle')}</h2>
             <div className="text-[#eedbff] text-sm sm:text-base md:text-xl text-center leading-relaxed max-w-[672px]">
               {t('about.closingDesc').split('\n\n').map((p, i) => (
                 <p key={i} className={i > 0 ? 'mt-4' : ''}>{p}</p>

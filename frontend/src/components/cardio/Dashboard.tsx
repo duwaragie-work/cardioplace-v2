@@ -578,7 +578,7 @@ export default function Dashboard() {
             </div>
             <div className="flex-1 min-w-0">
               <p
-                className="text-[10px] font-bold uppercase tracking-wider mb-0.5"
+                className="text-[0.625rem] font-bold uppercase tracking-wider mb-0.5"
                 style={{ color: topAlertVariant.accentText }}
               >
                 {t('dashboard.activeAlert')}
@@ -586,7 +586,7 @@ export default function Dashboard() {
               {/* lang="en": variant title/body are English clinical fallbacks. */}
               <p
                 lang="en"
-                className="text-[14px] font-bold leading-tight"
+                className="text-[0.875rem] font-bold leading-tight"
                 style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
               >
                 {topAlertVariant.title}
@@ -594,14 +594,14 @@ export default function Dashboard() {
               <p
                 data-testid="active-alert-reading"
                 lang="en"
-                className="text-[12px] mt-0.5 leading-snug"
+                className="text-[0.75rem] mt-0.5 leading-snug"
                 style={{ color: 'var(--brand-text-secondary)', wordBreak: 'break-word' }}
               >
                 {topAlertVariant.body}
               </p>
             </div>
             <div
-              className="shrink-0 hidden sm:flex items-center gap-1 px-3 h-9 rounded-full font-bold text-[12px] text-white"
+              className="shrink-0 hidden sm:flex items-center gap-1 px-3 h-9 rounded-full font-bold text-[0.75rem] text-white"
               style={{ backgroundColor: topAlertVariant.accent }}
               // Known WCAG debt — vibrant amber bg + 12px bold white text is
               // ~2.8:1 (fails AA Normal). Same tracking as the admin avatar.
@@ -691,7 +691,7 @@ export default function Dashboard() {
               renders below the BP when present on the latest entry. */}
           <div data-testid="latest-bp" className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl relative" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
             <div className="flex items-start justify-between gap-2 mb-2">
-              <span className="block text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
+              <span className="block text-[0.625rem] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
                 {loading ? <Bone w={60} h={9} r={5} /> : (todayHasEntry ? t('dashboard.todaysBp') : t('dashboard.latestBp'))}
               </span>
             </div>
@@ -700,7 +700,7 @@ export default function Dashboard() {
             ) : (
               <div className="text-2xl font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{latestBP}</div>
             )}
-            <p className="text-[10px] mt-0.5 mb-2 flex items-center gap-2" style={{ color: 'var(--brand-text-muted)' }}>
+            <p className="text-[0.625rem] mt-0.5 mb-2 flex items-center gap-2" style={{ color: 'var(--brand-text-muted)' }}>
               <span>mmHg</span>
               {!loading && latestEntry?.pulse != null && (
                 <span className="inline-flex items-center gap-0.5 font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
@@ -713,7 +713,7 @@ export default function Dashboard() {
             ) : (
               <span
                 data-testid="latest-bp-status"
-                className="inline-flex items-center justify-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-center"
+                className="inline-flex items-center justify-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold text-center"
                 style={{ backgroundColor: bpVsTargetStyle.bg, color: bpVsTargetStyle.fg }}
                 // Known WCAG debt — chip pattern at 10px is below AA Normal
                 // threshold with vibrant tokens. Same accepted tradeoff.
@@ -736,7 +736,7 @@ export default function Dashboard() {
                 {streak} <span className="text-sm font-medium">{t('dashboard.day')}</span>
               </div>
             )}
-            <span className="block text-[10px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
+            <span className="block text-[0.625rem] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
               {loading ? <Bone w={80} h={9} r={5} /> : t('dashboard.medicationStreak')}
             </span>
           </div>
@@ -744,7 +744,7 @@ export default function Dashboard() {
           {/* Total Check-ins Card */}
           <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl relative" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
             <div className="flex items-start justify-between gap-2 mb-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.625rem] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('dashboard.checkIns')}
               </p>
             </div>
@@ -753,7 +753,7 @@ export default function Dashboard() {
             ) : (
               <div className="text-2xl font-bold" style={{ color: 'var(--brand-accent-teal)' }}>{totalEntries}</div>
             )}
-            <span className="block text-[10px] mt-1" style={{ color: 'var(--brand-text-secondary)' }}>
+            <span className="block text-[0.625rem] mt-1" style={{ color: 'var(--brand-text-secondary)' }}>
               {loading ? <Bone w={56} h={9} r={5} /> : t('dashboard.totalLogged')}
             </span>
           </div>
@@ -777,11 +777,11 @@ export default function Dashboard() {
               <Target className="w-5 h-5" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-accent-teal)' }}>
+              <p className="text-[0.625rem] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-accent-teal)' }}>
                 {t('dashboard.yourGoal')}
               </p>
               <p
-                className="text-[13px] font-semibold leading-tight"
+                className="text-[0.8125rem] font-semibold leading-tight"
                 style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
               >
                 {(thresholdIsDiastolicOnly
@@ -799,7 +799,7 @@ export default function Dashboard() {
               {threshold?.sbpUpperTarget != null && (
                 <p
                   data-testid="dashboard-goal-tolerance"
-                  className="text-[11.5px] mt-0.5"
+                  className="text-[0.71875rem] mt-0.5"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
                   {t('dashboard.goalTolerance').replace(
@@ -825,7 +825,7 @@ export default function Dashboard() {
                 <button
                   type="button"
                   onClick={() => router.push('/readings')}
-                  className="text-[11px] font-semibold cursor-pointer hover:opacity-75 transition"
+                  className="text-[0.6875rem] font-semibold cursor-pointer hover:opacity-75 transition"
                   style={{ color: 'var(--brand-primary-purple)' }}
                 >
                   {t('dashboard.fullHistory')}
@@ -836,7 +836,7 @@ export default function Dashboard() {
                   <button
                     key={range}
                     onClick={() => setChartRange(range)}
-                    className="px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all"
+                    className="px-2.5 py-1 rounded-md text-[0.6875rem] font-semibold transition-all"
                     style={{
                       backgroundColor: chartRange === range ? 'var(--brand-primary-purple)' : 'transparent',
                       color: chartRange === range ? '#fff' : 'var(--brand-text-muted)',
@@ -938,12 +938,12 @@ export default function Dashboard() {
                   {loading ? (
                     <Bone w={88} h={20} r={99} />
                   ) : todayHasEntry ? (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold"
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.625rem] font-semibold"
                       style={{ backgroundColor: 'var(--brand-success-green-light)', color: 'var(--brand-success-green)' }}>
                       {'✓ ' + t('dashboard.completedToday')}
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold"
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.625rem] font-semibold"
                       style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
                       // Known WCAG debt — 10px vibrant amber on amber-100 =
                       // 2.51:1 (fails AA Normal). Same accepted tradeoff as
@@ -954,7 +954,7 @@ export default function Dashboard() {
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] mb-3 text-white">{t('dashboard.takesAbout')}</p>
+                <p className="text-[0.6875rem] mb-3 text-white">{t('dashboard.takesAbout')}</p>
               </div>
 
               <div data-testid="dashboard-cta-checkin">
@@ -968,7 +968,7 @@ export default function Dashboard() {
                     router.push(intakeUi.kind === 'done' ? '/check-in' : '/clinical-intake')
                   }
                   disabled={intakeUi.kind === 'unknown'}
-                  className="w-full h-11 bg-white flex items-center justify-center gap-1.5 rounded-full text-[#7B00E0] font-bold text-[13px] transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
+                  className="w-full h-11 bg-white flex items-center justify-center gap-1.5 rounded-full text-[#7B00E0] font-bold text-[0.8125rem] transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
                 >
                   {loading ? (
                     <Bone w={120} h={12} color="#7B00E0" />
@@ -978,7 +978,7 @@ export default function Dashboard() {
                     <>{todayHasEntry ? t('dashboard.logAnother') : t('dashboard.startCheckin')} <ArrowRight aria-hidden="true" className="w-4 h-4" /></>
                   )}
                 </button>
-                <span className="block text-[10px] mt-3 text-center text-white">
+                <span className="block text-[0.625rem] mt-3 text-center text-white">
                   {loading ? (
                     <span className="flex justify-center"><Bone w={90} h={8} r={5} /></span>
                   ) : (
@@ -1051,13 +1051,13 @@ export default function Dashboard() {
                             />
                           )}
                           <div className="min-w-0 flex-1">
-                            <p className="text-[11.5px] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
+                            <p className="text-[0.71875rem] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
                               {n.title}
                             </p>
-                            <p className="text-[10.5px] mt-0.5 leading-snug line-clamp-2" style={{ color: 'var(--brand-text-secondary)' }}>
+                            <p className="text-[0.65625rem] mt-0.5 leading-snug line-clamp-2" style={{ color: 'var(--brand-text-secondary)' }}>
                               {n.body}
                             </p>
-                            <p className="text-[9.5px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
+                            <p className="text-[0.59375rem] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
                               {formatAlertDate(n.sentAt)}
                             </p>
                           </div>
@@ -1069,7 +1069,7 @@ export default function Dashboard() {
                   {notifs.length > 3 && (
                     <button
                       onClick={() => router.push('/notifications?tab=notifications')}
-                      className="mt-2 w-full flex items-center justify-center gap-1 py-1.5 rounded-full text-[11px] font-semibold transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                      className="mt-2 w-full flex items-center justify-center gap-1 py-1.5 rounded-full text-[0.6875rem] font-semibold transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                       style={{ color: 'var(--brand-warning-amber-text)', backgroundColor: 'var(--brand-warning-amber-light)' }}
                     >
                       {t('dashboard.viewAllNotifications')} <ArrowRight aria-hidden="true" className="w-3 h-3" />
@@ -1096,7 +1096,7 @@ export default function Dashboard() {
         >
           <AudioButton size="sm" text={dashboardOverview} />
           <span
-            className="text-[10px] md:text-[12px] font-semibold whitespace-nowrap"
+            className="text-[0.625rem] md:text-[0.75rem] font-semibold whitespace-nowrap"
             style={{ color: 'var(--brand-text-secondary)' }}
           >
             {t('dashboard.hearSummary')}

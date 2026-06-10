@@ -63,7 +63,7 @@ export default function OtherMedicationsList({
     <div className="space-y-2">
       <div className="flex items-center gap-2 px-1">
         <h3
-          className="text-[14px] font-bold"
+          className="text-[0.875rem] font-bold"
           style={{ color: 'var(--brand-text-primary)' }}
         >
           {t('intake.a5.otherMedsTitle')} ({meds.length})
@@ -151,7 +151,7 @@ function OtherMedTile({
       )}
       <div className="flex-1 min-w-0">
         <p
-          className="text-[14px] font-bold leading-tight"
+          className="text-[0.875rem] font-bold leading-tight"
           lang="en"
           style={{ color: 'var(--brand-text-primary)' }}
         >
@@ -159,14 +159,14 @@ function OtherMedTile({
         </p>
         {med.plainLanguageDescription && (
           <p
-            className="text-[11.5px] mt-0.5 leading-snug"
+            className="text-[0.71875rem] mt-0.5 leading-snug"
             style={{ color: 'var(--brand-text-secondary)' }}
           >
             {med.plainLanguageDescription}
           </p>
         )}
         <p
-          className="text-[12px] mt-0.5"
+          className="text-[0.75rem] mt-0.5"
           style={{ color: 'var(--brand-text-muted)' }}
         >
           {freqLabel}

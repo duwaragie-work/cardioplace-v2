@@ -108,7 +108,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
             color: '#fff',
             padding: '10px 20px',
             borderRadius: 12,
-            fontSize: 13,
+            fontSize: '0.8125rem',
             fontWeight: 600,
             zIndex: 9999,
             boxShadow: '0 4px 24px rgba(0,0,0,0.18)',

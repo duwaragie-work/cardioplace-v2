@@ -33,8 +33,11 @@ body {
   /* WCAG 2.2 AA — Cedar Hill / BridgePoint patients are mostly 50+ with
      reduced contrast sensitivity. 18px baseline ensures any unstyled
      <p>/<div> reads at "large text" size; explicit Tailwind text-* classes
-     still override when smaller copy is intentional (badges, captions). */
-  font-size: 18px;
+     still override when smaller copy is intentional (badges, captions).
+     Expressed in rem (1.125rem = 18px at the default 16px root) so the whole
+     app scales with the browser/OS font-size setting — WCAG 2.2 SC 1.4.4
+     (resize text to 200%) for our mostly-50+ patients. */
+  font-size: 1.125rem;
   line-height: 1.5;
 }
 
@@ -67,21 +70,27 @@ body {
    to <main id="main"> on each page, skipping navigation. */
 .skip-link {
   position: absolute;
-  top: -48px;
+  top: 0;
   left: 0;
+  /* Hide by translating up its OWN full height (+1px guard) rather than a
+     fixed `top: -48px`. At high browser zoom the rem font + padding make the
+     link taller than 48px, so a fixed offset let its bottom edge peek below
+     the top edge. translateY(-100%) scales with the element, so it stays
+     fully hidden at any zoom level. */
+  transform: translateY(calc(-100% - 1px));
   background: var(--brand-primary-purple, #7B00E0);
   color: white;
   padding: 12px 20px;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 0.875rem;
   border-radius: 0 0 8px 0;
   z-index: 1000;
-  transition: top 120ms ease-out;
+  transition: transform 120ms ease-out;
   text-decoration: none;
 }
 .skip-link:focus,
 .skip-link:focus-visible {
-  top: 0;
+  transform: translateY(0);
   outline: 3px solid #ffffff;
   outline-offset: -3px;
 }

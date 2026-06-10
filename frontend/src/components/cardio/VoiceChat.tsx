@@ -151,13 +151,13 @@ function StateLabel({ state }: { state: SessionState }) {
         key={state}
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
-        className="text-[15px] font-bold"
+        className="text-[0.9375rem] font-bold"
         style={{ color: c.color }}
       >
         {c.text}
       </motion.p>
       {c.sub && (
-        <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
+        <p className="text-[0.75rem] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
           {c.sub}
         </p>
       )}
@@ -221,14 +221,14 @@ function ActionOverlay({ type }: { type: string }) {
           </motion.div>
         </div>
 
-        <p className="text-[16px] font-bold mt-4" style={{ color }}>{label}</p>
-        <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>{sub}</p>
+        <p className="text-[1rem] font-bold mt-4" style={{ color }}>{label}</p>
+        <p className="text-[0.75rem] mt-1" style={{ color: 'var(--brand-text-muted)' }}>{sub}</p>
 
         {/* Progress bar */}
         <div className="w-48 mx-auto mt-3 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: `${color}15` }}>
           <motion.div className="h-full rounded-full" style={{ backgroundColor: color }} animate={{ x: ['-100%', '100%'] }} transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }} />
         </div>
-        <p className="text-[10px] mt-3" style={{ color: 'var(--brand-text-muted)' }}>Please wait — AI will respond shortly</p>
+        <p className="text-[0.625rem] mt-3" style={{ color: 'var(--brand-text-muted)' }}>Please wait — AI will respond shortly</p>
       </div>
     </motion.div>
   );
@@ -279,7 +279,7 @@ function CheckinCard({
           )}
         </motion.div>
         <motion.p
-          className="text-[17px] font-bold mt-3"
+          className="text-[1.0625rem] font-bold mt-3"
           style={{ color: 'var(--brand-text-primary)' }}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -298,10 +298,10 @@ function CheckinCard({
       >
         {summary.systolicBP != null && summary.diastolicBP != null && (
           <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wide mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+            <p className="text-[0.625rem] font-semibold uppercase tracking-wide mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
               Blood Pressure
             </p>
-            <p className="text-[18px] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>
+            <p className="text-[1.125rem] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>
               {summary.systolicBP}/{summary.diastolicBP}
             </p>
           </div>
@@ -309,11 +309,11 @@ function CheckinCard({
 
         {summary.weight != null && summary.weight > 0 && (
           <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-accent-teal-light)' }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wide mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+            <p className="text-[0.625rem] font-semibold uppercase tracking-wide mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
               Weight
             </p>
-            <p className="text-[18px] font-bold" style={{ color: 'var(--brand-accent-teal)' }}>
-              {summary.weight} <span className="text-[11px] font-medium">lbs</span>
+            <p className="text-[1.125rem] font-bold" style={{ color: 'var(--brand-accent-teal)' }}>
+              {summary.weight} <span className="text-[0.6875rem] font-medium">lbs</span>
             </p>
           </div>
         )}
@@ -326,11 +326,11 @@ function CheckinCard({
               : 'var(--brand-alert-red-light)',
           }}
         >
-          <p className="text-[10px] font-semibold uppercase tracking-wide mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+          <p className="text-[0.625rem] font-semibold uppercase tracking-wide mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
             Medications
           </p>
           <p
-            className="text-[14px] font-bold"
+            className="text-[0.875rem] font-bold"
             style={{ color: summary.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red-text)' }}
           >
             {summary.medicationTaken ? 'Taken' : 'Missed'}
@@ -339,10 +339,10 @@ function CheckinCard({
 
         {summary.symptoms.length > 0 && (
           <div className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wide mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+            <p className="text-[0.625rem] font-semibold uppercase tracking-wide mb-0.5" style={{ color: 'var(--brand-text-muted)' }}>
               Symptoms
             </p>
-            <p className="text-[11px] font-semibold" style={{ color: 'var(--brand-warning-amber-text)' }}>
+            <p className="text-[0.6875rem] font-semibold" style={{ color: 'var(--brand-warning-amber-text)' }}>
               {summary.symptoms.slice(0, 2).join(', ')}
               {summary.symptoms.length > 2 && ` +${summary.symptoms.length - 2}`}
             </p>
@@ -363,7 +363,7 @@ function CheckinCard({
           transition={{ duration: 4, ease: 'linear' }}
         />
       </motion.div>
-      <p className="text-[10px] text-center mt-2" style={{ color: 'var(--brand-text-muted)' }}>
+      <p className="text-[0.625rem] text-center mt-2" style={{ color: 'var(--brand-text-muted)' }}>
         Returning to conversation...
       </p>
     </motion.div>
@@ -440,7 +440,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
                 key={m}
                 disabled={isActive}
                 onClick={() => setMode(m)}
-                className="px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all"
+                className="px-3 py-1.5 rounded-lg text-[0.75rem] font-semibold transition-all"
                 style={{
                   backgroundColor: mode === m ? 'var(--brand-primary-purple)' : 'transparent',
                   color: mode === m ? 'white' : 'var(--brand-primary-purple)',
@@ -458,7 +458,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
             if (isActive) await handleEnd();
             onBack();
           }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12px] font-semibold transition hover:opacity-75"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[0.75rem] font-semibold transition hover:opacity-75"
           style={{
             backgroundColor: 'var(--brand-primary-purple-light)',
             color: 'var(--brand-primary-purple)',
@@ -523,7 +523,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
                 <motion.p
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  className="text-[13px] text-center max-w-xs px-4"
+                  className="text-[0.8125rem] text-center max-w-xs px-4"
                   style={{ color: '#ef4444' }}
                 >
                   {errorMessage}
@@ -535,7 +535,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
                 <motion.p
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  className="text-[13px] text-center max-w-xs"
+                  className="text-[0.8125rem] text-center max-w-xs"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
                   {mode === 'checkin'
@@ -556,7 +556,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
                   }}
                 >
                   <PhoneCall className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-alert-red)' }} />
-                  <p className="text-[11px]" style={{ color: 'var(--brand-alert-red-text)' }}>
+                  <p className="text-[0.6875rem]" style={{ color: 'var(--brand-alert-red-text)' }}>
                     If you feel chest pain or severe shortness of breath, call 911 immediately.
                   </p>
                 </motion.div>
@@ -577,7 +577,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
             {canStart ? (
               <motion.button
                 onClick={() => void handleStart()}
-                className="flex items-center gap-2.5 px-10 py-3.5 rounded-2xl text-[14px] font-bold transition-all"
+                className="flex items-center gap-2.5 px-10 py-3.5 rounded-2xl text-[0.875rem] font-bold transition-all"
                 style={{
                   background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
                   color: 'white',
@@ -592,7 +592,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
             ) : (
               <motion.button
                 onClick={() => void handleEnd()}
-                className="flex items-center gap-2.5 px-10 py-3.5 rounded-2xl text-[14px] font-bold"
+                className="flex items-center gap-2.5 px-10 py-3.5 rounded-2xl text-[0.875rem] font-bold"
                 style={{
                   background: 'linear-gradient(135deg, #ef4444, #dc2626)',
                   color: 'white',
@@ -625,7 +625,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
               onKeyDown={handleKeyDown}
               placeholder={t('chat.orTypePlaceholder')}
               aria-label={t('chat.placeholder')}
-              className="flex-1 bg-transparent text-[13px] outline-none py-1.5"
+              className="flex-1 bg-transparent text-[0.8125rem] outline-none py-1.5"
               style={{ color: 'var(--brand-text-primary)' }}
             />
             <button
@@ -643,7 +643,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
           </div>
         )}
 
-        <p className="text-center text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>
+        <p className="text-center text-[0.625rem]" style={{ color: 'var(--brand-text-muted)' }}>
           Powered by Gemini Live · Responses monitored by care team
         </p>
       </div>

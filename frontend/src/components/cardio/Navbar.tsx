@@ -163,7 +163,7 @@ export default function Navbar() {
           <div className="relative" ref={langRef}>
             <button
               onClick={() => setLangOpen((v) => !v)}
-              className="flex items-center gap-1 h-8 px-2 rounded-lg text-[12px] font-semibold transition hover:opacity-80"
+              className="flex items-center gap-1 h-8 px-2 rounded-lg text-[0.75rem] font-semibold transition hover:opacity-80"
               style={{
                 backgroundColor: langOpen ? 'rgba(255,255,255,0.2)' : 'transparent',
                 color: 'rgba(255,255,255,0.85)',
@@ -192,7 +192,7 @@ export default function Navbar() {
                         setLocale(l.code);
                         setLangOpen(false);
                       }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-[13px] transition hover:bg-gray-50"
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-[0.8125rem] transition hover:bg-gray-50"
                       style={{
                         backgroundColor: active ? 'var(--brand-primary-purple-light)' : undefined,
                         color: active
@@ -205,7 +205,7 @@ export default function Navbar() {
                       <span className="flex-1">{l.nativeName}</span>
                       {!supported && (
                         <span
-                          className="px-1.5 py-0.5 rounded text-[10px] font-bold"
+                          className="px-1.5 py-0.5 rounded text-[0.625rem] font-bold"
                           style={{
                             backgroundColor: 'var(--brand-warning-amber-light)',
                             color: 'var(--brand-warning-amber-text)',
@@ -239,7 +239,7 @@ export default function Navbar() {
             />
             {alertCount > 0 && (
               <span
-                className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold text-white"
+                className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[0.625rem] font-bold text-white"
                 style={{ backgroundColor: 'var(--brand-warning-amber)' }}
               >
                 {alertCount > 9 ? '9+' : alertCount}

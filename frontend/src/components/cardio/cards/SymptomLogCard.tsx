@@ -64,7 +64,7 @@ export default function SymptomLogCard({ summary, onDismiss }: Props) {
             <AlertCircle className="w-5 h-5 shrink-0" style={{ color: "var(--brand-alert-red)" }} aria-hidden="true" />
           )}
           <p
-            className="font-bold text-[15px]"
+            className="font-bold text-[0.9375rem]"
             style={{ color: summary.logged ? 'var(--brand-alert-red)' : 'var(--brand-text-primary)' }}
           >
             {summary.logged ? t('chat.card.symptomLogged') : t('chat.card.symptomFailed')}
@@ -75,14 +75,14 @@ export default function SymptomLogCard({ summary, onDismiss }: Props) {
 
       <div className="px-5 py-4">
         <p
-          className="text-[18px] font-bold"
+          className="text-[1.125rem] font-bold"
           style={{ color: 'var(--brand-text-primary)' }}
         >
           {label}
         </p>
         {summary.notes && (
           <p
-            className="text-[13px] mt-2 leading-relaxed"
+            className="text-[0.8125rem] mt-2 leading-relaxed"
             style={{ color: 'var(--brand-text-secondary)' }}
           >
             &ldquo;{summary.notes}&rdquo;
@@ -99,7 +99,7 @@ export default function SymptomLogCard({ summary, onDismiss }: Props) {
               aria-hidden="true"
             />
             <p
-              className="text-[12px] leading-snug"
+              className="text-[0.75rem] leading-snug"
               style={{ color: 'var(--brand-text-primary)' }}
             >
               {t('chat.card.symptomCareTeamNotified')}
@@ -108,7 +108,7 @@ export default function SymptomLogCard({ summary, onDismiss }: Props) {
         )}
         {!summary.logged && (
           <p
-            className="text-[13px] mt-2"
+            className="text-[0.8125rem] mt-2"
             style={{ color: 'var(--brand-text-muted)' }}
           >
             {summary.message}
@@ -122,7 +122,7 @@ export default function SymptomLogCard({ summary, onDismiss }: Props) {
       >
         <Link
           href="/dashboard"
-          className="flex-1 h-11 rounded-xl font-semibold text-[13px] inline-flex items-center justify-center gap-1.5 transition hover:opacity-90"
+          className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] inline-flex items-center justify-center gap-1.5 transition hover:opacity-90"
           style={{
             backgroundColor: 'var(--brand-alert-red-light)',
             color: 'var(--brand-alert-red-text)',
@@ -133,7 +133,7 @@ export default function SymptomLogCard({ summary, onDismiss }: Props) {
         </Link>
         <button
           onClick={onDismiss}
-          className="flex-1 h-11 rounded-xl font-semibold text-[13px] text-white transition hover:opacity-90"
+          className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] text-white transition hover:opacity-90"
           style={{
             background: 'linear-gradient(135deg, var(--brand-alert-red), #EF4444)',
             boxShadow: '0 4px 14px rgba(220,38,38,0.28)',

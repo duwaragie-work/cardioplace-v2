@@ -80,7 +80,7 @@ export default function Homepage() {
           <div className="lg:hidden absolute top-10 left-4 sm:top-6 sm:left-6 z-20">
             <div className="bg-[#7b00e0] inline-flex items-center gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full">
               <Activity className="w-3 h-3 text-white" />
-              <span className="font-semibold text-white text-[9px] sm:text-[10px] md:text-xs">{t('home.heroBadge')}</span>
+              <span className="font-semibold text-white text-[0.5625rem] sm:text-[0.625rem] md:text-xs">{t('home.heroBadge')}</span>
             </div>
           </div>
 
@@ -97,7 +97,7 @@ export default function Homepage() {
                     Previously rendered as two <h1>s which the audit flagged
                     as a WCAG violation (heading-order / single-h1-per-page). */}
                 <div className="hidden lg:block">
-                  <h1 className="font-bold text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-[72px] leading-[1.05] tracking-tight"
+                  <h1 className="font-bold text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-[4.5rem] leading-[1.05] tracking-tight"
                     style={{ textShadow: '0 2px 10px rgba(0,0,0,0.4)', color: '#ffffff' }}>
                     <span className="block">{t('home.heroTitle1')}</span>
                     <span
@@ -153,8 +153,8 @@ export default function Homepage() {
                   </button>
                 </form>
                 {/* Prompt chips — single row */}
-                <div className="flex items-center gap-1.5 sm:gap-2 flex-nowrap overflow-x-auto">
-                  <span className="text-white/70 text-[10px] sm:text-xs font-semibold uppercase tracking-wider shrink-0">Try now</span>
+                <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                  <span className="text-white/70 text-[0.625rem] sm:text-xs font-semibold uppercase tracking-wider shrink-0">Try now</span>
                   {(['home.chip1', 'home.chip2', 'home.chip3'] as const).map((key) => (
                     <button
                       key={key}
@@ -166,14 +166,14 @@ export default function Homepage() {
                           router.push('/sign-in');
                         }
                       }}
-                      className="backdrop-blur-md bg-white/15 border border-white/25 text-white text-[8px] sm:text-xs md:text-sm px-2.5 sm:px-3 md:px-4 py-1 sm:py-1.5 rounded-full hover:bg-white/25 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+                      className="backdrop-blur-md bg-white/15 border border-white/25 text-white text-[0.5rem] sm:text-xs md:text-sm px-2.5 sm:px-3 md:px-4 py-1 sm:py-1.5 rounded-full hover:bg-white/25 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
                     >
                       {t(key)}
                     </button>
                   ))}
                 </div>
                 {/* CTA buttons — single row */}
-                <div className="flex items-center gap-2 sm:gap-3 md:gap-6 flex-nowrap">
+                <div className="flex items-center gap-2 sm:gap-3 md:gap-6 flex-wrap">
                   <Link href={loggedIn ? '/dashboard' : '/sign-in'} className="bg-[#7b00e0] text-white font-bold text-xs sm:text-sm md:text-lg px-5 sm:px-7 md:px-10 py-2.5 sm:py-3 md:py-3.5 rounded-full hover:bg-[#6600bc] transition-colors whitespace-nowrap shrink-0">
                     {loggedIn ? t('home.goToDashboard') : t('home.startCheckin')}
                   </Link>
@@ -219,7 +219,7 @@ export default function Homepage() {
             <div className="flex flex-col md:flex-row items-center gap-8 md:gap-12 lg:gap-16">
               {/* LEFT — title + description */}
               <div className="flex-1 flex flex-col gap-4 md:gap-5 text-center md:text-left">
-                <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[42px] leading-tight tracking-tight">
+                <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[2.625rem] leading-tight tracking-tight">
                   {t('home.demoTitle')}
                 </h2>
                 <p className="text-[#4c4355] text-sm sm:text-base md:text-lg leading-relaxed max-w-[520px] mx-auto md:mx-0">
@@ -262,7 +262,7 @@ export default function Homepage() {
         {/* ============ FEATURES SECTION ============ */}
         <section id="features" className="w-full max-w-[1280px] px-4 sm:px-6 md:px-8 py-10 md:py-16 lg:py-24">
           <div className="flex flex-col items-center gap-4 md:gap-6 mb-10 md:mb-24">
-            <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center tracking-tight leading-tight">
+            <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[3rem] text-center tracking-tight leading-tight">
               {t('home.sanctuaryTitle')}
             </h2>
             <div className="w-24 md:w-32 h-2 bg-[#7b00e0] rounded-full" />
@@ -316,13 +316,13 @@ export default function Homepage() {
                   style={{ backgroundColor: 'var(--brand-alert-red)' }}
                 >
                   <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                  <span className="text-white text-[8px] sm:text-[9px] font-bold uppercase">Alert</span>
+                  <span className="text-white text-[0.5rem] sm:text-[0.5625rem] font-bold uppercase">Alert</span>
                 </div>
               </div>
 
-              <div className="mt-3 sm:mt-4 flex gap-3">
+              <div className="mt-3 sm:mt-4 flex flex-col gap-2.5">
                 <div
-                  className="flex-1 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3"
+                  className="w-full min-w-0 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3"
                   style={{
                     backgroundColor: 'var(--brand-warning-amber-light)',
                     borderLeft: '4px solid var(--brand-warning-amber)',
@@ -333,18 +333,18 @@ export default function Homepage() {
                   data-axe-debt="avatar-orange-small-text"
                 >
                   <div className="flex items-center gap-1.5 mb-0.5">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--brand-warning-amber)' }} />
+                    <div className="w-2 h-2 shrink-0 rounded-full" style={{ backgroundColor: 'var(--brand-warning-amber)' }} />
                     <p
-                      className="text-[10px] sm:text-xs font-bold uppercase tracking-wider"
+                      className="text-[0.625rem] sm:text-xs font-bold uppercase tracking-wider"
                       style={{ color: 'var(--brand-warning-amber-text)' }}
                     >
                       Level 1
                     </p>
                   </div>
-                  <p className="text-[9px] sm:text-[10px]" style={{ color: 'var(--brand-warning-amber-text)' }}>24hr care team review</p>
+                  <p className="text-[0.5625rem] sm:text-[0.625rem] break-words" style={{ color: 'var(--brand-warning-amber-text)' }}>24hr care team review</p>
                 </div>
                 <div
-                  className="flex-1 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3"
+                  className="w-full min-w-0 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3"
                   style={{
                     backgroundColor: 'var(--brand-alert-red-light)',
                     borderLeft: '4px solid var(--brand-alert-red)',
@@ -354,15 +354,15 @@ export default function Homepage() {
                   data-axe-debt="avatar-orange-small-text"
                 >
                   <div className="flex items-center gap-1.5 mb-0.5">
-                    <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: 'var(--brand-alert-red)' }} />
+                    <div className="w-2 h-2 shrink-0 rounded-full animate-pulse" style={{ backgroundColor: 'var(--brand-alert-red)' }} />
                     <p
-                      className="text-[10px] sm:text-xs font-bold uppercase tracking-wider"
+                      className="text-[0.625rem] sm:text-xs font-bold uppercase tracking-wider"
                       style={{ color: 'var(--brand-alert-red-text)' }}
                     >
                       Level 2
                     </p>
                   </div>
-                  <p className="text-[9px] sm:text-[10px]" style={{ color: 'var(--brand-alert-red-text)' }}>Immediate 911 alert</p>
+                  <p className="text-[0.5625rem] sm:text-[0.625rem] break-words" style={{ color: 'var(--brand-alert-red-text)' }}>Immediate 911 alert</p>
                 </div>
               </div>
             </div>
@@ -405,7 +405,7 @@ export default function Homepage() {
         {/* ============ TARGET AUDIENCE ============ */}
         <section className="w-full max-w-[1280px] px-4 sm:px-6 md:px-8 py-10 md:py-12">
           <div className="flex flex-col items-center gap-4 md:gap-6 mb-10 md:mb-20">
-            <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center tracking-tight">
+            <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[3rem] text-center tracking-tight">
               {t('home.designedForEveryone')}
             </h2>
             <p className="text-[#4c4355] text-lg md:text-xl lg:text-2xl text-left md:text-center italic font-bold max-w-[672px]">{t('home.forPatientsOpening')}</p>
@@ -424,7 +424,7 @@ export default function Homepage() {
                 <div className="bg-white border border-[#ececec] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shrink-0 overflow-hidden">
                   <Image src="/patient.png" alt="" aria-hidden="true" width={32} height={32} className="object-cover" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-[#1f1924] text-lg sm:text-xl md:text-2xl font-normal">{t('home.forPatients')}</h3>
                   <p className="text-[#5c00a9] text-xs sm:text-sm font-bold">{t('home.forPatientsSubtitle')}</p>
                 </div>
@@ -445,7 +445,7 @@ export default function Homepage() {
                 <div className="bg-white border border-[#ececec] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shrink-0 overflow-hidden">
                   <Image src="/care team.png" alt="Care Team" width={32} height={32} className="object-cover" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-[#1f1924] text-lg sm:text-xl md:text-2xl font-normal">{t('home.forCareTeams')}</h3>
                   <p className="text-[#5c00a9] text-xs sm:text-sm font-bold">{t('home.forCareTeamsSubtitle')}</p>
                 </div>
@@ -466,7 +466,7 @@ export default function Homepage() {
                 <div className="bg-white border border-[#ececec] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shrink-0">
                   <Building2 className="w-6 h-6 sm:w-7 sm:h-7 text-[#7b00e0]" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-[#1f1924] text-lg sm:text-xl md:text-2xl font-normal">{t('home.forSystems')}</h3>
                   <p className="text-[#5c00a9] text-xs sm:text-sm font-bold">{t('home.forSystemsSubtitle')}</p>
                 </div>
@@ -486,7 +486,7 @@ export default function Homepage() {
         {/* ============ CTA ============ */}
         <section className="w-full">
           <div className="w-full p-8 sm:p-10 md:p-16 flex flex-col items-center gap-6 md:gap-8 bg-[#f5eafa]" >
-            <h2 className="text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center font-semibold max-w-[1024px]">{t('home.ctaTitle')}</h2>
+            <h2 className="text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[3rem] text-center font-semibold max-w-[1024px]">{t('home.ctaTitle')}</h2>
             <p className="text-gray-700 text-sm sm:text-base md:text-xl text-left md:text-center leading-relaxed max-w-[672px]">{t('home.ctaDesc')}</p>
             <Link href="/about" className="bg-[#7b00e0] text-white font-semibold text-base md:text-lg px-8 md:px-12 py-3 md:py-3.5 rounded-full hover:bg-[#9333ea] transition-colors mt-2">
               {t('home.ctaButton')}

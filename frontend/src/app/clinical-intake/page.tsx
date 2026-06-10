@@ -349,20 +349,20 @@ function A0bIntro({ onBegin, onSaveLater }: { onBegin: () => void; onSaveLater: 
       </motion.div>
 
       <div className="flex items-center gap-2 mb-2">
-        <h1 className="text-[26px] sm:text-[28px] font-bold tracking-tight" style={{ color: 'var(--brand-text-primary)' }}>
+        <h1 className="text-[1.625rem] sm:text-[1.75rem] font-bold tracking-tight" style={{ color: 'var(--brand-text-primary)' }}>
           {t('intake.a0b.title')}
         </h1>
         <AudioButton text={t('intake.a0b.audio')} />
       </div>
 
-      <p className="text-[15px] max-w-md leading-relaxed mb-8" style={{ color: 'var(--brand-text-secondary)' }}>
+      <p className="text-[0.9375rem] max-w-md leading-relaxed mb-8" style={{ color: 'var(--brand-text-secondary)' }}>
         {t('intake.a0b.desc')}
       </p>
 
       <motion.button
         type="button"
         onClick={onBegin}
-        className="w-full max-w-sm h-12 rounded-full font-bold text-white text-[15px] mb-3 cursor-pointer"
+        className="w-full max-w-sm h-12 rounded-full font-bold text-white text-[0.9375rem] mb-3 cursor-pointer"
         style={{
           backgroundColor: 'var(--brand-primary-purple)',
           boxShadow: 'var(--brand-shadow-button)',
@@ -375,7 +375,7 @@ function A0bIntro({ onBegin, onSaveLater }: { onBegin: () => void; onSaveLater: 
       <button
         type="button"
         onClick={onSaveLater}
-        className="text-[13px] font-semibold cursor-pointer"
+        className="text-[0.8125rem] font-semibold cursor-pointer"
         style={{ color: 'var(--brand-text-muted)' }}
       >
         {t('intake.a0b.saveForLater')}
@@ -437,7 +437,7 @@ function A1Demographics({ state, setState }: StepProps) {
           placeholder={t('intake.datePlaceholder')}
           onChange={(v) => setState((p) => ({ ...p, dateOfBirth: v || undefined }))}
         />
-        <p className="text-[12px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
+        <p className="text-[0.75rem] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
           {t('intake.a1.dobHint')}
         </p>
       </div>
@@ -482,7 +482,7 @@ function A1Demographics({ state, setState }: StepProps) {
               {unit === 'ftin' ? (
                 <div className="flex items-end gap-3">
                   <div className="flex-1">
-                    <label htmlFor="intake-a1-height-ft" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+                    <label htmlFor="intake-a1-height-ft" className="block text-[0.6875rem] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
                       {t('intake.a1.heightFeetLabel')}
                     </label>
                     <div className="flex items-center gap-2">
@@ -501,7 +501,7 @@ function A1Demographics({ state, setState }: StepProps) {
                           updateHeightFromFtIn(feet, storedInches);
                         }}
                         placeholder="5"
-                        className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
+                        className="flex-1 h-14 px-4 rounded-xl text-[1.125rem] outline-none transition box-border text-center"
                         style={{
                           border: '2px solid var(--brand-border)',
                           color: 'var(--brand-text-primary)',
@@ -521,7 +521,7 @@ function A1Demographics({ state, setState }: StepProps) {
                     </div>
                   </div>
                   <div className="flex-1">
-                    <label htmlFor="intake-a1-height-in" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+                    <label htmlFor="intake-a1-height-in" className="block text-[0.6875rem] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
                       {t('intake.a1.heightInchesLabel')}
                     </label>
                     <div className="flex items-center gap-2">
@@ -542,7 +542,7 @@ function A1Demographics({ state, setState }: StepProps) {
                           updateHeightFromFtIn(storedFeet, inches);
                         }}
                         placeholder="9"
-                        className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
+                        className="flex-1 h-14 px-4 rounded-xl text-[1.125rem] outline-none transition box-border text-center"
                         style={{
                           border: '2px solid var(--brand-border)',
                           color: 'var(--brand-text-primary)',
@@ -578,7 +578,7 @@ function A1Demographics({ state, setState }: StepProps) {
                         updateHeightFromCm(Number.isFinite(v) ? v : 0);
                       }}
                       placeholder="165"
-                      className="w-full h-14 pl-4 pr-14 rounded-xl text-[18px] outline-none transition box-border"
+                      className="w-full h-14 pl-4 pr-14 rounded-xl text-[1.125rem] outline-none transition box-border"
                       style={{
                         border: '2px solid var(--brand-border)',
                         color: 'var(--brand-text-primary)',
@@ -588,7 +588,7 @@ function A1Demographics({ state, setState }: StepProps) {
                       onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
                     />
                     <span
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-[16px]"
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-[1rem]"
                       style={{ color: 'var(--brand-text-muted)' }}
                     >
                       cm
@@ -605,13 +605,13 @@ function A1Demographics({ state, setState }: StepProps) {
                 </div>
               )}
               {state.heightCm ? (
-                <p className="text-[13px] mt-3 font-medium" style={{ color: 'var(--brand-primary-purple)' }}>
+                <p className="text-[0.8125rem] mt-3 font-medium" style={{ color: 'var(--brand-primary-purple)' }}>
                   {unit === 'ftin'
                     ? `≈ ${state.heightCm} cm`
                     : `≈ ${cmToFtIn(state.heightCm).feet} ft ${cmToFtIn(state.heightCm).inches} in`}
                 </p>
               ) : null}
-              <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.75rem] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('intake.a1.heightHint')}
               </p>
             </>
@@ -689,7 +689,7 @@ function A2Pregnancy({ state, setState }: StepProps) {
               ariaLabel={t('intake.a2.dueDateLabel')}
               value={state.pregnancyDueDate ?? ''}
               placeholder={t('intake.datePlaceholder')}
-              textSizeClass="text-[15px]"
+              textSizeClass="text-[0.9375rem]"
               onChange={(v) => setState((p) => ({ ...p, pregnancyDueDate: v || undefined }))}
             />
           </motion.div>
@@ -897,7 +897,7 @@ function MedicationGroup({
   const alsoKnown = t('intake.a5.audioAlsoKnown');
   return (
     <div>
-      <h3 className="text-[13px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--brand-text-muted)' }}>
+      <h3 className="text-[0.8125rem] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--brand-text-muted)' }}>
         {title}
       </h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1538,7 +1538,7 @@ function A8Categories({ state, setState }: StepProps) {
               className="pt-2"
             >
               <p
-                className="text-[11px] font-bold uppercase tracking-wider mb-2"
+                className="text-[0.6875rem] font-bold uppercase tracking-wider mb-2"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 {cat.label}
@@ -1569,7 +1569,7 @@ function A8Categories({ state, setState }: StepProps) {
             className="space-y-4 pt-2"
           >
             <div className="rounded-2xl p-4" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
-              <p className="text-[12px] mb-3" style={{ color: 'var(--brand-text-secondary)' }}>
+              <p className="text-[0.75rem] mb-3" style={{ color: 'var(--brand-text-secondary)' }}>
                 {t('intake.a8.otherBlurb')}
               </p>
 
@@ -1581,7 +1581,7 @@ function A8Categories({ state, setState }: StepProps) {
                   <Mic className="w-5 h-5" />
                 </div>
                 <div className="flex-1">
-                  <label htmlFor="intake-a8-other" className="block text-[12px] font-semibold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
+                  <label htmlFor="intake-a8-other" className="block text-[0.75rem] font-semibold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
                     {t('intake.a8.otherSpeakLabel')}
                   </label>
                   <div className="flex items-center gap-2">
@@ -1597,7 +1597,7 @@ function A8Categories({ state, setState }: StepProps) {
                         if (dupError) setDupError(null);
                       }}
                       placeholder={t('intake.a8.otherSpeakPlaceholder')}
-                      className="flex-1 h-11 px-4 rounded-lg text-[14px] outline-none transition box-border bg-white"
+                      className="flex-1 h-11 px-4 rounded-lg text-[0.875rem] outline-none transition box-border bg-white"
                       style={{
                         border: dupError
                           ? '2px solid var(--brand-alert-red)'
@@ -1616,7 +1616,7 @@ function A8Categories({ state, setState }: StepProps) {
                   {dupError && (
                     <p
                       role="alert"
-                      className="mt-1.5 text-[12px] leading-snug"
+                      className="mt-1.5 text-[0.75rem] leading-snug"
                       style={{ color: 'var(--brand-alert-red)' }}
                     >
                       {dupError}
@@ -1627,7 +1627,7 @@ function A8Categories({ state, setState }: StepProps) {
                     data-testid="intake-medication-add-button"
                     onClick={() => addOther('PATIENT_VOICE', otherText)}
                     disabled={!otherText.trim()}
-                    className="mt-2 px-4 py-1.5 rounded-full text-white text-[12px] font-bold disabled:opacity-50 cursor-pointer"
+                    className="mt-2 px-4 py-1.5 rounded-full text-white text-[0.75rem] font-bold disabled:opacity-50 cursor-pointer"
                     style={{ backgroundColor: 'var(--brand-primary-purple)' }}
                   >
                     {t('intake.a8.otherAdd')}
@@ -1643,7 +1643,7 @@ function A8Categories({ state, setState }: StepProps) {
                 is going to render. Keep the count for the rare case where
                 the list is hidden somehow. */}
             {otherCount > 0 && otherMedHandlers.otherMeds.length === 0 && (
-              <p className="text-[12px] text-center" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.75rem] text-center" style={{ color: 'var(--brand-text-muted)' }}>
                 {(otherCount === 1 ? t('intake.a8.otherCountSingle') : t('intake.a8.otherCountPlural')).replace('{n}', String(otherCount))}
               </p>
             )}
@@ -1677,7 +1677,7 @@ function A8Categories({ state, setState }: StepProps) {
         style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
       >
         <Shield className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />
-        <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+        <p className="text-[0.75rem] leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
           {t('intake.a8.skipHint')}
         </p>
       </div>
@@ -1697,7 +1697,7 @@ function A9Frequency({ state, setState }: StepProps) {
         />
         <div className="rounded-2xl p-6 text-center" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
           <Pill className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--brand-primary-purple)' }} />
-          <p className="text-[14px]" style={{ color: 'var(--brand-text-secondary)' }}>
+          <p className="text-[0.875rem]" style={{ color: 'var(--brand-text-secondary)' }}>
             {t('intake.a9.emptyBody')}
           </p>
         </div>
@@ -1738,9 +1738,9 @@ function A9Frequency({ state, setState }: StepProps) {
           >
             <div className="flex items-center justify-between mb-3">
               <div>
-                <p className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>{m.drugName}</p>
+                <p className="text-[0.9375rem] font-bold" style={{ color: 'var(--brand-text-primary)' }}>{m.drugName}</p>
                 {m.isCombination && (
-                  <span className="text-[10px] font-bold" style={{ color: 'var(--brand-accent-teal)' }}>
+                  <span className="text-[0.625rem] font-bold" style={{ color: 'var(--brand-accent-teal)' }}>
                     {t('intake.medCard.combo').toUpperCase()}
                   </span>
                 )}
@@ -1756,7 +1756,7 @@ function A9Frequency({ state, setState }: StepProps) {
                     type="button"
                     data-testid={`intake-a9-freq-${i}-${o.value}`}
                     onClick={() => setFreq(i, o.value)}
-                    className="h-11 rounded-full text-[13px] font-bold border-2 transition"
+                    className="h-11 rounded-full text-[0.8125rem] font-bold border-2 transition"
                     style={{
                       backgroundColor: active ? 'var(--brand-primary-purple)' : 'white',
                       borderColor: active ? 'var(--brand-primary-purple)' : 'var(--brand-border)',
@@ -1841,7 +1841,7 @@ function A10Review({ state, goTo }: StepProps) {
         style={{ backgroundColor: 'var(--brand-warning-amber-light)', border: '1.5px solid #FCD34D' }}
       >
         <Shield className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-warning-amber-text)' }} />
-        <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+        <p className="text-[0.78125rem] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
           {t('intake.a10.reviewBanner')}
         </p>
       </div>
@@ -1926,16 +1926,16 @@ function A11Complete({ onDone }: { onDone: () => void }) {
       >
         <Check className="w-14 h-14" style={{ color: 'var(--brand-success-green)' }} strokeWidth={3} />
       </motion.div>
-      <h2 className="text-[28px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+      <h2 className="text-[1.75rem] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
         {t('intake.a11.title')}
       </h2>
-      <p className="text-[15px] max-w-md mb-8 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+      <p className="text-[0.9375rem] max-w-md mb-8 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
         {t('intake.a11.body')}
       </p>
       <motion.button
         type="button"
         onClick={onDone}
-        className="h-12 px-8 rounded-full text-white font-bold text-[14px] cursor-pointer"
+        className="h-12 px-8 rounded-full text-white font-bold text-[0.875rem] cursor-pointer"
         style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.97 }}
@@ -1955,7 +1955,7 @@ function StepHeader({ title, subtitle, audio }: { title: string; subtitle: strin
     <div>
       <div className="flex items-start justify-between gap-3 mb-1">
         <h2
-          className="text-[20px] sm:text-[24px] font-bold tracking-tight min-w-0 flex-1"
+          className="text-[1.25rem] sm:text-[1.5rem] font-bold tracking-tight min-w-0 flex-1"
           style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
         >
           {title}
@@ -1964,7 +1964,7 @@ function StepHeader({ title, subtitle, audio }: { title: string; subtitle: strin
           <AudioButton text={audio} />
         </div>
       </div>
-      <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>{subtitle}</p>
+      <p className="text-[0.875rem]" style={{ color: 'var(--brand-text-muted)' }}>{subtitle}</p>
     </div>
   );
 }
@@ -1973,7 +1973,7 @@ function SectionLabel({ text, audio }: { text: string; audio?: string }) {
   return (
     <div className="flex items-start justify-between gap-2 mb-3">
       <p
-        className="text-[13px] font-semibold min-w-0 flex-1"
+        className="text-[0.8125rem] font-semibold min-w-0 flex-1"
         style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
       >
         {text}
@@ -1991,11 +1991,11 @@ function ReviewSection({ title, onEdit, children }: { title: string; onEdit: () 
   return (
     <div className="rounded-2xl p-4" style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)' }}>
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-[14px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>{title}</h3>
+        <h3 className="text-[0.875rem] font-bold" style={{ color: 'var(--brand-text-primary)' }}>{title}</h3>
         <button
           type="button"
           onClick={onEdit}
-          className="flex items-center gap-1 text-[12px] font-bold cursor-pointer"
+          className="flex items-center gap-1 text-[0.75rem] font-bold cursor-pointer"
           style={{ color: 'var(--brand-primary-purple)' }}
         >
           <Pencil className="w-3.5 h-3.5" /> Edit
@@ -2008,7 +2008,7 @@ function ReviewSection({ title, onEdit, children }: { title: string; onEdit: () 
 
 function ReviewRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between text-[13px]">
+    <div className="flex items-center justify-between text-[0.8125rem]">
       {label && <span style={{ color: 'var(--brand-text-muted)' }}>{label}</span>}
       <span className="font-semibold" style={{ color: 'var(--brand-text-primary)' }}>{value}</span>
     </div>
@@ -2065,10 +2065,10 @@ function DedupModal({
         className="bg-white rounded-3xl p-6 max-w-sm w-full"
         style={{ boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}
       >
-        <h3 className="text-[18px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+        <h3 className="text-[1.125rem] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
           {t('intake.a7.title')}
         </h3>
-        <p className="text-[13px] mb-5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+        <p className="text-[0.8125rem] mb-5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
           {t('intake.a7.body')
             .replace('{component}', componentSentenceCased)
             .replace('{combo}', conflict.comboBrand)
@@ -2078,7 +2078,7 @@ function DedupModal({
           <button
             type="button"
             onClick={() => onResolve('KEEP_COMBO', conflict)}
-            className="w-full h-11 rounded-xl text-[13.5px] font-bold cursor-pointer"
+            className="w-full h-11 rounded-xl text-[0.84375rem] font-bold cursor-pointer"
             style={{ backgroundColor: 'var(--brand-primary-purple)', color: 'white' }}
           >
             {t('intake.a7.keepCombo').replace('{combo}', conflict.comboBrand)}
@@ -2086,7 +2086,7 @@ function DedupModal({
           <button
             type="button"
             onClick={() => onResolve('KEEP_SINGLE', conflict)}
-            className="w-full h-11 rounded-xl text-[13.5px] font-bold cursor-pointer"
+            className="w-full h-11 rounded-xl text-[0.84375rem] font-bold cursor-pointer"
             style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
           >
             {t('intake.a7.keepSingle').replace('{component}', componentSentenceCased)}
@@ -2094,7 +2094,7 @@ function DedupModal({
           <button
             type="button"
             onClick={() => onResolve('KEEP_BOTH', conflict)}
-            className="w-full h-11 rounded-xl text-[13.5px] font-bold cursor-pointer"
+            className="w-full h-11 rounded-xl text-[0.84375rem] font-bold cursor-pointer"
             style={{ backgroundColor: 'white', color: 'var(--brand-text-secondary)', border: '1.5px solid var(--brand-border)' }}
           >
             {t('intake.a7.keepBoth')}
@@ -2103,7 +2103,7 @@ function DedupModal({
         <button
           type="button"
           onClick={onCancel}
-          className="w-full mt-3 text-[12px] font-semibold cursor-pointer"
+          className="w-full mt-3 text-[0.75rem] font-semibold cursor-pointer"
           style={{ color: 'var(--brand-text-muted)' }}
         >
           {t('intake.a7.goBack')}
@@ -2156,15 +2156,15 @@ function ExitSaveModal({
         >
           <Save className="w-7 h-7" style={{ color: 'var(--brand-primary-purple)' }} />
         </div>
-        <h3 className="text-[18px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+        <h3 className="text-[1.125rem] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
           {title}
         </h3>
-        <p className="text-[13px] mb-4 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+        <p className="text-[0.8125rem] mb-4 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
           {body}
         </p>
         {error && (
           <p
-            className="text-[12px] mb-4 px-3 py-2 rounded-lg"
+            className="text-[0.75rem] mb-4 px-3 py-2 rounded-lg"
             style={{
               color: 'var(--brand-alert-red-text)',
               backgroundColor: 'var(--brand-alert-red-light)',
@@ -2177,7 +2177,7 @@ function ExitSaveModal({
           type="button"
           onClick={onConfirm}
           disabled={saving}
-          className="w-full h-11 rounded-full text-white font-bold text-[14px] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full h-11 rounded-full text-white font-bold text-[0.875rem] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
         >
           {saving ? t('intake.exitSave.saving') : cta}
@@ -2187,7 +2187,7 @@ function ExitSaveModal({
             type="button"
             onClick={onDiscard}
             disabled={saving}
-            className="w-full mt-2 h-11 rounded-full font-semibold text-[14px] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+            className="w-full mt-2 h-11 rounded-full font-semibold text-[0.875rem] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             style={{
               backgroundColor: 'var(--brand-alert-red-light)',
               color: 'var(--brand-alert-red-text)',
@@ -2200,7 +2200,7 @@ function ExitSaveModal({
           type="button"
           onClick={onCancel}
           disabled={saving}
-          className="w-full mt-2 text-[12px] font-semibold cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full mt-2 text-[0.75rem] font-semibold cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           style={{ color: 'var(--brand-text-muted)' }}
         >
           {t('intake.exitSave.keepGoing')}
@@ -2741,14 +2741,14 @@ function ClinicalIntakeWizard() {
         <div className="rounded-full flex items-center justify-center mb-5" style={{ width: 80, height: 80, backgroundColor: 'var(--brand-success-green-light)' }}>
           <Check className="w-10 h-10" style={{ color: 'var(--brand-success-green)' }} strokeWidth={3} />
         </div>
-        <h1 className="text-[22px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('intake.profileExists.title')}</h1>
-        <p className="text-[14px] mb-6 max-w-sm" style={{ color: 'var(--brand-text-secondary)' }}>
+        <h1 className="text-[1.375rem] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('intake.profileExists.title')}</h1>
+        <p className="text-[0.875rem] mb-6 max-w-sm" style={{ color: 'var(--brand-text-secondary)' }}>
           {t('intake.profileExists.body')}
         </p>
         <button
           type="button"
           onClick={() => router.push('/dashboard')}
-          className="h-11 px-6 rounded-full text-white font-bold text-[14px] cursor-pointer"
+          className="h-11 px-6 rounded-full text-white font-bold text-[0.875rem] cursor-pointer"
           style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
         >
           {t('intake.profileExists.cta')}
@@ -2801,7 +2801,7 @@ function ClinicalIntakeWizard() {
             <button
               type="button"
               onClick={goBack}
-              className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[13px] font-semibold cursor-pointer"
+              className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[0.8125rem] font-semibold cursor-pointer"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
               <ArrowLeft className="w-4 h-4" />
@@ -2811,7 +2811,7 @@ function ClinicalIntakeWizard() {
             <button
               type="button"
               onClick={() => setShowExitSave(true)}
-              className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[13px] font-semibold cursor-pointer"
+              className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[0.8125rem] font-semibold cursor-pointer"
               style={{ color: 'var(--brand-text-muted)' }}
               aria-label={t('intake.nav.saveAria')}
             >
@@ -2841,7 +2841,7 @@ function ClinicalIntakeWizard() {
               aria-hidden
             />
             <p
-              className="text-[12.5px] leading-snug"
+              className="text-[0.78125rem] leading-snug"
               style={{ color: 'var(--brand-text-primary)' }}
             >
               {t('intake.edit.reverifyBanner')}
@@ -2907,7 +2907,7 @@ function ClinicalIntakeWizard() {
 
         {submitError && (
           <p
-            className="mt-5 text-[13px] text-center font-semibold px-4 py-2 rounded-lg"
+            className="mt-5 text-[0.8125rem] text-center font-semibold px-4 py-2 rounded-lg"
             style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
           >
             {(() => {
@@ -2945,7 +2945,7 @@ function ClinicalIntakeWizard() {
                   data-testid="intake-submit"
                   onClick={goNext}
                   disabled={submitting || exitSaving}
-                  className="flex-1 h-12 rounded-full border-2 font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                  className="flex-1 h-12 rounded-full border-2 font-bold text-[0.875rem] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
                   style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
                 >
                   {step === 'A10' ? t('intake.nav.submit') : t('intake.nav.continue')}
@@ -2955,7 +2955,7 @@ function ClinicalIntakeWizard() {
                   data-testid="intake-quick-save"
                   onClick={handleQuickSave}
                   disabled={submitting || exitSaving}
-                  className="flex-1 h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                  className="flex-1 h-12 rounded-full text-white font-bold text-[0.875rem] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
                   style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.98 }}
@@ -2970,7 +2970,7 @@ function ClinicalIntakeWizard() {
                 data-testid="intake-submit"
                 onClick={goNext}
                 disabled={submitting}
-                className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                className="w-full h-12 rounded-full text-white font-bold text-[0.875rem] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
                 style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.98 }}

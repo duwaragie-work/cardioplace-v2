@@ -78,13 +78,13 @@ export default function UpdateCard({ summary, onDismiss }: Props) {
           )}
           <div className="min-w-0">
             <p
-              className="font-bold text-[15px] leading-tight"
+              className="font-bold text-[0.9375rem] leading-tight"
               style={{ color: 'var(--brand-text-primary)' }}
             >
               {summary.updated ? t('chat.card.updated') : t('chat.card.updateFailed')}
             </p>
             {summary.entryDate && (
-              <p className="text-[11px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.6875rem] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
                 {new Date(summary.entryDate).toLocaleDateString('en-US', {
                   month: 'short',
                   day: 'numeric',
@@ -103,22 +103,22 @@ export default function UpdateCard({ summary, onDismiss }: Props) {
             <div className="flex items-baseline gap-1">
               <span
                 lang="en"
-                className="text-[36px] font-bold leading-none"
+                className="text-[2.25rem] font-bold leading-none"
                 style={{ color: 'var(--brand-accent-teal)' }}
               >
                 {summary.systolicBP}
               </span>
-              <span className="text-[24px] font-light" style={{ color: 'var(--brand-text-muted)' }}>
+              <span className="text-[1.5rem] font-light" style={{ color: 'var(--brand-text-muted)' }}>
                 /
               </span>
               <span
                 lang="en"
-                className="text-[36px] font-bold leading-none"
+                className="text-[2.25rem] font-bold leading-none"
                 style={{ color: 'var(--brand-accent-teal)' }}
               >
                 {summary.diastolicBP}
               </span>
-              <span className="text-[12px] ml-1" style={{ color: 'var(--brand-text-muted)' }}>
+              <span className="text-[0.75rem] ml-1" style={{ color: 'var(--brand-text-muted)' }}>
                 mmHg
               </span>
             </div>
@@ -126,7 +126,7 @@ export default function UpdateCard({ summary, onDismiss }: Props) {
           <div className="flex items-center gap-3 mt-2 flex-wrap">
             {summary.pulse != null && (
               <span
-                className="inline-flex items-center gap-1 text-[12px]"
+                className="inline-flex items-center gap-1 text-[0.75rem]"
                 style={{ color: 'var(--brand-text-secondary)' }}
               >
                 <Heart className="w-3.5 h-3.5" aria-hidden="true" />
@@ -134,7 +134,7 @@ export default function UpdateCard({ summary, onDismiss }: Props) {
               </span>
             )}
             {positionLabel && (
-              <span className="text-[12px]" style={{ color: 'var(--brand-text-secondary)' }}>
+              <span className="text-[0.75rem]" style={{ color: 'var(--brand-text-secondary)' }}>
                 · {positionLabel}
               </span>
             )}
@@ -156,7 +156,7 @@ export default function UpdateCard({ summary, onDismiss }: Props) {
             aria-hidden="true"
           />
           <p
-            className="text-[12px] leading-snug"
+            className="text-[0.75rem] leading-snug"
             style={{ color: 'var(--brand-text-primary)' }}
           >
             {summary.alert.patientMessage ?? 'Your care team will see this update.'}
@@ -172,31 +172,31 @@ export default function UpdateCard({ summary, onDismiss }: Props) {
           {summary.weight != null && (
             <div>
               <p
-                className="text-[10px] font-semibold uppercase tracking-wider"
+                className="text-[0.625rem] font-semibold uppercase tracking-wider"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 Weight
               </p>
               <p
                 lang="en"
-                className="text-[16px] font-bold"
+                className="text-[1rem] font-bold"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
-                {summary.weight} <span className="text-[11px] font-normal">lbs</span>
+                {summary.weight} <span className="text-[0.6875rem] font-normal">lbs</span>
               </p>
             </div>
           )}
           {summary.bmi != null && (
             <div>
               <p
-                className="text-[10px] font-semibold uppercase tracking-wider"
+                className="text-[0.625rem] font-semibold uppercase tracking-wider"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 BMI
               </p>
               <p
                 lang="en"
-                className="text-[16px] font-bold"
+                className="text-[1rem] font-bold"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
                 {summary.bmi.toFixed(1)}
@@ -211,13 +211,13 @@ export default function UpdateCard({ summary, onDismiss }: Props) {
         style={{ borderTop: '1px solid var(--brand-border)' }}
       >
         <p
-          className="text-[10px] font-semibold uppercase tracking-wider mb-1.5"
+          className="text-[0.625rem] font-semibold uppercase tracking-wider mb-1.5"
           style={{ color: 'var(--brand-text-muted)' }}
         >
           Medications
         </p>
         <p
-          className="text-[13px] font-medium"
+          className="text-[0.8125rem] font-medium"
           style={{
             color: medicationColor(summary.medicationTaken, summary.medicationScheduledLater),
           }}
@@ -233,7 +233,7 @@ export default function UpdateCard({ summary, onDismiss }: Props) {
           style={{ borderTop: '1px solid var(--brand-border)' }}
         >
           <p
-            className="text-[10px] font-semibold uppercase tracking-wider mb-1.5"
+            className="text-[0.625rem] font-semibold uppercase tracking-wider mb-1.5"
             style={{ color: 'var(--brand-text-muted)' }}
           >
             Symptoms
@@ -242,7 +242,7 @@ export default function UpdateCard({ summary, onDismiss }: Props) {
             {flaggedSymptoms.map((s) => (
               <span
                 key={s}
-                className="text-[11px] px-2 py-1 rounded-md font-semibold inline-flex items-center gap-1"
+                className="text-[0.6875rem] px-2 py-1 rounded-md font-semibold inline-flex items-center gap-1"
                 style={{
                   backgroundColor: 'var(--brand-alert-red-light)',
                   color: 'var(--brand-alert-red-text)',
@@ -255,7 +255,7 @@ export default function UpdateCard({ summary, onDismiss }: Props) {
             {(summary.otherSymptoms ?? []).map((s, i) => (
               <span
                 key={`other-${i}`}
-                className="text-[11px] px-2 py-1 rounded-md font-medium"
+                className="text-[0.6875rem] px-2 py-1 rounded-md font-medium"
                 style={{
                   backgroundColor: 'var(--brand-warning-amber-light)',
                   color: 'var(--brand-warning-amber-text)',
@@ -274,7 +274,7 @@ export default function UpdateCard({ summary, onDismiss }: Props) {
       >
         <Link
           href="/readings"
-          className="flex-1 h-11 rounded-xl font-semibold text-[13px] inline-flex items-center justify-center gap-1.5 transition hover:opacity-90"
+          className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] inline-flex items-center justify-center gap-1.5 transition hover:opacity-90"
           style={{
             backgroundColor: 'var(--brand-accent-teal-light)',
             color: 'var(--brand-accent-teal)',
@@ -285,7 +285,7 @@ export default function UpdateCard({ summary, onDismiss }: Props) {
         </Link>
         <button
           onClick={onDismiss}
-          className="flex-1 h-11 rounded-xl font-semibold text-[13px] text-white transition hover:opacity-90"
+          className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] text-white transition hover:opacity-90"
           style={{
             background: 'linear-gradient(135deg, #0D9488, #14B8A6)',
             boxShadow: '0 4px 14px rgba(13,148,136,0.28)',
