@@ -151,6 +151,17 @@ describe('normalisers (text chat)', () => {
 // ─── submit_checkin ───────────────────────────────────────────────────────────
 
 describe('submit_checkin scenarios', () => {
+  // Lock the wall clock so the dispatcher's NY-local "today" (per Bug 28)
+  // matches `new Date().toISOString().slice(0, 10)` paths inside tests.
+  // 16:00 UTC = noon EDT → both UTC and NY fall on the same calendar date.
+  beforeAll(() => {
+    jest.useFakeTimers()
+    jest.setSystemTime(new Date('2026-06-09T16:00:00.000Z'))
+  })
+  afterAll(() => {
+    jest.useRealTimers()
+  })
+
   it('happy path: required fields → calls journal.create + returns saved:true', async () => {
     const ctx = makeCtx()
     const result = await executeJournalTool(

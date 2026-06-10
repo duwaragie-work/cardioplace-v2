@@ -246,6 +246,20 @@ describe('journal-tools', () => {
       delete: jest.fn<any>(),
     }
 
+    // Lock the wall clock so `new Date().toISOString().slice(0, 10)` (used
+    // throughout these tests as "entry_date: todayISO") matches the
+    // dispatcher's tz-aware "today" (per Bug 28's NY-local default). 16:00
+    // UTC = noon EDT — UTC and NY both fall on the same calendar date, so
+    // the future-date guard never spuriously fires when the wallclock has
+    // crossed into a UTC-ahead-of-NY window since the test was written.
+    beforeAll(() => {
+      jest.useFakeTimers()
+      jest.setSystemTime(new Date('2026-06-09T16:00:00.000Z'))
+    })
+    afterAll(() => {
+      jest.useRealTimers()
+    })
+
     beforeEach(() => {
       jest.clearAllMocks()
     })
