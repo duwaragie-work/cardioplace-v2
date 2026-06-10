@@ -352,6 +352,7 @@ export default function ScheduleModal({
                     rows={3}
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
+                    aria-label={t('schedule.notes')}
                     placeholder={t('schedule.notesPlaceholder')}
                     className="w-full rounded-xl px-4 py-3 text-[13px] resize-none outline-none transition"
                     style={{

@@ -222,6 +222,7 @@ export default function CaregiversCard() {
           <div className="rounded-xl px-3 py-3 space-y-2.5" style={{ border: '1px solid var(--brand-border)', backgroundColor: 'var(--brand-background)' }}>
             <input
               data-testid="profile-caregiver-name-input"
+              aria-label={t('caregiver.namePlaceholder')}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={t('caregiver.namePlaceholder')}
@@ -230,6 +231,7 @@ export default function CaregiversCard() {
             />
             <input
               data-testid="profile-caregiver-relationship-input"
+              aria-label={t('caregiver.relationshipPlaceholder')}
               value={relationship}
               onChange={(e) => setRelationship(e.target.value)}
               placeholder={t('caregiver.relationshipPlaceholder')}
@@ -238,6 +240,7 @@ export default function CaregiversCard() {
             />
             <input
               data-testid="profile-caregiver-email-input"
+              aria-label={t('caregiver.emailPlaceholder')}
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -247,6 +250,7 @@ export default function CaregiversCard() {
             />
             <select
               data-testid="profile-caregiver-channel-select"
+              aria-label="Notification method"
               value={channel}
               onChange={(e) => setChannel(e.target.value as CaregiverNotifyChannelInput)}
               className="w-full rounded-lg px-3 py-2 text-[13.5px] bg-white"

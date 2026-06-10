@@ -622,6 +622,7 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
               onChange={(e) => setTextInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Or type a message..."
+              aria-label="Type a message"
               className="flex-1 bg-transparent text-[13px] outline-none py-1.5"
               style={{ color: 'var(--brand-text-primary)' }}
             />

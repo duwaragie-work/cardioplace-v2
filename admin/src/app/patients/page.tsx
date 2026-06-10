@@ -1001,6 +1001,7 @@ export default function PatientsPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={t('provider.searchPatients')}
+                aria-label={t('provider.searchPatients')}
                 data-testid="admin-patient-search-input"
                 className="flex-1 text-[12px] outline-none bg-transparent min-w-0"
                 style={{ color: 'var(--brand-text-primary)' }}
@@ -1023,6 +1024,7 @@ export default function PatientsPage() {
                 <select
                   value={riskFilter}
                   onChange={(e) => setRiskFilter(e.target.value)}
+                  aria-label={t('provider.allTiers')}
                   data-testid="admin-patient-risk-filter"
                   className="appearance-none w-full sm:w-auto h-9 pl-3 pr-7 rounded-full text-[12px] font-semibold outline-none cursor-pointer"
                   style={{

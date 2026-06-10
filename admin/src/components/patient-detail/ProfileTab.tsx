@@ -846,6 +846,7 @@ export default function ProfileTab({ patientId, profile, logs, loading, onChange
                 value={completeRationale}
                 onChange={(e) => setCompleteRationale(e.target.value)}
                 data-testid="admin-profile-verify-rationale"
+                aria-label="Optional rationale for the audit log"
                 placeholder="Optional rationale for the audit log"
                 className="px-3 h-9 rounded-lg text-[12.5px] outline-none"
                 style={{ border: '1px solid var(--brand-border)', minWidth: 240 }}
@@ -920,6 +921,7 @@ function renderEditor(field: FieldDef, value: unknown, onChange: (v: unknown) =>
       <select
         value={value ? 'true' : 'false'}
         onChange={(e) => onChange(e.target.value === 'true')}
+        aria-label={field.label}
         data-testid={`admin-profile-edit-input-${field.key}`}
         className="px-2.5 h-8 rounded-lg text-[12px] outline-none w-full"
         style={{ border: '1px solid var(--brand-border)' }}
@@ -934,6 +936,7 @@ function renderEditor(field: FieldDef, value: unknown, onChange: (v: unknown) =>
       <select
         value={(value as string) ?? ''}
         onChange={(e) => onChange(e.target.value)}
+        aria-label={field.label}
         data-testid={`admin-profile-edit-input-${field.key}`}
         className="px-2.5 h-8 rounded-lg text-[12px] outline-none w-full"
         style={{ border: '1px solid var(--brand-border)' }}
@@ -952,6 +955,7 @@ function renderEditor(field: FieldDef, value: unknown, onChange: (v: unknown) =>
         type="date"
         value={value ? String(value).slice(0, 10) : ''}
         onChange={(e) => onChange(e.target.value || null)}
+        aria-label={field.label}
         data-testid={`admin-profile-edit-input-${field.key}`}
         className="px-2.5 h-8 rounded-lg text-[12px] outline-none w-full"
         style={{ border: '1px solid var(--brand-border)' }}
@@ -964,6 +968,7 @@ function renderEditor(field: FieldDef, value: unknown, onChange: (v: unknown) =>
       type="number"
       value={(value as number | null) ?? ''}
       onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+      aria-label={field.label}
       data-testid={`admin-profile-edit-input-${field.key}`}
       className="px-2.5 h-8 rounded-lg text-[12px] outline-none w-full"
       style={{ border: '1px solid var(--brand-border)' }}

@@ -655,6 +655,7 @@ export default function ScheduledCallsPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={t('provider.searchCalls')}
+                aria-label={t('provider.searchCalls')}
                 className="flex-1 text-[12px] outline-none bg-transparent"
                 style={{ color: 'var(--brand-text-primary)' }}
               />
@@ -670,6 +671,7 @@ export default function ScheduledCallsPage() {
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
+                aria-label={t('provider.allStatuses')}
                 className="appearance-none h-9 pl-3 pr-7 rounded-full text-[12px] font-semibold outline-none cursor-pointer"
                 style={{
                   backgroundColor: 'white',

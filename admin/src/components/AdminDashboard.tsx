@@ -688,6 +688,7 @@ export default function AdminDashboard() {
                     value={alertSearch}
                     onChange={(e) => setAlertSearch(e.target.value)}
                     placeholder="Search patient or BP"
+                    aria-label="Search patient or BP"
                     data-testid="admin-dashboard-search"
                     className="flex-1 text-[11px] outline-none bg-transparent min-w-0"
                     style={{ color: 'var(--brand-text-primary)' }}

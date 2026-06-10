@@ -447,6 +447,7 @@ export default function NotificationsScreen() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search by patient, tier, or reading"
+                  aria-label="Search by patient, tier, or reading"
                   className="flex-1 text-[12px] outline-none bg-transparent min-w-0"
                   style={{ color: 'var(--brand-text-primary)' }}
                 />

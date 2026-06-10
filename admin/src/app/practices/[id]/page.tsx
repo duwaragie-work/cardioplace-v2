@@ -451,6 +451,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
                   <div className="flex items-center gap-2 flex-wrap">
                     <select
                       data-testid="admin-practice-staff-picker"
+                      aria-label={pickerRole === 'PROVIDER' ? 'Select provider' : 'Select medical director'}
                       value={pickerUserId}
                       onChange={(e) => setPickerUserId(e.target.value)}
                       disabled={pickerLoading}

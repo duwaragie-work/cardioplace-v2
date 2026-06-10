@@ -862,6 +862,7 @@ export default function TimelineTab({ logs, alerts, medications, logsLoading, al
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search events, values, notes…"
+              aria-label="Search events, values, notes"
               data-testid="admin-timeline-search"
               className="w-full h-8 pl-8 pr-2 rounded-lg text-[12px] outline-none"
               style={{ border: '1px solid var(--brand-border)', color: 'var(--brand-text-primary)' }}
@@ -878,6 +879,7 @@ export default function TimelineTab({ logs, alerts, medications, logsLoading, al
               <select
                 value={actorFilter}
                 onChange={(e) => setActorFilter(e.target.value)}
+                aria-label="Filter by actor"
                 data-testid="admin-timeline-actor"
                 className="w-full sm:w-auto h-8 pl-8 pr-2 rounded-lg text-[12px] outline-none cursor-pointer bg-white"
                 style={{ border: '1px solid var(--brand-border)', color: 'var(--brand-text-primary)', maxWidth: 200 }}
@@ -899,6 +901,7 @@ export default function TimelineTab({ logs, alerts, medications, logsLoading, al
               <select
                 value={rangePreset}
                 onChange={(e) => setRangePreset(e.target.value as typeof rangePreset)}
+                aria-label="Filter by date range"
                 data-testid="admin-timeline-range"
                 className="w-full sm:w-auto h-8 pl-8 pr-2 rounded-lg text-[12px] outline-none cursor-pointer bg-white"
                 style={{ border: '1px solid var(--brand-border)', color: 'var(--brand-text-primary)' }}
@@ -918,6 +921,7 @@ export default function TimelineTab({ logs, alerts, medications, logsLoading, al
                 type="date"
                 value={customFrom}
                 onChange={(e) => setCustomFrom(e.target.value)}
+                aria-label="Custom range from date"
                 data-testid="admin-timeline-range-from"
                 className="flex-1 sm:flex-none min-w-0 h-8 px-2 rounded-lg text-[12px] outline-none bg-white"
                 style={{ border: '1px solid var(--brand-border)', color: 'var(--brand-text-primary)' }}
@@ -927,6 +931,7 @@ export default function TimelineTab({ logs, alerts, medications, logsLoading, al
                 type="date"
                 value={customTo}
                 onChange={(e) => setCustomTo(e.target.value)}
+                aria-label="Custom range to date"
                 data-testid="admin-timeline-range-to"
                 className="flex-1 sm:flex-none min-w-0 h-8 px-2 rounded-lg text-[12px] outline-none bg-white"
                 style={{ border: '1px solid var(--brand-border)', color: 'var(--brand-text-primary)' }}

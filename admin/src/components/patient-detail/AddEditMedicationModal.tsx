@@ -111,8 +111,9 @@ export default function AddEditMedicationModal({ patientUserId, medication, onCl
           </p>
         )}
 
-        <label className="block text-[12px] font-semibold mb-1">Drug name</label>
+        <label htmlFor="admin-med-drugname" className="block text-[12px] font-semibold mb-1">Drug name</label>
         <input
+          id="admin-med-drugname"
           data-testid="admin-med-drugname"
           value={drugName}
           onChange={(e) => setDrugName(e.target.value)}
@@ -120,8 +121,9 @@ export default function AddEditMedicationModal({ patientUserId, medication, onCl
           style={{ border: '1px solid var(--brand-border)' }}
         />
 
-        <label className="block text-[12px] font-semibold mb-1">Drug class</label>
+        <label htmlFor="admin-med-drugclass" className="block text-[12px] font-semibold mb-1">Drug class</label>
         <select
+          id="admin-med-drugclass"
           data-testid="admin-med-drugclass"
           value={drugClass}
           onChange={(e) => setDrugClass(e.target.value)}
@@ -133,8 +135,9 @@ export default function AddEditMedicationModal({ patientUserId, medication, onCl
           ))}
         </select>
 
-        <label className="block text-[12px] font-semibold mb-1">Frequency</label>
+        <label htmlFor="admin-med-frequency" className="block text-[12px] font-semibold mb-1">Frequency</label>
         <select
+          id="admin-med-frequency"
           data-testid="admin-med-frequency"
           value={frequency}
           onChange={(e) => setFrequency(e.target.value)}
@@ -146,8 +149,9 @@ export default function AddEditMedicationModal({ patientUserId, medication, onCl
           ))}
         </select>
 
-        <label className="block text-[12px] font-semibold mb-1">Dose (optional)</label>
+        <label htmlFor="admin-med-dose" className="block text-[12px] font-semibold mb-1">Dose (optional)</label>
         <input
+          id="admin-med-dose"
           data-testid="admin-med-dose"
           value={dose}
           onChange={(e) => setDose(e.target.value)}
@@ -156,8 +160,9 @@ export default function AddEditMedicationModal({ patientUserId, medication, onCl
           style={{ border: '1px solid var(--brand-border)' }}
         />
 
-        <label className="block text-[12px] font-semibold mb-1">Notes (optional)</label>
+        <label htmlFor="admin-med-notes" className="block text-[12px] font-semibold mb-1">Notes (optional)</label>
         <textarea
+          id="admin-med-notes"
           data-testid="admin-med-notes"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
