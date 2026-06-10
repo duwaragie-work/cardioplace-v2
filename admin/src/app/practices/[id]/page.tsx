@@ -197,7 +197,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
 
   return (
     <div className="h-full" style={{ backgroundColor: 'var(--brand-background)' }}>
-      <main className="p-4 md:p-8 max-w-[1200px] mx-auto space-y-5">
+      <div className="p-4 md:p-8 max-w-[1200px] mx-auto space-y-5">
         {/* Back link */}
         <button
           type="button"
@@ -451,6 +451,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
                   <div className="flex items-center gap-2 flex-wrap">
                     <select
                       data-testid="admin-practice-staff-picker"
+                      aria-label={pickerRole === 'PROVIDER' ? 'Select provider' : 'Select medical director'}
                       value={pickerUserId}
                       onChange={(e) => setPickerUserId(e.target.value)}
                       disabled={pickerLoading}
@@ -561,7 +562,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
             </div>
           </>
         )}
-      </main>
+      </div>
     </div>
   );
 }

@@ -76,7 +76,7 @@ export default function LandingFooter() {
             <div className="bg-white rounded-lg px-2 py-1.5 shrink-0">
               <Image src="/DCHA-Logo.png" alt="DC Hospital Association" width={64} height={48} className="w-16 h-10 object-contain" />
             </div>
-            <p className="text-white/70 text-sm leading-relaxed">
+            <p className="text-white text-sm leading-relaxed">
               {t('landing.copyright')}
             </p>
           </div>
@@ -86,16 +86,16 @@ export default function LandingFooter() {
         <div className="grid grid-cols-2 gap-8">
           <div className="flex flex-col gap-3">
             <span className="font-bold text-white text-sm">{t('landing.company')}</span>
-            <a href="/about" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.mission')}</a>
-            <a href="/about" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.ourStory')}</a>
-            <a href="/about#team" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.team')}</a>
+            <a href="/about" className="text-white font-medium text-sm hover:text-white transition-colors">{t('landing.mission')}</a>
+            <a href="/about" className="text-white font-medium text-sm hover:text-white transition-colors">{t('landing.ourStory')}</a>
+            <a href="/about#team" className="text-white font-medium text-sm hover:text-white transition-colors">{t('landing.team')}</a>
             {/* Care Teams link hidden — page section not yet built. */}
-            {/* <a href="/about" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.careTeams')}</a> */}
+            {/* <a href="/about" className="text-white font-medium text-sm hover:text-white transition-colors">{t('landing.careTeams')}</a> */}
           </div>
           <div className="flex flex-col gap-3">
             <span className="font-bold text-white text-sm">{t('landing.legal')}</span>
-            <Link href="/privacy" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.privacy')}</Link>
-            <Link href="/terms" className="text-white/70 font-medium text-sm hover:text-white transition-colors">{t('landing.terms')}</Link>
+            <Link href="/privacy" className="text-white font-medium text-sm hover:text-white transition-colors">{t('landing.privacy')}</Link>
+            <Link href="/terms" className="text-white font-medium text-sm hover:text-white transition-colors">{t('landing.terms')}</Link>
           </div>
         </div>
 
@@ -112,7 +112,7 @@ export default function LandingFooter() {
                 <Send className="w-4 h-4 text-white" />
               </div>
               <p className="text-white font-semibold text-sm">{t('landing.messageSent')}</p>
-              <p className="text-white/70 text-xs mt-1">{t('landing.messageReply')}</p>
+              <p className="text-white text-xs mt-1">{t('landing.messageReply')}</p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="flex flex-col gap-3">

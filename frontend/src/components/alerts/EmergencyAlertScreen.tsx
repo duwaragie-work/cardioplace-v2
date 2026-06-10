@@ -260,7 +260,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge, isPreEnroll
             initial={{ y: -20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: -20, opacity: 0 }}
-            className="mx-4 mt-3 sm:mx-auto sm:mt-4 sm:max-w-md py-2 rounded-full text-[12.5px] font-bold cursor-pointer"
+            className="mx-4 mt-3 sm:mx-auto sm:mt-4 sm:max-w-md py-2 rounded-full text-[0.78125rem] font-bold cursor-pointer"
             style={{ backgroundColor: 'rgba(0,0,0,0.18)', color: 'white' }}
           >
             {t('alerts.emergency.audioHint')}
@@ -295,7 +295,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge, isPreEnroll
             <>
               <h1
                 lang="en"
-                className="text-[26px] sm:text-[32px] font-extrabold leading-tight mb-4"
+                className="text-[1.625rem] sm:text-[2rem] font-extrabold leading-tight mb-4"
                 style={{ wordBreak: 'break-word' }}
               >
                 {ANGIOEDEMA_TITLE}
@@ -303,11 +303,11 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge, isPreEnroll
               <p
                 data-testid="emergency-screen-message"
                 lang={angioedemaBodyLang}
-                className="text-[16px] sm:text-[18px] leading-relaxed mb-3 opacity-95"
+                className="text-[1rem] sm:text-[1.125rem] leading-relaxed mb-3 opacity-95"
               >
                 {angioedemaBody}
               </p>
-              <p lang="en" className="text-[13px] sm:text-[14px] opacity-90" data-testid="emergency-screen-reassurance">
+              <p lang="en" className="text-[0.8125rem] sm:text-[0.875rem] opacity-90" data-testid="emergency-screen-reassurance">
                 {effectiveAngioedemaReassurance}
               </p>
             </>
@@ -317,26 +317,26 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge, isPreEnroll
             <>
               <h1
                 lang="en"
-                className="text-[26px] sm:text-[32px] font-extrabold leading-tight mb-4"
+                className="text-[1.625rem] sm:text-[2rem] font-extrabold leading-tight mb-4"
                 style={{ wordBreak: 'break-word' }}
               >
                 {MESSAGE_TITLE}
               </h1>
-              <p data-testid="emergency-screen-message" lang="en" className="text-[16px] sm:text-[18px] leading-relaxed mb-3 opacity-95">
+              <p data-testid="emergency-screen-message" lang="en" className="text-[1rem] sm:text-[1.125rem] leading-relaxed mb-3 opacity-95">
                 If you have <b>chest pain</b>, <b>severe headache</b>, <b>difficulty breathing</b>, or <b>vision changes</b>, call 911 now.
               </p>
-              <p lang="en" className="text-[13px] sm:text-[14px] opacity-90" data-testid="emergency-screen-reassurance">{effectiveReassurance}</p>
+              <p lang="en" className="text-[0.8125rem] sm:text-[0.875rem] opacity-90" data-testid="emergency-screen-reassurance">{effectiveReassurance}</p>
             </>
           )
         ) : (
           <>
             <h1
-              className="text-[26px] sm:text-[32px] font-extrabold leading-tight mb-3"
+              className="text-[1.625rem] sm:text-[2rem] font-extrabold leading-tight mb-3"
               style={{ wordBreak: 'break-word' }}
             >
               {t('alerts.emergency.followupTitle')}
             </h1>
-            <p className="text-[14px] sm:text-[15px] opacity-95">
+            <p className="text-[0.875rem] sm:text-[0.9375rem] opacity-95">
               {(() => {
                 const e = followUpElapsed(alert.createdAt);
                 return e.show
@@ -358,7 +358,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge, isPreEnroll
             <a
               href="tel:911"
               data-testid="emergency-call-911-button"
-              className="block w-full text-center rounded-full py-4 sm:py-5 font-extrabold text-[20px] sm:text-[22px] active:scale-[0.98] transition"
+              className="block w-full text-center rounded-full py-4 sm:py-5 font-extrabold text-[1.25rem] sm:text-[1.375rem] active:scale-[0.98] transition"
               style={{
                 backgroundColor: 'white',
                 color: 'var(--brand-alert-red)',
@@ -375,7 +375,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge, isPreEnroll
               type="button"
               data-testid="alert-acknowledge-button"
               onClick={handleUnderstand}
-              className="w-full rounded-full py-3 font-bold text-[14px] cursor-pointer transition"
+              className="w-full rounded-full py-3 font-bold text-[0.875rem] cursor-pointer transition"
               style={{
                 backgroundColor: 'rgba(0,0,0,0.18)',
                 color: 'white',
@@ -389,7 +389,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge, isPreEnroll
             <button
               type="button"
               onClick={handleFollowupYes}
-              className="rounded-full py-4 font-extrabold text-[16px] flex items-center justify-center gap-2 cursor-pointer transition active:scale-[0.98]"
+              className="rounded-full py-4 font-extrabold text-[1rem] flex items-center justify-center gap-2 cursor-pointer transition active:scale-[0.98]"
               style={{
                 backgroundColor: 'white',
                 color: 'var(--brand-alert-red)',
@@ -401,7 +401,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge, isPreEnroll
             <button
               type="button"
               onClick={handleFollowupNotYet}
-              className="rounded-full py-4 font-extrabold text-[16px] flex items-center justify-center gap-2 cursor-pointer transition"
+              className="rounded-full py-4 font-extrabold text-[1rem] flex items-center justify-center gap-2 cursor-pointer transition"
               style={{
                 backgroundColor: 'rgba(0,0,0,0.22)',
                 color: 'white',
