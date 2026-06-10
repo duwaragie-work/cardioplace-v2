@@ -69,7 +69,7 @@ export default function AdminAbout() {
     <div className="bg-[#fef7ff] flex flex-col min-h-screen overflow-x-hidden">
       <LandingHeader activeLink="About" />
 
-      <main id="main" className="flex flex-col items-center pt-[64px] w-full overflow-x-hidden">
+      <main id="main" tabIndex={-1} className="flex flex-col items-center pt-[64px] w-full overflow-x-hidden">
         {/* ============ HERO SECTION ============ */}
         <section className="w-full bg-[#fef7ff] flex items-start lg:items-center justify-center min-h-[calc(100vh-64px)] px-4 sm:px-6 md:px-8 py-10 md:py-16 overflow-hidden">
           <div className="max-w-[1280px] w-full grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">

@@ -529,7 +529,7 @@ export default function AdminDashboard() {
         .admin-scroll { scrollbar-width: thin; scrollbar-color: #E0D4F5 transparent; }
       `}</style>
 
-      <main className="p-4 md:p-8">
+      <div className="p-4 md:p-8">
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div className="mb-6">
           <div className="flex items-center justify-between">
@@ -1065,7 +1065,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-      </main>
+      </div>
 
       {/* ── BP Trend Bottom Sheet — mobile/tablet ─────────────────────────── */}
       <AnimatePresence>

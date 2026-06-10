@@ -118,6 +118,31 @@ html {
   scroll-behavior: smooth;
 }
 
+/* ── Skip-to-main link (WCAG 2.4.1 Bypass Blocks) ─────────────────────────
+   First focusable element on every admin page. Hidden offscreen until a
+   keyboard user presses Tab, then it slides into view; Enter jumps focus to
+   <main id="main">, skipping the sidebar + top bar. */
+.skip-link {
+  position: absolute;
+  top: -48px;
+  left: 0;
+  background: var(--brand-primary-purple, #7B00E0);
+  color: white;
+  padding: 12px 20px;
+  font-weight: 700;
+  font-size: 14px;
+  border-radius: 0 0 8px 0;
+  z-index: 1000;
+  transition: top 120ms ease-out;
+  text-decoration: none;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  top: 0;
+  outline: 3px solid #ffffff;
+  outline-offset: -3px;
+}
+
 /* ── Thin brand scrollbar utility ─────────────────────────────────────────
    Apply via `className="thin-scrollbar"` on any element that owns its own
    overflow (sidebar nav, modal body, etc.). Uses brand primary purple to
