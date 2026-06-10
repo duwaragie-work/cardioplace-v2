@@ -1782,12 +1782,13 @@ function A9Frequency({ state, setState }: StepProps) {
 // "Continue" button just advances — no special submit wiring needed. Fully
 // optional: the patient can continue without adding anyone.
 function ACGCaregivers(_props: StepProps) {
+  const { t } = useLanguage();
   return (
     <div data-testid="intake-step-caregivers">
       <StepHeader
-        title="Add a caregiver (optional)"
-        subtitle="A family member or friend we can notify if a serious health alert comes up. They’re only contacted for care-team-approved alerts, and only after you give consent. You can skip this and add someone later from your profile."
-        audio="Optionally add a caregiver — a family member or friend we can notify if a serious health alert comes up. They are only contacted after you give consent. You can skip this and add someone later from your profile."
+        title={t('intake.caregivers.title')}
+        subtitle={t('intake.caregivers.subtitle')}
+        audio={t('intake.caregivers.audio')}
       />
       <div className="mt-4">
         <CaregiversCard />

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mic, MicOff, X, Send, CheckCircle, AlertCircle, PhoneCall, Pencil, Trash2, Heart } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
 import {
   useVoiceSession,
   type SessionState,
@@ -373,6 +374,7 @@ function CheckinCard({
 
 export default function VoiceChat({ onBack }: { onBack: () => void }) {
   const { token } = useAuth();
+  const { t } = useLanguage();
   const [mode, setMode] = useState<'checkin' | 'chat'>('chat');
   const [textInput, setTextInput] = useState('');
 
@@ -621,8 +623,8 @@ export default function VoiceChat({ onBack }: { onBack: () => void }) {
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Or type a message..."
-              aria-label="Type a message"
+              placeholder={t('chat.orTypePlaceholder')}
+              aria-label={t('chat.placeholder')}
               className="flex-1 bg-transparent text-[13px] outline-none py-1.5"
               style={{ color: 'var(--brand-text-primary)' }}
             />

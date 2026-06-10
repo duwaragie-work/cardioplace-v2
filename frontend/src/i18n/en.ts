@@ -1448,6 +1448,12 @@ const en = {
   'ocr.med.errRateLimited': 'Too many photo attempts today. Please add medications manually.',
   'ocr.med.errNetwork': 'Connection problem. Please add medications manually.',
   'ocr.med.errTooLarge': 'Photo is too big. Try a smaller picture.',
+
+  // i18n backfill — caregiver intake step + voice-chat text input
+  'intake.caregivers.title': 'Add a caregiver (optional)',
+  'intake.caregivers.subtitle': 'A family member or friend we can notify if a serious health alert comes up. They’re only contacted for care-team-approved alerts, and only after you give consent. You can skip this and add someone later from your profile.',
+  'intake.caregivers.audio': 'Optionally add a caregiver — a family member or friend we can notify if a serious health alert comes up. They are only contacted after you give consent. You can skip this and add someone later from your profile.',
+  'chat.orTypePlaceholder': 'Or type a message...',
 } as const;
 
 export type TranslationKey = keyof typeof en;

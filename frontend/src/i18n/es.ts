@@ -921,11 +921,11 @@ const es: Record<TranslationKey, string> = {
   'home.ctaDesc': "Desarrollado con la DC Hospital Association. Implementado en las comunidades de mayor riesgo de Washington DC. Diseñado para alcanzar a los pacientes que la tecnología de salud tradicional deja atrás.",
   'home.ctaButton': 'Sobre el Programa',
   // TODO i18n — placeholder English copy; translate when demo video is finalised.
-  'home.demoEyebrow': 'See it in action',
-  'home.demoTitle': 'A five-minute walkthrough',
-  'home.demoDesc': 'The patient experience and the care-team closed loop — end to end, in real time. Watch how an alert is generated, escalated, and resolved with full clinical accountability.',
-  'home.demoPlayLabel': 'Play the Cardioplace 5-minute demo',
-  'home.demoCloseLabel': 'Close demo',
+  'home.demoEyebrow': 'Véalo en acción',
+  'home.demoTitle': 'Un recorrido de cinco minutos',
+  'home.demoDesc': 'La experiencia del paciente y el circuito cerrado del equipo de atención: de principio a fin, en tiempo real. Vea cómo se genera, se escala y se resuelve una alerta con plena responsabilidad clínica.',
+  'home.demoPlayLabel': 'Reproducir la demostración de 5 minutos de Cardioplace',
+  'home.demoCloseLabel': 'Cerrar demostración',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'NUESTRA HISTORIA',
@@ -1424,6 +1424,12 @@ const es: Record<TranslationKey, string> = {
   'ocr.med.errRateLimited': 'Demasiados intentos hoy. Agregue medicamentos manualmente.',
   'ocr.med.errNetwork': 'Problema de conexión. Agregue medicamentos manualmente.',
   'ocr.med.errTooLarge': 'La foto es demasiado grande. Pruebe una imagen más pequeña.',
+
+  // i18n backfill — caregiver intake step + voice-chat text input
+  'intake.caregivers.title': 'Agregar un cuidador (opcional)',
+  'intake.caregivers.subtitle': 'Un familiar o amigo a quien podemos avisar si surge una alerta de salud grave. Solo se les contacta para alertas aprobadas por el equipo de atención y únicamente después de que usted dé su consentimiento. Puede omitir esto y agregar a alguien más tarde desde su perfil.',
+  'intake.caregivers.audio': 'Opcionalmente, agregue un cuidador: un familiar o amigo a quien podemos avisar si surge una alerta de salud grave. Solo se les contacta después de que usted dé su consentimiento. Puede omitir esto y agregar a alguien más tarde desde su perfil.',
+  'chat.orTypePlaceholder': 'O escriba un mensaje...',
 };
 
 export default es;
