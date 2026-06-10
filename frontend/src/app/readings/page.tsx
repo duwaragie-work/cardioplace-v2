@@ -470,6 +470,15 @@ function EntryCard({
 }) {
   const { t } = useLanguage();
   const hasBP = entry.systolicBP && entry.diastolicBP;
+  // Bug 37 — chat's log_symptom_quick funnels symptom-only logs through
+  // journal.create (so the rule engine sees the symptom boolean). Those
+  // entries land in My Readings with no BP. Pre-fix they appeared as
+  // confusing "No BP recorded" rows that looked like phantom BP readings.
+  // Detect them by shape and render with a "Symptom log" badge instead.
+  const trueStructuredSymptoms = SYMPTOM_KEYS.filter((k) => entry[k]);
+  const otherSymptomsCount = entry.otherSymptoms?.length ?? 0;
+  const isSymptomOnlyLog =
+    !hasBP && (trueStructuredSymptoms.length > 0 || otherSymptomsCount > 0);
   // BMI is read-only and only shown when both weight AND height exist.
   // Pulse pressure is intentionally NOT rendered on the patient app per
   // Niva — patients shouldn't see clinical signals they can't action.
@@ -598,6 +607,33 @@ function EntryCard({
                   {t('readings.mmHg')}
                 </span>
               </div>
+            </div>
+          ) : isSymptomOnlyLog ? (
+            // Bug 37 — symptom-only entries get a distinct red badge + the
+            // symptom name(s) as the headline. Patient understands this is a
+            // symptom log, not a BP reading with broken values.
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <span
+                className="text-[11px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider"
+                style={{
+                  backgroundColor: 'var(--brand-alert-red-light)',
+                  color: 'var(--brand-alert-red)',
+                }}
+              >
+                {t('readings.symptomLog')}
+              </span>
+              {trueStructuredSymptoms.length > 0 && (
+                <span className="text-[15px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                  {trueStructuredSymptoms
+                    .map((k) => t(SYMPTOM_LABEL_KEYS[k]))
+                    .join(', ')}
+                </span>
+              )}
+              {trueStructuredSymptoms.length === 0 && otherSymptomsCount > 0 && (
+                <span className="text-[15px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                  {entry.otherSymptoms?.join(', ')}
+                </span>
+              )}
             </div>
           ) : (
             <p className="text-[13px] mb-2" style={{ color: 'var(--brand-text-muted)' }}>

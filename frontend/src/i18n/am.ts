@@ -582,6 +582,7 @@ const am: Record<TranslationKey, string> = {
   'readings.detailTitle': 'የንባብ ዝርዝሮች',
   'readings.viewDetails': 'የንባብ ዝርዝሮችን ይመልከቱ',
   'readings.noBpRecorded': 'ደም ግፊት አልተመዘገበም',
+  'readings.symptomLog': 'የምልክት ምዝገባ',
   'readings.meds': 'መድሃኒቶች',
   'readings.taken': 'ተወስዷል',
   'readings.missed': 'ተዘልሏል',

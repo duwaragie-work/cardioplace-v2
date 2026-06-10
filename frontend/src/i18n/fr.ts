@@ -579,6 +579,7 @@ const fr: Record<TranslationKey, string> = {
   'readings.detailTitle': 'Détails de la mesure',
   'readings.viewDetails': 'Voir les détails de la mesure',
   'readings.noBpRecorded': 'Pas de TA enregistrée',
+  'readings.symptomLog': 'Journal des symptômes',
   'readings.meds': 'Méds',
   'readings.taken': 'Prise',
   'readings.missed': 'Manquée',
