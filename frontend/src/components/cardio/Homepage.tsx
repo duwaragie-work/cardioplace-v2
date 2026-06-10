@@ -422,7 +422,7 @@ export default function Homepage() {
             <div className="bg-[#f9fafb] md:bg-[#f9fafb] border border-[#e5e7eb] rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 md:p-10 shadow-sm">
               <div className="flex items-center gap-4 sm:gap-5 mb-6 sm:mb-8">
                 <div className="bg-white border border-[#ececec] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shrink-0 overflow-hidden">
-                  <Image src="/patient.png" alt="Patient" width={32} height={32} className="object-cover" />
+                  <Image src="/patient.png" alt="" aria-hidden="true" width={32} height={32} className="object-cover" />
                 </div>
                 <div>
                   <h3 className="text-[#1f1924] text-lg sm:text-xl md:text-2xl font-normal">{t('home.forPatients')}</h3>
