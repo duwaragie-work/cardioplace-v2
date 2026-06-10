@@ -654,7 +654,7 @@ export default function Dashboard() {
             <h1 className="sr-only">Dashboard</h1>
             {/* A3 (Doc 1) — time-of-day greeting + preferred name. Matches the
                 spoken-summary composition (greeting + ", name" when known). */}
-            <p data-testid="dashboard-greeting" className="text-white/70 text-xs font-medium mb-1">{greeting}{greeting && userName ? `, ${userName}` : ''}</p>
+            <p data-testid="dashboard-greeting" className="text-white text-xs font-medium mb-1">{greeting}{greeting && userName ? `, ${userName}` : ''}</p>
             {loading ? (
               <Bone w={160} h={26} color="rgba(255,255,255,0.3)" />
             ) : (
@@ -662,7 +662,7 @@ export default function Dashboard() {
                 {userName ? userName : t('dashboard.welcomeBack')}
               </h2>
             )}
-            <p className="text-white/70 text-xs mt-1 mb-3">
+            <p className="text-white text-xs mt-1 mb-3">
               {t('dashboard.careTeamMonitoring')}
             </p>
             <div className="flex items-center gap-2 flex-wrap">

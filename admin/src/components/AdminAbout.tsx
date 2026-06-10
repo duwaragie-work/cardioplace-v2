@@ -123,7 +123,7 @@ export default function AdminAbout() {
                       <div className="bg-[#edeeef] w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0">
                         <Mic aria-hidden="true" className="w-3 h-3 sm:w-4 sm:h-4 text-[#4c4355]" />
                       </div>
-                      <span className="text-[#4c4355]/60 text-[10px] sm:text-xs flex-1">{t('about.chatPlaceholder')}</span>
+                      <span className="text-[#475569] text-[10px] sm:text-xs flex-1">{t('about.chatPlaceholder')}</span>
                       <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 shadow-md" style={{ backgroundImage: 'linear-gradient(135deg, #7b00e0 0%, #5c00a9 100%)' }}>
                         <Send aria-hidden="true" className="w-3 h-3 text-white" />
                       </div>
@@ -356,7 +356,7 @@ export default function AdminAbout() {
             <Link href={closingHref} className="bg-white text-[#5c00a9] font-bold text-base md:text-lg px-8 md:px-12 py-3 md:py-3.5 rounded-full hover:bg-[#f5eafa] transition-colors mt-2">
               {t('about.closingButton')}
             </Link>
-            <p className="text-white/50 text-xs sm:text-sm mt-2 sm:mt-4 text-center">{t('about.closingFooter')}</p>
+            <p className="text-white text-xs sm:text-sm mt-2 sm:mt-4 text-center">{t('about.closingFooter')}</p>
           </div>
         </section>
 

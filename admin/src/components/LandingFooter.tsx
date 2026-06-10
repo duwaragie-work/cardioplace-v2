@@ -31,13 +31,13 @@ export default function LandingFooter() {
 
         {/* Legal + support */}
         <div className="flex items-center gap-4 text-[12px]">
-          <Link href="/privacy" className="text-white/70 hover:text-white transition-colors">
+          <Link href="/privacy" className="text-white hover:text-white transition-colors">
             {t('landing.privacy')}
           </Link>
-          <Link href="/terms" className="text-white/70 hover:text-white transition-colors">
+          <Link href="/terms" className="text-white hover:text-white transition-colors">
             {t('landing.terms')}
           </Link>
-          <a href={`mailto:${INFO_EMAIL}`} className="text-white/70 hover:text-white transition-colors">
+          <a href={`mailto:${INFO_EMAIL}`} className="text-white hover:text-white transition-colors">
             {INFO_EMAIL}
           </a>
         </div>

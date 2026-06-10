@@ -226,7 +226,7 @@ function CallDetailModal({
               </div>
               <div>
                 <h3 className="text-white font-bold text-[15px]">{t('provider.callDetails')}</h3>
-                <p className="text-white/70 text-[11px]">{call.callType} call</p>
+                <p className="text-white text-[11px]">{call.callType} call</p>
               </div>
             </div>
             <button

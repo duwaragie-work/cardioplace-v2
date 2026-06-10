@@ -632,7 +632,7 @@ function PatientModal({
             </div>
             <div>
               <h3 className="text-white font-bold text-[16px]">{patient.name ?? 'Unknown'}</h3>
-              <p className="text-white/70 text-[12px]">{patient.email ?? '--'}</p>
+              <p className="text-white text-[12px]">{patient.email ?? '--'}</p>
             </div>
           </div>
           <button
