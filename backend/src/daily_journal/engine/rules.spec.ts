@@ -523,6 +523,68 @@ describe('pregnancyL2Rule + pregnancyL1HighRule (G)', () => {
     )
     expect(r).toBeNull()
   })
+
+  // Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, conditional
+  // exception activated for pilot population on ACE/ARB).
+  describe('gestational age threading (Decision 4)', () => {
+    it('populates metadata.gestationalAgeWeeks from pregnancyDueDate (L2)', () => {
+      // Reading taken at 2026-06-01; EDD 2026-09-21 → 16 weeks until EDD
+      // → GA = 40 − 16 = 24 weeks.
+      const measured = new Date('2026-06-01T10:00:00Z')
+      const due = new Date('2026-09-21T10:00:00Z')
+      const ctxWithEdd = ctx({
+        profile: { isPregnant: true, pregnancyDueDate: due },
+        pregnancyThresholdsActive: true,
+      })
+      const r = pregnancyL2Rule(
+        session({ systolicBP: 165, diastolicBP: 115, measuredAt: measured }),
+        ctxWithEdd,
+      )
+      expect(r?.metadata.gestationalAgeWeeks).toBe(24)
+    })
+
+    it('populates metadata.gestationalAgeWeeks (L1 High)', () => {
+      const measured = new Date('2026-04-15T10:00:00Z')
+      const due = new Date('2026-08-15T10:00:00Z') // ~17 weeks out → GA ~23
+      const ctxWithEdd = ctx({
+        profile: { isPregnant: true, pregnancyDueDate: due },
+        pregnancyThresholdsActive: true,
+      })
+      const r = pregnancyL1HighRule(
+        session({ systolicBP: 145, diastolicBP: 92, measuredAt: measured }),
+        ctxWithEdd,
+      )
+      expect(r?.metadata.gestationalAgeWeeks).toBeGreaterThanOrEqual(22)
+      expect(r?.metadata.gestationalAgeWeeks).toBeLessThanOrEqual(24)
+    })
+
+    it('gestationalAgeWeeks is null when pregnancyDueDate is missing', () => {
+      const ctxNoEdd = ctx({
+        profile: { isPregnant: true, pregnancyDueDate: null },
+        pregnancyThresholdsActive: true,
+      })
+      const r = pregnancyL2Rule(
+        session({ systolicBP: 165, diastolicBP: 115 }),
+        ctxNoEdd,
+      )
+      expect(r?.metadata.gestationalAgeWeeks).toBeNull()
+    })
+
+    it('gestationalAgeWeeks is null when EDD implies an out-of-range value (clamp)', () => {
+      // EDD 2 years in the future → GA computes to a negative number → clamp to null.
+      const measured = new Date('2026-06-01T10:00:00Z')
+      const farFutureDue = new Date('2028-06-01T10:00:00Z')
+      const ctxFar = ctx({
+        profile: { isPregnant: true, pregnancyDueDate: farFutureDue },
+        pregnancyThresholdsActive: true,
+      })
+      const r = pregnancyL2Rule(
+        session({ systolicBP: 165, diastolicBP: 115, measuredAt: measured }),
+        ctxFar,
+      )
+      expect(r?.metadata.gestationalAgeWeeks).toBeNull()
+    })
+  })
 })
 
 // ─── H. HFrEF ───────────────────────────────────────────────────────────────

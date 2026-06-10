@@ -216,10 +216,11 @@ function bucketChrome(bucket: TierFilter): {
         icon: <Activity className="w-3 h-3" />,
       };
     case 'TIER_3':
+      // Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — Tier 3 = info-blue.
       return {
-        accent: 'var(--brand-accent-teal)',
-        accentText: 'var(--brand-accent-teal)',
-        light: 'var(--brand-accent-teal-light)',
+        accent: 'var(--brand-info-blue)',
+        accentText: 'var(--brand-info-blue)',
+        light: 'var(--brand-info-blue-light)',
         label: 'Tier 3 — Info',
         icon: <Bell className="w-3 h-3" />,
       };

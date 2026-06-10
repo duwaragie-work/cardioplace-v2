@@ -15,8 +15,11 @@ interface Props {
   rows: TierBreakdownRow[];
 }
 
+// Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — Tier 3 = info-blue.
+// `teal` slot retained for back-compat with anything still mapped that way,
+// but `tierSeverityColor` now returns 'blue' for TIER_3_INFO.
 const SEVERITY_PALETTE: Record<
-  'red' | 'amber' | 'teal' | 'muted',
+  'red' | 'amber' | 'blue' | 'teal' | 'muted',
   { dot: string; chip: string; chipText: string }
 > = {
   red: {
@@ -28,6 +31,11 @@ const SEVERITY_PALETTE: Record<
     dot: 'var(--brand-warning-amber)',
     chip: 'var(--brand-warning-amber-light)',
     chipText: 'var(--brand-warning-amber-text)',
+  },
+  blue: {
+    dot: 'var(--brand-info-blue)',
+    chip: 'var(--brand-info-blue-light)',
+    chipText: 'var(--brand-info-blue)',
   },
   teal: {
     dot: 'var(--brand-accent-teal)',

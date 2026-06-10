@@ -221,8 +221,15 @@ export function formatTierLabel(tier: string): string {
   }
 }
 
-/** Color slot for a tier — used by chips/dots so all surfaces agree. */
-export function tierSeverityColor(tier: string): 'red' | 'amber' | 'teal' | 'muted' {
+/** Color slot for a tier — used by chips/dots so all surfaces agree.
+ *
+ * Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — TIER_3_INFO
+ * returns 'blue' (was 'teal'). Downstream renderers must map 'blue' to
+ * the new --brand-info-blue token. 'teal' is retired from this function
+ * but kept on the union type during transition to surface any stale
+ * consumer at compile time.
+ */
+export function tierSeverityColor(tier: string): 'red' | 'amber' | 'blue' | 'teal' | 'muted' {
   switch (tier) {
     case 'BP_LEVEL_2':
     case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
@@ -234,7 +241,7 @@ export function tierSeverityColor(tier: string): 'red' | 'amber' | 'teal' | 'mut
     case 'BP_LEVEL_1_LOW':
       return 'amber'
     case 'TIER_3_INFO':
-      return 'teal'
+      return 'blue'
     default:
       return 'muted'
   }

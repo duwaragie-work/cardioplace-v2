@@ -102,7 +102,8 @@ function bucketChrome(b: TierFilter): {
     case 'BP_L1':
       return { label: 'BP L1', accent: 'var(--brand-warning-amber)', light: 'var(--brand-warning-amber-light)', icon: <Activity className="w-3 h-3" /> };
     case 'TIER_3':
-      return { label: 'Tier 3', accent: 'var(--brand-accent-teal)', light: 'var(--brand-accent-teal-light)', icon: <Activity className="w-3 h-3" /> };
+      // Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — Tier 3 = info-blue.
+      return { label: 'Tier 3', accent: 'var(--brand-info-blue)', light: 'var(--brand-info-blue-light)', icon: <Activity className="w-3 h-3" /> };
     default:
       return { label: 'Other', accent: 'var(--brand-text-muted)', light: 'var(--brand-background)', icon: <Bell className="w-3 h-3" /> };
   }

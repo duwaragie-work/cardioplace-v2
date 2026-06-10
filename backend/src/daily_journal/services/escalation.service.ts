@@ -27,9 +27,14 @@ import {
   type NotificationChannel as LadderChannel,
   TIER_1_BACKUP_ON_T0,
   TIER_1_LADDER,
-  // BP_LEVEL_1_PATIENT_T0 — still exported from ladder-defs for future re-instate;
-  // no longer dispatched (Round 2 Group B: patient inbox stops mirroring alerts).
+  // Manisha Open-Decisions sign-off 2026-06-06 (Decision 6) — BP_LEVEL_1_PATIENT_T0
+  // re-instated, cohort-gated to STANDARD mode + HIGH tier only (HFrEF/HCM
+  // suppressed to avoid alarm fatigue at tighter personalized thresholds).
+  BP_LEVEL_1_PATIENT_T0,
   ANGIOEDEMA_PATIENT_T0,
+  // Manisha Open-Decisions sign-off 2026-06-06 (Decision 5) — new patient-EMAIL
+  // dispatch at T+0 to close the contraindication "continued exposure" gap.
+  TIER_1_CONTRAINDICATION_PATIENT_T0,
 } from '../escalation/ladder-defs.js'
 import {
   isWithinBusinessHours,
@@ -91,6 +96,36 @@ export class EscalationService {
     this.patientBaseUrl = config
       .get<string>('PATIENT_BASE_URL', 'http://localhost:3000')
       .replace(/\/+$/, '')
+
+    // 2026-06-07 user-flagged — a localhost URL leaked into a Resend email
+    // would (a) be unclickable for recipients, (b) trigger spam-filter
+    // mismatched-domain heuristics that Resend specifically warns about.
+    // Loud warning at boot if NODE_ENV is production but the URLs still
+    // contain localhost — catches a missed deploy-time env var without
+    // breaking local dev.
+    const nodeEnv = config.get<string>('NODE_ENV', 'development')
+    if (nodeEnv === 'production') {
+      for (const [name, url] of [
+        ['ADMIN_BASE_URL', this.adminBaseUrl],
+        ['PATIENT_BASE_URL', this.patientBaseUrl],
+      ] as const) {
+        if (url.includes('localhost') || url.includes('127.0.0.1')) {
+          this.logger.error(
+            `${name} is set to "${url}" in production. Escalation emails will ` +
+              `contain unclickable localhost links and will likely trip Resend ` +
+              `spam filters (domain-URL mismatch). Set this env var to the ` +
+              `production domain (e.g. https://app.cardioplace.ai) before ` +
+              `the next deploy.`,
+          )
+        }
+        if (!url.startsWith('https://')) {
+          this.logger.warn(
+            `${name} is not https in production ("${url}"). Email recipients ` +
+              `may see a mixed-content warning. Use https in production.`,
+          )
+        }
+      }
+    }
   }
 
   // ─── event + cron entry points ──────────────────────────────────────────
@@ -470,15 +505,53 @@ export class EscalationService {
       }
     }
 
-    // Manual-test round 2 — Group B (Manisha sign-off pending). The
-    // BP_LEVEL_1_PATIENT_T0 patient PUSH/DASHBOARD dispatch is RETIRED:
-    // clinical alerts no longer mirror into the patient in-app inbox. The
-    // patient still sees the alert via the /alerts list + the dashboard
-    // banner. The provider ladder dispatch above (PRIMARY/BACKUP/MD email +
-    // push) is unchanged. Angioedema patient T+0 below stays — airway
-    // emergencies MUST page the patient with the 911 CTA.
-    // (The BP_LEVEL_1_PATIENT_T0 import remains for ladder-defs symmetry +
-    // future re-instate if the spec flips back.)
+    // Manisha Open-Decisions sign-off 2026-06-06 (Decision 6) — re-instate
+    // BP_LEVEL_1_PATIENT_T0 dispatch, COHORT-GATED.
+    //
+    // Original retirement (Manual-test round 2 Group B) blanket-suppressed
+    // every BP Level 1 patient-row dispatch. Manisha's clarification: standard-
+    // cohort patients at 165/100 ARE experiencing a clinically meaningful
+    // event (2025 AHA/ACC: SBP ≥140 = medication-initiation threshold for the
+    // general population) and should learn about it without having to open
+    // the app. Personalized-threshold cohorts (HFrEF, HCM) stay suppressed —
+    // their tighter thresholds would generate more frequent patient alerts
+    // and risk alarm fatigue in the very population they protect.
+    //
+    // Gate:
+    //   - tier === 'BP_LEVEL_1_HIGH'  (HIGH only — Manisha did NOT sign off on LOW)
+    //   - mode === 'STANDARD'         (engine sets PERSONALIZED for HFrEF/HCM ramps)
+    //
+    // Channel = EMAIL + DASHBOARD per the ladder-defs export (out-of-app
+    // PUSH not yet wired; EMAIL is the real reach).
+    if (alert.tier === 'BP_LEVEL_1_HIGH' && alert.mode === 'STANDARD') {
+      await this.dispatchStep({
+        alert,
+        step: BP_LEVEL_1_PATIENT_T0,
+        ladderKind: ladder.kind,
+        recipientRoles: BP_LEVEL_1_PATIENT_T0.recipientRoles,
+        practice,
+        assignment,
+        now,
+      })
+    }
+
+    // Manisha Open-Decisions sign-off 2026-06-06 (Decision 5) — TIER_1
+    // CONTRAINDICATION patient-EMAIL at T+0. Closes the gap where a patient
+    // could take another dose of a teratogenic/contraindicated medication
+    // before opening the app. Email body reuses the registry patientMessage
+    // (already worded to discourage panic-driven self-discontinuation:
+    // "please don't stop any medicine without talking to your doctor").
+    if (alert.tier === 'TIER_1_CONTRAINDICATION') {
+      await this.dispatchStep({
+        alert,
+        step: TIER_1_CONTRAINDICATION_PATIENT_T0,
+        ladderKind: ladder.kind,
+        recipientRoles: TIER_1_CONTRAINDICATION_PATIENT_T0.recipientRoles,
+        practice,
+        assignment,
+        now,
+      })
+    }
 
     // Cluster 8 — angioedema patient T+0. Out-of-app push + in-app card so
     // the patient sees the full-screen red + 911 CTA without opening the app
@@ -957,9 +1030,11 @@ export class EscalationService {
         // events (ack / resolve / HOLD / threshold / follow-up / gap-alert).
         // This single guard covers every clinical-alert ladder that lists
         // PATIENT as a recipient — BP Level 2, BP-L2 symptom-override, Tier 1
-        // angioedema, and the retired BP Level 1 patient row — so no
+        // angioedema, the cohort-gated BP Level 1 HIGH (Manisha Open-Decisions
+        // 2026-06-06 D6), and Tier 1 contraindication (Manisha D5) — so no
         // clinical Notification row leaks to the patient bell regardless of
-        // tier. Provider / MD / Ops DASHBOARD rows are unaffected.
+        // tier. Provider / MD / Ops DASHBOARD rows are unaffected. EMAIL is
+        // the active out-of-app channel for the patient rows.
         if (role === 'PATIENT' && channel === 'DASHBOARD') continue
 
         // DASHBOARD notifications are implicit via DeviationAlert rows; we
@@ -1759,6 +1834,20 @@ function patientSubject(tier: string | null): string {
   }
   if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') {
     return 'Urgent Blood Pressure Alert — Cardioplace'
+  }
+  // Manisha Open-Decisions sign-off 2026-06-06 (Decision 5) — recommended
+  // patient subject for contraindication alerts. Calm + actionable; pairs
+  // with the registry patientMessage's "please don't stop any medicine
+  // without talking to your doctor" framing in the body.
+  if (tier === 'TIER_1_CONTRAINDICATION') {
+    return 'Important medication alert from your care team — Cardioplace'
+  }
+  // Manisha Open-Decisions sign-off 2026-06-06 (Decision 6) — patient
+  // subject for the re-instated, cohort-gated BP_LEVEL_1_HIGH email
+  // (standard cohort only). Informative without alarming — frames the
+  // reading as something the care team will follow up on.
+  if (tier === 'BP_LEVEL_1_HIGH') {
+    return 'Your recent blood pressure reading — Cardioplace'
   }
   return 'Cardioplace Alert'
 }
