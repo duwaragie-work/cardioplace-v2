@@ -98,6 +98,14 @@ export default function MedicationPhotoConfirmModal({
 }: Props) {
   const { t } = useLanguage();
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onCancel();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
   // Initial rows — derive frequency from Gemini's free text, default kept=true.
   const [rows, setRows] = useState<RowState[]>(() =>
     medications.map((m) => ({

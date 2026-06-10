@@ -8,6 +8,7 @@
 // Numbers render with lang="en" so screen readers say "one forty-two" not
 // the locale-localised string — same convention as the alerts list.
 
+import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -30,6 +31,14 @@ export default function BpPhotoConfirmModal({
   onRetake,
 }: Props) {
   const { t } = useLanguage();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onCancel();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
 
   // Compose the spoken summary so eyes-closed users can verify by ear.
   // Pulse part is appended only when present so the speech doesn't say

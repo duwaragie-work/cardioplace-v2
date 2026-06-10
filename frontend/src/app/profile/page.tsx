@@ -432,6 +432,15 @@ function PersonalInfoModal({
   onSaved: (next: AuthProfileDto) => void;
 }) {
   const { t } = useLanguage();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const [name, setName] = useState(current.name ?? '');
   const [commPref, setCommPref] = useState<CommPref>(current.communicationPreference);
   const [saving, setSaving] = useState(false);

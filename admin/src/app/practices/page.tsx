@@ -239,6 +239,14 @@ function CreatePracticeModal({
   onClose: () => void;
   onCreated: (p: Practice) => void;
 }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const [form, setForm] = useState<UpsertPracticePayload>({
     name: '',
     businessHoursStart: '08:00',

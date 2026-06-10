@@ -5,7 +5,7 @@
 // backend ACE/ARB-on-angioedema gate which auto-holds with PROVIDER_DIRECTED_HOLD
 // and returns requiresAcknowledgement=true, which we surface here).
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   adminAddMedication,
   adminEditMedication,
@@ -50,6 +50,15 @@ interface Props {
 
 export default function AddEditMedicationModal({ patientUserId, medication, onClose, onSaved }: Props) {
   const isEdit = !!medication;
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const [drugName, setDrugName] = useState<string>(medication?.drugName ?? '');
   const [drugClass, setDrugClass] = useState<string>(medication?.drugClass ?? 'OTHER_UNVERIFIED');
   const [frequency, setFrequency] = useState<string>(medication?.frequency ?? 'ONCE_DAILY');

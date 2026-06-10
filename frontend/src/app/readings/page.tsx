@@ -890,6 +890,14 @@ function EditModal({
 }) {
   const { t } = useLanguage();
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   // Phase/26 TTS pass 2 — compose a humanised summary of the in-progress
   // form so the patient can hear what they're about to save. Reuses the
   // same helper as EntryCard so the prose style matches across the page.
@@ -1577,6 +1585,15 @@ function ReadingDetailModal({
   onClose: () => void;
 }) {
   const { t } = useLanguage();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const bmi = getBMI(heightCm, entry.weight);
   const medStatus = buildMedStatus(entry, medications);
   const dt = new Date(entry.measuredAt);
@@ -1843,6 +1860,15 @@ function DeleteConfirm({
   onCancel: () => void;
 }) {
   const { t } = useLanguage();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onCancel();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
   return (
     <motion.div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
