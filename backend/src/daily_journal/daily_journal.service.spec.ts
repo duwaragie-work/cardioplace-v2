@@ -568,4 +568,125 @@ describe('DailyJournalService', () => {
       expect(clause.NOT.AND).toEqual([{ alertId: { not: null } }, { channel: 'PUSH' }])
     })
   });
+
+  // ─── Bug 41 + 42 — no-op detection on update ──────────────────────────────
+  // When the LLM/patient asks to update a field to its current value (very
+  // common: "change BP to 120/80" when it's already 120/80), the service now
+  // returns a graceful "no changes" response instead of a successful but
+  // meaningless Prisma round-trip. Bug 42 — the resolveUpdateSessionId call
+  // is now gated on data.measuredAt SURVIVING the no-op filter so it stops
+  // churning sessionId when the LLM re-sets measuredAt to its current value.
+  describe('update — no-op detection (Bug 41 + 42)', () => {
+    const baseExisting = {
+      id: 'e1',
+      userId: 'u1',
+      measuredAt: new Date('2026-06-08T12:30:00.000Z'),
+      systolicBP: 120,
+      diastolicBP: 80,
+      pulse: 72,
+      weight: 68.04, // stored kg for a 150-lb reading
+      position: 'SITTING',
+      sessionId: 's-orig',
+      medicationTaken: true,
+      medicationScheduledLater: false,
+      missedDoses: null,
+      severeHeadache: false,
+      visualChanges: false,
+      alteredMentalStatus: false,
+      chestPainOrDyspnea: false,
+      focalNeuroDeficit: false,
+      severeEpigastricPain: false,
+      newOnsetHeadache: false,
+      ruqPain: false,
+      edema: false,
+      dizziness: false,
+      syncope: false,
+      palpitations: false,
+      legSwelling: false,
+      fatigue: false,
+      shortnessOfBreath: false,
+      dryCough: false,
+      nsaidUse: false,
+      faceSwelling: false,
+      throatTightness: false,
+      otherSymptoms: ['headache'],
+      teachBackAnswer: null,
+      teachBackCorrect: null,
+      notes: null,
+      source: EntrySource.MANUAL,
+      sourceMetadata: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+
+    it('returns graceful "no changes" when LLM updates BP to the same value', async () => {
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(baseExisting)
+      const r = await service.update('u1', 'e1', { systolicBP: 120, diastolicBP: 80 } as any)
+      expect(mockPrisma.journalEntry.update).not.toHaveBeenCalled()
+      expect(r.statusCode).toBe(200)
+      expect(r.message).toMatch(/no changes|already/i)
+    })
+
+    it('returns "no changes" when LLM updates weight to identical kg value', async () => {
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(baseExisting)
+      const r = await service.update('u1', 'e1', { weight: 68.04 } as any)
+      expect(mockPrisma.journalEntry.update).not.toHaveBeenCalled()
+      expect(r.statusCode).toBe(200)
+    })
+
+    it('PARTIAL no-op: same systolic + new diastolic → proceeds with diastolic only', async () => {
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(baseExisting)
+      mockPrisma.journalEntry.update.mockResolvedValueOnce({ ...baseExisting, diastolicBP: 85 })
+      await service.update('u1', 'e1', { systolicBP: 120, diastolicBP: 85 } as any)
+      expect(mockPrisma.journalEntry.update).toHaveBeenCalledTimes(1)
+      const updateArg = mockPrisma.journalEntry.update.mock.calls[0][0]
+      // Systolic stripped (no-op), diastolic survives.
+      expect(updateArg.data.systolicBP).toBeUndefined()
+      expect(updateArg.data.diastolicBP).toBe(85)
+    })
+
+    it('Bug 42 — resolveUpdateSessionId does NOT fire when measuredAt is re-set to its current value', async () => {
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(baseExisting)
+      // No other findFirst should fire (resolveUpdateSessionId would call findFirst).
+      await service.update('u1', 'e1', {
+        measuredAt: baseExisting.measuredAt.toISOString(),
+      } as any)
+      // Only the initial existence-check findFirst should have happened.
+      expect(mockPrisma.journalEntry.findFirst).toHaveBeenCalledTimes(1)
+      expect(mockPrisma.journalEntry.update).not.toHaveBeenCalled()
+    })
+
+    it('Bug 42 — resolveUpdateSessionId DOES fire when measuredAt actually changes', async () => {
+      mockPrisma.journalEntry.findFirst
+        .mockResolvedValueOnce(baseExisting)
+        // First resolveUpdateSessionId query — current-session sibling in window?
+        .mockResolvedValueOnce(null)
+        // Second query — other-session entry in window?
+        .mockResolvedValueOnce(null)
+        // Third query — original sibling still in current session?
+        .mockResolvedValueOnce(null)
+      mockPrisma.journalEntry.update.mockResolvedValueOnce({
+        ...baseExisting,
+        measuredAt: new Date('2026-06-08T14:00:00.000Z'),
+      })
+      await service.update('u1', 'e1', {
+        measuredAt: '2026-06-08T14:00:00.000Z',
+      } as any)
+      // resolveUpdateSessionId fires → multiple findFirst calls.
+      expect(mockPrisma.journalEntry.findFirst.mock.calls.length).toBeGreaterThan(1)
+      expect(mockPrisma.journalEntry.update).toHaveBeenCalledTimes(1)
+    })
+
+    it('otherSymptoms — set equality, order-irrelevant', async () => {
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce({
+        ...baseExisting,
+        otherSymptoms: ['a', 'b', 'c'],
+      })
+      const r = await service.update('u1', 'e1', {
+        otherSymptoms: ['c', 'a', 'b'],
+      } as any)
+      expect(mockPrisma.journalEntry.update).not.toHaveBeenCalled()
+      expect(r.statusCode).toBe(200)
+    })
+  })
 });

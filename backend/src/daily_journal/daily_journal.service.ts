@@ -265,29 +265,6 @@ export class DailyJournalService {
           : null
       if (dto.sessionId !== undefined) data.sessionId = dto.sessionId
 
-      // Bug 25 — when measuredAt changes AND the caller did NOT explicitly
-      // override sessionId, re-evaluate the session assignment against the
-      // new time. Auto-joins a 5-min-window sibling session, leaves a stale
-      // session when moving away from originals, or stays put when still
-      // grouped with current siblings. See resolveUpdateSessionId for the
-      // full policy. Skips the resolve when sessionId was explicitly passed
-      // (LLM is doing an intentional move-to-session) or when measuredAt
-      // isn't changing.
-      if (dto.measuredAt !== undefined && dto.sessionId === undefined) {
-        const resolved = await this.resolveUpdateSessionId(
-          userId,
-          entryId,
-          existing.sessionId,
-          data.measuredAt as Date,
-        )
-        if (resolved !== existing.sessionId) {
-          this.logger.log(
-            `update: time-edit auto-regrouping entry=${entryId} ` +
-              `${existing.sessionId ?? 'null'} → ${resolved}`,
-          )
-        }
-        data.sessionId = resolved
-      }
       if (dto.measurementConditions !== undefined)
         data.measurementConditions =
           (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull
@@ -344,6 +321,47 @@ export class DailyJournalService {
         data.source = dto.source ? SOURCE_MAP[dto.source] : EntrySource.MANUAL
       if (dto.sourceMetadata !== undefined)
         data.sourceMetadata = (dto.sourceMetadata as JsonValue) ?? Prisma.JsonNull
+
+      // Bug 41 + 42 — no-op filter. Strip any field whose new value equals
+      // the existing value so the LLM/patient gets a graceful "nothing to
+      // update" response instead of a successful but meaningless Prisma
+      // round-trip. Side effect (Bug 42): the resolveUpdateSessionId call
+      // below is now gated on data.measuredAt SURVIVING the filter — i.e.
+      // it only fires when the new time actually differs. Pre-fix Bug 25's
+      // regroup churned sessionId even when the LLM re-set measuredAt to
+      // its current value.
+      this.filterNoOpFieldsInPlace(data, existing)
+      if (Object.keys(data).length === 0) {
+        return {
+          statusCode: 200,
+          message:
+            'No changes — the reading already has those values. Nothing to update.',
+          data: this.serializeEntry(existing),
+        }
+      }
+
+      // Bug 25 — when measuredAt is being changed AND the caller did NOT
+      // explicitly override sessionId, re-evaluate the session assignment
+      // against the new time. Auto-joins a 5-min-window sibling session,
+      // leaves a stale session when moving away from originals, or stays
+      // put when still grouped with current siblings. Bug 42 — gated on
+      // data.measuredAt surviving the no-op filter above so we don't churn
+      // sessionId on a no-change "edit".
+      if (data.measuredAt !== undefined && dto.sessionId === undefined) {
+        const resolved = await this.resolveUpdateSessionId(
+          userId,
+          entryId,
+          existing.sessionId,
+          data.measuredAt as Date,
+        )
+        if (resolved !== existing.sessionId) {
+          this.logger.log(
+            `update: time-edit auto-regrouping entry=${entryId} ` +
+              `${existing.sessionId ?? 'null'} → ${resolved}`,
+          )
+        }
+        data.sessionId = resolved
+      }
 
       const updated = await this.prisma.journalEntry.update({
         where: { id: entryId },
@@ -1416,6 +1434,158 @@ export class DailyJournalService {
    *     session has other siblings, mint a fresh UUID (we're leaving);
    *     else keep current session_id (we were alone — nothing to regroup).
    */
+  /**
+   * Bug 41 — strip fields from a Prisma update payload when the new value
+   * equals the existing value, so the LLM/patient gets a clean "no changes"
+   * response when they ask to edit a reading to its current value (instead
+   * of a successful but meaningless DB round-trip + an "updated" message
+   * that confuses them). Side-effect supports Bug 42 — the gated
+   * resolveUpdateSessionId call only fires when data.measuredAt actually
+   * survives this filter, preventing spurious session-id churn.
+   *
+   * Mutates `data` in place. Compares the common-path fields the LLM
+   * touches on edit: measuredAt (millisecond compare), numeric BP/pulse,
+   * weight (Decimal → number compare), position, sessionId, medication
+   * flags, structured symptom booleans, source, notes, and the freeform
+   * otherSymptoms array (set-equality, order-irrelevant).
+   *
+   * Complex JSON fields (measurementConditions, missedMedications,
+   * medicationStatuses, sourceMetadata) are NOT compared — they're rare
+   * on LLM-edits AND their deep-equality is expensive + error-prone. If
+   * present in `data` they pass through to Prisma unchanged; in practice
+   * the LLM doesn't re-issue them without intent.
+   */
+  private filterNoOpFieldsInPlace(
+    data: Prisma.JournalEntryUpdateInput,
+    existing: {
+      measuredAt: Date | string
+      systolicBP: number | null
+      diastolicBP: number | null
+      pulse: number | null
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      weight: any
+      position: string | null
+      sessionId: string | null
+      medicationTaken: boolean | null
+      medicationScheduledLater: boolean | null
+      missedDoses: number | null
+      severeHeadache: boolean
+      visualChanges: boolean
+      alteredMentalStatus: boolean
+      chestPainOrDyspnea: boolean
+      focalNeuroDeficit: boolean
+      severeEpigastricPain: boolean
+      newOnsetHeadache: boolean
+      ruqPain: boolean
+      edema: boolean
+      dizziness: boolean
+      syncope: boolean
+      palpitations: boolean
+      legSwelling: boolean
+      fatigue: boolean
+      shortnessOfBreath: boolean
+      dryCough: boolean
+      nsaidUse: boolean
+      faceSwelling: boolean
+      throatTightness: boolean
+      otherSymptoms: string[]
+      teachBackAnswer: string | null
+      teachBackCorrect: boolean | null
+      notes: string | null
+      source: string | null
+    },
+  ): void {
+    // measuredAt — millisecond equality. Avoids a regroup when LLM re-set
+    // time to its current value.
+    if (data.measuredAt !== undefined) {
+      const newMs = (data.measuredAt as Date).getTime?.()
+      const existingMs =
+        existing.measuredAt instanceof Date
+          ? existing.measuredAt.getTime()
+          : new Date(existing.measuredAt).getTime()
+      if (newMs === existingMs) delete data.measuredAt
+    }
+    // Numeric scalars.
+    if (data.systolicBP !== undefined && data.systolicBP === existing.systolicBP)
+      delete data.systolicBP
+    if (data.diastolicBP !== undefined && data.diastolicBP === existing.diastolicBP)
+      delete data.diastolicBP
+    if (data.pulse !== undefined && data.pulse === existing.pulse) delete data.pulse
+    // Weight is Decimal in storage — compare via Number().
+    if (data.weight !== undefined) {
+      const newW = data.weight === null ? null : Number(data.weight)
+      const existingW =
+        existing.weight === null || existing.weight === undefined
+          ? null
+          : Number(existing.weight)
+      if (newW === existingW) delete data.weight
+    }
+    if (data.position !== undefined && data.position === existing.position)
+      delete data.position
+    if (data.sessionId !== undefined && data.sessionId === existing.sessionId)
+      delete data.sessionId
+    // Medication flags.
+    if (data.medicationTaken !== undefined && data.medicationTaken === existing.medicationTaken)
+      delete data.medicationTaken
+    if (
+      data.medicationScheduledLater !== undefined &&
+      data.medicationScheduledLater === existing.medicationScheduledLater
+    )
+      delete data.medicationScheduledLater
+    if (data.missedDoses !== undefined && data.missedDoses === existing.missedDoses)
+      delete data.missedDoses
+    // Structured symptom booleans (Flow B + Cluster 6/7/8).
+    const symptomBools: Array<
+      keyof Prisma.JournalEntryUpdateInput & keyof typeof existing
+    > = [
+      'severeHeadache',
+      'visualChanges',
+      'alteredMentalStatus',
+      'chestPainOrDyspnea',
+      'focalNeuroDeficit',
+      'severeEpigastricPain',
+      'newOnsetHeadache',
+      'ruqPain',
+      'edema',
+      'dizziness',
+      'syncope',
+      'palpitations',
+      'legSwelling',
+      'fatigue',
+      'shortnessOfBreath',
+      'dryCough',
+      'nsaidUse',
+      'faceSwelling',
+      'throatTightness',
+    ]
+    for (const k of symptomBools) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (data[k] !== undefined && (data as any)[k] === (existing as any)[k]) {
+        delete data[k]
+      }
+    }
+    // otherSymptoms — set equality, order-irrelevant.
+    if (Array.isArray(data.otherSymptoms)) {
+      const newSet = new Set(data.otherSymptoms as string[])
+      const existingSet = new Set(existing.otherSymptoms ?? [])
+      if (
+        newSet.size === existingSet.size &&
+        [...newSet].every((s) => existingSet.has(s))
+      ) {
+        delete data.otherSymptoms
+      }
+    }
+    if (data.teachBackAnswer !== undefined && data.teachBackAnswer === existing.teachBackAnswer)
+      delete data.teachBackAnswer
+    if (
+      data.teachBackCorrect !== undefined &&
+      data.teachBackCorrect === existing.teachBackCorrect
+    )
+      delete data.teachBackCorrect
+    if (data.notes !== undefined && data.notes === existing.notes) delete data.notes
+    if (data.source !== undefined && data.source === existing.source) delete data.source
+  }
+
   private async resolveUpdateSessionId(
     userId: string,
     entryId: string,
