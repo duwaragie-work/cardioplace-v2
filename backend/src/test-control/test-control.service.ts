@@ -8,6 +8,8 @@ import { ladderForTier } from '../daily_journal/escalation/ladder-defs.js'
 import { retroUpgradeAceArbHoldsForContraindication } from '../intake/ace-contraindication.js'
 import { VerifierRole } from '../generated/prisma/client.js'
 import type { LadderStep as LadderStepEnum } from '../generated/prisma/client.js'
+import type { UserRole } from '../generated/prisma/enums.js'
+import { createHash, randomBytes } from 'node:crypto'
 
 /**
  * Helpers backing the /test-control HTTP endpoints. Pure delegation —
@@ -1065,5 +1067,82 @@ export class TestControlService {
       },
     })
     return { ok: true }
+  }
+
+  // ─── Invite + magic-link token minting (specs 36/37/40) ───────────────────
+  //
+  // Both UserInvite and MagicLink persist only a SHA-256 hash of the raw
+  // token — the raw value is e-mailed and never stored. In CI the Resend key
+  // is a dummy, so a Playwright spec can never read the e-mail to recover the
+  // token. These two helpers mint a row directly and RETURN the raw token,
+  // hashing it exactly the way auth.service.ts does so the real production
+  // accept/verify endpoints (which the specs drive) accept it unchanged.
+
+  private sha256(raw: string): string {
+    return createHash('sha256').update(raw.trim()).digest('hex')
+  }
+
+  /**
+   * Mint a UserInvite and return its raw activation token. `expiresInSeconds`
+   * defaults to 48h; pass a negative value to forge an already-expired invite
+   * for the error-path test. The inviter defaults to the first SUPER_ADMIN
+   * seed (the FK to User is Restrict, so it must point at a real row).
+   */
+  async createInvite(args: {
+    email: string
+    name: string
+    role: UserRole
+    practiceId?: string
+    expiresInSeconds?: number
+  }): Promise<{ inviteId: string; token: string }> {
+    const inviter = await this.prisma.user.findFirst({
+      where: { roles: { has: 'SUPER_ADMIN' } },
+      select: { id: true },
+    })
+    if (!inviter) throw new Error('createInvite: no SUPER_ADMIN user to attribute the invite to')
+    // Drop any prior open invite for this email so re-runs don't trip the
+    // "already invited" guard in the accept flow.
+    await this.prisma.userInvite.deleteMany({
+      where: { email: args.email, acceptedAt: null },
+    })
+    const token = randomBytes(32).toString('hex')
+    const ttl = (args.expiresInSeconds ?? 48 * 3600) * 1000
+    const invite = await this.prisma.userInvite.create({
+      data: {
+        email: args.email,
+        name: args.name,
+        role: args.role,
+        practiceId: args.practiceId ?? null,
+        tokenHash: this.sha256(token),
+        invitedById: inviter.id,
+        expiresAt: new Date(Date.now() + ttl),
+      },
+      select: { id: true },
+    })
+    return { inviteId: invite.id, token }
+  }
+
+  /**
+   * Mint a MagicLink for `email` and return the raw token. `expiresInSeconds`
+   * defaults to 30 min (matching auth.service); pass a negative value for the
+   * expired-link test. `markUsed: true` stamps `usedAt` so the already-used
+   * error path is reachable.
+   */
+  async issueMagicLink(args: {
+    email: string
+    expiresInSeconds?: number
+    markUsed?: boolean
+  }): Promise<{ token: string }> {
+    const token = randomBytes(32).toString('hex')
+    const ttl = (args.expiresInSeconds ?? 30 * 60) * 1000
+    await this.prisma.magicLink.create({
+      data: {
+        email: args.email,
+        tokenHash: this.sha256(token),
+        expiresAt: new Date(Date.now() + ttl),
+        usedAt: args.markUsed ? new Date() : null,
+      },
+    })
+    return { token }
   }
 }

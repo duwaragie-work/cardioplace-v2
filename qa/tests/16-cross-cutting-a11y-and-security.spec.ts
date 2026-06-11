@@ -250,6 +250,49 @@ test.describe('Admin app — PHI safety (§F)', () => {
     expect(fatal, fatal.join('\n')).toEqual([])
   })
 
+  // ─── Admin sidebar + charts render smoke (commit 6439476, item 9) ─────────
+  test('admin sidebar renders all sections + patient-detail readings render console-clean', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000)
+    const errors: string[] = []
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') errors.push(msg.text())
+    })
+
+    // SUPER_ADMIN sees every nav section (Dashboard / Patients / Practices /
+    // Users / Reports + Alerts). Sidebar links carry no testid → assert by
+    // their accessible link text.
+    await signInAdmin(page, ADMINS.support.email, ADMIN_BASE_URL)
+    for (const name of ['Dashboard', 'Patients', 'Practices', 'Users', 'Reports']) {
+      await expect(
+        page.getByRole('link', { name: new RegExp(`^${name}$`, 'i') }).first(),
+        `sidebar shows ${name}`,
+      ).toBeVisible({ timeout: 20_000 })
+    }
+
+    // Patient-detail Readings tab renders its chart/cards without crashing.
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const aisha = await tc.findUser(PATIENTS.aisha.email)
+    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.locator(byTestId(T.admin.detailTab('readings'))).click()
+    // Either the readings list or its empty state must render (proves the tab
+    // + any chart components mounted without throwing).
+    await expect(
+      page
+        .locator(byTestId(T.admin.readingsList))
+        .or(page.locator(byTestId(T.admin.readingsEmpty))),
+    ).toBeVisible({ timeout: 25_000 })
+    await tc.dispose()
+
+    const fatal = errors.filter(
+      (e) =>
+        !/ResizeObserver|preload|hydration|favicon|net::ERR_/i.test(e) &&
+        !/40[13]|Unauthorized|Forbidden/i.test(e),
+    )
+    expect(fatal, fatal.join('\n')).toEqual([])
+  })
+
   test('error responses do not leak other patients PHI', async ({ request }) => {
     // An invalid/garbage alert id must not echo any other patient's name or
     // BP into the error body or a stack trace.

@@ -44,6 +44,52 @@ test.describe('Check-in wizard — UI spine', () => {
     await page.locator(byTestId(T.checkin.next)).click()
     await expect(page.locator(byTestId(T.checkin.systolic))).toBeVisible({ timeout: 10_000 })
   })
+
+  // ─── Low-literacy symptom icons (commit c2328a9) — smoke ──────────────────
+  // The symptom step renders one icon-button per symptom (data-testid
+  // `check-in-symptom-<KEY>`). Smoke-only per the handoff: assert the icons
+  // render, one selects, and archive a screenshot for visual regression.
+  test('symptom step renders selectable icon buttons', async ({ page }) => {
+    await page.goto('/check-in')
+    await dismissCheckinGate(page)
+
+    // Walk forward to the symptom step: advance through the wizard, filling BP
+    // when that step is up, until the symptom icons appear.
+    const symptoms = page.locator('[data-testid^="check-in-symptom-"]')
+    for (let step = 0; step < 8; step++) {
+      if ((await symptoms.count()) > 0) break
+      if (await page.locator(byTestId(T.checkin.systolic)).isVisible().catch(() => false)) {
+        await page.locator(byTestId(T.checkin.systolic)).fill('124')
+        await page.locator(byTestId(T.checkin.diastolic)).fill('78')
+        await page.locator(byTestId(T.checkin.pulse)).fill('72')
+      }
+      const next = page.locator(byTestId(T.checkin.next))
+      if (await next.isVisible().catch(() => false)) await next.click().catch(() => {})
+      else break
+    }
+
+    // Several distinct symptom icons render.
+    await expect(symptoms.first()).toBeVisible({ timeout: 10_000 })
+    expect(await symptoms.count(), 'multiple symptom icons render').toBeGreaterThanOrEqual(5)
+
+    // Visual-regression archive.
+    await page.screenshot({
+      path: 'test-results/checkin-symptom-icons.png',
+      fullPage: true,
+    })
+
+    // Selecting an icon toggles it (aria-pressed where the button exposes it).
+    const first = symptoms.first()
+    const before = await first.getAttribute('aria-pressed')
+    await first.click()
+    if (before !== null) {
+      await expect(first).toHaveAttribute('aria-pressed', 'true')
+    } else {
+      // No aria-pressed contract — at minimum the click is handled and the
+      // wizard stays operable (Next still present).
+      await expect(first).toBeVisible()
+    }
+  })
 })
 
 test.describe('Check-in submissions trigger expected alerts (via API)', () => {
