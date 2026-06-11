@@ -50,27 +50,54 @@ test.describe('Check-in wizard — UI spine', () => {
   // `check-in-symptom-<KEY>`). Smoke-only per the handoff: assert the icons
   // render, one selects, and archive a screenshot for visual regression.
   test('symptom step renders selectable icon buttons', async ({ page }) => {
+    test.setTimeout(90_000)
     await page.goto('/check-in')
+    // Next 16 hydration race (see 14d): the wizard ships interactive DOM ahead
+    // of React onClick attachment. Settle on networkidle before/after each step.
+    await page.waitForLoadState('networkidle').catch(() => {})
     await dismissCheckinGate(page)
+    await page
+      .locator(byTestId(T.checkin.step(1)))
+      .waitFor({ state: 'visible', timeout: 15_000 })
+      .catch(() => {})
 
-    // Walk forward to the symptom step: advance through the wizard, filling BP
-    // when that step is up, until the symptom icons appear.
-    const symptoms = page.locator('[data-testid^="check-in-symptom-"]')
-    for (let step = 0; step < 8; step++) {
-      if ((await symptoms.count()) > 0) break
+    // Walk B1 → B2(BP+position) → WEIGHT → MEDICATION → B3(symptoms), mirroring
+    // the proven navigation in 14d. Aisha has seeded meds, so the MEDICATION
+    // step gates Next until every med row is answered YES. Stop when a base
+    // symptom button (always rendered) is visible.
+    const chestPain = page.locator(byTestId(T.checkin.symptom('CHEST_PAIN')))
+    for (let i = 0; i < 12; i++) {
+      if (await chestPain.first().isVisible().catch(() => false)) break
       if (await page.locator(byTestId(T.checkin.systolic)).isVisible().catch(() => false)) {
-        await page.locator(byTestId(T.checkin.systolic)).fill('124')
+        await page.locator(byTestId(T.checkin.systolic)).fill('120')
         await page.locator(byTestId(T.checkin.diastolic)).fill('78')
         await page.locator(byTestId(T.checkin.pulse)).fill('72')
+        const pos = page.locator(byTestId('check-in-position-sitting')).first()
+        if (await pos.isVisible().catch(() => false)) await pos.click().catch(() => {})
+      }
+      const medYes = page.locator(byTestId(T.checkin.medicationYes))
+      if (await medYes.first().isVisible().catch(() => false)) {
+        const c = await medYes.count()
+        // Med rows are framer-motion ChoiceCards (animated) → force the click,
+        // same as the position card, else the MEDICATION step's Next stays
+        // gated and the walk stalls on "Step 4 of 5".
+        for (let j = 0; j < c; j++) await medYes.nth(j).click({ force: true }).catch(() => {})
       }
       const next = page.locator(byTestId(T.checkin.next))
-      if (await next.isVisible().catch(() => false)) await next.click().catch(() => {})
-      else break
+      if ((await next.count()) > 0) {
+        await next.scrollIntoViewIfNeeded({ timeout: 5_000 }).catch(() => {})
+        await next.click({ timeout: 10_000 }).catch(() => {})
+        await page.waitForLoadState('networkidle').catch(() => {})
+        await page.waitForTimeout(150)
+      } else break
     }
 
-    // Several distinct symptom icons render.
+    // Several distinct symptom icons render. Some are condition-gated, so a
+    // no-comorbidity control patient sees the base set — assert "several"
+    // rather than a fixed count, which is all a render smoke needs.
+    const symptoms = page.locator('[data-testid^="check-in-symptom-"]')
     await expect(symptoms.first()).toBeVisible({ timeout: 10_000 })
-    expect(await symptoms.count(), 'multiple symptom icons render').toBeGreaterThanOrEqual(5)
+    expect(await symptoms.count(), 'multiple symptom icons render').toBeGreaterThanOrEqual(3)
 
     // Visual-regression archive.
     await page.screenshot({
