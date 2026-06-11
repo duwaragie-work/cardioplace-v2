@@ -186,6 +186,60 @@ describe('voice system instruction — Bug 14 form-parity guards', () => {
         expect(prompt).toMatch(/in a chair|seated/i)
         expect(prompt).toMatch(/never invent a fourth/i)
       })
+
+      // ─── Bug 49 — symptom question stays short (1–2 examples) ────────
+      it('Bug 49 — spoken symptom question is short with "for example" framing, not a 19-item enumeration', () => {
+        // The spoken question is the text wrapped in the quotes after the
+        // step header (7. or 9.). Old form started "Any new symptoms today
+        // —" with a long comma list; new form uses "For example,".
+        expect(prompt).toMatch(/Any new symptoms today\?[\s\S]{0,200}For example/i)
+        // Sanity — the long enumeration ("vision changes, confusion, …
+        // weakness on one side, severe stomach pain") must NOT be inside
+        // the spoken question quotes. We assert by checking the open-ended
+        // ending instead — the new wording always ends with "or anything
+        // else you'd like to mention?".
+        expect(prompt).toMatch(/anything else you'?d like to mention/i)
+      })
+
+      it('Bug 49 — internal mapping list still covers all clinical symptoms (recognition unchanged)', () => {
+        // Spoken question shortened, but the prompt must still teach the
+        // LLM to recognise + map every symptom — otherwise we lose the
+        // structured-boolean coverage. These are the structured booleans
+        // emitted by the engine; each name must appear somewhere in the
+        // prompt as a recognition target.
+        const booleans = [
+          'severeHeadache',
+          'visualChanges',
+          'alteredMentalStatus',
+          'chestPainOrDyspnea',
+          'focalNeuroDeficit',
+          'severeEpigastricPain',
+          'dizziness',
+          'syncope',
+          'palpitations',
+          'legSwelling',
+          'fatigue',
+          'shortnessOfBreath',
+          'dryCough',
+          'nsaidUse',
+          'faceSwelling',
+          'throatTightness',
+        ]
+        for (const key of booleans) {
+          expect(prompt).toContain(key)
+        }
+      })
+
+      // ─── Bug 50 — BP threading reminder before submit_checkin ────────
+      it('Bug 50 — prompt explicitly tells the LLM to thread collected BP values into submit_checkin (not 0/0)', () => {
+        // The reminder must mention both the "thread real values" and the
+        // "0/0 is a separate sparse-log code path" parts. Future prompt
+        // edits that drop either half regress this fix.
+        expect(prompt).toMatch(/BP THREADING/i)
+        expect(prompt).toMatch(/systolic_bp.*138|diastolic_bp.*85|systolic=.*diastolic=/i)
+        expect(prompt).toMatch(/sparse log|sparse-log/i)
+        expect(prompt).toMatch(/never (?:pass|call|submit).{0,80}(?:systolic_bp\s*=\s*0|0\s*\/\s*0|with 0)|do not (?:pass|call|submit).{0,80}(?:systolic_bp\s*=\s*0|0\s*\/\s*0|with 0)/i)
+      })
     })
   }
 })

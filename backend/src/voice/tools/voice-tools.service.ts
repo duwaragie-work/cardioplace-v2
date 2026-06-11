@@ -99,12 +99,13 @@ export class VoiceToolsService {
       {
         name: 'submit_checkin',
         description:
-          "Submit the patient's health check-in after all values have been confirmed. Call only once the patient has said yes to saving. Supports sparse entries (BP=0 means not provided) for partial logs.",
+          "Submit the patient's health check-in after all values have been confirmed. Call only once the patient has said yes to saving. " +
+          "Bug 50 — CRITICAL: pass the systolic_bp and diastolic_bp values you actually collected from the patient in this conversation as positive integers (e.g. systolic_bp=138, diastolic_bp=85). 0/0 is ONLY the sparse-log code path — entries where the patient explicitly said they have NO BP today and is only logging medication or symptoms. Passing 0/0 when the patient gave real numbers is rejected with 'Got no over no — that's incomplete' and forces the patient to re-state their BP.",
         parameters: {
           type: Type.OBJECT,
           properties: {
-            systolic_bp: { type: Type.INTEGER, description: 'Top number 60-250. 0 = not provided (sparse log).' },
-            diastolic_bp: { type: Type.INTEGER, description: 'Bottom number 40-150. 0 = not provided (sparse log).' },
+            systolic_bp: { type: Type.INTEGER, description: 'Top number — integer 60-250. MUST be the value the patient gave you earlier in this conversation. 0 ONLY for sparse logs (medication-only / symptom-only entries where the patient has no BP today).' },
+            diastolic_bp: { type: Type.INTEGER, description: 'Bottom number — integer 40-150. MUST be the value the patient gave you earlier in this conversation. 0 ONLY for sparse logs (medication-only / symptom-only entries where the patient has no BP today).' },
             medication_taken: { type: Type.BOOLEAN, description: 'Whether the patient took all medications.' },
             weight: { type: Type.NUMBER, description: 'Weight as a number — whatever value the patient said. 0 = not provided. Set weight_unit to specify lbs or kg.' },
             weight_unit: { type: Type.STRING, description: 'Unit for `weight`: "LBS" or "KG". Use whichever unit the patient actually said — do NOT convert in your head. Defaults to LBS when omitted.' },
@@ -174,7 +175,15 @@ export class VoiceToolsService {
                 'new submit_checkin. Omit for one-off check-ins. "" = omit.',
             },
           },
-          required: ['medication_taken'],
+          // Bug 50 — chat-voice parity. Chat tool schema marks the same
+          // fields required (see backend/src/chat/tools/journal-tools.ts).
+          // Marking them required forces Gemini Live's function-calling
+          // layer to make the LLM include them in the args explicitly —
+          // either with the patient's real numbers OR with 0 for the
+          // sparse-log path. Without this, Gemini happily omits them and
+          // the dispatcher sees `undefined → 0`, looking identical to a
+          // deliberate sparse log even when the bot had real numbers.
+          required: ['entry_date', 'measurement_time', 'systolic_bp', 'diastolic_bp', 'medication_taken', 'symptoms'],
         },
       },
       {

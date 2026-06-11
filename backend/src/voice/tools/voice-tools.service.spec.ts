@@ -144,6 +144,40 @@ describe('VoiceToolsService.dispatch', () => {
     expect(desc).toMatch(/do not ask.*date/i)
   })
 
+  // Bug 50 — voice tool schema must require the same BP + adherence + symptoms
+  // fields the chat tool schema requires (see
+  // backend/src/chat/tools/journal-tools.ts:443). The voice schema previously
+  // only marked medication_taken required, which let Gemini Live omit BP
+  // entirely; the dispatcher then saw `undefined → 0` and rejected as a
+  // malformed "no over no" sparse log, forcing the patient to re-state BP.
+  it('Bug 50 — submit_checkin tool schema requires BP + entry_date + measurement_time + medication_taken + symptoms (chat parity)', () => {
+    const decls = service.getToolDeclarations()
+    const submit = decls.find((d) => d.name === 'submit_checkin')
+    expect(submit).toBeDefined()
+    const required = (submit?.parameters as { required?: string[] } | undefined)?.required ?? []
+    expect(required).toEqual(
+      expect.arrayContaining([
+        'entry_date',
+        'measurement_time',
+        'systolic_bp',
+        'diastolic_bp',
+        'medication_taken',
+        'symptoms',
+      ]),
+    )
+  })
+
+  // Bug 50 — the description must explicitly warn against passing 0/0 when
+  // the bot has real BP numbers. Without this, the LLM treats sparse-log
+  // support as a license to call submit_checkin with placeholder zeros.
+  it('Bug 50 — submit_checkin description warns the LLM not to pass 0/0 when it has real BP', () => {
+    const decls = service.getToolDeclarations()
+    const submit = decls.find((d) => d.name === 'submit_checkin')
+    const desc = (submit?.description ?? '').toLowerCase()
+    expect(desc).toMatch(/0\/0|sparse[- ]log/i)
+    expect(desc).toMatch(/138|positive integer|real (numbers|bp)/i)
+  })
+
   it('update_checkin description spells out natural-language target resolution', () => {
     const decls = service.getToolDeclarations()
     const update = decls.find((d) => d.name === 'update_checkin')
