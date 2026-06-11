@@ -543,6 +543,42 @@ export class TestControlController {
     return this.svc.findUser(email)
   }
 
+  // ─── Invite + magic-link token minting (specs 36/37/40) ───────────────────
+  // Return the RAW token (which the e-mail would carry) so a spec can drive
+  // the real activation / magic-link-verify endpoints without reading e-mail.
+  @Post('invite/create')
+  @HttpCode(200)
+  async createInvite(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: {
+      email: string
+      name: string
+      role: string
+      practiceId?: string
+      expiresInSeconds?: number
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.createInvite({
+      email: body.email,
+      name: body.name,
+      // Prisma validates the enum value; the controller just forwards it.
+      role: body.role as never,
+      practiceId: body.practiceId,
+      expiresInSeconds: body.expiresInSeconds,
+    })
+  }
+
+  @Post('magic-link/issue')
+  @HttpCode(200)
+  async issueMagicLink(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { email: string; expiresInSeconds?: number; markUsed?: boolean },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.issueMagicLink(body)
+  }
+
   // Spec 12 — drive the enrollment-gate "practice-missing-business-hours"
   // failure path. Clears the three businessHours fields on the practice
   // linked to `userId` via PatientProviderAssignment; returns the prior
