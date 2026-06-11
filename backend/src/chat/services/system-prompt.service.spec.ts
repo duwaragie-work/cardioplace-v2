@@ -14,6 +14,7 @@ const DOB = new Date('1980-06-15T00:00:00Z')
 function buildProfile(
   over: Partial<ResolvedContext['profile']> = {},
 ): ResolvedContext['profile'] {
+  // Cast at the end — see notes in system-prompt-scenarios.spec.ts.
   return {
     gender: 'FEMALE',
     heightCm: 165,
@@ -29,12 +30,13 @@ function buildProfile(
     hasDCM: false,
     hasTachycardia: false,
     hasBradycardia: false,
+    hasAorticStenosis: false,
     diagnosedHypertension: false,
     verificationStatus: 'VERIFIED',
     verifiedAt: NOW,
     lastEditedAt: NOW,
     ...over,
-  }
+  } as ResolvedContext['profile']
 }
 
 function buildMed(over: Partial<ContextMedication> = {}): ContextMedication {
@@ -56,6 +58,7 @@ function buildResolvedContext(
   over: {
     profile?: Partial<ResolvedContext['profile']>
     contextMeds?: ContextMedication[]
+    excludedMeds?: ContextMedication[]
     threshold?: ResolvedContext['threshold']
     readingCount?: number
     preDay3Mode?: boolean
@@ -70,7 +73,7 @@ function buildResolvedContext(
     ageGroup: '40-64',
     profile: buildProfile(over.profile),
     contextMeds: over.contextMeds ?? [],
-    excludedMeds: [],
+    excludedMeds: over.excludedMeds ?? [],
     threshold: over.threshold ?? null,
     assignment: null,
     readingCount,
@@ -381,6 +384,85 @@ describe('SystemPromptService', () => {
       )
       expect(out).toContain('Entresto')
       expect(out).toContain('combo: ARNI + ARB')
+    })
+
+    // ─── Bug 20 — pending-verification meds in the prompt ───────────────
+    // Pre-fix, appendMedications rendered ONLY contextMeds. Meds in
+    // excludedMeds (OTHER_UNVERIFIED, unreviewed voice/photo) never
+    // reached the LLM, so the bot's per-med adherence question silently
+    // skipped them. Now they land in a separate "pending verification"
+    // section so the patient gets asked about ALL meds they self-reported,
+    // while the rule engine still consumes only contextMeds.
+
+    it('OTHER_UNVERIFIED med (patient self-added under "other") → rendered under pending section', () => {
+      const out = service.buildPatientContext(
+        buildContext({
+          resolvedContext: buildResolvedContext({
+            contextMeds: [buildMed({ drugName: 'Lisinopril' })],
+            excludedMeds: [
+              buildMed({
+                id: 'm-other',
+                drugName: 'Glucosamine',
+                drugClass: 'OTHER_UNVERIFIED',
+                verificationStatus: 'UNVERIFIED',
+              }),
+            ],
+          }),
+        }),
+      )
+      // Active section still renders the known-class med.
+      expect(out).toContain('Lisinopril (ACE_INHIBITOR)')
+      // Pending section renders the "other"-category med so the LLM asks
+      // about adherence; drug class is humanised to "unclassified".
+      expect(out).toContain('Medications pending provider verification')
+      expect(out).toContain('Glucosamine (unclassified)')
+      expect(out).toContain('⚠ pending verification')
+    })
+
+    it('REJECTED med is hidden entirely (provider deliberately rejected — bot must not re-surface)', () => {
+      const out = service.buildPatientContext(
+        buildContext({
+          resolvedContext: buildResolvedContext({
+            contextMeds: [buildMed({ drugName: 'Lisinopril' })],
+            excludedMeds: [
+              buildMed({
+                id: 'm-rej',
+                drugName: 'WrongDrug',
+                drugClass: 'BETA_BLOCKER',
+                verificationStatus: 'REJECTED',
+              }),
+            ],
+          }),
+        }),
+      )
+      expect(out).toContain('Lisinopril')
+      expect(out).not.toContain('WrongDrug')
+      // No pending header when the only excluded med is REJECTED.
+      expect(out).not.toContain('Medications pending provider verification')
+    })
+
+    it('unreviewed voice-source med (AWAITING_PROVIDER) → surfaced in pending section', () => {
+      const out = service.buildPatientContext(
+        buildContext({
+          resolvedContext: buildResolvedContext({
+            contextMeds: [],
+            excludedMeds: [
+              buildMed({
+                id: 'm-voice',
+                drugName: 'Atenolol',
+                drugClass: 'BETA_BLOCKER',
+                source: 'PATIENT_VOICE',
+                verificationStatus: 'AWAITING_PROVIDER',
+              }),
+            ],
+          }),
+        }),
+      )
+      // No "No medications recorded" fallback even though contextMeds is empty.
+      expect(out).not.toContain('No medications recorded')
+      expect(out).toContain('Medications pending provider verification')
+      expect(out).toContain('Atenolol (BETA_BLOCKER)')
+      expect(out).toContain('⚠ pending verification')
     })
   })
 

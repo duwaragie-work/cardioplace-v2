@@ -32,7 +32,7 @@ import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
 import BpPhotoButton from '@/components/intake/BpPhotoButton';
 import SymptomTagInput from '@/components/intake/SymptomTagInput';
-import { kgToLbs } from '@/lib/units';
+import { kgToLbs, lbsToKg } from '@/lib/units';
 
 type TFn = (key: TranslationKey) => string;
 
@@ -470,6 +470,15 @@ function EntryCard({
 }) {
   const { t } = useLanguage();
   const hasBP = entry.systolicBP && entry.diastolicBP;
+  // Bug 37 — chat's log_symptom_quick funnels symptom-only logs through
+  // journal.create (so the rule engine sees the symptom boolean). Those
+  // entries land in My Readings with no BP. Pre-fix they appeared as
+  // confusing "No BP recorded" rows that looked like phantom BP readings.
+  // Detect them by shape and render with a "Symptom log" badge instead.
+  const trueStructuredSymptoms = SYMPTOM_KEYS.filter((k) => entry[k]);
+  const otherSymptomsCount = entry.otherSymptoms?.length ?? 0;
+  const isSymptomOnlyLog =
+    !hasBP && (trueStructuredSymptoms.length > 0 || otherSymptomsCount > 0);
   // BMI is read-only and only shown when both weight AND height exist.
   // Pulse pressure is intentionally NOT rendered on the patient app per
   // Niva — patients shouldn't see clinical signals they can't action.
@@ -598,6 +607,33 @@ function EntryCard({
                   {t('readings.mmHg')}
                 </span>
               </div>
+            </div>
+          ) : isSymptomOnlyLog ? (
+            // Bug 37 — symptom-only entries get a distinct red badge + the
+            // symptom name(s) as the headline. Patient understands this is a
+            // symptom log, not a BP reading with broken values.
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <span
+                className="text-[11px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider"
+                style={{
+                  backgroundColor: 'var(--brand-alert-red-light)',
+                  color: 'var(--brand-alert-red)',
+                }}
+              >
+                {t('readings.symptomLog')}
+              </span>
+              {trueStructuredSymptoms.length > 0 && (
+                <span className="text-[15px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                  {trueStructuredSymptoms
+                    .map((k) => t(SYMPTOM_LABEL_KEYS[k]))
+                    .join(', ')}
+                </span>
+              )}
+              {trueStructuredSymptoms.length === 0 && otherSymptomsCount > 0 && (
+                <span className="text-[15px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                  {entry.otherSymptoms?.join(', ')}
+                </span>
+              )}
             </div>
           ) : (
             <p className="text-[0.8125rem] mb-2" style={{ color: 'var(--brand-text-muted)' }}>
@@ -2030,7 +2066,16 @@ export default function ReadingsPage() {
       systolic: entry.systolicBP?.toString() ?? '',
       diastolic: entry.diastolicBP?.toString() ?? '',
       pulse: entry.pulse?.toString() ?? '',
-      weight: entry.weight?.toString() ?? '',
+      // Bug 39 — edit modal field is labelled "lbs" (readings.weightLbs).
+      // Pre-fix this loaded entry.weight (kg from DB) as a raw string, so
+      // a 150 lb reading (stored as 68.04 kg) displayed as "68.04" next to
+      // a "lbs" label. Either the patient saw the wrong value and was
+      // confused, or they tried to correct it to "150" — backend then
+      // stored that as 150 kg (= 330 lbs) because the POST never went
+      // through the lbs→kg conversion. Now we convert on load + save so
+      // the form is consistently lbs end-to-end, matching the label and
+      // matching CheckIn.tsx's submit flow.
+      weight: entry.weight != null ? kgToLbs(entry.weight).toString() : '',
       medicationStatus: buildMedStatus(entry, medications),
       severeHeadache: entry.severeHeadache ?? false,
       visualChanges: entry.visualChanges ?? false,
@@ -2101,7 +2146,15 @@ export default function ReadingsPage() {
       if (editForm.systolic) payload.systolicBP = parseInt(editForm.systolic, 10);
       if (editForm.diastolic) payload.diastolicBP = parseInt(editForm.diastolic, 10);
       if (editForm.pulse) payload.pulse = parseInt(editForm.pulse, 10);
-      if (editForm.weight) payload.weight = parseFloat(editForm.weight);
+      // Bug 39 — form holds lbs (matching the visible label and the load
+      // conversion above). Backend stores kg, so convert before POSTing.
+      // This also fixes the "weight must not exceed 300" false rejection
+      // patients hit when entering legitimate lbs values like 350 (= 159
+      // kg, well under the @Max(300) DTO bound).
+      if (editForm.weight) {
+        const lbs = parseFloat(editForm.weight);
+        if (Number.isFinite(lbs) && lbs > 0) payload.weight = lbsToKg(lbs);
+      }
       // Per-medication adherence → the rollup shape the backend stores.
       // Mirrors CheckIn's submit: each med marked "no" becomes a
       // missedMedications entry (with its reason + dose count); "not due yet"
@@ -2306,18 +2359,39 @@ export default function ReadingsPage() {
             return (
               <AnimatePresence mode="popLayout">
                 {grouped.map((group) => {
-                  // Within each date, sub-group consecutive entries by
-                  // sessionId. Multi-reading sessions render as a collapsible
-                  // SessionCard; solo readings stay as plain EntryCards.
-                  type Bucket = { sessionId: string | null; items: Entry[] };
+                  // Bug 43 — within each date, bucket consecutive entries that
+                  // are either (a) sharing the SAME non-null sessionId OR
+                  // (b) within 5 minutes of the bucket's most recent
+                  // measuredAt. The time-proximity branch fixes cases where
+                  // entries should clinically group but ended up with
+                  // different sessionIds — legacy null-id rows pre-#91,
+                  // backend's defensive stale-id reset minting a fresh UUID,
+                  // or a chat tool call that didn't thread session_id. Per
+                  // CLINICAL_SPEC §5.2 the 5-minute clock is the canonical
+                  // session-grouping rule; sessionId is just the storage
+                  // shortcut. Multi-item buckets render as SessionCard
+                  // regardless of whether they share an id.
+                  const FIVE_MIN_MS = 5 * 60 * 1000;
+                  type Bucket = { sessionId: string | null; items: Entry[]; lastMs: number };
                   const buckets: Bucket[] = [];
                   for (const e of group.items) {
                     const sid = e.sessionId ?? null;
+                    const eMs = new Date(e.measuredAt).getTime();
                     const last = buckets[buckets.length - 1];
-                    if (sid && last && last.sessionId === sid) {
+                    const sameSession =
+                      sid && last && last.sessionId === sid;
+                    const withinWindow =
+                      last && Number.isFinite(eMs) && Number.isFinite(last.lastMs) &&
+                      Math.abs(eMs - last.lastMs) <= FIVE_MIN_MS;
+                    if (last && (sameSession || withinWindow)) {
                       last.items.push(e);
+                      last.lastMs = eMs;
+                      // Promote the bucket to the first non-null sessionId we
+                      // see, so the React key + SessionCard caption pick up a
+                      // stable id when at least one entry in the bucket has one.
+                      if (!last.sessionId && sid) last.sessionId = sid;
                     } else {
-                      buckets.push({ sessionId: sid, items: [e] });
+                      buckets.push({ sessionId: sid, items: [e], lastMs: eMs });
                     }
                   }
                   return (
@@ -2333,9 +2407,9 @@ export default function ReadingsPage() {
                           : ''}
                       </p>
                       {buckets.map((bucket, i) =>
-                        bucket.sessionId && bucket.items.length > 1 ? (
+                        bucket.items.length > 1 ? (
                           <SessionCard
-                            key={bucket.sessionId}
+                            key={bucket.sessionId ?? `proximity-${group.date}-${i}`}
                             entries={bucket.items}
                             heightCm={heightCm}
                             onView={(e) => setDetailEntry(e)}

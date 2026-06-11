@@ -381,17 +381,28 @@ Reply with strict JSON only:
 
   /**
    * Transcribe audio using Gemini Flash.
-   * Accepts a base64-encoded WAV and returns the transcription text.
+   * Accepts a base64-encoded audio blob and returns the transcription text.
+   * `languageHint` is a BCP-47 tag (e.g. 'en-US', 'es-ES'). When provided,
+   * the prompt nudges the model to interpret the audio in that language —
+   * useful for chat dictation where the patient's preferredLanguage gives a
+   * strong prior. Defaults to none (model auto-detects).
    */
-  async transcribeAudio(audioBase64: string, mimeType = 'audio/wav'): Promise<string> {
+  async transcribeAudio(
+    audioBase64: string,
+    mimeType = 'audio/wav',
+    languageHint?: string,
+  ): Promise<string> {
     return this.withRetry('transcribeAudio', async () => {
+      const langClause = languageHint
+        ? ` The speaker's preferred language is ${languageHint}; treat that as a strong prior when the audio is ambiguous, but transcribe in the language actually spoken.`
+        : ''
       const response = await this.client.models.generateContent({
         model: this.chatModel,
         contents: [{
           role: 'user',
           parts: [
             { inlineData: { mimeType, data: audioBase64 } },
-            { text: 'Transcribe this audio exactly as spoken. Return only the transcription text, nothing else. If the audio is silent or unintelligible, return an empty string.' },
+            { text: `Transcribe this audio exactly as spoken. Return ONLY the transcription text — no preamble, no quotes, no formatting, no commentary. If the audio is silent or unintelligible, return an empty string.${langClause}` },
           ],
         }],
       })

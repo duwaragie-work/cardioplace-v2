@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Res, Req, Get, Param, Delete, UseGuards } from '@nestjs/common'
+import { Body, Controller, HttpException, HttpStatus, Logger, Post, Res, Req, Get, Param, Delete, UseGuards } from '@nestjs/common'
 import type { Request, Response } from 'express'
 import { randomUUID } from 'crypto'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js'
@@ -6,6 +6,8 @@ import { Roles } from '../auth/decorators/roles.decorator.js'
 import { UserRole } from '../generated/prisma/enums.js'
 import { ChatService } from './chat.service.js'
 import { ChatRequestDto } from './dto/chat-request.dto.js'
+import { TranscribeRequestDto, type TranscribeResponse } from './dto/transcribe.dto.js'
+import { GeminiService } from '../gemini/gemini.service.js'
 
 /**
  * All chat endpoints require JWT authentication AND PATIENT role.
@@ -21,7 +23,12 @@ import { ChatRequestDto } from './dto/chat-request.dto.js'
 @UseGuards(JwtAuthGuard)
 @Roles(UserRole.PATIENT)
 export class ChatController {
-  constructor(private readonly chatService: ChatService) { }
+  private readonly logger = new Logger(ChatController.name)
+
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly geminiService: GeminiService,
+  ) { }
 
   /**
    * POST /chat/streaming
@@ -133,5 +140,47 @@ export class ChatController {
   async deleteSession(@Param('sessionId') sessionId: string, @Req() req: Request) {
     const userId = (req.user as { id: string }).id
     return this.chatService.deleteSession(sessionId, userId)
+  }
+
+  /**
+   * POST /chat/transcribe
+   * Patient dictates into the chat input — browser MediaRecorder captures
+   * audio, base64-encodes the blob, and POSTs it here. Backend forwards to
+   * Gemini for transcription and returns the text so the frontend can fill
+   * the textarea for review-then-Send.
+   *
+   * Uses the same GeminiService.transcribeAudio path the voice service uses
+   * for transcript persistence — consistent quality, consistent surface,
+   * consistent cost model. Works on Firefox + iOS Safari where the browser
+   * Web Speech API isn't available.
+   *
+   * Body validation:
+   *   • audioBase64 capped at ~10 MB raw audio (see TranscribeRequestDto)
+   *   • mimeType allow-listed to formats Gemini accepts
+   *   • languageHint optional (BCP-47); narrows the transcription model's prior
+   */
+  @Post('transcribe')
+  async transcribe(
+    @Body() body: TranscribeRequestDto,
+    @Req() req: Request,
+  ): Promise<TranscribeResponse> {
+    const userId = (req.user as { id: string }).id
+    try {
+      const transcript = await this.geminiService.transcribeAudio(
+        body.audioBase64,
+        body.mimeType,
+        body.languageHint,
+      )
+      return { transcript }
+    } catch (err) {
+      this.logger.error(
+        `transcribe failed userId=${userId} mimeType=${body.mimeType} bytes=${body.audioBase64.length}`,
+        err instanceof Error ? err.stack : err,
+      )
+      throw new HttpException(
+        'Transcription failed. Please try again.',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      )
+    }
   }
 }

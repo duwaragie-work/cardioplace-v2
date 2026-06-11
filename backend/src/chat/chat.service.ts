@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter'
 import type { Content } from '@google/genai'
 import {
   getTrailing7DayBaseline,
@@ -25,9 +26,40 @@ import { MedicationAdherenceService } from './services/medication-adherence.serv
 import { SymptomQuickLogService } from './services/symptom-quick-log.service.js'
 import { getJournalToolDeclarations, executeJournalTool } from './tools/journal-tools.js'
 import type { JournalToolContext } from './tools/journal-tools.js'
+import { IntakeStatusService } from '../intake/intake-status.service.js'
+import { INTAKE_EVENTS, type IntakeUpdatedPayload } from '../intake/intake-events.js'
+import { EMERGENCY_EVENTS, type EmergencyFlaggedPayload } from './emergency-events.js'
 
 @Injectable()
 export class ChatService {
+  /**
+   * Per-user patient-context cache.
+   *
+   * `buildPatientSystemPrompt` runs 4 parallel Prisma queries plus
+   * ProfileResolver's 3 sub-queries every chat turn — but the underlying
+   * data only changes when the patient does a check-in CRUD via our
+   * journal tools. So we cache the fully-rendered system-prompt string
+   * keyed by userId and invalidate explicitly from the journal-tool
+   * executor on saved/updated/deleted/logged. Mirrors the proven pattern
+   * in voice.service.ts (line 155-156) — same Map shape, same TTL,
+   * same invalidation discipline.
+   *
+   * Multi-instance staleness is bounded by the 60s TTL — chat sessions
+   * have natural affinity to a single backend instance, and a
+   * cross-instance mutation worst case shows up to 60s of stale recent-
+   * readings context (no clinical risk; the rule engine still fires
+   * from actual DB writes, not from cached context).
+   *
+   * Cache shape note: we store the rendered patient-context block +
+   * the patient's timezone, NOT the fully-assembled system prompt. The
+   * "CURRENT DATE AND TIME" line at the bottom is re-derived from
+   * `new Date()` on every call so a cache hit still gets a fresh
+   * timestamp (otherwise the LLM's interpretation of "now"/"today"
+   * would lag by up to 60s, including across midnight).
+   */
+  private readonly contextCache = new Map<string, { patientContext: string; timezone: string; at: number }>()
+  private static readonly CONTEXT_TTL_MS = 60_000
+
   constructor(
     private readonly systemPromptService: SystemPromptService,
     private readonly ragService: RagService,
@@ -41,57 +73,177 @@ export class ChatService {
     private readonly adherenceService: MedicationAdherenceService,
     private readonly symptomQuickLogService: SymptomQuickLogService,
     private readonly alertEngineService: AlertEngineService,
+    private readonly intakeStatusService: IntakeStatusService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * Drop the cached patient-context for `userId`. Called by the journal-tool
+   * executor after every successful CRUD so the next chat turn rebuilds
+   * fresh — the newly-saved check-in / adherence log / quick symptom must
+   * land in the next prompt's recent-readings block.
+   */
+  /**
+   * Event listener — IntakeService emits `intake.updated` after a successful
+   * profile / medication / pregnancy mutation. Drops the cached patient
+   * context so the next chat turn sees the new INTAKE STATUS block + fresh
+   * resolved conditions / medications without waiting for the 60s TTL.
+   */
+  @OnEvent(INTAKE_EVENTS.UPDATED)
+  onIntakeUpdated(payload: IntakeUpdatedPayload): void {
+    this.invalidateContextCache(payload.userId)
+  }
+
+  invalidateContextCache(userId: string): void {
+    if (this.contextCache.delete(userId)) {
+      console.log(`[CHAT cache] invalidated patient context for user=${userId}`)
+    }
+  }
 
   /** Phase/27 — bag of services the journal-tools executor needs for the
    *  new adherence / quick-symptom / photo-OCR tools. Built lazily because
    *  the constructor wires the deps; this just packages them. */
-  private toolContext(): JournalToolContext {
+  private toolContext(
+    userId: string,
+    ocrState?: JournalToolContext['ocrState'],
+  ): JournalToolContext {
+    // Bug 18 — pull the patient's IANA timezone from the per-user context
+    // cache populated by buildPatientSystemPrompt at the start of every
+    // streaming turn. The cache is guaranteed warm by the time tool
+    // dispatch runs (system prompt is built first, then the LLM call, then
+    // tools), and the timezone is what submit_checkin / update_checkin use
+    // to convert wallclock measurement_time → UTC measuredAt correctly.
+    const timezone = this.contextCache.get(userId)?.timezone ?? 'America/New_York'
     return {
       journalService: this.dailyJournalService,
       adherenceService: this.adherenceService,
       symptomService: this.symptomQuickLogService,
       ocrService: this.ocrService,
       alertEngine: this.alertEngineService,
+      intakeStatusService: this.intakeStatusService,
+      timezone,
+      // Bug 13 — caller passes a SHARED mutable ocrState so the same object
+      // survives across the multiple toolContext() calls within one
+      // streaming turn. submit_bp_from_photo mutates lastAt; the streaming
+      // loop flips userMessageSince when a new user turn arrives; the next
+      // submit_checkin reads the flag and refuses if unconfirmed.
+      ocrState,
+      // Mutating tools (submit/update/delete check-in, log adherence, log
+      // symptom) call this after a successful write so the next chat turn
+      // rebuilds patient context with the fresh row included. Mirrors the
+      // voice gateway's invalidateContextCache wiring on its CRUD callbacks.
+      onPatientDataMutated: (uid) => this.invalidateContextCache(uid),
     }
   }
 
   /**
    * Record an emergency event in the database (fire-and-forget).
    */
-  private recordEmergencyEvent(
+  /**
+   * Prompt-size observability — emits one log line per Gemini call showing
+   * the assembled system-prompt size, the contents-array size, and the
+   * total. Lets ops tell whether a slow / expensive turn was driven by a
+   * bloated prompt (long patient context, long session summary, many
+   * tool-result follow-up iterations) without enabling per-call payload
+   * logging in Gemini itself. Always on — the line is one short tagged
+   * log per turn, cheap to emit and easy to grep.
+   */
+  private logPromptSize(
+    sessionId: string,
+    systemPrompt: string,
+    contents: Content[],
+    historyTurns: number,
+  ): void {
+    const systemChars = systemPrompt.length
+    const contentsChars = JSON.stringify(contents).length
+    console.log(
+      `[chat.prompt size] sessionId=${sessionId} system=${systemChars} contents_turns=${historyTurns} contents_chars=${contentsChars} total=${systemChars + contentsChars}`,
+    )
+  }
+
+  /**
+   * Persist an EmergencyEvent row AND fan out an emergency.flagged event so
+   * EscalationService can page the care team.
+   *
+   * Bug 10 — was previously fire-and-forget (.then/.catch with void return).
+   * If Prisma was briefly down the row was silently lost — patient still got
+   * verbal "call 911" from the LLM but ops had no audit trail. Now awaited
+   * INSIDE the method; failure logged with the [SECURITY-CRITICAL] prefix
+   * ops alerting watches for. Callers still invoke as fire-and-forget so the
+   * streaming LLM response isn't blocked on the DB write.
+   *
+   * Bug 11 — after a successful row insert, emits EMERGENCY_EVENTS.FLAGGED so
+   * EscalationService can dispatch caregiver / provider notifications via
+   * the existing dispatchCaregiverNotification machinery. Without this the
+   * EmergencyEvent row sat in the DB unread; no SMS / email / push fired.
+   */
+  private async recordEmergencyEvent(
     sessionId: string | null,
     userId: string | null,
     prompt: string,
     emergencySituation: string,
-  ): void {
-    this.prisma.emergencyEvent.create({
-      data: {
-        userId,
-        sessionId,
-        prompt,
-        isEmergency: true,
-        emergency_situation: emergencySituation,
-      },
-    }).then(() => {
-      console.log(`Recorded emergency event for session ${sessionId}: ${emergencySituation}`)
-    }).catch((error) => {
-      console.error('Error recording emergency event:', error)
-    })
+    source: EmergencyFlaggedPayload['source'] = 'chat-tool',
+  ): Promise<void> {
+    try {
+      await this.prisma.emergencyEvent.create({
+        data: {
+          userId,
+          sessionId,
+          prompt,
+          isEmergency: true,
+          emergency_situation: emergencySituation,
+        },
+      })
+      console.log(
+        `Recorded emergency event for session ${sessionId}: ${emergencySituation}`,
+      )
+      // Bug 11 — fan out to EscalationService.onEmergencyFlagged. Only emit
+      // when we have a userId — anonymous emergencies (rare; admin sessions
+      // hitting chat by accident) have no care team to page.
+      if (userId) {
+        const payload: EmergencyFlaggedPayload = {
+          userId,
+          sessionId,
+          situation: emergencySituation,
+          source,
+        }
+        this.eventEmitter.emit(EMERGENCY_EVENTS.FLAGGED, payload)
+      }
+    } catch (error) {
+      console.error(
+        `[SECURITY-CRITICAL] emergency event persistence failed userId=${userId} sessionId=${sessionId} situation="${emergencySituation}" source=${source} error=${
+          (error as Error).message ?? 'unknown'
+        }`,
+      )
+    }
   }
 
   /**
    * Build patient context part of system prompt (DB queries only, no LLM calls).
+   *
+   * Per-user cached for CONTEXT_TTL_MS — patient context (recent readings,
+   * alerts, profile, meds, thresholds) only changes when the patient writes
+   * via our journal tools, and those paths call invalidateContextCache.
+   * The "CURRENT DATE AND TIME" tail is always rebuilt fresh so the LLM's
+   * interpretation of "now"/"today" never lags.
    */
   private async buildPatientSystemPrompt(userId: string): Promise<string> {
-    let systemPrompt = this.systemPromptService.buildSystemPrompt({ toneMode: 'PATIENT' })
+    const basePrompt = this.systemPromptService.buildSystemPrompt({ toneMode: 'PATIENT' })
 
-    if (!userId) return systemPrompt
+    if (!userId) return basePrompt
+
+    // Cache fast-path — return rendered prompt without hitting Prisma.
+    const cached = this.contextCache.get(userId)
+    if (cached && Date.now() - cached.at < ChatService.CONTEXT_TTL_MS) {
+      return basePrompt + '\n\n' + cached.patientContext + this.currentDateTimeBlock(cached.timezone)
+    }
+
+    let systemPrompt = basePrompt
 
     // Phase/16 — pull full ResolvedContext from ProfileResolverService (single
     // source of truth, shared with the alert engine) and v2-shape DeviationAlert
     // rows with tier/ruleId/patientMessage/physicianMessage for chat context.
-    const [recentEntries, activeAlerts, user, resolvedContext] = await Promise.all([
+    const [recentEntries, activeAlerts, user, resolvedContext, intakeStatus] = await Promise.all([
       this.prisma.journalEntry.findMany({
         where: { userId },
         orderBy: { measuredAt: 'desc' },
@@ -118,6 +270,10 @@ export class ChatService {
         if (err instanceof ProfileNotFoundException) return null
         throw err
       }) as Promise<ResolvedContext | null>,
+      // Cheap PK-scoped findUnique on PatientProfile — mirrors the gate at
+      // DailyJournalService.create. Sub-ms; runs in parallel with the four
+      // other prompt-context queries.
+      this.intakeStatusService.getStatus(userId),
     ])
 
     // Trailing 7-day mean — single source of truth lives in
@@ -147,13 +303,27 @@ export class ChatService {
       patientName: user?.name ?? null,
       dateOfBirth: user?.dateOfBirth ?? null,
       resolvedContext,
+      intakeStatus,
       toneMode: 'PATIENT',
     })
 
-    systemPrompt = systemPrompt + '\n\n' + patientContext
-
-    // Inject current date/time so the AI knows what "now" and "today" mean
     const tz = user?.timezone ?? 'America/New_York'
+
+    // Cache the rendered patient-context block + the patient's timezone so
+    // the cheap-rebuild path on cache HIT can attach a fresh timestamp.
+    this.contextCache.set(userId, { patientContext, timezone: tz, at: Date.now() })
+
+    systemPrompt = systemPrompt + '\n\n' + patientContext + this.currentDateTimeBlock(tz)
+    return systemPrompt
+  }
+
+  /**
+   * Render the trailing "CURRENT DATE AND TIME …" block in the patient's
+   * timezone. Re-derived from `new Date()` on every call so cache hits get
+   * a fresh timestamp — the LLM's interpretation of "now"/"today" must
+   * never lag, especially across midnight in the patient's TZ.
+   */
+  private currentDateTimeBlock(tz: string): string {
     const now = new Date()
     const formatter = new Intl.DateTimeFormat('en-US', {
       timeZone: tz,
@@ -168,9 +338,7 @@ export class ChatService {
     const mi = parts.find(p => p.type === 'minute')?.value
     const currentDate = `${y}-${mo}-${d}`
     const currentTime = `${h}:${mi}`
-    systemPrompt += `\n\nCURRENT DATE AND TIME (patient timezone ${tz}): ${currentDate} at ${currentTime}. When the patient says "now", "today", or "right now", use EXACTLY this date and time. NEVER guess a different date or time.`
-
-    return systemPrompt
+    return `\n\nCURRENT DATE AND TIME (patient timezone ${tz}): ${currentDate} at ${currentTime}. When the patient says "now", "today", or "right now", use EXACTLY this date and time. NEVER guess a different date or time.`
   }
 
   /**
@@ -239,6 +407,10 @@ export class ChatService {
     const toolResults: Array<{ tool: string; result: any }> = []
     const emergency: EmergencyDetectionResult = { isEmergency: false, emergencySituation: null }
     let fullText = ''
+    // Captured when the submit_checkin discussion gate blocks. Drives the
+    // silent-block fallback below — see the matching block in
+    // getStreamingResponse for the longer rationale.
+    let blockedCheckinNextAction: string | null = null
 
     for (let iteration = 0; iteration < 5; iteration++) {
       const response = await this.geminiService.generateContentWithTools({
@@ -279,16 +451,17 @@ export class ChatService {
           const gate = ChatService.checkSubmitCheckinDiscussion(contents, toolArgs)
           if (gate.block) {
             console.log(`[submit_checkin BLOCKED] Missing: ${gate.missing.join(', ')}`)
+            blockedCheckinNextAction = gate.missing[0]
             resultStr = JSON.stringify({
               saved: false,
               _internal: true,
               next_action: `Continue asking. Missing: ${gate.missing[0]}`,
             })
           } else {
-            resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(), userId)
+            resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(userId), userId)
           }
         } else {
-          resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(), userId)
+          resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(userId), userId)
         }
 
         console.log(`Tool result [${toolName}]:`, resultStr.slice(0, 200))
@@ -358,6 +531,16 @@ export class ChatService {
       }
     }
 
+    // Silent-block fallback: if submit_checkin was blocked by the discussion
+    // gate AND Gemini didn't produce a follow-up question (it sees
+    // `_internal: true` and often goes quiet), surface the missing-field
+    // prompt ourselves so the patient never hits silence on a "yes" confirm.
+    if (!fullText.trim() && blockedCheckinNextAction) {
+      fullText =
+        'Before I save, let me check one more thing — ' +
+        blockedCheckinNextAction
+    }
+
     return { text: fullText, toolResults, emergency }
   }
 
@@ -378,6 +561,7 @@ export class ChatService {
     | string
     | { type: 'emergency'; emergencySituation: string | null }
     | { type: 'toolResult'; tool: string; result: any }
+    | { type: 'hallucinationSuspected'; claim: 'save' | 'update' | 'delete'; excerpt: string }
   > {
     const { prompt } = request
     const sessionId = request.sessionId as string
@@ -386,7 +570,7 @@ export class ChatService {
       // ── Tier 1: Parallel — DB + local embeddings only, zero Gemini calls ──
       const [basePrompt, sessionSummary, ragDocs, chatHistory] = await Promise.all([
         this.buildPatientSystemPrompt(userId),
-        this.conversationHistoryService.getSessionSummary(sessionId),
+        this.conversationHistoryService.getSessionSummary(userId, sessionId),
         this.ragService.retrieveDocuments(prompt, 10),
         this.conversationHistoryService.getConversationHistory(userId, sessionId, prompt),
       ])
@@ -396,12 +580,32 @@ export class ChatService {
       const systemPrompt = this.assembleSystemPrompt(basePrompt, sessionSummary, ragDocs)
       const contents = this.buildGeminiContents(chatHistory, prompt)
 
+      this.logPromptSize(sessionId, systemPrompt, contents, chatHistory.length / 2)
+
       // ── Tier 2: Streaming Gemini + function-calling loop ────────────────
       const toolDeclarations = getJournalToolDeclarations()
       let fullResponse = ''
       const toolResultsCollected: Array<{ tool: string; result: any }> = []
       let emergency: EmergencyDetectionResult = { isEmergency: false, emergencySituation: null }
       let emergencyYielded = false
+      // Captured when the submit_checkin discussion gate blocks. Drives the
+      // silent-block fallback below (if Gemini doesn't generate text after a
+      // block, we stream the missing-field question ourselves so the patient
+      // never sees silence on a "yes" confirmation).
+      let blockedCheckinNextAction: string | null = null
+
+      // Bug 13 — per-turn OCR-confirmation state. Shared mutable object so
+      // both submit_bp_from_photo (sets lastAt + clears flag) and
+      // submit_checkin (reads flag) see the same instance. Reset on a new
+      // patient message — since this streaming call IS a new patient
+      // message, userMessageSince starts true (LLM may have called OCR in
+      // a PRIOR turn that's now stale-bypassed by the current message).
+      const ocrState = { lastAt: 0, userMessageSince: true }
+
+      // Bug 22 Fix 1 — accumulate which write-tools fired across the
+      // entire turn (across all 5 internal iterations). Used by the
+      // hallucination detector after the tool loop completes.
+      const writeToolsCalledThisTurn = new Set<string>()
 
       for (let iteration = 0; iteration < 5; iteration++) {
         const stream = this.geminiService.streamContentWithTools({
@@ -450,20 +654,26 @@ export class ChatService {
           console.log(`Executing tool: ${toolName}`, JSON.stringify(toolArgs))
 
           let resultStr: string
+          // Bug 22 Fix 1 — track every tool fired this turn. Write tools
+          // are correlated against the LLM's text at end-of-turn to catch
+          // hallucinated "I saved it" / "I deleted it" with no real call.
+          if (toolName) writeToolsCalledThisTurn.add(toolName)
+
           if (toolName === 'submit_checkin') {
             const gate = ChatService.checkSubmitCheckinDiscussion(contents, toolArgs)
             if (gate.block) {
               console.log(`[submit_checkin BLOCKED] Missing: ${gate.missing.join(', ')}`)
+              blockedCheckinNextAction = gate.missing[0]
               resultStr = JSON.stringify({
                 saved: false,
                 _internal: true,
                 next_action: `Continue asking. Missing: ${gate.missing[0]}`,
               })
             } else {
-              resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(), userId)
+              resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(userId, ocrState), userId)
             }
           } else {
-            resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(), userId)
+            resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(userId, ocrState), userId)
           }
 
           console.log(`Tool result [${toolName}]:`, resultStr.slice(0, 200))
@@ -476,7 +686,11 @@ export class ChatService {
             if (!emergencyYielded) {
               emergencyYielded = true
               yield { type: 'emergency', emergencySituation: emergency.emergencySituation }
-              this.recordEmergencyEvent(sessionId, userId, prompt, emergency.emergencySituation!)
+              // Bug 10/11 — fire-and-forget at the call site so the LLM
+              // stream isn't blocked on the DB write, but the method is now
+              // async + awaited internally + emits the .FLAGGED event for
+              // care-team escalation.
+              void this.recordEmergencyEvent(sessionId, userId, prompt, emergency.emergencySituation!)
             }
           }
 
@@ -526,6 +740,81 @@ export class ChatService {
         if (fallback) {
           fullResponse = fallback
           yield fallback
+        }
+      }
+
+      // Silent-block fallback: if submit_checkin was rejected by the
+      // discussion gate AND the LLM produced no follow-up text (it sees
+      // `_internal: true` in the function-response and often produces no
+      // user-facing text), the patient would see total silence after their
+      // "yes". Stream the missing-field question ourselves so the chat
+      // never goes quiet on a confirm. After Change 1 (args-only gate)
+      // this should fire only on real protocol bugs, but it's the right
+      // safety net.
+      if (!fullResponse.trim() && blockedCheckinNextAction) {
+        const fallback =
+          'Before I save, let me check one more thing — ' +
+          blockedCheckinNextAction
+        fullResponse = fallback
+        yield fallback
+      }
+
+      // Bug 15 — last-ditch silent-turn fallback. If the two more-specific
+      // fallbacks above didn't fire (no tool succeeded, no submit was
+      // blocked) but the LLM still produced zero user-facing text, the
+      // patient just sent a message and is staring at silence. The
+      // commonest trigger is the LLM treating a "yes correct" confirmation
+      // as merely acknowledging the summary and forgetting to call
+      // submit_checkin — toolResultsCollected stays empty,
+      // blockedCheckinNextAction stays null, neither fallback runs. Recover
+      // by asking the patient to clarify rather than going silent.
+      if (!fullResponse.trim()) {
+        const fallback =
+          "I want to make sure I got that right — did you mean to confirm and save the reading, " +
+          'or did you want to change something first?'
+        fullResponse = fallback
+        yield fallback
+      }
+
+      // Bug 22 Fix 1 — hallucination detector. Worst-case clinical-chat
+      // bug: the LLM emits "your reading is saved" / "I've deleted that
+      // for you" without firing the matching write tool. Prompt-level
+      // guards are real but soft. Here we cross-check at the protocol
+      // level: if the assistant text claims a write but no matching
+      // tool fired across the whole turn (5 internal iterations
+      // included), we log an error and emit a structured event the
+      // frontend can use to surface a "I'm not sure that saved — let
+      // me check" banner + re-verify via get_recent_readings.
+      //
+      // Past-tense indicative only — "saving" / "deleting" gerunds
+      // don't trigger (the action is still in progress). False
+      // positives (e.g. "I saved your preferences earlier") are
+      // tolerable; missing a true hallucination on a hypertensive
+      // patient is not.
+      if (fullResponse.trim()) {
+        const saveClaim =
+          /\b(?:saved|recorded|logged it)\b|your\s+(?:reading|check[- ]?in)\s+(?:is|has\s+been)\s+(?:saved|recorded|logged)/i
+        const updateClaim =
+          /\b(?:updated|changed it|edited|modified it)\b|your\s+(?:reading|check[- ]?in)\s+(?:is|has\s+been)\s+updated/i
+        const deleteClaim =
+          /\b(?:deleted|removed|erased)\b|your\s+(?:reading|check[- ]?in)\s+(?:is|has\s+been)\s+(?:deleted|removed)/i
+        const firedSave =
+          writeToolsCalledThisTurn.has('submit_checkin') ||
+          writeToolsCalledThisTurn.has('finalize_checkin') ||
+          writeToolsCalledThisTurn.has('submit_bp_from_photo')
+        const firedUpdate = writeToolsCalledThisTurn.has('update_checkin')
+        const firedDelete = writeToolsCalledThisTurn.has('delete_checkin')
+        let claim: 'save' | 'update' | 'delete' | null = null
+        if (saveClaim.test(fullResponse) && !firedSave) claim = 'save'
+        else if (updateClaim.test(fullResponse) && !firedUpdate) claim = 'update'
+        else if (deleteClaim.test(fullResponse) && !firedDelete) claim = 'delete'
+        if (claim) {
+          const excerpt = fullResponse.slice(0, 240).replace(/\s+/g, ' ').trim()
+          console.error(
+            `[CHAT hallucination_suspected] type=${claim} tools=[${[...writeToolsCalledThisTurn].join(',')}] ` +
+              `excerpt="${excerpt}" session=${sessionId}`,
+          )
+          yield { type: 'hallucinationSuspected', claim, excerpt }
         }
       }
 
@@ -582,7 +871,7 @@ export class ChatService {
       // ── Tier 1: Parallel — DB + local embeddings only, zero Gemini calls ──
       const [basePrompt, sessionSummary, ragDocs, chatHistory] = await Promise.all([
         this.buildPatientSystemPrompt(userId),
-        this.conversationHistoryService.getSessionSummary(sessionId),
+        this.conversationHistoryService.getSessionSummary(userId, sessionId),
         this.ragService.retrieveDocuments(prompt, 10),
         this.conversationHistoryService.getConversationHistory(userId, sessionId, prompt),
       ])
@@ -591,6 +880,8 @@ export class ChatService {
 
       const systemPrompt = this.assembleSystemPrompt(basePrompt, sessionSummary, ragDocs)
       const contents = this.buildGeminiContents(chatHistory, prompt)
+
+      this.logPromptSize(sessionId, systemPrompt, contents, chatHistory.length / 2)
 
       // ── Tier 2: Single Gemini call — LLM response + emergency detection via tool ──
       let { text: responseText, toolResults, emergency } = await this.runToolLoop(systemPrompt, contents, userId, prompt)
@@ -615,7 +906,18 @@ export class ChatService {
       }
 
       if (emergency.isEmergency) {
-        this.recordEmergencyEvent(sessionId, userId, prompt, emergency.emergencySituation!)
+        // Bug 10/11 — fire-and-forget at the call site; the method is now
+        // async + awaited internally + emits EMERGENCY_EVENTS.FLAGGED for
+        // care-team escalation. Source 'detector' covers the upstream
+        // EmergencyDetectionService classifier path that sets
+        // emergency.isEmergency before any LLM tool call.
+        void this.recordEmergencyEvent(
+          sessionId,
+          userId,
+          prompt,
+          emergency.emergencySituation!,
+          'detector',
+        )
       }
 
       // ── Tier 3: Save conversation before returning ─────────────────────
@@ -779,48 +1081,31 @@ export class ChatService {
    * full ChatService.
    */
   static checkSubmitCheckinDiscussion(
-    contents: readonly Content[],
+    _contents: readonly Content[],   // kept for API compatibility; no longer read
     toolArgs: Record<string, unknown>,
   ): { block: boolean; missing: string[] } {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const allText = contents
-      .flatMap(
-        (c) =>
-          (c.parts as any[])
-            ?.filter((p: any) => p.text)
-            .map((p: any) => p.text) ?? [],
-      )
-      .join(' ')
-
-    const hasMedication =
-      toolArgs.medication_taken != null ||
-      /medication|meds|medicine|pills/.test(allText)
-    const hasSymptoms =
-      Array.isArray(toolArgs.symptoms) ||
-      /symptom|headache|dizziness|chest|no symptom|none|nothing|fine/.test(
-        allText,
-      )
-    const hasWeight =
-      toolArgs.weight != null ||
-      /weight|weigh|lbs|pounds|skip/.test(allText)
-
+    // Args-only check. The earlier version regex-matched the chat history for
+    // medication/symptom/weight tokens — that produced silent-failure UX bugs:
+    // a confirmed check-in would block on the first "yes" because the regex
+    // happened not to find "weight"/"lbs"/"skip" in the previous turns, even
+    // when weight was legitimately skipped per the (optional) tool spec.
+    // Now we trust the args directly: `medication_taken` and `symptoms` are
+    // REQUIRED on the submit_checkin tool spec, so a missing arg means the
+    // LLM truly didn't ask. `weight` is OPTIONAL per the spec — never block
+    // on it here. journal-tools.ts:574-580 has an inner missing-field gate
+    // that produces the same patient-facing instruction text if anything
+    // slips through.
     const missing: string[] = []
-    if (!hasMedication) {
+    if (toolArgs.medication_taken == null) {
       missing.push(
         'medication (ask: "Did you take your medication today?")',
       )
     }
-    if (!hasSymptoms) {
+    if (!Array.isArray(toolArgs.symptoms)) {
       missing.push(
         'symptoms (ask: "Any symptoms like headache, dizziness, or chest tightness?")',
       )
     }
-    if (!hasWeight) {
-      missing.push(
-        'weight (ask: "Do you know your weight today? Totally fine to skip.")',
-      )
-    }
-
     return { block: missing.length > 0, missing }
   }
 }

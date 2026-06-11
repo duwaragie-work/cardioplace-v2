@@ -581,6 +581,7 @@ const en = {
   'readings.detailTitle': 'Reading details',
   'readings.viewDetails': 'View reading details',
   'readings.noBpRecorded': 'No BP recorded',
+  'readings.symptomLog': 'Symptom log',
   'readings.meds': 'Meds',
   'readings.taken': 'Taken',
   'readings.missed': 'Missed',
