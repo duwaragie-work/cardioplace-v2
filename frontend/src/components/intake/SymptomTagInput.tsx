@@ -96,7 +96,7 @@ export default function SymptomTagInput({
       <div className="flex items-center justify-between gap-2 mb-2">
         <label
           htmlFor={inputId}
-          className="block text-[13px] font-semibold"
+          className="block text-[0.8125rem] font-semibold"
           style={{ color: 'var(--brand-text-primary)' }}
         >
           {label}
@@ -130,7 +130,7 @@ export default function SymptomTagInput({
           }}
           placeholder={placeholder}
           aria-describedby={atCapacity ? `${inputId}-cap` : undefined}
-          className="flex-1 min-w-0 h-11 px-4 rounded-xl text-[14px] outline-none transition"
+          className="flex-1 min-w-0 h-11 px-4 rounded-xl text-[0.875rem] outline-none transition"
           style={{
             border: '2px solid var(--brand-border)',
             color: 'var(--brand-text-primary)',
@@ -143,7 +143,7 @@ export default function SymptomTagInput({
           onClick={add}
           disabled={!canAdd}
           aria-label={addLabel}
-          className="shrink-0 h-11 px-4 rounded-xl text-[13px] font-semibold flex items-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed enabled:cursor-pointer"
+          className="shrink-0 h-11 px-4 rounded-xl text-[0.8125rem] font-semibold flex items-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed enabled:cursor-pointer"
           style={{
             backgroundColor: 'var(--brand-primary-purple-light)',
             color: 'var(--brand-primary-purple)',
@@ -155,7 +155,7 @@ export default function SymptomTagInput({
       </div>
 
       {atCapacity && (
-        <p id={`${inputId}-cap`} className="mt-1 text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
+        <p id={`${inputId}-cap`} className="mt-1 text-[0.6875rem]" style={{ color: 'var(--brand-text-muted)' }}>
           {value.length}/{maxItems}
         </p>
       )}
@@ -168,7 +168,7 @@ export default function SymptomTagInput({
           {value.map((symptom, i) => (
             <span
               key={`${symptom}-${i}`}
-              className="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1 rounded-full text-[12.5px] font-medium"
+              className="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1 rounded-full text-[0.78125rem] font-medium"
               style={{
                 backgroundColor: 'var(--brand-primary-purple-light)',
                 color: 'var(--brand-primary-purple)',

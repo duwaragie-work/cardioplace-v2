@@ -132,6 +132,16 @@ export const ADMINS = {
     roles: ['HEALPLACE_OPS'],
     name: 'HealPlace Ops',
   },
+  // phase/23 — front-desk role scoped to the Cedar Hill seed practice via
+  // PracticeCoordinator. Drives the patient-invite + user-management e2e
+  // flows (specs 35/37) and the COORDINATOR permission-boundary spec (38).
+  coordinator: {
+    email:
+      process.env.ADMIN_COORDINATOR_EMAIL ??
+      'coordinator.fernando@cardioplace.test',
+    roles: ['COORDINATOR'],
+    name: 'Lakshitha Fernando',
+  },
 } as const
 
 export type AdminKey = keyof typeof ADMINS

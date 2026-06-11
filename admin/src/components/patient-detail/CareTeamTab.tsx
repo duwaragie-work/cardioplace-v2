@@ -553,6 +553,8 @@ function ProviderSlot({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={options.length === 0}
+          aria-label={label}
+          aria-required="true"
           data-testid={testId}
           className="w-full px-3 h-9 text-[13px] outline-none bg-white disabled:opacity-60"
           style={{ color: 'var(--brand-text-primary)' }}

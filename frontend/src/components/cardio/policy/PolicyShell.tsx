@@ -60,19 +60,19 @@ export function PolicyShell({
               }}
             >
               <Shield className="w-3 h-3" aria-hidden />
-              <span className="text-[10px] font-bold uppercase tracking-wider">
+              <span className="text-[0.625rem] font-bold uppercase tracking-wider">
                 {KIND_LABEL[kind]}
               </span>
             </div>
             <h1
-              className="font-bold tracking-tight text-3xl sm:text-4xl lg:text-[44px] mb-3"
+              className="font-bold tracking-tight text-3xl sm:text-4xl lg:text-[2.75rem] mb-3"
               style={{ color: 'var(--brand-text-primary, #170c1d)' }}
             >
               {title}
             </h1>
             {intro && (
               <p
-                className="text-[15px] sm:text-base leading-relaxed max-w-[640px] mb-3"
+                className="text-[0.9375rem] sm:text-base leading-relaxed max-w-[640px] mb-3"
                 style={{ color: 'var(--brand-text-secondary, #374151)' }}
               >
                 {intro}
@@ -123,7 +123,7 @@ export function PolicySection({
     >
       <div className="flex items-center gap-3 mb-4">
         <span
-          className="shrink-0 inline-flex items-center justify-center min-w-[34px] h-8 px-2 rounded-lg text-[12px] font-bold tabular-nums"
+          className="shrink-0 inline-flex items-center justify-center min-w-[34px] h-8 px-2 rounded-lg text-[0.75rem] font-bold tabular-nums"
           style={{
             backgroundColor: 'var(--brand-primary-purple-light, #F3F0FF)',
             color: 'var(--brand-primary-purple, #7B00E0)',
@@ -140,7 +140,7 @@ export function PolicySection({
         </h2>
       </div>
       <div
-        className="space-y-3 text-[15px] leading-relaxed"
+        className="space-y-3 text-[0.9375rem] leading-relaxed"
         style={{ color: 'var(--brand-text-primary, #1F2937)' }}
       >
         {children}
@@ -178,7 +178,7 @@ export function PolicyContact({
       </h3>
       {intro && (
         <p
-          className="text-[14px] mb-3"
+          className="text-[0.875rem] mb-3"
           style={{ color: 'var(--brand-text-secondary, #374151)' }}
         >
           {intro}
@@ -186,13 +186,13 @@ export function PolicyContact({
       )}
       {organization && (
         <p
-          className="text-[14px] font-semibold mb-2"
+          className="text-[0.875rem] font-semibold mb-2"
           style={{ color: 'var(--brand-text-primary, #170c1d)' }}
         >
           {organization}
         </p>
       )}
-      <ul className="space-y-1.5 text-[14px]">
+      <ul className="space-y-1.5 text-[0.875rem]">
         {emails.map((email) => (
           <li key={email}>
             <a

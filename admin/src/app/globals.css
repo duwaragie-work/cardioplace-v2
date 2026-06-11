@@ -99,9 +99,48 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
+/* ── Visible keyboard focus (WCAG 2.4.7 Focus Visible) ────────────────────
+   Many admin controls use Tailwind's `outline-none`, which otherwise leaves
+   keyboard focus invisible. Restore a clear, on-brand focus ring for keyboard
+   / programmatic focus only — `:focus-visible` does NOT match mouse clicks, so
+   pointer users are unaffected. `outline` (not box-shadow) can't be clipped by
+   `overflow-hidden` ancestors and stays visible in Windows high-contrast /
+   forced-colors mode. Defined after the Tailwind import so it wins over plain
+   `.outline-none` (equal specificity, later source); controls that set their
+   own `focus:ring` still show those too. */
+:focus-visible {
+  outline: 2px solid var(--brand-primary-purple, #7B00E0);
+  outline-offset: 2px;
+}
+
 /* In-page anchor jumps (hero "Watch demo" → #demo) ease instead of snapping. */
 html {
   scroll-behavior: smooth;
+}
+
+/* ── Skip-to-main link (WCAG 2.4.1 Bypass Blocks) ─────────────────────────
+   First focusable element on every admin page. Hidden offscreen until a
+   keyboard user presses Tab, then it slides into view; Enter jumps focus to
+   <main id="main">, skipping the sidebar + top bar. */
+.skip-link {
+  position: absolute;
+  top: -48px;
+  left: 0;
+  background: var(--brand-primary-purple, #7B00E0);
+  color: white;
+  padding: 12px 20px;
+  font-weight: 700;
+  font-size: 14px;
+  border-radius: 0 0 8px 0;
+  z-index: 1000;
+  transition: top 120ms ease-out;
+  text-decoration: none;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  top: 0;
+  outline: 3px solid #ffffff;
+  outline-offset: -3px;
 }
 
 /* ── Thin brand scrollbar utility ─────────────────────────────────────────

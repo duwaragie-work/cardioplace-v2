@@ -539,7 +539,7 @@ function EntryCard({
         <div className="flex items-center gap-2 flex-wrap min-w-0">
           <p
             data-testid="reading-row-date"
-            className="text-[12px] font-semibold"
+            className="text-[0.75rem] font-semibold"
             style={{ color: 'var(--brand-text-muted)' }}
           >
             {formatDate(entry.measuredAt)}
@@ -551,7 +551,7 @@ function EntryCard({
             const mi = String(dt.getMinutes()).padStart(2, '0');
             return (
               <span
-                className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                className="text-[0.625rem] px-1.5 py-0.5 rounded font-semibold"
                 style={{
                   backgroundColor: 'var(--brand-primary-purple-light)',
                   color: 'var(--brand-primary-purple)',
@@ -594,16 +594,16 @@ function EntryCard({
       {hasBP ? (
             <div className="flex items-center gap-3 mb-2 flex-wrap">
               <div className="flex items-baseline gap-0.5">
-                <span className="text-[30px] font-bold leading-none" style={{ color: 'var(--brand-text-primary)' }}>
+                <span className="text-[1.875rem] font-bold leading-none" style={{ color: 'var(--brand-text-primary)' }}>
                   {entry.systolicBP}
                 </span>
-                <span className="text-[18px] font-semibold mx-1" style={{ color: 'var(--brand-text-muted)' }}>
+                <span className="text-[1.125rem] font-semibold mx-1" style={{ color: 'var(--brand-text-muted)' }}>
                   /
                 </span>
-                <span className="text-[30px] font-bold leading-none" style={{ color: 'var(--brand-text-primary)' }}>
+                <span className="text-[1.875rem] font-bold leading-none" style={{ color: 'var(--brand-text-primary)' }}>
                   {entry.diastolicBP}
                 </span>
-                <span className="text-[12px] ml-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+                <span className="text-[0.75rem] ml-1.5" style={{ color: 'var(--brand-text-muted)' }}>
                   {t('readings.mmHg')}
                 </span>
               </div>
@@ -636,7 +636,7 @@ function EntryCard({
               )}
             </div>
           ) : (
-            <p className="text-[13px] mb-2" style={{ color: 'var(--brand-text-muted)' }}>
+            <p className="text-[0.8125rem] mb-2" style={{ color: 'var(--brand-text-muted)' }}>
               {t('readings.noBpRecorded')}
             </p>
           )}
@@ -649,7 +649,7 @@ function EntryCard({
           <div className="flex flex-wrap gap-1.5 mt-1">
             {entry.pulse != null && (
               <span
-                className="text-[11px] px-2 py-0.5 rounded-md font-medium flex items-center gap-1"
+                className="text-[0.6875rem] px-2 py-0.5 rounded-md font-medium flex items-center gap-1"
                 style={{
                   backgroundColor: 'var(--brand-accent-teal-light)',
                   color: 'var(--brand-accent-teal)',
@@ -660,7 +660,7 @@ function EntryCard({
             )}
             {entry.position && (
               <span
-                className="text-[11px] px-2 py-0.5 rounded-md font-medium"
+                className="text-[0.6875rem] px-2 py-0.5 rounded-md font-medium"
                 style={{
                   backgroundColor: '#F1F5F9',
                   color: 'var(--brand-text-secondary)',
@@ -671,7 +671,7 @@ function EntryCard({
             )}
             {entry.weight != null && (
               <span
-                className="text-[11px] px-2 py-0.5 rounded-md font-medium"
+                className="text-[0.6875rem] px-2 py-0.5 rounded-md font-medium"
                 style={{
                   backgroundColor: 'var(--brand-primary-purple-light)',
                   color: 'var(--brand-primary-purple)',
@@ -682,7 +682,7 @@ function EntryCard({
             )}
             {bmi != null && (
               <span
-                className="text-[11px] px-2 py-0.5 rounded-md font-medium"
+                className="text-[0.6875rem] px-2 py-0.5 rounded-md font-medium"
                 style={{
                   backgroundColor: 'var(--brand-primary-purple-light)',
                   color: 'var(--brand-primary-purple)',
@@ -694,7 +694,7 @@ function EntryCard({
             )}
             {entry.medicationTaken != null && (
               <span
-                className="text-[11px] px-2 py-0.5 rounded-md font-medium"
+                className="text-[0.6875rem] px-2 py-0.5 rounded-md font-medium"
                 style={{
                   backgroundColor: entry.medicationTaken
                     ? 'var(--brand-success-green-light)'
@@ -709,7 +709,7 @@ function EntryCard({
             )}
             {entry.symptoms && entry.symptoms.length > 0 && (
               <span
-                className="text-[11px] px-2 py-0.5 rounded-md font-medium flex items-center gap-1"
+                className="text-[0.6875rem] px-2 py-0.5 rounded-md font-medium flex items-center gap-1"
                 style={{
                   backgroundColor: 'var(--brand-alert-red-light)',
                   color: 'var(--brand-alert-red-text)',
@@ -721,7 +721,7 @@ function EntryCard({
             )}
             {entry.notes && (
               <span
-                className="text-[11px] px-2 py-0.5 rounded-md font-medium"
+                className="text-[0.6875rem] px-2 py-0.5 rounded-md font-medium"
                 style={{
                   backgroundColor: 'var(--brand-accent-teal-light)',
                   color: 'var(--brand-accent-teal)',
@@ -738,7 +738,7 @@ function EntryCard({
           {entry.otherSymptoms && entry.otherSymptoms.length > 0 && (
             <div className="mt-2.5">
               <p
-                className="text-[10px] font-bold uppercase tracking-wider mb-1"
+                className="text-[0.625rem] font-bold uppercase tracking-wider mb-1"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 {t('readings.otherSymptoms')}
@@ -747,7 +747,7 @@ function EntryCard({
                 {entry.otherSymptoms.map((s, i) => (
                   <span
                     key={`${s}-${i}`}
-                    className="text-[11px] px-2 py-0.5 rounded-md font-medium"
+                    className="text-[0.6875rem] px-2 py-0.5 rounded-md font-medium"
                     style={{
                       backgroundColor: 'var(--brand-warning-amber-light)',
                       color: 'var(--brand-warning-amber-text)',
@@ -764,7 +764,7 @@ function EntryCard({
               full note shows in the detail modal. */}
           {entry.notes && (
             <p
-              className="text-[12px] mt-2.5 leading-relaxed line-clamp-2 break-words"
+              className="text-[0.75rem] mt-2.5 leading-relaxed line-clamp-2 break-words"
               style={{ color: 'var(--brand-text-muted)' }}
             >
               &ldquo;{entry.notes}&rdquo;
@@ -840,19 +840,19 @@ function SessionCard({
         </div>
         <div className="flex-1 min-w-0">
           <p
-            className="text-[10px] font-bold uppercase tracking-wider"
+            className="text-[0.625rem] font-bold uppercase tracking-wider"
             style={{ color: 'var(--brand-primary-purple)' }}
           >
             {t('readings.sessionReadings').replace('{count}', String(entries.length))}{span ? ` · ${span}` : ''}
           </p>
           <p
-            className="text-[14px] font-bold leading-tight"
+            className="text-[0.875rem] font-bold leading-tight"
             style={{ color: 'var(--brand-text-primary)' }}
           >
             {avgSys != null && avgDia != null ? (
               <>
                 {t('readings.avg')} <span>{avgSys}/{avgDia}</span>{' '}
-                <span className="text-[11px] font-medium" style={{ color: 'var(--brand-text-muted)' }}>
+                <span className="text-[0.6875rem] font-medium" style={{ color: 'var(--brand-text-muted)' }}>
                   {t('readings.mmHg')}
                 </span>
               </>
@@ -925,6 +925,14 @@ function EditModal({
   onClose: () => void;
 }) {
   const { t } = useLanguage();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   // Phase/26 TTS pass 2 — compose a humanised summary of the in-progress
   // form so the patient can hear what they're about to save. Reuses the
@@ -1019,7 +1027,7 @@ function EditModal({
           style={{ borderBottom: '1px solid var(--brand-border)' }}
         >
           <div className="flex items-center gap-2 min-w-0">
-            <h2 id="edit-reading-title" className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+            <h2 id="edit-reading-title" className="text-[1rem] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
               {t('readings.editReading')}
             </h2>
             {/* Phase/26 TTS pass 2 — humanised summary of the in-progress
@@ -1044,7 +1052,7 @@ function EditModal({
               <div>
                 <label
                   htmlFor="readings-edit-date"
-                  className="block text-[12px] font-semibold mb-1.5"
+                  className="block text-[0.75rem] font-semibold mb-1.5"
                   style={{ color: 'var(--brand-text-secondary)' }}
                 >
                   {t('checkin.date')}
@@ -1054,7 +1062,7 @@ function EditModal({
                   type="date"
                   value={form.measuredDate}
                   onChange={(e) => onChange('measuredDate', e.target.value)}
-                  className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none min-w-0"
+                  className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none min-w-0"
                   style={{
                     borderColor: 'var(--brand-border)',
                     color: 'var(--brand-text-primary)',
@@ -1065,7 +1073,7 @@ function EditModal({
               <div>
                 <label
                   htmlFor="readings-edit-time"
-                  className="block text-[12px] font-semibold mb-1.5"
+                  className="block text-[0.75rem] font-semibold mb-1.5"
                   style={{ color: 'var(--brand-text-secondary)' }}
                 >
                   {t('checkin.time')}
@@ -1075,7 +1083,7 @@ function EditModal({
                   type="time"
                   value={form.measuredTime}
                   onChange={(e) => onChange('measuredTime', e.target.value)}
-                  className="w-full h-11 px-3 rounded-xl border text-[14px] outline-none min-w-0"
+                  className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none min-w-0"
                   style={{
                     borderColor: 'var(--brand-border)',
                     color: 'var(--brand-text-primary)',
@@ -1088,7 +1096,7 @@ function EditModal({
             {/* Position — 3-up picker matching CheckIn */}
             <div>
               <label
-                className="block text-[12px] font-semibold mb-2"
+                className="block text-[0.75rem] font-semibold mb-2"
                 style={{ color: 'var(--brand-text-secondary)' }}
               >
                 {t('readings.positionLabel')}
@@ -1101,7 +1109,7 @@ function EditModal({
                       key={p}
                       type="button"
                       onClick={() => onChange('position', p)}
-                      className="h-11 rounded-xl border-2 text-[12.5px] font-semibold transition cursor-pointer"
+                      className="h-11 rounded-xl border-2 text-[0.78125rem] font-semibold transition cursor-pointer"
                       style={{
                         borderColor: active ? 'var(--brand-primary-purple)' : 'var(--brand-border)',
                         backgroundColor: active
@@ -1128,7 +1136,7 @@ function EditModal({
               <div className="flex items-center justify-between gap-2 mb-1.5">
                 <label
                   htmlFor="readings-edit-systolic"
-                  className="block text-[12px] font-semibold"
+                  className="block text-[0.75rem] font-semibold"
                   style={{ color: 'var(--brand-text-secondary)' }}
                 >
                   {t('readings.bloodPressure')}
@@ -1155,7 +1163,7 @@ function EditModal({
                   onChange={(e) => onChange('systolic', e.target.value)}
                   min={60}
                   max={250}
-                  className="flex-1 h-11 px-3 rounded-xl border text-[14px] outline-none min-w-0"
+                  className="flex-1 h-11 px-3 rounded-xl border text-[0.875rem] outline-none min-w-0"
                   style={{
                     borderColor: 'var(--brand-border)',
                     color: 'var(--brand-text-primary)',
@@ -1166,7 +1174,7 @@ function EditModal({
                   numeric
                   onTranscript={(text) => onChange('systolic', text)}
                 />
-                <span className="text-[18px] font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
+                <span className="text-[1.125rem] font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
                   /
                 </span>
                 <input
@@ -1177,7 +1185,7 @@ function EditModal({
                   onChange={(e) => onChange('diastolic', e.target.value)}
                   min={40}
                   max={150}
-                  className="flex-1 h-11 px-3 rounded-xl border text-[14px] outline-none min-w-0"
+                  className="flex-1 h-11 px-3 rounded-xl border text-[0.875rem] outline-none min-w-0"
                   style={{
                     borderColor: 'var(--brand-border)',
                     color: 'var(--brand-text-primary)',
@@ -1196,7 +1204,7 @@ function EditModal({
               <div className="flex items-center justify-between gap-2 mb-1.5">
                 <label
                   htmlFor="readings-edit-pulse"
-                  className="block text-[12px] font-semibold"
+                  className="block text-[0.75rem] font-semibold"
                   style={{ color: 'var(--brand-text-secondary)' }}
                 >
                   {t('readings.pulseLabel')}
@@ -1212,7 +1220,7 @@ function EditModal({
                   onChange={(e) => onChange('pulse', e.target.value)}
                   min={30}
                   max={220}
-                  className="flex-1 h-11 px-3 rounded-xl border text-[14px] outline-none"
+                  className="flex-1 h-11 px-3 rounded-xl border text-[0.875rem] outline-none"
                   style={{
                     borderColor: 'var(--brand-border)',
                     color: 'var(--brand-text-primary)',
@@ -1231,7 +1239,7 @@ function EditModal({
               <div className="flex items-center justify-between gap-2 mb-1.5">
                 <label
                   htmlFor="readings-edit-weight"
-                  className="block text-[12px] font-semibold"
+                  className="block text-[0.75rem] font-semibold"
                   style={{ color: 'var(--brand-text-secondary)' }}
                 >
                   {t('readings.weightLbs')}
@@ -1247,7 +1255,7 @@ function EditModal({
                   onChange={(e) => onChange('weight', e.target.value)}
                   min={20}
                   max={600}
-                  className="flex-1 h-11 px-3 rounded-xl border text-[14px] outline-none"
+                  className="flex-1 h-11 px-3 rounded-xl border text-[0.875rem] outline-none"
                   style={{
                     borderColor: 'var(--brand-border)',
                     color: 'var(--brand-text-primary)',
@@ -1267,7 +1275,7 @@ function EditModal({
                 per-med reason + missed-dose counter. */}
             <div>
               <label
-                className="block text-[12px] font-semibold mb-2"
+                className="block text-[0.75rem] font-semibold mb-2"
                 style={{ color: 'var(--brand-text-secondary)' }}
               >
                 {t('readings.medicationTaken')}
@@ -1275,7 +1283,7 @@ function EditModal({
 
               {medications.length === 0 ? (
                 <p
-                  className="text-[12.5px] rounded-xl p-3 leading-relaxed"
+                  className="text-[0.78125rem] rounded-xl p-3 leading-relaxed"
                   style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-text-primary)' }}
                 >
                   {t('checkin.b4.noMeds')}
@@ -1306,12 +1314,12 @@ function EditModal({
                         <div className="px-3 py-3">
                           <div className="mb-2 min-w-0">
                             <p
-                              className="text-[13.5px] font-semibold truncate"
+                              className="text-[0.84375rem] font-semibold truncate"
                               style={{ color: 'var(--brand-text-primary)' }}
                             >
                               {med.drugName}
                             </p>
-                            <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
+                            <p className="text-[0.6875rem]" style={{ color: 'var(--brand-text-muted)' }}>
                               {drugClassLabel(med.drugClass)}
                             </p>
                           </div>
@@ -1323,7 +1331,7 @@ function EditModal({
                                   key={val}
                                   type="button"
                                   onClick={() => setMedTaken(med.id, val)}
-                                  className="h-10 rounded-xl border-2 text-[12px] font-semibold transition cursor-pointer"
+                                  className="h-10 rounded-xl border-2 text-[0.75rem] font-semibold transition cursor-pointer"
                                   style={{
                                     borderColor: active ? 'var(--brand-primary-purple)' : 'var(--brand-border)',
                                     backgroundColor: active ? 'var(--brand-primary-purple-light)' : 'white',
@@ -1346,7 +1354,7 @@ function EditModal({
                             <div className="pt-3">
                               <label
                                 htmlFor={`edit-missed-reason-${med.id}`}
-                                className="block text-[11px] font-semibold uppercase tracking-wide mb-1"
+                                className="block text-[0.6875rem] font-semibold uppercase tracking-wide mb-1"
                                 style={{ color: 'var(--brand-text-muted)' }}
                               >
                                 {t('readings.whyMissed')}
@@ -1357,7 +1365,7 @@ function EditModal({
                                 onChange={(e) =>
                                   patchMed(med.id, { reason: (e.target.value || null) as MedEntry['reason'] })
                                 }
-                                className="w-full px-3 py-2 rounded-lg border text-[14px] bg-white"
+                                className="w-full px-3 py-2 rounded-lg border text-[0.875rem] bg-white"
                                 style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
                               >
                                 <option value="">{t('readings.selectReason')}</option>
@@ -1372,7 +1380,7 @@ function EditModal({
 
                             <fieldset className="border-0 p-0 m-0">
                               <legend
-                                className="text-[11px] font-semibold uppercase tracking-wide"
+                                className="text-[0.6875rem] font-semibold uppercase tracking-wide"
                                 style={{ color: 'var(--brand-text-muted)' }}
                               >
                                 {t('readings.howManyDoses')}
@@ -1388,7 +1396,7 @@ function EditModal({
                                   −
                                 </button>
                                 <span
-                                  className="text-[16px] font-bold w-6 text-center"
+                                  className="text-[1rem] font-bold w-6 text-center"
                                   style={{ color: 'var(--brand-text-primary)' }}
                                 >
                                   {med_entry.missedDoses}
@@ -1416,7 +1424,7 @@ function EditModal({
             {/* Symptoms — V2 structured booleans (matches CheckIn B3) */}
             <div>
               <label
-                className="block text-[12px] font-semibold mb-2"
+                className="block text-[0.75rem] font-semibold mb-2"
                 style={{ color: 'var(--brand-text-secondary)' }}
               >
                 {t('readings.symptoms')}
@@ -1449,7 +1457,7 @@ function EditModal({
                         {checked && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
                       </div>
                       <span
-                        className="text-[12.5px] flex-1 min-w-0"
+                        className="text-[0.78125rem] flex-1 min-w-0"
                         style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
                       >
                         {t(SYMPTOM_LABEL_KEYS[key])}
@@ -1479,7 +1487,7 @@ function EditModal({
               <div className="flex items-center justify-between gap-2 mb-1.5">
                 <label
                   htmlFor="readings-edit-notes"
-                  className="block text-[12px] font-semibold"
+                  className="block text-[0.75rem] font-semibold"
                   style={{ color: 'var(--brand-text-secondary)' }}
                 >
                   {t('readings.notes')}
@@ -1502,7 +1510,7 @@ function EditModal({
                 placeholder={t('readings.notesPlaceholder')}
                 rows={3}
                 aria-describedby="readings-edit-notes-count"
-                className="w-full px-3 py-2.5 rounded-xl border text-[14px] outline-none resize-none leading-relaxed"
+                className="w-full px-3 py-2.5 rounded-xl border text-[0.875rem] outline-none resize-none leading-relaxed"
                 style={{
                   borderColor: 'var(--brand-border)',
                   color: 'var(--brand-text-primary)',
@@ -1510,7 +1518,7 @@ function EditModal({
               />
               <p
                 id="readings-edit-notes-count"
-                className="mt-1 text-[11px] text-right tabular-nums"
+                className="mt-1 text-[0.6875rem] text-right tabular-nums"
                 style={{
                   color:
                     form.notes.length >= JOURNAL_NOTE_MAX_LENGTH
@@ -1531,7 +1539,7 @@ function EditModal({
         >
           {error && (
             <p
-              className="text-[12.5px] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
+              className="text-[0.78125rem] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
               style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
             >
               {error}
@@ -1571,10 +1579,10 @@ function EditModal({
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3 py-1.5">
-      <span className="text-[12px] font-semibold shrink-0" style={{ color: 'var(--brand-text-muted)' }}>
+      <span className="text-[0.75rem] font-semibold shrink-0" style={{ color: 'var(--brand-text-muted)' }}>
         {label}
       </span>
-      <span className="text-[13.5px] text-right" style={{ color: 'var(--brand-text-primary)' }}>
+      <span className="text-[0.84375rem] text-right" style={{ color: 'var(--brand-text-primary)' }}>
         {value}
       </span>
     </div>
@@ -1584,7 +1592,7 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
 function DetailSectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <p
-      className="text-[10px] font-bold uppercase tracking-wider mb-1 mt-1"
+      className="text-[0.625rem] font-bold uppercase tracking-wider mb-1 mt-1"
       style={{ color: 'var(--brand-primary-purple)' }}
     >
       {children}
@@ -1613,6 +1621,15 @@ function ReadingDetailModal({
   onClose: () => void;
 }) {
   const { t } = useLanguage();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const bmi = getBMI(heightCm, entry.weight);
   const medStatus = buildMedStatus(entry, medications);
   const dt = new Date(entry.measuredAt);
@@ -1703,10 +1720,10 @@ function ReadingDetailModal({
         >
           <div className="flex items-center gap-2 min-w-0">
             <div className="min-w-0">
-              <h2 id="reading-detail-title" className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+              <h2 id="reading-detail-title" className="text-[1rem] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
                 {t('readings.detailTitle')}
               </h2>
-              <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.75rem]" style={{ color: 'var(--brand-text-muted)' }}>
                 {formatDate(entry.measuredAt)}{timeStr ? ` · ${timeStr}` : ''}
               </p>
             </div>
@@ -1729,13 +1746,13 @@ function ReadingDetailModal({
             <div className="text-center mb-3">
               {entry.systolicBP && entry.diastolicBP ? (
                 <div className="flex items-baseline gap-1.5 justify-center">
-                  <span className="text-[34px] font-bold leading-none" style={{ color: 'var(--brand-primary-purple)' }}>
+                  <span className="text-[2.125rem] font-bold leading-none" style={{ color: 'var(--brand-primary-purple)' }}>
                     {entry.systolicBP}/{entry.diastolicBP}
                   </span>
-                  <span className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>{t('readings.mmHg')}</span>
+                  <span className="text-[0.75rem]" style={{ color: 'var(--brand-text-muted)' }}>{t('readings.mmHg')}</span>
                 </div>
               ) : (
-                <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>{t('readings.noBpRecorded')}</p>
+                <p className="text-[0.8125rem]" style={{ color: 'var(--brand-text-muted)' }}>{t('readings.noBpRecorded')}</p>
               )}
             </div>
 
@@ -1751,11 +1768,11 @@ function ReadingDetailModal({
               <DetailSectionTitle>{t('readings.medicationTaken')}</DetailSectionTitle>
               {medications.length === 0 ? (
                 entry.medicationTaken != null ? (
-                  <p className="text-[13px]" style={{ color: 'var(--brand-text-primary)' }}>
+                  <p className="text-[0.8125rem]" style={{ color: 'var(--brand-text-primary)' }}>
                     {entry.medicationTaken ? t('readings.taken') : t('readings.missed')}
                   </p>
                 ) : (
-                  <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>—</p>
+                  <p className="text-[0.8125rem]" style={{ color: 'var(--brand-text-muted)' }}>—</p>
                 )
               ) : (
                 <div className="space-y-1.5">
@@ -1763,10 +1780,10 @@ function ReadingDetailModal({
                     const s = medStatus[med.id] ?? { taken: null, reason: null, missedDoses: 1 };
                     return (
                       <div key={med.id} className="flex items-baseline justify-between gap-3">
-                        <span className="text-[13px] min-w-0 truncate" style={{ color: 'var(--brand-text-primary)' }}>
+                        <span className="text-[0.8125rem] min-w-0 truncate" style={{ color: 'var(--brand-text-primary)' }}>
                           {med.drugName}
                         </span>
-                        <span className="text-[12.5px] text-right shrink-0" style={{ color: 'var(--brand-text-secondary)' }}>
+                        <span className="text-[0.78125rem] text-right shrink-0" style={{ color: 'var(--brand-text-secondary)' }}>
                           {takenLabel(s.taken)}
                           {s.taken === 'no' && s.reason ? ` · ${reasonLabel(s.reason)}` : ''}
                           {s.taken === 'no' && s.missedDoses ? ` · ${s.missedDoses}` : ''}
@@ -1786,7 +1803,7 @@ function ReadingDetailModal({
                   {trueSymptoms.map((k) => (
                     <span
                       key={k}
-                      className="text-[11.5px] px-2 py-0.5 rounded-md font-medium"
+                      className="text-[0.71875rem] px-2 py-0.5 rounded-md font-medium"
                       style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
                     >
                       {t(SYMPTOM_LABEL_KEYS[k])}
@@ -1795,7 +1812,7 @@ function ReadingDetailModal({
                   {legacySymptoms.map((s, i) => (
                     <span
                       key={`legacy-${s}-${i}`}
-                      className="text-[11.5px] px-2 py-0.5 rounded-md font-medium"
+                      className="text-[0.71875rem] px-2 py-0.5 rounded-md font-medium"
                       style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
                     >
                       {s}
@@ -1813,7 +1830,7 @@ function ReadingDetailModal({
                   {entry.otherSymptoms.map((s, i) => (
                     <span
                       key={`${s}-${i}`}
-                      className="text-[11.5px] px-2 py-0.5 rounded-md font-medium"
+                      className="text-[0.71875rem] px-2 py-0.5 rounded-md font-medium"
                       style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
                     >
                       {s}
@@ -1828,7 +1845,7 @@ function ReadingDetailModal({
               <div className="mt-3">
                 <DetailSectionTitle>{t('readings.notes')}</DetailSectionTitle>
                 <p
-                  className="text-[13px] leading-relaxed whitespace-pre-wrap break-words"
+                  className="text-[0.8125rem] leading-relaxed whitespace-pre-wrap break-words"
                   style={{ color: 'var(--brand-text-primary)' }}
                 >
                   {entry.notes}
@@ -1879,6 +1896,15 @@ function DeleteConfirm({
   onCancel: () => void;
 }) {
   const { t } = useLanguage();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onCancel();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
   return (
     <motion.div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -1902,14 +1928,14 @@ function DeleteConfirm({
         >
           <Trash2 aria-hidden="true" className="w-5 h-5" style={{ color: 'var(--brand-alert-red)' }} />
         </div>
-        <h3 className="text-[16px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
+        <h3 className="text-[1rem] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
           {t('readings.deleteReading')}
         </h3>
-        <p className="text-[13px] mb-6 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
+        <p className="text-[0.8125rem] mb-6 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
           {t('readings.deleteWarning')}
         </p>
         {error && (
-          <p className="text-[13px] mb-4 text-center" style={{ color: 'var(--brand-alert-red)' }}>
+          <p className="text-[0.8125rem] mb-4 text-center" style={{ color: 'var(--brand-alert-red)' }}>
             {error}
           </p>
         )}
@@ -2265,7 +2291,7 @@ export default function ReadingsPage() {
                   <Bone w={90} h={10} rounded="rounded-md" />
                 </div>
               ) : (
-                <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
+                <p className="text-[0.75rem]" style={{ color: 'var(--brand-text-muted)' }}>
                   {`${entries.length} ${entries.length === 1 ? t('readings.totalEntry') : t('readings.totalEntries')}`}
                 </p>
               )}
@@ -2274,7 +2300,7 @@ export default function ReadingsPage() {
 
           <Link
             href="/check-in"
-            className="h-9 px-4 rounded-full flex items-center gap-1.5 text-[13px] font-semibold text-white transition hover:opacity-85 shrink-0"
+            className="h-9 px-4 rounded-full flex items-center gap-1.5 text-[0.8125rem] font-semibold text-white transition hover:opacity-85 shrink-0"
             style={{ backgroundColor: 'var(--brand-primary-purple)' }}
           >
             <Plus aria-hidden="true" className="w-4 h-4" />
@@ -2299,12 +2325,12 @@ export default function ReadingsPage() {
               />
             </div>
             <p
-              className="text-[16px] font-bold mb-1.5"
+              className="text-[1rem] font-bold mb-1.5"
               style={{ color: 'var(--brand-text-primary)' }}
             >
               {t('readings.noReadings')}
             </p>
-            <p className="text-[13px] mb-5" style={{ color: 'var(--brand-text-muted)' }}>
+            <p className="text-[0.8125rem] mb-5" style={{ color: 'var(--brand-text-muted)' }}>
               {t('readings.noReadingsDesc')}
             </p>
             <Link
@@ -2372,7 +2398,7 @@ export default function ReadingsPage() {
                     <div key={group.date} data-testid="reading-group" className="space-y-2">
                       <p
                         data-testid="reading-group-date"
-                        className="text-[11px] font-bold uppercase tracking-wider px-1 pt-2"
+                        className="text-[0.6875rem] font-bold uppercase tracking-wider px-1 pt-2"
                         style={{ color: 'var(--brand-text-muted)' }}
                       >
                         {formatDate(group.items[0].measuredAt)}

@@ -53,7 +53,7 @@ export default function MedicationAdherenceCard({ summary, onDismiss }: Props) {
             <AlertCircle className="w-5 h-5 shrink-0" style={{ color: "var(--brand-alert-red)" }} aria-hidden="true" />
           )}
           <p
-            className="font-bold text-[15px]"
+            className="font-bold text-[0.9375rem]"
             style={{ color: 'var(--brand-text-primary)' }}
           >
             {summary.logged ? t('chat.card.medLogged') : t('chat.card.medFailed')}
@@ -76,14 +76,14 @@ export default function MedicationAdherenceCard({ summary, onDismiss }: Props) {
           </div>
           <div className="min-w-0 flex-1">
             <p
-              className="text-[16px] font-bold"
+              className="text-[1rem] font-bold"
               style={{ color: 'var(--brand-text-primary)' }}
             >
               {summary.medication?.drugName ?? 'Medication'}
             </p>
             {summary.medication?.drugClass && (
               <p
-                className="text-[11px] uppercase tracking-wider mt-0.5"
+                className="text-[0.6875rem] uppercase tracking-wider mt-0.5"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 {summary.medication.drugClass.replace(/_/g, ' ').toLowerCase()}
@@ -91,7 +91,7 @@ export default function MedicationAdherenceCard({ summary, onDismiss }: Props) {
             )}
           </div>
           <span
-            className="px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider inline-flex items-center gap-1 shrink-0"
+            className="px-3 py-1.5 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider inline-flex items-center gap-1 shrink-0"
             style={{ backgroundColor: statusInfo.pillBg, color: statusInfo.color }}
           >
             {statusInfo.icon}
@@ -110,7 +110,7 @@ export default function MedicationAdherenceCard({ summary, onDismiss }: Props) {
               aria-hidden="true"
             />
             <p
-              className="text-[12px] font-semibold"
+              className="text-[0.75rem] font-semibold"
               style={{ color: 'var(--brand-warning-amber-text)' }}
             >
               {summary.streakDays}-day streak — keep it up!
@@ -120,7 +120,7 @@ export default function MedicationAdherenceCard({ summary, onDismiss }: Props) {
 
         {!summary.logged && (
           <p
-            className="text-[12px] mt-3"
+            className="text-[0.75rem] mt-3"
             style={{ color: 'var(--brand-text-muted)' }}
           >
             {summary.message}
@@ -134,7 +134,7 @@ export default function MedicationAdherenceCard({ summary, onDismiss }: Props) {
       >
         <button
           onClick={onDismiss}
-          className="h-11 px-5 rounded-xl font-semibold text-[13px] text-white transition hover:opacity-90"
+          className="h-11 px-5 rounded-xl font-semibold text-[0.8125rem] text-white transition hover:opacity-90"
           style={{
             background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
             boxShadow: '0 4px 14px rgba(123,0,224,0.28)',

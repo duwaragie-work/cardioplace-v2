@@ -106,10 +106,37 @@ export async function seedAdmins() {
   })
   await seedPermaOtp('ops@healplace.com', otpHash)
 
+  // ─── Coordinator (phase/23 user-management + e2e persona) ────────────────
+  // Front-desk role scoped to a single practice via PracticeCoordinator.
+  // The QA suite (specs 35/37/38) signs in as this persona to drive the
+  // patient-invite + user-management flows and to assert the COORDINATOR
+  // permission boundaries. Linked to the Cedar Hill seed practice so the
+  // server-side implicit-practice fill has something to resolve.
+  const coordinator = await prisma.user.upsert({
+    where: { email: 'coordinator.fernando@cardioplace.test' },
+    update: { roles: ['COORDINATOR'] },
+    create: {
+      email: 'coordinator.fernando@cardioplace.test',
+      pwdhash,
+      name: 'Lakshitha Fernando',
+      roles: ['COORDINATOR'],
+      isVerified: true,
+      onboardingStatus: 'COMPLETED',
+      timezone: 'America/New_York',
+    },
+  })
+  await seedPermaOtp('coordinator.fernando@cardioplace.test', otpHash)
+  await prisma.practiceCoordinator.upsert({
+    where: { userId: coordinator.id },
+    update: { practiceId: 'seed-cedar-hill' },
+    create: { userId: coordinator.id, practiceId: 'seed-cedar-hill' },
+  })
+
   console.log(
     `  providers: primary ${primaryProvider.email}, backup ${backupProvider.email}, MD ${medicalDirector.email}`,
   )
   console.log(`  ops: ${opsUser.email}`)
+  console.log(`  coordinator: ${coordinator.email} (practice seed-cedar-hill)`)
 
   return {
     manishaPatel,
@@ -118,6 +145,7 @@ export async function seedAdmins() {
     backupProvider,
     medicalDirector,
     opsUser,
+    coordinator,
   }
 }
 

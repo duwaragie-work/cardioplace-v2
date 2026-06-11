@@ -35,7 +35,7 @@ export default function DateField({
   min,
   testId,
   ariaLabel,
-  textSizeClass = 'text-[18px]',
+  textSizeClass = 'text-[1.125rem]',
 }: DateFieldProps) {
   const [focused, setFocused] = useState(false);
   // Show our placeholder only when empty AND not focused; once focused we let

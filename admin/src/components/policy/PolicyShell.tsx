@@ -45,6 +45,7 @@ export function PolicyShell({
 
       <main
         id="main"
+        tabIndex={-1}
         className="flex-1 pt-[100px] sm:pt-[120px] lg:pt-[140px] pb-16 px-4 sm:px-6 lg:px-12"
       >
         <div className="max-w-[860px] mx-auto">

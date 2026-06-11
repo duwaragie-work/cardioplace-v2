@@ -532,6 +532,45 @@ export class TestControl {
     return this.get(`test-control/user/find?email=${encodeURIComponent(email)}`)
   }
 
+  // ─── Invite + magic-link token minting (specs 36/37/40) ───────────────────
+  /**
+   * Mint a UserInvite and get back the RAW activation token. The token is
+   * what the e-mail carries; in CI the Resend key is a dummy, so this is the
+   * only way a spec can recover it. Drive activation with
+   * `${BASE}/activate/${token}` (patient or admin app) or POST it to
+   * `/api/v2/auth/invite/${token}/accept`. Pass a negative `expiresInSeconds`
+   * to forge an already-expired invite for the error-path test.
+   */
+  async createInvite(args: {
+    email: string
+    name: string
+    role:
+      | 'PATIENT'
+      | 'PROVIDER'
+      | 'MEDICAL_DIRECTOR'
+      | 'COORDINATOR'
+      | 'HEALPLACE_OPS'
+      | 'SUPER_ADMIN'
+    practiceId?: string
+    expiresInSeconds?: number
+  }): Promise<{ inviteId: string; token: string }> {
+    return this.post('test-control/invite/create', args)
+  }
+
+  /**
+   * Mint a MagicLink for `email` and get back the raw token. Drive the real
+   * verify endpoint via `GET /api/v2/auth/magic-link/verify?token=…`. Pass a
+   * negative `expiresInSeconds` for the expired-link test, or `markUsed:true`
+   * for the already-used test.
+   */
+  async issueMagicLink(args: {
+    email: string
+    expiresInSeconds?: number
+    markUsed?: boolean
+  }): Promise<{ token: string }> {
+    return this.post('test-control/magic-link/issue', args)
+  }
+
   async dispose(): Promise<void> {
     await this.ctx.dispose()
   }

@@ -69,7 +69,7 @@ export default function AdminAbout() {
     <div className="bg-[#fef7ff] flex flex-col min-h-screen overflow-x-hidden">
       <LandingHeader activeLink="About" />
 
-      <main id="main" className="flex flex-col items-center pt-[64px] w-full overflow-x-hidden">
+      <main id="main" tabIndex={-1} className="flex flex-col items-center pt-[64px] w-full overflow-x-hidden">
         {/* ============ HERO SECTION ============ */}
         <section className="w-full bg-[#fef7ff] flex items-start lg:items-center justify-center min-h-[calc(100vh-64px)] px-4 sm:px-6 md:px-8 py-10 md:py-16 overflow-hidden">
           <div className="max-w-[1280px] w-full grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
@@ -123,7 +123,7 @@ export default function AdminAbout() {
                       <div className="bg-[#edeeef] w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0">
                         <Mic aria-hidden="true" className="w-3 h-3 sm:w-4 sm:h-4 text-[#4c4355]" />
                       </div>
-                      <span className="text-[#4c4355]/60 text-[10px] sm:text-xs flex-1">{t('about.chatPlaceholder')}</span>
+                      <span className="text-[#475569] text-[10px] sm:text-xs flex-1">{t('about.chatPlaceholder')}</span>
                       <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 shadow-md" style={{ backgroundImage: 'linear-gradient(135deg, #7b00e0 0%, #5c00a9 100%)' }}>
                         <Send aria-hidden="true" className="w-3 h-3 text-white" />
                       </div>
@@ -332,7 +332,7 @@ export default function AdminAbout() {
             <div className="bg-white rounded-[24px] sm:rounded-[32px] p-6 sm:p-8 md:p-10 border border-[#eedbff] shadow-sm">
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6 mb-4 sm:mb-6">
                 <div className="bg-[#eedbff] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shrink-0 border-2 border-[#7b00e0]/20">
-                  <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={32} height={32} className="w-7 h-7 sm:w-8 sm:h-8" />
+                  <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={32} height={32} className="w-7 h-7 sm:w-8 sm:h-8" />
                 </div>
                 <div>
                   <h3 className="text-[#1f1924] text-lg sm:text-xl font-semibold">{t('about.engTeamTitle')}</h3>
@@ -356,7 +356,7 @@ export default function AdminAbout() {
             <Link href={closingHref} className="bg-white text-[#5c00a9] font-bold text-base md:text-lg px-8 md:px-12 py-3 md:py-3.5 rounded-full hover:bg-[#f5eafa] transition-colors mt-2">
               {t('about.closingButton')}
             </Link>
-            <p className="text-white/50 text-xs sm:text-sm mt-2 sm:mt-4 text-center">{t('about.closingFooter')}</p>
+            <p className="text-white text-xs sm:text-sm mt-2 sm:mt-4 text-center">{t('about.closingFooter')}</p>
           </div>
         </section>
 

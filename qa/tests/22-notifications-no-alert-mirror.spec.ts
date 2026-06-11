@@ -57,6 +57,12 @@ test.describe('G.4 — emergency alert does not mirror into the patient Notifica
     const emergency = alerts.find((a) => a.tier?.startsWith('BP_LEVEL_2'))!
     expect(emergency, 'an emergency BP_LEVEL_2 alert fired').toBeDefined()
 
+    // Fire the queued T+0 escalation deterministically. The T+0 PATIENT PUSH
+    // Notification row is dispatched by the escalation scan, not synchronously
+    // on alert creation — without driving the scan, CI can poll the full 20s
+    // before the daily cron happens to run and the row never materializes.
+    await tc.runEscalationScan()
+
     // Poll the raw notification rows for the escalation T+0 patient PUSH mirror.
     let alertLinkedPush: { id: string; channel: string; alertId: string | null } | undefined
     for (let i = 0; i < 20; i++) {

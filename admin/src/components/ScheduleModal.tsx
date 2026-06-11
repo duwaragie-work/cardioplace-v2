@@ -2,7 +2,7 @@
 
 import { X, Phone, Video, Clock, Calendar, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n/en';
 
@@ -69,6 +69,15 @@ export default function ScheduleModal({
   error,
 }: ScheduleModalProps) {
   const { t } = useLanguage();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const days = getNextDays(t);
   const [selectedDate, setSelectedDate] = useState(days[1].value);
   const [selectedTime, setSelectedTime] = useState('10:00 AM');
@@ -352,6 +361,7 @@ export default function ScheduleModal({
                     rows={3}
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
+                    aria-label={t('schedule.notes')}
                     placeholder={t('schedule.notesPlaceholder')}
                     className="w-full rounded-xl px-4 py-3 text-[13px] resize-none outline-none transition"
                     style={{

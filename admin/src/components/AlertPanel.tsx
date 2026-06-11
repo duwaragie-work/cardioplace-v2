@@ -10,7 +10,7 @@ import {
   ReferenceLine,
 } from 'recharts';
 import { motion } from 'framer-motion';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 // TODO(phase/11): migrate to v2 tier model (TIER_1_CONTRAINDICATION, BP_LEVEL_2, etc.)
@@ -107,6 +107,15 @@ export default function AlertPanel({
   onSchedule,
 }: AlertPanelProps) {
   const { t } = useLanguage();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const [reviewedSuccess, setReviewedSuccess] = useState(false);
 
   // TODO(phase/11): migrate to v2 tier model (TIER_1_CONTRAINDICATION, BP_LEVEL_2, etc.)
