@@ -166,7 +166,7 @@ export default function PatientAlertCard({
               <span
                 data-testid={`${testIdPrefix}-title-${alert.id}`}
                 lang="en"
-                className="text-[14px] font-bold"
+                className="text-[0.875rem] font-bold"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
                 {v.title.replace(/\.$/, '')}
@@ -177,7 +177,7 @@ export default function PatientAlertCard({
                   TIER_META → SEVERITY_META mapping that could drift). */}
               <span
                 data-testid={`${testIdPrefix}-severity-${alert.id}`}
-                className="px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0"
+                className="px-2 py-0.5 rounded-full text-[0.6875rem] font-bold shrink-0"
                 style={{ backgroundColor: v.accentLight, color: v.accentText }}
               >
                 {v.key === 'emergency'
@@ -198,7 +198,7 @@ export default function PatientAlertCard({
                 <span
                   data-testid={`${testIdPrefix}-mode-${alert.id}`}
                   title="Thresholds this alert was evaluated against"
-                  className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider shrink-0"
+                  className="px-2 py-0.5 rounded-full text-[0.625rem] font-bold uppercase tracking-wider shrink-0"
                   style={{
                     backgroundColor: 'var(--brand-surface-muted, #f1f5f9)',
                     color: 'var(--brand-text-secondary)',
@@ -211,7 +211,7 @@ export default function PatientAlertCard({
               {alert.escalated && (
                 <span
                   data-testid={`${testIdPrefix}-escalated-${alert.id}`}
-                  className="px-2 py-0.5 rounded-full text-[11px] font-bold text-white shrink-0 flex items-center gap-1"
+                  className="px-2 py-0.5 rounded-full text-[0.6875rem] font-bold text-white shrink-0 flex items-center gap-1"
                   style={{ backgroundColor: 'var(--brand-alert-red)' }}
                 >
                   <Zap className="w-3 h-3" />
@@ -222,7 +222,7 @@ export default function PatientAlertCard({
               {alert.resolvedBy && (
                 <span
                   data-testid={`${testIdPrefix}-reviewed-${alert.id}`}
-                  className="px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0 flex items-center gap-1"
+                  className="px-2 py-0.5 rounded-full text-[0.6875rem] font-bold shrink-0 flex items-center gap-1"
                   style={{
                     backgroundColor: 'var(--brand-success-green-light)',
                     color: 'var(--brand-success-green)',
@@ -239,7 +239,7 @@ export default function PatientAlertCard({
             {!compact && alert.patientMessage && (
               <p
                 data-testid={`${testIdPrefix}-message-${alert.id}`}
-                className="text-[12.5px] mb-1 leading-relaxed"
+                className="text-[0.78125rem] mb-1 leading-relaxed"
                 style={{ color: 'var(--brand-text-secondary)' }}
               >
                 {alert.patientMessage}
@@ -250,7 +250,7 @@ export default function PatientAlertCard({
             {alert.journalEntry && isBpAlert && (
               <p
                 data-testid={`${testIdPrefix}-reading-${alert.id}`}
-                className="text-[12px] mb-1"
+                className="text-[0.75rem] mb-1"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 {t('alert.recorded')}{' '}
@@ -268,7 +268,7 @@ export default function PatientAlertCard({
             {alert.journalEntry?.measuredAt && (
               <p
                 data-testid={`${testIdPrefix}-date-${alert.id}`}
-                className="text-[11px] inline-flex items-center gap-1.5"
+                className="text-[0.6875rem] inline-flex items-center gap-1.5"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 <Clock className="w-3 h-3" />
@@ -280,7 +280,7 @@ export default function PatientAlertCard({
             {!alert.journalEntry?.measuredAt && alert.createdAt && (
               <p
                 data-testid={`${testIdPrefix}-date-${alert.id}`}
-                className="text-[11px] inline-flex items-center gap-1.5"
+                className="text-[0.6875rem] inline-flex items-center gap-1.5"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 <Clock className="w-3 h-3" />
@@ -297,7 +297,7 @@ export default function PatientAlertCard({
               style={{ color: '#16A34A' }}
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span className="text-[11px] font-semibold">{t('notifications.done')}</span>
+              <span className="text-[0.6875rem] font-semibold">{t('notifications.done')}</span>
             </div>
           )}
         </div>
@@ -310,7 +310,7 @@ export default function PatientAlertCard({
                 data-testid={`${testIdPrefix}-ack-${alert.id}`}
                 onClick={() => onAcknowledge(alert.id)}
                 disabled={isAcking}
-                className="flex-1 h-10 rounded-xl text-[13px] font-bold flex items-center justify-center gap-2 text-white transition disabled:opacity-60 cursor-pointer"
+                className="flex-1 h-10 rounded-xl text-[0.8125rem] font-bold flex items-center justify-center gap-2 text-white transition disabled:opacity-60 cursor-pointer"
                 style={{ backgroundColor: v.accent }}
               >
                 {isAcking ? t('notifications.acknowledging') : t('notifications.acknowledge')}
@@ -320,7 +320,7 @@ export default function PatientAlertCard({
               data-testid={`${testIdPrefix}-detail-${alert.id}`}
               href={`/alerts/${alert.id}`}
               aria-label={t('notifications.viewDetailsAria')}
-              className="flex-1 h-10 rounded-xl text-[13px] font-bold flex items-center justify-center gap-2 transition cursor-pointer"
+              className="flex-1 h-10 rounded-xl text-[0.8125rem] font-bold flex items-center justify-center gap-2 transition cursor-pointer"
               style={{
                 backgroundColor: 'white',
                 color: v.accentText,

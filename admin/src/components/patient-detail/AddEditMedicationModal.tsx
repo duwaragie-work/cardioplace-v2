@@ -5,7 +5,7 @@
 // backend ACE/ARB-on-angioedema gate which auto-holds with PROVIDER_DIRECTED_HOLD
 // and returns requiresAcknowledgement=true, which we surface here).
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   adminAddMedication,
   adminEditMedication,
@@ -50,6 +50,15 @@ interface Props {
 
 export default function AddEditMedicationModal({ patientUserId, medication, onClose, onSaved }: Props) {
   const isEdit = !!medication;
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const [drugName, setDrugName] = useState<string>(medication?.drugName ?? '');
   const [drugClass, setDrugClass] = useState<string>(medication?.drugClass ?? 'OTHER_UNVERIFIED');
   const [frequency, setFrequency] = useState<string>(medication?.frequency ?? 'ONCE_DAILY');
@@ -98,10 +107,11 @@ export default function AddEditMedicationModal({ patientUserId, medication, onCl
       style={{ backgroundColor: 'rgba(0,0,0,0.45)' }}
       role="dialog"
       aria-modal="true"
+      aria-labelledby="admin-med-modal-title"
       data-testid="admin-add-edit-medication-modal"
     >
       <div className="w-full max-w-md rounded-2xl bg-white p-5" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
-        <h3 className="text-[17px] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
+        <h3 id="admin-med-modal-title" className="text-[17px] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
           {isEdit ? `Edit ${medication!.drugName}` : 'Add medication'}
         </h3>
 
@@ -111,8 +121,9 @@ export default function AddEditMedicationModal({ patientUserId, medication, onCl
           </p>
         )}
 
-        <label className="block text-[12px] font-semibold mb-1">Drug name</label>
+        <label htmlFor="admin-med-drugname" className="block text-[12px] font-semibold mb-1">Drug name</label>
         <input
+          id="admin-med-drugname"
           data-testid="admin-med-drugname"
           value={drugName}
           onChange={(e) => setDrugName(e.target.value)}
@@ -120,8 +131,9 @@ export default function AddEditMedicationModal({ patientUserId, medication, onCl
           style={{ border: '1px solid var(--brand-border)' }}
         />
 
-        <label className="block text-[12px] font-semibold mb-1">Drug class</label>
+        <label htmlFor="admin-med-drugclass" className="block text-[12px] font-semibold mb-1">Drug class</label>
         <select
+          id="admin-med-drugclass"
           data-testid="admin-med-drugclass"
           value={drugClass}
           onChange={(e) => setDrugClass(e.target.value)}
@@ -133,8 +145,9 @@ export default function AddEditMedicationModal({ patientUserId, medication, onCl
           ))}
         </select>
 
-        <label className="block text-[12px] font-semibold mb-1">Frequency</label>
+        <label htmlFor="admin-med-frequency" className="block text-[12px] font-semibold mb-1">Frequency</label>
         <select
+          id="admin-med-frequency"
           data-testid="admin-med-frequency"
           value={frequency}
           onChange={(e) => setFrequency(e.target.value)}
@@ -146,8 +159,9 @@ export default function AddEditMedicationModal({ patientUserId, medication, onCl
           ))}
         </select>
 
-        <label className="block text-[12px] font-semibold mb-1">Dose (optional)</label>
+        <label htmlFor="admin-med-dose" className="block text-[12px] font-semibold mb-1">Dose (optional)</label>
         <input
+          id="admin-med-dose"
           data-testid="admin-med-dose"
           value={dose}
           onChange={(e) => setDose(e.target.value)}
@@ -156,8 +170,9 @@ export default function AddEditMedicationModal({ patientUserId, medication, onCl
           style={{ border: '1px solid var(--brand-border)' }}
         />
 
-        <label className="block text-[12px] font-semibold mb-1">Notes (optional)</label>
+        <label htmlFor="admin-med-notes" className="block text-[12px] font-semibold mb-1">Notes (optional)</label>
         <textarea
+          id="admin-med-notes"
           data-testid="admin-med-notes"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}

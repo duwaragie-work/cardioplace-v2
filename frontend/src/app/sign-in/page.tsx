@@ -300,14 +300,14 @@ export default function RegisterPage() {
           <div className="flex-1 w-full max-w-[400px] md:max-w-105 lg:max-w-130">
             {/* Heading */}
             <div className="mb-5 md:mb-8 flex flex-col items-center md:items-start gap-3">
-              <h2 className="font-bold leading-[1.2] text-[#170c1d] text-[22px] sm:text-[26px] lg:text-[33px] tracking-[-0.4px] text-center md:text-left">
+              <h2 className="font-bold leading-[1.2] text-[#170c1d] text-[1.375rem] sm:text-[1.625rem] lg:text-[2.0625rem] tracking-[-0.4px] text-center md:text-left">
                 {t('register.signIn')}
               </h2>
             </div>
 
             {!otpSent && !magicLinkSent && (
               <div className="mb-6 md:mb-10 w-full">
-                <p className="font-normal leading-relaxed text-[#4b5563] text-sm sm:text-base lg:text-[18px] text-center md:text-left">
+                <p className="font-normal leading-relaxed text-[#4b5563] text-sm sm:text-base lg:text-[1.125rem] text-center md:text-left">
                   {t('register.enterEmail')}
                 </p>
               </div>
@@ -376,7 +376,7 @@ export default function RegisterPage() {
                 {/* Inline email format error — quiet until user has typed */}
                 {showEmailError && (
                   <p
-                    className="mt-1.5 text-[11px] lg:text-xs"
+                    className="mt-1.5 text-[0.6875rem] lg:text-xs"
                     style={{ color: 'var(--brand-alert-red)' }}
                   >
                     {t('register.invalidEmail')}
@@ -448,7 +448,7 @@ export default function RegisterPage() {
                         </div>
                         {/* OTP-length hint: only while user is mid-typing */}
                         {showOtpLengthHint && (
-                          <p className="text-[11px] lg:text-xs text-[#a16207] mb-2">
+                          <p className="text-[0.6875rem] lg:text-xs text-[#a16207] mb-2">
                             {t('register.otpLengthHint').replace('{n}', String(otp.length))}
                           </p>
                         )}
@@ -512,7 +512,7 @@ export default function RegisterPage() {
               {/* Terms — passive notice below the buttons (consent itself is
                   collected once on the onboarding privacy step for new users). */}
               <div className="w-full max-w-105">
-                <p className="text-[#737373] text-[11px] lg:text-xs leading-relaxed text-center">
+                <p className="text-[#737373] text-[0.6875rem] lg:text-xs leading-relaxed text-center">
                   {t('register.terms')}{" "}
                   <a href="/terms" className="font-medium text-[#7B00E0] hover:underline">
                     {t('register.termsOfService')}
@@ -540,7 +540,7 @@ export default function RegisterPage() {
                       {t('register.privacyAssurance')}
                     </p>
                   </div>
-                  <p className="text-[#6b5b75] text-[11px] leading-relaxed border-t border-[#f0e6fa] pt-3">
+                  <p className="text-[#6b5b75] text-[0.6875rem] leading-relaxed border-t border-[#f0e6fa] pt-3">
                     {t('register.medicalDisclaimer')}
                   </p>
                 </div>
@@ -605,7 +605,7 @@ export default function RegisterPage() {
                       {t('register.privacyAssurance')}
                     </p>
                   </div>
-                  <p className="text-[#6b5b75] text-[11px] lg:text-xs leading-relaxed pl-6">
+                  <p className="text-[#6b5b75] text-[0.6875rem] lg:text-xs leading-relaxed pl-6">
                     {t('register.medicalDisclaimer')}
                   </p>
                 </div>

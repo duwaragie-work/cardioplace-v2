@@ -85,10 +85,10 @@ export default function ReAddConfirmModal({ open, drugName, onConfirm, onCancel,
                   <ShieldAlert className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
-                  <h2 className="text-[16px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
+                  <h2 className="text-[1rem] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
                     {title}
                   </h2>
-                  <p className="text-[13.5px] mt-1.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+                  <p className="text-[0.84375rem] mt-1.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
                     {body}
                   </p>
                 </div>
@@ -100,7 +100,7 @@ export default function ReAddConfirmModal({ open, drugName, onConfirm, onCancel,
                 type="button"
                 onClick={onCancel}
                 data-testid="readd-rejected-cancel"
-                className="flex-1 h-11 rounded-full text-[14px] font-bold cursor-pointer transition hover:opacity-85"
+                className="flex-1 h-11 rounded-full text-[0.875rem] font-bold cursor-pointer transition hover:opacity-85"
                 style={{ border: '1.5px solid var(--brand-border)', color: 'var(--brand-text-secondary)', backgroundColor: 'white' }}
               >
                 {t('common.cancel')}
@@ -109,7 +109,7 @@ export default function ReAddConfirmModal({ open, drugName, onConfirm, onCancel,
                 type="button"
                 onClick={onConfirm}
                 data-testid={isContra ? 'readd-contraindicated-confirm' : 'readd-rejected-confirm'}
-                className="flex-1 h-11 rounded-full text-[14px] font-bold text-white cursor-pointer transition hover:opacity-90"
+                className="flex-1 h-11 rounded-full text-[0.875rem] font-bold text-white cursor-pointer transition hover:opacity-90"
                 style={{ backgroundColor: 'var(--brand-primary-purple)' }}
               >
                 {isContra ? 'I understand — add for review' : t('intake.reAddRejectedConfirmBtn')}

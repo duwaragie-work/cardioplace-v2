@@ -394,6 +394,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                   {subFields.map((f) => (
                     <div key={f.key}>
                       <label
+                        htmlFor={`admin-resolve-subfield-${f.key}`}
                         className="block text-[12px] font-semibold mb-1.5"
                         style={{ color: 'var(--brand-text-secondary)' }}
                       >
@@ -429,7 +430,9 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                       ) : (
                         <input
                           type="text"
+                          id={`admin-resolve-subfield-${f.key}`}
                           data-testid={`admin-resolve-subfield-${f.key}`}
+                          aria-required={f.required || undefined}
                           value={typeof details[f.key] === 'string' ? (details[f.key] as string) : ''}
                           onChange={(e) => setDetails((d) => ({ ...d, [f.key]: e.target.value }))}
                           placeholder={f.label}
@@ -448,6 +451,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
               {action && (
                 <div>
                   <label
+                    htmlFor="admin-resolve-rationale"
                     className="block text-[12px] font-semibold mb-1.5"
                     style={{ color: 'var(--brand-text-secondary)' }}
                   >
@@ -459,7 +463,9 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                     )}
                   </label>
                   <textarea
+                    id="admin-resolve-rationale"
                     data-testid="admin-resolve-rationale"
+                    aria-required={rationaleRequired || undefined}
                     value={rationale}
                     onChange={(e) => setRationale(e.target.value)}
                     placeholder={

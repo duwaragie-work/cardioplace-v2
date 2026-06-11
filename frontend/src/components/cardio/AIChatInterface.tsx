@@ -178,7 +178,7 @@ function TypingIndicator() {
         className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
         style={{ boxShadow: '0 2px 8px rgba(123,0,224,0.3)' }}
       >
-        <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
+        <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={30} height={30} />
       </div>
       <div
         className="flex items-center gap-1.5 px-4 py-3.5"
@@ -220,10 +220,10 @@ function MessageBubble({ msg }: { msg: Message }) {
             boxShadow: '0 4px 14px rgba(123,0,224,0.25)',
           }}
         >
-          <p className="text-[14px] leading-relaxed text-white">{msg.text}</p>
+          <p className="text-[0.875rem] leading-relaxed text-white">{msg.text}</p>
           <div className="flex items-center justify-end gap-1.5 mt-1.5">
             {isVoice && <Mic className="w-2.5 h-2.5" style={{ color: 'rgba(255,255,255,0.5)' }} />}
-            <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.6)' }}>{msg.time}</p>
+            <p className="text-[0.625rem]" style={{ color: 'rgba(255,255,255,0.6)' }}>{msg.time}</p>
           </div>
         </div>
       </motion.div>
@@ -240,19 +240,19 @@ function MessageBubble({ msg }: { msg: Message }) {
         transition={{ duration: 0.2 }}
       >
         <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0">
-          <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
+          <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={30} height={30} />
         </div>
         <div
           className="max-w-[75%] sm:max-w-[65%] px-4 py-3.5"
           style={{ backgroundColor: 'var(--brand-accent-teal-light)', borderRadius: '4px 18px 18px 18px', borderLeft: '3px solid var(--brand-accent-teal)' }}
         >
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold mb-2" style={{ backgroundColor: 'var(--brand-accent-teal)', color: 'white' }}>
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-semibold mb-2" style={{ backgroundColor: 'var(--brand-accent-teal)', color: 'white' }}>
             {t('chat.checkinMode')}
           </span>
-          <div className="prose prose-sm max-w-none text-[14px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+          <div className="prose prose-sm max-w-none text-[0.875rem] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
             <ReactMarkdown>{msg.text}</ReactMarkdown>
           </div>
-          <p className="text-[10px] mt-1.5 text-right" style={{ color: 'var(--brand-text-muted)' }}>{msg.time}</p>
+          <p className="text-[0.625rem] mt-1.5 text-right" style={{ color: 'var(--brand-text-muted)' }}>{msg.time}</p>
         </div>
       </motion.div>
     );
@@ -268,7 +268,7 @@ function MessageBubble({ msg }: { msg: Message }) {
       transition={{ duration: 0.2 }}
     >
       <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
-        <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
+        <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={30} height={30} />
       </div>
       <div
         data-testid="chat-message-ai"
@@ -279,19 +279,19 @@ function MessageBubble({ msg }: { msg: Message }) {
           <div className="flex items-center gap-1.5 mb-2">
             <Mic className="w-3 h-3" style={{ color: 'var(--brand-primary-purple)' }} />
             <span
-              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold"
+              className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-bold"
               style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
             >
               Voice Session Summary
             </span>
           </div>
         )}
-        <div className="prose prose-sm max-w-none text-[14px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+        <div className="prose prose-sm max-w-none text-[0.875rem] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
           <ReactMarkdown>{msg.text}</ReactMarkdown>
         </div>
         <div className="flex items-center justify-end gap-1.5 mt-1.5">
           {isVoice && <Mic className="w-2.5 h-2.5" style={{ color: 'var(--brand-text-muted)' }} />}
-          <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>{msg.time}</p>
+          <p className="text-[0.625rem]" style={{ color: 'var(--brand-text-muted)' }}>{msg.time}</p>
         </div>
       </div>
     </motion.div>
@@ -344,17 +344,17 @@ function DeleteConfirmModal({
           >
             <Trash2 className="w-6 h-6" style={{ color: 'var(--brand-alert-red-text)' }} />
           </div>
-          <p className="text-[15px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
+          <p className="text-[0.9375rem] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
             Delete conversation?
           </p>
-          <p className="text-[12px] leading-relaxed mb-4" style={{ color: 'var(--brand-text-muted)' }}>
+          <p className="text-[0.75rem] leading-relaxed mb-4" style={{ color: 'var(--brand-text-muted)' }}>
             &ldquo;{sessionTitle.length > 30 ? sessionTitle.slice(0, 30) + '…' : sessionTitle}&rdquo; will be permanently deleted.
           </p>
           <div className="flex gap-2">
             <button
               onClick={onCancel}
               disabled={deleting}
-              className="flex-1 h-10 rounded-xl text-[13px] font-semibold transition hover:opacity-90 disabled:opacity-50"
+              className="flex-1 h-10 rounded-xl text-[0.8125rem] font-semibold transition hover:opacity-90 disabled:opacity-50"
               style={{ backgroundColor: 'var(--brand-background)', color: 'var(--brand-text-secondary)', border: '1px solid var(--brand-border)' }}
             >
               Cancel
@@ -362,7 +362,7 @@ function DeleteConfirmModal({
             <button
               onClick={onConfirm}
               disabled={deleting}
-              className="flex-1 h-10 rounded-xl text-[13px] font-bold text-white transition hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5"
+              className="flex-1 h-10 rounded-xl text-[0.8125rem] font-bold text-white transition hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5"
               style={{ backgroundColor: 'var(--brand-alert-red)' }}
             >
               {deleting ? (
@@ -411,10 +411,10 @@ function SidebarContent({
     <div className="flex flex-col h-full overflow-hidden">
       <style>{sidebarScrollStyles}</style>
       <div className="px-4 pt-5 pb-3 shrink-0">
-        <h2 className="text-[15px] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.conversations')}</h2>
+        <h2 className="text-[0.9375rem] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.conversations')}</h2>
         <button
           onClick={onNewConversation}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[13px] font-semibold transition-all hover:opacity-90 active:scale-[0.98]"
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[0.8125rem] font-semibold transition-all hover:opacity-90 active:scale-[0.98]"
           style={{ background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)', color: 'white', boxShadow: '0 4px 14px rgba(123,0,224,0.28)' }}
         >
           <Plus className="w-4 h-4" />
@@ -425,14 +425,14 @@ function SidebarContent({
       <div className="px-4 pb-3 shrink-0">
         <div className="rounded-2xl p-3.5" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-[12px] font-bold shrink-0" style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}>
+            <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-[0.75rem] font-bold shrink-0" style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}>
               {userInitials}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[13px] font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>{userName}</p>
-              <p className="text-[11px] font-medium" style={{ color: 'var(--brand-accent-teal)' }}>{t('chat.patient')}</p>
+              <p className="text-[0.8125rem] font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>{userName}</p>
+              <p className="text-[0.6875rem] font-medium" style={{ color: 'var(--brand-accent-teal)' }}>{t('chat.patient')}</p>
             </div>
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0" style={{ backgroundColor: riskColor.bg, color: riskColor.text }}>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold shrink-0" style={{ backgroundColor: riskColor.bg, color: riskColor.text }}>
               {riskTier}
             </span>
           </div>
@@ -440,11 +440,11 @@ function SidebarContent({
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 pb-4 min-h-0 sidebar-scroll">
-        <p className="text-[10px] font-bold uppercase tracking-wider px-2 mb-2" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.recent')}</p>
+        <p className="text-[0.625rem] font-bold uppercase tracking-wider px-2 mb-2" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.recent')}</p>
         {isLoading ? (
           <SessionSkeleton />
         ) : sessions.length === 0 ? (
-          <p className="text-[12px] px-2 py-2" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.noConversations')}</p>
+          <p className="text-[0.75rem] px-2 py-2" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.noConversations')}</p>
         ) : (
           <div className="space-y-0.5">
             {sessions.map((s) => {
@@ -458,9 +458,9 @@ function SidebarContent({
                 >
                   <div className="flex items-center gap-1.5 pr-6">
                     {s.isVoice && <Mic className="w-3 h-3 shrink-0" style={{ color: isActive ? 'var(--brand-primary-purple)' : 'var(--brand-text-muted)' }} />}
-                    <p className="text-[13px] font-semibold truncate" style={{ color: isActive ? 'var(--brand-primary-purple)' : 'var(--brand-text-secondary)' }}>{s.title}</p>
+                    <p className="text-[0.8125rem] font-semibold truncate" style={{ color: isActive ? 'var(--brand-primary-purple)' : 'var(--brand-text-secondary)' }}>{s.title}</p>
                   </div>
-                  <p className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--brand-text-muted)' }}>{s.isVoice ? `🎙 ${s.time}` : s.time}</p>
+                  <p className="text-[0.6875rem] mt-0.5 truncate" style={{ color: 'var(--brand-text-muted)' }}>{s.isVoice ? `🎙 ${s.time}` : s.time}</p>
                   {/* Delete button — visible on hover */}
                   <button
                     onClick={(e) => { e.stopPropagation(); onDeleteSession(s.id); }}
@@ -518,26 +518,26 @@ function VoiceCallBar({
       />
       <div className="flex items-center gap-2 flex-1 min-w-0">
         <Mic className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />
-        <span className="text-[12px] font-semibold" style={{ color: 'var(--brand-primary-purple)' }}>
+        <span className="text-[0.75rem] font-semibold" style={{ color: 'var(--brand-primary-purple)' }}>
           {t('chat.voiceMode')}
         </span>
         <span
           data-testid="voice-state-label"
-          className="text-[12px]"
+          className="text-[0.75rem]"
           style={{ color: 'var(--brand-text-muted)' }}
         >
           · {stateLabel[state] ?? state}
         </span>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px]" style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}>
+        <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem]" style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}>
           <PhoneCall className="w-3 h-3" />
           <span>{t('chat.emergencyCall')}</span>
         </div>
         <button
           data-testid="voice-end-button"
           onClick={onStop}
-          className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-semibold transition hover:opacity-80"
+          className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.75rem] font-semibold transition hover:opacity-80"
           style={{ backgroundColor: '#ef4444', color: 'white' }}
         >
           <MicOff className="w-3 h-3" />
@@ -588,7 +588,7 @@ function TypingText({ text, speaker }: { text: string; speaker: 'user' | 'agent'
   }, [text]);
 
   return (
-    <p className="text-[14px] leading-relaxed" style={{ color: speaker === 'user' ? 'white' : 'var(--brand-text-primary)' }}>
+    <p className="text-[0.875rem] leading-relaxed" style={{ color: speaker === 'user' ? 'white' : 'var(--brand-text-primary)' }}>
       {displayed}
       {displayed.length < text.length && (
         <span className="inline-block w-[2px] h-[14px] ml-0.5 align-middle animate-pulse" style={{ backgroundColor: speaker === 'user' ? 'rgba(255,255,255,0.7)' : 'var(--brand-primary-purple)' }} />
@@ -624,7 +624,7 @@ function LiveTranscriptBubbles({ lines }: { lines: TranscriptLine[] }) {
         >
           {group.speaker === 'agent' && (
             <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0">
-              <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
+              <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={30} height={30} />
             </div>
           )}
           <div
@@ -757,10 +757,10 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3 }}
             >
-              <p className="text-[16px] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>
+              <p className="text-[1rem] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>
                 {state === 'connecting' ? 'Turning on...' : 'Starting mic...'}
               </p>
-              <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.75rem] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
                 Setting up your voice assistant
               </p>
               <div className="flex items-center justify-center gap-1.5 mt-3">
@@ -808,20 +808,20 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
               )}
             </motion.div>
 
-            <p className="text-[17px] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
+            <p className="text-[1.0625rem] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
               {pendingCheckin.saved ? 'Check-in saved!' : 'Could not save'}
             </p>
 
             <div className="grid grid-cols-2 gap-2 mb-4">
               {pendingCheckin.systolicBP != null && pendingCheckin.diastolicBP != null && (
                 <div className="rounded-xl p-2.5 text-center" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
-                  <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>BP</p>
-                  <p className="text-[16px] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{pendingCheckin.systolicBP}/{pendingCheckin.diastolicBP}</p>
+                  <p className="text-[0.5625rem] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>BP</p>
+                  <p className="text-[1rem] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{pendingCheckin.systolicBP}/{pendingCheckin.diastolicBP}</p>
                 </div>
               )}
               <div className="rounded-xl p-2.5 text-center" style={{ backgroundColor: pendingCheckin.medicationTaken ? 'var(--brand-success-green-light)' : 'var(--brand-alert-red-light)' }}>
-                <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Meds</p>
-                <p className="text-[13px] font-bold" style={{ color: pendingCheckin.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red-text)' }}>{pendingCheckin.medicationTaken ? 'Taken' : 'Missed'}</p>
+                <p className="text-[0.5625rem] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Meds</p>
+                <p className="text-[0.8125rem] font-bold" style={{ color: pendingCheckin.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red-text)' }}>{pendingCheckin.medicationTaken ? 'Taken' : 'Missed'}</p>
               </div>
             </div>
 
@@ -829,7 +829,7 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
             <motion.div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--brand-border)' }}>
               <motion.div className="h-full rounded-full" style={{ backgroundColor: 'var(--brand-success-green)' }} initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: 3, ease: 'linear' }} />
             </motion.div>
-            <p className="text-[10px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>AI will continue talking...</p>
+            <p className="text-[0.625rem] mt-2" style={{ color: 'var(--brand-text-muted)' }}>AI will continue talking...</p>
           </motion.div>
         )}
 
@@ -883,12 +883,12 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
               </div>
 
               <div className="text-center mt-4">
-                <p className="text-[16px] font-bold" style={{ color: crudColor }}>{crudLabel}</p>
-                <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>{crudSub}</p>
+                <p className="text-[1rem] font-bold" style={{ color: crudColor }}>{crudLabel}</p>
+                <p className="text-[0.75rem] mt-1" style={{ color: 'var(--brand-text-muted)' }}>{crudSub}</p>
                 <div className="w-48 mx-auto mt-3 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: `${crudColor}15` }}>
                   <motion.div className="h-full rounded-full" style={{ backgroundColor: crudColor }} animate={{ x: ['-100%', '100%'] }} transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }} />
                 </div>
-                <p className="text-[10px] mt-3" style={{ color: 'var(--brand-text-muted)' }}>AI will resume automatically</p>
+                <p className="text-[0.625rem] mt-3" style={{ color: 'var(--brand-text-muted)' }}>AI will resume automatically</p>
               </div>
             </motion.div>
           );
@@ -934,10 +934,10 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
 
             {/* State text — fixed position below orb */}
             <div className="text-center mt-2">
-              <motion.p key={state} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="text-[16px] font-bold" style={{ color: isListening ? '#ef4444' : 'var(--brand-primary-purple)' }}>
+              <motion.p key={state} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="text-[1rem] font-bold" style={{ color: isListening ? '#ef4444' : 'var(--brand-primary-purple)' }}>
                 {isListening ? 'Listening' : isSpeaking ? 'AI Speaking' : 'Ready'}
               </motion.p>
-              <p className="text-[12px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.75rem] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
                 {isListening ? 'Speak naturally...' : isSpeaking ? 'Listening to response...' : ''}
               </p>
             </div>
@@ -964,7 +964,7 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
                 style={{ backgroundColor: 'var(--brand-alert-red-light)', border: '1px solid var(--brand-alert-red)' }}
               >
                 <PhoneCall className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-alert-red)' }} />
-                <p className="text-[10px]" style={{ color: 'var(--brand-alert-red-text)' }}>Chest pain or severe shortness of breath? Call 911 immediately.</p>
+                <p className="text-[0.625rem]" style={{ color: 'var(--brand-alert-red-text)' }}>Chest pain or severe shortness of breath? Call 911 immediately.</p>
               </motion.div>
             )}
           </motion.div>
@@ -990,20 +990,20 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
                 {pendingUpdate.updated
                   ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-accent-teal)' }} />
                   : <AlertCircle className="w-5 h-5" style={{ color: "var(--brand-alert-red)" }} />}
-                <p className="font-bold text-[14px]" style={{ color: 'var(--brand-text-primary)' }}>
+                <p className="font-bold text-[0.875rem]" style={{ color: 'var(--brand-text-primary)' }}>
                   {pendingUpdate.updated ? 'Reading updated!' : 'Could not update reading'}
                 </p>
               </div>
               {pendingUpdate.systolicBP != null && pendingUpdate.diastolicBP != null && (
                 <div className="rounded-xl p-2.5 text-center mb-2" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
-                  <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Blood Pressure</p>
-                  <p className="text-[18px] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{pendingUpdate.systolicBP}/{pendingUpdate.diastolicBP} <span className="text-[10px] font-medium">mmHg</span></p>
+                  <p className="text-[0.5625rem] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Blood Pressure</p>
+                  <p className="text-[1.125rem] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{pendingUpdate.systolicBP}/{pendingUpdate.diastolicBP} <span className="text-[0.625rem] font-medium">mmHg</span></p>
                 </div>
               )}
               <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--brand-border)' }}>
                 <motion.div className="h-full rounded-full" style={{ backgroundColor: 'var(--brand-accent-teal)' }} initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: 3, ease: 'linear' }} />
               </div>
-              <p className="text-[10px] mt-1.5 text-center" style={{ color: 'var(--brand-text-muted)' }}>AI will resume talking…</p>
+              <p className="text-[0.625rem] mt-1.5 text-center" style={{ color: 'var(--brand-text-muted)' }}>AI will resume talking…</p>
             </div>
           </motion.div>
         )}
@@ -1028,15 +1028,15 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
                 {pendingDelete.success
                   ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-alert-red-text)' }} />
                   : <AlertCircle className="w-5 h-5" style={{ color: "var(--brand-alert-red)" }} />}
-                <p className="font-bold text-[14px]" style={{ color: 'var(--brand-text-primary)' }}>
+                <p className="font-bold text-[0.875rem]" style={{ color: 'var(--brand-text-primary)' }}>
                   {pendingDelete.success
                     ? (pendingDelete.deletedCount === 1 ? 'Reading deleted' : `${pendingDelete.deletedCount} readings deleted`)
                     : 'Could not delete reading'}
                 </p>
               </div>
               <div className="rounded-xl p-2.5 text-center mb-2" style={{ backgroundColor: 'var(--brand-alert-red-light)' }}>
-                <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Removed</p>
-                <p className="text-[14px] font-bold" style={{ color: 'var(--brand-alert-red-text)' }}>
+                <p className="text-[0.5625rem] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Removed</p>
+                <p className="text-[0.875rem] font-bold" style={{ color: 'var(--brand-alert-red-text)' }}>
                   {pendingDelete.deletedCount} entry{pendingDelete.deletedCount === 1 ? '' : 'ies'}
                   {pendingDelete.failedCount > 0 ? ` (${pendingDelete.failedCount} failed)` : ''}
                 </p>
@@ -1044,7 +1044,7 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
               <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--brand-border)' }}>
                 <motion.div className="h-full rounded-full" style={{ backgroundColor: 'var(--brand-alert-red)' }} initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: 3, ease: 'linear' }} />
               </div>
-              <p className="text-[10px] mt-1.5 text-center" style={{ color: 'var(--brand-text-muted)' }}>AI will resume talking…</p>
+              <p className="text-[0.625rem] mt-1.5 text-center" style={{ color: 'var(--brand-text-muted)' }}>AI will resume talking…</p>
             </div>
           </motion.div>
         )}
@@ -1670,18 +1670,18 @@ export default function AIChatInterface() {
           </button>
           <div className="flex items-center gap-3 flex-1 min-w-0">
             <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
-              <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
+              <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={30} height={30} />
             </div>
             <div>
-              <p className="text-[14px] font-semibold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.title')}</p>
+              <p className="text-[0.875rem] font-semibold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.title')}</p>
               <div className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
-                <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.onlineMonitored')}</span>
+                <span className="text-[0.6875rem]" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.onlineMonitored')}</span>
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'var(--brand-accent-teal-light)', color: 'var(--brand-accent-teal)' }}>
+            <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-[0.6875rem] font-semibold" style={{ backgroundColor: 'var(--brand-accent-teal-light)', color: 'var(--brand-accent-teal)' }}>
               {t('chat.contextLoaded')}
             </span>
             <button className="lg:hidden w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-85 active:scale-95" style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }} onClick={handleNewConversation}>
@@ -1704,7 +1704,7 @@ export default function AIChatInterface() {
         <AnimatePresence>
           {voiceState === 'error' && voiceError && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="shrink-0 px-4 lg:px-6 py-2 text-[12px]"
+              className="shrink-0 px-4 lg:px-6 py-2 text-[0.75rem]"
               style={{
                 backgroundColor: 'var(--brand-alert-red-light)',
                 borderBottom: '1px solid var(--brand-alert-red)',
@@ -1741,10 +1741,10 @@ export default function AIChatInterface() {
             <div data-testid="chat-empty-state" className="flex-1 flex items-center justify-center">
               <div className="text-center max-w-xs mx-auto">
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
-                  <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={50} height={50} />
+                  <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={50} height={50} />
                 </div>
-                <p className="text-[16px] font-bold mb-1.5" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.howCanIHelp')}</p>
-                <p className="text-[13px] leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
+                <p className="text-[1rem] font-bold mb-1.5" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.howCanIHelp')}</p>
+                <p className="text-[0.8125rem] leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
                   {t('chat.askMe')}
                 </p>
                 <div className="flex flex-wrap gap-2 justify-center mt-5">
@@ -1752,7 +1752,7 @@ export default function AIChatInterface() {
                     <button
                       key={chip}
                       onClick={() => setInputValue(chip)}
-                      className="px-3 py-1.5 rounded-full text-[12px] font-semibold transition hover:opacity-80 active:scale-95"
+                      className="px-3 py-1.5 rounded-full text-[0.75rem] font-semibold transition hover:opacity-80 active:scale-95"
                       style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)', border: '1px solid #E9D5FF' }}
                     >
                       {chip}
@@ -1879,7 +1879,7 @@ export default function AIChatInterface() {
               onKeyDown={handleKeyDown}
               placeholder={isVoiceActive ? t('chat.voiceEndToType') : t('chat.placeholder')}
               aria-label={t('chat.title') ? `${t('chat.title')} message input` : 'Chat message'}
-              className="flex-1 bg-transparent text-[14px] outline-none min-w-0 py-2 resize-none leading-[1.4] thin-scrollbar"
+              className="flex-1 bg-transparent text-[0.875rem] outline-none min-w-0 py-2 resize-none leading-[1.4] thin-scrollbar"
               style={{
                 color: 'var(--brand-text-primary)',
                 opacity: isVoiceActive ? 0.4 : 1,
@@ -1997,7 +1997,7 @@ export default function AIChatInterface() {
             </motion.button>
           </div>
 
-          <p className="text-center text-[10px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
+          <p className="text-center text-[0.625rem] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
             {t('chat.footer')}
           </p>
         </div>
@@ -2023,7 +2023,7 @@ export default function AIChatInterface() {
       {photoError && (
         <div
           role="alert"
-          className="fixed bottom-32 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full text-[12px] font-semibold shadow-lg"
+          className="fixed bottom-32 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full text-[0.75rem] font-semibold shadow-lg"
           style={{
             backgroundColor: 'var(--brand-alert-red-light)',
             color: 'var(--brand-alert-red-text)',

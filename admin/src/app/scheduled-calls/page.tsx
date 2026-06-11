@@ -226,7 +226,7 @@ function CallDetailModal({
               </div>
               <div>
                 <h3 className="text-white font-bold text-[15px]">{t('provider.callDetails')}</h3>
-                <p className="text-white/70 text-[11px]">{call.callType} call</p>
+                <p className="text-white text-[11px]">{call.callType} call</p>
               </div>
             </div>
             <button
@@ -655,6 +655,7 @@ export default function ScheduledCallsPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={t('provider.searchCalls')}
+                aria-label={t('provider.searchCalls')}
                 className="flex-1 text-[12px] outline-none bg-transparent"
                 style={{ color: 'var(--brand-text-primary)' }}
               />
@@ -670,6 +671,7 @@ export default function ScheduledCallsPage() {
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
+                aria-label={t('provider.allStatuses')}
                 className="appearance-none h-9 pl-3 pr-7 rounded-full text-[12px] font-semibold outline-none cursor-pointer"
                 style={{
                   backgroundColor: 'white',

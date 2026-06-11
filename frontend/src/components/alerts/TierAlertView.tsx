@@ -127,7 +127,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge, isP
               router.push('/dashboard');
             }
           }}
-          className="inline-flex items-center gap-1.5 text-[13px] font-semibold cursor-pointer"
+          className="inline-flex items-center gap-1.5 text-[0.8125rem] font-semibold cursor-pointer"
           style={{ color: 'var(--brand-text-secondary)' }}
         >
           <ArrowLeft className="w-4 h-4" /> {t('alerts.tier.back')}
@@ -167,7 +167,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge, isP
                   <h1
                     data-testid="alert-detail-tier-badge"
                     lang="en"
-                    className="text-[20px] sm:text-[22px] font-bold leading-tight"
+                    className="text-[1.25rem] sm:text-[1.375rem] font-bold leading-tight"
                     style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
                   >
                     {v.title}
@@ -178,7 +178,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge, isP
                 </div>
 
                 {bp && (
-                  <p className="text-[13px] mt-1" style={{ color: v.accent, fontWeight: 600 }}>
+                  <p className="text-[0.8125rem] mt-1" style={{ color: v.accent, fontWeight: 600 }}>
                     {bp}
                     <span className="opacity-80 font-medium" style={{ color: 'var(--brand-text-muted)' }}>
                       {' · '}
@@ -190,7 +190,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge, isP
                 <p
                   data-testid="alert-message-patient"
                   lang={angioedemaKey ? locale : 'en'}
-                  className="text-[14.5px] sm:text-[15px] mt-3 leading-relaxed"
+                  className="text-[0.90625rem] sm:text-[0.9375rem] mt-3 leading-relaxed"
                   style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
                 >
                   {body}
@@ -202,7 +202,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge, isP
           {/* Footer message inside banner */}
           <div
             lang="en"
-            className="px-5 sm:px-6 py-4 text-[13px] sm:text-[13.5px] leading-relaxed"
+            className="px-5 sm:px-6 py-4 text-[0.8125rem] sm:text-[0.84375rem] leading-relaxed"
             style={{
               backgroundColor: 'rgba(255,255,255,0.6)',
               color: 'var(--brand-text-secondary)',
@@ -221,7 +221,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge, isP
         >
           <div className="flex items-start justify-between gap-3 mb-1.5">
             <p
-              className="text-[12px] font-bold uppercase tracking-wider"
+              className="text-[0.75rem] font-bold uppercase tracking-wider"
               style={{ color: 'var(--brand-primary-purple)' }}
             >
               {t('alerts.tier.whatNext')}
@@ -230,7 +230,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge, isP
           </div>
           <p
             lang="en"
-            className="text-[13.5px] leading-relaxed"
+            className="text-[0.84375rem] leading-relaxed"
             style={{ color: 'var(--brand-text-secondary)', wordBreak: 'break-word' }}
           >
             {v.followUp}
@@ -273,14 +273,14 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge, isP
                 />
                 <div className="flex-1 min-w-0">
                   <p
-                    className="text-[13px] font-semibold"
+                    className="text-[0.8125rem] font-semibold"
                     style={{ color: 'var(--brand-success-green)' }}
                   >
                     {t('alerts.tier.resolvedAction')}
                   </p>
                   <p
                     lang="en"
-                    className="text-[13px] mt-1 leading-relaxed"
+                    className="text-[0.8125rem] mt-1 leading-relaxed"
                     style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
                   >
                     {actionLabel}
@@ -288,7 +288,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge, isP
                   {rationale && (
                     <p
                       lang="en"
-                      className="text-[12.5px] mt-1.5 leading-relaxed"
+                      className="text-[0.78125rem] mt-1.5 leading-relaxed"
                       style={{ color: 'var(--brand-text-secondary)', wordBreak: 'break-word' }}
                     >
                       {rationale}
@@ -316,13 +316,13 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge, isP
                 />
                 <div>
                   <p
-                    className="text-[13.5px] font-bold mb-1"
+                    className="text-[0.84375rem] font-bold mb-1"
                     style={{ color: 'var(--brand-warning-amber-text)' }}
                   >
                     Your enrollment is pending
                   </p>
                   <p
-                    className="text-[12.5px] leading-relaxed"
+                    className="text-[0.78125rem] leading-relaxed"
                     style={{ color: 'var(--brand-text-secondary)' }}
                   >
                     If you have any concerning symptoms — chest pain, severe
@@ -347,13 +347,13 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge, isP
                 />
                 <div>
                   <p
-                    className="text-[13.5px] font-bold mb-1"
+                    className="text-[0.84375rem] font-bold mb-1"
                     style={{ color: 'var(--brand-primary-purple)' }}
                   >
                     Your care team has been notified
                   </p>
                   <p
-                    className="text-[12.5px] leading-relaxed"
+                    className="text-[0.78125rem] leading-relaxed"
                     style={{ color: 'var(--brand-text-secondary)' }}
                   >
                     A clinician needs to review this with you before it can be
@@ -374,7 +374,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge, isP
                   className="w-5 h-5 shrink-0"
                   style={{ color: 'var(--brand-success-green)' }}
                 />
-                <p className="text-[13px]" style={{ color: 'var(--brand-success-green)' }}>
+                <p className="text-[0.8125rem]" style={{ color: 'var(--brand-success-green)' }}>
                   {t('alerts.tier.seenResolved')}
                 </p>
               </div>
@@ -390,7 +390,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge, isP
                   data-testid="alert-acknowledge-button"
                   onClick={onAcknowledge}
                   disabled={acknowledging}
-                  className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer transition"
+                  className="w-full h-12 rounded-full text-white font-bold text-[0.875rem] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer transition"
                   style={{
                     backgroundColor: 'var(--brand-primary-purple)',
                     boxShadow: 'var(--brand-shadow-button)',

@@ -91,14 +91,14 @@ export default function ChoiceCard({
             {icon}
           </div>
           <p
-            className="text-[12px] sm:text-[13px] font-semibold leading-tight"
+            className="text-[0.75rem] sm:text-[0.8125rem] font-semibold leading-tight"
             style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
           >
             {title}
           </p>
           {description && (
             <p
-              className="text-[10.5px] leading-snug"
+              className="text-[0.65625rem] leading-snug"
               style={{ color: 'var(--brand-text-muted)', wordBreak: 'break-word' }}
             >
               {description}
@@ -123,14 +123,14 @@ export default function ChoiceCard({
 
           <div className="flex-1 min-w-0">
             <p
-              className="text-[15px] font-semibold"
+              className="text-[0.9375rem] font-semibold"
               style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
             >
               {title}
             </p>
             {description && (
               <p
-                className="text-[13px] mt-1 leading-relaxed"
+                className="text-[0.8125rem] mt-1 leading-relaxed"
                 style={{ color: 'var(--brand-text-muted)', wordBreak: 'break-word' }}
               >
                 {description}

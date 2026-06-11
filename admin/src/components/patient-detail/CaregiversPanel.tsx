@@ -210,6 +210,7 @@ export default function CaregiversPanel({ patientId }: Props) {
           <div className="rounded-xl px-3 py-3 space-y-2.5" style={{ border: '1px solid var(--brand-border)', backgroundColor: 'var(--brand-background)' }}>
             <input
               data-testid="admin-caregiver-name-input"
+              aria-label="Caregiver name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Caregiver name"
@@ -218,6 +219,7 @@ export default function CaregiversPanel({ patientId }: Props) {
             />
             <input
               data-testid="admin-caregiver-relationship-input"
+              aria-label="Relationship (optional)"
               value={relationship}
               onChange={(e) => setRelationship(e.target.value)}
               placeholder="Relationship (optional)"
@@ -226,6 +228,7 @@ export default function CaregiversPanel({ patientId }: Props) {
             />
             <input
               data-testid="admin-caregiver-email-input"
+              aria-label="Email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -235,6 +238,7 @@ export default function CaregiversPanel({ patientId }: Props) {
             />
             <select
               data-testid="admin-caregiver-channel-select"
+              aria-label="Notification channel"
               value={channel}
               onChange={(e) => setChannel(e.target.value as CaregiverNotifyChannelInput)}
               className="w-full rounded-lg px-3 py-2 text-[13.5px] bg-white"

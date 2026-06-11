@@ -118,7 +118,7 @@ export default function CaregiversCard() {
           >
             <Users className="w-4 h-4" />
           </div>
-          <h2 className="text-[15px] font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>
+          <h2 className="text-[0.9375rem] font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>
             {t('caregiver.title')}
           </h2>
         </div>
@@ -127,7 +127,7 @@ export default function CaregiversCard() {
             type="button"
             data-testid="profile-caregiver-add-button"
             onClick={() => { setAdding(true); setError(null); }}
-            className="inline-flex items-center gap-1 text-[13px] font-semibold cursor-pointer"
+            className="inline-flex items-center gap-1 text-[0.8125rem] font-semibold cursor-pointer"
             style={{ color: 'var(--brand-primary-purple)' }}
           >
             <Plus className="w-4 h-4" /> {t('caregiver.add')}
@@ -136,13 +136,13 @@ export default function CaregiversCard() {
       </div>
 
       <div className="px-5 py-4 space-y-3">
-        <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+        <p className="text-[0.78125rem] leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
           {t('caregiver.description')}
         </p>
 
         {error && (
           <div
-            className="flex items-start gap-2 rounded-xl px-3 py-2 text-[12.5px]"
+            className="flex items-start gap-2 rounded-xl px-3 py-2 text-[0.78125rem]"
             style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
           >
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /> {error}
@@ -152,11 +152,11 @@ export default function CaregiversCard() {
         {loading ? (
           // Round 2 D1 — mirror admin CaregiversPanel's spinner loading state
           // (was plain "Loading…" text) for visual parity across surfaces.
-          <div className="flex items-center gap-2 text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
+          <div className="flex items-center gap-2 text-[0.8125rem]" style={{ color: 'var(--brand-text-muted)' }}>
             <Loader2 className="w-4 h-4 animate-spin" /> {t('caregiver.loading')}
           </div>
         ) : caregivers.length === 0 && !adding ? (
-          <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
+          <p className="text-[0.8125rem]" style={{ color: 'var(--brand-text-muted)' }}>
             {t('caregiver.empty')}
           </p>
         ) : (
@@ -174,18 +174,18 @@ export default function CaregiversCard() {
                     Patient-friendly wording is kept (per Duwaragie) — short
                     "Allow"/"Revoke" CTAs instead of admin's "Record consent". */}
                 <div className="min-w-0">
-                  <p className="text-[13.5px] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
+                  <p className="text-[0.84375rem] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
                     {c.name}
                     {c.relationship ? (
                       <span className="font-normal" style={{ color: 'var(--brand-text-muted)' }}> · {c.relationship}</span>
                     ) : null}
                   </p>
-                  <p className="text-[12px]" style={{ color: 'var(--brand-text-secondary)' }}>
+                  <p className="text-[0.75rem]" style={{ color: 'var(--brand-text-secondary)' }}>
                     {channelLabel(c.notifyChannel)}{c.email ? ` · ${c.email}` : ''}
                   </p>
                   <span
                     data-testid={`profile-caregiver-consent-status-${c.id}`}
-                    className="mt-1 inline-flex items-center gap-1 text-[11.5px] font-semibold"
+                    className="mt-1 inline-flex items-center gap-1 text-[0.71875rem] font-semibold"
                     style={{ color: c.consentGivenAt ? 'var(--brand-accent-teal)' : 'var(--brand-warning-amber-text)' }}
                   >
                     {c.consentGivenAt ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldOff className="w-3.5 h-3.5" />}
@@ -197,7 +197,7 @@ export default function CaregiversCard() {
                     type="button"
                     data-testid={`profile-caregiver-consent-${c.id}`}
                     onClick={() => handleToggleConsent(c)}
-                    className="text-[11.5px] font-semibold px-2 py-1 rounded-lg cursor-pointer"
+                    className="text-[0.71875rem] font-semibold px-2 py-1 rounded-lg cursor-pointer"
                     style={{ color: 'var(--brand-primary-purple)' }}
                   >
                     {c.consentGivenAt ? t('caregiver.revoke') : t('caregiver.allow')}
@@ -222,34 +222,38 @@ export default function CaregiversCard() {
           <div className="rounded-xl px-3 py-3 space-y-2.5" style={{ border: '1px solid var(--brand-border)', backgroundColor: 'var(--brand-background)' }}>
             <input
               data-testid="profile-caregiver-name-input"
+              aria-label={t('caregiver.namePlaceholder')}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={t('caregiver.namePlaceholder')}
-              className="w-full rounded-lg px-3 py-2 text-[13.5px]"
+              className="w-full rounded-lg px-3 py-2 text-[0.84375rem]"
               style={{ border: '1px solid var(--brand-border)' }}
             />
             <input
               data-testid="profile-caregiver-relationship-input"
+              aria-label={t('caregiver.relationshipPlaceholder')}
               value={relationship}
               onChange={(e) => setRelationship(e.target.value)}
               placeholder={t('caregiver.relationshipPlaceholder')}
-              className="w-full rounded-lg px-3 py-2 text-[13.5px]"
+              className="w-full rounded-lg px-3 py-2 text-[0.84375rem]"
               style={{ border: '1px solid var(--brand-border)' }}
             />
             <input
               data-testid="profile-caregiver-email-input"
+              aria-label={t('caregiver.emailPlaceholder')}
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder={t('caregiver.emailPlaceholder')}
-              className="w-full rounded-lg px-3 py-2 text-[13.5px]"
+              className="w-full rounded-lg px-3 py-2 text-[0.84375rem]"
               style={{ border: '1px solid var(--brand-border)' }}
             />
             <select
               data-testid="profile-caregiver-channel-select"
+              aria-label="Notification method"
               value={channel}
               onChange={(e) => setChannel(e.target.value as CaregiverNotifyChannelInput)}
-              className="w-full rounded-lg px-3 py-2 text-[13.5px] bg-white"
+              className="w-full rounded-lg px-3 py-2 text-[0.84375rem] bg-white"
               style={{ border: '1px solid var(--brand-border)' }}
             >
               {/* Cross-Handoff Addendum Decision 2 — caregivers are EMAIL-ONLY
@@ -259,7 +263,7 @@ export default function CaregiversCard() {
               <option value="EMAIL">{t('caregiver.optionEmail')}</option>
               <option value="NONE">{t('caregiver.optionNone')}</option>
             </select>
-            <label className="flex items-start gap-2 text-[12.5px] cursor-pointer" style={{ color: 'var(--brand-text-secondary)' }}>
+            <label className="flex items-start gap-2 text-[0.78125rem] cursor-pointer" style={{ color: 'var(--brand-text-secondary)' }}>
               <input
                 data-testid="profile-caregiver-consent-checkbox"
                 data-no-min-target
@@ -284,7 +288,7 @@ export default function CaregiversCard() {
                 data-testid="profile-caregiver-save-button"
                 onClick={handleAdd}
                 disabled={saving}
-                className="rounded-full px-4 py-1.5 text-[13px] font-bold text-white disabled:opacity-60 cursor-pointer"
+                className="rounded-full px-4 py-1.5 text-[0.8125rem] font-bold text-white disabled:opacity-60 cursor-pointer"
                 style={{ backgroundColor: 'var(--brand-primary-purple)' }}
               >
                 {saving ? t('caregiver.saving') : t('caregiver.save')}
@@ -292,7 +296,7 @@ export default function CaregiversCard() {
               <button
                 type="button"
                 onClick={resetForm}
-                className="rounded-full px-4 py-1.5 text-[13px] font-semibold cursor-pointer"
+                className="rounded-full px-4 py-1.5 text-[0.8125rem] font-semibold cursor-pointer"
                 style={{ color: 'var(--brand-text-secondary)' }}
               >
                 {t('caregiver.cancel')}

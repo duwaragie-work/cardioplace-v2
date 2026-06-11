@@ -13,10 +13,16 @@ import { newTestControl } from '../helpers/test-control.js'
 
 test.describe('Admin app — per-role sign-in', () => {
   for (const [key, account] of Object.entries(ADMINS)) {
-    test(`${key} (${account.roles.join(',')}) signs in and lands on /dashboard`, async ({ page }) => {
-      await signInAdmin(page, account.email, ADMIN_BASE_URL)
-      await expect(page).toHaveURL(new RegExp(`${ADMIN_BASE_URL}/dashboard`), { timeout: 30_000 })
-      // Dashboard always renders the user's name somewhere (greeting / nav)
+    // A COORDINATOR's sidebar hides Dashboard, so the app lands them on their
+    // /users surface instead of /dashboard. Every other admin role lands on
+    // /dashboard.
+    const isCoordinatorOnly =
+      account.roles.length === 1 && account.roles[0] === 'COORDINATOR'
+    const landing = isCoordinatorOnly ? /\/(users|patients|dashboard)/ : /\/dashboard/
+    test(`${key} (${account.roles.join(',')}) signs in and lands on the admin app`, async ({ page }) => {
+      await signInAdmin(page, account.email, ADMIN_BASE_URL, landing)
+      await expect(page).toHaveURL(landing, { timeout: 30_000 })
+      // The shell always renders the user's name somewhere (greeting / nav).
       await expect(page.locator('body')).toContainText(account.name.split(' ').slice(-1)[0], {
         timeout: 10_000,
       })

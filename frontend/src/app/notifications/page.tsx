@@ -364,7 +364,7 @@ function NotifCard({
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <p
-                className="text-[14px] leading-snug"
+                className="text-[0.875rem] leading-snug"
                 style={{
                   color: 'var(--brand-text-primary)',
                   fontWeight: notif.watched ? 500 : 700,
@@ -374,14 +374,14 @@ function NotifCard({
               </p>
               <span
                 data-testid="notification-date"
-                className="text-[11px] shrink-0 mt-0.5"
+                className="text-[0.6875rem] shrink-0 mt-0.5"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 {timeAgo(notif.sentAt, t)}
               </span>
             </div>
             <p
-              className="text-[13px] mt-0.5 leading-relaxed"
+              className="text-[0.8125rem] mt-0.5 leading-relaxed"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
               {notif.body}
@@ -398,7 +398,7 @@ function NotifCard({
               <div className="mt-1.5 flex items-center justify-between gap-3">
                 <span
                   data-testid={`notification-link-${notif.id}`}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold"
+                  className="inline-flex items-center gap-1 text-[0.6875rem] font-semibold"
                   style={{ color: 'var(--brand-primary-purple)' }}
                 >
                   {t('notifications.viewAlert')}
@@ -412,7 +412,7 @@ function NotifCard({
                       e.stopPropagation();
                       onRead(notif.id);
                     }}
-                    className="inline-flex items-center gap-1 px-2 h-6 rounded-full text-[11px] font-semibold cursor-pointer transition hover:opacity-80"
+                    className="inline-flex items-center gap-1 px-2 h-6 rounded-full text-[0.6875rem] font-semibold cursor-pointer transition hover:opacity-80"
                     style={{
                       backgroundColor: 'var(--brand-background)',
                       color: 'var(--brand-text-secondary)',
@@ -427,7 +427,7 @@ function NotifCard({
             ) : (
               !notif.watched && (
                 <span
-                  className="inline-block mt-1.5 text-[11px] font-semibold"
+                  className="inline-block mt-1.5 text-[0.6875rem] font-semibold"
                   style={{ color: 'var(--brand-primary-purple)' }}
                 >
                   {t('notifications.tapToRead')}
@@ -446,7 +446,7 @@ function NotifCard({
                 setExpanded((v) => !v);
                 if (!notif.watched) onRead(notif.id);
               }}
-              className="flex items-center gap-1.5 text-[12px] font-semibold transition hover:opacity-75"
+              className="flex items-center gap-1.5 text-[0.75rem] font-semibold transition hover:opacity-75"
               style={{ color: 'var(--brand-accent-teal)' }}
             >
               {expanded ? (
@@ -474,7 +474,7 @@ function NotifCard({
                   {notif.tips.map((tip, i) => (
                     <li
                       key={i}
-                      className="flex items-start gap-2 text-[12px] leading-relaxed"
+                      className="flex items-start gap-2 text-[0.75rem] leading-relaxed"
                       style={{ color: 'var(--brand-text-secondary)' }}
                     >
                       <span
@@ -513,7 +513,7 @@ function TabBar({ active, onChange, unreadCount }: { active: Tab; onChange: (t: 
         <button
           key={tab.id}
           onClick={() => onChange(tab.id)}
-          className="relative flex-1 h-8 rounded-lg text-[13px] font-semibold transition"
+          className="relative flex-1 h-8 rounded-lg text-[0.8125rem] font-semibold transition"
           style={{
             backgroundColor: active === tab.id ? 'white' : 'transparent',
             color: active === tab.id ? 'var(--brand-primary-purple)' : 'var(--brand-text-muted)',
@@ -523,7 +523,7 @@ function TabBar({ active, onChange, unreadCount }: { active: Tab; onChange: (t: 
           {tab.label}
           {tab.id === 'unread' && unreadCount > 0 && (
             <span
-              className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center"
+              className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[0.5625rem] font-bold text-white flex items-center justify-center"
               style={{ backgroundColor: 'var(--brand-primary-purple)' }}
             >
               {unreadCount > 9 ? '9+' : unreadCount}
@@ -564,7 +564,7 @@ function TopTabBar({
           key={tab.id}
           data-testid={tab.id === 'alerts' ? 'notifications-tab-alerts' : 'notifications-tab-notifications'}
           onClick={() => onChange(tab.id)}
-          className="relative flex-1 h-10 rounded-lg text-[13.5px] sm:text-[14px] font-semibold transition flex items-center justify-center gap-2 cursor-pointer"
+          className="relative flex-1 h-10 rounded-lg text-[0.84375rem] sm:text-[0.875rem] font-semibold transition flex items-center justify-center gap-2 cursor-pointer"
           style={{
             backgroundColor: active === tab.id ? 'white' : 'transparent',
             color: active === tab.id ? 'var(--brand-primary-purple)' : 'var(--brand-text-muted)',
@@ -574,7 +574,7 @@ function TopTabBar({
           {tab.label}
           {tab.count > 0 && (
             <span
-              className="min-w-[18px] h-[18px] px-1.5 rounded-full text-[10px] font-bold text-white flex items-center justify-center"
+              className="min-w-[18px] h-[18px] px-1.5 rounded-full text-[0.625rem] font-bold text-white flex items-center justify-center"
               style={{
                 backgroundColor:
                   active === tab.id
@@ -597,14 +597,14 @@ function SectionLabel({ children, count, testId }: { children: React.ReactNode; 
     <div className="flex items-center gap-2 mb-3 mt-1">
       <span
         data-testid={testId}
-        className="text-[12px] font-bold uppercase tracking-wide"
+        className="text-[0.75rem] font-bold uppercase tracking-wide"
         style={{ color: 'var(--brand-text-muted)' }}
       >
         {children}
       </span>
       {count != null && count > 0 && (
         <span
-          className="px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white"
+          className="px-1.5 py-0.5 rounded-full text-[0.625rem] font-bold text-white"
           style={{ backgroundColor: 'var(--brand-primary-purple)' }}
         >
           {count}
@@ -624,7 +624,7 @@ function EmptyState({ message }: { message: string }) {
       >
         <Bell className="w-7 h-7" style={{ color: 'var(--brand-primary-purple)' }} />
       </div>
-      <p className="text-[14px] font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
+      <p className="text-[0.875rem] font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
         {message}
       </p>
     </div>
@@ -810,7 +810,7 @@ export default function NotificationsPage() {
                 {t('notifications.title')}
               </h1>
               {!loading && (
-                <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
+                <p className="text-[0.75rem]" style={{ color: 'var(--brand-text-muted)' }}>
                   {openAlerts.length > 0
                     ? `${openAlerts.length} ${openAlerts.length > 1 ? t('notifications.actionsNeededPlural') : t('notifications.actionsNeeded')} · ${unreadCount} ${t('notifications.unread')}`
                     : unreadCount > 0
@@ -825,7 +825,7 @@ export default function NotificationsPage() {
             <button
               onClick={handleMarkAllRead}
               disabled={markingAll}
-              className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[12px] font-semibold transition hover:opacity-80 disabled:opacity-50"
+              className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[0.75rem] font-semibold transition hover:opacity-80 disabled:opacity-50"
               style={{
                 backgroundColor: 'var(--brand-primary-purple-light)',
                 color: 'var(--brand-primary-purple)',
@@ -910,7 +910,7 @@ export default function NotificationsPage() {
                       aria-selected={active}
                       data-testid={`alerts-tier-filter-${key}`}
                       onClick={() => setAlertTierFilter(key)}
-                      className="px-2.5 h-7 rounded-full text-[11.5px] font-semibold transition cursor-pointer"
+                      className="px-2.5 h-7 rounded-full text-[0.71875rem] font-semibold transition cursor-pointer"
                       style={{
                         backgroundColor: active
                           ? 'var(--brand-primary-purple)'
@@ -1029,7 +1029,7 @@ function PastAlerts({ alerts }: { alerts: Alert[] }) {
       <button
         data-testid="alerts-section-past"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-wide transition hover:opacity-75"
+        className="flex items-center gap-2 text-[0.75rem] font-bold uppercase tracking-wide transition hover:opacity-75"
         style={{ color: 'var(--brand-text-muted)' }}
       >
         {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
