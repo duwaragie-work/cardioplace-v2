@@ -40,11 +40,18 @@ export function kgToLbs(kg: number): number {
 }
 
 /**
- * Convert pounds to kilograms, rounded to one decimal place.
+ * Convert pounds to kilograms, rounded to two decimal places.
+ *
+ * Bug 24 — was one decimal place, which caused integer-lbs inputs to
+ * drift on display. 150 lbs → 68.0388555 kg → rounded to 68.0 →
+ * displayed back as 149.9 lbs. About half of common integer-lbs values
+ * drift by 0.1 lbs at 1 dp because the 0.1 kg quantum doesn't align
+ * with 1.0 lbs. 2 dp is the minimum that round-trips cleanly.
+ * Backend `lbsToKg` in src/common/units.ts mirrors this — keep in sync.
  */
 export function lbsToKg(lbs: number): number {
   if (!Number.isFinite(lbs) || lbs <= 0) return 0
-  return Math.round(lbs * KG_PER_LB * 10) / 10
+  return Math.round(lbs * KG_PER_LB * 100) / 100
 }
 
 /**

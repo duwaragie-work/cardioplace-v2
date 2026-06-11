@@ -122,7 +122,7 @@ export default function MedicationPhotoButton({
           aria-label={uploading ? t('ocr.med.uploading') : buttonLabel}
           aria-pressed={uploading}
           disabled={uploading}
-          className={`inline-flex shrink-0 items-center justify-center gap-2 px-4 h-11 rounded-full font-semibold text-[13px] whitespace-nowrap transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--brand-primary-purple)] disabled:cursor-wait ${className ?? ''}`}
+          className={`inline-flex shrink-0 items-center justify-center gap-2 px-4 h-11 rounded-full font-semibold text-[0.8125rem] whitespace-nowrap transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--brand-primary-purple)] disabled:cursor-wait ${className ?? ''}`}
           style={{
             backgroundColor: uploading
               ? 'var(--brand-primary-purple)'
@@ -150,7 +150,7 @@ export default function MedicationPhotoButton({
         {error && (
           <p
             role="alert"
-            className="text-[12px] font-medium"
+            className="text-[0.75rem] font-medium"
             style={{ color: 'var(--brand-alert-red)' }}
           >
             {error}

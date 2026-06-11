@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { OnEvent } from '@nestjs/event-emitter'
 import { GoogleGenAI, Modality } from '@google/genai'
 import type { Session, LiveServerMessage, FunctionResponse } from '@google/genai'
 import { trace, SpanStatusCode } from '@opentelemetry/api'
@@ -20,6 +21,8 @@ import { ConversationHistoryService } from '../chat/services/conversation-histor
 import { SystemPromptService } from '../chat/services/system-prompt.service.js'
 import { ProfileResolverService } from '../daily_journal/services/profile-resolver.service.js'
 import { GeminiService } from '../gemini/gemini.service.js'
+import { IntakeStatusService } from '../intake/intake-status.service.js'
+import { INTAKE_EVENTS, type IntakeUpdatedPayload } from '../intake/intake-events.js'
 import { VoiceToolsService } from './tools/voice-tools.service.js'
 import type { ToolEvent } from './tools/voice-tools.service.js'
 import { buildVoiceSystemInstruction } from './prompts/voice-system-instruction.js'
@@ -55,6 +58,16 @@ export interface VoiceSessionCallbacks {
   onCheckinSaved: (summary: CheckinSummary) => void
   onCheckinUpdated: (summary: UpdateSummary) => void
   onCheckinDeleted: (summary: DeleteSummary) => void
+  /**
+   * Bug 22 Fix 1 — fires when the agent's transcript claimed a write
+   * (saved / updated / deleted) for the current turn but the matching
+   * write tool was NOT actually invoked. Frontend should surface a
+   * "I'm not sure that saved — let me check" banner and, for save claims,
+   * trigger get_recent_readings to verify whether the entry actually
+   * landed. Per-turn, fires at most once. Optional — backend logs an
+   * error regardless so the gap is captured in telemetry.
+   */
+  onHallucinationSuspected?: (claim: 'save' | 'update' | 'delete', transcriptExcerpt: string) => void
   onError: (message: string) => void
   onClose: () => void
 }
@@ -142,6 +155,17 @@ interface ActiveSession {
   // session. Surfaced every 25 chunks under VOICE_DEBUG_AUDIO=1 so we
   // can see audio is flowing when troubleshooting "listening forever".
   userAudioChunkCount: number
+  // Bug 22 Fix 1 — per-turn state used by the hallucination detector.
+  // currentTurnAgentText accumulates the agent's transcript chunks for
+  // the in-progress turn; currentTurnWriteToolsCalled tracks which
+  // write-tools (submit/update/delete/finalize) the model actually
+  // invoked in the same turn. On turnComplete we compare the two: if
+  // the agent claimed a save/update/delete without firing the matching
+  // tool, the model is hallucinating the action. State resets after
+  // each turnComplete so consecutive turns are scored independently.
+  currentTurnAgentText: string
+  currentTurnWriteToolsCalled: Set<string>
+  hallucinationFlaggedThisTurn: boolean
 }
 
 @Injectable()
@@ -172,6 +196,7 @@ export class VoiceService implements OnModuleDestroy {
     private readonly systemPromptService: SystemPromptService,
     private readonly profileResolver: ProfileResolverService,
     private readonly voiceTools: VoiceToolsService,
+    private readonly intakeStatusService: IntakeStatusService,
   ) {
     // Default to a Live-capable model verified present via ListModels on
     // the Gemini Developer API. `gemini-2.5-flash-native-audio-preview-
@@ -397,6 +422,9 @@ export class VoiceService implements OnModuleDestroy {
       agentAudioBytes: 0,
       lastUserFinalAt: null,
       userAudioChunkCount: 0,
+      currentTurnAgentText: '',
+      currentTurnWriteToolsCalled: new Set(),
+      hallucinationFlaggedThisTurn: false,
       callbacks,
     }
     this.sessions.set(socketId, activeSession)
@@ -515,6 +543,11 @@ export class VoiceService implements OnModuleDestroy {
           session.transcriptBuffer.push({ speaker: 'agent', text: trimmed })
           session.activity.agentTexts.push(trimmed)
         }
+        // Bug 22 Fix 1 — accumulate the agent transcript for the
+        // in-progress turn so the hallucination detector at turnComplete
+        // can scan it. We append the RAW (untrimmed) chunk so word
+        // boundaries are preserved across chunks.
+        session.currentTurnAgentText += outT
       }
       // Generation-complete is the closest analogue to ADK's "speaker turn
       // ended" signal. Mark the last transcript line as final so the UI can
@@ -524,6 +557,16 @@ export class VoiceService implements OnModuleDestroy {
       if (c.turnComplete && session.transcriptBuffer.length > 0) {
         const last = session.transcriptBuffer[session.transcriptBuffer.length - 1]
         callbacks.onTranscript(last.text, true, last.speaker)
+      }
+      // Bug 22 Fix 1 — hallucination detector. Runs once per turnComplete
+      // boundary. Compares the agent transcript accumulated since the
+      // last turn end against the write-tools fired in the same turn.
+      // Resets per-turn state so the next turn is scored fresh.
+      if (c.turnComplete) {
+        this.detectHallucination(session, socketId)
+        session.currentTurnAgentText = ''
+        session.currentTurnWriteToolsCalled.clear()
+        session.hallucinationFlaggedThisTurn = false
       }
       // generationComplete is the canonical end-of-audio signal — forward to
       // the client so it can flip out of agent_speaking without relying on
@@ -545,6 +588,10 @@ export class VoiceService implements OnModuleDestroy {
         const name = fc.name ?? ''
         const args = (fc.args ?? {}) as Record<string, unknown>
         this.logger.log(`[VOICE Live] toolCall name=${name} id=${fc.id ?? '?'} [socket=${socketId}]`)
+        // Bug 22 Fix 1 — record which write-tools fired this turn so the
+        // hallucination detector at turnComplete can correlate them
+        // against the agent's spoken claims.
+        if (name) session.currentTurnWriteToolsCalled.add(name)
         const result = await tracer.startActiveSpan(
           `voice.tool.${name || 'unknown'}`,
           async (span) => {
@@ -608,6 +655,89 @@ export class VoiceService implements OnModuleDestroy {
     if (msg.usageMetadata) {
       // Quiet trace — useful for cost telemetry but noisy at debug level.
       return
+    }
+  }
+
+  /**
+   * Bug 22 Fix 1 — hallucination detector.
+   *
+   * Worst-case bug class for a clinical chat: the model emits audio
+   * saying "your reading is saved" or "I've deleted that for you"
+   * without ever calling submit_checkin / update_checkin /
+   * delete_checkin. Prompt-level guards ("Your words alone do not
+   * change the database", "the tool call IS the response") are real
+   * but soft — the model can ignore them, and Gemini Live's
+   * audio + tool-call streams arrive as independent message types
+   * with no atomic coupling.
+   *
+   * This detector closes the loop at the protocol level. Per turn:
+   *   • currentTurnAgentText accumulates the model's transcript chunks
+   *   • currentTurnWriteToolsCalled records which write-tools fired
+   *   • on turnComplete we cross-check: if the transcript claims a
+   *     write action (saved / updated / deleted) but the matching tool
+   *     did NOT fire this turn, log an ERROR and fire
+   *     onHallucinationSuspected so the frontend can surface a banner
+   *     and re-verify via get_recent_readings.
+   *
+   * Regex notes:
+   *   • save: includes "saved", "recorded", "logged it", and the
+   *     phrasing the prompt teaches ("your reading is saved"). Anchored
+   *     to avoid matching "save" in conditional / question contexts
+   *     like "would you like me to save it?".
+   *   • update / delete: past-tense indicative only; "updating" /
+   *     "deleting" gerunds are allowed because they describe an action
+   *     in progress (the tool call is mid-flight).
+   *
+   * False-positive tolerance: we accept that the model may sometimes
+   * say "saved" in a non-confirmation context (e.g. "I saved your
+   * preferences earlier"). The cost of a spurious banner is far less
+   * than the cost of silently confirming a write that never happened
+   * to a hypertensive patient.
+   *
+   * The check fires at most once per turn — hallucinationFlaggedThisTurn
+   * prevents double-emit if multiple turnComplete signals arrive
+   * (rare but possible during model self-interrupt).
+   */
+  private detectHallucination(session: ActiveSession, socketId: string): void {
+    if (session.hallucinationFlaggedThisTurn) return
+    const text = session.currentTurnAgentText
+    if (!text || text.trim().length === 0) return
+
+    // Past-tense write confirmations only. Avoid matching "save" / "saving"
+    // / "would you like to save" — those are not claims that the write
+    // happened.
+    const saveClaim =
+      /\b(?:saved|recorded|logged it)\b|your\s+(?:reading|check[- ]?in)\s+(?:is|has\s+been)\s+(?:saved|recorded|logged)/i
+    const updateClaim =
+      /\b(?:updated|changed it|edited|modified it)\b|your\s+(?:reading|check[- ]?in)\s+(?:is|has\s+been)\s+updated/i
+    const deleteClaim =
+      /\b(?:deleted|removed|erased)\b|your\s+(?:reading|check[- ]?in)\s+(?:is|has\s+been)\s+(?:deleted|removed)/i
+
+    const firedSave =
+      session.currentTurnWriteToolsCalled.has('submit_checkin') ||
+      session.currentTurnWriteToolsCalled.has('finalize_checkin') ||
+      session.currentTurnWriteToolsCalled.has('submit_bp_from_photo')
+    const firedUpdate = session.currentTurnWriteToolsCalled.has('update_checkin')
+    const firedDelete = session.currentTurnWriteToolsCalled.has('delete_checkin')
+
+    let claim: 'save' | 'update' | 'delete' | null = null
+    if (saveClaim.test(text) && !firedSave) claim = 'save'
+    else if (updateClaim.test(text) && !firedUpdate) claim = 'update'
+    else if (deleteClaim.test(text) && !firedDelete) claim = 'delete'
+
+    if (!claim) return
+
+    session.hallucinationFlaggedThisTurn = true
+    const excerpt = text.slice(0, 240).replace(/\s+/g, ' ').trim()
+    this.logger.error(
+      `[VOICE hallucination_suspected] type=${claim} ` +
+        `tools=[${[...session.currentTurnWriteToolsCalled].join(',')}] ` +
+        `transcript="${excerpt}" [socket=${socketId}]`,
+    )
+    try {
+      session.callbacks.onHallucinationSuspected?.(claim, excerpt)
+    } catch (err) {
+      this.logger.warn(`onHallucinationSuspected callback threw: ${err}`)
     }
   }
 
@@ -729,6 +859,46 @@ export class VoiceService implements OnModuleDestroy {
   invalidateContextCache(userId: string): void {
     if (this.contextCache.delete(userId)) {
       this.logger.log(`[VOICE cache] invalidated patient context for user=${userId}`)
+    }
+  }
+
+  /**
+   * Listener — IntakeService emits `intake.updated` after profile / medication
+   * mutation. Drops the voice context cache so a FOLLOW-UP voice session sees
+   * the new INTAKE STATUS block + fresh resolved conditions / medications.
+   *
+   * Bug 1 fix — also broadcast a system-style text turn to any CURRENTLY-OPEN
+   * voice session(s) for this user. Gemini Live delivers the systemInstruction
+   * exactly once at connect; without this nudge a patient who completes intake
+   * in another tab during an active voice call stays stuck with the stale
+   * "INTAKE STATUS: INCOMPLETE" instruction and the bot keeps refusing
+   * submit_checkin until they end and restart the session.
+   */
+  @OnEvent(INTAKE_EVENTS.UPDATED)
+  onIntakeUpdated(payload: IntakeUpdatedPayload): void {
+    this.invalidateContextCache(payload.userId)
+    let broadcastCount = 0
+    for (const session of this.sessions.values()) {
+      if (session.userId !== payload.userId) continue
+      if (session.streamClosed) continue
+      try {
+        session.liveSession.sendRealtimeInput({
+          text:
+            '[System update: the patient has now completed their clinical intake. ' +
+            'You may proceed with check-ins normally. Call check_intake_status if you ' +
+            'need to confirm before the first save.]',
+        })
+        broadcastCount += 1
+      } catch (err) {
+        this.logger.warn(
+          `[VOICE intake-broadcast] failed for user=${payload.userId}: ${(err as Error).message}`,
+        )
+      }
+    }
+    if (broadcastCount > 0) {
+      this.logger.log(
+        `[VOICE intake-broadcast] notified ${broadcastCount} active session(s) for user=${payload.userId}`,
+      )
     }
   }
 
@@ -917,7 +1087,7 @@ export class VoiceService implements OnModuleDestroy {
       // SystemPromptService.buildPatientContext() give voice the same
       // conditions / meds / threshold / active-alert block (including the
       // three-tier patientMessage bodies) that the text chatbot sees.
-      const [user, entries, activeAlerts, sessionData, resolvedContext] = await Promise.all([
+      const [user, entries, activeAlerts, sessionData, resolvedContext, intakeStatus] = await Promise.all([
         this.prisma.user.findUnique({
           where: { id: userId },
           select: {
@@ -943,16 +1113,25 @@ export class VoiceService implements OnModuleDestroy {
           take: 5,
           select: PATIENT_DEVIATION_ALERT_FIELDS_FOR_LLM_PROMPT,
         }),
+        // Bug 17 — prior-conversation summary so voice knows what the
+        // patient already said in text (and in earlier voice turns) in this
+        // same session. The full summary (compressed bullets + ALL append
+        // lines, both [Text]- and [Voice]-tagged) — unlike the text-chat
+        // path which slices the last 12 because they're shipped raw in the
+        // Gemini `contents` array, voice has no contents array; the system
+        // instruction is the only seed. Userid-scope guard inside the
+        // helper (defence-in-depth against any future call site that
+        // passes an unvalidated sessionId).
         sessionId
-          ? this.prisma.session.findUnique({
-              where: { id: sessionId },
-              select: { summary: true },
-            })
-          : Promise.resolve(null),
+          ? this.conversationHistory.getSessionSummaryForVoice(userId, sessionId)
+          : Promise.resolve(''),
         this.profileResolver.resolve(userId).catch((err: unknown) => {
           if (err instanceof ProfileNotFoundException) return null
           throw err
         }) as Promise<ResolvedContext | null>,
+        // Cheap PK-scoped findUnique; renders the INTAKE STATUS block in the
+        // patient-context. Mirrors chat.service.ts.
+        this.intakeStatusService.getStatus(userId),
       ])
 
       // Trailing 7-day mean — shared helper in @cardioplace/shared/derivatives
@@ -985,6 +1164,7 @@ export class VoiceService implements OnModuleDestroy {
         patientName: user?.name ?? null,
         dateOfBirth: user?.dateOfBirth ?? null,
         resolvedContext,
+        intakeStatus,
         toneMode: 'PATIENT',
         // Voice-only: never inline per-reading BP numbers. Native-audio LLMs
         // echo prompt-injected numbers as if the patient just said them. The
@@ -1013,11 +1193,17 @@ export class VoiceService implements OnModuleDestroy {
       const currentDate = `${y}-${mo}-${d}`
       const currentTime = `${h}:${mi}`
 
-      // historySummary intentionally NOT injected — Gemini Live accumulates
-      // conversation context turn-by-turn, duplicating adds no value.
-      void sessionData
+      // Bug 17 — when joining a session that already has prior turns (text
+      // or voice or both), seed Gemini Live with the rolling summary so the
+      // bot doesn't greet fresh and re-ask questions already answered. The
+      // summary already labels each turn `[Text]` / `[Voice]`. Empty string
+      // → fresh session, no block injected, no fresh-greet weirdness.
+      const priorConversationBlock =
+        typeof sessionData === 'string' && sessionData.trim().length > 0
+          ? `\n\n--- PRIOR CONVERSATION SUMMARY (text + voice turns so far) ---\n${sessionData}\n--- END PRIOR CONVERSATION ---\n\nYou are JOINING an ongoing conversation. The block above is what the patient and the chatbot already discussed in this session — across text AND voice turns. Use it to maintain continuity: do NOT greet the patient as if it's a fresh conversation, do NOT re-ask questions already answered, and acknowledge anything the patient already told you.`
+          : ''
 
-      return `${patientContext}\n\nCURRENT DATE AND TIME (patient timezone ${tz}): ${currentDate} at ${currentTime}. When the patient says "now", "today", or "right now", use EXACTLY this date and time. NEVER guess a different date or time.`
+      return `${patientContext}${priorConversationBlock}\n\nCURRENT DATE AND TIME (patient timezone ${tz}): ${currentDate} at ${currentTime}. When the patient says "now", "today", or "right now", use EXACTLY this date and time. NEVER guess a different date or time.`
     } catch {
       return 'Patient context unavailable.'
     }

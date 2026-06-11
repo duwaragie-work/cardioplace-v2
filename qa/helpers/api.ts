@@ -1,4 +1,9 @@
-import { type APIRequestContext, type Page, expect } from '@playwright/test'
+import {
+  type APIRequestContext,
+  type Page,
+  expect,
+  request as pwRequest,
+} from '@playwright/test'
 import type { TestControl } from './test-control.js'
 import { byTestId, T } from './selectors.js'
 import { signInAdmin } from './auth.js'
@@ -994,6 +999,66 @@ export async function assertRouteForbidden(
   await expect(adminPage).not.toHaveURL(new RegExp(`${route}$`), {
     timeout: 10_000,
   })
+}
+
+// ─── Invite activation (specs 35/36/37) ────────────────────────────────────
+
+/**
+ * Accept a UserInvite by its raw token via the real public endpoint
+ * (`POST /api/v2/auth/invite/:token/accept`), creating the actual User +
+ * practice-membership row. Returns the new user's id so callers can drive the
+ * admin UI against a throwaway account without touching the seed personas.
+ *
+ * Pair with `tc.createInvite(...)` to get the token. This is the headless
+ * (API) path; specs that need to prove the /activate/[token] PAGE works drive
+ * `activateInviteViaUI` instead.
+ */
+export async function acceptInviteViaApi(
+  apiBase: string,
+  token: string,
+): Promise<{ userId: string; email: string | null; roles: string[] }> {
+  const root = apiBase.replace(/\/api\/?$/, '').replace(/\/$/, '')
+  const ctx = await pwRequest.newContext({ baseURL: root })
+  try {
+    const res = await ctx.post(`/api/v2/auth/invite/${token}/accept`)
+    expect(res.ok(), `invite accept: ${res.status()}: ${await res.text()}`).toBeTruthy()
+    const body = await res.json()
+    // Global interceptor may wrap in { statusCode, message, data }.
+    const payload = (body?.data ?? body) as {
+      userId?: string
+      email?: string | null
+      roles?: string[]
+    }
+    if (!payload.userId) {
+      throw new Error(`acceptInviteViaApi: no userId in response: ${JSON.stringify(body)}`)
+    }
+    return {
+      userId: payload.userId,
+      email: payload.email ?? null,
+      roles: payload.roles ?? [],
+    }
+  } finally {
+    await ctx.dispose()
+  }
+}
+
+/**
+ * Drive the `/activate/[token]` page on whichever app (`baseUrl`) and confirm
+ * activation. The page previews the invite (name/email/role) then a single
+ * `activate-confirm` button mints the session and redirects to /dashboard
+ * (admin) or /dashboard|/onboarding (patient). Returns once redirected.
+ */
+export async function activateInviteViaUI(
+  page: Page,
+  baseUrl: string,
+  token: string,
+  landingPattern: RegExp = /\/(dashboard|onboarding)/,
+): Promise<void> {
+  await page.goto(`${baseUrl}/activate/${token}`)
+  const confirm = page.locator(byTestId(T.activate.confirm))
+  await confirm.waitFor({ state: 'visible', timeout: 20_000 })
+  await confirm.click()
+  await page.waitForURL(landingPattern, { timeout: 30_000 })
 }
 
 export { gotoPatientAlertsTab }

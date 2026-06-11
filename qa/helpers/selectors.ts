@@ -547,6 +547,79 @@ export const T = {
     notificationRow: (notifId: string) => `admin-notification-row-${notifId}`,
     notificationsList: 'admin-notifications-list',
   },
+
+  // ─── Admin: user management (/users, phase/23) ──────────────────────────
+  //
+  // Rows + per-row action buttons are keyed by the user/invite EMAIL (not an
+  // id) — both a desktop table row (`-row-`) and a mobile card (`-card-`)
+  // render the same record, so action buttons exist in a desktop and a
+  // `-card-` variant. Target the desktop one in specs (default viewport is
+  // desktop) via the non-card testid.
+  adminUsers: {
+    accessDenied: 'admin-users-access-denied',
+    inviteSingle: 'admin-users-invite-single',
+    bulkToggle: 'admin-users-bulk-toggle',
+    csvToggle: 'admin-users-csv-toggle',
+    search: 'admin-users-search-input',
+    clearFilters: 'admin-users-clear-filters',
+    roleFilter: 'admin-users-role-filter-select',
+    statusFilter: 'admin-users-status-filter-select',
+    practiceFilter: 'admin-users-practice-filter-select',
+    coordinatorPractice: 'admin-users-coordinator-practice',
+    row: (email: string) => `admin-users-row-${email}`,
+    card: (email: string) => `admin-users-card-${email}`,
+    resend: (email: string) => `admin-user-resend-${email}`,
+    revoke: (email: string) => `admin-user-revoke-${email}`,
+    deactivate: (email: string) => `admin-user-deactivate-${email}`,
+    reactivate: (email: string) => `admin-user-reactivate-${email}`,
+
+    // Single-invite modal (InviteUserModal.tsx)
+    inviteModal: 'admin-invite-user-modal',
+    inviteName: 'admin-invite-name',
+    inviteEmail: 'admin-invite-email',
+    inviteRole: 'admin-invite-role',
+    invitePractice: 'admin-invite-practice',
+    inviteSubmit: 'admin-invite-submit',
+
+    // Bulk inline invite (BulkInviteInline.tsx)
+    bulkPanel: 'admin-bulk-invite-panel',
+    bulkRow: (i: number) => `admin-bulk-row-${i}`,
+    bulkAddRow: 'admin-bulk-add-row',
+    bulkSendAll: 'admin-bulk-send-all',
+
+    // CSV upload (CSVUploadCard.tsx). TEMPLATE_HEADERS = name,email,role,practiceId
+    csvCard: 'admin-csv-upload-card',
+    csvDownloadTemplate: 'admin-csv-download-template',
+    csvFileInput: 'admin-csv-file-input',
+    csvSend: 'admin-csv-send',
+    csvClear: 'admin-csv-clear',
+
+    // Deactivate confirm (DeactivateConfirmModal.tsx)
+    deactivateModal: 'admin-deactivate-modal',
+    deactivateReason: 'admin-deactivate-reason',
+    deactivateConfirm: 'admin-deactivate-confirm',
+  },
+
+  // ─── Admin: monthly reports (/reports, phase/24) ────────────────────────
+  reports: {
+    accessDenied: 'admin-reports-access-denied',
+    monthPicker: 'report-month-picker',
+    practicePicker: 'report-practice-picker',
+    practiceLocked: 'report-practice-locked',
+    recompute: 'report-recompute',
+    downloadCsv: 'report-download-csv',
+    downloadPdf: 'report-download-pdf',
+    cacheBadge: 'report-cache-badge',
+    error: 'report-error',
+    skeleton: 'report-skeleton',
+    refetchOverlay: 'report-refetch-overlay',
+    noPractices: 'report-no-practices',
+  },
+
+  // ─── Invite activation (/activate/[token], patient + admin apps) ────────
+  activate: {
+    confirm: 'activate-confirm',
+  },
 } as const
 
 export type TestId = string

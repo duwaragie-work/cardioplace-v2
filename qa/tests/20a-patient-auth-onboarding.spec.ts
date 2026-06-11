@@ -165,4 +165,31 @@ test.describe('Phase 4a — patient auth + onboarding', () => {
     await expect(page).toHaveURL(/\/dashboard/)
     await expect(page).not.toHaveURL(/\/onboarding/)
   })
+
+  // ─── Privacy-trust consent step (commit b7ccc8b, V2-E Gap 7) ──────────────
+  test('20a.6 — privacy-trust step shows FIRST and gates the name form', async ({
+    page,
+  }) => {
+    await tc.setOnboardingStatus(taylorId, 'NOT_COMPLETED')
+    await otpSignIn(page, PATIENTS.taylor.email)
+    await page.waitForURL(/\/onboarding/, { timeout: 30_000 })
+
+    // The consent step renders before the profile form: the agree-terms
+    // control + Continue button are present, the name field is NOT yet.
+    const agree = page.locator(byTestId(T.onboarding.agreeTerms))
+    const cont = page.locator(byTestId(T.onboarding.privacyContinueBtn))
+    await expect(agree).toBeVisible({ timeout: 15_000 })
+    await expect(cont).toBeVisible()
+    await expect(page.locator('#onboarding-name')).toHaveCount(0)
+
+    // Continue is disabled until terms are accepted (the 16px box hides under a
+    // 44px tap overlay → force the check; see advancePastPrivacyStep).
+    await expect(cont).toBeDisabled()
+    await agree.check({ force: true })
+    await expect(cont).toBeEnabled({ timeout: 10_000 })
+    await cont.click()
+
+    // Accepting advances to the profile (name) form.
+    await expect(page.locator('#onboarding-name')).toBeVisible({ timeout: 10_000 })
+  })
 })

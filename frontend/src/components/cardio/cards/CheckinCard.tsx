@@ -90,13 +90,13 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
           )}
           <div className="min-w-0">
             <p
-              className="font-bold text-[15px] leading-tight"
+              className="font-bold text-[0.9375rem] leading-tight"
               style={{ color: 'var(--brand-text-primary)' }}
             >
               {summary.saved ? t('chat.card.checkinSaved') : t('chat.card.checkinFailed')}
             </p>
             {measuredAtLabel && (
-              <p className="text-[11px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.6875rem] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
                 {measuredAtLabel}
               </p>
             )}
@@ -112,33 +112,33 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
             <div className="flex items-baseline gap-1">
               <span
                 lang="en"
-                className="text-[42px] font-bold leading-none"
+                className="text-[2.625rem] font-bold leading-none"
                 style={{ color: status.color }}
               >
                 {summary.systolicBP}
               </span>
               <span
-                className="text-[28px] font-light"
+                className="text-[1.75rem] font-light"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 /
               </span>
               <span
                 lang="en"
-                className="text-[42px] font-bold leading-none"
+                className="text-[2.625rem] font-bold leading-none"
                 style={{ color: status.color }}
               >
                 {summary.diastolicBP}
               </span>
               <span
-                className="text-[12px] ml-1"
+                className="text-[0.75rem] ml-1"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 mmHg
               </span>
             </div>
             <span
-              className="px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider"
+              className="px-3 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider"
               style={{ backgroundColor: status.pillBg, color: status.color }}
             >
               {status.label}
@@ -148,7 +148,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
           <div className="flex items-center gap-3 mt-2 flex-wrap">
             {summary.pulse != null && (
               <span
-                className="inline-flex items-center gap-1 text-[12px]"
+                className="inline-flex items-center gap-1 text-[0.75rem]"
                 style={{ color: 'var(--brand-text-secondary)' }}
               >
                 <Heart className="w-3.5 h-3.5" aria-hidden="true" />
@@ -157,7 +157,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
             )}
             {positionLabel && (
               <span
-                className="text-[12px]"
+                className="text-[0.75rem]"
                 style={{ color: 'var(--brand-text-secondary)' }}
               >
                 · {positionLabel}
@@ -165,7 +165,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
             )}
             {summary.pulsePressureWide && (
               <span
-                className="text-[11px] px-2 py-0.5 rounded-md font-medium"
+                className="text-[0.6875rem] px-2 py-0.5 rounded-md font-medium"
                 style={{
                   backgroundColor: 'var(--brand-accent-teal-light)',
                   color: 'var(--brand-accent-teal)',
@@ -194,7 +194,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
             aria-hidden="true"
           />
           <p
-            className="text-[12px] leading-snug"
+            className="text-[0.75rem] leading-snug"
             style={{ color: 'var(--brand-text-primary)' }}
           >
             {summary.alert.patientMessage ?? alertTierFallback(summary.alert.tier)}
@@ -211,31 +211,31 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
           {summary.weight != null && (
             <div>
               <p
-                className="text-[10px] font-semibold uppercase tracking-wider"
+                className="text-[0.625rem] font-semibold uppercase tracking-wider"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 Weight
               </p>
               <p
                 lang="en"
-                className="text-[16px] font-bold"
+                className="text-[1rem] font-bold"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
-                {summary.weight} <span className="text-[11px] font-normal">lbs</span>
+                {summary.weight} <span className="text-[0.6875rem] font-normal">lbs</span>
               </p>
             </div>
           )}
           {summary.bmi != null && (
             <div>
               <p
-                className="text-[10px] font-semibold uppercase tracking-wider"
+                className="text-[0.625rem] font-semibold uppercase tracking-wider"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 BMI
               </p>
               <p
                 lang="en"
-                className="text-[16px] font-bold"
+                className="text-[1rem] font-bold"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
                 {summary.bmi.toFixed(1)}
@@ -251,13 +251,13 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
         style={{ borderTop: '1px solid var(--brand-border)' }}
       >
         <p
-          className="text-[10px] font-semibold uppercase tracking-wider mb-1.5"
+          className="text-[0.625rem] font-semibold uppercase tracking-wider mb-1.5"
           style={{ color: 'var(--brand-text-muted)' }}
         >
           Medications
         </p>
         <p
-          className="text-[13px] font-medium"
+          className="text-[0.8125rem] font-medium"
           style={{
             color: medicationColor(summary),
           }}
@@ -272,14 +272,14 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
         style={{ borderTop: '1px solid var(--brand-border)' }}
       >
         <p
-          className="text-[10px] font-semibold uppercase tracking-wider mb-1.5"
+          className="text-[0.625rem] font-semibold uppercase tracking-wider mb-1.5"
           style={{ color: 'var(--brand-text-muted)' }}
         >
           Symptoms
         </p>
         {flaggedSymptoms.length === 0 &&
         (!summary.otherSymptoms || summary.otherSymptoms.length === 0) ? (
-          <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
+          <p className="text-[0.8125rem]" style={{ color: 'var(--brand-text-muted)' }}>
             No symptoms reported
           </p>
         ) : (
@@ -287,7 +287,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
             {flaggedSymptoms.map((s) => (
               <span
                 key={s}
-                className="text-[11px] px-2 py-1 rounded-md font-semibold inline-flex items-center gap-1"
+                className="text-[0.6875rem] px-2 py-1 rounded-md font-semibold inline-flex items-center gap-1"
                 style={{
                   backgroundColor: 'var(--brand-alert-red-light)',
                   color: 'var(--brand-alert-red-text)',
@@ -300,7 +300,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
             {(summary.otherSymptoms ?? []).map((s, i) => (
               <span
                 key={`other-${i}`}
-                className="text-[11px] px-2 py-1 rounded-md font-medium"
+                className="text-[0.6875rem] px-2 py-1 rounded-md font-medium"
                 style={{
                   backgroundColor: 'var(--brand-warning-amber-light)',
                   color: 'var(--brand-warning-amber-text)',
@@ -320,7 +320,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
       >
         <Link
           href="/readings"
-          className="flex-1 h-11 rounded-xl font-semibold text-[13px] inline-flex items-center justify-center gap-1.5 transition hover:opacity-90"
+          className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] inline-flex items-center justify-center gap-1.5 transition hover:opacity-90"
           style={{
             backgroundColor: 'var(--brand-primary-purple-light)',
             color: 'var(--brand-primary-purple)',
@@ -331,7 +331,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
         </Link>
         <button
           onClick={onDismiss}
-          className="flex-1 h-11 rounded-xl font-semibold text-[13px] text-white transition hover:opacity-90"
+          className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] text-white transition hover:opacity-90"
           style={{
             background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
             boxShadow: '0 4px 14px rgba(123,0,224,0.28)',
@@ -389,6 +389,14 @@ function bpStatus(
 }
 
 function medicationLabel(s: CheckinSummary): string {
+  // Bug 16C — when the patient explicitly missed one or more meds, surface
+  // the names ("Missed: Norvasc, Toprol") instead of the generic boolean
+  // rollup. Drives the same card whether the backend received
+  // medication_taken=true (Bug 16A normalises this to false) or false.
+  if (s.missedMedications && s.missedMedications.length > 0) {
+    const names = s.missedMedications.map((m) => m.drugName).join(', ');
+    return `Missed: ${names}`;
+  }
   if (s.medicationScheduledLater) return 'Scheduled for later — not due yet';
   if (s.medicationTaken === true) return 'All taken ✓';
   if (s.medicationTaken === false) return 'Missed — care team has been notified';
@@ -396,6 +404,12 @@ function medicationLabel(s: CheckinSummary): string {
 }
 
 function medicationColor(s: CheckinSummary): string {
+  // Bug 16C — non-empty missedMedications means at least one was missed,
+  // even if the boolean wasn't set. Show the alert-red color so the card
+  // visually matches its label.
+  if (s.missedMedications && s.missedMedications.length > 0) {
+    return 'var(--brand-alert-red)';
+  }
   if (s.medicationScheduledLater) return 'var(--brand-warning-amber)';
   if (s.medicationTaken === true) return 'var(--brand-success-green)';
   if (s.medicationTaken === false) return 'var(--brand-alert-red)';

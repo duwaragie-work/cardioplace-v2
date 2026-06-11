@@ -39,6 +39,7 @@ import {
   type MedicationAdherenceSummary,
   type SymptomLogSummary,
   type BPPhotoSummary,
+  type StructuredSymptoms,
 } from '@/hooks/useVoiceSession';
 // Phase/27 chatbot v2 — rich result cards.
 import {
@@ -47,6 +48,8 @@ import {
   type BpOcrSuccess,
 } from '@/lib/services/ocr.service';
 import BpPhotoConfirmModal from '@/components/intake/BpPhotoConfirmModal';
+import { transcribeAudio } from '@/lib/services/chat.service';
+import { kgToLbs } from '@/lib/units';
 import CheckinCard from '@/components/cardio/cards/CheckinCard';
 import UpdateCard from '@/components/cardio/cards/UpdateCard';
 import DeleteCard from '@/components/cardio/cards/DeleteCard';
@@ -130,6 +133,60 @@ function nowTimeStr(): string {
   return new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
+/**
+ * Extract the 9 Stage-A structured-symptom booleans from a submit_checkin /
+ * update_checkin tool-result `data` payload. The backend's serializeEntry
+ * always returns these fields (default `false`); we coerce strictly to
+ * `boolean` so a stray `true`/`false` string from a sloppy serialiser can't
+ * fool the card into showing a wrong badge. Returns `undefined` when none
+ * are true so the card's existing `summary.structuredSymptoms` check stays
+ * idiomatic (truthy iff there's something to show).
+ */
+function pickStructuredSymptoms(d: Record<string, unknown>): StructuredSymptoms | undefined {
+  const out: StructuredSymptoms = {
+    severeHeadache: d.severeHeadache === true,
+    visualChanges: d.visualChanges === true,
+    alteredMentalStatus: d.alteredMentalStatus === true,
+    chestPainOrDyspnea: d.chestPainOrDyspnea === true,
+    focalNeuroDeficit: d.focalNeuroDeficit === true,
+    severeEpigastricPain: d.severeEpigastricPain === true,
+    newOnsetHeadache: d.newOnsetHeadache === true,
+    ruqPain: d.ruqPain === true,
+    edema: d.edema === true,
+  };
+  const anyTrue = Object.values(out).some((v) => v === true);
+  return anyTrue ? out : undefined;
+}
+
+/**
+ * Bug 16B — extract the patient's missed medications from the submit_checkin
+ * tool response. Backend's `serializeEntry` returns each row as
+ * `{ drugName, reason, missedDoses, medicationId? }`. The card only needs
+ * the drugName + reason for display ("Missed: Norvasc"); drop the
+ * medicationId (internal). Returns undefined when the array is empty so
+ * downstream truthy checks ("if (summary.missedMedications?.length)") stay
+ * idiomatic.
+ */
+function pickMissedMedications(
+  d: Record<string, unknown>,
+): Array<{ drugName: string; reason?: string; missedDoses?: number }> | undefined {
+  const raw = d.missedMedications
+  if (!Array.isArray(raw) || raw.length === 0) return undefined
+  const out: Array<{ drugName: string; reason?: string; missedDoses?: number }> = []
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue
+    const r = row as Record<string, unknown>
+    const drugName = typeof r.drugName === 'string' ? r.drugName : ''
+    if (!drugName) continue
+    out.push({
+      drugName,
+      reason: typeof r.reason === 'string' ? r.reason : undefined,
+      missedDoses: typeof r.missedDoses === 'number' ? r.missedDoses : undefined,
+    })
+  }
+  return out.length > 0 ? out : undefined
+}
+
 // Phase/27 — map BpOcrError codes to the existing patient-app i18n strings
 // so the chat photo flow surfaces the same friendly fallback copy as the
 // CheckIn surface.
@@ -178,7 +235,7 @@ function TypingIndicator() {
         className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
         style={{ boxShadow: '0 2px 8px rgba(123,0,224,0.3)' }}
       >
-        <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
+        <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={30} height={30} />
       </div>
       <div
         className="flex items-center gap-1.5 px-4 py-3.5"
@@ -220,10 +277,10 @@ function MessageBubble({ msg }: { msg: Message }) {
             boxShadow: '0 4px 14px rgba(123,0,224,0.25)',
           }}
         >
-          <p className="text-[14px] leading-relaxed text-white">{msg.text}</p>
+          <p className="text-[0.875rem] leading-relaxed text-white">{msg.text}</p>
           <div className="flex items-center justify-end gap-1.5 mt-1.5">
             {isVoice && <Mic className="w-2.5 h-2.5" style={{ color: 'rgba(255,255,255,0.5)' }} />}
-            <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.6)' }}>{msg.time}</p>
+            <p className="text-[0.625rem]" style={{ color: 'rgba(255,255,255,0.6)' }}>{msg.time}</p>
           </div>
         </div>
       </motion.div>
@@ -240,19 +297,19 @@ function MessageBubble({ msg }: { msg: Message }) {
         transition={{ duration: 0.2 }}
       >
         <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0">
-          <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
+          <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={30} height={30} />
         </div>
         <div
           className="max-w-[75%] sm:max-w-[65%] px-4 py-3.5"
           style={{ backgroundColor: 'var(--brand-accent-teal-light)', borderRadius: '4px 18px 18px 18px', borderLeft: '3px solid var(--brand-accent-teal)' }}
         >
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold mb-2" style={{ backgroundColor: 'var(--brand-accent-teal)', color: 'white' }}>
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-semibold mb-2" style={{ backgroundColor: 'var(--brand-accent-teal)', color: 'white' }}>
             {t('chat.checkinMode')}
           </span>
-          <div className="prose prose-sm max-w-none text-[14px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+          <div className="prose prose-sm max-w-none text-[0.875rem] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
             <ReactMarkdown>{msg.text}</ReactMarkdown>
           </div>
-          <p className="text-[10px] mt-1.5 text-right" style={{ color: 'var(--brand-text-muted)' }}>{msg.time}</p>
+          <p className="text-[0.625rem] mt-1.5 text-right" style={{ color: 'var(--brand-text-muted)' }}>{msg.time}</p>
         </div>
       </motion.div>
     );
@@ -268,7 +325,7 @@ function MessageBubble({ msg }: { msg: Message }) {
       transition={{ duration: 0.2 }}
     >
       <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
-        <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
+        <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={30} height={30} />
       </div>
       <div
         data-testid="chat-message-ai"
@@ -279,19 +336,19 @@ function MessageBubble({ msg }: { msg: Message }) {
           <div className="flex items-center gap-1.5 mb-2">
             <Mic className="w-3 h-3" style={{ color: 'var(--brand-primary-purple)' }} />
             <span
-              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold"
+              className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-bold"
               style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
             >
               Voice Session Summary
             </span>
           </div>
         )}
-        <div className="prose prose-sm max-w-none text-[14px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+        <div className="prose prose-sm max-w-none text-[0.875rem] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
           <ReactMarkdown>{msg.text}</ReactMarkdown>
         </div>
         <div className="flex items-center justify-end gap-1.5 mt-1.5">
           {isVoice && <Mic className="w-2.5 h-2.5" style={{ color: 'var(--brand-text-muted)' }} />}
-          <p className="text-[10px]" style={{ color: 'var(--brand-text-muted)' }}>{msg.time}</p>
+          <p className="text-[0.625rem]" style={{ color: 'var(--brand-text-muted)' }}>{msg.time}</p>
         </div>
       </div>
     </motion.div>
@@ -344,17 +401,17 @@ function DeleteConfirmModal({
           >
             <Trash2 className="w-6 h-6" style={{ color: 'var(--brand-alert-red-text)' }} />
           </div>
-          <p className="text-[15px] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
+          <p className="text-[0.9375rem] font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
             Delete conversation?
           </p>
-          <p className="text-[12px] leading-relaxed mb-4" style={{ color: 'var(--brand-text-muted)' }}>
+          <p className="text-[0.75rem] leading-relaxed mb-4" style={{ color: 'var(--brand-text-muted)' }}>
             &ldquo;{sessionTitle.length > 30 ? sessionTitle.slice(0, 30) + '…' : sessionTitle}&rdquo; will be permanently deleted.
           </p>
           <div className="flex gap-2">
             <button
               onClick={onCancel}
               disabled={deleting}
-              className="flex-1 h-10 rounded-xl text-[13px] font-semibold transition hover:opacity-90 disabled:opacity-50"
+              className="flex-1 h-10 rounded-xl text-[0.8125rem] font-semibold transition hover:opacity-90 disabled:opacity-50"
               style={{ backgroundColor: 'var(--brand-background)', color: 'var(--brand-text-secondary)', border: '1px solid var(--brand-border)' }}
             >
               Cancel
@@ -362,7 +419,7 @@ function DeleteConfirmModal({
             <button
               onClick={onConfirm}
               disabled={deleting}
-              className="flex-1 h-10 rounded-xl text-[13px] font-bold text-white transition hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5"
+              className="flex-1 h-10 rounded-xl text-[0.8125rem] font-bold text-white transition hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5"
               style={{ backgroundColor: 'var(--brand-alert-red)' }}
             >
               {deleting ? (
@@ -411,10 +468,10 @@ function SidebarContent({
     <div className="flex flex-col h-full overflow-hidden">
       <style>{sidebarScrollStyles}</style>
       <div className="px-4 pt-5 pb-3 shrink-0">
-        <h2 className="text-[15px] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.conversations')}</h2>
+        <h2 className="text-[0.9375rem] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.conversations')}</h2>
         <button
           onClick={onNewConversation}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[13px] font-semibold transition-all hover:opacity-90 active:scale-[0.98]"
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[0.8125rem] font-semibold transition-all hover:opacity-90 active:scale-[0.98]"
           style={{ background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)', color: 'white', boxShadow: '0 4px 14px rgba(123,0,224,0.28)' }}
         >
           <Plus className="w-4 h-4" />
@@ -425,14 +482,14 @@ function SidebarContent({
       <div className="px-4 pb-3 shrink-0">
         <div className="rounded-2xl p-3.5" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-[12px] font-bold shrink-0" style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}>
+            <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-[0.75rem] font-bold shrink-0" style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}>
               {userInitials}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[13px] font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>{userName}</p>
-              <p className="text-[11px] font-medium" style={{ color: 'var(--brand-accent-teal)' }}>{t('chat.patient')}</p>
+              <p className="text-[0.8125rem] font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>{userName}</p>
+              <p className="text-[0.6875rem] font-medium" style={{ color: 'var(--brand-accent-teal)' }}>{t('chat.patient')}</p>
             </div>
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0" style={{ backgroundColor: riskColor.bg, color: riskColor.text }}>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold shrink-0" style={{ backgroundColor: riskColor.bg, color: riskColor.text }}>
               {riskTier}
             </span>
           </div>
@@ -440,11 +497,11 @@ function SidebarContent({
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 pb-4 min-h-0 sidebar-scroll">
-        <p className="text-[10px] font-bold uppercase tracking-wider px-2 mb-2" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.recent')}</p>
+        <p className="text-[0.625rem] font-bold uppercase tracking-wider px-2 mb-2" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.recent')}</p>
         {isLoading ? (
           <SessionSkeleton />
         ) : sessions.length === 0 ? (
-          <p className="text-[12px] px-2 py-2" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.noConversations')}</p>
+          <p className="text-[0.75rem] px-2 py-2" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.noConversations')}</p>
         ) : (
           <div className="space-y-0.5">
             {sessions.map((s) => {
@@ -458,9 +515,9 @@ function SidebarContent({
                 >
                   <div className="flex items-center gap-1.5 pr-6">
                     {s.isVoice && <Mic className="w-3 h-3 shrink-0" style={{ color: isActive ? 'var(--brand-primary-purple)' : 'var(--brand-text-muted)' }} />}
-                    <p className="text-[13px] font-semibold truncate" style={{ color: isActive ? 'var(--brand-primary-purple)' : 'var(--brand-text-secondary)' }}>{s.title}</p>
+                    <p className="text-[0.8125rem] font-semibold truncate" style={{ color: isActive ? 'var(--brand-primary-purple)' : 'var(--brand-text-secondary)' }}>{s.title}</p>
                   </div>
-                  <p className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--brand-text-muted)' }}>{s.isVoice ? `🎙 ${s.time}` : s.time}</p>
+                  <p className="text-[0.6875rem] mt-0.5 truncate" style={{ color: 'var(--brand-text-muted)' }}>{s.isVoice ? `🎙 ${s.time}` : s.time}</p>
                   {/* Delete button — visible on hover */}
                   <button
                     onClick={(e) => { e.stopPropagation(); onDeleteSession(s.id); }}
@@ -518,26 +575,26 @@ function VoiceCallBar({
       />
       <div className="flex items-center gap-2 flex-1 min-w-0">
         <Mic className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />
-        <span className="text-[12px] font-semibold" style={{ color: 'var(--brand-primary-purple)' }}>
+        <span className="text-[0.75rem] font-semibold" style={{ color: 'var(--brand-primary-purple)' }}>
           {t('chat.voiceMode')}
         </span>
         <span
           data-testid="voice-state-label"
-          className="text-[12px]"
+          className="text-[0.75rem]"
           style={{ color: 'var(--brand-text-muted)' }}
         >
           · {stateLabel[state] ?? state}
         </span>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px]" style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}>
+        <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem]" style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}>
           <PhoneCall className="w-3 h-3" />
           <span>{t('chat.emergencyCall')}</span>
         </div>
         <button
           data-testid="voice-end-button"
           onClick={onStop}
-          className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-semibold transition hover:opacity-80"
+          className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.75rem] font-semibold transition hover:opacity-80"
           style={{ backgroundColor: '#ef4444', color: 'white' }}
         >
           <MicOff className="w-3 h-3" />
@@ -588,7 +645,7 @@ function TypingText({ text, speaker }: { text: string; speaker: 'user' | 'agent'
   }, [text]);
 
   return (
-    <p className="text-[14px] leading-relaxed" style={{ color: speaker === 'user' ? 'white' : 'var(--brand-text-primary)' }}>
+    <p className="text-[0.875rem] leading-relaxed" style={{ color: speaker === 'user' ? 'white' : 'var(--brand-text-primary)' }}>
       {displayed}
       {displayed.length < text.length && (
         <span className="inline-block w-[2px] h-[14px] ml-0.5 align-middle animate-pulse" style={{ backgroundColor: speaker === 'user' ? 'rgba(255,255,255,0.7)' : 'var(--brand-primary-purple)' }} />
@@ -624,7 +681,7 @@ function LiveTranscriptBubbles({ lines }: { lines: TranscriptLine[] }) {
         >
           {group.speaker === 'agent' && (
             <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0">
-              <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
+              <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={30} height={30} />
             </div>
           )}
           <div
@@ -757,10 +814,10 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3 }}
             >
-              <p className="text-[16px] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>
+              <p className="text-[1rem] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>
                 {state === 'connecting' ? 'Turning on...' : 'Starting mic...'}
               </p>
-              <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.75rem] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
                 Setting up your voice assistant
               </p>
               <div className="flex items-center justify-center gap-1.5 mt-3">
@@ -808,28 +865,49 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
               )}
             </motion.div>
 
-            <p className="text-[17px] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
+            <p className="text-[1.0625rem] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
               {pendingCheckin.saved ? 'Check-in saved!' : 'Could not save'}
             </p>
 
             <div className="grid grid-cols-2 gap-2 mb-4">
               {pendingCheckin.systolicBP != null && pendingCheckin.diastolicBP != null && (
                 <div className="rounded-xl p-2.5 text-center" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
-                  <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>BP</p>
-                  <p className="text-[16px] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{pendingCheckin.systolicBP}/{pendingCheckin.diastolicBP}</p>
+                  <p className="text-[0.5625rem] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>BP</p>
+                  <p className="text-[1rem] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{pendingCheckin.systolicBP}/{pendingCheckin.diastolicBP}</p>
                 </div>
               )}
-              <div className="rounded-xl p-2.5 text-center" style={{ backgroundColor: pendingCheckin.medicationTaken ? 'var(--brand-success-green-light)' : 'var(--brand-alert-red-light)' }}>
-                <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Meds</p>
-                <p className="text-[13px] font-bold" style={{ color: pendingCheckin.medicationTaken ? 'var(--brand-success-green)' : 'var(--brand-alert-red-text)' }}>{pendingCheckin.medicationTaken ? 'Taken' : 'Missed'}</p>
-              </div>
+              {(() => {
+                // Bug 16C — treat the pendingCheckin pill the same way the
+                // CheckinCard's medicationLabel does. Non-empty
+                // missedMedications takes precedence over the boolean.
+                const hasMissed =
+                  Array.isArray(pendingCheckin.missedMedications)
+                    && pendingCheckin.missedMedications.length > 0;
+                const medsLabel = hasMissed
+                  ? `Missed: ${pendingCheckin.missedMedications!.map((m) => m.drugName).join(', ')}`
+                  : pendingCheckin.medicationTaken
+                    ? 'Taken'
+                    : 'Missed';
+                const medsBgColor = hasMissed || pendingCheckin.medicationTaken === false
+                  ? 'var(--brand-alert-red-light)'
+                  : 'var(--brand-success-green-light)';
+                const medsTextColor = hasMissed || pendingCheckin.medicationTaken === false
+                  ? 'var(--brand-alert-red-text)'
+                  : 'var(--brand-success-green)';
+                return (
+                  <div className="rounded-xl p-2.5 text-center" style={{ backgroundColor: medsBgColor }}>
+                    <p className="text-[0.5625rem] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Meds</p>
+                    <p className="text-[0.8125rem] font-bold" style={{ color: medsTextColor }}>{medsLabel}</p>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Auto-dismiss countdown */}
             <motion.div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--brand-border)' }}>
               <motion.div className="h-full rounded-full" style={{ backgroundColor: 'var(--brand-success-green)' }} initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: 3, ease: 'linear' }} />
             </motion.div>
-            <p className="text-[10px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>AI will continue talking...</p>
+            <p className="text-[0.625rem] mt-2" style={{ color: 'var(--brand-text-muted)' }}>AI will continue talking...</p>
           </motion.div>
         )}
 
@@ -883,12 +961,12 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
               </div>
 
               <div className="text-center mt-4">
-                <p className="text-[16px] font-bold" style={{ color: crudColor }}>{crudLabel}</p>
-                <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>{crudSub}</p>
+                <p className="text-[1rem] font-bold" style={{ color: crudColor }}>{crudLabel}</p>
+                <p className="text-[0.75rem] mt-1" style={{ color: 'var(--brand-text-muted)' }}>{crudSub}</p>
                 <div className="w-48 mx-auto mt-3 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: `${crudColor}15` }}>
                   <motion.div className="h-full rounded-full" style={{ backgroundColor: crudColor }} animate={{ x: ['-100%', '100%'] }} transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }} />
                 </div>
-                <p className="text-[10px] mt-3" style={{ color: 'var(--brand-text-muted)' }}>AI will resume automatically</p>
+                <p className="text-[0.625rem] mt-3" style={{ color: 'var(--brand-text-muted)' }}>AI will resume automatically</p>
               </div>
             </motion.div>
           );
@@ -934,10 +1012,10 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
 
             {/* State text — fixed position below orb */}
             <div className="text-center mt-2">
-              <motion.p key={state} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="text-[16px] font-bold" style={{ color: isListening ? '#ef4444' : 'var(--brand-primary-purple)' }}>
+              <motion.p key={state} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="text-[1rem] font-bold" style={{ color: isListening ? '#ef4444' : 'var(--brand-primary-purple)' }}>
                 {isListening ? 'Listening' : isSpeaking ? 'AI Speaking' : 'Ready'}
               </motion.p>
-              <p className="text-[12px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.75rem] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
                 {isListening ? 'Speak naturally...' : isSpeaking ? 'Listening to response...' : ''}
               </p>
             </div>
@@ -964,7 +1042,7 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
                 style={{ backgroundColor: 'var(--brand-alert-red-light)', border: '1px solid var(--brand-alert-red)' }}
               >
                 <PhoneCall className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-alert-red)' }} />
-                <p className="text-[10px]" style={{ color: 'var(--brand-alert-red-text)' }}>Chest pain or severe shortness of breath? Call 911 immediately.</p>
+                <p className="text-[0.625rem]" style={{ color: 'var(--brand-alert-red-text)' }}>Chest pain or severe shortness of breath? Call 911 immediately.</p>
               </motion.div>
             )}
           </motion.div>
@@ -990,20 +1068,20 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
                 {pendingUpdate.updated
                   ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-accent-teal)' }} />
                   : <AlertCircle className="w-5 h-5" style={{ color: "var(--brand-alert-red)" }} />}
-                <p className="font-bold text-[14px]" style={{ color: 'var(--brand-text-primary)' }}>
+                <p className="font-bold text-[0.875rem]" style={{ color: 'var(--brand-text-primary)' }}>
                   {pendingUpdate.updated ? 'Reading updated!' : 'Could not update reading'}
                 </p>
               </div>
               {pendingUpdate.systolicBP != null && pendingUpdate.diastolicBP != null && (
                 <div className="rounded-xl p-2.5 text-center mb-2" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
-                  <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Blood Pressure</p>
-                  <p className="text-[18px] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{pendingUpdate.systolicBP}/{pendingUpdate.diastolicBP} <span className="text-[10px] font-medium">mmHg</span></p>
+                  <p className="text-[0.5625rem] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Blood Pressure</p>
+                  <p className="text-[1.125rem] font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{pendingUpdate.systolicBP}/{pendingUpdate.diastolicBP} <span className="text-[0.625rem] font-medium">mmHg</span></p>
                 </div>
               )}
               <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--brand-border)' }}>
                 <motion.div className="h-full rounded-full" style={{ backgroundColor: 'var(--brand-accent-teal)' }} initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: 3, ease: 'linear' }} />
               </div>
-              <p className="text-[10px] mt-1.5 text-center" style={{ color: 'var(--brand-text-muted)' }}>AI will resume talking…</p>
+              <p className="text-[0.625rem] mt-1.5 text-center" style={{ color: 'var(--brand-text-muted)' }}>AI will resume talking…</p>
             </div>
           </motion.div>
         )}
@@ -1028,15 +1106,15 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
                 {pendingDelete.success
                   ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--brand-alert-red-text)' }} />
                   : <AlertCircle className="w-5 h-5" style={{ color: "var(--brand-alert-red)" }} />}
-                <p className="font-bold text-[14px]" style={{ color: 'var(--brand-text-primary)' }}>
+                <p className="font-bold text-[0.875rem]" style={{ color: 'var(--brand-text-primary)' }}>
                   {pendingDelete.success
                     ? (pendingDelete.deletedCount === 1 ? 'Reading deleted' : `${pendingDelete.deletedCount} readings deleted`)
                     : 'Could not delete reading'}
                 </p>
               </div>
               <div className="rounded-xl p-2.5 text-center mb-2" style={{ backgroundColor: 'var(--brand-alert-red-light)' }}>
-                <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Removed</p>
-                <p className="text-[14px] font-bold" style={{ color: 'var(--brand-alert-red-text)' }}>
+                <p className="text-[0.5625rem] font-bold uppercase tracking-wide" style={{ color: 'var(--brand-text-muted)' }}>Removed</p>
+                <p className="text-[0.875rem] font-bold" style={{ color: 'var(--brand-alert-red-text)' }}>
                   {pendingDelete.deletedCount} entry{pendingDelete.deletedCount === 1 ? '' : 'ies'}
                   {pendingDelete.failedCount > 0 ? ` (${pendingDelete.failedCount} failed)` : ''}
                 </p>
@@ -1044,7 +1122,7 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
               <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--brand-border)' }}>
                 <motion.div className="h-full rounded-full" style={{ backgroundColor: 'var(--brand-alert-red)' }} initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: 3, ease: 'linear' }} />
               </div>
-              <p className="text-[10px] mt-1.5 text-center" style={{ color: 'var(--brand-text-muted)' }}>AI will resume talking…</p>
+              <p className="text-[0.625rem] mt-1.5 text-center" style={{ color: 'var(--brand-text-muted)' }}>AI will resume talking…</p>
             </div>
           </motion.div>
         )}
@@ -1064,9 +1142,20 @@ function mapSessions(arr: Array<{ id: string; title: string; summary?: string | 
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
+// BCP-47 locale map for the Web Speech API dictation. Mirrors the same
+// table MicButton uses so dictation respects the patient's preferredLanguage
+// (Ward 7/8 DC patients with Spanish / Amharic preferences get their locale).
+const DICTATION_LOCALE_TO_BCP47: Record<string, string> = {
+  en: 'en-US',
+  es: 'es-ES',
+  fr: 'fr-FR',
+  de: 'de-DE',
+  am: 'am-ET',
+};
+
 export default function AIChatInterface() {
   const { user, token } = useAuth();
-  const { t } = useLanguage();
+  const { t, locale } = useLanguage();
   const searchParams = useSearchParams();
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -1100,6 +1189,147 @@ export default function AIChatInterface() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const justCreatedSessionRef = useRef(false);
+  // Bug 17 — when voice ADOPTS an existing text session (sessionId passed
+  // through to startVoice), the on-idle teardown below must NOT wipe the
+  // visible text bubbles + replace them with a single voice-summary block.
+  // Instead, reload the full mixed transcript via getSessionHistory once
+  // the voice turns persist. This ref records whether we adopted, so the
+  // teardown can branch cleanly.
+  const adoptedSessionAtVoiceStartRef = useRef(false);
+
+  // ─── Dictation (speech-to-text into the chat input box) ──────────────────
+  // Distinct from the voice-call mic — this is one-shot dictation that fills
+  // the text input so the patient can review and click Send. Records audio
+  // with MediaRecorder, POSTs to /chat/transcribe, and gets the transcript
+  // back from Gemini. Same model the voice chat + OCR use, so quality + cost
+  // stay consistent. Works on Firefox + iOS Safari where the browser's
+  // SpeechRecognition API is unavailable.
+  const [dictationState, setDictationState] = useState<
+    'idle' | 'recording' | 'uploading' | 'unsupported'
+  >('idle');
+  const [dictationError, setDictationError] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  // Detect MediaRecorder + getUserMedia support on mount. Both must be
+  // present; otherwise the button is hidden.
+  useEffect(() => {
+    if (
+      typeof window === 'undefined'
+      || typeof MediaRecorder === 'undefined'
+      || !navigator.mediaDevices?.getUserMedia
+    ) {
+      setDictationState('unsupported');
+    }
+    return () => {
+      // Best-effort cleanup if the component unmounts mid-recording.
+      try { mediaRecorderRef.current?.stop(); } catch { /* swallow */ }
+      mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+  // Auto-clear the error pill so the patient gets a clean slate after a few
+  // seconds — matches the MicButton intake pattern.
+  useEffect(() => {
+    if (!dictationError) return;
+    const id = setTimeout(() => setDictationError(null), 3500);
+    return () => clearTimeout(id);
+  }, [dictationError]);
+  const handleDictate = useCallback(async () => {
+    // Stop path — finalises the recording, kicks off upload + transcribe.
+    if (dictationState === 'recording') {
+      try { mediaRecorderRef.current?.stop(); } catch { /* swallow */ }
+      return;
+    }
+    // Already uploading or unsupported — taps are no-ops.
+    if (dictationState !== 'idle') return;
+    setDictationError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      // Prefer opus in webm/ogg — well-compressed, supported by Gemini.
+      // Browser will pick a reasonable default if neither is supported.
+      const mimeType =
+        MediaRecorder.isTypeSupported?.('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : MediaRecorder.isTypeSupported?.('audio/webm')
+            ? 'audio/webm'
+            : MediaRecorder.isTypeSupported?.('audio/mp4')
+              ? 'audio/mp4'
+              : '';
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      recordedChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        // Stop all mic tracks — releases the browser's recording indicator.
+        mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+        mediaStreamRef.current = null;
+        const blob = new Blob(recordedChunksRef.current, {
+          type: recorder.mimeType || 'audio/webm',
+        });
+        recordedChunksRef.current = [];
+        if (blob.size === 0) {
+          setDictationState('idle');
+          setDictationError("I didn't catch any audio — please try again.");
+          return;
+        }
+        setDictationState('uploading');
+        try {
+          const transcript = await transcribeAudio(
+            blob,
+            DICTATION_LOCALE_TO_BCP47[locale] ?? 'en-US',
+          );
+          if (transcript.trim()) {
+            setInputValue((prev) =>
+              prev ? `${prev} ${transcript.trim()}`.trim() : transcript.trim(),
+            );
+            // Re-focus the textarea so the patient can review + Send.
+            requestAnimationFrame(() => inputRef.current?.focus());
+          } else {
+            setDictationError("I couldn't hear that clearly — please try again.");
+          }
+        } catch (err) {
+          setDictationError(
+            err instanceof Error
+              ? err.message
+              : 'Transcription failed — please try again.',
+          );
+        } finally {
+          setDictationState('idle');
+        }
+      };
+      recorder.onerror = () => {
+        setDictationError('Recording failed — please try again.');
+        setDictationState('idle');
+        mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+        mediaStreamRef.current = null;
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setDictationState('recording');
+    } catch (err) {
+      // getUserMedia rejection — most commonly NotAllowedError (denied) or
+      // NotFoundError (no mic). Distinguish so we can give actionable copy.
+      const name = err instanceof Error ? err.name : '';
+      if (name === 'NotAllowedError' || name === 'SecurityError') {
+        setDictationError(
+          'Microphone access blocked. Enable it in your browser settings to dictate.',
+        );
+      } else if (name === 'NotFoundError') {
+        setDictationError('No microphone detected on this device.');
+      } else {
+        setDictationError(
+          err instanceof Error ? err.message : 'Could not start dictation.',
+        );
+      }
+    }
+  }, [dictationState, locale]);
+  const isDictating = dictationState === 'recording';
+  const isTranscribing = dictationState === 'uploading';
+  const dictationSupported = dictationState !== 'unsupported';
 
   const userInitials = getUserInitials(user?.name);
   const userName = user?.name ?? 'Patient';
@@ -1179,9 +1409,13 @@ export default function AIChatInterface() {
     prevVoiceStateRef.current = voiceState;
     if (prev !== 'idle' && voiceState === 'idle') {
       voiceDebug('AIChat', `idle transition from=${prev} — tearing down voice session and loading summary`);
-      // Clear everything immediately — show skeleton
+      const sessionId = activeSessionId;
+      const wasAdopted = adoptedSessionAtVoiceStartRef.current && sessionId !== null;
+      adoptedSessionAtVoiceStartRef.current = false;
+
+      // Always clear transient card state — those cards are tied to the
+      // just-ended voice turn, not to the persistent message history.
       clearTranscript();
-      setMessages([]);
       setPendingCheckin(null);
       setPendingUpdateCard(null);
       setPendingDeleteCard(null);
@@ -1190,7 +1424,66 @@ export default function AIChatInterface() {
       setPendingPhoto(null);
       setVoiceSummaryLoading(true);
 
-      const sessionId = activeSessionId;
+      if (wasAdopted) {
+        // Bug 17 — voice adopted an existing text session. Keep the visible
+        // text bubbles, then once the voice turns persist (saveVoiceTranscript
+        // writes async on endSession), reload the FULL mixed transcript from
+        // getSessionHistory and render text+voice bubbles inline together.
+        // Do NOT setMessages([]) — that would wipe the patient's prior
+        // text history from the UI until they refresh.
+        const reloadMixedTranscript = async () => {
+          if (!sessionId) return;
+          const maxAttempts = 8;
+          const delayMs = 2500;
+          for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            if (attempt > 0) await new Promise((r) => setTimeout(r, delayMs));
+            try {
+              const history = await getSessionHistory(sessionId);
+              const arr = Array.isArray(history) ? history : [];
+              const hasVoiceRow = arr.some((r: { source: string }) => r.source === 'voice');
+              // Either a voice row appeared (transcript persisted) OR we've
+              // waited enough that the patient didn't actually speak — render
+              // whatever we have, including the case of no voice rows at all.
+              if (hasVoiceRow || attempt >= 3) {
+                const msgs: Message[] = [];
+                arr.forEach(
+                  (
+                    item: { id: string; userMessage: string; aiSummary: string; source: string; timestamp: string },
+                    idx: number,
+                  ) => {
+                    msgs.push({
+                      id: idx * 2,
+                      type: 'patient',
+                      source: (item.source as MessageSource) || 'text',
+                      text: item.userMessage,
+                      time: formatMsgTime(item.timestamp),
+                    });
+                    msgs.push({
+                      id: idx * 2 + 1,
+                      type: 'ai',
+                      source: (item.source as MessageSource) || 'text',
+                      text: item.aiSummary,
+                      time: formatMsgTime(item.timestamp),
+                    });
+                  },
+                );
+                setMessages(msgs);
+                getChatSessions()
+                  .then((d) => setSessions(mapSessions(Array.isArray(d) ? d : [])))
+                  .catch(() => {});
+                return;
+              }
+            } catch {
+              // retry on transient failure
+            }
+          }
+        };
+        reloadMixedTranscript().finally(() => setVoiceSummaryLoading(false));
+        return;
+      }
+
+      // Pure voice session (no prior text turns) — existing summary-only path.
+      setMessages([]);
 
       const loadVoiceSummary = async () => {
         if (!sessionId) return;
@@ -1467,9 +1760,29 @@ export default function AIChatInterface() {
             setPendingCheckin({
               systolicBP: d.systolicBP as number | undefined,
               diastolicBP: d.diastolicBP as number | undefined,
-              weight: d.weight as number | undefined,
+              // Bug 36 — backend persists kg (per Bug 19's lbs→kg conversion
+              // at the dispatcher) and returns kg in data.weight. CheckinCard
+              // hardcodes the "lbs" label, so the popup must convert kg→lbs
+              // for display. Pre-fix the popup showed 181 lbs for a 400 lb
+              // entry while the LLM's confirmation text + My Readings both
+              // correctly showed 400 lbs.
+              weight: typeof d.weight === 'number' ? kgToLbs(d.weight) : undefined,
               medicationTaken: d.medicationTaken as boolean | undefined,
-              symptoms: (d.symptoms as string[] | undefined) ?? [],
+              // Bug 16B fix — read missedMedications so the card surfaces
+              // WHICH meds were missed (was: rendered "All taken" even when
+              // missed array was non-empty). Bug 16A normalises
+              // medication_taken=false when the array is non-empty so the
+              // boolean + array stay consistent.
+              missedMedications: pickMissedMedications(d),
+              // The legacy `symptoms: string[]` field on CheckinSummary is no
+              // longer authoritative — symptoms now flow through the two
+              // fields below (structured booleans → red badges, freeform
+              // strings → grey chips). Keep this empty to satisfy the type.
+              symptoms: [],
+              structuredSymptoms: pickStructuredSymptoms(d),
+              otherSymptoms: Array.isArray(d.otherSymptoms)
+                ? (d.otherSymptoms as string[])
+                : undefined,
               saved: true,
             });
           } else if (tool === 'update_checkin' && (result as { updated?: boolean }).updated) {
@@ -1479,9 +1792,17 @@ export default function AIChatInterface() {
               entryDate: d.entryDate as string | undefined,
               systolicBP: d.systolicBP as number | undefined,
               diastolicBP: d.diastolicBP as number | undefined,
-              weight: d.weight as number | undefined,
+              // Bug 36 — same kg→lbs conversion as the submit_checkin popup
+              // above. UpdateCard hardcodes the "lbs" label and the backend
+              // returns kg in data.weight.
+              weight: typeof d.weight === 'number' ? kgToLbs(d.weight) : undefined,
               medicationTaken: d.medicationTaken as boolean | undefined,
-              symptoms: (d.symptoms as string[] | undefined) ?? [],
+              missedMedications: pickMissedMedications(d),
+              symptoms: [],
+              structuredSymptoms: pickStructuredSymptoms(d),
+              otherSymptoms: Array.isArray(d.otherSymptoms)
+                ? (d.otherSymptoms as string[])
+                : undefined,
               updated: true,
             });
           } else if (tool === 'delete_checkin') {
@@ -1616,7 +1937,16 @@ export default function AIChatInterface() {
     if (isVoiceActive || isVoiceConnecting) {
       await endVoice();
     } else if (token) {
-      await startVoice({ token });
+      // Bug 17 — pass the currently-active session id so voice ADOPTS the
+      // text conversation instead of starting an orphaned session in the
+      // sidebar. Backend's resolveSession validates `{ id, userId }` and
+      // falls through to creating a new one if the lookup fails, so
+      // passing a value is safe even on fresh chats (when activeSessionId
+      // is null we pass undefined and the backend creates one as before).
+      // Record whether we adopted, so the post-voice teardown can keep the
+      // visible text history instead of wiping it for a summary-only block.
+      adoptedSessionAtVoiceStartRef.current = activeSessionId !== null;
+      await startVoice({ token, sessionId: activeSessionId ?? undefined });
     }
   };
 
@@ -1670,18 +2000,18 @@ export default function AIChatInterface() {
           </button>
           <div className="flex items-center gap-3 flex-1 min-w-0">
             <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
-              <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={30} height={30} />
+              <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={30} height={30} />
             </div>
             <div>
-              <p className="text-[14px] font-semibold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.title')}</p>
+              <p className="text-[0.875rem] font-semibold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.title')}</p>
               <div className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
-                <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.onlineMonitored')}</span>
+                <span className="text-[0.6875rem]" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.onlineMonitored')}</span>
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'var(--brand-accent-teal-light)', color: 'var(--brand-accent-teal)' }}>
+            <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-[0.6875rem] font-semibold" style={{ backgroundColor: 'var(--brand-accent-teal-light)', color: 'var(--brand-accent-teal)' }}>
               {t('chat.contextLoaded')}
             </span>
             <button className="lg:hidden w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-85 active:scale-95" style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }} onClick={handleNewConversation}>
@@ -1704,7 +2034,7 @@ export default function AIChatInterface() {
         <AnimatePresence>
           {voiceState === 'error' && voiceError && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="shrink-0 px-4 lg:px-6 py-2 text-[12px]"
+              className="shrink-0 px-4 lg:px-6 py-2 text-[0.75rem]"
               style={{
                 backgroundColor: 'var(--brand-alert-red-light)',
                 borderBottom: '1px solid var(--brand-alert-red)',
@@ -1741,10 +2071,10 @@ export default function AIChatInterface() {
             <div data-testid="chat-empty-state" className="flex-1 flex items-center justify-center">
               <div className="text-center max-w-xs mx-auto">
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
-                  <Image src="/cardioplace-icon.svg" alt="Cardioplace" width={50} height={50} />
+                  <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={50} height={50} />
                 </div>
-                <p className="text-[16px] font-bold mb-1.5" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.howCanIHelp')}</p>
-                <p className="text-[13px] leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
+                <p className="text-[1rem] font-bold mb-1.5" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.howCanIHelp')}</p>
+                <p className="text-[0.8125rem] leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
                   {t('chat.askMe')}
                 </p>
                 <div className="flex flex-wrap gap-2 justify-center mt-5">
@@ -1752,7 +2082,7 @@ export default function AIChatInterface() {
                     <button
                       key={chip}
                       onClick={() => setInputValue(chip)}
-                      className="px-3 py-1.5 rounded-full text-[12px] font-semibold transition hover:opacity-80 active:scale-95"
+                      className="px-3 py-1.5 rounded-full text-[0.75rem] font-semibold transition hover:opacity-80 active:scale-95"
                       style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)', border: '1px solid #E9D5FF' }}
                     >
                       {chip}
@@ -1871,6 +2201,7 @@ export default function AIChatInterface() {
             }}
           >
             <textarea
+              id="chat-input"
               data-testid="chat-input"
               ref={inputRef}
               rows={1}
@@ -1879,7 +2210,7 @@ export default function AIChatInterface() {
               onKeyDown={handleKeyDown}
               placeholder={isVoiceActive ? t('chat.voiceEndToType') : t('chat.placeholder')}
               aria-label={t('chat.title') ? `${t('chat.title')} message input` : 'Chat message'}
-              className="flex-1 bg-transparent text-[14px] outline-none min-w-0 py-2 resize-none leading-[1.4] thin-scrollbar"
+              className="flex-1 bg-transparent text-[0.875rem] outline-none min-w-0 py-2 resize-none leading-[1.4] thin-scrollbar"
               style={{
                 color: 'var(--brand-text-primary)',
                 opacity: isVoiceActive ? 0.4 : 1,
@@ -1931,6 +2262,72 @@ export default function AIChatInterface() {
                   onChange={handlePhotoFile}
                 />
               </>
+            )}
+
+            {/* Dictation button — speech-to-text into the input box, powered
+                by Gemini via /chat/transcribe. Three visual states:
+                  • idle      → teal tint, Mic icon
+                  • recording → red gradient + pulsing shadow, MicOff icon
+                  • uploading → teal tint, spinner (await Gemini response)
+                Distinct from the purple voice-call mic to the right which
+                starts a live bidirectional voice call. Hidden when the
+                browser lacks MediaRecorder / getUserMedia. */}
+            {dictationSupported && (
+              <motion.button
+                data-testid="chat-dictate-button"
+                type="button"
+                onClick={() => void handleDictate()}
+                disabled={
+                  isSending || isVoiceActive || isVoiceConnecting || isTranscribing
+                }
+                aria-label={
+                  isDictating
+                    ? 'Stop dictation'
+                    : isTranscribing
+                      ? 'Transcribing audio'
+                      : 'Dictate your message'
+                }
+                aria-pressed={isDictating}
+                aria-controls="chat-input"
+                aria-busy={isTranscribing}
+                className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition disabled:opacity-40"
+                style={{
+                  background: isDictating
+                    ? 'linear-gradient(135deg, #ef4444, #dc2626)'
+                    : '#CCFBF1', // teal-100, distinct from purple voice-call mic
+                }}
+                animate={
+                  isDictating
+                    ? { boxShadow: ['0 0 0 0 rgba(220,38,38,0.55)', '0 0 0 6px rgba(220,38,38,0)'] }
+                    : undefined
+                }
+                transition={isDictating ? { duration: 1.2, repeat: Infinity } : undefined}
+                whileHover={!isTranscribing ? { scale: 1.08 } : {}}
+                whileTap={!isTranscribing ? { scale: 0.92 } : {}}
+                title={
+                  isDictating
+                    ? 'Stop dictation and transcribe'
+                    : isTranscribing
+                      ? 'Transcribing…'
+                      : 'Dictate your message into the text box'
+                }
+              >
+                {isTranscribing ? (
+                  <Loader2
+                    className="w-3.5 h-3.5 animate-spin"
+                    style={{ color: '#0F766E' }}
+                    aria-hidden="true"
+                  />
+                ) : isDictating ? (
+                  <MicOff className="w-3.5 h-3.5 text-white" aria-hidden="true" />
+                ) : (
+                  <Mic
+                    className="w-3.5 h-3.5"
+                    style={{ color: '#0F766E' }}
+                    aria-hidden="true"
+                  /> /* teal-700 */
+                )}
+              </motion.button>
             )}
 
             {/* Mic button — disabled while text is sending. Color encodes:
@@ -1997,7 +2394,30 @@ export default function AIChatInterface() {
             </motion.button>
           </div>
 
-          <p className="text-center text-[10px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
+          {/* Dictation status / error pill — sits BELOW the input bar so it
+              doesn't disturb the row layout. role="status" / role="alert"
+              announce to screen readers (WCAG 2.2 AA Task 8 — status not
+              colour-only). Auto-clears after ~3.5s for errors. */}
+          {(isDictating || isTranscribing) && (
+            <p
+              role="status"
+              className="text-[0.6875rem] mt-2 text-center font-medium"
+              style={{ color: isDictating ? 'var(--brand-alert-red-text)' : '#0F766E' }}
+            >
+              {isDictating ? 'Listening… tap mic again to stop and transcribe.' : 'Transcribing…'}
+            </p>
+          )}
+          {dictationError && !isDictating && !isTranscribing && (
+            <p
+              role="alert"
+              className="text-[0.6875rem] mt-2 text-center font-medium"
+              style={{ color: 'var(--brand-alert-red-text)' }}
+            >
+              {dictationError}
+            </p>
+          )}
+
+          <p className="text-center text-[0.625rem] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
             {t('chat.footer')}
           </p>
         </div>
@@ -2023,7 +2443,7 @@ export default function AIChatInterface() {
       {photoError && (
         <div
           role="alert"
-          className="fixed bottom-32 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full text-[12px] font-semibold shadow-lg"
+          className="fixed bottom-32 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full text-[0.75rem] font-semibold shadow-lg"
           style={{
             backgroundColor: 'var(--brand-alert-red-light)',
             color: 'var(--brand-alert-red-text)',

@@ -1,9 +1,11 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { EventEmitter2 } from '@nestjs/event-emitter'
 import {
   ActorUser,
   PatientAccessService,
 } from '../common/patient-access.service.js'
 import { DrugEnrichmentService } from '../drug-enrichment/drug-enrichment.service.js'
+import { INTAKE_EVENTS } from './intake-events.js'
 import {
   DrugClass,
   EnrollmentStatus,
@@ -135,7 +137,20 @@ export class IntakeService {
     private readonly prisma: PrismaService,
     private readonly drugEnrichment: DrugEnrichmentService,
     private readonly access: PatientAccessService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * Notify subscribers that a patient's intake or medication list changed so
+   * downstream caches (ChatService.contextCache, VoiceService.contextCache)
+   * drop the stale entry. Decoupled via @nestjs/event-emitter to avoid a
+   * ChatModule ↔ IntakeModule circular import. Listener lives in
+   * ChatService.onIntakeUpdated (and VoiceService equivalent).
+   */
+  private emitIntakeUpdated(userId: string): void {
+    if (!userId) return
+    this.eventEmitter.emit(INTAKE_EVENTS.UPDATED, { userId })
+  }
 
   /**
    * Background-enrich freeform medications (drugClass = OTHER_UNVERIFIED) by
@@ -274,6 +289,9 @@ export class IntakeService {
     } else if (conditionReviewLabels.length) {
       await this.notifyCareTeamConditionReview(userId, conditionReviewLabels)
     }
+    // Drop any stale chat/voice patient-context cache — the next prompt build
+    // must see the new profile so the INTAKE STATUS block flips immediately.
+    this.emitIntakeUpdated(userId)
     return result
   }
 
@@ -461,6 +479,7 @@ export class IntakeService {
       }
     }, TX_OPTIONS).then(({ result, created }) => {
       this.kickOffMedicationEnrichment(created)
+      this.emitIntakeUpdated(userId)
       return result
     })
   }
@@ -687,6 +706,7 @@ export class IntakeService {
       }
     }, TX_OPTIONS).then(({ result, created }) => {
       this.kickOffMedicationEnrichment(created)
+      this.emitIntakeUpdated(userId)
       return result
     })
   }

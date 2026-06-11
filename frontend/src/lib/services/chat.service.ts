@@ -250,3 +250,54 @@ export async function deleteSession(sessionId: string): Promise<void> {
     throw new Error(err.message || `Request failed: ${res.status}`)
   }
 }
+
+/**
+ * Patient dictates into the chat input — browser MediaRecorder captures
+ * audio, this client converts the Blob to base64 and POSTs to the backend
+ * where Gemini handles the transcription. Returns the transcript text so
+ * the caller can append it to the textarea for review-then-Send.
+ *
+ * Use this in place of the browser Web Speech API for consistent results
+ * across Firefox / iOS Safari / Chrome and consistent quality on medical
+ * terminology (same model the voice chat + OCR use).
+ *
+ * The languageHint is a BCP-47 tag (`en-US`, `es-ES`, etc.) derived from
+ * the patient's preferredLanguage. Optional but recommended.
+ */
+export async function transcribeAudio(
+  blob: Blob,
+  languageHint?: string,
+): Promise<string> {
+  const audioBase64 = await blobToBase64(blob)
+  const res = await fetchWithAuth(`${API}/api/chat/transcribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      audioBase64,
+      mimeType: blob.type || 'audio/webm',
+      languageHint,
+    }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Transcription failed: ${res.status}`)
+  }
+  const json = (await res.json()) as { transcript: string }
+  return json.transcript ?? ''
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buf = await blob.arrayBuffer()
+  // Encode in chunks to avoid the Maximum call stack exceeded error
+  // String.fromCharCode hits at ~125k args. 32k is a safe chunk size.
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  const CHUNK = 32_768
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(
+      null,
+      Array.from(bytes.subarray(i, i + CHUNK)) as unknown as number[],
+    )
+  }
+  return btoa(binary)
+}

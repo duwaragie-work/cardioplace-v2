@@ -163,8 +163,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   let service: AlertEngineService
   let prisma: Record<string, any>
   let eventEmitter: { emit: jest.Mock }
-  let profileResolver: { resolve: jest.Mock }
-  let sessionAverager: { averageForEntry: jest.Mock }
+  let profileResolver: { resolve: jest.Mock<any> }
+  let sessionAverager: { averageForEntry: jest.Mock<any> }
 
   beforeEach(async () => {
     prisma = {
@@ -845,7 +845,9 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
       buildSession({ systolicBP: 102, diastolicBP: 72 }),
       buildCtx({
         profile: { hasAorticStenosis: true },
-        threshold: { sbpLowerTarget: 105, sbpUpperTarget: 160 },
+        // Provider threshold — only SBP bounds matter for this rule; cast
+        // to bypass the full ContextThreshold shape requirement.
+        threshold: { sbpLowerTarget: 105, sbpUpperTarget: 160 } as unknown as NonNullable<ResolvedContext['threshold']>,
       }),
     )
     expect(result?.ruleId).toBe('RULE_AORTIC_STENOSIS_LOW')

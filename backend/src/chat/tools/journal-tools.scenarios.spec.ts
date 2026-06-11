@@ -151,6 +151,17 @@ describe('normalisers (text chat)', () => {
 // ─── submit_checkin ───────────────────────────────────────────────────────────
 
 describe('submit_checkin scenarios', () => {
+  // Lock the wall clock so the dispatcher's NY-local "today" (per Bug 28)
+  // matches `new Date().toISOString().slice(0, 10)` paths inside tests.
+  // 16:00 UTC = noon EDT → both UTC and NY fall on the same calendar date.
+  beforeAll(() => {
+    jest.useFakeTimers()
+    jest.setSystemTime(new Date('2026-06-09T16:00:00.000Z'))
+  })
+  afterAll(() => {
+    jest.useRealTimers()
+  })
+
   it('happy path: required fields → calls journal.create + returns saved:true', async () => {
     const ctx = makeCtx()
     const result = await executeJournalTool(
@@ -385,6 +396,13 @@ describe('submit_checkin scenarios', () => {
 
 describe('get_recent_readings scenarios', () => {
   it('returns count + reading list when entries exist', async () => {
+    // Bug 26 — measurement_time must be projected into the patient's
+    // local timezone, not echoed as the raw UTC wallclock slice. ctx
+    // has no timezone here, so the dispatcher falls back to
+    // 'America/New_York'. May 19 2026 is EDT (UTC-4) → stored 08:30Z
+    // projects to 04:30 local. Pre-fix this returned '08:30' (UTC), so
+    // a New York patient asking "how am I doing?" saw chatbot times
+    // four hours later than the My Readings UI.
     const ctx = makeCtx()
     ;(ctx.journalService.findAll as jest.Mock<any>).mockResolvedValueOnce({
       data: [
@@ -408,7 +426,35 @@ describe('get_recent_readings scenarios', () => {
     expect(parsed.count).toBe(1)
     expect(parsed.readings[0].systolic).toBe(132)
     expect(parsed.readings[0].date).toBe('2026-05-19')
-    expect(parsed.readings[0].measurement_time).toBe('08:30')
+    expect(parsed.readings[0].measurement_time).toBe('04:30')
+  })
+
+  it('Bug 26 — projects measuredAt into ctx.timezone when explicitly provided', async () => {
+    // Same UTC instant, different ctx tz. IST = UTC+5:30, no DST →
+    // 08:30Z projects to 14:00 IST. Confirms ctx.timezone is the
+    // override path, not just the default.
+    const ctx = { ...makeCtx(), timezone: 'Asia/Kolkata' }
+    ;(ctx.journalService.findAll as jest.Mock<any>).mockResolvedValueOnce({
+      data: [
+        {
+          id: 'e1',
+          measuredAt: '2026-05-19T08:30:00.000Z',
+          systolicBP: 132,
+          diastolicBP: 84,
+          medicationTaken: true,
+          otherSymptoms: [],
+        },
+      ],
+    })
+    const result = await executeJournalTool(
+      'get_recent_readings',
+      { days: 7 },
+      ctx as any,
+      USER,
+    )
+    const parsed = JSON.parse(result)
+    expect(parsed.readings[0].date).toBe('2026-05-19')
+    expect(parsed.readings[0].measurement_time).toBe('14:00')
   })
 
   it('returns empty when no entries exist', async () => {
@@ -433,9 +479,16 @@ describe('get_recent_readings scenarios', () => {
 
 describe('update_checkin scenarios', () => {
   it('finds entry by date+time and applies field changes', async () => {
+    // Bug 27 — measuredAt is stored as UTC. Patient says "delete my 8:30
+    // reading" → LLM passes original_time: '08:30' (their local clock).
+    // Dispatcher must project measuredAt through ctx.timezone before
+    // comparing. ctx default tz = America/New_York → May 20 is EDT (UTC-4)
+    // → 12:30Z stored projects to 08:30 local. Pre-Bug-27 the dispatcher
+    // sliced UTC ('12:30') and compared against '08:30', so every chat
+    // update / delete bounced with "Could not find the reading".
     const ctx = makeCtx()
     ;(ctx.journalService.findAll as jest.Mock<any>).mockResolvedValueOnce({
-      data: [{ id: 'e1', measuredAt: '2026-05-20T08:30:00.000Z' }],
+      data: [{ id: 'e1', measuredAt: '2026-05-20T12:30:00.000Z' }],
     })
     const result = await executeJournalTool(
       'update_checkin',
@@ -483,7 +536,8 @@ describe('update_checkin scenarios', () => {
   it('threads structured Stage A booleans into the update DTO', async () => {
     const ctx = makeCtx()
     ;(ctx.journalService.findAll as jest.Mock<any>).mockResolvedValueOnce({
-      data: [{ id: 'e1', measuredAt: '2026-05-20T08:30:00.000Z' }],
+      // Bug 27 — 08:30 NY EDT (default ctx tz) = 12:30Z stored.
+      data: [{ id: 'e1', measuredAt: '2026-05-20T12:30:00.000Z' }],
     })
     await executeJournalTool(
       'update_checkin',
@@ -508,11 +562,52 @@ describe('delete_checkin scenarios', () => {
   it('finds entry by date+time and deletes', async () => {
     const ctx = makeCtx()
     ;(ctx.journalService.findAll as jest.Mock<any>).mockResolvedValueOnce({
-      data: [{ id: 'e1', measuredAt: '2026-05-20T08:30:00.000Z' }],
+      // Bug 27 — 08:30 NY EDT (default ctx tz) = 12:30Z stored.
+      data: [{ id: 'e1', measuredAt: '2026-05-20T12:30:00.000Z' }],
     })
     const result = await executeJournalTool(
       'delete_checkin',
       { entry_date: '2026-05-20', original_time: '08:30' },
+      ctx as any,
+      USER,
+    )
+    expect(JSON.parse(result).deleted).toBe(true)
+    expect(ctx.journalService.delete).toHaveBeenCalledWith(USER, 'e1')
+  })
+
+  // Bug 27 — the user-reported delete bug. Symmetric with Bug 26. After
+  // Bug 26 the LLM receives patient-local times from get_recent_readings;
+  // it passes those local times back when the patient picks which entry
+  // to delete. Pre-fix the dispatcher compared LLM-supplied "13:36" (NY
+  // local) against the UTC slice "17:36" → no match → "0 readings removed
+  // / 1 could not be deleted." This regression pins the fix.
+  it('Bug 27 — matches local-time delete against UTC-stored measuredAt (NY EDT)', async () => {
+    const ctx = makeCtx()
+    ;(ctx.journalService.findAll as jest.Mock<any>).mockResolvedValueOnce({
+      // Patient saved at 13:36 EDT on June 8 → stored as 17:36Z.
+      data: [{ id: 'e1', measuredAt: '2026-06-08T17:36:00.000Z' }],
+    })
+    const result = await executeJournalTool(
+      'delete_checkin',
+      // LLM picks the entry by the LOCAL time it saw via get_recent_readings.
+      { entry_date: '2026-06-08', original_time: '13:36' },
+      ctx as any,
+      USER,
+    )
+    expect(JSON.parse(result).deleted).toBe(true)
+    expect(ctx.journalService.delete).toHaveBeenCalledWith(USER, 'e1')
+  })
+
+  it('Bug 27 — same path with explicit IST ctx tz (08:30Z → 14:00 IST)', async () => {
+    // IST is UTC+5:30 (no DST). 08:30Z stored projects to 14:00 IST. The
+    // LLM passed 14:00 — the dispatcher must project before comparing.
+    const ctx = { ...makeCtx(), timezone: 'Asia/Kolkata' }
+    ;(ctx.journalService.findAll as jest.Mock<any>).mockResolvedValueOnce({
+      data: [{ id: 'e1', measuredAt: '2026-05-19T08:30:00.000Z' }],
+    })
+    const result = await executeJournalTool(
+      'delete_checkin',
+      { entry_date: '2026-05-19', original_time: '14:00' },
       ctx as any,
       USER,
     )
@@ -755,5 +850,67 @@ describe('flag_emergency scenarios', () => {
       USER,
     )
     expect(JSON.parse(result).flagged).toBe(true)
+  })
+})
+
+// ─── Bug 28 — UTC-default fallback when LLM forgets entry_date / measurement_time ──
+// Pre-fix the dispatcher defaulted entry_date to UTC's calendar date and
+// measurement_time to UTC's HH:mm, then handed both to isoFromTzWallclock
+// which interpreted them as patient-local — landing the stored instant on
+// the wrong day for patients near a UTC midnight, and shifting the time
+// by the tz offset twice. Lower-severity than Bug 27 because the prompts
+// strictly tell the LLM to ALWAYS ask date + time — this is a defensive
+// fallback that only fires on prompt non-compliance.
+
+describe('Bug 28 — UTC-default fallback when args omit date / time', () => {
+  // Canonical failure case: 23:30 NY EDT on June 7 = 03:30Z on June 8.
+  // UTC's calendar has rolled over but the patient's local clock is still
+  // on the prior day.
+  const NY_NEAR_MIDNIGHT_UTC = new Date('2026-06-08T03:30:00.000Z')
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+    jest.setSystemTime(NY_NEAR_MIDNIGHT_UTC)
+  })
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  it('submit_checkin: future-date guard uses patient-local calendar, not UTC', async () => {
+    // NY local "today" is June 7. June 8 is in the future for the patient.
+    // Pre-fix the guard compared against UTC today ("2026-06-08") so it
+    // mistakenly let June 8 through.
+    const ctx = { ...makeCtx(), timezone: 'America/New_York' }
+    const result = await executeJournalTool(
+      'submit_checkin',
+      {
+        entry_date: '2026-06-08',
+        measurement_time: '08:00',
+        systolic_bp: 130,
+        diastolic_bp: 80,
+        medication_taken: true,
+        symptoms: [],
+      },
+      ctx as any,
+      USER,
+    )
+    const parsed = JSON.parse(result)
+    expect(parsed.saved).toBe(false)
+    expect(parsed.message).toMatch(/future date/i)
+    expect(ctx.journalService.create).not.toHaveBeenCalled()
+  })
+
+  it('update_checkin: NY patient at 23:30 EDT passes only measurement_time → date defaults to local June 7, not UTC June 8', async () => {
+    const ctx = { ...makeCtx(), timezone: 'America/New_York' }
+    await executeJournalTool(
+      'update_checkin',
+      { entry_id: 'e-known', measurement_time: '09:00' },
+      ctx as any,
+      USER,
+    )
+    const dto = (ctx.journalService.update as jest.Mock).mock.calls[0][2] as { measuredAt: string }
+    // Local June 7 at 09:00 EDT = 13:00Z June 7. Pre-fix this defaulted
+    // to UTC's date (June 8) and landed at 13:00Z June 8 — wrong day.
+    expect(dto.measuredAt).toBe('2026-06-07T13:00:00.000Z')
   })
 })

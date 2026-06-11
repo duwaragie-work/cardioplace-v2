@@ -61,8 +61,8 @@ function baseCtx(over: Partial<ResolvedContext> = {}): ResolvedContext {
 describe('AlertEngineService.evaluateAdHoc', () => {
   let service: AlertEngineService
   let prisma: Record<string, any>
-  let profileResolver: { resolve: jest.Mock }
-  let outputGenerator: { generate: jest.Mock }
+  let profileResolver: { resolve: jest.Mock<any> }
+  let outputGenerator: { generate: jest.Mock<any> }
 
   beforeEach(async () => {
     prisma = {

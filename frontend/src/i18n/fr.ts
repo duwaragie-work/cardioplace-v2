@@ -588,6 +588,7 @@ const fr: Record<TranslationKey, string> = {
   'readings.detailTitle': 'Détails de la mesure',
   'readings.viewDetails': 'Voir les détails de la mesure',
   'readings.noBpRecorded': 'Pas de TA enregistrée',
+  'readings.symptomLog': 'Journal des symptômes',
   'readings.meds': 'Méds',
   'readings.taken': 'Prise',
   'readings.missed': 'Manquée',
@@ -930,11 +931,11 @@ const fr: Record<TranslationKey, string> = {
   'home.ctaDesc': "Développé avec la DC Hospital Association. Déployé dans les communautés les plus à risque de Washington DC. Conçu pour atteindre les patients que la technologie de santé traditionnelle laisse de côté.",
   'home.ctaButton': 'À Propos du Programme',
   // TODO i18n — placeholder English copy; translate when demo video is finalised.
-  'home.demoEyebrow': 'See it in action',
-  'home.demoTitle': 'A five-minute walkthrough',
-  'home.demoDesc': 'The patient experience and the care-team closed loop — end to end, in real time. Watch how an alert is generated, escalated, and resolved with full clinical accountability.',
-  'home.demoPlayLabel': 'Play the Cardioplace 5-minute demo',
-  'home.demoCloseLabel': 'Close demo',
+  'home.demoEyebrow': 'Voyez-le en action',
+  'home.demoTitle': 'Une présentation de cinq minutes',
+  'home.demoDesc': 'L’expérience du patient et la boucle fermée de l’équipe soignante — de bout en bout, en temps réel. Découvrez comment une alerte est générée, transmise et résolue avec une responsabilité clinique complète.',
+  'home.demoPlayLabel': 'Lire la démo de 5 minutes de Cardioplace',
+  'home.demoCloseLabel': 'Fermer la démo',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'NOTRE HISTOIRE',
@@ -1433,6 +1434,12 @@ const fr: Record<TranslationKey, string> = {
   'ocr.med.errRateLimited': 'Trop de tentatives aujourd\'hui. Ajoutez les médicaments manuellement.',
   'ocr.med.errNetwork': 'Problème de connexion. Ajoutez les médicaments manuellement.',
   'ocr.med.errTooLarge': 'La photo est trop grande. Essayez une image plus petite.',
+
+  // i18n backfill — caregiver intake step + voice-chat text input
+  'intake.caregivers.title': 'Ajouter un proche aidant (facultatif)',
+  'intake.caregivers.subtitle': 'Un membre de la famille ou un ami que nous pouvons prévenir en cas d’alerte de santé grave. Ils ne sont contactés que pour les alertes approuvées par l’équipe soignante, et seulement après votre consentement. Vous pouvez ignorer cette étape et ajouter quelqu’un plus tard depuis votre profil.',
+  'intake.caregivers.audio': 'Vous pouvez ajouter un proche aidant — un membre de la famille ou un ami que nous pouvons prévenir en cas d’alerte de santé grave. Ils ne sont contactés qu’après votre consentement. Vous pouvez ignorer cette étape et ajouter quelqu’un plus tard depuis votre profil.',
+  'chat.orTypePlaceholder': 'Ou tapez un message...',
 };
 
 export default fr;

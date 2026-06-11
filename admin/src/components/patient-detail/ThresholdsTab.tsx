@@ -475,10 +475,11 @@ export default function ThresholdsTab({
 
         {/* Notes */}
         <div className="mt-5">
-          <label className="block text-[11.5px] font-bold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+          <label htmlFor="admin-threshold-notes" className="block text-[11.5px] font-bold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
             Clinical rationale
           </label>
           <textarea
+            id="admin-threshold-notes"
             value={form.notes}
             onChange={(e) => set('notes', e.target.value)}
             data-testid="admin-threshold-notes"
@@ -528,6 +529,7 @@ export default function ThresholdsTab({
                 value={reviewNote}
                 onChange={(e) => setReviewNote(e.target.value)}
                 data-testid="admin-threshold-review-note"
+                aria-label="Review note (optional)"
                 placeholder="Review note (optional)"
                 className="px-3 h-9 rounded-lg text-[12.5px] outline-none"
                 style={{ border: '1px solid var(--brand-border)', minWidth: 220 }}

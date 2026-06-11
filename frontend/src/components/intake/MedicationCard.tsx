@@ -78,7 +78,7 @@ export default function MedicationCard({
     >
       {isCombination && (
         <span
-          className="absolute -top-2.5 left-4 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider"
+          className="absolute -top-2.5 left-4 text-[0.625rem] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider"
           style={{
             backgroundColor: 'var(--brand-accent-teal)',
             color: 'white',
@@ -95,21 +95,21 @@ export default function MedicationCard({
 
         <div className="flex-1 min-w-0">
           <p
-            className="text-[15px] font-bold leading-tight"
+            className="text-[0.9375rem] font-bold leading-tight"
             style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
           >
             {brandName}
           </p>
           {genericName && (
             <p
-              className="text-[13px] font-semibold leading-tight mt-0.5"
+              className="text-[0.8125rem] font-semibold leading-tight mt-0.5"
               style={{ color: 'var(--brand-primary-purple)', wordBreak: 'break-word' }}
             >
               {genericName}
             </p>
           )}
           <p
-            className="text-[12px] mt-1.5 leading-snug"
+            className="text-[0.75rem] mt-1.5 leading-snug"
             style={{ color: 'var(--brand-text-secondary)', wordBreak: 'break-word' }}
           >
             {purpose}
@@ -138,7 +138,7 @@ export default function MedicationCard({
 
       <div className="mt-3 flex items-center justify-between">
         <span
-          className="text-[11px] font-semibold uppercase tracking-wider"
+          className="text-[0.6875rem] font-semibold uppercase tracking-wider"
           style={{ color: selected ? 'var(--brand-success-green)' : 'var(--brand-text-muted)' }}
         >
           {selected ? `✓ ${t('intake.medCard.takeThis')}` : t('intake.medCard.tapIfTake')}

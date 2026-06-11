@@ -234,14 +234,14 @@ export default function MicButton({
           // role=status announces the listening state to screen readers; the
           // text label is the non-colour pairing required by WCAG 2.2 AA Task 8.
           role="status"
-          className="text-[12px] font-medium"
+          className="text-[0.75rem] font-medium"
           style={{ color: 'var(--brand-alert-red)' }}
         >
           {t('intake.audio.dictateListening')}
         </span>
       )}
       {errorMsg && !listening && (
-        <span role="alert" className="text-[12px]" style={{ color: 'var(--brand-alert-red)' }}>
+        <span role="alert" className="text-[0.75rem]" style={{ color: 'var(--brand-alert-red)' }}>
           {errorMsg}
         </span>
       )}

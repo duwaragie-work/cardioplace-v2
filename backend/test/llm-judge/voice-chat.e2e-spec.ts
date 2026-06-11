@@ -64,7 +64,10 @@ function connectVoice(url: string, jwt: string) {
 
 descr('Voice Chat — Real E2E + LLM-as-Judge', () => {
   let judge: JudgeService
-  let ctx: TestContext | undefined
+  // Definite-assignment assertion — beforeAll always sets this before any
+  // it() runs. The earlier `| undefined` typing forced ctx!.jwt at every
+  // call site (4 spots) and tripped TS18048.
+  let ctx!: TestContext
   let baseUrl: string
   const results: EvalResult[] = []
 

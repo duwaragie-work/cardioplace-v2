@@ -267,7 +267,7 @@ function SectionCard({
             {icon}
           </div>
           <h2
-            className="text-[15px] font-bold truncate"
+            className="text-[0.9375rem] font-bold truncate"
             style={{ color: 'var(--brand-text-primary)' }}
           >
             {title}
@@ -278,7 +278,7 @@ function SectionCard({
           <Link
             href={editHref}
             data-testid={editTestId}
-            className="shrink-0 inline-flex items-center gap-1 h-8 px-3 rounded-full text-[12px] font-bold cursor-pointer transition hover:opacity-85"
+            className="shrink-0 inline-flex items-center gap-1 h-8 px-3 rounded-full text-[0.75rem] font-bold cursor-pointer transition hover:opacity-85"
             style={{
               backgroundColor: 'var(--brand-primary-purple-light)',
               color: 'var(--brand-primary-purple)',
@@ -293,7 +293,7 @@ function SectionCard({
             type="button"
             data-testid={editTestId}
             onClick={onEdit}
-            className="shrink-0 inline-flex items-center gap-1 h-8 px-3 rounded-full text-[12px] font-bold cursor-pointer transition hover:opacity-85"
+            className="shrink-0 inline-flex items-center gap-1 h-8 px-3 rounded-full text-[0.75rem] font-bold cursor-pointer transition hover:opacity-85"
             style={{
               backgroundColor: 'var(--brand-primary-purple-light)',
               color: 'var(--brand-primary-purple)',
@@ -321,7 +321,7 @@ function VerifiedBadge({ status }: { status?: string | null }) {
   if (status === 'VERIFIED') {
     return (
       <span
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-bold"
         style={{
           backgroundColor: 'var(--brand-success-green-light)',
           color: 'var(--brand-success-green)',
@@ -335,7 +335,7 @@ function VerifiedBadge({ status }: { status?: string | null }) {
   if (status === 'CORRECTED') {
     return (
       <span
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-bold"
         style={{
           backgroundColor: 'var(--brand-accent-teal-light)',
           color: 'var(--brand-accent-teal)',
@@ -348,7 +348,7 @@ function VerifiedBadge({ status }: { status?: string | null }) {
   }
   return (
     <span
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-bold"
       style={{
         backgroundColor: 'var(--brand-warning-amber-light)',
         color: 'var(--brand-warning-amber-text)',
@@ -366,7 +366,7 @@ function MedVerifiedBadge({ status }: { status: PatientMedicationDto['verificati
   if (status === 'REJECTED') {
     return (
       <span
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-bold"
         style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
       >
         <ShieldAlert aria-hidden="true" className="w-3 h-3" />
@@ -377,7 +377,7 @@ function MedVerifiedBadge({ status }: { status: PatientMedicationDto['verificati
   if (status === 'HOLD') {
     return (
       <span
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-bold"
         style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
       >
         <Clock aria-hidden="true" className="w-3 h-3" />
@@ -391,11 +391,11 @@ function MedVerifiedBadge({ status }: { status: PatientMedicationDto['verificati
 function Row({ label, value, testId }: { label: string; value: React.ReactNode; testId?: string }) {
   return (
     <div data-testid={testId} className="flex items-baseline justify-between gap-3 py-2">
-      <span className="text-[12.5px] shrink-0" style={{ color: 'var(--brand-text-muted)' }}>
+      <span className="text-[0.78125rem] shrink-0" style={{ color: 'var(--brand-text-muted)' }}>
         {label}
       </span>
       <span
-        className="text-[13.5px] font-semibold text-right min-w-0 flex-1"
+        className="text-[0.84375rem] font-semibold text-right min-w-0 flex-1"
         style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
       >
         {value}
@@ -432,6 +432,15 @@ function PersonalInfoModal({
   onSaved: (next: AuthProfileDto) => void;
 }) {
   const { t } = useLanguage();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const [name, setName] = useState(current.name ?? '');
   const [commPref, setCommPref] = useState<CommPref>(current.communicationPreference);
   const [saving, setSaving] = useState(false);
@@ -487,7 +496,7 @@ function PersonalInfoModal({
           style={{ borderBottom: '1px solid var(--brand-border)' }}
         >
           <div className="flex items-center gap-2">
-            <h2 id="personal-info-title" className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+            <h2 id="personal-info-title" className="text-[1rem] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
               {t('profile.editPersonalInfo')}
             </h2>
             <AudioButton size="sm" text={t('profile.editPersonalInfo')} />
@@ -505,7 +514,7 @@ function PersonalInfoModal({
 
         <div className="flex-1 overflow-y-auto thin-scrollbar p-5 space-y-4">
           <div>
-            <label htmlFor="profile-edit-name" className="block text-[12px] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
+            <label htmlFor="profile-edit-name" className="block text-[0.75rem] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
               {t('profile.nameLabel')}
             </label>
             <div className="flex items-center gap-2">
@@ -515,7 +524,7 @@ function PersonalInfoModal({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={t('profile.namePlaceholder')}
-                className="flex-1 h-11 px-3 rounded-xl border text-[14px] outline-none"
+                className="flex-1 h-11 px-3 rounded-xl border text-[0.875rem] outline-none"
                 style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
               />
               <MicButton
@@ -526,7 +535,7 @@ function PersonalInfoModal({
           </div>
 
           <div>
-            <label htmlFor="profile-edit-email" className="block text-[12px] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
+            <label htmlFor="profile-edit-email" className="block text-[0.75rem] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
               {t('profile.email')} <span className="font-normal" style={{ color: 'var(--brand-text-muted)' }}>{t('profile.emailCannotChange')}</span>
             </label>
             <input
@@ -534,7 +543,7 @@ function PersonalInfoModal({
               type="email"
               value={current.email ?? ''}
               readOnly
-              className="w-full h-11 px-3 rounded-xl border text-[14px] cursor-not-allowed"
+              className="w-full h-11 px-3 rounded-xl border text-[0.875rem] cursor-not-allowed"
               style={{
                 borderColor: 'var(--brand-border)',
                 color: 'var(--brand-text-muted)',
@@ -544,7 +553,7 @@ function PersonalInfoModal({
           </div>
 
           <div>
-            <label className="block text-[12px] font-semibold mb-2" style={{ color: 'var(--brand-text-secondary)' }}>
+            <label className="block text-[0.75rem] font-semibold mb-2" style={{ color: 'var(--brand-text-secondary)' }}>
               {t('profile.commPrefLabel')}
             </label>
             <div className="grid grid-cols-3 gap-2">
@@ -560,7 +569,7 @@ function PersonalInfoModal({
                     type="button"
                     data-testid={`profile-comm-preference-${opt.value ?? 'null'}`}
                     onClick={() => setCommPref(opt.value)}
-                    className="h-10 rounded-xl border-2 text-[12.5px] font-semibold transition cursor-pointer"
+                    className="h-10 rounded-xl border-2 text-[0.78125rem] font-semibold transition cursor-pointer"
                     style={{
                       borderColor: active ? 'var(--brand-primary-purple)' : 'var(--brand-border)',
                       backgroundColor: active ? 'var(--brand-primary-purple-light)' : 'transparent',
@@ -581,7 +590,7 @@ function PersonalInfoModal({
         >
           {error && (
             <p
-              className="text-[12.5px] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
+              className="text-[0.78125rem] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
               style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
             >
               {error}
@@ -734,7 +743,7 @@ export default function ProfilePage() {
         <div className="flex items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-3 min-w-0">
             <div
-              className="shrink-0 rounded-2xl flex items-center justify-center text-white font-bold text-[18px] sm:text-[20px]"
+              className="shrink-0 rounded-2xl flex items-center justify-center text-white font-bold text-[1.125rem] sm:text-[1.25rem]"
               style={{
                 width: 56,
                 height: 56,
@@ -749,7 +758,7 @@ export default function ProfilePage() {
               <div className="flex items-center gap-2">
                 <h1
                   data-testid="profile-name"
-                  className="text-[20px] sm:text-[22px] font-bold leading-tight truncate"
+                  className="text-[1.25rem] sm:text-[1.375rem] font-bold leading-tight truncate"
                   style={{ color: 'var(--brand-text-primary)' }}
                 >
                   {user?.name ?? t('profile.yourProfile')}
@@ -759,14 +768,14 @@ export default function ProfilePage() {
                   text={`${user?.name ?? t('profile.yourProfile')}. ${user?.email ?? ''}`}
                 />
               </div>
-              <p className="text-[12.5px] truncate" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.78125rem] truncate" style={{ color: 'var(--brand-text-muted)' }}>
                 {user?.email ?? '—'}
               </p>
               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                 {profile && <VerifiedBadge status={verificationStatus} />}
                 {!profile && (
                   <span
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-bold"
                     style={{
                       backgroundColor: 'var(--brand-warning-amber-light)',
                       color: 'var(--brand-warning-amber-text)',
@@ -784,7 +793,7 @@ export default function ProfilePage() {
             data-testid="profile-signout"
             type="button"
             onClick={logout}
-            className="shrink-0 inline-flex items-center gap-1.5 h-10 px-3 sm:px-4 rounded-full font-bold text-[12.5px] cursor-pointer transition hover:opacity-85"
+            className="shrink-0 inline-flex items-center gap-1.5 h-10 px-3 sm:px-4 rounded-full font-bold text-[0.78125rem] cursor-pointer transition hover:opacity-85"
             style={{
               backgroundColor: 'var(--brand-alert-red-light)',
               color: 'var(--brand-alert-red-text)',
@@ -805,7 +814,7 @@ export default function ProfilePage() {
         {!profile && (
           <Link
             href="/clinical-intake"
-            className="block rounded-2xl p-4 text-center text-white font-bold text-[14px]"
+            className="block rounded-2xl p-4 text-center text-white font-bold text-[0.875rem]"
             style={{
               background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
               boxShadow: 'var(--brand-shadow-button)',
@@ -850,7 +859,7 @@ export default function ProfilePage() {
               />
             </div>
           ) : (
-            <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
+            <p className="text-[0.8125rem]" style={{ color: 'var(--brand-text-muted)' }}>
               {t('profile.noCareTeam')}
             </p>
           )}
@@ -980,7 +989,7 @@ export default function ProfilePage() {
               })()}
             >
               {onConditions.length === 0 && !profile?.diagnosedHypertension ? (
-                <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
+                <p className="text-[0.8125rem]" style={{ color: 'var(--brand-text-muted)' }}>
                   {t('profile.noConditions')}
                 </p>
               ) : (
@@ -996,7 +1005,7 @@ export default function ProfilePage() {
                         {c.kind === 'af' && <Activity className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />}
                         {c.kind === 'cad' && <Stethoscope className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />}
                         {(c.kind === 'hcm' || c.kind === 'dcm') && <Sparkles className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />}
-                        <span className="text-[13px] font-semibold" style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}>
+                        <span className="text-[0.8125rem] font-semibold" style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}>
                           {c.label}
                         </span>
                       </div>
@@ -1010,7 +1019,7 @@ export default function ProfilePage() {
                   )}
                   {profile?.diagnosedHypertension && (
                     <div className="flex items-center justify-between gap-2 flex-wrap pt-2" style={{ borderTop: '1px solid var(--brand-border)' }}>
-                      <span className="text-[13px] font-semibold min-w-0" style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}>
+                      <span className="text-[0.8125rem] font-semibold min-w-0" style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}>
                         {t('profile.diagnosedHtn')}
                       </span>
                       <div className="shrink-0">
@@ -1067,7 +1076,7 @@ export default function ProfilePage() {
             })()}
           >
             {activeMeds.length === 0 ? (
-              <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.8125rem]" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('profile.noMedications')}
               </p>
             ) : (
@@ -1098,7 +1107,7 @@ export default function ProfilePage() {
                       {/* Row 1: name (truncates to single line) + verified badge */}
                       <div className="flex items-center justify-between gap-2 min-w-0">
                         <p
-                          className="text-[13.5px] font-bold leading-tight truncate min-w-0 flex-1"
+                          className="text-[0.84375rem] font-bold leading-tight truncate min-w-0 flex-1"
                           style={{ color: 'var(--brand-text-primary)' }}
                           title={m.drugName}
                         >
@@ -1119,7 +1128,7 @@ export default function ProfilePage() {
                           matchToCatalog(m.drugName)?.purpose;
                         return purposeLine ? (
                           <p
-                            className="text-[11.5px] mt-0.5 leading-snug"
+                            className="text-[0.71875rem] mt-0.5 leading-snug"
                             style={{ color: 'var(--brand-text-secondary)' }}
                           >
                             {purposeLine}
@@ -1130,14 +1139,14 @@ export default function ProfilePage() {
                       <div className="mt-1 flex items-center gap-2 flex-wrap">
                         {m.isCombination && (
                           <span
-                            className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider"
+                            className="shrink-0 text-[0.625rem] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider"
                             style={{ backgroundColor: 'var(--brand-accent-teal)', color: 'white' }}
                           >
                             {t('profile.combinationPill')}
                           </span>
                         )}
                         <p
-                          className="text-[12px]"
+                          className="text-[0.75rem]"
                           style={{ color: 'var(--brand-text-muted)' }}
                         >
                           {frequencyLabel(m.frequency, t)}
@@ -1169,7 +1178,7 @@ export default function ProfilePage() {
             }}
           >
             <ShieldAlert className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-alert-red-text)' }} />
-            <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+            <p className="text-[0.78125rem] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
               {t('profile.fieldsNeedRecheck').replace('{fields}', rejectedFieldLabels.join(', '))}
             </p>
           </div>
@@ -1182,7 +1191,7 @@ export default function ProfilePage() {
             }}
           >
             <Clock className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-warning-amber-text)' }} />
-            <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+            <p className="text-[0.78125rem] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
               {t('profile.reviewingChanges')}
             </p>
           </div>

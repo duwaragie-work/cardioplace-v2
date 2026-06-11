@@ -72,19 +72,19 @@ export default function ActionRequiredCard({ state, ctaHref = '/clinical-intake'
 
         <div className="flex-1 min-w-0">
           <p
-            className="text-[10px] font-bold uppercase tracking-wider mb-0.5"
+            className="text-[0.625rem] font-bold uppercase tracking-wider mb-0.5"
             style={{ color: 'var(--brand-warning-amber-text)' }}
           >
             {t('intake.a0.actionRequired')}
           </p>
           <p
-            className="text-[15px] md:text-[16px] font-bold leading-tight"
+            className="text-[0.9375rem] md:text-[1rem] font-bold leading-tight"
             style={{ color: 'var(--brand-text-primary)' }}
           >
             {heading}
           </p>
           <p
-            className="text-[12px] md:text-[13px] mt-0.5 leading-snug"
+            className="text-[0.75rem] md:text-[0.8125rem] mt-0.5 leading-snug"
             style={{ color: 'var(--brand-text-secondary)' }}
           >
             {sub}
@@ -104,7 +104,7 @@ export default function ActionRequiredCard({ state, ctaHref = '/clinical-intake'
         </div>
 
         <div
-          className="shrink-0 hidden sm:flex items-center gap-1.5 px-4 py-2 rounded-full font-bold text-[13px]"
+          className="shrink-0 hidden sm:flex items-center gap-1.5 px-4 py-2 rounded-full font-bold text-[0.8125rem]"
           style={{
             backgroundColor: 'var(--brand-warning-amber)',
             color: 'white',
@@ -117,7 +117,7 @@ export default function ActionRequiredCard({ state, ctaHref = '/clinical-intake'
       </div>
 
       <div
-        className="sm:hidden mt-3 w-full h-9 rounded-full flex items-center justify-center gap-1.5 font-bold text-[13px]"
+        className="sm:hidden mt-3 w-full h-9 rounded-full flex items-center justify-center gap-1.5 font-bold text-[0.8125rem]"
         style={{
           backgroundColor: 'var(--brand-warning-amber)',
           color: 'white',

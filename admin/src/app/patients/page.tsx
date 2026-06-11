@@ -632,7 +632,7 @@ function PatientModal({
             </div>
             <div>
               <h3 className="text-white font-bold text-[16px]">{patient.name ?? 'Unknown'}</h3>
-              <p className="text-white/70 text-[12px]">{patient.email ?? '--'}</p>
+              <p className="text-white text-[12px]">{patient.email ?? '--'}</p>
             </div>
           </div>
           <button
@@ -753,16 +753,25 @@ function PatientModal({
                               {entry.systolicBP && entry.diastolicBP ? `${entry.systolicBP}/${entry.diastolicBP}` : '--'}
                             </td>
                             <td className="px-3 py-2">
-                              <span
-                                className="inline-block w-2 h-2 rounded-full"
-                                style={{
-                                  backgroundColor: entry.medicationTaken
-                                    ? 'var(--brand-success-green)'
-                                    : entry.medicationTaken === false
-                                    ? 'var(--brand-alert-red)'
-                                    : 'var(--brand-border)',
-                                }}
-                              />
+                              {(() => {
+                                // WCAG 1.4.1 — don't rely on the dot colour alone;
+                                // pair it with a text label (Taken / Missed / —).
+                                const meta = entry.medicationTaken
+                                  ? { color: 'var(--brand-success-green)', label: 'Taken' }
+                                  : entry.medicationTaken === false
+                                  ? { color: 'var(--brand-alert-red)', label: 'Missed' }
+                                  : { color: 'var(--brand-border)', label: '—' };
+                                return (
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <span
+                                      className="inline-block w-2 h-2 rounded-full shrink-0"
+                                      style={{ backgroundColor: meta.color }}
+                                      aria-hidden
+                                    />
+                                    <span style={{ color: 'var(--brand-text-secondary)' }}>{meta.label}</span>
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="px-3 py-2" style={{ color: 'var(--brand-text-muted)' }}>
                               {entry.symptoms.length > 0 ? entry.symptoms.join(', ') : 'None'}
@@ -1001,6 +1010,7 @@ export default function PatientsPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={t('provider.searchPatients')}
+                aria-label={t('provider.searchPatients')}
                 data-testid="admin-patient-search-input"
                 className="flex-1 text-[12px] outline-none bg-transparent min-w-0"
                 style={{ color: 'var(--brand-text-primary)' }}
@@ -1023,6 +1033,7 @@ export default function PatientsPage() {
                 <select
                   value={riskFilter}
                   onChange={(e) => setRiskFilter(e.target.value)}
+                  aria-label={t('provider.allTiers')}
                   data-testid="admin-patient-risk-filter"
                   className="appearance-none w-full sm:w-auto h-9 pl-3 pr-7 rounded-full text-[12px] font-semibold outline-none cursor-pointer"
                   style={{

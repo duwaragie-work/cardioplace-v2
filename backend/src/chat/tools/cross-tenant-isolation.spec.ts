@@ -11,8 +11,13 @@
 //   • getConversationHistory validates session ownership + emits
 //     `[SECURITY] cross_tenant_attempt` log line on mismatch
 //   • MedicationAdherenceService logs cross-tenant medication id probes
-//   • LLM tool projections never include internal fields (userId, sessionId,
-//     createdAt, etc.)
+//   • LLM tool projections never include internal fields (userId, createdAt,
+//     source, sourceMetadata, updatedAt). sessionId is the ONE intentional
+//     allow-list exception in the get_recent_readings projection, exposed as
+//     `session_id` so the LLM can thread an existing session through a
+//     subsequent submit_checkin (multi-reading add-to-session flow). It is a
+//     grouping label, never a security boundary — composite { id, userId }
+//     scoping on every mutation still prevents cross-tenant leak.
 //
 // If any of these tests regresses, the multi-tenant boundary has weakened
 // and the PR must NOT merge.
@@ -29,6 +34,8 @@ import { EmbeddingService } from '../../common/embedding.service.js'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
 import { VoiceToolsService } from '../../voice/tools/voice-tools.service.js'
 import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
+import { IntakeStatusService } from '../../intake/intake-status.service.js'
+import { EventEmitter2 } from '@nestjs/event-emitter'
 import {
   executeJournalTool,
   getJournalToolDeclarations,
@@ -63,6 +70,9 @@ describe('Tool dispatcher userId guard', () => {
         { provide: DailyJournalService, useValue: { create: jest.fn(), findAll: jest.fn() } },
         { provide: GeminiService, useValue: { extractBpFromImage: jest.fn() } },
         { provide: AlertEngineService, useValue: { evaluateAdHoc: jest.fn() } },
+        { provide: IntakeStatusService, useValue: { getStatus: jest.fn() } },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: jest.fn() } } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -105,6 +115,9 @@ describe('userId source — LLM args never override dispatch context', () => {
         { provide: DailyJournalService, useValue: { create: jest.fn() } },
         { provide: GeminiService, useValue: { extractBpFromImage: jest.fn() } },
         { provide: AlertEngineService, useValue: { evaluateAdHoc } },
+        { provide: IntakeStatusService, useValue: { getStatus: jest.fn() } },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: jest.fn() } } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -126,7 +139,8 @@ describe('userId source — LLM args never override dispatch context', () => {
 describe('Cross-tenant id rejections', () => {
   it('update_checkin — when journalService.update throws (cross-tenant), tool returns updated:false', async () => {
     const findAll = jest.fn().mockResolvedValue({
-      data: [{ id: 'entry-foreign', measuredAt: new Date('2026-05-30T08:00:00Z') }],
+      // Bug 27 — 08:00 NY EDT (default ctx tz) = 12:00Z stored.
+      data: [{ id: 'entry-foreign', measuredAt: new Date('2026-05-30T12:00:00Z') }],
     } as never) as jest.Mock
     // Simulate the daily-journal service rejection — its findFirst returned null
     // because the entry belongs to a different patient, so it threw.
@@ -148,7 +162,8 @@ describe('Cross-tenant id rejections', () => {
 
   it('delete_checkin — when journalService.delete throws (cross-tenant), tool returns deleted:false', async () => {
     const findAll = jest.fn().mockResolvedValue({
-      data: [{ id: 'entry-foreign', measuredAt: new Date('2026-05-30T08:00:00Z') }],
+      // Bug 27 — 08:00 NY EDT (default ctx tz) = 12:00Z stored.
+      data: [{ id: 'entry-foreign', measuredAt: new Date('2026-05-30T12:00:00Z') }],
     } as never) as jest.Mock
     const del = jest.fn().mockRejectedValue(new Error('Journal entry not found') as never)
     const ctx = {
@@ -201,6 +216,79 @@ describe('ConversationHistoryService.getConversationHistory ownership guard', ()
     expect(loggerWarn).toHaveBeenCalledWith(
       expect.stringMatching(/\[SECURITY\] cross_tenant_attempt.*conversation_history/),
     )
+  })
+
+  // Bug 9 regression — getSessionSummary must mirror the userId guard.
+  // Without it, user-B could pass user-A's sessionId and read user-A's
+  // compressed clinical summary in their LLM prompt while getConversationHistory
+  // correctly returned []. Same defence as the sibling above.
+  it('getSessionSummary: returns "" + logs [SECURITY] when sessionId belongs to a different user', async () => {
+    prisma.session.findFirst.mockResolvedValue(null as never)
+    const r = await svc.getSessionSummary('user-B', 'session-of-A')
+    expect(r).toBe('')
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringMatching(/\[SECURITY\] cross_tenant_attempt service=conversation_history\.summary/),
+    )
+  })
+
+  it('getSessionSummary: returns the sliced summary when sessionId belongs to the user', async () => {
+    prisma.session.findFirst.mockResolvedValue({ summary: 'older bullets' } as never)
+    const r = await svc.getSessionSummary('user-A', 'session-A')
+    expect(r).toBe('older bullets')
+    expect(loggerWarn).not.toHaveBeenCalled()
+  })
+
+  it('getSessionSummary: scopes the Prisma query by BOTH id AND userId', async () => {
+    prisma.session.findFirst.mockResolvedValue({ summary: '' } as never)
+    await svc.getSessionSummary('user-A', 'session-A')
+    expect(prisma.session.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'session-A', userId: 'user-A' },
+      }),
+    )
+  })
+
+  // Bug 17 — voice's prior-conversation summary path. Same userId-scope
+  // guard as the sibling above; differs by returning the FULL (un-sliced)
+  // summary because voice has no `contents` array to duplicate against.
+  it('getSessionSummaryForVoice: returns "" + logs [SECURITY] for cross-tenant sessionId', async () => {
+    prisma.session.findFirst.mockResolvedValue(null as never)
+    const r = await svc.getSessionSummaryForVoice('user-B', 'session-of-A')
+    expect(r).toBe('')
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringMatching(/\[SECURITY\] cross_tenant_attempt service=conversation_history\.summary_for_voice/),
+    )
+  })
+
+  it('getSessionSummaryForVoice: returns the FULL summary (no slicing) for the owning user', async () => {
+    // Build a summary with both compressed bullets AND tail append lines —
+    // voice MUST receive both because Gemini Live has no `contents` array
+    // for the raw recent turns.
+    const fullSummary = [
+      'Compressed bullets up here.',
+      '- [Text] Patient: My BP was 145/95 → AI: That is elevated…',
+      '- [Voice] Patient: I took my meds → AI: Good — keep it up.',
+    ].join('\n')
+    prisma.session.findFirst.mockResolvedValue({ summary: fullSummary } as never)
+    const r = await svc.getSessionSummaryForVoice('user-A', 'session-A')
+    expect(r).toBe(fullSummary)
+    expect(loggerWarn).not.toHaveBeenCalled()
+  })
+
+  it('getSessionSummaryForVoice: scopes the Prisma query by BOTH id AND userId', async () => {
+    prisma.session.findFirst.mockResolvedValue({ summary: '' } as never)
+    await svc.getSessionSummaryForVoice('user-A', 'session-A')
+    expect(prisma.session.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'session-A', userId: 'user-A' },
+      }),
+    )
+  })
+
+  it('getSessionSummaryForVoice: returns "" when userId or sessionId is empty', async () => {
+    expect(await svc.getSessionSummaryForVoice('', 'session-A')).toBe('')
+    expect(await svc.getSessionSummaryForVoice('user-A', '')).toBe('')
+    expect(prisma.session.findFirst).not.toHaveBeenCalled()
   })
 
   it('returns rows + does NOT log when sessionId belongs to current user', async () => {
@@ -264,7 +352,7 @@ describe('MedicationAdherenceService cross-tenant guard', () => {
 // ─── 6. LLM privacy boundary — projection contains no internal fields ──────
 
 describe('LLM privacy boundary (Part B.2)', () => {
-  it('text get_recent_readings projection — no userId/sessionId/createdAt/updatedAt fields', async () => {
+  it('text get_recent_readings projection — no userId/createdAt/updatedAt; session_id allowed (multi-reading flow)', async () => {
     // Simulate findAll returning a fully-populated entry (mimics serializeEntry
     // which DOES include the internal columns).
     const findAll = jest.fn().mockResolvedValue({
@@ -300,20 +388,28 @@ describe('LLM privacy boundary (Part B.2)', () => {
     // …and must NOT include internal fields.
     const keys = Object.keys(parsed.readings[0])
     expect(keys).not.toContain('userId')
-    expect(keys).not.toContain('sessionId')
     expect(keys).not.toContain('source')
     expect(keys).not.toContain('sourceMetadata')
     expect(keys).not.toContain('createdAt')
     expect(keys).not.toContain('updatedAt')
+    // session_id is the ONE intentional allow-list exception — exposed under
+    // its snake_case alias so the LLM can thread it back into a follow-up
+    // submit_checkin for the multi-reading add-to-session flow (AFib + any
+    // clinically-grouped session). Grouping label only, not a security
+    // boundary — composite { id, userId } scoping still prevents cross-tenant
+    // writes. The camelCase `sessionId` is still rejected.
+    expect(keys).not.toContain('sessionId')
+    expect(keys).toContain('session_id')
+    expect(parsed.readings[0].session_id).toBe('session-X')
   })
 })
 
 // ─── 7. Catalog assertion — guard didn't regress declarations ──────────────
 
 describe('Tool catalog still intact after security hardening', () => {
-  it('text catalog still exposes 9 tools (no accidental removals)', () => {
+  it('text catalog still exposes 11 tools (no accidental removals)', () => {
     const decls = getJournalToolDeclarations()
-    expect(decls).toHaveLength(9)
+    expect(decls).toHaveLength(11)
   })
 })
 

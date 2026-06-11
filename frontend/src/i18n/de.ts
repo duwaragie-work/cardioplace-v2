@@ -588,6 +588,7 @@ const de: Record<TranslationKey, string> = {
   'readings.detailTitle': 'Messdetails',
   'readings.viewDetails': 'Messdetails anzeigen',
   'readings.noBpRecorded': 'Kein BD aufgezeichnet',
+  'readings.symptomLog': 'Symptom-Eintrag',
   'readings.meds': 'Meds',
   'readings.taken': 'Genommen',
   'readings.missed': 'Versäumt',
@@ -930,11 +931,11 @@ const de: Record<TranslationKey, string> = {
   'home.ctaDesc': 'Entwickelt mit der DC Hospital Association. Eingesetzt in den am stärksten gefährdeten Gemeinschaften Washingtons. Konzipiert, um die Patienten zu erreichen, die herkömmliche Gesundheitstechnologie zurücklässt.',
   'home.ctaButton': 'Über das Programm',
   // TODO i18n — placeholder English copy; translate when demo video is finalised.
-  'home.demoEyebrow': 'See it in action',
-  'home.demoTitle': 'A five-minute walkthrough',
-  'home.demoDesc': 'The patient experience and the care-team closed loop — end to end, in real time. Watch how an alert is generated, escalated, and resolved with full clinical accountability.',
-  'home.demoPlayLabel': 'Play the Cardioplace 5-minute demo',
-  'home.demoCloseLabel': 'Close demo',
+  'home.demoEyebrow': 'Sehen Sie es in Aktion',
+  'home.demoTitle': 'Eine fünfminütige Übersicht',
+  'home.demoDesc': 'Das Patientenerlebnis und der geschlossene Regelkreis des Behandlungsteams — durchgängig, in Echtzeit. Sehen Sie, wie ein Alarm erzeugt, eskaliert und mit vollständiger klinischer Nachvollziehbarkeit gelöst wird.',
+  'home.demoPlayLabel': 'Die 5-minütige Cardioplace-Demo abspielen',
+  'home.demoCloseLabel': 'Demo schließen',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'UNSERE GESCHICHTE',
@@ -1433,6 +1434,12 @@ const de: Record<TranslationKey, string> = {
   'ocr.med.errRateLimited': 'Zu viele Versuche heute. Bitte fügen Sie Medikamente manuell hinzu.',
   'ocr.med.errNetwork': 'Verbindungsproblem. Bitte fügen Sie Medikamente manuell hinzu.',
   'ocr.med.errTooLarge': 'Foto ist zu groß. Versuchen Sie ein kleineres Bild.',
+
+  // i18n backfill — caregiver intake step + voice-chat text input
+  'intake.caregivers.title': 'Eine Betreuungsperson hinzufügen (optional)',
+  'intake.caregivers.subtitle': 'Ein Familienmitglied oder Freund, den wir benachrichtigen können, wenn ein ernster Gesundheitsalarm auftritt. Sie werden nur bei vom Behandlungsteam genehmigten Alarmen kontaktiert und erst, nachdem Sie zugestimmt haben. Sie können dies überspringen und später in Ihrem Profil jemanden hinzufügen.',
+  'intake.caregivers.audio': 'Optional können Sie eine Betreuungsperson hinzufügen — ein Familienmitglied oder Freund, den wir benachrichtigen können, wenn ein ernster Gesundheitsalarm auftritt. Sie werden erst kontaktiert, nachdem Sie zugestimmt haben. Sie können dies überspringen und später in Ihrem Profil jemanden hinzufügen.',
+  'chat.orTypePlaceholder': 'Oder eine Nachricht eingeben...',
 };
 
 export default de;

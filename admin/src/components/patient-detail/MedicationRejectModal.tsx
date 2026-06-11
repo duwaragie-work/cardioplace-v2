@@ -200,6 +200,7 @@ export default function MedicationRejectModal({ med, open, onClose, onConfirmed 
               {picked && (
                 <div>
                   <label
+                    htmlFor="admin-med-reject-rationale"
                     className="block text-[12px] font-semibold mb-1.5"
                     style={{ color: 'var(--brand-text-secondary)' }}
                   >
@@ -207,9 +208,11 @@ export default function MedicationRejectModal({ med, open, onClose, onConfirmed 
                     <span style={{ color: 'var(--brand-alert-red)' }}> · required</span>
                   </label>
                   <textarea
+                    id="admin-med-reject-rationale"
                     value={rationale}
                     onChange={(e) => setRationale(e.target.value)}
                     data-testid="admin-med-reject-rationale"
+                    aria-required="true"
                     placeholder="Brief clinical note for the audit trail."
                     rows={3}
                     className="w-full px-3 py-2 rounded-lg text-[13px] outline-none resize-y leading-relaxed"

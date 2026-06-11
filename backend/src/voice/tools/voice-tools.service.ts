@@ -1,10 +1,26 @@
-import { Injectable, Logger } from '@nestjs/common'
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common'
+import { EventEmitter2 } from '@nestjs/event-emitter'
 import { Type } from '@google/genai'
 import type { FunctionDeclaration } from '@google/genai'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
 import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import type { SessionSymptoms } from '../../daily_journal/engine/types.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
+import { dedupeSymptomsAgainstFlags, isIntakeIncompleteError } from '../../chat/tools/journal-tools.js'
+import { IntakeStatusService } from '../../intake/intake-status.service.js'
+import { PrismaService } from '../../prisma/prisma.service.js'
+import {
+  EMERGENCY_EVENTS,
+  type EmergencyFlaggedPayload,
+} from '../../chat/emergency-events.js'
+import { isoFromTzWallclock, tzWallclockFromIso } from '../../common/datetime.js'
+import { kgToLbs, normaliseWeightToKg } from '../../common/units.js'
 
 // Voice-tool I/O — argument shapes are stable contract with the Gemini Live
 // system prompt; field-name and sentinel-value changes ripple into the
@@ -68,6 +84,9 @@ export class VoiceToolsService {
     private readonly dailyJournal: DailyJournalService,
     private readonly gemini: GeminiService,
     private readonly alertEngine: AlertEngineService,
+    private readonly intakeStatusService: IntakeStatusService,
+    private readonly prisma: PrismaService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -80,14 +99,16 @@ export class VoiceToolsService {
       {
         name: 'submit_checkin',
         description:
-          "Submit the patient's health check-in after all values have been confirmed. Call only once the patient has said yes to saving. Supports sparse entries (BP=0 means not provided) for partial logs.",
+          "Submit the patient's health check-in after all values have been confirmed. Call only once the patient has said yes to saving. " +
+          "Bug 50 — CRITICAL: pass the systolic_bp and diastolic_bp values you actually collected from the patient in this conversation as positive integers (e.g. systolic_bp=138, diastolic_bp=85). 0/0 is ONLY the sparse-log code path — entries where the patient explicitly said they have NO BP today and is only logging medication or symptoms. Passing 0/0 when the patient gave real numbers is rejected with 'Got no over no — that's incomplete' and forces the patient to re-state their BP.",
         parameters: {
           type: Type.OBJECT,
           properties: {
-            systolic_bp: { type: Type.INTEGER, description: 'Top number 60-250. 0 = not provided (sparse log).' },
-            diastolic_bp: { type: Type.INTEGER, description: 'Bottom number 40-150. 0 = not provided (sparse log).' },
+            systolic_bp: { type: Type.INTEGER, description: 'Top number — integer 60-250. MUST be the value the patient gave you earlier in this conversation. 0 ONLY for sparse logs (medication-only / symptom-only entries where the patient has no BP today).' },
+            diastolic_bp: { type: Type.INTEGER, description: 'Bottom number — integer 40-150. MUST be the value the patient gave you earlier in this conversation. 0 ONLY for sparse logs (medication-only / symptom-only entries where the patient has no BP today).' },
             medication_taken: { type: Type.BOOLEAN, description: 'Whether the patient took all medications.' },
-            weight: { type: Type.NUMBER, description: 'Weight in lbs. 0 = not provided.' },
+            weight: { type: Type.NUMBER, description: 'Weight as a number — whatever value the patient said. 0 = not provided. Set weight_unit to specify lbs or kg.' },
+            weight_unit: { type: Type.STRING, description: 'Unit for `weight`: "LBS" or "KG". Use whichever unit the patient actually said — do NOT convert in your head. Defaults to LBS when omitted.' },
             symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Legacy freeform symptom list. Prefer the structured booleans below.' },
             notes: { type: Type.STRING, description: 'Extra notes. ALWAYS in English.' },
             entry_date: { type: Type.STRING, description: 'YYYY-MM-DD or "" for today.' },
@@ -143,13 +164,37 @@ export class VoiceToolsService {
                 required: ['drug_name', 'reason'],
               },
             },
+            session_id: {
+              type: Type.STRING,
+              description:
+                'Optional session-grouping UUID. When recording MULTIPLE readings as one session ' +
+                '(AFib patients always; or anyone you asked to take ≥2), generate ONE UUID at session ' +
+                'start and pass the SAME value on every submit_checkin call in that session. To ADD a ' +
+                'reading to an EXISTING session beyond the 5-min proximity window, first call ' +
+                'get_recent_readings, read sessionId off an entry in that session, and reuse it on the ' +
+                'new submit_checkin. Omit for one-off check-ins. "" = omit.',
+            },
           },
-          required: ['medication_taken'],
+          // Bug 50 — chat-voice parity. Chat tool schema marks the same
+          // fields required (see backend/src/chat/tools/journal-tools.ts).
+          // Marking them required forces Gemini Live's function-calling
+          // layer to make the LLM include them in the args explicitly —
+          // either with the patient's real numbers OR with 0 for the
+          // sparse-log path. Without this, Gemini happily omits them and
+          // the dispatcher sees `undefined → 0`, looking identical to a
+          // deliberate sparse log even when the bot had real numbers.
+          required: ['entry_date', 'measurement_time', 'systolic_bp', 'diastolic_bp', 'medication_taken', 'symptoms'],
         },
       },
       {
         name: 'get_recent_readings',
-        description: "Retrieve the patient's recent BP readings. Use for history questions or to find entry_id before update/delete.",
+        description:
+          "Retrieve the patient's recent BP readings. Use for history questions or to find entry_id before update/delete. " +
+          'Bug 21c — triggers on ANY patient phrasing meaning "show me my past readings" — ' +
+          'e.g. "give me my readings", "show me my readings", "show me my BP", ' +
+          '"what\'s my BP history", "list my readings", "what are my readings", ' +
+          '"my history", "my check-ins", "my measurements", "my recent BPs", ' +
+          '"show me my last reading", "what was my last reading".',
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -160,7 +205,12 @@ export class VoiceToolsService {
       {
         name: 'update_checkin',
         description:
-          'Modify an existing reading. MUST first call get_recent_readings to get the entry_id. Sentinel defaults: 0/""/[] leave the field unchanged.',
+          'Modify an existing reading. MUST first call get_recent_readings to get the entry_id. ' +
+          'TARGET RESOLUTION: If the patient uses a natural-language reference ' +
+          "(e.g. 'change the last reading', 'update my most recent BP', 'fix the one I just took'), " +
+          'DO NOT ask them for the date and time — the newest entry returned by get_recent_readings ' +
+          'IS the target. Read it back to the patient with the proposed change and get explicit ' +
+          'verbal yes before calling. Sentinel defaults: 0/""/[] leave the field unchanged.',
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -168,10 +218,19 @@ export class VoiceToolsService {
             systolic_bp: { type: Type.INTEGER, description: '0 = leave unchanged' },
             diastolic_bp: { type: Type.INTEGER, description: '0 = leave unchanged' },
             medication_taken: { type: Type.STRING, description: '"yes" / "no" / "" leave unchanged' },
-            weight: { type: Type.NUMBER, description: '0 = leave unchanged' },
+            weight: { type: Type.NUMBER, description: 'New weight. 0 = leave unchanged. Set weight_unit to specify lbs or kg.' },
+            weight_unit: { type: Type.STRING, description: 'Unit for `weight`: "LBS" or "KG". Use whichever unit the patient said. Defaults to LBS.' },
             symptoms: { type: Type.ARRAY, items: { type: Type.STRING }, description: '[] = leave unchanged' },
             notes: { type: Type.STRING, description: '"" = leave unchanged. ALWAYS English.' },
             measurement_time: { type: Type.STRING, description: 'HH:mm. "" = leave unchanged.' },
+            session_id: {
+              type: Type.STRING,
+              description:
+                'Optional. Move this reading into the given session-grouping UUID. Most edits should ' +
+                'LEAVE THIS OUT — the entry already has a session_id from record time and changing it ' +
+                'would split or merge averaging groups. Only set when the patient explicitly asks to move ' +
+                'a reading to a different session. "" = leave unchanged.',
+            },
           },
           required: ['entry_id'],
         },
@@ -179,7 +238,12 @@ export class VoiceToolsService {
       {
         name: 'delete_checkin',
         description:
-          "Remove one or more readings. MUST first call get_recent_readings, read back the rows to the patient, and get explicit confirmation.",
+          'Remove one or more readings. MUST first call get_recent_readings, read back the rows to the patient, and get explicit confirmation. ' +
+          'TARGET RESOLUTION: If the patient uses a natural-language reference ' +
+          "(e.g. 'delete the last reading', 'remove my most recent BP', 'delete the one I just took'), " +
+          'DO NOT ask them for the date and time — the newest entry returned by get_recent_readings ' +
+          'IS the target. Read it back ("Your most recent reading is one thirty eight over eighty ' +
+          "five at eight thirty AM on June first — should I delete it?\") and only on explicit yes call this tool.",
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -228,6 +292,63 @@ export class VoiceToolsService {
           required: ['systolic_bp', 'diastolic_bp'],
         },
       },
+      {
+        name: 'check_intake_status',
+        description:
+          "Check whether the patient has completed their one-time clinical intake form. " +
+          "Call this BEFORE the first submit_checkin / update_checkin / delete_checkin / " +
+          "finalize_checkin in a conversation. If completed=false, do NOT call any of those " +
+          "tools — the backend will 403 and the patient cannot save readings until intake is " +
+          "done. Route them to intake_url instead. Read-only; nothing is persisted.",
+        parameters: { type: Type.OBJECT, properties: {} },
+      },
+      {
+        name: 'finalize_checkin',
+        description:
+          'Finalise a SINGLE-reading session — tells the rule engine to evaluate the just-saved ' +
+          'entry NOW even though only one reading was taken. The engine normally requires ≥2 ' +
+          'readings averaged in the same session before non-emergency rules fire; this flips ' +
+          'singleReadingFinalized so the gate is bypassed for that one entry. ' +
+          'WHEN TO CALL: only after a successful submit_checkin AND the patient said they will ' +
+          'not take a second reading. Do NOT call for AFib patients — they need ≥3 readings; ' +
+          'walk them through more submit_checkin calls instead. ' +
+          "Required arg: entry_id from the previous submit_checkin's saved entry.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            entry_id: {
+              type: Type.STRING,
+              description: 'Entry id from the previous submit_checkin result.',
+            },
+          },
+          required: ['entry_id'],
+        },
+      },
+      {
+        // Bug 12 — voice parity with the text `flag_emergency` tool. Without
+        // this, a voice patient saying "I'm having a stroke" got only verbal
+        // "call 911" — no EmergencyEvent row, no care-team page. Now voice
+        // and text share the same emergency surface end-to-end.
+        name: 'flag_emergency',
+        description:
+          'Flag an acute life-threatening emergency the patient is describing RIGHT NOW. ' +
+          'Call ONLY for: crushing/severe chest pain, sudden inability to breathe, sudden numbness ' +
+          'or weakness on one side, sudden vision loss, heart-attack / stroke feeling NOW, or heart ' +
+          'racing combined with faintness. After calling, continue speaking to the patient with 911 ' +
+          'guidance — the tool records the event and pages the care team in parallel.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            emergency_situation: {
+              type: Type.STRING,
+              description:
+                'Short description of what the patient said happened (one sentence). Used in ' +
+                'the care-team page and the audit trail.',
+            },
+          },
+          required: ['emergency_situation'],
+        },
+      },
     ]
   }
 
@@ -267,6 +388,12 @@ export class VoiceToolsService {
           return await this.submitBpFromPhoto(args, ctx)
         case 'evaluate_reading':
           return await this.evaluateReading(args, ctx)
+        case 'finalize_checkin':
+          return await this.finalizeCheckin(args, ctx)
+        case 'check_intake_status':
+          return await this.checkIntakeStatus(ctx)
+        case 'flag_emergency':
+          return await this.flagEmergency(args, ctx)
         default:
           return {
             llmResponse: { ok: false, error: `Unknown tool: ${name}` },
@@ -311,8 +438,7 @@ export class VoiceToolsService {
         events: [],
       }
     }
-    const bpProvided = sbpProvided && dbpProvided
-    if (bpProvided && (sbp < 60 || sbp > 250 || dbp < 40 || dbp > 150)) {
+    if (sbpProvided && dbpProvided && (sbp < 60 || sbp > 250 || dbp < 40 || dbp > 150)) {
       this.logger.warn(`BP out of range: ${sbp}/${dbp} — rejecting`)
       return {
         llmResponse: {
@@ -324,8 +450,96 @@ export class VoiceToolsService {
     }
 
     const symptoms = toStringArray(args.symptoms)
+    // Bug 5 fix — `medication_taken` is required by the schema, but Gemini may
+    // still issue the call without it. Without this guard, the dispatcher
+    // would default to `false` and silently flag the patient as non-adherent
+    // (firing Stage-B medication-adherence alerts on someone who actually
+    // took their meds). Mirror the text-side missing-field rejection.
+    if (args.medication_taken === undefined || args.medication_taken === null) {
+      this.logger.warn('submit_checkin rejected: medication_taken missing — asking patient first')
+      return {
+        llmResponse: {
+          saved: false,
+          reason: 'MISSING_FIELD',
+          message:
+            'I need to ask the patient whether they took their medication today before saving. ' +
+            'Ask them now, then call submit_checkin again with medication_taken set.',
+        },
+        events: [],
+      }
+    }
     const medicationTaken = toBool(args.medication_taken, false)
     const weight = toNumber(args.weight, 0)
+
+    // Bug 33 — ghost-save guard. The dispatcher allows BP=0/0 because V2's
+    // PARTIAL LOGGING flow uses it for medication-only, symptom-only, or
+    // missed-med-only logs (where the patient only mentions one thing). But
+    // the LLM can also misfire submit_checkin from ambient conversation
+    // ("hi, how are you doing?") if the prompt-side discipline fails —
+    // creating a journal entry with no BP, no symptoms, no missed meds,
+    // and nothing to record. The patient sees a phantom reading in
+    // My Readings.
+    //
+    // Require at least ONE concrete signal:
+    //   - BP (both numbers > 0)
+    //   - any structured symptom boolean = true
+    //   - missed_medications array with content
+    //   - medication_scheduled_later = true
+    //   - notes string starting with a sparse-log marker
+    //     ("Medication-only log:" / "Symptom-only log:")
+    // medication_taken alone does NOT count because it's required on every
+    // call by the schema — it can't distinguish "I took my meds" intent from
+    // a default-filled hallucination.
+    const hasStructuredSymptom =
+      toBool(args.severe_headache, false) ||
+      toBool(args.visual_changes, false) ||
+      toBool(args.altered_mental_status, false) ||
+      toBool(args.chest_pain_or_dyspnea, false) ||
+      toBool(args.focal_neuro_deficit, false) ||
+      toBool(args.severe_epigastric_pain, false) ||
+      toBool(args.new_onset_headache, false) ||
+      toBool(args.ruq_pain, false) ||
+      toBool(args.edema, false) ||
+      toBool(args.dizziness, false) ||
+      toBool(args.syncope, false) ||
+      toBool(args.palpitations, false) ||
+      toBool(args.leg_swelling, false) ||
+      toBool(args.face_swelling, false) ||
+      toBool(args.throat_tightness, false)
+    const hasMissedMeds =
+      Array.isArray(args.missed_medications) && args.missed_medications.length > 0
+    const hasScheduledLater = toBool(args.medication_scheduled_later, false)
+    const notesRaw = asString(args.notes, '').trim().toLowerCase()
+    const hasPartialLogMarker =
+      notesRaw.startsWith('medication-only log') ||
+      notesRaw.startsWith('symptom-only log')
+    const hasFreeformSymptoms = symptoms.length > 0
+    const bpProvided = sbpProvided && dbpProvided
+    if (
+      !bpProvided &&
+      !hasStructuredSymptom &&
+      !hasMissedMeds &&
+      !hasScheduledLater &&
+      !hasPartialLogMarker &&
+      !hasFreeformSymptoms
+    ) {
+      this.logger.warn(
+        `submit_checkin rejected: no BP, no symptoms, no missed meds, no scheduled-later, no partial-log marker — ghost save guard`,
+      )
+      return {
+        llmResponse: {
+          saved: false,
+          reason: 'NO_DATA_TO_SAVE',
+          message:
+            "I don't have anything to record yet. The patient hasn't given BP numbers, " +
+            'symptoms, or any medication-change detail this turn. Ask them what they want ' +
+            'to log — a BP reading, a symptom they\'re having, or a medication update — and ' +
+            're-call submit_checkin only when there is concrete data.',
+        },
+        events: [],
+      }
+    }
+
     const detail = `BP=${sbp}/${dbp} meds=${medicationTaken ? 'taken' : 'missed'} symptoms=${
       symptoms.length ? symptoms.join(',') : 'none'
     } weight=${weight || 'N/A'}`
@@ -366,7 +580,18 @@ export class VoiceToolsService {
       dto.systolicBP = sbp
       dto.diastolicBP = dbp
     }
-    if (weight > 0) dto.weight = weight
+    // Bug 19 + kg/lbs follow-up — tool now accepts BOTH units via the
+    // new `weight_unit` arg ('LBS' | 'KG'). Default = LBS for back-compat
+    // when the LLM omits the unit. JournalEntry.weight stores kg, so
+    // normalise here. The submitCheckin response below still echoes raw
+    // patient lbs for the frontend CheckinCard (which displays lbs).
+    if (weight > 0) {
+      const kg = normaliseWeightToKg(
+        weight,
+        typeof args.weight_unit === 'string' ? args.weight_unit : undefined,
+      )
+      if (kg > 0) dto.weight = kg
+    }
     const pulse = toInt(args.pulse, 0)
     if (pulse > 0) dto.pulse = pulse
     const position = asString(args.position, '').trim().toUpperCase()
@@ -396,7 +621,34 @@ export class VoiceToolsService {
     dto.faceSwelling = toBool(args.face_swelling, false)
     dto.throatTightness = toBool(args.throat_tightness, false)
     const otherSymptoms = toStringArray(args.other_symptoms)
-    if (otherSymptoms.length) dto.otherSymptoms = otherSymptoms
+    if (otherSymptoms.length) {
+      // Bug 23 — strip any phrasing already captured by a TRUE structured
+      // boolean (e.g. "vision changes" when visualChanges is set). Prevents
+      // the chart from showing the same symptom under both "Symptoms" and
+      // "Other symptoms". Defense-in-depth alongside the prompt strengthening.
+      const flagsForDedupe: Partial<SessionSymptoms> = {
+        severeHeadache: dto.severeHeadache === true,
+        visualChanges: dto.visualChanges === true,
+        alteredMentalStatus: dto.alteredMentalStatus === true,
+        chestPainOrDyspnea: dto.chestPainOrDyspnea === true,
+        focalNeuroDeficit: dto.focalNeuroDeficit === true,
+        severeEpigastricPain: dto.severeEpigastricPain === true,
+        newOnsetHeadache: dto.newOnsetHeadache === true,
+        ruqPain: dto.ruqPain === true,
+        edema: dto.edema === true,
+        dizziness: dto.dizziness === true,
+        syncope: dto.syncope === true,
+        palpitations: dto.palpitations === true,
+        legSwelling: dto.legSwelling === true,
+        faceSwelling: dto.faceSwelling === true,
+        throatTightness: dto.throatTightness === true,
+      }
+      const deduped = dedupeSymptomsAgainstFlags(otherSymptoms, flagsForDedupe)
+      if (deduped && deduped.length) dto.otherSymptoms = deduped
+    }
+
+    const sessionId = asString(args.session_id, '').trim()
+    if (sessionId) dto.sessionId = sessionId
 
     if (args.measurement_conditions && typeof args.measurement_conditions === 'object') {
       const allowed = new Set([
@@ -426,6 +678,7 @@ export class VoiceToolsService {
 
     let saved = false
     let savedMessage = 'There was a problem saving the check-in. Please try again later.'
+    let intakeIncomplete = false
     try {
       // Same DTO shape NestJS daily-journal controller expects (validated by
       // CreateJournalEntryDto). Calling the service directly skips network +
@@ -438,12 +691,56 @@ export class VoiceToolsService {
     } catch (err) {
       this.logger.error('submit_checkin: dailyJournal.create failed', err)
       saved = false
+      // Bug 32 — pre-fix this only handled isIntakeIncompleteError. Every
+      // other throw kept the generic "There was a problem saving..." default,
+      // so the LLM had no way to know WHY the save failed and the patient
+      // kept hearing "having trouble in recording the BP reading" on every
+      // retry. Now we surface a specific reason per exception so the LLM
+      // can either re-ask the patient (BP transpose) or move on (duplicate
+      // timestamp), mirroring the text-chat dispatcher which has always
+      // passed err.message through.
+      if (isIntakeIncompleteError(err)) {
+        intakeIncomplete = true
+        savedMessage =
+          "Before I can save a check-in I need you to complete your one-time intake form. " +
+          "Please go to /clinical-intake and come back when you're done."
+      } else if (err instanceof UnprocessableEntityException) {
+        // "implausible-reading" — diastolic ≥ systolic. Almost always a BP
+        // transpose at the tool-call layer. Tell the LLM to re-ask both
+        // numbers; do NOT silently retry with the same args.
+        savedMessage =
+          "The numbers look transposed — the top number should be bigger than the bottom. " +
+          "Ask the patient to repeat both numbers and re-call submit_checkin with the corrected values."
+      } else if (err instanceof ConflictException) {
+        // P2002 unique constraint on (userId, measuredAt). Two readings
+        // resolved to the same minute (patient took two within a minute,
+        // or the LLM submitted twice with measurement_time="now").
+        savedMessage =
+          "There's already a reading at that exact time. " +
+          "If the patient meant to add a new reading, ask them what time the new one was taken " +
+          'and pass it as measurement_time in HH:mm — do NOT retry with measurement_time="now".'
+      } else {
+        // Surface the real message so the LLM has context, like chat does.
+        const msg = (err as Error)?.message
+        if (msg) savedMessage = `Couldn't save the check-in: ${msg}. Please try again later.`
+      }
     }
 
+    // Bug 40 — pre-fix this emitted the RAW LLM-passed weight value, which
+    // could be lbs OR kg depending on weight_unit. The VoiceChat card
+    // hardcodes the "lbs" label, so a patient saying "150 kg" via voice saw
+    // the popup show "150 lbs" (off by 2.2x). Bug 36 fixed the chat surface
+    // the same way; voice was missed at the time. Now we normalise to kg
+    // first (the storage unit) then project to lbs for the popup payload —
+    // same contract as the chat AIChatInterface mapping.
+    const popupKg = weight > 0
+      ? normaliseWeightToKg(weight, typeof args.weight_unit === 'string' ? args.weight_unit : undefined)
+      : 0
+    const popupLbs = popupKg > 0 ? kgToLbs(popupKg) : 0
     const checkinSummary: CheckinSummary = {
       systolicBP: bpProvided ? sbp : undefined,
       diastolicBP: bpProvided ? dbp : undefined,
-      weight: weight > 0 ? weight : undefined,
+      weight: popupLbs > 0 ? popupLbs : undefined,
       medicationTaken,
       symptoms,
       saved,
@@ -459,6 +756,9 @@ export class VoiceToolsService {
     return {
       llmResponse: {
         saved,
+        ...(intakeIncomplete
+          ? { reason: 'INTAKE_INCOMPLETE', intake_url: '/clinical-intake' }
+          : {}),
         entry_date_used: resolvedDate,
         measurement_time_used: resolvedTime,
         message: savedMessage,
@@ -494,19 +794,30 @@ export class VoiceToolsService {
       // ── LLM privacy boundary ───────────────────────────────────────────
       // The narrow `entry_id="…" | <date> | BP <sbp>/<dbp> | meds … | symptoms …`
       // line below is the privacy boundary between the JournalEntry row
-      // (which carries internal columns like userId, sessionId, source,
-      // sourceMetadata, createdAt, updatedAt) and what the LLM receives.
-      // NEVER widen this string to include internal fields — the model can
-      // quote them back to the patient. Mirror chat/tools/journal-tools.ts
+      // (which carries internal columns like userId, source, sourceMetadata,
+      // createdAt, updatedAt) and what the LLM receives. NEVER widen this
+      // string to include internal fields — the model can quote them back
+      // to the patient. Allow-list exception: `session_id` is intentionally
+      // exposed (only when non-null) so the LLM can thread an existing
+      // session through a subsequent submit_checkin (multi-reading
+      // add-to-session flow for AFib and other clinically-grouped
+      // sessions). It is a grouping label, never a security boundary —
+      // composite { id, userId } scoping on every mutation still prevents
+      // cross-tenant leak. Mirror chat/tools/journal-tools.ts
       // `get_recent_readings` if changing the shape.
+      // Bug 26 — project measuredAt into the patient's local timezone
+      // before formatting for the LLM. Pre-fix this took the raw UTC
+      // wallclock from toISOString() and read it back as if it were
+      // local — so a New York patient who saved at 04:04 EDT (08:04 UTC)
+      // had voice echo "at 08:04" in the summary. Symmetric with the
+      // write-side isoFromTzWallclock used in submit/update.
+      const tz = ctx.timezone ?? 'America/New_York'
       const lines: string[] = []
       for (const e of entries.slice(0, 5)) {
         const entryId = e.id ?? 'unknown'
-        const measuredAt: string = e.measuredAt instanceof Date
-          ? e.measuredAt.toISOString()
-          : String(e.measuredAt ?? '')
-        const date = measuredAt.length >= 10 ? measuredAt.slice(0, 10) : 'unknown'
-        const time = measuredAt.length >= 16 ? measuredAt.slice(11, 16) : ''
+        const local = tzWallclockFromIso(e.measuredAt ?? '', tz)
+        const date = local.date || 'unknown'
+        const time = local.time
         const sbp = e.systolicBP ?? '?'
         const dbp = e.diastolicBP ?? '?'
         const med = e.medicationTaken ? 'yes' : 'no'
@@ -514,7 +825,8 @@ export class VoiceToolsService {
           ? e.otherSymptoms.join(', ')
           : 'none'
         const timeStr = time ? ` at ${time}` : ''
-        lines.push(`entry_id="${entryId}" | ${date}${timeStr} | BP ${sbp}/${dbp} | meds ${med} | symptoms: ${sym}`)
+        const sessionStr = e.sessionId ? ` | session_id="${e.sessionId}"` : ''
+        lines.push(`entry_id="${entryId}" | ${date}${timeStr} | BP ${sbp}/${dbp} | meds ${med} | symptoms: ${sym}${sessionStr}`)
       }
       const summary = lines.length ? lines.join('\n') : 'No readings found.'
       events.push({
@@ -569,17 +881,47 @@ export class VoiceToolsService {
         const existing = await this.dailyJournal.findOne(ctx.userId, entryId)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const existingIso = (existing?.data as any)?.measuredAt
-        const existingDate =
-          existingIso instanceof Date
-            ? existingIso.toISOString().slice(0, 10)
-            : typeof existingIso === 'string' && existingIso.length >= 10
-              ? existingIso.slice(0, 10)
-              : null
+        // Bug 27 — pre-fix this took the UTC date slice of the existing
+        // measuredAt and combined it with the new local time. For a
+        // patient near a UTC midnight (e.g. 11 PM EDT stored as 03:00Z
+        // next day), the UTC date was already the NEXT calendar day, so
+        // the rebase moved the entry to the wrong day. Project through
+        // ctx.timezone first so the date matches what the patient sees.
+        const existingDate = existingIso
+          ? tzWallclockFromIso(existingIso, ctx.timezone).date || null
+          : null
         if (existingDate) {
           dto.measuredAt = isoFromTzWallclock(existingDate, measurementTime, ctx.timezone)
+        } else {
+          // Bug 6 fix — entry exists but has no measuredAt we can pivot on
+          // (extremely unlikely; defensive). Reject rather than apply other
+          // fields while silently dropping the requested time change.
+          return {
+            llmResponse: {
+              updated: false,
+              message:
+                "I couldn't load that reading's existing date to rebase the new time. " +
+                'Ask the patient to call get_recent_readings and confirm the entry id, then try again.',
+            },
+            events: [],
+          }
         }
       } catch (err) {
-        this.logger.warn(`update_checkin: could not resolve measuredAt for ${entryId}: ${(err as Error).message}`)
+        // Bug 6 fix — when the patient asked to change the time and
+        // `findOne` failed (entry deleted, id hallucinated, permission slip),
+        // do NOT silently proceed with the OTHER field changes while
+        // dropping the time. Reject the whole update so the LLM tells the
+        // patient honestly instead of claiming "Got it, I changed the time".
+        this.logger.warn(`update_checkin: findOne failed for ${entryId}: ${(err as Error).message}`)
+        return {
+          llmResponse: {
+            updated: false,
+            message:
+              "I couldn't load that reading to update its time. " +
+              'Ask the patient to call get_recent_readings and confirm the entry id, then try again.',
+          },
+          events: [],
+        }
       }
     }
 
@@ -593,11 +935,20 @@ export class VoiceToolsService {
       else if (['no', 'false', 'missed', 'not taken'].includes(medicationTakenStr)) dto.medicationTaken = false
     }
     const weight = toNumber(args.weight, 0)
-    if (weight > 0) dto.weight = weight
+    // Bug 19 + kg/lbs follow-up — same normalisation as submitCheckin.
+    if (weight > 0) {
+      const kg = normaliseWeightToKg(
+        weight,
+        typeof args.weight_unit === 'string' ? args.weight_unit : undefined,
+      )
+      if (kg > 0) dto.weight = kg
+    }
     const symptoms = toStringArray(args.symptoms)
     if (symptoms.length) dto.symptoms = symptoms
     const notes = asString(args.notes, '')
     if (notes) dto.notes = notes
+    const newSessionId = asString(args.session_id, '').trim()
+    if (newSessionId) dto.sessionId = newSessionId
 
     if (Object.keys(dto).length === 0) {
       return {
@@ -610,7 +961,8 @@ export class VoiceToolsService {
     if ('systolicBP' in dto) changes.push(`systolic=${dto.systolicBP}`)
     if ('diastolicBP' in dto) changes.push(`diastolic=${dto.diastolicBP}`)
     if ('medicationTaken' in dto) changes.push(`medication=${dto.medicationTaken ? 'taken' : 'missed'}`)
-    if ('weight' in dto) changes.push(`weight=${dto.weight}lbs`)
+    // Bug 19 — dto.weight is now kg (post lbsToKg conversion above).
+    if ('weight' in dto) changes.push(`weight=${dto.weight}kg`)
     if ('symptoms' in dto) {
       const syms = dto.symptoms as string[]
       changes.push(`symptoms=${syms.length ? syms.join(',') : 'none'}`)
@@ -631,6 +983,17 @@ export class VoiceToolsService {
     let finalMed = dto.medicationTaken === true
     let finalSymptoms = symptoms
 
+    // Bug 34 — pre-fix this catch just logged the error and left `updated`
+    // false with a generic "Could not update the reading. Please try again"
+    // message. Same family as Bug 32 (submit): every error from
+    // dailyJournal.update was swallowed, so the LLM couldn't tell whether
+    // the entry_id was stale, the BP was transposed, the new time collided
+    // with another reading, or it was a generic failure. The patient looped
+    // hearing the same generic "couldn't update" while the LLM retried with
+    // identical args. Now we route each known exception to an actionable
+    // message so the LLM knows whether to re-ask BP, ask for a different
+    // time, or pick a fresh entry id.
+    let failureMessage: string | null = null
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await this.dailyJournal.update(ctx.userId, entryId, dto as any)
@@ -648,6 +1011,30 @@ export class VoiceToolsService {
       finalSymptoms = Array.isArray(data.otherSymptoms) ? data.otherSymptoms : finalSymptoms
     } catch (err) {
       this.logger.error(`update_checkin failed for ${entryId}`, err)
+      updated = false
+      if (err instanceof NotFoundException) {
+        // Stale or hallucinated entry_id.
+        failureMessage =
+          `Entry ${entryId} not found — likely a stale or hallucinated id. ` +
+          'Call get_recent_readings to fetch a fresh list and ask the patient which entry they meant.'
+      } else if (err instanceof UnprocessableEntityException) {
+        // "implausible-reading" — diastolic ≥ systolic. BP transpose at
+        // the tool-call layer (same as Bug 32 submit path).
+        failureMessage =
+          "The new BP numbers look transposed — the top number should be bigger than the bottom. " +
+          'Ask the patient to repeat both numbers and re-call update_checkin with the corrected values.'
+      } else if (err instanceof ConflictException) {
+        // P2002 on (userId, measuredAt). The new time collides with a
+        // sibling entry's measuredAt.
+        failureMessage =
+          "The new time collides with another reading at that same minute. " +
+          'Ask the patient for a different time and re-call update_checkin with the corrected measurement_time.'
+      } else {
+        const msg = (err as Error)?.message
+        failureMessage = msg
+          ? `Couldn't update the reading: ${msg}. Please try again.`
+          : 'Could not update the reading. Please try again.'
+      }
     }
 
     const summary: UpdateSummary = {
@@ -655,7 +1042,18 @@ export class VoiceToolsService {
       entryDate: entryDate || undefined,
       systolicBP: finalSbp || undefined,
       diastolicBP: finalDbp || undefined,
-      weight: finalWeight > 0 ? finalWeight : undefined,
+      // Bug 40 — always normalise from the raw LLM-passed args (which the
+      // patient actually said) rather than finalWeight, which was kg on
+      // success but raw input on failure — ambiguous. Patient says "200
+      // lbs" → popup shows 200 lbs regardless of whether the underlying
+      // update succeeded. The VoiceChat card hardcodes the "lbs" label.
+      weight: (() => {
+        if (!weight || weight <= 0) return undefined
+        const inputUnit = typeof args.weight_unit === 'string' ? args.weight_unit : undefined
+        const kg = normaliseWeightToKg(weight, inputUnit)
+        const lbs = kg > 0 ? kgToLbs(kg) : 0
+        return lbs > 0 ? lbs : undefined
+      })(),
       medicationTaken: finalMed,
       symptoms: finalSymptoms,
       updated,
@@ -673,7 +1071,7 @@ export class VoiceToolsService {
         updated,
         message: updated
           ? 'Reading updated successfully.'
-          : 'Could not update the reading. Please try again.',
+          : failureMessage ?? 'Could not update the reading. Please try again.',
       },
       events,
     }
@@ -713,17 +1111,33 @@ export class VoiceToolsService {
       },
     ]
 
+    // Bug 35 — pre-fix per-id errors were logged but never surfaced to the
+    // LLM. The aggregate message just said "Could not delete the reading(s)"
+    // or "X reading(s) deleted, but Y could not". The LLM had no idea WHY
+    // each id failed — most commonly NotFoundException (stale or
+    // hallucinated id), which the LLM would otherwise just retry. Now we
+    // track each failure with its reason so the LLM can tell the patient
+    // something useful and pick a fresh id from get_recent_readings instead
+    // of looping on the same stale ones.
     let deletedCount = 0
-    let failedCount = 0
+    const failures: Array<{ entry_id: string; reason: string }> = []
     for (const eid of ids) {
       try {
         await this.dailyJournal.delete(ctx.userId, eid)
         deletedCount += 1
       } catch (err) {
-        failedCount += 1
-        this.logger.warn(`delete_checkin: ${eid} failed: ${(err as Error).message}`)
+        const errMsg = (err as Error)?.message ?? 'unknown error'
+        this.logger.warn(`delete_checkin: ${eid} failed: ${errMsg}`)
+        let reason: string
+        if (err instanceof NotFoundException) {
+          reason = 'not found (likely already deleted or stale id)'
+        } else {
+          reason = errMsg
+        }
+        failures.push({ entry_id: eid, reason })
       }
     }
+    const failedCount = failures.length
 
     let message: string
     if (failedCount === 0) {
@@ -731,9 +1145,15 @@ export class VoiceToolsService {
         ? 'Reading deleted successfully.'
         : `All ${deletedCount} readings deleted successfully.`
     } else if (deletedCount === 0) {
-      message = 'Could not delete the reading(s). Please try again.'
+      const detail = failures.map((f) => `${f.entry_id} (${f.reason})`).join('; ')
+      message =
+        `Could not delete the reading(s): ${detail}. ` +
+        'Ask the patient to call get_recent_readings to fetch fresh entry ids and pick again.'
     } else {
-      message = `Deleted ${deletedCount} reading(s), but ${failedCount} could not be deleted.`
+      const detail = failures.map((f) => `${f.entry_id} (${f.reason})`).join('; ')
+      message =
+        `Deleted ${deletedCount} reading(s), but ${failedCount} could not be deleted: ${detail}. ` +
+        'For the failed ones, ask the patient to call get_recent_readings and pick again.'
     }
 
     const summary: DeleteSummary = {
@@ -752,7 +1172,12 @@ export class VoiceToolsService {
     })
 
     return {
-      llmResponse: { deleted_count: deletedCount, failed_count: failedCount, message },
+      llmResponse: {
+        deleted_count: deletedCount,
+        failed_count: failedCount,
+        message,
+        ...(failures.length > 0 ? { failures } : {}),
+      },
       events,
     }
   }
@@ -860,6 +1285,132 @@ export class VoiceToolsService {
       }
     }
   }
+
+  /**
+   * Finalise a single-reading session — flips singleReadingFinalized: true on
+   * the entry so the engine's non-emergency gate is bypassed and Stage C
+   * rules (BP-high, sbp-low, HR) re-evaluate on this lone reading. Voice
+   * mirror of the text dispatcher's finalize_checkin case. Idempotent at
+   * the service layer via updateMany.
+   */
+  private async finalizeCheckin(
+    args: Record<string, unknown>,
+    ctx: ToolContext,
+  ): Promise<DispatchResult> {
+    const entryId = typeof args.entry_id === 'string' ? args.entry_id.trim() : ''
+    if (!entryId) {
+      return {
+        llmResponse: {
+          finalized: false,
+          message: "entry_id is required — pass the id from the previous submit_checkin's saved entry.",
+        },
+        events: [],
+      }
+    }
+    try {
+      const result = await this.dailyJournal.finalizeSingleReadingSession(ctx.userId, entryId)
+      return {
+        llmResponse: {
+          finalized: true,
+          message: result.message ?? 'Check-in finalised; alerts re-evaluated.',
+        },
+        events: [],
+      }
+    } catch (err) {
+      this.logger.error('finalize_checkin failed', err)
+      return {
+        llmResponse: {
+          finalized: false,
+          message: (err as Error)?.message ?? 'Failed to finalise check-in.',
+        },
+        events: [],
+      }
+    }
+  }
+
+  // ── Tool: check_intake_status ──────────────────────────────────────────────
+  // Read-only precheck. Lets the voice LLM detect an INTAKE STATUS gap before
+  // it tries submit_checkin (which would 403). Mirrors the text-chat tool of
+  // the same name in journal-tools.ts case 'check_intake_status'.
+  private async checkIntakeStatus(ctx: ToolContext): Promise<DispatchResult> {
+    const status = await this.intakeStatusService.getStatus(ctx.userId)
+    return {
+      llmResponse: {
+        completed: status.completed,
+        profile_exists: status.profileExists,
+        intake_url: '/clinical-intake',
+        message: status.completed
+          ? 'Intake is complete — you may proceed with check-ins.'
+          : 'Intake is NOT complete. Do not call submit_checkin. Direct the patient to /clinical-intake first.',
+      },
+      events: [
+        {
+          kind: 'action',
+          type: 'checking_intake_status',
+          detail: status.completed ? 'complete' : 'incomplete',
+        },
+        {
+          kind: 'action_complete',
+          type: 'checking_intake_status',
+          success: true,
+          detail: status.completed ? 'complete' : 'incomplete',
+        },
+      ],
+    }
+  }
+
+  /**
+   * Bug 12 — voice equivalent of the text `flag_emergency` tool. Persists an
+   * EmergencyEvent row and emits EMERGENCY_EVENTS.FLAGGED so EscalationService
+   * pages the care team. Mirrors the ChatService.recordEmergencyEvent flow
+   * (Bug 10 fix): awaited DB write, [SECURITY-CRITICAL] log on failure.
+   */
+  private async flagEmergency(
+    args: Record<string, unknown>,
+    ctx: ToolContext,
+  ): Promise<DispatchResult> {
+    const situation =
+      typeof args.emergency_situation === 'string' && args.emergency_situation.trim()
+        ? args.emergency_situation.trim()
+        : 'Emergency detected during voice session'
+    try {
+      await this.prisma.emergencyEvent.create({
+        data: {
+          userId: ctx.userId,
+          sessionId: null, // voice doesn't pass chatSessionId into ToolContext
+          prompt: '', // voice has no single "prompt" — situation captures it
+          isEmergency: true,
+          emergency_situation: situation,
+        },
+      })
+      const payload: EmergencyFlaggedPayload = {
+        userId: ctx.userId,
+        sessionId: null,
+        situation,
+        source: 'voice-tool',
+      }
+      this.eventEmitter.emit(EMERGENCY_EVENTS.FLAGGED, payload)
+    } catch (err) {
+      this.logger.error(
+        `[SECURITY-CRITICAL] voice emergency persistence failed userId=${ctx.userId} situation="${situation}" error=${
+          (err as Error).message ?? 'unknown'
+        }`,
+      )
+      // Do not throw — the LLM should still tell the patient "call 911"
+      // verbally even if our audit write failed.
+    }
+    return {
+      llmResponse: {
+        flagged: true,
+        emergency_situation: situation,
+        message: 'Emergency flagged. Continue speaking to the patient with 911 guidance.',
+      },
+      events: [
+        { kind: 'action', type: 'flag_emergency', detail: situation },
+        { kind: 'action_complete', type: 'flag_emergency', success: true, detail: situation },
+      ],
+    }
+  }
 }
 
 /**
@@ -867,32 +1418,43 @@ export class VoiceToolsService {
  * `symptoms: string[]` the model passes (e.g. ["dizziness","chest pain"])
  * into the structured-symptom booleans the rule engine consumes.
  */
-function mapVoiceSymptomsToFlags(raw: unknown): Partial<SessionSymptoms> | undefined {
+// Negation prefixes that mean "patient denies this symptom" — must skip the
+// mapper, not flip the flag on. Bug 2 fix.
+const SYMPTOM_NEGATION_RE = /^(no|not|none|negative for|denies|denying|without|absent|no signs? of)\b/
+
+export function mapVoiceSymptomsToFlags(raw: unknown): Partial<SessionSymptoms> | undefined {
   if (!Array.isArray(raw) || raw.length === 0) return undefined
   const flags: Partial<SessionSymptoms> = {}
   for (const item of raw) {
     if (typeof item !== 'string') continue
     const k = item.trim().toLowerCase()
     if (!k) continue
-    if (k === 'severeheadache' || k.includes('severe headache')) flags.severeHeadache = true
-    else if (k === 'newonsetheadache' || k.includes('new headache') || k.includes('new-onset')) flags.newOnsetHeadache = true
-    else if (k === 'visualchanges' || k.includes('vision') || k.includes('blurr')) flags.visualChanges = true
-    else if (k === 'alteredmentalstatus' || k.includes('confus') || k.includes('mental status')) flags.alteredMentalStatus = true
-    else if (k === 'chestpainordyspnea' || k.includes('chest pain') || k.includes('chest tight') || k.includes('dyspnea')) flags.chestPainOrDyspnea = true
-    else if (k === 'focalneurodeficit' || k.includes('one side') || k.includes('weakness')) flags.focalNeuroDeficit = true
-    else if (k === 'severeepigastricpain' || k.includes('epigastric')) flags.severeEpigastricPain = true
-    else if (k === 'ruqpain' || k.includes('ruq') || k.includes('right upper')) flags.ruqPain = true
-    else if (k === 'edema' || k === 'swelling') flags.edema = true
-    else if (k === 'dizziness' || k.includes('dizzy') || k.includes('lighthead')) flags.dizziness = true
-    else if (k === 'syncope' || k.includes('faint') || k.includes('pass out')) flags.syncope = true
-    else if (k === 'palpitations' || k.includes('palpit') || k.includes('flutter')) flags.palpitations = true
-    else if (k === 'legswelling' || k.includes('leg swell') || k.includes('ankle swell')) flags.legSwelling = true
-    else if (k === 'fatigue' || k.includes('tired')) flags.fatigue = true
-    else if (k === 'shortnessofbreath' || k.includes('short of breath') || k.includes('breathless')) flags.shortnessOfBreath = true
-    else if (k === 'drycough' || k.includes('dry cough')) flags.dryCough = true
-    else if (k === 'nsaiduse' || k.includes('nsaid') || k.includes('ibuprofen')) flags.nsaidUse = true
-    else if (k === 'faceswelling' || k.includes('face swell')) flags.faceSwelling = true
-    else if (k === 'throattightness' || k.includes('throat')) flags.throatTightness = true
+    // Bug 2 fix — see mapSymptomsArrayToFlags in journal-tools.ts for full
+    // rationale. Without this, "no chest pain" flips chestPainOrDyspnea on
+    // and fires a Level-2 emergency alert.
+    if (SYMPTOM_NEGATION_RE.test(k)) continue
+    // Bug 3 fix — collapse snake_case (e.g. 'face_swelling') to no-underscore
+    // form so TIER_1_ANGIOEDEMA fires when the LLM echoes the schema key.
+    const kn = k.replace(/_/g, '')
+    if (kn === 'severeheadache' || kn.includes('severe headache')) flags.severeHeadache = true
+    else if (kn === 'newonsetheadache' || kn.includes('new headache') || kn.includes('new-onset')) flags.newOnsetHeadache = true
+    else if (kn === 'visualchanges' || kn.includes('vision') || kn.includes('blurr')) flags.visualChanges = true
+    else if (kn === 'alteredmentalstatus' || kn.includes('confus') || kn.includes('mental status')) flags.alteredMentalStatus = true
+    else if (kn === 'chestpainordyspnea' || kn.includes('chest pain') || kn.includes('chest tight') || kn.includes('dyspnea')) flags.chestPainOrDyspnea = true
+    else if (kn === 'focalneurodeficit' || kn.includes('one side') || kn.includes('weakness')) flags.focalNeuroDeficit = true
+    else if (kn === 'severeepigastricpain' || kn.includes('epigastric')) flags.severeEpigastricPain = true
+    else if (kn === 'ruqpain' || kn.includes('ruq') || kn.includes('right upper')) flags.ruqPain = true
+    else if (kn === 'edema' || kn === 'swelling') flags.edema = true
+    else if (kn === 'dizziness' || kn.includes('dizzy') || kn.includes('lighthead')) flags.dizziness = true
+    else if (kn === 'syncope' || kn.includes('faint') || kn.includes('pass out')) flags.syncope = true
+    else if (kn === 'palpitations' || kn.includes('palpit') || kn.includes('flutter')) flags.palpitations = true
+    else if (kn === 'legswelling' || kn.includes('leg swell') || kn.includes('ankle swell')) flags.legSwelling = true
+    else if (kn === 'fatigue' || kn.includes('tired')) flags.fatigue = true
+    else if (kn === 'shortnessofbreath' || kn.includes('short of breath') || kn.includes('breathless')) flags.shortnessOfBreath = true
+    else if (kn === 'drycough' || kn.includes('dry cough')) flags.dryCough = true
+    else if (kn === 'nsaiduse' || kn.includes('nsaid') || kn.includes('ibuprofen')) flags.nsaidUse = true
+    else if (kn === 'faceswelling' || kn.includes('face swell')) flags.faceSwelling = true
+    else if (kn === 'throattightness' || kn.includes('throat')) flags.throatTightness = true
   }
   return Object.keys(flags).length > 0 ? flags : undefined
 }
@@ -962,42 +1524,7 @@ function formatInTz(date: Date, tz: string): TzParts {
   return { y: get('year'), mo: get('month'), d: get('day'), h: get('hour'), mi: get('minute') }
 }
 
-/**
- * Build an ISO 8601 timestamp from a wall-clock date+time interpreted in
- * `tz`. Computes the UTC offset by formatting `Date.UTC(...)` in `tz` and
- * comparing back — matches Python's zoneinfo behaviour incl. DST.
- */
-function isoFromTzWallclock(dateStr: string, timeStr: string, tz: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr)
-  const t = /^(\d{1,2}):(\d{2})$/.exec(timeStr)
-  if (!m || !t) {
-    return new Date().toISOString()
-  }
-  const y = parseInt(m[1], 10)
-  const mo = parseInt(m[2], 10)
-  const d = parseInt(m[3], 10)
-  const h = parseInt(t[1], 10)
-  const mi = parseInt(t[2], 10)
-
-  // First guess at UTC, then correct by the local offset of that guess.
-  const utcGuess = Date.UTC(y, mo - 1, d, h, mi, 0)
-  const offsetMs = tzOffsetMs(utcGuess, tz)
-  return new Date(utcGuess - offsetMs).toISOString()
-}
-
-function tzOffsetMs(utcMs: number, tz: string): number {
-  const date = new Date(utcMs)
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hour12: false,
-  })
-  const parts = formatter.formatToParts(date)
-  const get = (t: string) => parseInt(parts.find((p) => p.type === t)?.value ?? '0', 10)
-  const localMs = Date.UTC(
-    get('year'), get('month') - 1, get('day'),
-    get('hour'), get('minute'), get('second'),
-  )
-  return localMs - utcMs
-}
+// isoFromTzWallclock + tzOffsetMs moved to backend/src/common/datetime.ts so
+// text chat's journal-tools dispatcher can share the same implementation.
+// See Bug 18 — text chat was writing wallclock-as-UTC while voice used this
+// helper correctly, causing My Readings to drift by the patient's UTC offset.

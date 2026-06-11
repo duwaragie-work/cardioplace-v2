@@ -591,6 +591,7 @@ const am: Record<TranslationKey, string> = {
   'readings.detailTitle': 'የንባብ ዝርዝሮች',
   'readings.viewDetails': 'የንባብ ዝርዝሮችን ይመልከቱ',
   'readings.noBpRecorded': 'ደም ግፊት አልተመዘገበም',
+  'readings.symptomLog': 'የምልክት ምዝገባ',
   'readings.meds': 'መድሃኒቶች',
   'readings.taken': 'ተወስዷል',
   'readings.missed': 'ተዘልሏል',
@@ -934,11 +935,11 @@ const am: Record<TranslationKey, string> = {
   'home.ctaDesc': "ከ DC Hospital Association ጋር የተገነባ። በዋሽንግተን ዲሲ ከፍተኛ-አደጋ ማህበረሰቦች ውስጥ ተሰማርቷል። ባህላዊ የጤና ቴክኖሎጂ ከኋላ የሚያስቀራቸውን ታካሚዎች ለመድረስ የተዘጋጀ።",
   'home.ctaButton': 'ስለ ፕሮግራሙ',
   // TODO i18n — placeholder English copy; translate when demo video is finalised.
-  'home.demoEyebrow': 'See it in action',
-  'home.demoTitle': 'A five-minute walkthrough',
-  'home.demoDesc': 'The patient experience and the care-team closed loop — end to end, in real time. Watch how an alert is generated, escalated, and resolved with full clinical accountability.',
-  'home.demoPlayLabel': 'Play the Cardioplace 5-minute demo',
-  'home.demoCloseLabel': 'Close demo',
+  'home.demoEyebrow': 'በተግባር ይዩት',
+  'home.demoTitle': 'የአምስት ደቂቃ ዙረት',
+  'home.demoDesc': 'የታካሚው ተሞክሮ እና የእንክብካቤ ቡድኑ የተዘጋ ዑደት — ከጫፍ እስከ ጫፍ፣ በቅጽበት። ማንቂያ እንዴት እንደሚፈጠር፣ እንደሚሰፋ እና በሙሉ ክሊኒካዊ ተጠያቂነት እንደሚፈታ ይመልከቱ።',
+  'home.demoPlayLabel': 'የCardioplace የ5 ደቂቃ ማሳያ አጫውት',
+  'home.demoCloseLabel': 'ማሳያ ዝጋ',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'ታሪካችን',
@@ -1439,6 +1440,12 @@ const am: Record<TranslationKey, string> = {
   'ocr.med.errRateLimited': 'ዛሬ በጣም ብዙ ሙከራዎች። እባክዎ መድሃኒቶችን በእጅ ይጨምሩ።',
   'ocr.med.errNetwork': 'የግንኙነት ችግር። እባክዎ መድሃኒቶችን በእጅ ይጨምሩ።',
   'ocr.med.errTooLarge': 'ፎቶው በጣም ትልቅ ነው። ትንሽ ፎቶ ይሞክሩ።',
+
+  // i18n backfill — caregiver intake step + voice-chat text input
+  'intake.caregivers.title': 'የእንክብካቤ ሰጪ ያክሉ (አማራጭ)',
+  'intake.caregivers.subtitle': 'ከባድ የጤና ማንቂያ ሲከሰት ልናሳውቀው የምንችለው የቤተሰብ አባል ወይም ጓደኛ። የሚገናኙት በእንክብካቤ ቡድኑ ለጸደቁ ማንቂያዎች ብቻ ሲሆን፣ እርስዎ ፈቃድ ከሰጡ በኋላ ብቻ ነው። ይህንን ዘለው ቆይተው ከመገለጫዎ ሌላ ሰው ማከል ይችላሉ።',
+  'intake.caregivers.audio': 'በአማራጭ የእንክብካቤ ሰጪ ያክሉ — ከባድ የጤና ማንቂያ ሲከሰት ልናሳውቀው የምንችለው የቤተሰብ አባል ወይም ጓደኛ። የሚገናኙት እርስዎ ፈቃድ ከሰጡ በኋላ ብቻ ነው። ይህንን ዘለው ቆይተው ከመገለጫዎ ሌላ ሰው ማከል ይችላሉ።',
+  'chat.orTypePlaceholder': 'ወይም መልእክት ይተይቡ...',
 };
 
 export default am;
