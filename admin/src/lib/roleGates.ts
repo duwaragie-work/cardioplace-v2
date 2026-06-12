@@ -136,6 +136,20 @@ export function canEditThresholds(input: RoleInput | UserInput): boolean {
   return has(input, ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER'])
 }
 
+// ─── Patient readings CRUD (admin-entered readings) ─────────────────────────
+/**
+ * Add / edit / delete readings on a patient's behalf (clinic-floor entry +
+ * transcription-error correction). Clinical write action — same scope as
+ * thresholds. HEALPLACE_OPS excluded; COORDINATOR excluded for MVP (pending
+ * Manisha confirmation). MED_DIR / PROVIDER are further runtime-scoped by
+ * PatientAccessService on the backend.
+ *   @Roles(SUPER_ADMIN, MEDICAL_DIRECTOR, PROVIDER)
+ *   backend/src/practice/admin-readings.controller.ts
+ */
+export function canManageReadings(input: RoleInput | UserInput): boolean {
+  return has(input, ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER'])
+}
+
 // ─── Legacy v1 / scheduled calls ────────────────────────────────────────────
 /**
  * @Roles(SUPER_ADMIN) — legacy v1 provider endpoints and scheduled-calls

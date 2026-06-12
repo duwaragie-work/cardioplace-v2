@@ -22,6 +22,9 @@ import {
   ArrowUp,
   AlertTriangle,
   Edit3,
+  Plus,
+  Stethoscope,
+  Trash2,
   X as XIcon,
   Loader2,
   Search,
@@ -44,7 +47,7 @@ interface Props {
   alertsLoading: boolean;
 }
 
-type FeedFilter = 'ALL' | 'PROFILE' | 'MEDICATION' | 'ALERT';
+type FeedFilter = 'ALL' | 'PROFILE' | 'MEDICATION' | 'ALERT' | 'READINGS';
 
 interface FeedEntry {
   id: string;
@@ -82,6 +85,15 @@ const VERIF_ICON: Record<string, { icon: React.ReactNode; color: string }> = {
   ADMIN_VERIFY: { icon: <ShieldCheck className="w-3 h-3" />, color: 'var(--brand-success-green)' },
   ADMIN_CORRECT: { icon: <Edit3 className="w-3 h-3" />, color: 'var(--brand-warning-amber)' },
   ADMIN_REJECT: { icon: <XIcon className="w-3 h-3" />, color: 'var(--brand-alert-red)' },
+  // Journal-entry (BP reading) audit rows — patient actions in calm
+  // info-blue (deletes amber, they're destructive), care-team actions in
+  // admin purple with the Stethoscope marking clinic-floor entry.
+  PATIENT_READING_CREATED: { icon: <Plus className="w-3 h-3" />, color: 'var(--brand-info-blue)' },
+  PATIENT_READING_EDITED: { icon: <Edit3 className="w-3 h-3" />, color: 'var(--brand-info-blue)' },
+  PATIENT_READING_DELETED: { icon: <Trash2 className="w-3 h-3" />, color: 'var(--brand-warning-amber)' },
+  ADMIN_READING_ADDED: { icon: <Stethoscope className="w-3 h-3" />, color: 'var(--brand-primary-purple)' },
+  ADMIN_READING_EDITED: { icon: <Edit3 className="w-3 h-3" />, color: 'var(--brand-primary-purple)' },
+  ADMIN_READING_DELETED: { icon: <Trash2 className="w-3 h-3" />, color: 'var(--brand-primary-purple)' },
 };
 
 // All audit timestamps render in a single fixed clinical timezone (#8) so two
@@ -189,7 +201,7 @@ const USER_FIELD_LABELS: Record<string, string> = {
 };
 
 interface ParsedPath {
-  scope: 'profile' | 'medication' | 'caregiver';
+  scope: 'profile' | 'medication' | 'caregiver' | 'journal';
   /** Friendly label for the field (or "Medication" if the whole row was added). */
   field: string;
   /** Raw field key (after the prefix), useful for special-casing e.g. "verificationStatus". */
@@ -231,6 +243,14 @@ function parseFieldPath(path: string): ParsedPath {
       caregiverId: id.length > 0 ? id : undefined,
       rowLevel: true,
     };
+  }
+  // Journal-entry (BP reading) audit rows — backend writes
+  // `journal_entry.created` / `.edited` / `.deleted` / `.admin_added` /
+  // `.admin_edited` / `.admin_deleted`. The reading snapshot lives in
+  // previousValue/newValue; the action suffix is carried in fieldKey.
+  if (path.startsWith('journal_entry.')) {
+    const f = path.slice('journal_entry.'.length);
+    return { scope: 'journal', field: 'Reading', fieldKey: f, rowLevel: true };
   }
   if (path.startsWith('profile.')) {
     const f = path.slice('profile.'.length);
@@ -307,6 +327,61 @@ function actionVerb(changeType: string, rowLevel: boolean | undefined, actor: st
     default:
       return 'changed';
   }
+}
+
+// ─── Journal-entry (reading) audit helpers ───────────────────────────────────
+// Snapshot shape (DailyJournalService.serializeForAudit): { entryId,
+// measuredAt, systolicBP, diastolicBP, pulse, weight, position, sessionId,
+// medicationTaken, missedDoses, symptoms[], notes, source }.
+
+function readingBP(v: unknown): string | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  return typeof o.systolicBP === 'number' && typeof o.diastolicBP === 'number'
+    ? `${o.systolicBP}/${o.diastolicBP}`
+    : null;
+}
+
+function readingVerb(changeType: string, actor: string): string {
+  switch (changeType) {
+    case 'PATIENT_READING_CREATED':
+      return `logged by ${actor}`;
+    case 'ADMIN_READING_ADDED':
+      return `entered by ${actor}`;
+    case 'PATIENT_READING_EDITED':
+    case 'ADMIN_READING_EDITED':
+      return `edited by ${actor}`;
+    case 'PATIENT_READING_DELETED':
+    case 'ADMIN_READING_DELETED':
+      return `deleted by ${actor}`;
+    default:
+      return `updated by ${actor}`;
+  }
+}
+
+function readingWhen(iso: string): string {
+  return `${dayKey(iso)} ${timeOf(iso)} ${CLINIC_TZ_LABEL}`;
+}
+
+/** Body line for a reading event: BP/pulse/measured-time diff on edits, the
+ *  measured time on adds, the destroyed state on deletes. */
+function describeReadingChange(prev: unknown, next: unknown): string | null {
+  const p = prev && typeof prev === 'object' ? (prev as Record<string, unknown>) : null;
+  const n = next && typeof next === 'object' ? (next as Record<string, unknown>) : null;
+
+  if (p && n) {
+    const parts: string[] = [];
+    const pBp = readingBP(p);
+    const nBp = readingBP(n);
+    if (pBp !== nBp && (pBp || nBp)) parts.push(`${pBp ?? '—'} → ${nBp ?? '—'}`);
+    if (p.pulse !== n.pulse) parts.push(`Pulse ${p.pulse ?? '—'} → ${n.pulse ?? '—'}`);
+    if (p.measuredAt !== n.measuredAt && typeof n.measuredAt === 'string')
+      parts.push(`Measured time moved to ${readingWhen(n.measuredAt)}`);
+    return parts.length > 0 ? parts.join(' · ') : 'Details updated';
+  }
+  if (n && typeof n.measuredAt === 'string') return `Measured ${readingWhen(n.measuredAt)}`;
+  if (p && typeof p.measuredAt === 'string') return `Was measured ${readingWhen(p.measuredAt)}`;
+  return null;
 }
 
 /**
@@ -406,7 +481,7 @@ interface BuiltLog {
    *  into a single expandable group. */
   groupKey: string;
   changeType: string;
-  scope: 'profile' | 'medication' | 'caregiver';
+  scope: 'profile' | 'medication' | 'caregiver' | 'journal';
   drugName: string | null;
   actorWord: string;
   actor: string;
@@ -470,6 +545,16 @@ function entriesFromLogs(
       title = `${subject} ${verb}`;
       body = l.rationale ?? undefined;
     }
+    // ── Journal-entry (BP reading) audit rows — lead with the BP value so
+    //    the trail reads "Reading 140/90 entered by provider". The body line
+    //    carries the prior→new diff on edits, the measured time on adds, and
+    //    the destroyed state on deletes.
+    else if (parsed.scope === 'journal') {
+      const bp = readingBP(l.newValue) ?? readingBP(l.previousValue);
+      const subject = bp ? `Reading ${bp}` : 'Reading';
+      title = `${subject} ${readingVerb(l.changeType, actorWord)}`;
+      body = describeReadingChange(l.previousValue, l.newValue) ?? l.rationale ?? undefined;
+    }
     // ── Whole-medication add: lead with the drug name.
     else if (parsed.rowLevel) {
       const medSummary = formatMedicationObject(l.newValue);
@@ -523,7 +608,12 @@ function entriesFromLogs(
     const entry: FeedEntry = {
       id: `verif-${l.id}`,
       ts: l.createdAt,
-      filter: parsed.scope === 'medication' ? 'MEDICATION' : 'PROFILE',
+      filter:
+        parsed.scope === 'journal'
+          ? 'READINGS'
+          : parsed.scope === 'medication'
+            ? 'MEDICATION'
+            : 'PROFILE',
       icon: chrome.icon,
       color: chrome.color,
       title,
@@ -535,9 +625,11 @@ function entriesFromLogs(
 
     // Burst key: rows from one submission/action share actor + change type +
     // scope + (medication id) + timestamp-to-the-second. Enrollment re-gates
-    // are distinct system events, so they always stay solo.
+    // are distinct system events, so they always stay solo. Reading events
+    // stay solo too — each one is an independently meaningful audit action
+    // (two same-second session adds must not collapse into one line).
     const groupKey =
-      parsed.fieldKey === 'enrollmentStatus'
+      parsed.fieldKey === 'enrollmentStatus' || parsed.scope === 'journal'
         ? `solo-${l.id}`
         : `${l.changedBy}|${l.changeType}|${parsed.scope}|${parsed.medId ?? ''}|${l.createdAt.slice(0, 19)}`;
 
@@ -781,6 +873,7 @@ export default function TimelineTab({ logs, alerts, medications, logsLoading, al
     PROFILE: all.filter((e) => e.filter === 'PROFILE').length,
     MEDICATION: all.filter((e) => e.filter === 'MEDICATION').length,
     ALERT: all.filter((e) => e.filter === 'ALERT').length,
+    READINGS: all.filter((e) => e.filter === 'READINGS').length,
   }), [all]);
 
   const isLoading = logsLoading || alertsLoading;
@@ -815,6 +908,9 @@ export default function TimelineTab({ logs, alerts, medications, logsLoading, al
             ['PROFILE', 'Profile', counts.PROFILE, 'var(--brand-text-secondary)', 'var(--brand-background)'],
             ['MEDICATION', 'Medications', counts.MEDICATION, 'var(--brand-warning-amber)', 'var(--brand-warning-amber-light)'],
             ['ALERT', 'Alerts', counts.ALERT, 'var(--brand-alert-red)', 'var(--brand-alert-red-light)'],
+            // Label hardcoded like its siblings; `timeline.filter.readings`
+            // exists in all 5 locale files for the future i18n pass.
+            ['READINGS', 'Readings', counts.READINGS, 'var(--brand-info-blue)', 'var(--brand-info-blue-light)'],
           ] as [FeedFilter, string, number, string, string][]).map(([key, label, count, color, bg]) => {
             const active = key === 'ALL' ? categories.size === 0 : categories.has(key as CategoryKey);
             return (
