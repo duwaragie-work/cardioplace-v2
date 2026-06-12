@@ -290,6 +290,36 @@ describe('SystemPromptService — Bug 14 chat-prompt form-parity guards', () => 
         // conditional skip.
         expect(prompt).toMatch(/UNLESS Bug 38 SKIP applies|photo OCR returned a pulse/i)
       })
+
+      // ─── Bug 52 — continuation readings inside a 5-min session ────────
+      // Mirror of the voice-prompt Bug 52 guards. The chat prompt must
+      // teach the same per-session inheritance contract so 2nd / 3rd
+      // readings inside the 5-min window skip weight / meds / symptoms /
+      // B1 / notes without losing data (real values are threaded).
+      it('Bug 52 — CONTINUATION READINGS block is present with activation conditions', () => {
+        expect(prompt).toMatch(/CONTINUATION READINGS/i)
+        expect(prompt).toMatch(/ALREADY called submit_checkin.{0,200}within 5 minutes/i)
+        expect(prompt).toMatch(/AFib.{0,80}3-reading minimum/i)
+      })
+
+      it('Bug 52 — block enumerates per-reading vs inherited fields', () => {
+        expect(prompt).toMatch(/ASK ON EVERY READING/i)
+        expect(prompt).toMatch(/measurement_time[\s\S]{0,200}systolic_bp[\s\S]{0,200}diastolic_bp/i)
+        expect(prompt).toMatch(/INHERIT FROM THE PRIOR READING/i)
+        expect(prompt).toMatch(/weight[\s\S]{0,300}medication_taken[\s\S]{0,300}measurement_conditions/i)
+        expect(prompt).toMatch(/session_id/i)
+      })
+
+      it('Bug 52 — block forbids passing 0 / empty for inherited fields (preserves accuracy)', () => {
+        expect(prompt).toMatch(/NEVER pass 0 or empty for an inherited field|never (?:pass|use) (?:0|zero|empty)/i)
+        expect(prompt).toMatch(/sparse[- ]log.{0,80}NOT the continuation/i)
+      })
+
+      it('Bug 52 — block defines exit conditions (5-min expiry + finalize / new check-in)', () => {
+        expect(prompt).toMatch(/EXIT the continuation mode/i)
+        expect(prompt).toMatch(/more than 5 minutes.{0,150}full check-in flow/i)
+        expect(prompt).toMatch(/finalize_checkin.{0,80}non[- ]AFib|never for AFib/i)
+      })
     })
   }
 })
