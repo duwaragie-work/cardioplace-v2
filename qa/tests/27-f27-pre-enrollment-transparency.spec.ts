@@ -40,48 +40,54 @@ test.describe('F27 — pre-enrollment patient sees truthful messaging', () => {
     // Put the patient in the pre-enrollment window — dispatch is deferred.
     await tc.setEnrollment(patient.id, 'NOT_ENROLLED')
 
-    const api = await authedApi(apiBase, PATIENTS.aisha.email, 'patient')
-    // Fire an emergency reading (185/120) — single reading bypasses the gate.
-    const res = await api.post('daily-journal', {
-      data: {
-        measuredAt: new Date().toISOString(),
-        systolicBP: 185,
-        diastolicBP: 120,
-        pulse: 78,
-        position: 'SITTING',
-        sessionId: randomUUID(),
-      },
-    })
-    expect(res.status()).toBe(202)
+    try {
+      const api = await authedApi(apiBase, PATIENTS.aisha.email, 'patient')
+      // Fire an emergency reading (185/120) — single reading bypasses the gate.
+      const res = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date().toISOString(),
+          systolicBP: 185,
+          diastolicBP: 120,
+          pulse: 78,
+          position: 'SITTING',
+          sessionId: randomUUID(),
+        },
+      })
+      expect(res.status()).toBe(202)
 
-    const alerts = await waitForAlerts(tc, patient.id, (xs) =>
-      xs.some((a) => a.status === 'OPEN' && a.tier === 'BP_LEVEL_2'),
-    )
-    const emergency = alerts.find((a) => a.tier === 'BP_LEVEL_2')!
-    expect(emergency, 'BP Level 2 alert exists').toBeDefined()
+      const alerts = await waitForAlerts(tc, patient.id, (xs) =>
+        xs.some((a) => a.status === 'OPEN' && a.tier === 'BP_LEVEL_2'),
+      )
+      const emergency = alerts.find((a) => a.tier === 'BP_LEVEL_2')!
+      expect(emergency, 'BP Level 2 alert exists').toBeDefined()
 
-    // Open the alert detail page directly. (The dashboard's "Recent Alerts"
-    // strip + the old `dashboard-active-alert` banner testid were removed in
-    // 25e3296; the active-alert surface is now a button, not an <a href>. This
-    // test asserts the ALERT-DETAIL page content, so navigate straight there.)
-    await signInPatient(page, PATIENTS.aisha.email)
-    await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
-    await page.goto(`/alerts/${emergency.id}`)
-    await page.waitForURL(new RegExp(`/alerts/${emergency.id}`), { timeout: 30_000 }).catch(() => {})
-    await page.waitForLoadState('networkidle').catch(() => {})
+      // Open the alert detail page directly. (The dashboard's "Recent Alerts"
+      // strip + the old `dashboard-active-alert` banner testid were removed in
+      // 25e3296; the active-alert surface is now a button, not an <a href>. This
+      // test asserts the ALERT-DETAIL page content, so navigate straight there.)
+      await signInPatient(page, PATIENTS.aisha.email)
+      await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
+      await page.goto(`/alerts/${emergency.id}`)
+      await page.waitForURL(new RegExp(`/alerts/${emergency.id}`), { timeout: 30_000 }).catch(() => {})
+      await page.waitForLoadState('networkidle').catch(() => {})
 
-    const bodyText = await page.locator('body').innerText()
-    // The emergency 911 CTA still shows; the FALSE reassurance must not.
-    expect(bodyText, 'pre-enrollment notice present').toMatch(/enrollment is pending|enrollment pending/i)
-    expect(bodyText, 'no false "care team has been notified"').not.toMatch(
-      /care team has been notified/i,
-    )
+      const bodyText = await page.locator('body').innerText()
+      // The emergency 911 CTA still shows; the FALSE reassurance must not.
+      expect(bodyText, 'pre-enrollment notice present').toMatch(/enrollment is pending|enrollment pending/i)
+      expect(bodyText, 'no false "care team has been notified"').not.toMatch(
+        /care team has been notified/i,
+      )
 
-    await page.screenshot({
-      path: `reports/screenshots/f27-pre-enrollment.png`,
-      fullPage: true,
-    })
-
-    await tc.dispose()
+      await page.screenshot({
+        path: `reports/screenshots/f27-pre-enrollment.png`,
+        fullPage: true,
+      })
+    } finally {
+      // Restore ENROLLED so this spec doesn't strand Aisha NOT_ENROLLED for
+      // sibling specs sharing the DB (e.g. spec 22's emergency-dispatch path
+      // needs her ENROLLED). Runs even if an assertion above throws.
+      await tc.setEnrollment(patient.id, 'ENROLLED')
+      await tc.dispose()
+    }
   })
 })

@@ -34,6 +34,12 @@ test.describe('G.4 — emergency alert does not mirror into the patient Notifica
     const tc = await newTestControl(apiBase, process.env.TEST_CONTROL_SECRET)
     const aisha = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(aisha.id)
+    // Hermetic precondition. A sibling spec sharing the DB (e.g. spec 27)
+    // can leave Aisha NOT_ENROLLED, and resetUser does NOT touch enrollment.
+    // An un-enrolled patient makes fireT0 defer ALL dispatch (Layer B gate) →
+    // no patient PUSH row → this spec fails on a polluted state, not a real
+    // bug. Establish ENROLLED explicitly (mirrors spec 12's defensive restore).
+    await tc.setEnrollment(aisha.id, 'ENROLLED')
 
     const api = await authedApi(apiBase, PATIENTS.aisha.email, 'patient')
 
