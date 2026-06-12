@@ -806,6 +806,8 @@ const fr: Record<TranslationKey, string> = {
   'lang.ko': '한국어',
   'lang.ht': 'Kreyòl Ayisyen',
   'timeline.filter.readings': 'Relevés', // EN: Readings
+  'alerts.badge.thresholdPending':
+    'Seuil du patient en attente — définissez le seuil personnalisé et examinez l’alerte', // EN: Patient threshold pending — set personalized threshold and review alert
 };
 
 export default fr;

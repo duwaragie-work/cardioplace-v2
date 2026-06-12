@@ -806,6 +806,8 @@ const en = {
   // The tab itself still hardcodes English labels (pre-i18n surface); this key
   // is pre-seeded so the eventual i18n pass has the filter label ready.
   'timeline.filter.readings': 'Readings',
+  'alerts.badge.thresholdPending':
+    'Patient threshold pending — set personalized threshold and review alert',
 } as const;
 
 export type TranslationKey = keyof typeof en;

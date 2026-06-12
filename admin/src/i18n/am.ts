@@ -806,6 +806,8 @@ const am: Record<TranslationKey, string> = {
   'lang.ko': '한국어',
   'lang.ht': 'Kreyòl Ayisyen',
   'timeline.filter.readings': 'ንባቦች', // EN: Readings
+  'alerts.badge.thresholdPending':
+    'የታካሚ ገደብ በመጠባበቅ ላይ — ብጁ ገደብ ያዘጋጁ እና ማንቂያውን ይገምግሙ', // EN: Patient threshold pending — set personalized threshold and review alert
 };
 
 export default am;

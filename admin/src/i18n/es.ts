@@ -806,6 +806,8 @@ const es: Record<TranslationKey, string> = {
   'lang.ko': '한국어',
   'lang.ht': 'Kreyòl Ayisyen',
   'timeline.filter.readings': 'Lecturas', // EN: Readings
+  'alerts.badge.thresholdPending':
+    'Umbral del paciente pendiente — configure el umbral personalizado y revise la alerta', // EN: Patient threshold pending — set personalized threshold and review alert
 };
 
 export default es;

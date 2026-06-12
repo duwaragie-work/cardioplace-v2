@@ -39,6 +39,7 @@ import {
   resolutionTierFor,
 } from '@/lib/services/provider.service';
 import { useAuth } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { canResolveAlerts } from '@/lib/roleGates';
 import type {
   PatientAlert,
@@ -198,6 +199,15 @@ interface Props {
    *  dispatch was deferred. Renders a "No dispatch — awaiting enrollment"
    *  badge on OPEN alerts so a provider can prioritize enrollment. */
   patientPreEnrollment?: boolean;
+  /** Manisha 2026-06-12 — true when this NOT_ENROLLED patient was previously
+   *  enrolled (auto-un-enrolled on serious-condition add). Dispatch still fired
+   *  (was-ever-enrolled bypass), so the card shows a "threshold pending" action
+   *  badge instead of the F27 "no dispatch" badge. Mutually exclusive. */
+  previouslyEnrolled?: boolean;
+  /** Click handler for the threshold-pending badge — navigates to the patient's
+   *  threshold-editing tab. Patient-detail passes setTab('thresholds'); other
+   *  surfaces may omit it (badge then renders non-interactive). */
+  onThresholdAction?: () => void;
   /** P3 — suppress the per-alert pre-personalization "X of 7" note. AlertsTab
    *  hoists it to a single patient-header band (F4), so repeating it on every
    *  expanded card — three times inside one cofire group — is redundant noise.
@@ -224,9 +234,12 @@ export default function AlertCard({
   heightCm,
   rowClickable = true,
   patientPreEnrollment = false,
+  previouslyEnrolled = false,
+  onThresholdAction,
   hideDisclaimer = false,
 }: Props) {
   const { user } = useAuth();
+  const { t } = useLanguage();
   // May 2026 access-scope — HEALPLACE_OPS sees the alert row + audit trail
   // (they receive the T+24h / T+48h notification and need context for
   // operational follow-up) but cannot close it. Hide both write buttons.
@@ -328,21 +341,43 @@ export default function AlertCard({
                 {alert.mode === 'PERSONALIZED' ? 'Personalized' : 'Standard'}
               </span>
             )}
-            {/* F27 — pre-enrollment dispatch transparency. The escalation
-                pipeline defers ALL dispatch until the patient is ENROLLED, so
-                this OPEN alert was never sent to the care team. Flag it so a
-                provider can prioritize enrollment instead of assuming someone
-                was paged. */}
+            {/* F27 + Manisha 2026-06-12 — pre-enrollment dispatch
+                transparency, now two-state. A NOT_ENROLLED patient who was
+                NEVER enrolled had ALL dispatch deferred → "no dispatch" badge.
+                A NOT_ENROLLED patient who was PREVIOUSLY enrolled (auto-un-
+                enrolled on serious-condition add) DID get dispatched via the
+                was-ever-enrolled bypass — so the "no dispatch" badge would lie.
+                They get an amber "threshold pending" action badge instead,
+                routing the provider to set the personalized threshold + review.
+                Mutually exclusive — never both. */}
             {patientPreEnrollment && alert.status === 'OPEN' && (
-              <span
-                data-testid={`admin-alert-no-dispatch-badge-${alert.id}`}
-                title="Escalation dispatch is deferred until this patient is enrolled"
-                className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
-                style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
-              >
-                <ShieldAlert className="w-2.5 h-2.5" />
-                No dispatch — awaiting enrollment
-              </span>
+              previouslyEnrolled ? (
+                <button
+                  type="button"
+                  data-testid={`admin-alert-threshold-pending-badge-${alert.id}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onThresholdAction?.();
+                  }}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  title="Set this patient's personalized threshold, then review the alert"
+                  className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${onThresholdAction ? 'cursor-pointer hover:brightness-95' : 'cursor-default'}`}
+                  style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
+                >
+                  <AlertTriangle className="w-2.5 h-2.5" />
+                  {t('alerts.badge.thresholdPending')}
+                </button>
+              ) : (
+                <span
+                  data-testid={`admin-alert-no-dispatch-badge-${alert.id}`}
+                  title="Escalation dispatch is deferred until this patient is enrolled"
+                  className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+                  style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
+                >
+                  <ShieldAlert className="w-2.5 h-2.5" />
+                  No dispatch — awaiting enrollment
+                </span>
+              )
             )}
             {alert.status === 'RESOLVED' && (
               <span

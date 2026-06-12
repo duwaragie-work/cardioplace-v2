@@ -5,6 +5,7 @@ import {
   PatientAccessService,
 } from '../common/patient-access.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { wasEverEnrolled } from '../practice/enrollment-helpers.js'
 import { EmailService } from '../email/email.service.js'
 import { scheduleCallEmailHtml } from '../email/email-templates.js'
 import { UserRole } from '../generated/prisma/enums.js'
@@ -714,6 +715,15 @@ export class ProviderService {
     // v2 baseline: trailing 7-day mean, computed inline (not stored).
     const baseline = await this.trailing7dayMean(userId)
 
+    // Manisha sign-off 2026-06-12 — drives the alert-card badge: a NOT_ENROLLED
+    // patient who was previously enrolled (auto-un-enrolled on serious-condition
+    // add) shows "threshold pending" (dispatch DID fire) rather than the
+    // "awaiting enrollment / no dispatch" badge. Only query when un-enrolled.
+    const previouslyEnrolled =
+      user.enrollmentStatus === 'ENROLLED'
+        ? false
+        : await wasEverEnrolled(this.prisma, userId)
+
     const patient = {
       id: user.id,
       name: user.name,
@@ -724,6 +734,7 @@ export class ProviderService {
       conditions: this.derivePatientConditions(profile),
       onboardingStatus: user.onboardingStatus,
       enrollmentStatus: user.enrollmentStatus,
+      previouslyEnrolled,
       latestBaseline: baseline,
       activeAlertsCount: user.deviationAlerts.length,
       lastEntryDate: latestEntry?.measuredAt ?? null,
