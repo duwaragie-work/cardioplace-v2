@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter'
 import {
@@ -299,6 +299,39 @@ export class EscalationService {
   async runScan(now: Date): Promise<void> {
     await this.firePendingScheduled(now)
     await this.advanceOverdueLadders(now)
+  }
+
+  /**
+   * Test-only deterministic T+0 driver. In production, T+0 fires via the
+   * fire-and-forget `@OnEvent(ALERT_CREATED)` handler — a Playwright spec
+   * can't await that, and `runScan` does NOT fire a fresh alert's T+0 (it
+   * only does firePendingScheduled + advanceOverdueLadders). This reconstructs
+   * the AlertCreatedEvent from the persisted alert and awaits the SAME private
+   * `fireT0` path, so the T+0 Notification rows are guaranteed written before
+   * the caller continues. Idempotent — the dispatchStep dedup guard makes a
+   * second fire (or a race with the async handler) a safe no-op. Errors
+   * propagate, unlike the @OnEvent wrapper which swallows them, so a real
+   * dispatch failure surfaces to the test instead of vanishing into the log.
+   */
+  async dispatchT0ForAlert(alertId: string, now: Date = new Date()): Promise<void> {
+    const alert = await this.loadAlert(alertId)
+    if (!alert) throw new NotFoundException(`Alert ${alertId} not found`)
+    // fireT0 routes solely on alertId + tier; type/severity/escalated are not
+    // read on the dispatch path (the ladder is resolved from tier), so the
+    // narrowed AlertRow — which omits them — is sufficient. Placeholders keep
+    // the AlertCreatedEvent shape without re-fetching the full row.
+    await this.fireT0(
+      {
+        userId: alert.userId,
+        alertId: alert.id,
+        type: 'SYSTOLIC_BP',
+        severity: 'HIGH',
+        escalated: true,
+        tier: alert.tier,
+        ruleId: alert.ruleId,
+      },
+      now,
+    )
   }
 
   /**
