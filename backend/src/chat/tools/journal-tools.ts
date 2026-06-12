@@ -8,7 +8,7 @@ import { Type } from '@google/genai'
 import type { FunctionDeclaration } from '@google/genai'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
 import { isoFromTzWallclock, tzWallclockFromIso } from '../../common/datetime.js'
-import { normaliseWeightToKg } from '../../common/units.js'
+import { kgToLbs, normaliseWeightToKg } from '../../common/units.js'
 import type { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import type { SessionSymptoms } from '../../daily_journal/engine/types.js'
 import type { OcrService } from '../../ocr/ocr.service.js'
@@ -916,7 +916,38 @@ export async function executeJournalTool(
             typeof args.session_id === 'string' && args.session_id.trim() ? args.session_id.trim() : undefined,
         } as any)
         ctx.onPatientDataMutated?.(userId)
-        return JSON.stringify({ saved: true, message: 'Check-in saved successfully.', data: result.data })
+        // Bug 54 — include weight_display so the LLM verbalises back in the
+        // unit the patient originally said. Pre-fix the response only carried
+        // the kg-stored weight number (via data.weight); the LLM had to
+        // remember what unit the patient used and sometimes mismatched
+        // ("Saved your weight of 80 lbs" when the patient had said 80 kg).
+        // weight_display.verbalize_as is the canonical string to read back.
+        const savedWeightKg =
+          typeof (result.data as { weight?: number | null }).weight === 'number'
+            ? (result.data as { weight: number }).weight
+            : null
+        const patientWeightUnit =
+          typeof args.weight_unit === 'string' && args.weight_unit.toUpperCase() === 'KG'
+            ? 'KG'
+            : 'LBS'
+        const weightDisplay =
+          savedWeightKg != null && savedWeightKg > 0
+            ? {
+                kg: savedWeightKg,
+                lbs: kgToLbs(savedWeightKg),
+                original_unit: patientWeightUnit,
+                verbalize_as:
+                  patientWeightUnit === 'KG'
+                    ? `${savedWeightKg} kg`
+                    : `${kgToLbs(savedWeightKg)} lbs`,
+              }
+            : null
+        return JSON.stringify({
+          saved: true,
+          message: 'Check-in saved successfully.',
+          data: result.data,
+          weight_display: weightDisplay,
+        })
       } catch (err: any) {
         if (isIntakeIncompleteError(err)) return intakeIncompleteResponse('saved')
         return JSON.stringify({ saved: false, message: err.message ?? 'Failed to save check-in.' })
@@ -983,7 +1014,20 @@ export async function executeJournalTool(
     case 'update_checkin': {
       try {
         const dto: any = {}
-        if (args.entry_date != null || args.measurement_time != null) {
+        // Bug 55 — only rebuild measuredAt when the LLM is EXPLICITLY changing
+        // the time. The pre-fix gate `args.entry_date != null || args.measurement_time != null`
+        // fired on EVERY update_checkin call because `entry_date` is REQUIRED in
+        // the schema for entry lookup (not for editing). When the patient just
+        // said "change the systolic to 142", the LLM correctly passed
+        // entry_date + original_time for lookup and OMITTED measurement_time,
+        // but `normaliseTime(undefined) ?? localNow.time` then defaulted to
+        // the current wall-clock and overwrote the saved time. Now we only
+        // touch measuredAt if the LLM passed a real new measurement_time.
+        const newMeasurementTime =
+          typeof args.measurement_time === 'string'
+            ? normaliseTime(args.measurement_time.trim())
+            : null
+        if (newMeasurementTime) {
           // Bug 28 — when the LLM updates JUST the time (or JUST the date),
           // the other field used to default to UTC today/now. For a NY
           // patient near midnight UTC the date default landed the entry on
@@ -991,11 +1035,15 @@ export async function executeJournalTool(
           // instant by the tz offset. Both defaults now project through
           // ctx.timezone so they match what the patient sees.
           const tz = ctx.timezone ?? 'America/New_York'
-          const localNow = tzWallclockFromIso(new Date(), tz)
-          const d = args.entry_date || localNow.date
-          const t = normaliseTime(args.measurement_time) ?? localNow.time
+          // entry_date is REQUIRED for entry lookup — use it as the date
+          // component when rebuilding measuredAt. Defensive fallback to
+          // today only if the LLM somehow omits it (shouldn't happen).
+          const d =
+            typeof args.entry_date === 'string' && args.entry_date.trim()
+              ? args.entry_date.trim()
+              : tzWallclockFromIso(new Date(), tz).date
           // Bug 18 — same wallclock-as-UTC fix as submit_checkin above.
-          dto.measuredAt = isoFromTzWallclock(d, t, tz)
+          dto.measuredAt = isoFromTzWallclock(d, newMeasurementTime, tz)
         }
         if (args.systolic_bp != null) dto.systolicBP = args.systolic_bp
         if (args.diastolic_bp != null) dto.diastolicBP = args.diastolic_bp
@@ -1094,7 +1142,37 @@ export async function executeJournalTool(
 
         const result = await journalService.update(userId, entryId, dto)
         ctx.onPatientDataMutated?.(userId)
-        return JSON.stringify({ updated: true, message: 'Reading updated successfully.', data: result.data })
+        // Bug 54 — same weight_display enrichment as submit_checkin. The
+        // patient's original unit on an UPDATE comes from args.weight_unit
+        // (when the patient is changing the weight) or defaults to LBS
+        // (display convention) when only the BP / pulse / position fields
+        // are being edited.
+        const updatedWeightKg =
+          typeof (result.data as { weight?: number | null }).weight === 'number'
+            ? (result.data as { weight: number }).weight
+            : null
+        const updatePatientUnit =
+          typeof args.weight_unit === 'string' && args.weight_unit.toUpperCase() === 'KG'
+            ? 'KG'
+            : 'LBS'
+        const updatedWeightDisplay =
+          updatedWeightKg != null && updatedWeightKg > 0
+            ? {
+                kg: updatedWeightKg,
+                lbs: kgToLbs(updatedWeightKg),
+                original_unit: updatePatientUnit,
+                verbalize_as:
+                  updatePatientUnit === 'KG'
+                    ? `${updatedWeightKg} kg`
+                    : `${kgToLbs(updatedWeightKg)} lbs`,
+              }
+            : null
+        return JSON.stringify({
+          updated: true,
+          message: 'Reading updated successfully.',
+          data: result.data,
+          weight_display: updatedWeightDisplay,
+        })
       } catch (err: any) {
         return JSON.stringify({ updated: false, message: err.message ?? 'Failed to update.' })
       }

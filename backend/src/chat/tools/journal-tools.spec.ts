@@ -361,6 +361,147 @@ describe('journal-tools', () => {
       expect(parsed.updated).toBe(true)
     })
 
+    // ─── Bug 55 — update_checkin must NOT overwrite measuredAt when the
+    // LLM is only changing OTHER fields (e.g., systolic_bp). The pre-fix
+    // dispatcher fired the measuredAt rebuild branch on every call because
+    // `entry_date` is a REQUIRED lookup key (always present), then defaulted
+    // the time portion to localNow.time → silently overwrote the saved time
+    // with the current clock time on every non-time edit.
+    it('Bug 55 — update_checkin with only systolic change does NOT update measuredAt', async () => {
+      mockJournalService.findAll.mockResolvedValue({
+        data: [{ id: '123', measuredAt: '2026-04-07T18:30:00.000Z', systolicBP: 120, diastolicBP: 80 }],
+      })
+      mockJournalService.update.mockResolvedValue({
+        data: { id: '123', systolicBP: 142 },
+      })
+
+      await executeJournalTool(
+        'update_checkin',
+        {
+          entry_date: '2026-04-07',
+          original_time: '14:30',
+          systolic_bp: 142,
+          // No measurement_time → the dispatcher must NOT touch measuredAt.
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+
+      const updateArgs = mockJournalService.update.mock.calls[0][2]
+      expect(updateArgs.measuredAt).toBeUndefined()
+      expect(updateArgs.systolicBP).toBe(142)
+    })
+
+    it('Bug 55 — update_checkin with empty-string measurement_time also leaves measuredAt unchanged', async () => {
+      mockJournalService.findAll.mockResolvedValue({
+        data: [{ id: '123', measuredAt: '2026-04-07T18:30:00.000Z', systolicBP: 120, diastolicBP: 80 }],
+      })
+      mockJournalService.update.mockResolvedValue({
+        data: { id: '123', systolicBP: 142 },
+      })
+
+      await executeJournalTool(
+        'update_checkin',
+        {
+          entry_date: '2026-04-07',
+          original_time: '14:30',
+          measurement_time: '', // sentinel — leave unchanged
+          systolic_bp: 142,
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+
+      const updateArgs = mockJournalService.update.mock.calls[0][2]
+      expect(updateArgs.measuredAt).toBeUndefined()
+    })
+
+    it('Bug 55 — update_checkin with a real new measurement_time uses entry_date as the date (not today)', async () => {
+      mockJournalService.findAll.mockResolvedValue({
+        data: [{ id: '123', measuredAt: '2026-04-07T18:30:00.000Z' }],
+      })
+      mockJournalService.update.mockResolvedValue({
+        data: { id: '123', systolicBP: 120 },
+      })
+
+      await executeJournalTool(
+        'update_checkin',
+        {
+          entry_date: '2026-04-07',
+          original_time: '14:30',
+          measurement_time: '15:00', // real new time
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+
+      const updateArgs = mockJournalService.update.mock.calls[0][2]
+      // The new measuredAt must be built from entry_date (2026-04-07), not today.
+      expect(updateArgs.measuredAt).toBeDefined()
+      const newIso = updateArgs.measuredAt as string
+      // 2026-04-07 in NY (default tz) at 15:00 → 19:00Z (EDT, UTC-4).
+      expect(newIso).toMatch(/^2026-04-07T19:00:00/)
+    })
+
+    // ─── Bug 54 — submit/update response must include weight_display so
+    // the LLM can verbalise back in the unit the patient said, instead of
+    // remembering and sometimes mismatching ("Saved 80 lbs" when patient
+    // said "80 kg").
+    it('Bug 54 — submit_checkin response includes weight_display.verbalize_as in the unit the patient said (KG)', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'e1', weight: 80, systolicBP: 120, diastolicBP: 80 },
+      })
+
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: '2026-06-01',
+          measurement_time: '08:30',
+          systolic_bp: 120,
+          diastolic_bp: 80,
+          medication_taken: true,
+          symptoms: [],
+          weight: 80,
+          weight_unit: 'KG',
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+
+      const parsed = JSON.parse(result)
+      expect(parsed.weight_display).toBeDefined()
+      expect(parsed.weight_display.original_unit).toBe('KG')
+      expect(parsed.weight_display.verbalize_as).toMatch(/80\s*kg/i)
+      expect(parsed.weight_display.kg).toBe(80)
+      expect(parsed.weight_display.lbs).toBeGreaterThan(170)
+    })
+
+    it('Bug 54 — submit_checkin response uses LBS verbalisation when the patient said LBS', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'e1', weight: 81.65, systolicBP: 120, diastolicBP: 80 }, // 180 lbs ≈ 81.65 kg
+      })
+
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: '2026-06-01',
+          measurement_time: '08:30',
+          systolic_bp: 120,
+          diastolic_bp: 80,
+          medication_taken: true,
+          symptoms: [],
+          weight: 180,
+          weight_unit: 'LBS',
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+
+      const parsed = JSON.parse(result)
+      expect(parsed.weight_display.original_unit).toBe('LBS')
+      expect(parsed.weight_display.verbalize_as).toMatch(/\d+(\.\d+)?\s*lbs/i)
+    })
+
     it('should execute delete_checkin with date/time lookup', async () => {
       mockJournalService.findAll.mockResolvedValue({
         data: [{ id: '123', measuredAt: '2026-04-07T18:30:00.000Z' }],

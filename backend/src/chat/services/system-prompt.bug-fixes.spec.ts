@@ -321,6 +321,33 @@ describe('SystemPromptService — Bug 14 chat-prompt form-parity guards', () => 
         expect(prompt).toMatch(/finalize_checkin.{0,80}non[- ]AFib|never for AFib/i)
       })
 
+      // ─── Bug 54 — verbalise weight in the unit the patient said ──────
+      it('Bug 54 — weight step tells LLM to use weight_display.verbalize_as from the tool response', () => {
+        expect(prompt).toMatch(/weight_display\.verbalize_as/i)
+        // [\s\S] spans line wraps in the V2 prompt where the warning is
+        // broken across multiple indented lines.
+        expect(prompt).toMatch(/NEVER mix[\s\S]{0,120}unit|never (?:write|say)[\s\S]{0,120}(?:80\s*lbs|80\s*kg)/i)
+      })
+
+      // ─── Bug 55 — update_checkin sentinel contract preserves saved date/time
+      // The pre-fix chat dispatcher overwrote the saved measurement time
+      // with the current clock whenever the LLM passed entry_date for
+      // lookup (which is on every update_checkin call). The prompt now
+      // explicitly teaches the LLM that entry_date / original_time are
+      // LOOKUP keys, and any field the patient is NOT changing should be
+      // omitted from the call.
+      it('Bug 55 — update_checkin sentinel contract is documented in the prompt', () => {
+        expect(prompt).toMatch(/SENTINEL CONTRACT|sentinel contract/i)
+        // entry_date / original_time are clarified as lookup keys, not new
+        // values.
+        expect(prompt).toMatch(/LOOKUP keys?|lookup keys?/i)
+        // Must tell the LLM not to pass "now" / current time unless the
+        // patient explicitly asked to change the time.
+        expect(prompt).toMatch(/NEVER pass "now"|never pass "?now"?/i)
+        // Must instruct: include ONLY the fields the patient asked to change.
+        expect(prompt).toMatch(/include ONLY the fields|only include the fields/i)
+      })
+
       // ─── Bug 53 — skip medication question for 0-meds patients ────────
       // Mirror of the voice-prompt Bug 53 guard. Patients with no active
       // prescribed medications (or only PRN / AS_NEEDED which the backend

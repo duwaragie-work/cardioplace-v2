@@ -753,6 +753,26 @@ export class VoiceToolsService {
       detail: `BP=${sbp}/${dbp} saved=${saved}`,
     })
 
+    // Bug 54 — include weight_display so the LLM verbalises back in the unit
+    // the patient said. Pre-fix the LLM response carried no weight info at
+    // all (only the popup payload had it), so the LLM had to remember the
+    // patient's words and sometimes mismatched ("Saved 80 lbs" when the
+    // patient said 80 kg). weight_display.verbalize_as is the canonical
+    // string for the spoken reply.
+    const voicePatientWeightUnit =
+      typeof args.weight_unit === 'string' && args.weight_unit.toUpperCase() === 'KG'
+        ? 'KG'
+        : 'LBS'
+    const voiceWeightDisplay =
+      popupKg > 0
+        ? {
+            kg: popupKg,
+            lbs: popupLbs,
+            original_unit: voicePatientWeightUnit,
+            verbalize_as:
+              voicePatientWeightUnit === 'KG' ? `${popupKg} kg` : `${popupLbs} lbs`,
+          }
+        : null
     return {
       llmResponse: {
         saved,
@@ -761,6 +781,7 @@ export class VoiceToolsService {
           : {}),
         entry_date_used: resolvedDate,
         measurement_time_used: resolvedTime,
+        weight_display: voiceWeightDisplay,
         message: savedMessage,
       },
       events,
@@ -1066,9 +1087,33 @@ export class VoiceToolsService {
       detail: `entry=${entryId} updated=${updated}`,
     })
 
+    // Bug 54 — include weight_display so the LLM verbalises back in the unit
+    // the patient said. Same contract as submit_checkin's llmResponse.
+    const voiceUpdateInputUnit =
+      typeof args.weight_unit === 'string' ? args.weight_unit : undefined
+    const voiceUpdateKg =
+      weight && weight > 0 ? normaliseWeightToKg(weight, voiceUpdateInputUnit) : 0
+    const voiceUpdateLbs = voiceUpdateKg > 0 ? kgToLbs(voiceUpdateKg) : 0
+    const voiceUpdatePatientUnit =
+      typeof args.weight_unit === 'string' && args.weight_unit.toUpperCase() === 'KG'
+        ? 'KG'
+        : 'LBS'
+    const voiceUpdateWeightDisplay =
+      voiceUpdateKg > 0
+        ? {
+            kg: voiceUpdateKg,
+            lbs: voiceUpdateLbs,
+            original_unit: voiceUpdatePatientUnit,
+            verbalize_as:
+              voiceUpdatePatientUnit === 'KG'
+                ? `${voiceUpdateKg} kg`
+                : `${voiceUpdateLbs} lbs`,
+          }
+        : null
     return {
       llmResponse: {
         updated,
+        weight_display: voiceUpdateWeightDisplay,
         message: updated
           ? 'Reading updated successfully.'
           : failureMessage ?? 'Could not update the reading. Please try again.',
