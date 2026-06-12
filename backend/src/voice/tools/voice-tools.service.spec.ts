@@ -1291,3 +1291,58 @@ describe('VoiceToolsService.dispatch — Bug 57 (actionable update errors)', () 
     expect(llm.message).toMatch(/positive number|new value|not.{0,20}0|Sentinels|sentinel/i)
   })
 })
+
+// ─── Bug 59 — voice update_checkin propagates the service's noChange flag
+// so the LLM tells the patient "already those values" instead of falsely
+// claiming a successful update.
+describe('VoiceToolsService.dispatch — Bug 59 (no-change graceful response)', () => {
+  let service: VoiceToolsService
+  let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock }
+
+  beforeEach(async () => {
+    dailyJournal = {
+      create: jest.fn() as jest.Mock,
+      findAll: jest.fn() as jest.Mock,
+      findOne: jest.fn() as jest.Mock,
+      update: jest.fn() as jest.Mock,
+      delete: jest.fn() as jest.Mock,
+    }
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        VoiceToolsService,
+        { provide: DailyJournalService, useValue: dailyJournal },
+        { provide: GeminiService, useValue: { extractBpFromImage: jest.fn() } },
+        { provide: AlertEngineService, useValue: { evaluateAdHoc: jest.fn() } },
+        {
+          provide: IntakeStatusService,
+          useValue: {
+            getStatus: jest.fn(async () => ({ completed: true, profileExists: true })) as jest.Mock,
+          },
+        },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: jest.fn() } } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile()
+    service = moduleRef.get(VoiceToolsService)
+  })
+
+  it('service returns noChange:true → llmResponse carries no_change:true + canonical message + updated:false', async () => {
+    ;(dailyJournal.update as jest.Mock<any>).mockResolvedValue({
+      statusCode: 200,
+      noChange: true,
+      message: 'No changes — the reading already has those values. Nothing to update.',
+      data: { id: 'e1', systolicBP: 138, diastolicBP: 85 },
+    })
+
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'e1', systolic_bp: 138, diastolic_bp: 85 },
+      CTX,
+    )
+
+    const llm = r.llmResponse as { updated: boolean; no_change?: boolean; message: string }
+    expect(llm.updated).toBe(false)
+    expect(llm.no_change).toBe(true)
+    expect(llm.message).toMatch(/already (have|has) those values/i)
+  })
+})

@@ -337,6 +337,35 @@ describe('journal-tools', () => {
       expect(parsed.readings).toHaveLength(1)
     })
 
+    // Bug 59 — service returns noChange:true when every requested field
+    // already matches the stored value. Dispatcher must propagate that as
+    // updated:false + no_change:true so the LLM doesn't falsely claim
+    // "Reading updated successfully." (the canonical message comes from
+    // the service and is read back to the patient verbatim).
+    it('Bug 59 — chat update_checkin propagates noChange:true from service as no_change in llmResponse', async () => {
+      mockJournalService.findAll.mockResolvedValue({
+        data: [{ id: '123', measuredAt: '2026-04-07T18:30:00.000Z', systolicBP: 138, diastolicBP: 85 }],
+      })
+      mockJournalService.update.mockResolvedValue({
+        statusCode: 200,
+        noChange: true,
+        message: 'No changes — the reading already has those values. Nothing to update.',
+        data: { id: '123', systolicBP: 138, diastolicBP: 85 },
+      })
+
+      const result = await executeJournalTool(
+        'update_checkin',
+        { entry_date: '2026-04-07', original_time: '14:30', systolic_bp: 138, diastolic_bp: 85 },
+        mockJournalService as any,
+        'user-1',
+      )
+
+      const parsed = JSON.parse(result)
+      expect(parsed.updated).toBe(false)
+      expect(parsed.no_change).toBe(true)
+      expect(parsed.message).toMatch(/already (have|has) those values/i)
+    })
+
     it('should execute update_checkin with date/time lookup', async () => {
       // Bug 27 — LLM passes the patient-local time the LLM saw via
       // get_recent_readings (14:30). Stored measuredAt is UTC. April 7

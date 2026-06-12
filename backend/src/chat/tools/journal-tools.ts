@@ -1204,6 +1204,25 @@ export async function executeJournalTool(
                     : `${kgToLbs(updatedWeightKg)} lbs`,
               }
             : null
+        // Bug 59 — when the service detected every requested field already
+        // matched the stored value, propagate the explicit no_change signal
+        // so the LLM tells the patient gracefully ("Those values are
+        // already what's saved — nothing to change") instead of falsely
+        // claiming "Reading updated successfully." The service's canonical
+        // message is the spoken / typed reply the bot should use verbatim.
+        const noChange = (result as { noChange?: boolean }).noChange === true
+        if (noChange) {
+          return JSON.stringify({
+            updated: false,
+            no_change: true,
+            message:
+              typeof result.message === 'string' && result.message
+                ? result.message
+                : 'No changes — the reading already has those values. Nothing to update.',
+            data: result.data,
+            weight_display: updatedWeightDisplay,
+          })
+        }
         return JSON.stringify({
           updated: true,
           message: 'Reading updated successfully.',

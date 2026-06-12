@@ -1067,6 +1067,13 @@ export class VoiceToolsService {
     ]
 
     let updated = false
+    // Bug 59 — when the service detects every requested field already
+    // matched the stored value, route the response to a graceful "values
+    // are already what's saved" message instead of claiming success. The
+    // canonical message comes from daily_journal.service.ts (no-op
+    // branch); we just propagate it to the LLM.
+    let noChange = false
+    let noChangeMessage: string | null = null
     let entryDate = ''
     let finalSbp = sbp || 0
     let finalDbp = dbp || 0
@@ -1088,7 +1095,18 @@ export class VoiceToolsService {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await this.dailyJournal.update(ctx.userId, entryId, dto as any)
-      updated = true
+      noChange = (result as { noChange?: boolean }).noChange === true
+      if (noChange) {
+        const m = (result as { message?: string }).message
+        noChangeMessage =
+          typeof m === 'string' && m
+            ? m
+            : 'No changes — the reading already has those values. Nothing to update.'
+      }
+      // `updated` reflects whether the entry was actually mutated. We set
+      // it true only for real updates; no-op leaves it false so the UI
+      // popup + frontend treat it as "nothing happened" cleanly.
+      updated = !noChange
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const data = (result?.data as any) ?? {}
       const ma: string = data.measuredAt instanceof Date
@@ -1183,10 +1201,17 @@ export class VoiceToolsService {
     return {
       llmResponse: {
         updated,
+        // Bug 59 — propagate the explicit no_change flag so the LLM can
+        // route a graceful "those values are already what's saved" reply
+        // instead of falsely claiming the reading was updated when nothing
+        // changed.
+        ...(noChange ? { no_change: true as const } : {}),
         weight_display: voiceUpdateWeightDisplay,
-        message: updated
-          ? 'Reading updated successfully.'
-          : failureMessage ?? 'Could not update the reading. Please try again.',
+        message: noChange
+          ? noChangeMessage ?? 'No changes — the reading already has those values. Nothing to update.'
+          : updated
+            ? 'Reading updated successfully.'
+            : failureMessage ?? 'Could not update the reading. Please try again.',
       },
       events,
     }

@@ -348,6 +348,13 @@ describe('SystemPromptService — Bug 14 chat-prompt form-parity guards', () => 
         expect(prompt).toMatch(/include ONLY the fields|only include the fields/i)
       })
 
+      // ─── Bug 59 — chat prompt handles no_change response gracefully ───
+      it('Bug 59 — prompt teaches the LLM to handle no_change responses gracefully', () => {
+        expect(prompt).toMatch(/no_change/i)
+        expect(prompt).toMatch(/DO NOT say.{0,80}I updated|that's a lie|nothing actually changed/i)
+        expect(prompt).toMatch(/already what'?s saved|already those values|nothing to change/i)
+      })
+
       // ─── Bug 53 — skip medication question for 0-meds patients ────────
       // Mirror of the voice-prompt Bug 53 guard. Patients with no active
       // prescribed medications (or only PRN / AS_NEEDED which the backend

@@ -294,6 +294,17 @@ describe('voice system instruction — Bug 14 form-parity guards', () => {
         expect(prompt).toMatch(/NEVER mix.{0,80}unit|never (?:write|say).{0,80}(?:80\s*lbs|80\s*kg)/i)
       })
 
+      // ─── Bug 59 — voice prompt handles no_change response gracefully ───
+      // Both V1 and V2 update flow must instruct the LLM to read the
+      // canonical message and NOT falsely claim success.
+      it('Bug 59 — prompt teaches the LLM to handle no_change responses gracefully', () => {
+        expect(prompt).toMatch(/no_change/i)
+        // The LLM must NOT claim the update succeeded.
+        expect(prompt).toMatch(/DO NOT say.{0,80}I updated|that's a lie|nothing actually changed/i)
+        // A canonical "already those values" reply.
+        expect(prompt).toMatch(/already what'?s saved|already those values|nothing to change/i)
+      })
+
       // ─── Bug 53 — skip medication question for 0-meds patients ────────
       // Patients with no active prescribed medications (or only PRN /
       // AS_NEEDED which the backend filters) should NOT be asked "did you
