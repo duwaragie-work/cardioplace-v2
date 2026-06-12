@@ -37,4 +37,14 @@ enum VerificationChangeType {
   // distinct from ADMIN_CORRECT so auditors can tell migration-merged rows
   // apart from human provider corrections.
   SYSTEM_MIGRATION
+  // Journal-entry (BP reading) audit trail — HIPAA/JCAHO closure. PATIENT_*
+  // rows are patient-app actions on their own readings; ADMIN_* rows are
+  // care-team actions via /admin/patients/:userId/readings (actor in
+  // changedBy). previousValue/newValue hold serializeForAudit() snapshots.
+  PATIENT_READING_CREATED
+  PATIENT_READING_EDITED
+  PATIENT_READING_DELETED
+  ADMIN_READING_ADDED
+  ADMIN_READING_EDITED
+  ADMIN_READING_DELETED
 }

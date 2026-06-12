@@ -1,6 +1,11 @@
 model JournalEntry {
   id                    String      @id @default(uuid())
   userId                String
+  // Care-team actor who entered this reading on the patient's behalf via the
+  // admin readings endpoints (source = ADMIN). Null on patient-entered rows.
+  // SET NULL on user delete so the clinical reading survives staff-account
+  // removal (the ProfileVerificationLog audit row keeps the actor id).
+  addedByUserId         String?
   measuredAt            DateTime
   systolicBP            Int?
   diastolicBP           Int?
@@ -91,10 +96,15 @@ model JournalEntry {
   updatedAt DateTime @updatedAt
 
   deviationAlerts DeviationAlert[]
-  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Both User relations are named — Prisma requires disambiguation once a
+  // second relation to the same model exists. Names are client-level only;
+  // no SQL is generated from them.
+  user            User             @relation("PatientJournalEntries", fields: [userId], references: [id], onDelete: Cascade)
+  addedBy         User?            @relation("JournalEntryAddedBy", fields: [addedByUserId], references: [id], onDelete: SetNull)
 
   @@unique([userId, measuredAt])
   @@index([userId, measuredAt(sort: Desc)])
+  @@index([addedByUserId])
 }
 
 enum Position {
@@ -142,4 +152,7 @@ enum CommunicationPreference {
 enum EntrySource {
   MANUAL
   HEALTHKIT
+  // Entered by care-team staff via the admin readings endpoints — pairs with
+  // JournalEntry.addedByUserId for "entered by [staff]" display.
+  ADMIN
 }
