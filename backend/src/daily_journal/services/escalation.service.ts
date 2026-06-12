@@ -41,6 +41,7 @@ import {
   nextBusinessHoursStart,
   type BusinessHoursConfig,
 } from '../utils/business-hours.js'
+import { wasEverEnrolled } from '../../practice/enrollment-helpers.js'
 
 /**
  * Cluster 7 A.6 — rules whose primary delivery channel is the caregiver
@@ -483,10 +484,23 @@ export class EscalationService {
     // fail-loud path would just write DISPATCH ERROR rows. See
     // TESTING_FLOW_GUIDE.md §6.2–§6.3.
     if (alert.user.enrollmentStatus !== 'ENROLLED') {
+      // Manisha sign-off 2026-06-12 — a patient who was EVER enrolled keeps
+      // their full dispatch + ladder after an auto-un-enroll (serious condition
+      // added without a threshold). Care team + routing are already in place;
+      // only the personalized threshold is pending. A truly never-enrolled
+      // patient still defers (original gate intent). See enrollment-gate-
+      // emergency-gap memory note.
+      const previouslyEnrolled = await wasEverEnrolled(this.prisma, alert.userId)
+      if (!previouslyEnrolled) {
+        this.logger.log(
+          `Alert ${alert.id}: patient ${alert.userId} never enrolled — deferring dispatch at T+0`,
+        )
+        return
+      }
       this.logger.log(
-        `Alert ${payload.alertId}: patient ${alert.userId} not enrolled — deferring dispatch`,
+        `Alert ${alert.id}: patient ${alert.userId} un-enrolled (threshold pending) — dispatching anyway (previously enrolled, at T+0)`,
       )
-      return
+      // fall through to normal T+0 dispatch
     }
 
     const practice = alert.user.providerAssignmentAsPatient?.practice ?? null
@@ -620,10 +634,20 @@ export class EscalationService {
       // time (e.g. admin revoked enrollment). Leave the row in place;
       // re-enrollment will pick it up on the next cron pass.
       if (alert.user.enrollmentStatus !== 'ENROLLED') {
-        this.logger.debug(
-          `Pending event ${row.id}: patient ${alert.userId} not enrolled — deferring`,
+        // Manisha sign-off 2026-06-12 — previously-enrolled patients dispatch
+        // even while un-enrolled (threshold pending). See enrollment-gate-
+        // emergency-gap memory note + fireT0 gate above.
+        const previouslyEnrolled = await wasEverEnrolled(this.prisma, alert.userId)
+        if (!previouslyEnrolled) {
+          this.logger.debug(
+            `Pending event ${row.id}: patient ${alert.userId} never enrolled — deferring at firePendingScheduled`,
+          )
+          continue
+        }
+        this.logger.log(
+          `Pending event ${row.id}: patient ${alert.userId} un-enrolled (threshold pending) — dispatching anyway (previously enrolled, at firePendingScheduled)`,
         )
-        continue
+        // fall through — dispatch the queued/scheduled event
       }
 
       // Check alert still open + not acknowledged; if it's been resolved /
@@ -719,10 +743,20 @@ export class EscalationService {
       // catches alerts created pre-enrollment-split (when fireT0 didn't gate)
       // so their ladders don't keep walking once the filter kicks in.
       if (alert.user.enrollmentStatus !== 'ENROLLED') {
-        this.logger.debug(
-          `Alert ${alert.id}: patient ${alert.userId} not enrolled — ladder paused`,
+        // Manisha sign-off 2026-06-12 — previously-enrolled patients keep their
+        // ladder advancing even while un-enrolled (threshold pending). See
+        // enrollment-gate-emergency-gap memory note + fireT0 gate above.
+        const previouslyEnrolled = await wasEverEnrolled(this.prisma, alert.userId)
+        if (!previouslyEnrolled) {
+          this.logger.debug(
+            `Alert ${alert.id}: patient ${alert.userId} never enrolled — ladder paused at advanceOverdueLadders`,
+          )
+          continue
+        }
+        this.logger.log(
+          `Alert ${alert.id}: patient ${alert.userId} un-enrolled (threshold pending) — advancing ladder anyway (previously enrolled, at advanceOverdueLadders)`,
         )
-        continue
+        // fall through — advance the ladder normally
       }
 
       // Fetch all escalation events for the alert — need both dispatched rows
