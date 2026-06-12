@@ -320,6 +320,18 @@ describe('SystemPromptService — Bug 14 chat-prompt form-parity guards', () => 
         expect(prompt).toMatch(/more than 5 minutes.{0,150}full check-in flow/i)
         expect(prompt).toMatch(/finalize_checkin.{0,80}non[- ]AFib|never for AFib/i)
       })
+
+      // ─── Bug 53 — skip medication question for 0-meds patients ────────
+      // Mirror of the voice-prompt Bug 53 guard. Patients with no active
+      // prescribed medications (or only PRN / AS_NEEDED which the backend
+      // filters) must NOT be asked the adherence question; the bot must
+      // instead pass medication_taken=true vacuously so the required-field
+      // gate is still satisfied.
+      it('Bug 53 — medication step skips when patient context says "No medications recorded"', () => {
+        expect(prompt).toMatch(/No medications recorded/i)
+        expect(prompt).toMatch(/SKIP this step entirely|skip this step entirely/i)
+        expect(prompt).toMatch(/medication_taken\s*=\s*true.{0,200}vacuously|vacuously true[\s\S]{0,200}medication_taken/i)
+      })
     })
   }
 })

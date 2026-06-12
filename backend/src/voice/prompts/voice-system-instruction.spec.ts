@@ -281,6 +281,25 @@ describe('voice system instruction — Bug 14 form-parity guards', () => {
         // finalize_checkin is the explicit "evaluate this" path (non-AFib only).
         expect(prompt).toMatch(/finalize_checkin.{0,80}non[- ]AFib|never for AFib/i)
       })
+
+      // ─── Bug 53 — skip medication question for 0-meds patients ────────
+      // Patients with no active prescribed medications (or only PRN /
+      // AS_NEEDED which the backend filters) should NOT be asked "did you
+      // take your medications?" — the question is meaningless and
+      // frustrating. The bot must instead pass medication_taken=true
+      // (vacuously) so the required-field gate is still satisfied. The
+      // trigger phrase is the exact patient-context line
+      // "Medications: No medications recorded."
+      it('Bug 53 — medication step skips when patient context says "No medications recorded"', () => {
+        // Trigger phrase appears verbatim so the LLM can pattern-match
+        // against the rendered patient context block.
+        expect(prompt).toMatch(/No medications recorded/i)
+        // SKIP directive is explicit (not just "ask if they have any").
+        expect(prompt).toMatch(/SKIP this step entirely|skip this step entirely/i)
+        // Vacuous-true contract for medication_taken is spelled out so the
+        // LLM doesn't get rejected by the dispatcher's required-field gate.
+        expect(prompt).toMatch(/medication_taken\s*=\s*true.{0,200}vacuously|vacuously true[\s\S]{0,200}medication_taken/i)
+      })
     })
   }
 })
