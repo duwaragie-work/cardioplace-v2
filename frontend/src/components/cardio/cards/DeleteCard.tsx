@@ -47,7 +47,7 @@ export default function DeleteCard({ summary, onDismiss }: Props) {
           <AlertCircle className="w-5 h-5 shrink-0" style={{ color: "var(--brand-alert-red)" }} aria-hidden="true" />
         )}
         <p
-          className="font-bold text-[15px]"
+          className="font-bold text-[0.9375rem]"
           style={{ color: 'var(--brand-text-primary)' }}
         >
           {summary.success ? successLabel : t('chat.card.deleteFailed')}
@@ -67,7 +67,7 @@ export default function DeleteCard({ summary, onDismiss }: Props) {
           <div>
             <p
               lang="en"
-              className="text-[16px] font-bold"
+              className="text-[1rem] font-bold"
               style={{ color: 'var(--brand-alert-red-text)' }}
             >
               {summary.deletedCount}{' '}
@@ -75,7 +75,7 @@ export default function DeleteCard({ summary, onDismiss }: Props) {
             </p>
             {summary.failedCount > 0 && (
               <p
-                className="text-[12px] mt-0.5"
+                className="text-[0.75rem] mt-0.5"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 {summary.failedCount} could not be deleted
@@ -85,7 +85,7 @@ export default function DeleteCard({ summary, onDismiss }: Props) {
         </div>
         {summary.message && (
           <p
-            className="text-[12px] mt-3 text-center"
+            className="text-[0.75rem] mt-3 text-center"
             style={{ color: 'var(--brand-text-muted)' }}
           >
             {summary.message}
@@ -99,7 +99,7 @@ export default function DeleteCard({ summary, onDismiss }: Props) {
       >
         <Link
           href="/readings"
-          className="flex-1 h-11 rounded-xl font-semibold text-[13px] inline-flex items-center justify-center gap-1.5 transition hover:opacity-90"
+          className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] inline-flex items-center justify-center gap-1.5 transition hover:opacity-90"
           style={{
             backgroundColor: 'var(--brand-background)',
             color: 'var(--brand-text-primary)',
@@ -110,7 +110,7 @@ export default function DeleteCard({ summary, onDismiss }: Props) {
         </Link>
         <button
           onClick={onDismiss}
-          className="flex-1 h-11 rounded-xl font-semibold text-[13px] text-white transition hover:opacity-90"
+          className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] text-white transition hover:opacity-90"
           style={{
             background: 'linear-gradient(135deg, var(--brand-alert-red), #EF4444)',
             boxShadow: '0 4px 14px rgba(220,38,38,0.28)',

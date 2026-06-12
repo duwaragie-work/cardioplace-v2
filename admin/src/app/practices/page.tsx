@@ -61,7 +61,7 @@ export default function PracticesPage() {
 
   return (
     <div className="h-full" style={{ backgroundColor: 'var(--brand-background)' }}>
-      <main className="p-4 md:p-8 max-w-[1200px] mx-auto space-y-5">
+      <div className="p-4 md:p-8 max-w-[1200px] mx-auto space-y-5">
         {/* Header */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3">
@@ -190,7 +190,7 @@ export default function PracticesPage() {
             </ul>
           )}
         </div>
-      </main>
+      </div>
 
       {/* Create modal */}
       <AnimatePresence>
@@ -239,6 +239,14 @@ function CreatePracticeModal({
   onClose: () => void;
   onCreated: (p: Practice) => void;
 }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const [form, setForm] = useState<UpsertPracticePayload>({
     name: '',
     businessHoursStart: '08:00',

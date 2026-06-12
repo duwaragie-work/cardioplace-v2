@@ -31,13 +31,18 @@ export async function signInAdmin(
   page: Page,
   email: string,
   adminBaseUrl: string,
+  // The admin sign-in always router.push('/dashboard'), but a COORDINATOR's
+  // sidebar hides Dashboard and the app lands them on their /users surface
+  // instead — so coordinator specs pass a wider pattern. Defaults to the
+  // /dashboard landing every other admin role gets.
+  landingPattern: RegExp = /\/dashboard/,
 ): Promise<void> {
   await page.goto(`${adminBaseUrl}/sign-in`)
   await page.locator(byTestId(T.admin.signInEmail)).fill(email)
   await page.locator(byTestId(T.admin.signInSendOtp)).click()
   await page.locator(byTestId(T.admin.signInOtp)).fill(DEMO_OTP)
   await page.locator(byTestId(T.admin.signInVerify)).click()
-  await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
+  await page.waitForURL(landingPattern, { timeout: 30_000 })
 }
 
 /** Sign out via the patient profile page. */

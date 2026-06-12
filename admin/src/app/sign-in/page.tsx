@@ -221,7 +221,7 @@ export default function RegisterPage() {
     <Suspense>
     <div className="bg-white">
       <LandingHeader activeLink="" />
-      <div className="lg:min-h-screen pt-24 lg:pt-[64px] pb-10 lg:pb-0 flex items-start lg:items-center justify-center px-4 sm:px-6 lg:px-12">
+      <main id="main" tabIndex={-1} className="lg:min-h-screen pt-24 lg:pt-[64px] pb-10 lg:pb-0 flex items-start lg:items-center justify-center px-4 sm:px-6 lg:px-12">
       <div className="w-full max-w-300 mx-auto">
         <div className="flex flex-col items-center md:items-center md:flex-row gap-8 lg:gap-20">
           {/* Left side - Form */}
@@ -270,7 +270,7 @@ export default function RegisterPage() {
                   placeholder={t('register.emailPlaceholder')}
                   autoComplete="email"
                   aria-invalid={showEmailError}
-                  className={`w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] rounded-lg text-sm lg:text-base text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all border ${
+                  className={`w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] rounded-lg text-sm lg:text-base text-[#171717] placeholder:text-[#737373] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all border ${
                     showEmailError ? 'border-[var(--brand-alert-red)]' : 'border-[#e5d9f2]'
                   }`}
                 />
@@ -334,7 +334,7 @@ export default function RegisterPage() {
                         }}
                         placeholder="••••••"
                         maxLength={OTP_LENGTH}
-                        className="w-full h-11 lg:h-12 pl-4 lg:pl-5 pr-11 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-base lg:text-lg text-center tracking-[8px] text-[#171717] placeholder:text-[#a3a3a3] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                        className="w-full h-11 lg:h-12 pl-4 lg:pl-5 pr-11 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-base lg:text-lg text-center tracking-[8px] text-[#171717] placeholder:text-[#737373] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
                       />
                       <button
                         type="button"
@@ -440,7 +440,7 @@ export default function RegisterPage() {
           </div>
         </div>
       </div>
-      </div>
+      </main>
       <LandingFooter />
     </div>
     </Suspense>

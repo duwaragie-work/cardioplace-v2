@@ -490,7 +490,7 @@ export default function PatientDetailShell({ patientId }: Props) {
 
   return (
     <div className="h-full" style={{ backgroundColor: 'var(--brand-background)' }}>
-      <main className="p-4 md:p-8 space-y-5 md:space-y-6 max-w-[1400px] mx-auto">
+      <div className="p-4 md:p-8 space-y-5 md:space-y-6 max-w-[1400px] mx-auto">
         {/* ── Back link ───────────────────────────────────────────────────── */}
         <button
           type="button"
@@ -892,7 +892,7 @@ export default function PatientDetailShell({ patientId }: Props) {
             <Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--brand-text-muted)' }} />
           </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }

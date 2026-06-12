@@ -130,19 +130,19 @@ export default function MonthlyMedReask({ userId, hasMedications, intakeComplete
             </div>
 
             <p
-              className="text-[11px] font-bold uppercase tracking-wider mb-1"
+              className="text-[0.6875rem] font-bold uppercase tracking-wider mb-1"
               style={{ color: 'var(--brand-primary-purple)' }}
             >
               {t('intake.reask.kicker')}
             </p>
             <h2
-              className="text-[20px] font-bold leading-tight mb-2"
+              className="text-[1.25rem] font-bold leading-tight mb-2"
               style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
             >
               {t('intake.reask.title')}
             </h2>
             <p
-              className="text-[13px] mb-6 leading-relaxed"
+              className="text-[0.8125rem] mb-6 leading-relaxed"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
               {t('intake.reask.body')}
@@ -152,7 +152,7 @@ export default function MonthlyMedReask({ userId, hasMedications, intakeComplete
               <button
                 type="button"
                 onClick={handleYes}
-                className="w-full h-12 rounded-full font-bold text-white text-[14px] flex items-center justify-center gap-2 cursor-pointer transition active:scale-[0.98]"
+                className="w-full h-12 rounded-full font-bold text-white text-[0.875rem] flex items-center justify-center gap-2 cursor-pointer transition active:scale-[0.98]"
                 style={{
                   backgroundColor: 'var(--brand-primary-purple)',
                   boxShadow: 'var(--brand-shadow-button)',
@@ -164,7 +164,7 @@ export default function MonthlyMedReask({ userId, hasMedications, intakeComplete
               <button
                 type="button"
                 onClick={handleUpdate}
-                className="w-full h-12 rounded-full font-bold text-[14px] flex items-center justify-center gap-2 cursor-pointer transition"
+                className="w-full h-12 rounded-full font-bold text-[0.875rem] flex items-center justify-center gap-2 cursor-pointer transition"
                 style={{
                   backgroundColor: 'var(--brand-warning-amber-light)',
                   color: 'var(--brand-warning-amber-text)',

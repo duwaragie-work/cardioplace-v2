@@ -113,11 +113,52 @@ export interface AlertContext {
    * elevated risk; second/third trimester causes classic fetopathy:
    * renal dysgenesis, oligohydramnios, pulmonary hypoplasia). Populated
    * by OutputGenerator from PatientProfile when the rule fires against a
-   * pregnant patient; null when unknown or non-pregnancy alerts. The
-   * other Decision-4 placeholders ([age], [medication list]) remain
-   * backlogged.
+   * pregnant patient; null when unknown or non-pregnancy alerts.
    */
   gestationalAgeWeeks?: number | null
+
+  /**
+   * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4) — patient age
+   * in completed years. Decision 4 backlog item #1 (issue #68). Threaded
+   * through to physician messages where age modifies clinical
+   * significance (e.g. brady surveillance in patients on rate-controlling
+   * meds — MESA study found HR ≤50 bpm associated with markedly elevated
+   * mortality in this population, varying by age). Populated by
+   * OutputGenerator from `User.dateOfBirth` and `session.measuredAt` at
+   * fire-time. Null when DOB unknown.
+   *
+   * NOTE: which specific rule messages render this suffix is an open
+   * clinical-wording decision — see issue #68 for the candidate list
+   * pending Manisha confirmation. The helper `agePhrase(ctx)` always
+   * returns the rendered fragment ("(age 67)" or ""), so a future
+   * commit can apply it without re-touching the plumbing.
+   */
+  patientAgeYears?: number | null
+
+  /**
+   * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4) — patient's
+   * full active medication list, EXCLUDING the triggering drug(s) already
+   * cited via `drugNames`. Decision 4 backlog item #2 (issue #69).
+   *
+   * Threaded through to contraindication-related physician messages where
+   * the broader regimen context helps the clinician judge substitution
+   * options (e.g. for a pregnancy + ACE/ARB contraindication, knowing the
+   * patient is also on a thiazide and a beta-blocker frames the
+   * substitution decision).
+   *
+   * Populated by OutputGenerator from `ResolvedContext.contextMeds`. The
+   * dedup against `drugNames` happens at populate-time so the rendered
+   * "currently taking: …" list never duplicates a drug the message
+   * already names. Empty array when no other active meds exist.
+   *
+   * NOTE: which specific rule messages render this list is an open
+   * clinical-wording decision — see issue #69 for the candidate list
+   * pending Manisha confirmation. The helper `medicationListPhrase(ctx)`
+   * always returns the rendered fragment ("currently also taking:
+   * Atenolol, HCTZ" or ""), so a future commit can apply it without
+   * re-touching the plumbing.
+   */
+  activeMedications?: Array<{ drugName: string; drugClass: string }>
 }
 
 export type MessageBuilder = (ctx: AlertContext) => string
@@ -243,6 +284,53 @@ function gestationalAgePhrase(ctx: AlertContext): string {
   if (ga == null) return ''
   if (!Number.isFinite(ga) || ga < 1 || ga > 45) return ''
   return ` (${ga}w gestation)`
+}
+
+/**
+ * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, issue #68) —
+ * render the patient's age as a clinician-readable suffix like `(age 67)`.
+ * Returns empty string when age is unknown (DOB missing, future date,
+ * implausibly old). Format follows convention used in escalation emails
+ * (`ageFromDob` + `age X` suffix on the patient identifier block).
+ *
+ * Kept generic (no rule-id check) — any rule that wants it inlines the call.
+ * Plausibility clamp: 0–130 years; anything outside returns empty string.
+ *
+ * Example use in a physician message:
+ *   `BRADY SURVEILLANCE — HR ${hr}${agePhrase(ctx)}. Sustained HR ≤49…`
+ *   →  "BRADY SURVEILLANCE — HR 45 (age 67). Sustained HR ≤49…"
+ */
+function agePhrase(ctx: AlertContext): string {
+  const age = ctx.patientAgeYears
+  if (age == null) return ''
+  if (!Number.isFinite(age) || age < 0 || age > 130) return ''
+  return ` (age ${age})`
+}
+
+/**
+ * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, issue #69) —
+ * render the patient's other active medications as a clinician-readable
+ * suffix. Format: `" Currently also taking: Atenolol, HCTZ."` or empty
+ * string when no other meds.
+ *
+ * Dedup is done at the populate-time in OutputGenerator (it strips any
+ * drug already named in `drugNames`), so this helper just renders.
+ *
+ * Plain-English join: "X" / "X and Y" / "X, Y, and Z" — matches
+ * `formatDrugList` already used in patient/caregiver messages so the
+ * three tiers read consistently.
+ *
+ * Example use in a physician message:
+ *   `CONTRAINDICATION — ${drug}.${medicationListPhrase(ctx)} Recommend…`
+ *   → "CONTRAINDICATION — Lisinopril. Currently also taking: Atenolol
+ *      and HCTZ. Recommend immediate substitution…"
+ */
+function medicationListPhrase(ctx: AlertContext): string {
+  const meds = ctx.activeMedications
+  if (!meds || meds.length === 0) return ''
+  const names = meds.map((m) => m.drugName).filter(Boolean)
+  if (names.length === 0) return ''
+  return ` Currently also taking: ${formatDrugList(names)}.`
 }
 
 /**

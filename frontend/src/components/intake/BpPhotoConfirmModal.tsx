@@ -8,6 +8,7 @@
 // Numbers render with lang="en" so screen readers say "one forty-two" not
 // the locale-localised string — same convention as the alerts list.
 
+import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -30,6 +31,14 @@ export default function BpPhotoConfirmModal({
   onRetake,
 }: Props) {
   const { t } = useLanguage();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onCancel();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
 
   // Compose the spoken summary so eyes-closed users can verify by ear.
   // Pulse part is appended only when present so the speech doesn't say
@@ -82,7 +91,7 @@ export default function BpPhotoConfirmModal({
           <div className="flex items-center gap-2">
             <h2
               id="bp-confirm-title"
-              className="text-[16px] font-bold"
+              className="text-[1rem] font-bold"
               style={{ color: 'var(--brand-text-primary)' }}
             >
               {t('ocr.bp.confirmTitle')}
@@ -118,7 +127,7 @@ export default function BpPhotoConfirmModal({
                   rather than the locale-localised pronunciation of the digits. */}
               <p
                 lang="en"
-                className="text-[36px] font-bold leading-none"
+                className="text-[2.25rem] font-bold leading-none"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
                 {result.sbp} / {result.dbp}
@@ -126,7 +135,7 @@ export default function BpPhotoConfirmModal({
               {result.pulse != null && (
                 <p
                   lang="en"
-                  className="mt-1 text-[14px] font-semibold"
+                  className="mt-1 text-[0.875rem] font-semibold"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
                   pulse {result.pulse}
@@ -136,7 +145,7 @@ export default function BpPhotoConfirmModal({
           </div>
 
           <p
-            className="text-[13px] leading-relaxed"
+            className="text-[0.8125rem] leading-relaxed"
             style={{ color: 'var(--brand-text-secondary)' }}
           >
             {t('ocr.bp.helpText')}

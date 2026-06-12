@@ -56,7 +56,7 @@ export default function AdminHomepage() {
     <div className="bg-white flex flex-col min-h-screen">
       <LandingHeader activeLink="Home" />
 
-      <main className="flex-1 pt-[64px] flex flex-col">
+      <main id="main" tabIndex={-1} className="flex-1 pt-[64px] flex flex-col">
         {/* Hero */}
         <section className="w-full max-w-[1280px] mx-auto px-6 md:px-8 py-12 md:py-16 flex flex-col lg:flex-row items-center gap-12 min-h-[calc(100vh-64px)]">
           <div className="flex-1">

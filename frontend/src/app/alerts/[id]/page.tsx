@@ -103,13 +103,13 @@ function CareTeamOnly() {
           />
         </div>
         <h1
-          className="text-[20px] font-bold mb-2"
+          className="text-[1.25rem] font-bold mb-2"
           style={{ color: 'var(--brand-text-primary)' }}
         >
           Reviewed by your care team
         </h1>
         <p
-          className="text-[13.5px] mb-6 leading-relaxed"
+          className="text-[0.84375rem] mb-6 leading-relaxed"
           style={{ color: 'var(--brand-text-secondary)' }}
         >
           {t('alerts.notFound.tier2')}
@@ -117,7 +117,7 @@ function CareTeamOnly() {
         <button
           type="button"
           onClick={() => router.push('/dashboard')}
-          className="inline-flex items-center gap-2 h-11 px-6 rounded-full text-white font-bold text-[14px] cursor-pointer"
+          className="inline-flex items-center gap-2 h-11 px-6 rounded-full text-white font-bold text-[0.875rem] cursor-pointer"
           style={{
             backgroundColor: 'var(--brand-primary-purple)',
             boxShadow: 'var(--brand-shadow-button)',
@@ -152,13 +152,13 @@ function NotFound({ reason }: { reason: string }) {
           />
         </div>
         <h1
-          className="text-[20px] font-bold mb-2"
+          className="text-[1.25rem] font-bold mb-2"
           style={{ color: 'var(--brand-text-primary)' }}
         >
           {t('alerts.notFound.title')}
         </h1>
         <p
-          className="text-[13.5px] mb-6 leading-relaxed"
+          className="text-[0.84375rem] mb-6 leading-relaxed"
           style={{ color: 'var(--brand-text-secondary)' }}
         >
           {reason}
@@ -166,7 +166,7 @@ function NotFound({ reason }: { reason: string }) {
         <button
           type="button"
           onClick={() => router.push('/dashboard')}
-          className="inline-flex items-center gap-2 h-11 px-6 rounded-full text-white font-bold text-[14px] cursor-pointer"
+          className="inline-flex items-center gap-2 h-11 px-6 rounded-full text-white font-bold text-[0.875rem] cursor-pointer"
           style={{
             backgroundColor: 'var(--brand-primary-purple)',
             boxShadow: 'var(--brand-shadow-button)',
