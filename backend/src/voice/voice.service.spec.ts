@@ -399,6 +399,29 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
     })
   })
 
+  // ─── Bug 58 — JournalEntry mutations invalidate the voice patient-
+  // context cache so a FOLLOW-UP voice session reads fresh values after
+  // any edit (chat tool, voice tool, HTTP REST). This was the gap the
+  // user reported: editing a reading via My Readings left the voice's
+  // cached recent-readings block showing pre-edit values.
+  describe('onJournalEntryMutated (Bug 58)', () => {
+    it('invalidates the context cache when a journal entry is updated', () => {
+      const spy = jest.spyOn(service, 'invalidateContextCache')
+      service.onJournalEntryMutated({ userId: 'user-1' })
+      expect(spy).toHaveBeenCalledWith('user-1')
+    })
+
+    it('invalidates the context cache when a journal entry is created (works for ENTRY_CREATED too)', () => {
+      // Same listener method handles both ENTRY_CREATED and ENTRY_UPDATED
+      // via stacked @OnEvent decorators. The method itself is unit-tested
+      // here; the decorator registrations are verified by the integration
+      // path (when the event emitter fires, the runtime calls this method).
+      const spy = jest.spyOn(service, 'invalidateContextCache')
+      service.onJournalEntryMutated({ userId: 'user-create' })
+      expect(spy).toHaveBeenCalledWith('user-create')
+    })
+  })
+
   // ────────────────────────────────────────────────────────────────────────────
   // Bug 17 — prior-conversation summary injection so voice knows what the
   // patient already said in text (and earlier voice) when joining a session
