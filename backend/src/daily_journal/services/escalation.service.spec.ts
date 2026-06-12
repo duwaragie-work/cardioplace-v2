@@ -326,6 +326,40 @@ describe('EscalationService', () => {
   })
 
   // ────────────────────────────────────────────────────────────────────────
+  // dispatchT0ForAlert — test-control deterministic T+0 driver (spec 22 G.4)
+  //   Reconstructs the AlertCreatedEvent from the persisted alert and awaits
+  //   the same fireT0 path, so a Playwright spec can guarantee the T+0
+  //   Notification rows exist (the async @OnEvent handler can't be awaited).
+  // ────────────────────────────────────────────────────────────────────────
+  describe('dispatchT0ForAlert', () => {
+    it('writes the patient PUSH Notification row for a BP_LEVEL_2 alert', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildAlert({ tier: 'BP_LEVEL_2', ruleId: 'RULE_ABSOLUTE_EMERGENCY' }),
+      )
+
+      await service.dispatchT0ForAlert('alert-1')
+
+      // The patient (alert.userId) gets a PUSH row linked to the alert — the
+      // exact row spec 22 asserts the write path produced (G.4 hides it from
+      // the bell on the READ side, but the WRITE must happen).
+      const patientPush = (prisma.notification.create as jest.Mock).mock.calls.find(
+        ([arg]: [any]) =>
+          arg?.data?.userId === 'patient-1' &&
+          arg?.data?.channel === 'PUSH' &&
+          arg?.data?.alertId === 'alert-1',
+      )
+      expect(patientPush).toBeDefined()
+    })
+
+    it('throws NotFoundException when the alert does not exist', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue(null)
+      await expect(service.dispatchT0ForAlert('missing')).rejects.toThrow(
+        /not found/i,
+      )
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
   // Layer B — escalation dispatch gate
   //   The DeviationAlert row is already persisted by the rule engine; this
   //   gate only controls whether EscalationEvent rows + Notifications get

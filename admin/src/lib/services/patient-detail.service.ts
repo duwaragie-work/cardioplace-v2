@@ -139,6 +139,16 @@ export type VerificationChangeType =
   | 'ADMIN_VERIFY'
   | 'ADMIN_CORRECT'
   | 'ADMIN_REJECT'
+  // Journal-entry (BP reading) audit rows — mirrors the backend
+  // VerificationChangeType additions (HIPAA/JCAHO closure). PATIENT_* =
+  // patient-app actions on own readings; ADMIN_* = care-team actions via
+  // the admin readings endpoints.
+  | 'PATIENT_READING_CREATED'
+  | 'PATIENT_READING_EDITED'
+  | 'PATIENT_READING_DELETED'
+  | 'ADMIN_READING_ADDED'
+  | 'ADMIN_READING_EDITED'
+  | 'ADMIN_READING_DELETED'
 
 export type VerifierRole = 'PATIENT' | 'ADMIN' | 'PROVIDER'
 
@@ -531,7 +541,10 @@ export function thresholdMandatory(
 /** Per-field verification state derived from the latest log at profile.{field}. */
 export type FieldVerificationStatus = 'confirmed' | 'corrected' | 'rejected' | 'pending'
 
-const CHANGE_TYPE_TO_STATUS: Record<VerificationChangeType, FieldVerificationStatus> = {
+// Partial — the *_READING_* changeTypes never reach this map (it's only
+// consulted for `profile.{field}` paths); the lookup's `?? 'pending'`
+// fallback covers any non-profile changeType defensively.
+const CHANGE_TYPE_TO_STATUS: Partial<Record<VerificationChangeType, FieldVerificationStatus>> = {
   ADMIN_VERIFY: 'confirmed',
   ADMIN_CORRECT: 'corrected',
   ADMIN_REJECT: 'rejected',

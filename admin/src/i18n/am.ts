@@ -805,8 +805,7 @@ const am: Record<TranslationKey, string> = {
   'lang.ar': 'العربية',
   'lang.ko': '한국어',
   'lang.ht': 'Kreyòl Ayisyen',
-
-
+  'timeline.filter.readings': 'ንባቦች', // EN: Readings
 };
 
 export default am;

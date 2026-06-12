@@ -802,6 +802,10 @@ const en = {
   'lang.ar': 'العربية',
   'lang.ko': '한국어',
   'lang.ht': 'Kreyòl Ayisyen',
+  // --- Patient-detail Timeline tab ---
+  // The tab itself still hardcodes English labels (pre-i18n surface); this key
+  // is pre-seeded so the eventual i18n pass has the filter label ready.
+  'timeline.filter.readings': 'Readings',
 } as const;
 
 export type TranslationKey = keyof typeof en;

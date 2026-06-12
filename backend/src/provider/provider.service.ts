@@ -840,6 +840,9 @@ export class ProviderService {
         skip,
         take: limit,
         include: {
+          // Care-team actor on admin-entered readings (source = ADMIN) —
+          // drives the "entered by [staff]" display on the Readings tab.
+          addedBy: { select: { name: true, email: true } },
           deviationAlerts: {
             // Tier is required so the admin Readings tab can render the
             // tier badge per linked alert (V2-C). Severity stays for
@@ -910,8 +913,13 @@ export class ProviderService {
           position: entry.position,
           weight: entry.weight != null ? Number(entry.weight) : null,
           medicationTaken: entry.medicationTaken,
+          medicationScheduledLater: entry.medicationScheduledLater,
           missedDoses: entry.missedDoses,
           missedMedications: entry.missedMedications,
+          // Per-med yes/no/not-due-yet snapshot — lets the admin reading
+          // modal rebuild each med's exact answer on edit (same role it
+          // plays for the patient app's edit modal).
+          medicationStatuses: entry.medicationStatuses,
           // Structured Level-2 symptom booleans (the Readings tab renders
           // these as chips; only true ones are shown).
           severeHeadache: entry.severeHeadache,
@@ -936,6 +944,10 @@ export class ProviderService {
           notes: entry.notes,
           source: entry.source.toLowerCase(),
           sourceMetadata: entry.sourceMetadata,
+          addedByUserId: entry.addedByUserId,
+          addedByName: entry.addedBy
+            ? (entry.addedBy.name ?? entry.addedBy.email)
+            : null,
           baseline: null,
           deviations: entry.deviationAlerts.map((a) => ({
             id: a.id,
