@@ -1,6 +1,7 @@
 import { Injectable, Optional } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { ResolvedContext } from '@cardioplace/shared'
+import { kgToLbs } from '../../common/units.js'
 
 /**
  * Scaffolding for future chat routing — phase/16 always sends PATIENT. The
@@ -882,7 +883,14 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
               : entry.medicationTaken === false
                 ? 'missed'
                 : 'not recorded'
-          const wt = entry.weight != null ? `, Weight: ${entry.weight} lbs` : ''
+          // Bug 58 — pre-fix this emitted `entry.weight` (kg, the storage
+          // unit) with a hardcoded " lbs" label. A patient editing their
+          // weight to 500 lbs saw the chat context render "Weight: 226.8 lbs"
+          // (the kg value with the wrong label). Convert kg → lbs so the
+          // displayed number matches the label, and matches what the patient
+          // sees in My Readings + the voice / chat post-save summaries.
+          const wt =
+            entry.weight != null ? `, Weight: ${kgToLbs(entry.weight)} lbs` : ''
           const sym = entry.otherSymptoms?.length
             ? `, Symptoms: ${entry.otherSymptoms.join(', ')}`
             : ''
