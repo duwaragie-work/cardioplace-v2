@@ -387,7 +387,7 @@ describe('journal-tools', () => {
         'user-1',
       )
 
-      const updateArgs = mockJournalService.update.mock.calls[0][2]
+      const updateArgs = mockJournalService.update.mock.calls[0][2] as Record<string, unknown>
       expect(updateArgs.measuredAt).toBeUndefined()
       expect(updateArgs.systolicBP).toBe(142)
     })
@@ -412,7 +412,7 @@ describe('journal-tools', () => {
         'user-1',
       )
 
-      const updateArgs = mockJournalService.update.mock.calls[0][2]
+      const updateArgs = mockJournalService.update.mock.calls[0][2] as Record<string, unknown>
       expect(updateArgs.measuredAt).toBeUndefined()
     })
 
@@ -435,7 +435,7 @@ describe('journal-tools', () => {
         'user-1',
       )
 
-      const updateArgs = mockJournalService.update.mock.calls[0][2]
+      const updateArgs = mockJournalService.update.mock.calls[0][2] as Record<string, unknown>
       // The new measuredAt must be built from entry_date (2026-04-07), not today.
       expect(updateArgs.measuredAt).toBeDefined()
       const newIso = updateArgs.measuredAt as string

@@ -835,7 +835,16 @@ export async function executeJournalTool(
         // safety bug, not just a UI nit. The freeform array is still
         // preserved (`symptoms` and `otherSymptoms` below) so the chart
         // keeps the patient's exact words.
-        const mappedFromFreeform = mapSymptomsArrayToFlags(args.symptoms) ?? {}
+        // Bug 56 — also scan `other_symptoms` for known phrases. Pre-fix
+        // mapping only covered `args.symptoms` (the V1 legacy array). When
+        // the LLM put "chest pain" in `other_symptoms` but forgot to set
+        // `chest_pain_or_dyspnea: true`, the structured boolean stayed
+        // false, the rule engine missed the Level-2 chest-pain trigger,
+        // and the chart showed the symptom only under "Other symptoms".
+        const mappedFromFreeform: Partial<SessionSymptoms> = {
+          ...(mapSymptomsArrayToFlags(args.symptoms) ?? {}),
+          ...(mapSymptomsArrayToFlags(args.other_symptoms) ?? {}),
+        }
         // Bug 23 — compute the final set of TRUE structured booleans (explicit
         // arg OR freeform-mapped), then strip duplicates from both `symptoms`
         // (V1 legacy) and `other_symptoms` (V2). Keeps each symptom in exactly
@@ -1072,11 +1081,39 @@ export async function executeJournalTool(
         if (args.ruq_pain != null) dto.ruqPain = args.ruq_pain === true
         if (args.edema != null) dto.edema = args.edema === true
         if (Array.isArray(args.other_symptoms)) dto.otherSymptoms = args.other_symptoms
-        // Bug 23 — server-side dedupe. After all the symptom-related fields
-        // are staged on `dto`, strip any freeform phrasing that maps to a
-        // structured boolean we just set TRUE. Prevents the UI from showing
-        // the same symptom under both "Symptoms" (from the boolean) and
-        // "Other symptoms" (from the freeform array).
+        // Bug 23 + Bug 56 — server-side dedupe. After all the
+        // symptom-related fields are staged on `dto`, strip any freeform
+        // phrasing that maps to a structured boolean we just set TRUE.
+        // Bug 56 additionally auto-detects flags from the freeform arrays
+        // themselves: if the LLM puts "chest pain" in symptoms[] or
+        // other_symptoms[] but forgets to set chest_pain_or_dyspnea: true,
+        // the auto-detection sets the flag and dedupe strips the freeform
+        // mention — keeping the rule engine triggers correct.
+        const updateAutoFlags: Partial<SessionSymptoms> = {
+          ...(mapSymptomsArrayToFlags(dto.symptoms as unknown) ?? {}),
+          ...(mapSymptomsArrayToFlags(dto.otherSymptoms as unknown) ?? {}),
+        }
+        // Auto-promote any detected flag to dto if the LLM didn't pass one
+        // explicitly. Only PROMOTE (auto → true); never demote (don't
+        // override an explicit true with an undetected false).
+        if (dto.severeHeadache === undefined && updateAutoFlags.severeHeadache === true)
+          dto.severeHeadache = true
+        if (dto.visualChanges === undefined && updateAutoFlags.visualChanges === true)
+          dto.visualChanges = true
+        if (dto.alteredMentalStatus === undefined && updateAutoFlags.alteredMentalStatus === true)
+          dto.alteredMentalStatus = true
+        if (dto.chestPainOrDyspnea === undefined && updateAutoFlags.chestPainOrDyspnea === true)
+          dto.chestPainOrDyspnea = true
+        if (dto.focalNeuroDeficit === undefined && updateAutoFlags.focalNeuroDeficit === true)
+          dto.focalNeuroDeficit = true
+        if (dto.severeEpigastricPain === undefined && updateAutoFlags.severeEpigastricPain === true)
+          dto.severeEpigastricPain = true
+        if (dto.newOnsetHeadache === undefined && updateAutoFlags.newOnsetHeadache === true)
+          dto.newOnsetHeadache = true
+        if (dto.ruqPain === undefined && updateAutoFlags.ruqPain === true)
+          dto.ruqPain = true
+        if (dto.edema === undefined && updateAutoFlags.edema === true)
+          dto.edema = true
         const dtoFlagsForDedupe: Partial<SessionSymptoms> = {
           severeHeadache: dto.severeHeadache === true,
           visualChanges: dto.visualChanges === true,
