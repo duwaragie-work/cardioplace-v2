@@ -23,6 +23,7 @@ import { ProfileResolverService } from '../daily_journal/services/profile-resolv
 import { GeminiService } from '../gemini/gemini.service.js'
 import { IntakeStatusService } from '../intake/intake-status.service.js'
 import { INTAKE_EVENTS, type IntakeUpdatedPayload } from '../intake/intake-events.js'
+import { JOURNAL_EVENTS } from '../daily_journal/constants/events.js'
 import { VoiceToolsService } from './tools/voice-tools.service.js'
 import type { ToolEvent } from './tools/voice-tools.service.js'
 import { buildVoiceSystemInstruction } from './prompts/voice-system-instruction.js'
@@ -860,6 +861,25 @@ export class VoiceService implements OnModuleDestroy {
     if (this.contextCache.delete(userId)) {
       this.logger.log(`[VOICE cache] invalidated patient context for user=${userId}`)
     }
+  }
+
+  /**
+   * Bug 58 — every JournalEntry mutation (create / update / delete-with-
+   * surviving-anchor / finalize) drops the voice patient-context cache so
+   * the NEXT voice session pulls fresh data. Fixes the gap where edits made
+   * outside the voice dispatcher — via chat tools, the HTTP REST endpoint
+   * (My Readings → Edit modal), or the rule engine itself — left a follow-up
+   * voice session showing pre-edit values.
+   *
+   * Mirrors the proven INTAKE_EVENTS.UPDATED pattern below. The event is
+   * emitted from daily_journal.service.ts:194 (create), 371 (update), 893
+   * (finalize), and 947 (delete-cascade re-evaluation anchor). Each payload
+   * carries `userId`; we use only that field.
+   */
+  @OnEvent(JOURNAL_EVENTS.ENTRY_CREATED)
+  @OnEvent(JOURNAL_EVENTS.ENTRY_UPDATED)
+  onJournalEntryMutated(payload: { userId: string }): void {
+    this.invalidateContextCache(payload.userId)
   }
 
   /**

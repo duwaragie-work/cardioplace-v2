@@ -12,6 +12,12 @@ import { EventEmitter2 } from '@nestjs/event-emitter'
 import { randomUUID } from 'node:crypto'
 import { SESSION_WINDOW_MS } from '@cardioplace/shared'
 import { Prisma, EntrySource, EscalationLevel, DelayBand } from '../generated/prisma/client.js'
+import {
+  UserRole,
+  VerifierRole,
+  VerificationChangeType,
+} from '../generated/prisma/enums.js'
+import type { ActorUser } from '../common/patient-access.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from './constants/events.js'
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto.js'
@@ -46,6 +52,31 @@ export function computeDelayBand(measuredAt: Date, now: Date): DelayBand {
   return DelayBand.HISTORICAL_ENTRY
 }
 
+// Structured symptom booleans snapshotted into journal audit rows — collapsed
+// to the names that are true so the Timeline renders one readable list
+// instead of 19 booleans. Order mirrors the schema groupings.
+const AUDIT_SYMPTOM_FLAGS = [
+  'severeHeadache',
+  'visualChanges',
+  'alteredMentalStatus',
+  'chestPainOrDyspnea',
+  'focalNeuroDeficit',
+  'severeEpigastricPain',
+  'newOnsetHeadache',
+  'ruqPain',
+  'edema',
+  'dizziness',
+  'syncope',
+  'palpitations',
+  'legSwelling',
+  'fatigue',
+  'shortnessOfBreath',
+  'dryCough',
+  'nsaidUse',
+  'faceSwelling',
+  'throatTightness',
+] as const
+
 /**
  * Channel-aware predicate for the in-app bell LIST + unread COUNT. Both
  * exclusions are READ-SIDE ONLY — the escalation write path
@@ -79,7 +110,14 @@ export class DailyJournalService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  async create(userId: string, dto: CreateJournalEntryDto) {
+  /**
+   * `actor` is set when care-team staff create the reading on the patient's
+   * behalf via the admin readings endpoints (Phase 3B) — it flips the audit
+   * changeType to ADMIN_READING_ADDED, stamps addedByUserId + source=ADMIN,
+   * and makes a stale client sessionId a hard 400 instead of a silent
+   * re-group. Patient-app calls leave it undefined.
+   */
+  async create(userId: string, dto: CreateJournalEntryDto, actor?: ActorUser) {
     // Layer A journaling gate — patient must have a PatientProfile row
     // (completed clinical intake) before their readings get persisted. The
     // rule engine relies on PatientProfile for every safety-net bias; without
@@ -149,7 +187,13 @@ export class DailyJournalService {
     // Reject attaching this reading to an EXPIRED session. The client supplies
     // sessionId, so a stale/reused id (e.g. a cached id from a prior sitting)
     // could otherwise smuggle a reading hours apart into one averaged session.
-    // Dropped (not 400) so voice/chat flows that pass a cached id don't fail.
+    // Patient path: dropped (not 400) so voice/chat flows that pass a cached
+    // id don't fail. Admin path: strict 400 — the admin multi-reading flow
+    // passes sessionId deliberately, so a stale id is an error the staff
+    // member must see, not silently re-group.
+    if (actor && dto.sessionId) {
+      await this.assertSessionJoinable(userId, dto.sessionId, new Date(dto.measuredAt))
+    }
     const effectiveSessionId = await this.resolveCreateSessionId(
       userId,
       dto.sessionId,
@@ -160,9 +204,14 @@ export class DailyJournalService {
       // Chunk A — compute the measurement-lag band at persist time so the
       // patient app + admin can render the right affordance off a stored value.
       const delayBand = computeDelayBand(new Date(dto.measuredAt), new Date())
-      const entry = await this.prisma.journalEntry.create({
+      // Audit write is transaction-scoped with the insert — a reading can't
+      // exist without its PATIENT_READING_CREATED / ADMIN_READING_ADDED audit
+      // row; an audit failure rolls the insert back (succeed/fail together).
+      const entry = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.journalEntry.create({
         data: {
           userId,
+          addedByUserId: actor?.id ?? null,
           measuredAt: new Date(dto.measuredAt),
           delayBand,
           systolicBP: dto.systolicBP ?? null,
@@ -210,11 +259,31 @@ export class DailyJournalService {
           teachBackAnswer: dto.teachBackAnswer ?? null,
           teachBackCorrect: dto.teachBackCorrect ?? null,
           notes: dto.notes ?? null,
-          source: dto.source ? SOURCE_MAP[dto.source] : EntrySource.MANUAL,
+          source: actor
+            ? EntrySource.ADMIN
+            : dto.source
+              ? SOURCE_MAP[dto.source]
+              : EntrySource.MANUAL,
           sourceMetadata: (dto.sourceMetadata as JsonValue) ?? Prisma.JsonNull,
         },
+        })
+
+        await this.writeJournalAudit(tx, {
+          userId,
+          actor,
+          changeType: actor
+            ? VerificationChangeType.ADMIN_READING_ADDED
+            : VerificationChangeType.PATIENT_READING_CREATED,
+          fieldPath: actor ? 'journal_entry.admin_added' : 'journal_entry.created',
+          previousValue: null,
+          newValue: this.serializeForAudit(created),
+        })
+
+        return created
       })
 
+      // Engine evaluation runs for BOTH patient and admin creates — a new
+      // reading is a new clinical datapoint regardless of who keyed it in.
       this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_CREATED, {
         userId,
         entryId: entry.id,
@@ -281,7 +350,20 @@ export class DailyJournalService {
     }
   }
 
-  async update(userId: string, entryId: string, dto: UpdateJournalEntryDto) {
+  /**
+   * `actor` set = care-team edit via the admin readings endpoints: audit row
+   * is ADMIN_READING_EDITED and the engine is NOT re-triggered (CTO Option C
+   * — the corrected value flows into the next new reading's batch). Patient
+   * edits (actor undefined) KEEP the existing ENTRY_UPDATED re-evaluation
+   * until Manisha signs off her pending Q2 on removing it — safety net for
+   * e.g. a reading corrected upward into emergency range.
+   */
+  async update(
+    userId: string,
+    entryId: string,
+    dto: UpdateJournalEntryDto,
+    actor?: ActorUser,
+  ) {
     const existing = await this.prisma.journalEntry.findFirst({
       where: { id: entryId, userId },
     })
@@ -380,8 +462,15 @@ export class DailyJournalService {
       // its current value.
       this.filterNoOpFieldsInPlace(data, existing)
       if (Object.keys(data).length === 0) {
+        // Bug 59 — explicit `noChange: true` flag so dispatchers can route
+        // the response to a graceful "values already match" reply for the
+        // patient instead of claiming "Reading updated successfully." when
+        // nothing actually changed. Pre-fix dispatchers ignored result.message
+        // and hardcoded "Reading updated successfully." — the patient got
+        // told their reading was edited even when it wasn't.
         return {
           statusCode: 200,
+          noChange: true,
           message:
             'No changes — the reading already has those values. Nothing to update.',
           data: this.serializeEntry(existing),
@@ -411,26 +500,46 @@ export class DailyJournalService {
         data.sessionId = resolved
       }
 
-      const updated = await this.prisma.journalEntry.update({
-        where: { id: entryId },
-        data,
+      // Update + audit are one transaction — the edit can't land without its
+      // prior/new snapshot pair, and an audit failure rolls the edit back.
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const row = await tx.journalEntry.update({
+          where: { id: entryId },
+          data,
+        })
+        await this.writeJournalAudit(tx, {
+          userId,
+          actor,
+          changeType: actor
+            ? VerificationChangeType.ADMIN_READING_EDITED
+            : VerificationChangeType.PATIENT_READING_EDITED,
+          fieldPath: actor ? 'journal_entry.admin_edited' : 'journal_entry.edited',
+          previousValue: this.serializeForAudit(existing),
+          newValue: this.serializeForAudit(row),
+        })
+        return row
       })
 
-      this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
-        userId,
-        entryId: updated.id,
-        measuredAt: updated.measuredAt,
-        systolicBP: updated.systolicBP,
-        diastolicBP: updated.diastolicBP,
-        pulse: updated.pulse,
-        weight: updated.weight != null ? Number(updated.weight) : null,
-        sessionId: updated.sessionId,
-      })
+      // Patient edits keep the engine re-evaluation (see method doc). Admin
+      // edits skip it per CTO Option C — no new emit, existing alerts stand.
+      if (!actor) {
+        this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
+          userId,
+          entryId: updated.id,
+          measuredAt: updated.measuredAt,
+          systolicBP: updated.systolicBP,
+          diastolicBP: updated.diastolicBP,
+          pulse: updated.pulse,
+          weight: updated.weight != null ? Number(updated.weight) : null,
+          sessionId: updated.sessionId,
+        })
+      }
 
       return {
-        statusCode: 202,
-        message:
-          'Journal entry updated. Background re-analysis in progress.',
+        statusCode: actor ? 200 : 202,
+        message: actor
+          ? 'Journal entry updated.'
+          : 'Journal entry updated. Background re-analysis in progress.',
         data: this.serializeEntry(updated),
       }
     } catch (error) {
@@ -956,15 +1065,15 @@ export class DailyJournalService {
     }
   }
 
-  async delete(userId: string, id: string) {
+  /**
+   * Hard delete (soft-delete is paused with Chunk E). `actor` set = care-team
+   * delete via the admin readings endpoints — ADMIN_READING_DELETED audit row
+   * and NO session re-evaluation emit. Full row fetched (not a narrow select)
+   * because the audit snapshot must capture the state being destroyed.
+   */
+  async delete(userId: string, id: string, actor?: ActorUser) {
     const entry = await this.prisma.journalEntry.findFirst({
       where: { id, userId },
-      select: {
-        id: true,
-        userId: true,
-        sessionId: true,
-        measuredAt: true,
-      },
     })
 
     if (!entry) {
@@ -987,10 +1096,28 @@ export class DailyJournalService {
     // explicitly via /admin/alerts/:id/resolve. Re-evaluation may surface
     // NEW alerts on the surviving entry, but it never silently closes
     // existing ones.
-    const survivingAnchor = await this.findSessionReevalAnchor(entry)
+    const survivingAnchor = actor ? null : await this.findSessionReevalAnchor(entry)
 
-    await this.prisma.journalEntry.delete({ where: { id } })
+    // Audit row is written BEFORE the row is removed, in the same transaction
+    // — the snapshot survives the hard delete, and a failed audit write rolls
+    // the delete back (a reading can't vanish without its audit row).
+    await this.prisma.$transaction(async (tx) => {
+      await this.writeJournalAudit(tx, {
+        userId,
+        actor,
+        changeType: actor
+          ? VerificationChangeType.ADMIN_READING_DELETED
+          : VerificationChangeType.PATIENT_READING_DELETED,
+        fieldPath: actor ? 'journal_entry.admin_deleted' : 'journal_entry.deleted',
+        previousValue: this.serializeForAudit(entry),
+        newValue: null,
+      })
+      await tx.journalEntry.delete({ where: { id } })
+    })
 
+    // Patient deletes keep the surviving-sibling re-evaluation (session-
+    // integrity maintenance — the averaged vitals must recompute for what's
+    // left of the session). Admin deletes skip it per CTO Option C.
     if (survivingAnchor) {
       this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
         userId: survivingAnchor.userId,
@@ -1239,6 +1366,122 @@ export class DailyJournalService {
           },
         }
       }),
+    }
+  }
+
+  /**
+   * Compact JSON snapshot of a reading for the journal audit rows
+   * (ProfileVerificationLog.previousValue / newValue) — the patient-visible
+   * state only: vitals, timing, session, symptoms, notes. Internal engine
+   * flags (narrowPpArtifact, singleReadingFinalized, teach-back) are not
+   * audit-surface. `symptoms` collapses the structured booleans to the names
+   * that are true plus freeform otherSymptoms.
+   */
+  private serializeForAudit(entry: {
+    id: string
+    measuredAt: Date
+    systolicBP?: number | null
+    diastolicBP?: number | null
+    pulse?: number | null
+    weight?: Prisma.Decimal | number | null
+    position?: string | null
+    sessionId?: string | null
+    medicationTaken?: boolean | null
+    missedDoses?: number | null
+    otherSymptoms?: string[]
+    notes?: string | null
+    source?: EntrySource
+    [key: string]: unknown
+  }): Prisma.InputJsonValue {
+    const symptoms: string[] = [
+      ...AUDIT_SYMPTOM_FLAGS.filter((flag) => entry[flag] === true),
+      ...(entry.otherSymptoms ?? []),
+    ]
+    return {
+      entryId: entry.id,
+      measuredAt: entry.measuredAt.toISOString(),
+      systolicBP: entry.systolicBP ?? null,
+      diastolicBP: entry.diastolicBP ?? null,
+      pulse: entry.pulse ?? null,
+      weight: entry.weight != null ? Number(entry.weight) : null,
+      position: entry.position ?? null,
+      sessionId: entry.sessionId ?? null,
+      medicationTaken: entry.medicationTaken ?? null,
+      missedDoses: entry.missedDoses ?? null,
+      symptoms,
+      notes: entry.notes ?? null,
+      source: entry.source ? entry.source.toLowerCase() : null,
+    }
+  }
+
+  /**
+   * Journal-entry audit row writer — HIPAA/JCAHO closure for reading
+   * create/edit/delete, which previously left no trace. Transaction-scoped
+   * (caller passes the tx) so the audit row and the data operation succeed
+   * or fail together; mirrors caregiver.service.ts writeAudit.
+   */
+  private async writeJournalAudit(
+    tx: Prisma.TransactionClient,
+    args: {
+      userId: string
+      actor?: ActorUser
+      changeType: VerificationChangeType
+      fieldPath: string
+      previousValue: Prisma.InputJsonValue | null
+      newValue: Prisma.InputJsonValue | null
+    },
+  ): Promise<void> {
+    await tx.profileVerificationLog.create({
+      data: {
+        userId: args.userId,
+        fieldPath: args.fieldPath,
+        previousValue: args.previousValue ?? Prisma.JsonNull,
+        newValue: args.newValue ?? Prisma.JsonNull,
+        changedBy: args.actor?.id ?? args.userId,
+        changedByRole: this.verifierRoleFor(args.actor),
+        changeType: args.changeType,
+      },
+    })
+  }
+
+  /**
+   * VerifierRole predates the 5-role split, so admin actors collapse:
+   * PROVIDER (without a broader admin role) keeps its own VerifierRole;
+   * SUPER_ADMIN / MEDICAL_DIRECTOR map to ADMIN. No actor = patient action.
+   */
+  private verifierRoleFor(actor?: ActorUser): VerifierRole {
+    if (!actor) return VerifierRole.PATIENT
+    if (
+      actor.roles.includes(UserRole.PROVIDER) &&
+      !actor.roles.includes(UserRole.SUPER_ADMIN) &&
+      !actor.roles.includes(UserRole.MEDICAL_DIRECTOR)
+    ) {
+      return VerifierRole.PROVIDER
+    }
+    return VerifierRole.ADMIN
+  }
+
+  /**
+   * Strict admin-POST variant of resolveCreateSessionId's staleness check.
+   * The admin multi-reading flow passes sessionId deliberately, so a stale id
+   * must surface as a 400 ("Session expired or invalid") rather than being
+   * silently re-grouped like the forgiving patient/voice path. A sessionId
+   * with no members yet is fine — the reading establishes the session.
+   */
+  private async assertSessionJoinable(
+    userId: string,
+    sessionId: string,
+    measuredAt: Date,
+  ): Promise<void> {
+    const newest = await this.prisma.journalEntry.findFirst({
+      where: { userId, sessionId },
+      orderBy: { measuredAt: 'desc' },
+      select: { measuredAt: true },
+    })
+    if (!newest) return
+    const gapMs = Math.abs(measuredAt.getTime() - newest.measuredAt.getTime())
+    if (gapMs > SESSION_WINDOW_MS) {
+      throw new BadRequestException('Session expired or invalid')
     }
   }
 

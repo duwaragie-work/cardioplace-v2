@@ -805,8 +805,9 @@ const de: Record<TranslationKey, string> = {
   'lang.ar': 'العربية',
   'lang.ko': '한국어',
   'lang.ht': 'Kreyòl Ayisyen',
-
-
+  'timeline.filter.readings': 'Messwerte', // EN: Readings
+  'alerts.badge.thresholdPending':
+    'Patientenschwelle ausstehend — personalisierten Schwellenwert festlegen und Warnung prüfen', // EN: Patient threshold pending — set personalized threshold and review alert
 };
 
 export default de;

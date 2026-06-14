@@ -656,7 +656,12 @@ describe('VoiceToolsService.dispatch', () => {
   it('update_checkin: returns updated:false when only entry_id is given (no fields)', async () => {
     const r = await service.dispatch('update_checkin', { entry_id: 'abc' }, CTX)
     expect(dailyJournal.update).not.toHaveBeenCalled()
-    expect(r.llmResponse).toEqual({ updated: false, message: 'No fields to update.' })
+    // Bug 57 — the empty-dto message was upgraded from "No fields to update."
+    // to an actionable hint that tells the LLM to pass the actual new value
+    // (not the 0/""/[] sentinel) so consecutive-update failures self-recover.
+    const llm = r.llmResponse as { updated: boolean; message: string }
+    expect(llm.updated).toBe(false)
+    expect(llm.message).toMatch(/positive number|sentinel|new value/i)
   })
 
   // Bug 6 regression — when patient asks to change the time and `findOne`
@@ -1099,5 +1104,245 @@ describe('mapVoiceSymptomsToFlags', () => {
     expect(mapVoiceSymptomsToFlags(['chest_pain_or_dyspnea'])).toEqual({ chestPainOrDyspnea: true })
     expect(mapVoiceSymptomsToFlags(['altered_mental_status'])).toEqual({ alteredMentalStatus: true })
     expect(mapVoiceSymptomsToFlags(['throat_tightness'])).toEqual({ throatTightness: true })
+  })
+
+})
+
+// ─── Bug 56 — chest pain in symptoms[] or other_symptoms[] auto-sets the
+// structured chestPainOrDyspnea flag AND gets stripped from the freeform
+// array so the chart doesn't double-render the same symptom. Lives in its
+// own describe so it sees the same per-test setup as the main suite.
+describe('VoiceToolsService.dispatch — Bug 56 (symptom auto-map + dedupe)', () => {
+  let service: VoiceToolsService
+  let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock }
+
+  beforeEach(async () => {
+    dailyJournal = {
+      create: jest.fn() as jest.Mock,
+      findAll: jest.fn() as jest.Mock,
+      findOne: jest.fn() as jest.Mock,
+      update: jest.fn() as jest.Mock,
+      delete: jest.fn() as jest.Mock,
+    }
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        VoiceToolsService,
+        { provide: DailyJournalService, useValue: dailyJournal },
+        { provide: GeminiService, useValue: { extractBpFromImage: jest.fn() } },
+        { provide: AlertEngineService, useValue: { evaluateAdHoc: jest.fn() } },
+        {
+          provide: IntakeStatusService,
+          useValue: {
+            getStatus: jest.fn(async () => ({ completed: true, profileExists: true })) as jest.Mock,
+          },
+        },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: jest.fn() } } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile()
+    service = moduleRef.get(VoiceToolsService)
+  })
+
+  function dtoOf(mock: jest.Mock): Record<string, unknown> {
+    const call = mock.mock.calls[0] as [string, Record<string, unknown>]
+    return call[1]
+  }
+
+  it('LLM puts "chest pain" in symptoms[] without setting chest_pain_or_dyspnea → flag auto-set, freeform stripped', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'submit_checkin',
+      {
+        entry_date: '2026-06-12',
+        measurement_time: '08:00',
+        systolic_bp: 138,
+        diastolic_bp: 85,
+        medication_taken: true,
+        symptoms: ['chest pain'],
+        // intentionally omit chest_pain_or_dyspnea
+      },
+      CTX,
+    )
+    const dto = dtoOf(dailyJournal.create)
+    expect(dto.chestPainOrDyspnea).toBe(true)
+    expect(dto.symptoms).toEqual([])
+  })
+
+  it('LLM puts "chest pain" in other_symptoms[] without setting chest_pain_or_dyspnea → flag auto-set, freeform stripped', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'submit_checkin',
+      {
+        entry_date: '2026-06-12',
+        measurement_time: '08:00',
+        systolic_bp: 138,
+        diastolic_bp: 85,
+        medication_taken: true,
+        other_symptoms: ['chest pain'],
+      },
+      CTX,
+    )
+    const dto = dtoOf(dailyJournal.create)
+    expect(dto.chestPainOrDyspnea).toBe(true)
+    const other = dto.otherSymptoms
+    expect(other === undefined || (Array.isArray(other) && other.length === 0)).toBe(true)
+  })
+
+  it('LLM correctly sets BOTH boolean AND adds to other_symptoms → freeform mention is stripped (no double-render)', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'submit_checkin',
+      {
+        entry_date: '2026-06-12',
+        measurement_time: '08:00',
+        systolic_bp: 138,
+        diastolic_bp: 85,
+        medication_taken: true,
+        chest_pain_or_dyspnea: true,
+        other_symptoms: ['chest pain'],
+      },
+      CTX,
+    )
+    const dto = dtoOf(dailyJournal.create)
+    expect(dto.chestPainOrDyspnea).toBe(true)
+    const other = dto.otherSymptoms
+    expect(other === undefined || (Array.isArray(other) && other.length === 0)).toBe(true)
+  })
+
+  it('genuinely unrecognised freeform (e.g. "knee pain") survives dedupe', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'submit_checkin',
+      {
+        entry_date: '2026-06-12',
+        measurement_time: '08:00',
+        systolic_bp: 138,
+        diastolic_bp: 85,
+        medication_taken: true,
+        other_symptoms: ['knee pain'],
+      },
+      CTX,
+    )
+    const dto = dtoOf(dailyJournal.create)
+    expect(dto.chestPainOrDyspnea).toBe(false)
+    expect(dto.otherSymptoms).toEqual(['knee pain'])
+  })
+})
+
+// ─── Bug 57 — dispatcher error messages on consecutive-update failure
+// modes are actionable enough for the LLM to recover without re-asking
+// the patient. The voice prompt also tells the LLM to reuse entry_id;
+// the dispatcher backstop catches cases where the model drops it or
+// sends 0 / "" sentinels for the field it actually wanted to change.
+describe('VoiceToolsService.dispatch — Bug 57 (actionable update errors)', () => {
+  let service: VoiceToolsService
+
+  beforeEach(async () => {
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        VoiceToolsService,
+        {
+          provide: DailyJournalService,
+          useValue: {
+            create: jest.fn(),
+            findAll: jest.fn(),
+            findOne: jest.fn(),
+            update: jest.fn(),
+            delete: jest.fn(),
+          },
+        },
+        { provide: GeminiService, useValue: { extractBpFromImage: jest.fn() } },
+        { provide: AlertEngineService, useValue: { evaluateAdHoc: jest.fn() } },
+        {
+          provide: IntakeStatusService,
+          useValue: {
+            getStatus: jest.fn(async () => ({ completed: true, profileExists: true })) as jest.Mock,
+          },
+        },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: jest.fn() } } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile()
+    service = moduleRef.get(VoiceToolsService)
+  })
+
+  it('missing entry_id returns a recovery hint mentioning get_recent_readings and prior update_checkin', async () => {
+    const r = await service.dispatch('update_checkin', {}, CTX)
+    const llm = r.llmResponse as { updated: boolean; message: string }
+    expect(llm.updated).toBe(false)
+    expect(llm.message).toMatch(/entry_id/i)
+    expect(llm.message).toMatch(/get_recent_readings/i)
+    expect(llm.message).toMatch(/prior update_checkin|consecutive|same reading/i)
+  })
+
+  it('all-sentinel args (e.g. weight=0) returns a hint about passing the actual new value', async () => {
+    const r = await service.dispatch(
+      'update_checkin',
+      {
+        entry_id: 'real-id',
+        systolic_bp: 0,
+        diastolic_bp: 0,
+        weight: 0,
+      },
+      CTX,
+    )
+    const llm = r.llmResponse as { updated: boolean; message: string }
+    expect(llm.updated).toBe(false)
+    expect(llm.message).toMatch(/positive number|new value|not.{0,20}0|Sentinels|sentinel/i)
+  })
+})
+
+// ─── Bug 59 — voice update_checkin propagates the service's noChange flag
+// so the LLM tells the patient "already those values" instead of falsely
+// claiming a successful update.
+describe('VoiceToolsService.dispatch — Bug 59 (no-change graceful response)', () => {
+  let service: VoiceToolsService
+  let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock }
+
+  beforeEach(async () => {
+    dailyJournal = {
+      create: jest.fn() as jest.Mock,
+      findAll: jest.fn() as jest.Mock,
+      findOne: jest.fn() as jest.Mock,
+      update: jest.fn() as jest.Mock,
+      delete: jest.fn() as jest.Mock,
+    }
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        VoiceToolsService,
+        { provide: DailyJournalService, useValue: dailyJournal },
+        { provide: GeminiService, useValue: { extractBpFromImage: jest.fn() } },
+        { provide: AlertEngineService, useValue: { evaluateAdHoc: jest.fn() } },
+        {
+          provide: IntakeStatusService,
+          useValue: {
+            getStatus: jest.fn(async () => ({ completed: true, profileExists: true })) as jest.Mock,
+          },
+        },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: jest.fn() } } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile()
+    service = moduleRef.get(VoiceToolsService)
+  })
+
+  it('service returns noChange:true → llmResponse carries no_change:true + canonical message + updated:false', async () => {
+    ;(dailyJournal.update as jest.Mock<any>).mockResolvedValue({
+      statusCode: 200,
+      noChange: true,
+      message: 'No changes — the reading already has those values. Nothing to update.',
+      data: { id: 'e1', systolicBP: 138, diastolicBP: 85 },
+    })
+
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'e1', systolic_bp: 138, diastolic_bp: 85 },
+      CTX,
+    )
+
+    const llm = r.llmResponse as { updated: boolean; no_change?: boolean; message: string }
+    expect(llm.updated).toBe(false)
+    expect(llm.no_change).toBe(true)
+    expect(llm.message).toMatch(/already (have|has) those values/i)
   })
 })

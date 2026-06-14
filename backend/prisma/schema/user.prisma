@@ -28,7 +28,8 @@ model User {
   contentReviews                       ContentReview[]             @relation("ContentReviewedBy")
   deviationAlerts                      DeviationAlert[]
   escalationEvents                     EscalationEvent[]
-  journalEntries                       JournalEntry[]
+  journalEntries                       JournalEntry[]              @relation("PatientJournalEntries")
+  journalEntriesAdded                  JournalEntry[]              @relation("JournalEntryAddedBy")
   notifications                        Notification[]
   refreshTokens                        RefreshToken[]
   scheduledCalls                       ScheduledCall[]

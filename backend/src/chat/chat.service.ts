@@ -28,6 +28,7 @@ import { getJournalToolDeclarations, executeJournalTool } from './tools/journal-
 import type { JournalToolContext } from './tools/journal-tools.js'
 import { IntakeStatusService } from '../intake/intake-status.service.js'
 import { INTAKE_EVENTS, type IntakeUpdatedPayload } from '../intake/intake-events.js'
+import { JOURNAL_EVENTS } from '../daily_journal/constants/events.js'
 import { EMERGENCY_EVENTS, type EmergencyFlaggedPayload } from './emergency-events.js'
 
 @Injectable()
@@ -91,6 +92,25 @@ export class ChatService {
    */
   @OnEvent(INTAKE_EVENTS.UPDATED)
   onIntakeUpdated(payload: IntakeUpdatedPayload): void {
+    this.invalidateContextCache(payload.userId)
+  }
+
+  /**
+   * Bug 58 — every JournalEntry mutation (create / update / delete-with-
+   * surviving-anchor / finalize) drops the chat's patient-context cache so
+   * the NEXT chat turn pulls fresh data. Fixes the gap where edits made
+   * outside the chat dispatcher — via voice tools, the HTTP REST endpoint
+   * (My Readings → Edit modal), or the rule engine itself — left the chat
+   * showing pre-edit values.
+   *
+   * Mirrors the proven INTAKE_EVENTS.UPDATED pattern. The event is emitted
+   * from daily_journal.service.ts:194 (create), 371 (update), 893
+   * (finalize single-reading session), and 947 (delete-cascade re-evaluation
+   * anchor). Each payload carries `userId`; we use only that field.
+   */
+  @OnEvent(JOURNAL_EVENTS.ENTRY_CREATED)
+  @OnEvent(JOURNAL_EVENTS.ENTRY_UPDATED)
+  onJournalEntryMutated(payload: { userId: string }): void {
     this.invalidateContextCache(payload.userId)
   }
 

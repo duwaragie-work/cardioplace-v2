@@ -240,6 +240,89 @@ describe('voice system instruction — Bug 14 form-parity guards', () => {
         expect(prompt).toMatch(/sparse log|sparse-log/i)
         expect(prompt).toMatch(/never (?:pass|call|submit).{0,80}(?:systolic_bp\s*=\s*0|0\s*\/\s*0|with 0)|do not (?:pass|call|submit).{0,80}(?:systolic_bp\s*=\s*0|0\s*\/\s*0|with 0)/i)
       })
+
+      // ─── Bug 52 — continuation readings inside a 5-min session ────────
+      // For a 2nd / 3rd reading inside the same 5-min session window the bot
+      // must NOT re-ask invariant fields (weight, meds, symptoms, B1
+      // checklist, notes). It must INHERIT those from the prior submit_checkin
+      // in this conversation and thread them into the next call. Each of these
+      // tests pins a different facet of the block — a future edit that drops
+      // any one of them regresses the fix.
+      it('Bug 52 — CONTINUATION READINGS block is present with activation conditions', () => {
+        expect(prompt).toMatch(/CONTINUATION READINGS/i)
+        expect(prompt).toMatch(/ALREADY called submit_checkin.{0,200}within 5 minutes/i)
+        // AFib is the canonical proactive case — block must call it out.
+        expect(prompt).toMatch(/AFib.{0,80}3-reading minimum/i)
+      })
+
+      it('Bug 52 — block enumerates per-reading vs inherited fields', () => {
+        // Per-reading: BP top + bottom, pulse, position, measurement_time.
+        expect(prompt).toMatch(/ASK ON EVERY READING/i)
+        expect(prompt).toMatch(/measurement_time[\s\S]{0,200}systolic_bp[\s\S]{0,200}diastolic_bp/i)
+        // Inherited: at minimum weight, medication, symptoms, measurement_conditions, notes, session_id.
+        expect(prompt).toMatch(/INHERIT FROM THE PRIOR READING/i)
+        expect(prompt).toMatch(/weight[\s\S]{0,300}medication_taken[\s\S]{0,300}measurement_conditions/i)
+        expect(prompt).toMatch(/session_id/i)
+      })
+
+      it('Bug 52 — block forbids passing 0 / empty for inherited fields (preserves accuracy)', () => {
+        // The user's explicit constraint: "no need to add bogus numbers".
+        // Inheritance must thread REAL values, not 0/empty placeholders.
+        expect(prompt).toMatch(/NEVER pass 0 or empty for an inherited field|never (?:pass|use) (?:0|zero|empty)/i)
+        // Mentions the sparse-log distinction so the LLM knows 0/0 is a
+        // different code path, not the fallback for continuation.
+        expect(prompt).toMatch(/sparse[- ]log.{0,80}NOT the continuation/i)
+      })
+
+      it('Bug 52 — block defines exit conditions (5-min expiry + finalize / new check-in)', () => {
+        expect(prompt).toMatch(/EXIT the continuation mode/i)
+        // 5-min expiry triggers a full re-run.
+        expect(prompt).toMatch(/more than 5 minutes.{0,150}full check-in flow/i)
+        // finalize_checkin is the explicit "evaluate this" path (non-AFib only).
+        expect(prompt).toMatch(/finalize_checkin.{0,80}non[- ]AFib|never for AFib/i)
+      })
+
+      // ─── Bug 54 — verbalise weight in the unit the patient said ──────
+      // The dispatcher response includes weight_display.verbalize_as.
+      // The prompt must teach the LLM to use that string verbatim when
+      // reading the saved weight back to the patient, so a "80 kg" save
+      // is never echoed as "80 lbs" (off by 2.2x).
+      it('Bug 54 — weight step tells LLM to verbalise back in the unit the patient said', () => {
+        expect(prompt).toMatch(/weight_display\.verbalize_as/i)
+        // Phrasing nuance — must include the warning about mixing number
+        // from one unit with the label of another.
+        expect(prompt).toMatch(/NEVER mix.{0,80}unit|never (?:write|say).{0,80}(?:80\s*lbs|80\s*kg)/i)
+      })
+
+      // ─── Bug 59 — voice prompt handles no_change response gracefully ───
+      // Both V1 and V2 update flow must instruct the LLM to read the
+      // canonical message and NOT falsely claim success.
+      it('Bug 59 — prompt teaches the LLM to handle no_change responses gracefully', () => {
+        expect(prompt).toMatch(/no_change/i)
+        // The LLM must NOT claim the update succeeded.
+        expect(prompt).toMatch(/DO NOT say.{0,80}I updated|that's a lie|nothing actually changed/i)
+        // A canonical "already those values" reply.
+        expect(prompt).toMatch(/already what'?s saved|already those values|nothing to change/i)
+      })
+
+      // ─── Bug 53 — skip medication question for 0-meds patients ────────
+      // Patients with no active prescribed medications (or only PRN /
+      // AS_NEEDED which the backend filters) should NOT be asked "did you
+      // take your medications?" — the question is meaningless and
+      // frustrating. The bot must instead pass medication_taken=true
+      // (vacuously) so the required-field gate is still satisfied. The
+      // trigger phrase is the exact patient-context line
+      // "Medications: No medications recorded."
+      it('Bug 53 — medication step skips when patient context says "No medications recorded"', () => {
+        // Trigger phrase appears verbatim so the LLM can pattern-match
+        // against the rendered patient context block.
+        expect(prompt).toMatch(/No medications recorded/i)
+        // SKIP directive is explicit (not just "ask if they have any").
+        expect(prompt).toMatch(/SKIP this step entirely|skip this step entirely/i)
+        // Vacuous-true contract for medication_taken is spelled out so the
+        // LLM doesn't get rejected by the dispatcher's required-field gate.
+        expect(prompt).toMatch(/medication_taken\s*=\s*true.{0,200}vacuously|vacuously true[\s\S]{0,200}medication_taken/i)
+      })
     })
   }
 })

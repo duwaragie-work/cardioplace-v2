@@ -68,6 +68,16 @@ export class TestControl {
     })
   }
 
+  /**
+   * Deterministically fire T+0 for one alert. Unlike runEscalationScan (which
+   * only advances overdue ladders + fires queued events), this awaits the real
+   * fireT0 dispatch for a fresh alert, so the T+0 Notification rows are
+   * guaranteed written before the caller asserts. Idempotent.
+   */
+  async fireEscalationT0(alertId: string): Promise<void> {
+    await this.post('test-control/escalation/fire-t0', { alertId })
+  }
+
   /** Run the gap-alert scanner. 48h trigger, 24h idempotency. */
   async runGapAlertScan(now?: Date): Promise<{ scanned: number; nudged: number }> {
     return this.post('test-control/cron/gap-alert/run', {
