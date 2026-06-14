@@ -290,6 +290,82 @@ describe('SystemPromptService — Bug 14 chat-prompt form-parity guards', () => 
         // conditional skip.
         expect(prompt).toMatch(/UNLESS Bug 38 SKIP applies|photo OCR returned a pulse/i)
       })
+
+      // ─── Bug 52 — continuation readings inside a 5-min session ────────
+      // Mirror of the voice-prompt Bug 52 guards. The chat prompt must
+      // teach the same per-session inheritance contract so 2nd / 3rd
+      // readings inside the 5-min window skip weight / meds / symptoms /
+      // B1 / notes without losing data (real values are threaded).
+      it('Bug 52 — CONTINUATION READINGS block is present with activation conditions', () => {
+        expect(prompt).toMatch(/CONTINUATION READINGS/i)
+        expect(prompt).toMatch(/ALREADY called submit_checkin.{0,200}within 5 minutes/i)
+        expect(prompt).toMatch(/AFib.{0,80}3-reading minimum/i)
+      })
+
+      it('Bug 52 — block enumerates per-reading vs inherited fields', () => {
+        expect(prompt).toMatch(/ASK ON EVERY READING/i)
+        expect(prompt).toMatch(/measurement_time[\s\S]{0,200}systolic_bp[\s\S]{0,200}diastolic_bp/i)
+        expect(prompt).toMatch(/INHERIT FROM THE PRIOR READING/i)
+        expect(prompt).toMatch(/weight[\s\S]{0,300}medication_taken[\s\S]{0,300}measurement_conditions/i)
+        expect(prompt).toMatch(/session_id/i)
+      })
+
+      it('Bug 52 — block forbids passing 0 / empty for inherited fields (preserves accuracy)', () => {
+        expect(prompt).toMatch(/NEVER pass 0 or empty for an inherited field|never (?:pass|use) (?:0|zero|empty)/i)
+        expect(prompt).toMatch(/sparse[- ]log.{0,80}NOT the continuation/i)
+      })
+
+      it('Bug 52 — block defines exit conditions (5-min expiry + finalize / new check-in)', () => {
+        expect(prompt).toMatch(/EXIT the continuation mode/i)
+        expect(prompt).toMatch(/more than 5 minutes.{0,150}full check-in flow/i)
+        expect(prompt).toMatch(/finalize_checkin.{0,80}non[- ]AFib|never for AFib/i)
+      })
+
+      // ─── Bug 54 — verbalise weight in the unit the patient said ──────
+      it('Bug 54 — weight step tells LLM to use weight_display.verbalize_as from the tool response', () => {
+        expect(prompt).toMatch(/weight_display\.verbalize_as/i)
+        // [\s\S] spans line wraps in the V2 prompt where the warning is
+        // broken across multiple indented lines.
+        expect(prompt).toMatch(/NEVER mix[\s\S]{0,120}unit|never (?:write|say)[\s\S]{0,120}(?:80\s*lbs|80\s*kg)/i)
+      })
+
+      // ─── Bug 55 — update_checkin sentinel contract preserves saved date/time
+      // The pre-fix chat dispatcher overwrote the saved measurement time
+      // with the current clock whenever the LLM passed entry_date for
+      // lookup (which is on every update_checkin call). The prompt now
+      // explicitly teaches the LLM that entry_date / original_time are
+      // LOOKUP keys, and any field the patient is NOT changing should be
+      // omitted from the call.
+      it('Bug 55 — update_checkin sentinel contract is documented in the prompt', () => {
+        expect(prompt).toMatch(/SENTINEL CONTRACT|sentinel contract/i)
+        // entry_date / original_time are clarified as lookup keys, not new
+        // values.
+        expect(prompt).toMatch(/LOOKUP keys?|lookup keys?/i)
+        // Must tell the LLM not to pass "now" / current time unless the
+        // patient explicitly asked to change the time.
+        expect(prompt).toMatch(/NEVER pass "now"|never pass "?now"?/i)
+        // Must instruct: include ONLY the fields the patient asked to change.
+        expect(prompt).toMatch(/include ONLY the fields|only include the fields/i)
+      })
+
+      // ─── Bug 59 — chat prompt handles no_change response gracefully ───
+      it('Bug 59 — prompt teaches the LLM to handle no_change responses gracefully', () => {
+        expect(prompt).toMatch(/no_change/i)
+        expect(prompt).toMatch(/DO NOT say.{0,80}I updated|that's a lie|nothing actually changed/i)
+        expect(prompt).toMatch(/already what'?s saved|already those values|nothing to change/i)
+      })
+
+      // ─── Bug 53 — skip medication question for 0-meds patients ────────
+      // Mirror of the voice-prompt Bug 53 guard. Patients with no active
+      // prescribed medications (or only PRN / AS_NEEDED which the backend
+      // filters) must NOT be asked the adherence question; the bot must
+      // instead pass medication_taken=true vacuously so the required-field
+      // gate is still satisfied.
+      it('Bug 53 — medication step skips when patient context says "No medications recorded"', () => {
+        expect(prompt).toMatch(/No medications recorded/i)
+        expect(prompt).toMatch(/SKIP this step entirely|skip this step entirely/i)
+        expect(prompt).toMatch(/medication_taken\s*=\s*true.{0,200}vacuously|vacuously true[\s\S]{0,200}medication_taken/i)
+      })
     })
   }
 })

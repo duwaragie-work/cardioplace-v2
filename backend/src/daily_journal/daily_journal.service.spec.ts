@@ -644,6 +644,19 @@ describe('DailyJournalService', () => {
       expect(r.statusCode).toBe(200)
     })
 
+    it('Bug 59 — no-op return carries explicit noChange:true so dispatchers can route the response gracefully', async () => {
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(baseExisting)
+      const r = await service.update('u1', 'e1', {
+        systolicBP: baseExisting.systolicBP,
+        diastolicBP: baseExisting.diastolicBP,
+      } as any)
+      expect(mockPrisma.journalEntry.update).not.toHaveBeenCalled()
+      // Explicit flag the chat/voice dispatchers check.
+      expect((r as { noChange?: boolean }).noChange).toBe(true)
+      // Canonical message the bot reads back to the patient.
+      expect(r.message).toMatch(/already (have|has) those values/i)
+    })
+
     it('PARTIAL no-op: same systolic + new diastolic → proceeds with diastolic only', async () => {
       mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(baseExisting)
       mockPrisma.journalEntry.update.mockResolvedValueOnce({ ...baseExisting, diastolicBP: 85 })

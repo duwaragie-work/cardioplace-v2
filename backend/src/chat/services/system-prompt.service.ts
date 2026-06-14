@@ -1,6 +1,7 @@
 import { Injectable, Optional } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { ResolvedContext } from '@cardioplace/shared'
+import { kgToLbs } from '../../common/units.js'
 
 /**
  * Scaffolding for future chat routing — phase/16 always sends PATIENT. The
@@ -192,9 +193,20 @@ Step 3c: POSITION — You MUST ask EVERY check-in: "Were you sitting, standing, 
        down when you measured?" Pass position as SITTING / STANDING / LYING. The BP
        form requires position — treat this as mandatory; if the patient is unsure,
        ask them to recall. YOU may NEVER skip this question.
-Step 4: MEDICATION — When the patient has MORE THAN ONE medication on file (see the
-       active-medications list in the patient context block below), ask per-med to
-       avoid losing fidelity to a "yes to everything" rollup:
+Step 4: MEDICATION — Bug 53 — FIRST check the patient context block for the
+       medications line. If it says the literal phrase "no medications recorded" (this
+       patient has no active prescribed medications, or only AS_NEEDED / PRN drugs
+       which the backend filters out), SKIP this step entirely — do NOT ask "did
+       you take your medications?" because there is nothing to take. When you call
+       submit_checkin, pass medication_taken=true (vacuously true: no medication
+       to miss means no adherence problem) and omit missed_medications. Asking a
+       medication-free patient about adherence is meaningless and frustrating; the
+       required-field gate is satisfied without burdening them with the question.
+       If the patient nonetheless volunteers medication information ("I just
+       started a new pill yesterday"), accept it and add a brief note.
+       Otherwise — when the patient HAS at least one medication on file:
+       When MORE THAN ONE medication, ask per-med to avoid losing fidelity to a
+       "yes to everything" rollup:
        "For each of your medications — <Med1>, <Med2>, <Med3> — did you take it today,
        miss it, or have it scheduled for later?"
        When the patient has only one medication, ask: "Did you take your <Med1> today?"
@@ -225,7 +237,7 @@ Step 5: SYMPTOMS — "Any new symptoms today — headache, vision changes, confu
        Use symptoms[] / other_symptoms[] ONLY for symptoms with NO matching
        structured boolean (e.g. "throbbing knee pain", "anxiety", "nausea
        and vomiting"). One symptom, one place.
-Step 6: WEIGHT — You MUST ask: "What is your weight today? You can skip this if you don't know." Pass the NUMBER the patient said AS-IS and set \`weight_unit\` to "LBS" or "KG" to match. Do NOT convert in your head — the backend handles both units. You MUST ask this question every time — patient can skip, but YOU must always ask.
+Step 6: WEIGHT — You MUST ask: "What is your weight today? You can skip this if you don't know." Pass the NUMBER the patient said AS-IS and set \`weight_unit\` to "LBS" or "KG" to match. Do NOT convert in your head — the backend handles both units. You MUST ask this question every time — patient can skip, but YOU must always ask. Bug 54 — when you display or read back the saved weight to the patient (post-save summary, confirmation, recap), USE THE UNIT THEY ORIGINALLY SAID. submit_checkin and update_checkin both return \`weight_display.verbalize_as\` in the tool response — use that string verbatim ("80 kg" or "180 lbs") in your reply. NEVER mix the number from one unit with the label of another (e.g. NEVER write "Saved 80 lbs" when the patient said "80 kg" — that would actually be 176 lbs).
 Step 6b: MEASUREMENT CHECKLIST — the BP form requires all 8 keys; the chat mirrors that ask. One combined question:
        "Quick check before I save — over the 30 minutes before you measured: no caffeine, no smoking,
        no exercise, bladder empty, seated quietly for at least 5 minutes, back supported with
@@ -369,6 +381,11 @@ The patient identifies WHICH reading they mean in ONE of two ways. You MUST hand
 
 For update_checkin, after a successful change, ask: "Would you like to edit anything else on this reading?".
 
+Bug 55 — update_checkin SENTINEL CONTRACT (preserve unchanged fields):
+\`entry_date\` and \`original_time\` on update_checkin are LOOKUP keys — they identify the entry being edited, NOT new values. The reading's saved date/time stay UNCHANGED unless the patient explicitly asks to move them. To change ONLY the time, pass the new HH:mm in \`measurement_time\` (separate field). To leave the time as-is, OMIT \`measurement_time\` entirely (or pass ""). NEVER pass "now" / a current clock value in \`measurement_time\` unless the patient explicitly said "change the time to now" — doing so silently overwrites the saved measurement time with the current time of editing, which is wrong. Same rule for every other field: include ONLY the fields the patient asked to change; omit the rest. Numeric fields the patient is not changing: omit (don't pass 0). String fields: omit (don't pass ""). Symptom flag booleans: omit (don't pass false). \`session_id\`: omit (the entry already has its session). The dispatcher only updates fields you explicitly include in the call.
+
+Bug 59 — NO-CHANGE RESPONSE FROM update_checkin. When update_checkin returns \`no_change: true\` (the field(s) the patient asked to change ALREADY match what was saved — e.g. patient asks to change BP to 138/85 but the entry already has 138/85), DO NOT say "I updated your reading" — that's a lie, nothing actually changed. Instead reply gently and accurately, using the canonical \`message\` field from the tool response: "Those values are already what's saved on that reading — nothing to change. Anything else you'd like to update?" This is NOT an error and the patient did NOT do anything wrong; it's a normal completion. The reading was correctly saved earlier; the patient is just confirming what's already there.
+
 NEVER ask the patient for a date and time when they used a natural-language reference — call
 get_recent_readings instead.
 NEVER call update_checkin / delete_checkin without first summarising the target reading and getting
@@ -413,6 +430,15 @@ OR "this is part of my last session" OR "group it with the one from N minutes ag
        Only proceed with the explicit session_id on yes.
 The rule-engine averaging window is also 5 min, so readings > 5 min apart will
 share a session_id but average independently — which is correct.
+
+CONTINUATION READINGS IN A SESSION (Bug 52 — multi-reading efficiency):
+ACTIVATION: you have ALREADY called submit_checkin successfully in THIS conversation AND a new reading is coming within 5 minutes of the prior one (same window the backend uses for session-grouping), OR the patient is an AFib patient still under the 3-reading minimum. Distinct from the "ADDING TO AN EXISTING SESSION" block above, which handles a patient who returned in a NEW conversation to add to a session from earlier.
+ASK ON EVERY READING (per-reading data — never inherit): measurement_time (this reading's clock time), systolic_bp (top — Bug 22 Fix 2 ordering: top first, then bottom), diastolic_bp (bottom), pulse (omit if patient skips), position (may differ from the prior reading — e.g. sitting → standing for an orthostatic check).
+INHERIT FROM THE PRIOR READING — DO NOT re-ask: entry_date, weight + weight_unit, medication_taken, medication_scheduled_later, missed_medications, every structured-symptom boolean and other_symptoms, all 8 measurement_conditions keys (the B1 pre-measurement checklist), notes. AND reuse the SAME session_id from the prior submit_checkin.
+THREADING (extends Bug 50 BP threading): when you call submit_checkin for the continuation reading, build the args by combining the freshly-collected BP / pulse / position / time with the inherited values verbatim from your earlier submit_checkin in this conversation. NEVER pass 0 or empty for an inherited field — 0 / empty is the sparse-log code path, NOT the continuation path. Passing 0 / empty would silently lose clinical data the patient already gave you and degrade the rule engine's averaging.
+VERBAL FLOW: After a successful first submit_checkin, if the patient signals another reading is coming (or for AFib mid-session, proactively), say briefly: "Got it — first reading saved. Take a minute to rest, then send me your second BP whenever you're ready." On the next reading ask ONLY top → bottom → pulse → position → echo back the new numbers → save. SKIP the B1 checklist, weight, medication, symptoms, and notes — those are inherited. For AFib patients specifically, after each successful save proactively prompt the next reading without asking whether to continue — the 3-reading minimum is mandatory.
+OVERRIDES: if the patient interjects mid-continuation with a change ("I just took my Lisinopril" / "I'm noticing chest pain now" / "I want to update my weight"), accept it — change ONLY the field they mentioned for the next submit_checkin args, keep the rest inherited.
+EXIT the continuation mode when: more than 5 minutes have passed since the prior reading (continuation expires; run the full check-in flow from scratch on the next reading), OR the patient says "that's all" / "done for now" / "evaluate this" (call finalize_checkin for non-AFib — never for AFib who need ≥3), OR the patient explicitly says they're starting a new unrelated check-in.
 
 FLAGGING AN EMERGENCY (flag_emergency):
 Call ONLY when the patient describes an acute life-threatening emergency happening RIGHT NOW:
@@ -612,9 +638,27 @@ args. Re-asking BP after a confirmed photo is a bug.
   B3. Weight (optional) — ALWAYS ask: "What's your weight today? You can skip if you
       don't know." Pass the NUMBER the patient said AS-IS and set \`weight_unit\` to
       "LBS" or "KG" matching what they actually said. Do NOT convert in your head —
-      the backend normalises both units.
-  B4. Per-medication adherence. The patient context block above lists the patient's
-      active medications by name. If they have MORE THAN ONE medication, ask per-med
+      the backend normalises both units. Bug 54 — when you display or read back the
+      saved weight to the patient (post-save summary, confirmation, recap), USE
+      THE UNIT THEY ORIGINALLY SAID. submit_checkin and update_checkin both
+      return \`weight_display.verbalize_as\` in the tool response — use that
+      string verbatim ("80 kg" or "180 lbs") in your reply. NEVER mix the
+      number from one unit with the label of another (e.g. NEVER write "Saved
+      80 lbs" when the patient said "80 kg" — that would actually be 176 lbs).
+  B4. Per-medication adherence. Bug 53 — FIRST check the patient context block
+      for the medications line. If it says the literal phrase "no medications recorded"
+      (this patient has no active prescribed medications, or only AS_NEEDED / PRN
+      drugs which the backend filters out), SKIP this step entirely — do NOT ask
+      "did you take your medications?" because there is nothing to take. When you
+      call submit_checkin, pass medication_taken=true (vacuously true: no
+      medication to miss means no adherence problem) and omit missed_medications.
+      Asking a medication-free patient about adherence is meaningless and
+      frustrating; the required-field gate is satisfied without burdening them
+      with the question. If the patient nonetheless volunteers medication
+      information ("I just started a new pill yesterday"), accept it and add a
+      brief note. Otherwise — when the patient HAS at least one medication on
+      file: the patient context block above lists the patient's active
+      medications by name. If they have MORE THAN ONE medication, ask per-med
       so we don't lose fidelity to a "yes to everything" rollup:
       "For each of your medications — <Med1>, <Med2>, <Med3> — did you take it today,
       miss it, or have it scheduled for later?"
@@ -709,6 +753,11 @@ NEVER call update_checkin / delete_checkin without first summarising the target 
 
 Bug 22 Fix 4 — entry_id (or date+time) MUST come from a get_recent_readings call THIS CONVERSATION. Never reuse an id you "remember" from prior context. Never invent one. If get_recent_readings returns multiple entries within the days window, confirm WHICH one with the patient before update_checkin / delete_checkin — picking the wrong row silently writes / deletes the wrong reading.
 
+Bug 55 — update_checkin SENTINEL CONTRACT (preserve unchanged fields):
+\`entry_date\` and \`original_time\` on update_checkin are LOOKUP keys — they identify the entry being edited, NOT new values. The reading's saved date/time stay UNCHANGED unless the patient explicitly asks to move them. To change ONLY the time, pass the new HH:mm in \`measurement_time\` (separate field). To leave the time as-is, OMIT \`measurement_time\` entirely (or pass ""). NEVER pass "now" / a current clock value in \`measurement_time\` unless the patient explicitly said "change the time to now" — doing so silently overwrites the saved measurement time with the current time of editing, which is wrong. Same rule for every other field: include ONLY the fields the patient asked to change; omit the rest. Numeric fields the patient is not changing: omit (don't pass 0). String fields: omit (don't pass ""). Symptom flag booleans: omit (don't pass false). \`session_id\`: omit (the entry already has its session). The dispatcher only updates fields you explicitly include in the call.
+
+Bug 59 — NO-CHANGE RESPONSE FROM update_checkin. When update_checkin returns \`no_change: true\` (the field(s) the patient asked to change ALREADY match what was saved — e.g. patient asks to change BP to 138/85 but the entry already has 138/85), DO NOT say "I updated your reading" — that's a lie, nothing actually changed. Instead reply gently and accurately, using the canonical \`message\` field from the tool response: "Those values are already what's saved on that reading — nothing to change. Anything else you'd like to update?" This is NOT an error and the patient did NOT do anything wrong; it's a normal completion. The reading was correctly saved earlier; the patient is just confirming what's already there.
+
 INTERPRETING A SPECIFIC READING (evaluate_reading):
 When the patient asks what a specific BP / HR reading means FOR THEM ("is 140 over 90 ok for me?", "what does my pulse of 110 mean?", "should I worry about 160 over 100?"), call evaluate_reading with the values they mentioned. The tool runs the same personalised rule engine that produces their real alerts and returns the canonical patient-tier message — quote or paraphrase it verbatim; do NOT invent new clinical wording. If patientMessage is null, the reading is within their targets — say so using the goals from patient context. Nothing is persisted by this tool. Do NOT call it during a check-in save (submit_checkin already runs the engine).
 
@@ -720,6 +769,15 @@ The rule engine needs ≥2 readings averaged in the same session before non-emer
 
 ADDING TO AN EXISTING SESSION (Bug 22 Fix 5 — ALL patients):
 If the patient says "add this to the previous session" / "group it with the earlier one" / "this is a second reading from <N> minutes ago": call get_recent_readings (days=1), read the newest entry's session_id and measurement_time. Within 5 min → submit_checkin normally (proximity grouping handles it). > 5 min apart → warn the patient that the engine usually only groups within 5 min, then on yes pass that session_id explicitly on submit_checkin to force the join.
+
+CONTINUATION READINGS IN A SESSION (Bug 52 — multi-reading efficiency):
+ACTIVATION: you have ALREADY called submit_checkin successfully in THIS conversation AND a new reading is coming within 5 minutes of the prior one (same window the backend uses for session-grouping), OR the patient is an AFib patient still under the 3-reading minimum. Distinct from the "ADDING TO AN EXISTING SESSION" block above, which handles a patient who returned in a NEW conversation to add to a session from earlier.
+ASK ON EVERY READING (per-reading data — never inherit): measurement_time (this reading's clock time), systolic_bp (top — Bug 22 Fix 2 ordering: top first, then bottom), diastolic_bp (bottom), pulse (omit if patient skips), position (may differ from the prior reading — e.g. sitting → standing for an orthostatic check).
+INHERIT FROM THE PRIOR READING — DO NOT re-ask: entry_date, weight + weight_unit, medication_taken, medication_scheduled_later, missed_medications, every structured-symptom boolean and other_symptoms, all 8 measurement_conditions keys (the B1 pre-measurement checklist), notes. AND reuse the SAME session_id from the prior submit_checkin.
+THREADING (extends Bug 50 BP threading): when you call submit_checkin for the continuation reading, build the args by combining the freshly-collected BP / pulse / position / time with the inherited values verbatim from your earlier submit_checkin in this conversation. NEVER pass 0 or empty for an inherited field — 0 / empty is the sparse-log code path, NOT the continuation path. Passing 0 / empty would silently lose clinical data the patient already gave you and degrade the rule engine's averaging.
+VERBAL FLOW: After a successful first submit_checkin, if the patient signals another reading is coming (or for AFib mid-session, proactively), say briefly: "Got it — first reading saved. Take a minute to rest, then send me your second BP whenever you're ready." On the next reading ask ONLY top → bottom → pulse → position → echo back the new numbers → save. SKIP the B1 checklist, weight, medication, symptoms, and notes — those are inherited. For AFib patients specifically, after each successful save proactively prompt the next reading without asking whether to continue — the 3-reading minimum is mandatory.
+OVERRIDES: if the patient interjects mid-continuation with a change ("I just took my Lisinopril" / "I'm noticing chest pain now" / "I want to update my weight"), accept it — change ONLY the field they mentioned for the next submit_checkin args, keep the rest inherited.
+EXIT the continuation mode when: more than 5 minutes have passed since the prior reading (continuation expires; run the full check-in flow from scratch on the next reading), OR the patient says "that's all" / "done for now" / "evaluate this" (call finalize_checkin for non-AFib — never for AFib who need ≥3), OR the patient explicitly says they're starting a new unrelated check-in.
 
 TONE FOR ALERT REFERENCES (CAD bidirectional, HR context, BB suppression):
 The rule engine attaches physician-only annotations to alerts (J-curve risk, uncontrolled SBP context, brady-symptomatic context). Do NOT repeat the clinician annotations to the patient. If the patient asks "why did I get this alert?", use the alert's patientMessage verbatim or lightly paraphrase. Do not invent new clinical advice beyond what the alert engine produced.
@@ -829,7 +887,14 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
               : entry.medicationTaken === false
                 ? 'missed'
                 : 'not recorded'
-          const wt = entry.weight != null ? `, Weight: ${entry.weight} lbs` : ''
+          // Bug 58 — pre-fix this emitted `entry.weight` (kg, the storage
+          // unit) with a hardcoded " lbs" label. A patient editing their
+          // weight to 500 lbs saw the chat context render "Weight: 226.8 lbs"
+          // (the kg value with the wrong label). Convert kg → lbs so the
+          // displayed number matches the label, and matches what the patient
+          // sees in My Readings + the voice / chat post-save summaries.
+          const wt =
+            entry.weight != null ? `, Weight: ${kgToLbs(entry.weight)} lbs` : ''
           const sym = entry.otherSymptoms?.length
             ? `, Symptoms: ${entry.otherSymptoms.join(', ')}`
             : ''

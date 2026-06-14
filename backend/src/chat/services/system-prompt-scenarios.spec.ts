@@ -378,4 +378,31 @@ describe('SystemPromptService — end-to-end rendering scenarios', () => {
     // Guardrails still present
     expect(out).toContain('Never suggest starting, stopping')
   })
+
+  // Bug 58 — recent-entries weight rendering must convert kg → lbs before
+  // appending the "lbs" label. Pre-fix this line emitted the raw kg number
+  // (e.g. 226.8) with a hardcoded " lbs" label — so a patient who saved
+  // 500 lbs (stored as 226.8 kg) saw "Weight: 226.8 lbs" in the chat
+  // context block. The chart + popup display correctly because they
+  // convert; the prompt did not.
+  it('Scenario 11 — Bug 58 — recent-entry weight is converted kg → lbs before the "lbs" label', () => {
+    // 226.8 kg ≈ 500 lbs (patient saved 500 lbs, backend stored 226.8 kg).
+    const out = render(
+      patientContext({
+        recentEntries: [
+          {
+            measuredAt: new Date('2026-06-12T13:00:00Z'),
+            systolicBP: 138,
+            diastolicBP: 85,
+            weight: 226.8,
+            medicationTaken: true,
+            otherSymptoms: [],
+          },
+        ],
+      }),
+    )
+    // Must render 500 lbs (the patient's input), NOT 226.8 lbs (raw kg).
+    expect(out).toMatch(/Weight: 500(\.\d+)? lbs/)
+    expect(out).not.toMatch(/Weight: 226\.8 lbs/)
+  })
 })

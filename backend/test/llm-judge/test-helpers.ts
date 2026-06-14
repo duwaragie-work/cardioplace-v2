@@ -6,6 +6,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { AppModule } from '../../src/app.module.js'
 import { PrismaService } from '../../src/prisma/prisma.service.js'
+import { UserRole } from '../../src/generated/prisma/enums.js'
 
 export interface TestContext {
   app: INestApplication
@@ -29,7 +30,9 @@ export async function setupTestApp(): Promise<TestContext> {
   const prisma = app.get(PrismaService)
   const jwtService = app.get(JwtService)
 
-  // Create or find test user — use Prisma enum values
+  // Create or find test user — needs the PATIENT role so the @Roles(PATIENT)
+  // guard on /chat routes passes. jwt.strategy maps payload.roles → req.user.roles,
+  // so a roleless token makes RolesGuard throw (500) on every chat request.
   const email = 'llm-judge-test@healplace.test'
   let user = await prisma.user.findFirst({ where: { email } })
   if (!user) {
@@ -39,12 +42,24 @@ export async function setupTestApp(): Promise<TestContext> {
         name: 'Test Patient',
         preferredLanguage: 'en',
         dateOfBirth: new Date('1975-06-15'),
+        roles: [UserRole.PATIENT],
       },
+    })
+  } else if (!user.roles?.includes(UserRole.PATIENT)) {
+    // Heal a user left over from an earlier run that predates the role fix.
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: { roles: [UserRole.PATIENT] },
     })
   }
 
-  // Sign JWT using the same secret the app reads from env
-  const jwt = jwtService.sign({ sub: user.id, email: user.email })
+  // Sign JWT mirroring the app's payload shape (auth.service signs
+  // { sub, email, roles }; jwt.strategy reads roles straight off the token).
+  const jwt = jwtService.sign({
+    sub: user.id,
+    email: user.email,
+    roles: user.roles,
+  })
 
   return { app, jwt, userId: user.id, prisma }
 }

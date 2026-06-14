@@ -12,7 +12,11 @@ import { DailyJournalService } from '../../daily_journal/daily_journal.service.j
 import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import type { SessionSymptoms } from '../../daily_journal/engine/types.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
-import { dedupeSymptomsAgainstFlags, isIntakeIncompleteError } from '../../chat/tools/journal-tools.js'
+import {
+  dedupeSymptomsAgainstFlags,
+  isIntakeIncompleteError,
+  mapSymptomsArrayToFlags,
+} from '../../chat/tools/journal-tools.js'
 import { IntakeStatusService } from '../../intake/intake-status.service.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import {
@@ -601,50 +605,89 @@ export class VoiceToolsService {
     if (toBool(args.medication_scheduled_later, false)) {
       dto.medicationScheduledLater = true
     }
-    dto.severeHeadache = toBool(args.severe_headache, false)
-    dto.visualChanges = toBool(args.visual_changes, false)
-    dto.alteredMentalStatus = toBool(args.altered_mental_status, false)
-    dto.chestPainOrDyspnea = toBool(args.chest_pain_or_dyspnea, false)
-    dto.focalNeuroDeficit = toBool(args.focal_neuro_deficit, false)
-    dto.severeEpigastricPain = toBool(args.severe_epigastric_pain, false)
-    dto.newOnsetHeadache = toBool(args.new_onset_headache, false)
-    dto.ruqPain = toBool(args.ruq_pain, false)
-    dto.edema = toBool(args.edema, false)
+    // Bug 56 — auto-detect structured-symptom flags from freeform arrays.
+    // Pre-fix the structured booleans were set ONLY from the LLM's explicit
+    // `chest_pain_or_dyspnea` / `severe_headache` / etc args. When the LLM
+    // put "chest pain" in `args.symptoms` OR `args.other_symptoms` but
+    // FORGOT to also set `chest_pain_or_dyspnea: true`, the structured
+    // boolean stayed false. The chart then rendered the symptom under
+    // "Other symptoms" only — but the rule engine ALSO missed the Level-2
+    // chest-pain trigger because `chestPainOrDyspnea` was false. Worse:
+    // when the LLM DID set both (boolean + freeform), the dedupe couldn't
+    // strip the freeform mention if `args.symptoms` (vs `args.other_symptoms`)
+    // was the one carrying the duplicate, because dedupe ran on
+    // `otherSymptoms` only.
+    //
+    // Fix: scan BOTH freeform arrays for known phrases (chest pain, dizzy,
+    // throat tightness, etc.) and OR the detected flags with what the LLM
+    // explicitly passed. Dedupe then runs on BOTH arrays, so duplicates
+    // get stripped no matter which array carried them.
+    const freeformSymptomsRaw = symptoms
+    const otherSymptomsRaw = toStringArray(args.other_symptoms)
+    const autoFlags: Partial<SessionSymptoms> = {
+      ...(mapSymptomsArrayToFlags(freeformSymptomsRaw) ?? {}),
+      ...(mapSymptomsArrayToFlags(otherSymptomsRaw) ?? {}),
+    }
+    dto.severeHeadache =
+      toBool(args.severe_headache, false) || autoFlags.severeHeadache === true
+    dto.visualChanges =
+      toBool(args.visual_changes, false) || autoFlags.visualChanges === true
+    dto.alteredMentalStatus =
+      toBool(args.altered_mental_status, false) || autoFlags.alteredMentalStatus === true
+    dto.chestPainOrDyspnea =
+      toBool(args.chest_pain_or_dyspnea, false) || autoFlags.chestPainOrDyspnea === true
+    dto.focalNeuroDeficit =
+      toBool(args.focal_neuro_deficit, false) || autoFlags.focalNeuroDeficit === true
+    dto.severeEpigastricPain =
+      toBool(args.severe_epigastric_pain, false) || autoFlags.severeEpigastricPain === true
+    dto.newOnsetHeadache =
+      toBool(args.new_onset_headache, false) || autoFlags.newOnsetHeadache === true
+    dto.ruqPain = toBool(args.ruq_pain, false) || autoFlags.ruqPain === true
+    dto.edema = toBool(args.edema, false) || autoFlags.edema === true
     // Cluster 6 — universal symptom signals.
-    dto.dizziness = toBool(args.dizziness, false)
-    dto.syncope = toBool(args.syncope, false)
-    dto.palpitations = toBool(args.palpitations, false)
-    dto.legSwelling = toBool(args.leg_swelling, false)
+    dto.dizziness = toBool(args.dizziness, false) || autoFlags.dizziness === true
+    dto.syncope = toBool(args.syncope, false) || autoFlags.syncope === true
+    dto.palpitations = toBool(args.palpitations, false) || autoFlags.palpitations === true
+    dto.legSwelling = toBool(args.leg_swelling, false) || autoFlags.legSwelling === true
     // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema airway emergency.
     // Setting either of these on a JournalEntry trips TIER_1_ANGIOEDEMA in
     // the rule engine regardless of BP value (single-reading, any patient).
-    dto.faceSwelling = toBool(args.face_swelling, false)
-    dto.throatTightness = toBool(args.throat_tightness, false)
-    const otherSymptoms = toStringArray(args.other_symptoms)
-    if (otherSymptoms.length) {
-      // Bug 23 — strip any phrasing already captured by a TRUE structured
-      // boolean (e.g. "vision changes" when visualChanges is set). Prevents
-      // the chart from showing the same symptom under both "Symptoms" and
-      // "Other symptoms". Defense-in-depth alongside the prompt strengthening.
-      const flagsForDedupe: Partial<SessionSymptoms> = {
-        severeHeadache: dto.severeHeadache === true,
-        visualChanges: dto.visualChanges === true,
-        alteredMentalStatus: dto.alteredMentalStatus === true,
-        chestPainOrDyspnea: dto.chestPainOrDyspnea === true,
-        focalNeuroDeficit: dto.focalNeuroDeficit === true,
-        severeEpigastricPain: dto.severeEpigastricPain === true,
-        newOnsetHeadache: dto.newOnsetHeadache === true,
-        ruqPain: dto.ruqPain === true,
-        edema: dto.edema === true,
-        dizziness: dto.dizziness === true,
-        syncope: dto.syncope === true,
-        palpitations: dto.palpitations === true,
-        legSwelling: dto.legSwelling === true,
-        faceSwelling: dto.faceSwelling === true,
-        throatTightness: dto.throatTightness === true,
-      }
-      const deduped = dedupeSymptomsAgainstFlags(otherSymptoms, flagsForDedupe)
-      if (deduped && deduped.length) dto.otherSymptoms = deduped
+    dto.faceSwelling = toBool(args.face_swelling, false) || autoFlags.faceSwelling === true
+    dto.throatTightness =
+      toBool(args.throat_tightness, false) || autoFlags.throatTightness === true
+
+    // Bug 23 + Bug 56 — dedupe BOTH freeform arrays against the FINAL flag
+    // state (LLM-passed OR auto-detected). Strips any phrasing already
+    // captured by a TRUE structured boolean.
+    const flagsForDedupe: Partial<SessionSymptoms> = {
+      severeHeadache: dto.severeHeadache === true,
+      visualChanges: dto.visualChanges === true,
+      alteredMentalStatus: dto.alteredMentalStatus === true,
+      chestPainOrDyspnea: dto.chestPainOrDyspnea === true,
+      focalNeuroDeficit: dto.focalNeuroDeficit === true,
+      severeEpigastricPain: dto.severeEpigastricPain === true,
+      newOnsetHeadache: dto.newOnsetHeadache === true,
+      ruqPain: dto.ruqPain === true,
+      edema: dto.edema === true,
+      dizziness: dto.dizziness === true,
+      syncope: dto.syncope === true,
+      palpitations: dto.palpitations === true,
+      legSwelling: dto.legSwelling === true,
+      faceSwelling: dto.faceSwelling === true,
+      throatTightness: dto.throatTightness === true,
+    }
+    // Re-assign dto.symptoms after deduping. dto.symptoms was set earlier
+    // from `symptoms` at line 576; replace with the deduped version (which
+    // may be empty if every freeform entry mapped to a TRUE flag).
+    const dedupedSymptoms =
+      dedupeSymptomsAgainstFlags(freeformSymptomsRaw, flagsForDedupe) ?? []
+    dto.symptoms = dedupedSymptoms
+    if (otherSymptomsRaw.length) {
+      const dedupedOther = dedupeSymptomsAgainstFlags(
+        otherSymptomsRaw,
+        flagsForDedupe,
+      )
+      if (dedupedOther && dedupedOther.length) dto.otherSymptoms = dedupedOther
     }
 
     const sessionId = asString(args.session_id, '').trim()
@@ -753,6 +796,26 @@ export class VoiceToolsService {
       detail: `BP=${sbp}/${dbp} saved=${saved}`,
     })
 
+    // Bug 54 — include weight_display so the LLM verbalises back in the unit
+    // the patient said. Pre-fix the LLM response carried no weight info at
+    // all (only the popup payload had it), so the LLM had to remember the
+    // patient's words and sometimes mismatched ("Saved 80 lbs" when the
+    // patient said 80 kg). weight_display.verbalize_as is the canonical
+    // string for the spoken reply.
+    const voicePatientWeightUnit =
+      typeof args.weight_unit === 'string' && args.weight_unit.toUpperCase() === 'KG'
+        ? 'KG'
+        : 'LBS'
+    const voiceWeightDisplay =
+      popupKg > 0
+        ? {
+            kg: popupKg,
+            lbs: popupLbs,
+            original_unit: voicePatientWeightUnit,
+            verbalize_as:
+              voicePatientWeightUnit === 'KG' ? `${popupKg} kg` : `${popupLbs} lbs`,
+          }
+        : null
     return {
       llmResponse: {
         saved,
@@ -761,6 +824,7 @@ export class VoiceToolsService {
           : {}),
         entry_date_used: resolvedDate,
         measurement_time_used: resolvedTime,
+        weight_display: voiceWeightDisplay,
         message: savedMessage,
       },
       events,
@@ -865,8 +929,22 @@ export class VoiceToolsService {
   ): Promise<DispatchResult> {
     const entryId = asString(args.entry_id, '').trim()
     if (!entryId) {
+      // Bug 57 — make this message ACTIONABLE so the LLM knows what to do
+      // next. Pre-fix "Missing entry_id." gave the LLM no recovery path —
+      // it would either retry without the id (same error) or hallucinate
+      // one. The new wording tells the LLM to thread the entry_id from
+      // get_recent_readings or the prior update_checkin response, which
+      // is what the prompt teaches for consecutive edits.
       return {
-        llmResponse: { updated: false, message: 'Missing entry_id.' },
+        llmResponse: {
+          updated: false,
+          message:
+            "Missing entry_id. You MUST pass the entry_id from your most recent " +
+            'get_recent_readings call OR from the prior update_checkin response ' +
+            'in this conversation. If the patient is making multiple edits to the ' +
+            'SAME reading, reuse the same entry_id every time — do not omit it ' +
+            'and do not invent a new one.',
+        },
         events: [],
       }
     }
@@ -951,8 +1029,21 @@ export class VoiceToolsService {
     if (newSessionId) dto.sessionId = newSessionId
 
     if (Object.keys(dto).length === 0) {
+      // Bug 57 — make this ACTIONABLE. Pre-fix "No fields to update."
+      // told the LLM nothing about why the call was empty. On a
+      // consecutive update where the patient said "now make it 400 lbs",
+      // a model that interpreted "400 lbs" as a 0 sentinel (or omitted
+      // it entirely) would hit this branch and have no way to recover
+      // except by re-asking the patient — making the bot feel broken.
       return {
-        llmResponse: { updated: false, message: 'No fields to update.' },
+        llmResponse: {
+          updated: false,
+          message:
+            "No change found in the args you passed. For the field the patient asked to change, " +
+            'pass the NEW value as a positive number / non-empty string (e.g. weight=400, weight_unit="LBS" — ' +
+            'NOT weight=0). Sentinels (0 / "" / []) mean "leave unchanged". If the patient said "change ' +
+            'it to 400 pounds", pass weight=400 and weight_unit="LBS", not weight=0.',
+        },
         events: [],
       }
     }
@@ -976,6 +1067,13 @@ export class VoiceToolsService {
     ]
 
     let updated = false
+    // Bug 59 — when the service detects every requested field already
+    // matched the stored value, route the response to a graceful "values
+    // are already what's saved" message instead of claiming success. The
+    // canonical message comes from daily_journal.service.ts (no-op
+    // branch); we just propagate it to the LLM.
+    let noChange = false
+    let noChangeMessage: string | null = null
     let entryDate = ''
     let finalSbp = sbp || 0
     let finalDbp = dbp || 0
@@ -997,7 +1095,18 @@ export class VoiceToolsService {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await this.dailyJournal.update(ctx.userId, entryId, dto as any)
-      updated = true
+      noChange = (result as { noChange?: boolean }).noChange === true
+      if (noChange) {
+        const m = (result as { message?: string }).message
+        noChangeMessage =
+          typeof m === 'string' && m
+            ? m
+            : 'No changes — the reading already has those values. Nothing to update.'
+      }
+      // `updated` reflects whether the entry was actually mutated. We set
+      // it true only for real updates; no-op leaves it false so the UI
+      // popup + frontend treat it as "nothing happened" cleanly.
+      updated = !noChange
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const data = (result?.data as any) ?? {}
       const ma: string = data.measuredAt instanceof Date
@@ -1066,12 +1175,43 @@ export class VoiceToolsService {
       detail: `entry=${entryId} updated=${updated}`,
     })
 
+    // Bug 54 — include weight_display so the LLM verbalises back in the unit
+    // the patient said. Same contract as submit_checkin's llmResponse.
+    const voiceUpdateInputUnit =
+      typeof args.weight_unit === 'string' ? args.weight_unit : undefined
+    const voiceUpdateKg =
+      weight && weight > 0 ? normaliseWeightToKg(weight, voiceUpdateInputUnit) : 0
+    const voiceUpdateLbs = voiceUpdateKg > 0 ? kgToLbs(voiceUpdateKg) : 0
+    const voiceUpdatePatientUnit =
+      typeof args.weight_unit === 'string' && args.weight_unit.toUpperCase() === 'KG'
+        ? 'KG'
+        : 'LBS'
+    const voiceUpdateWeightDisplay =
+      voiceUpdateKg > 0
+        ? {
+            kg: voiceUpdateKg,
+            lbs: voiceUpdateLbs,
+            original_unit: voiceUpdatePatientUnit,
+            verbalize_as:
+              voiceUpdatePatientUnit === 'KG'
+                ? `${voiceUpdateKg} kg`
+                : `${voiceUpdateLbs} lbs`,
+          }
+        : null
     return {
       llmResponse: {
         updated,
-        message: updated
-          ? 'Reading updated successfully.'
-          : failureMessage ?? 'Could not update the reading. Please try again.',
+        // Bug 59 — propagate the explicit no_change flag so the LLM can
+        // route a graceful "those values are already what's saved" reply
+        // instead of falsely claiming the reading was updated when nothing
+        // changed.
+        ...(noChange ? { no_change: true as const } : {}),
+        weight_display: voiceUpdateWeightDisplay,
+        message: noChange
+          ? noChangeMessage ?? 'No changes — the reading already has those values. Nothing to update.'
+          : updated
+            ? 'Reading updated successfully.'
+            : failureMessage ?? 'Could not update the reading. Please try again.',
       },
       events,
     }

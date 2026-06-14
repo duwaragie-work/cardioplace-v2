@@ -414,8 +414,15 @@ export class DailyJournalService {
       // its current value.
       this.filterNoOpFieldsInPlace(data, existing)
       if (Object.keys(data).length === 0) {
+        // Bug 59 — explicit `noChange: true` flag so dispatchers can route
+        // the response to a graceful "values already match" reply for the
+        // patient instead of claiming "Reading updated successfully." when
+        // nothing actually changed. Pre-fix dispatchers ignored result.message
+        // and hardcoded "Reading updated successfully." — the patient got
+        // told their reading was edited even when it wasn't.
         return {
           statusCode: 200,
+          noChange: true,
           message:
             'No changes — the reading already has those values. Nothing to update.',
           data: this.serializeEntry(existing),

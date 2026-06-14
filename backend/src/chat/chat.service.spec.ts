@@ -280,4 +280,23 @@ describe('ChatService.buildPatientSystemPrompt() — phase/16', () => {
       expect(prompt).toContain('TONE — patient mode')
     })
   })
+
+  // ─── Bug 58 — JournalEntry mutations invalidate the chat patient-
+  // context cache so the NEXT chat turn reads fresh values after any edit
+  // (chat tool, voice tool, HTTP REST). Without this listener, the chat
+  // would keep serving cached pre-edit data for up to 60 seconds (TTL)
+  // after edits made outside the chat dispatcher.
+  describe('onJournalEntryMutated (Bug 58)', () => {
+    it('invalidates the context cache when a journal entry is updated', () => {
+      const spy = jest.spyOn(service, 'invalidateContextCache')
+      service.onJournalEntryMutated({ userId: 'user-1' })
+      expect(spy).toHaveBeenCalledWith('user-1')
+    })
+
+    it('handles ENTRY_CREATED payloads the same way (same listener method)', () => {
+      const spy = jest.spyOn(service, 'invalidateContextCache')
+      service.onJournalEntryMutated({ userId: 'user-create' })
+      expect(spy).toHaveBeenCalledWith('user-create')
+    })
+  })
 })
